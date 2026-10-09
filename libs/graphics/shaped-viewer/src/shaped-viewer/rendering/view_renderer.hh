@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
@@ -8,6 +9,8 @@
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
 #include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/camera.hh>
+#include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/transform/transform.hh>
 
 /// The textures a render plan resolved to, owned for the length of the frame that recorded it.
 ///
@@ -178,3 +181,17 @@ private:
     /// the instance, so the invalidation has to be said out loud.
     u64 _shader_generation = 0;
 };
+
+namespace sv::impl
+{
+/// The radiance an instance emits as a light of the trace: `emission`, its permutation's, read out of its parameter block `block`.
+///
+/// Empty where the instance lights nothing: its type declares no emission, a factor is not a constant yet, or the radiance `max(0, scale) * max(0, color)` is zero in every channel.
+/// The renderer adds the rest of the rule — a resident triangle mesh, shaded by its own permutation rather than the fallback.
+[[nodiscard]] cc::optional<tg::vec3f> emitter_radiance_of(material_emission const& emission,
+                                                          instance_record const& block);
+
+/// What `placement` makes of an object-space area: exact under a similarity, and an estimate under a non-uniform scale.
+/// Only an emitter's selection weight reads it, which a rough area leaves unbiased.
+[[nodiscard]] f32 world_area_of(f32 object_area, tg::affine_transform3f const& placement);
+} // namespace sv::impl

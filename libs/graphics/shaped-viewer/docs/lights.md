@@ -153,6 +153,43 @@ That pins every unit conversion, at one bounce, where next-event estimation carr
 The parallel light has no bounce branch, so an error in the sun's bounce weighting shows there instead of cancelling.
 
 A layer with no lights of its own is traced under `layer::fallback_light`, a sun unless the layer sets another or turns it off.
+A traced layer whose only lights are emissive instances counts as lit, and takes no fallback.
+A raster layer draws no emitter's light, so it keeps its fallback.
+
+## Emissive instances
+
+**An emissive instance is a light of the trace, but no `sv::light` makes it.**
+The renderer appends one record of path `scene.light_path_mesh` (`sv::light_path_mesh`, 4) per qualifying instance, after every analytic light.
+So emitters and analytic lights share one selection CDF, and a frame's work grows with emissive instances, never with triangles.
+[plans/emissive-triangles.md](plans/emissive-triangles.md) is the design and its phasing.
+
+**Only a type that declares its emission lights the scene.**
+`material_type::emission_color_attribute` (a float3) and the optional `emission_scale_attribute` (a float) say where it comes from.
+The radiance is `max(0, scale) * max(0, color)`, and the generator writes it into `surface` after the fragment, so the closest hit and the light sampler read one value.
+openpbr declares `emission_color` and `emission_luminance`, pbr declares `emissive` at a scale of 1, and unlit declares none: it is a display material, which the camera sees and nothing else does.
+
+**An instance qualifies** where its own permutation declares an emission whose factors are constants that are not zero.
+It must also be a resident triangle mesh, shaded by that permutation rather than by the fallback a streaming mesh takes.
+`sv::impl::emitter_radiance_of` is the material half of that rule.
+An emission sourced from a texture or a mesh attribute stays camera-only until P2's reader samples it; so does a quadric batch.
+
+**Its record** carries the radiance as `emission`, two-sided, and an estimate of its world area — the object area times `|det M|^(2/3)` — which only selection reads.
+Its weight is that area times π times two faces times the luminance, beside the local lights.
+`traced.emitters` holds the rest, one `emitter_record` per mesh record from `frame_constants::emitter_offset`: the instance's row and its mesh's area CDF.
+The instance record's `emitter` names the light record back, so a bounce ray that meets the instance finds its density.
+
+**The area CDF is the mesh's, built on the GPU** by shaders/emitter_cdf.sgl the first time a trace needs it, and cached with the mesh as its BLAS is (`mesh_manager::acquire_emitter_cdf`).
+It is two-level — triangles within blocks of 256, then blocks — so the f32 widths stay accurate over millions of triangles, and a zero-area triangle has a width of exactly 0.
+It is in object space, which is unbiased under any placement: the density a sample carries is its triangle's width over the triangle's world area.
+While its kernels compile an instance is camera-only, and the frame its CDF lands restarts the image.
+
+**Next-event estimation** picks a triangle by the CDF and a uniform point on it.
+Its solid-angle density, `pt.mesh_light_pdf`, is the record's pick probability times the triangle's width over its world area, times the squared distance over the cosine at the light.
+The emission at the point is the record's, scaled by the instance's cutout opacity there, read by the one opacity reader a cutout already has.
+**A bounce ray that meets an emitter** forms the same density at its hit (`tracer.emitter_pdf`) and weighs the emission by the balance heuristic; the camera's own view keeps its full weight.
+
+ReSTIR GI takes a weighted emitter its visible point's continuation reaches as that point's direct light, as it does a rect.
+ReSTIR DI leaves a point on an emissive instance to the path's own estimate, and gives one it draws a weight of 0, until its P3.
 
 ## Landing order
 

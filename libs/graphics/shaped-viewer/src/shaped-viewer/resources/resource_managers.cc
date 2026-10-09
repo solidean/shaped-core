@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/all.hh>
@@ -6,6 +7,7 @@
 #include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh>
+#include <sv_shaders.hh>
 
 namespace sv
 {
@@ -41,6 +43,17 @@ namespace
     return build_input_usage(ctx) | sg::buffer_usage::copy_dst;
 }
 constexpr auto quadric_primitive_usage = sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst;
+
+/// The area of the triangle over `a`, `b` and `c`.
+[[nodiscard]] f64 triangle_area(tg::pos3f a, tg::pos3f b, tg::pos3f c)
+{
+    auto const e1 = b - a;
+    auto const e2 = c - a;
+    auto const x = f64(e1[1]) * f64(e2[2]) - f64(e1[2]) * f64(e2[1]);
+    auto const y = f64(e1[2]) * f64(e2[0]) - f64(e1[0]) * f64(e2[2]);
+    auto const z = f64(e1[0]) * f64(e2[1]) - f64(e1[1]) * f64(e2[0]);
+    return 0.5 * tg::sqrt(x * x + y * y + z * z);
+}
 } // namespace
 
 namespace impl
@@ -80,12 +93,18 @@ mesh_id mesh_manager::acquire(triangle_data const& mesh)
     auto transfer = _ctx.stream.data_to_buffer(vertices, mesh.positions);
     transfer.set_priority(impl::geometry_stream_priority);
 
+    // Summed while the positions are at hand, since the payload is the stream's from here on.
+    auto area = 0.0;
+    for (auto i = isize(0); i + 2 < positions.size(); i += 3)
+        area += triangle_area(positions[i], positions[i + 1], positions[i + 2]);
+
     auto const id = insert(mesh.hash,
                            {.state = residency::pending,
                             .vertices = cc::move(vertices),
                             .indices = cc::move(stand_in),
                             .is_indexed = false,
                             .triangle_count = positions.size() / 3,
+                            .surface_area = f32(area),
                             .bounds = mesh.bounds},
                            size_in_bytes);
 
@@ -160,12 +179,21 @@ mesh_id mesh_manager::acquire(indexed_triangle_data const& mesh)
     vertex_transfer.set_priority(impl::geometry_stream_priority);
     index_transfer.set_priority(impl::geometry_stream_priority);
 
+    // Summed while the payload is at hand, since it is the stream's from here on.
+    // An index past the positions adds nothing here; the trace would read garbage there anyway.
+    auto area = 0.0;
+    auto const vertex_count = u32(positions.size());
+    for (auto i = isize(0); i + 2 < indices.size(); i += 3)
+        if (indices[i] < vertex_count && indices[i + 1] < vertex_count && indices[i + 2] < vertex_count)
+            area += triangle_area(positions[indices[i]], positions[indices[i + 1]], positions[indices[i + 2]]);
+
     auto const id = insert(mesh.hash,
                            {.state = residency::pending,
                             .vertices = cc::move(vertices),
                             .indices = cc::move(index_buffer),
                             .is_indexed = true,
                             .triangle_count = indices.size() / 3,
+                            .surface_area = f32(area),
                             .bounds = mesh.bounds},
                            size_in_bytes);
 
@@ -216,6 +244,73 @@ sg::blas_handle const& mesh_manager::acquire_blas(sg::command_list& cmd, mesh_id
     // Only now is the acceleration structure's own cost known, which is the one thing a record cannot size at insert.
     add_bytes(id, record->blas->size_in_bytes());
     return record->blas;
+}
+
+bool mesh_manager::_emitter_cdf_kernels_ready()
+{
+    if (_cdf_failed)
+        return false;
+    if (!_cdf_blocks.is_valid())
+    {
+        _cdf_blocks = shaders::emitter_cdf.blocks.acquire_pipeline(_ctx);
+        _cdf_total = shaders::emitter_cdf.total.acquire_pipeline(_ctx);
+        (void)_ctx.backlog.start(_cdf_blocks);
+        (void)_ctx.backlog.start(_cdf_total);
+        return false;
+    }
+    if (!_cdf_blocks->is_ready() || !_cdf_total->is_ready())
+        return false;
+
+    auto const* const blocks = _cdf_blocks->try_value();
+    auto const* const total = _cdf_total->try_value();
+    if (blocks == nullptr || total == nullptr || *blocks == nullptr || *total == nullptr)
+    {
+        CC_LOG_ERROR("the kernels that build an emitter's area CDF did not build, so emissive meshes light nothing");
+        _cdf_failed = true;
+        return false;
+    }
+    return true;
+}
+
+sg::buffer<f32> const* mesh_manager::acquire_emitter_cdf(sg::command_list& cmd, mesh_id id)
+{
+    auto* const record = mutable_record(id);
+    CC_ASSERT(record != nullptr && record->state == residency::complete, "mesh_manager::acquire_emitter_cdf needs a "
+                                                                         "resident mesh whose geometry has landed");
+    if (record->emitter_cdf.raw() != nullptr)
+        return &record->emitter_cdf;
+    if (!_emitter_cdf_kernels_ready())
+        return nullptr;
+
+    auto const triangles = u32(record->triangle_count);
+    auto const blocks = emitter_cdf_block_count(record->triangle_count);
+    auto cdf = _ctx.persistent.create_buffer<f32>(
+        isize(triangles) + isize(blocks) + 1,
+        sg::buffer_usage::readwrite_buffer | sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_src);
+
+    auto const group = _ctx.transient.create_binding_group(
+        cmd, _ctx.cached.acquire_binding_group_layout<shaders::emitter_cdf_io>(),
+        shaders::emitter_cdf_io{.vertices = record->vertices.reinterpret_as<byte>().as_readonly_buffer(),
+                                .indices = record->indices.reinterpret_as<byte>().as_readonly_buffer(),
+                                .cdf = cdf.as_readwrite_buffer()});
+    auto const shape = shaders::emitter_cdf_shape{.triangle_count = triangles,
+                                                  .block_count = blocks,
+                                                  .is_indexed = record->is_indexed ? 1u : 0u}
+                           .to_block();
+
+    // Two dispatches over one buffer, the second reading what the first wrote: the blocks, then the mesh over them.
+    cmd.compute.bind_pipeline(**_cdf_blocks->try_value());
+    cmd.compute.bind_group(0, *group);
+    cmd.compute.set_inline_constants(shape);
+    cmd.compute.dispatch_threads(int(blocks));
+    cmd.compute.bind_pipeline(**_cdf_total->try_value());
+    cmd.compute.bind_group(0, *group);
+    cmd.compute.set_inline_constants(shape);
+    cmd.compute.dispatch_threads(1);
+
+    add_bytes(id, cdf.size_in_bytes());
+    record->emitter_cdf = cc::move(cdf);
+    return &record->emitter_cdf;
 }
 
 isize mesh_manager::collect_settled()

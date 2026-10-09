@@ -201,10 +201,14 @@ Gotchas:
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
 
 ```cpp
-sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute; hash128 hash; }
-sv::material_type::create(name, signature, shader, opacity_attribute = {}, opacity_cutoff_attribute = {})
-                                 //   -> hashes all five; asserts a name declared twice, a default that is not its format's size,
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute;
+                                 //   string emission_color_attribute, emission_scale_attribute; hash128 hash; }
+sv::material_type::create(name, signature, shader, opacity_attribute = {}, opacity_cutoff_attribute = {},
+                          emission_color_attribute = {}, emission_scale_attribute = {})
+                                 //   -> hashes all seven; asserts a name declared twice, a default that is not its format's size,
                                  //      an opacity attribute that is not a declared float, and a fragment that writes geometry_opacity
+                                 //   an emission color must be a declared float3 and a scale a float; a declaring type's fragment may not write surface.emission_*
+t.declares_emission()            // -> bool; only such a type's instances light the scene (docs/lights.md#emissive-instances)
                                  //   shader: an SGL FRAGMENT, statements unindented, attributes immutable locals, `surface` the one `let mut`
 t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
 sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
@@ -226,6 +230,7 @@ lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> ma
 sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
+                                 //   emission declared by openpbr (emission_color, emission_luminance) and pbr (emissive); unlit's reaches the camera alone
                                  //   openpbr also declares `alpha_cutoff`, its opacity cutoff (0 = off, glTF's MASK), and `occlusion` (imported, ignored here)
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
@@ -323,7 +328,10 @@ auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::
 `material/shader_generator.hh`; modules `material`, `openpbr` and `tracer` (shaders/sgl) are the hand-authored half it is written against.
 
 ```cpp
-sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source, shade_source, raster_source; layout; material_opacity opacity; hash128 key;}
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source, shade_source, raster_source; layout; material_opacity opacity; material_emission emission; hash128 key;}
+sv::material_emission            // { material_emission_factor color, scale; } — where a declared emission lives; declares() / is_constant()
+                                 //   a factor is material_opacity's fields for one value (kind none|constant|attribute|texture), its swizzle as `channels[3]`
+                                 //   the generator writes `surface.emission_* = max(0, ...)` after the fragment from the declared attributes
                                  //   raster_source: `@pixel fun sv_raster`, the same body over module raster; empty for a quadric permutation
 sv::material_opacity             // { kind (none|constant|attribute|texture); offset, uv_offset, frequency, channel, sampler, transform, cutoff }
                                  //   where the cutout opacity lives in the parameter block; o.can_cut_out() -> kind != none
@@ -337,7 +345,7 @@ sv::material_shader_key(permutation_key, opts)  // -> hash128 — what `g.key` i
 
 resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, compiling for its context
 sv::material_shader_cache::create(&ctx)   // one hit group per permutation; a null ctx makes every permutation's hit group an error
-cache.acquire(resolved, kind = triangles) // -> material_permutation const& {hash128 key; layout; geometry_kind kind; material_opacity opacity; hit_group; string source;}
+cache.acquire(resolved, kind = triangles) // -> material_permutation const& {hash128 key; layout; geometry_kind kind; material_opacity opacity; material_emission emission; hit_group; string source;}
 p.hit_group                      // -> shared_async<vector<sg::hit_shader>>, COLD: one hit shader per ray type, which pathtrace_routine starts
 cache.acquire_fallback(kind) / acquire_quadric_fallback()  // the neutral permutation of each kind, over an EMPTY signature
 cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
@@ -701,7 +709,10 @@ mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; el
 mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, indexed: a BLAS built later follows the index buffer's primitive order
 mesh_manager::acquire_blas(cmd, id) -> blas_handle const& // built onto cmd the first time, held after; id complete, ray tracing required
 quadric_manager::acquire_blas(cmd, id)                    // the same, a procedural BLAS over the batch's boxes
-sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas (null until a trace); }
+sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas (null until a trace);
+                         //   f32 surface_area (object space, summed at acquire); buffer<f32> emitter_cdf (null until an emissive instance is traced); }
+mesh_manager::acquire_emitter_cdf(cmd, id) -> buffer<f32> const*  // the two-level area CDF, built on the GPU onto cmd once and held; null while its kernels compile
+sv::emitter_cdf_block_size / sv::emitter_cdf_block_count(n)   // 256 triangles a block; the CDF holds n + blocks + 1 floats (shaders/emitter_cdf.sgl)
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
 manager.used_bytes() / count() / evict(id)          // current residency; manual drop
@@ -802,6 +813,7 @@ sv::pt_trace_desc                                    // the trace's targets and 
                                                      //   hit_groups     — the permutations; tlas_instance::hit_group_offset is 2 * index, rewritten to that permutation's row
                                                      //                    one not compiled yet is substituted by fallback / quadric_fallback, by its kind
                                                      //   lights         — every light, grouped by path (pt_light_table::records); NULL means none, and light_count must be 0
+                                                     //   emitters       — one emitter_record per record of path sv::light_path_mesh, in their order; NULL means none
                                                      //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
                                                      //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
                                                      //   the guide and split targets are typed: rgba16_float / r32_float / r16_float / rg32_float as sv allocates them
@@ -811,9 +823,10 @@ sv::raster_draw                                      // { u32 instance, triangle
 sv::raster_gbuffer                                   // { color rgba32f; normal, albedo, specular_albedo rgba16f; depth r32f; roughness r16f; motion rg32f; primary_depth r32f }
                                                      //   the layer's slots, every one render_target-capable; THE seam a hybrid lighting pass reads
 sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block
-sv::pt_light_table::grouped(span<light_record>, sel) // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
+sv::pt_light_table::grouped(span<light_record>, sel) // -> { records grouped by path, path_offset[5], path_count[5] } — a counting sort; each run keeps the given order
+                                                   //   path sv::light_path_mesh (4) is an emissive instance's record, last; describe_in writes its offset as emitter_offset
                                                    //   sel = light_selection::power (default) writes each record's select_pdf/select_cdf; ::uniform writes 0s
-table.describe_in(fc)                                // writes light_count + the per-path table into the frame block, so the two cannot disagree
+table.describe_in(fc)                                // writes light_count, the per-path table and emitter_offset into the frame block, so they cannot disagree
 
 sv::shader_package()                                 // the one SGL package: tracer + module tracer, layout and depth fill; sv's default library adds it
 ```

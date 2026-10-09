@@ -26,7 +26,7 @@
 ///                           "surface.base_color = saturate(tint)\n"
 ///                           "surface.specular_roughness = 0.8\n");
 ///
-/// `hash` is the content key over name, signature, fragment and opacity attribute together.
+/// `hash` is the content key over name, signature, fragment, opacity and emission attributes together.
 /// Two types built from equal inputs hash equal, so a library registering the same type twice keeps one.
 struct sv::material_type
 {
@@ -51,16 +51,33 @@ struct sv::material_type
     /// It must resolve to a value per instance; one sourced from a texture or a mesh attribute is ignored with a warning.
     cc::string opacity_cutoff_attribute;
 
+    /// Which declared float3 attribute is this type's emission color, or empty for a type that lights nothing.
+    ///
+    /// **Only a type declaring it lights the scene**: an instance of it may be sampled as a light.
+    /// Its emitted radiance is `max(0, scale) * max(0, color)`, which the generator writes into `surface` after the fragment.
+    /// The fragment of such a type may not write `surface.emission_*` itself, so the closest hit and the light sampler read one emission.
+    /// A type that leaves it empty may still write emission, which then reaches the camera and nothing else.
+    cc::string emission_color_attribute;
+
+    /// Which declared float attribute scales the emission color, or empty for a scale of 1.
+    cc::string emission_scale_attribute;
+
     cc::hash128 hash;
 
-    /// Hashes `name`, `signature`, `shader` and both opacity attributes into the content key.
+    /// Hashes `name`, `signature`, `shader`, both opacity attributes and both emission attributes into the content key.
     /// A signature declaring one name twice asserts: the resolver would have no way to say which declaration a binding meant.
     /// So does an opacity attribute naming something the signature does not declare as a float.
+    /// So do an emission color that is not a declared float3, and a fragment of an emitting type that writes `surface.emission_*`.
     [[nodiscard]] static material_type create(cc::string name,
                                               cc::vector<material_signature_entry> signature,
                                               cc::string shader,
                                               cc::string opacity_attribute = {},
-                                              cc::string opacity_cutoff_attribute = {});
+                                              cc::string opacity_cutoff_attribute = {},
+                                              cc::string emission_color_attribute = {},
+                                              cc::string emission_scale_attribute = {});
+
+    /// Whether this type declares where its emission comes from, which is what lets an instance of it light the scene.
+    [[nodiscard]] bool declares_emission() const { return !emission_color_attribute.empty(); }
 
     /// The declaration of `name`, or null if this type does not read it.
     [[nodiscard]] material_signature_entry const* find(cc::string_view name) const;

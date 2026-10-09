@@ -45,6 +45,13 @@ void place_instance_record(shaders::tracer::instance_record& record,
                            material_opacity const& opacity);
 
 static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table has one slot per light_path");
+
+/// The path of an emissive instance's light record, `scene.light_path_mesh`: one past every `light_path`, since no `sv::light` takes it.
+/// Its records stand after every analytic one, from `frame_constants::emitter_offset`.
+inline constexpr u32 light_path_mesh = 4;
+
+/// What an instance record's `emitter` holds where the instance lights nothing, `scene.no_offset`.
+inline constexpr u32 no_emitter = 0xffffffffu;
 } // namespace sv
 
 /// How next-event estimation picks among a table's lights.
@@ -66,16 +73,18 @@ enum class sv::light_selection : sv::u8
 /// carry an index across from one to the other.
 struct sv::pt_light_table
 {
-    /// grouped by path in `light_path` order, each run keeping the order the lights were given in
+    /// Grouped by path in `light_path` order, each run keeping the order the lights were given in.
+    /// The emissive instances' records are last.
     cc::vector<shaders::tracer::light_record> records;
-    u32 path_offset[4] = {};
-    u32 path_count[4] = {};
+    /// Indexed by path, `light_path_mesh` included; the frame block carries the first four, and the fifth's offset as `emitter_offset`.
+    u32 path_offset[5] = {};
+    u32 path_count[5] = {};
 
     /// Also writes each record's selection probability and the cumulative one, in the order the table keeps, or 0 in both for `light_selection::uniform`.
     [[nodiscard]] static pt_light_table grouped(cc::span<shaders::tracer::light_record const> lights,
                                                 light_selection selection = light_selection::power);
 
-    /// Writes the count and the per-path table into `fc`.
+    /// Writes the count, the per-path table and where the emissive instances' records start into `fc`.
     void describe_in(shaders::tracer::frame_constants& fc) const;
 };
 
@@ -148,6 +157,11 @@ struct sv::pt_trace_desc
     /// Null means no lights at all, and then the frame block's `light_count` must be 0.
     /// The routine binds a zeroed stand-in for it, since a binding cannot be empty.
     sg::buffer<shaders::tracer::light_record> lights;
+
+    /// One record per light of path `light_path_mesh` in `lights`, in their order — `traced.emitters`.
+    /// Null means none, and then `lights` holds no such record; the routine binds a zeroed stand-in.
+    /// Every instance record whose `emitter` names one of them must be the row its `emitter_record::instance` names.
+    sg::buffer<shaders::tracer::emitter_record> emitters;
 
     /// The permutations this trace's instances shade with, one hit group each, in hit-group index order.
     ///

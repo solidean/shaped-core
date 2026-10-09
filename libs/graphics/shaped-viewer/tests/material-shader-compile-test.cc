@@ -49,18 +49,24 @@ namespace
     return bind(sv::mesh_attribute::create("uv", f, uvs));
 }
 
-/// One entry point of `g`'s hit group, compiled; fails the test with the compiler's message and the source.
-void check_entry_compiles(sv::generated_material_shader const& g, sg::shader_stage stage, cc::string_view entry)
+/// One entry point of `source`, compiled; fails the test with the compiler's message and the source.
+void check_source_compiles(cc::string const& source, sg::shader_stage stage, cc::string_view entry)
 {
     auto const& lib = *sv_test::shared_env().lib;
-    auto const shader = lib.compile_source(g.source, stage, entry, sg::shader_format::dxil,
-                                           {.language = slib::shader_language::sgl, .label = "<generated hit group>"});
+    auto const shader = lib.compile_source(source, stage, entry, sg::shader_format::dxil,
+                                           {.language = slib::shader_language::sgl, .label = "<generated material>"});
     REQUIRE(shader != nullptr);
     (void)cc::try_async_blocking_get(shader);
     if (shader->has_error())
-        FAIL(cc::format("{}: {}\n--- source ---\n{}", entry, shader->try_error()->underlying().to_string(), g.source));
+        FAIL(cc::format("{}: {}\n--- source ---\n{}", entry, shader->try_error()->underlying().to_string(), source));
     REQUIRE(shader->has_value());
     CHECK(shader->try_value()->bytecode.size() > 0);
+}
+
+/// One entry point of `g`'s hit group, compiled.
+void check_entry_compiles(sv::generated_material_shader const& g, sg::shader_stage stage, cc::string_view entry)
+{
+    check_source_compiles(g.source, stage, entry);
 }
 
 /// Every entry point the hit group of `r` declares, for geometry of `kind`.
@@ -70,6 +76,8 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
     REQUIRE(!g.source.empty());
     CHECK(g.source.contains("hit_group sv_material for path_rays"));
     check_entry_compiles(g, sg::shader_stage::closest_hit, "sv_closest_hit");
+    // The wavefront's shade kernel of the same permutation, which shades through module `tracer`'s stored-hit path.
+    check_source_compiles(g.shade_source, sg::shader_stage::compute, "sv_shade");
     if (kind == sv::geometry_kind::quadrics)
         check_entry_compiles(g, sg::shader_stage::intersection, "sv_intersection");
     else if (g.opacity.can_cut_out())

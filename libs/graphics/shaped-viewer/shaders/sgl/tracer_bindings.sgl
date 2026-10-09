@@ -60,10 +60,24 @@ struct instance_record:
     opacity_transform: uint
     opacity_cutoff: uint
     shade_group: uint
-    pad: uint
+    emitter: uint
     to_world_x: float4
     to_world_y: float4
     to_world_z: float4
+
+/// What next-event estimation reads of one emissive instance beyond its light record, as `traced.emitters` holds it, 16 bytes.
+/// The host fills it in `sv::view_renderer`, one per record of path `scene.light_path_mesh`, in the order those records stand.
+struct emitter_record:
+    /// the row of `traced.instances` the emitter is
+    instance: uint
+    /// The `bindless.buffers` index of its mesh's area CDF, `sv::mesh_manager::acquire_emitter_cdf`'s.
+    /// A float per triangle, cumulative within its block of `emitter_block_size`, then one per block, cumulative over the mesh.
+    cdf: uint
+    triangle_count: uint
+    block_count: uint
+
+/// How many triangles one block of an emitter's area CDF covers; `sv::emitter_cdf_block_size` restates it.
+const emitter_block_size = 256u
 
 /// The per-frame constants, 256 bytes; the host starts from `sv::default_frame_constants` (rendering/pathtrace_routine.hh).
 ///
@@ -81,7 +95,9 @@ struct frame_constants:
 
     /// How many lights `traced.lights` holds, and where each path's run starts in it, indexed by the `scene.light_path_*` values.
     light_count: uint
-    pad0: uint3
+    /// Where the emissive instances' records start in `traced.lights`: they follow every analytic light, and `traced.emitters` is indexed from here.
+    emitter_offset: uint
+    pad0: uint2
     path_offset: uint4
     path_count: uint4
 
@@ -399,6 +415,9 @@ binding traced:
     /// Every light the trace samples, grouped by path — what `sv::pt_light_table` builds.
     lights: buffer[light_record]
 
+    /// One per emissive instance among `lights`, in the order their records stand from `frame.emitter_offset`.
+    emitters: buffer[emitter_record]
+
     /// The clip-space depth of the first primary hit per pixel, 1 where it escaped, written while `frame.write_primary_depth` is set.
     primary_depth: out image_2d[.r32_float]
 
@@ -590,6 +609,10 @@ struct surface_payload:
     /// 1 where `direction` lies above the shading frame's horizon, the only directions next-event estimation samples.
     /// Where it is 0, a light or the sky the continuation reaches is the BSDF's alone, at full weight.
     nee_reachable: uint
+    /// The solid-angle density next-event estimation draws this hit's point with, from the ray's origin.
+    /// Negative where the instance is no light of the trace, and 0 where it is but next-event estimation cannot draw this point.
+    /// What the caller weighs `emission` by past the camera's ray.
+    light_pdf: float
 
 /// The wavefront's indirect-dispatch arguments, a group of their own: a dispatch may not read its counts from a buffer it binds writable.
 /// Only the small kernels that turn counts into arguments list it — `dispatch_*` name its records.
@@ -622,7 +645,7 @@ rays path_rays:
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
 fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u)
+    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:

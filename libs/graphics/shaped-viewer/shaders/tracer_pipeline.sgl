@@ -115,6 +115,7 @@ rays path_rays:
             let n = p.normal
             let pdf = p.bsdf_pdf
             let reachable = p.nee_reachable != 0u
+            let light_pdf = p.light_pdf
             let albedo = p.albedo
             let specular_albedo = p.specular_albedo
             let roughness = p.roughness
@@ -281,8 +282,16 @@ rays path_rays:
                 if path_is_specular and b > 0 => radiance_specular += c
                 break
 
-            // A surface's own emission reaches the camera directly and contributes nothing indirectly.
-            if b == 0 => radiance += throughput * emission
+            // A surface's own emission reaches the camera at full weight.
+            // Past the camera's ray only an emitter of the light table adds it, as the BSDF strategy of the hit's next-event estimate.
+            // Every other emissive surface lights nothing.
+            if b == 0:
+                radiance += throughput * emission
+            else if light_pdf >= 0.0:
+                let w = if prev_nee_reachable and light_pdf > 0.0 => pt.mis_weight(prev_pdf, light_pdf) else 1.0
+                let c = throughput * emission * w
+                radiance += c
+                if path_is_specular => radiance_specular += c
 
             // What the hit already estimated toward its picked light and the environment, through its own BSDF.
             radiance += throughput * (direct_diffuse + direct_specular)
@@ -394,6 +403,7 @@ fun component_of(v: float3, i: uint) -> float:
     p.bsdf_pdf = 0.0
     p.hit_t = -1.0
     p.nee_reachable = 0u
+    p.light_pdf = -1.0
 
 /// The shadow ray's miss: reached only when nothing occluded the ray, so it marks it visible.
 @miss fun shadow_miss(p: mut tracer.shadow_payload){tracer.traced, tracer.bindless}:

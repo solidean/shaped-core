@@ -424,11 +424,11 @@ importance-samples the continuation — so what is left is coverage of the model
   reflects a blur whatever the roughness says; only the analytic lights — rects and suns — give a real highlight.
   An equirect HDR environment with 2D-CDF importance sampling is the fix; babel already reads it, through `babel::hdr` and `babel::image`.
   How such a map relates to a sun light is open — see "Designed, not landed" in [lights.md](lights.md).
-- **An emissive mesh lights nothing but the camera.** `emission_luminance` is authored and shaded, but next-event
-  estimation samples the analytic lights alone, so emissive geometry is direct-visibility only and contributes no
-  indirect light.
-  What it needs is light sampling over emissive triangles — an emitter list built per trace with its own area pdf,
-  balanced against the BSDF sampler the way a rect light already is.
+- **An emissive mesh lights the scene only where its emission is a constant.**
+  A type declaring its emission makes an instance a light, sampled by area and balanced against the bounce ray in both tracers ([lights.md](lights.md#emissive-instances)).
+  An emission from a texture or a mesh attribute still reaches the camera alone, until the reader of [plans/emissive-triangles.md](plans/emissive-triangles.md)'s P2 samples it.
+  ReSTIR DI leaves emitters to the path until that plan's P3.
+  A raster layer draws no emitter's light yet.
 - **A partly-covered surface is expressible now**, through the cutout any hits a generated hit group carries.
   Reaching it takes two things, and for a while it only had one.
   The hit group needs the any-hit attached, which `material_permutation::opacity` decides: a type names its

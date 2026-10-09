@@ -48,7 +48,8 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    // Lit by its own lamp, an emissive mesh, which is the box's only light: both tracers sample it.
+    auto const lit = sv_test::as_lit_meshes(box, 4.0f);
 
     auto square = sv::drawing();
     square.add_fill(sv::path::rectangle(tg::aabb2f(tg::pos2f(-0.3f, -0.3f), tg::pos2f(0.3f, 0.3f))),
@@ -65,8 +66,8 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
         f.register_capture("front", [](sv::capture_context const&) {});
 
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
         scene.add_sphere(tg::sphere3f(tg::pos3f(-0.45f, -0.65f, 0.2f), 0.35f));
         scene.add_sphere(tg::sphere3f(tg::pos3f(0.45f, -0.7f, -0.2f), 0.3f));
         scene.add_sphere(tg::sphere3f(tg::pos3f(0.0f, 0.3f, 0.5f), 0.2f));

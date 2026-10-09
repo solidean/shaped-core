@@ -382,7 +382,7 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
             .is_indexed = 0u,
             .link_mask = ~0u,
             .shade_group = 0,
-            .pad = 0};
+            .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 }
 
 shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
@@ -411,7 +411,7 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
                 .is_indexed = (!pending && m.is_indexed) ? 1u : 0u,
                 .link_mask = ~0u,
                 .shade_group = 0,
-                .pad = 0};
+                .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 
     _upload_parameters(cmd, r);
 
@@ -424,7 +424,7 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
             .is_indexed = m.is_indexed ? 1u : 0u,
             .link_mask = ~0u,
             .shade_group = 0,
-            .pad = 0};
+            .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 }
 
 bool gpu_resource_manager::attributes_resident(instance_id instance)

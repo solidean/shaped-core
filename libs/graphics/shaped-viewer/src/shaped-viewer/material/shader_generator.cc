@@ -485,6 +485,65 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
     return out;
 }
 
+/// Where attribute `name` of `r` lives in `layout`, read as one factor of the emission; `none` where `name` is empty.
+///
+/// Unlike the opacity, a value at `material_type` frequency counts: the signature's default is a real emission.
+/// A default of zero is what keeps an instance from qualifying as a light at all.
+[[nodiscard]] material_emission_factor emission_factor_of(resolved_material const& r,
+                                                          material_parameter_layout const& layout,
+                                                          cc::string_view name)
+{
+    auto out = material_emission_factor();
+    if (name.empty())
+        return out;
+
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        auto const& a = r.attributes[i];
+        if (a.name != name)
+            continue;
+
+        switch (a.frequency)
+        {
+        case material_frequency::material_type:
+        case material_frequency::material:
+        case material_frequency::mesh_instance:
+            out.kind = material_opacity_kind::constant;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
+            break;
+
+        case material_frequency::mesh_attribute:
+            out.kind = material_opacity_kind::attribute;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.attribute->frequency);
+            break;
+
+        case material_frequency::material_texture:
+        case material_frequency::mesh_texture_binding:
+            out.kind = material_opacity_kind::texture;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::texture_index).offset);
+            out.uv_offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.uv->frequency);
+            for (auto c = 0; c < 3; ++c)
+                out.channels[c] = channel_code(a.sample->swizzle.components[c]);
+            out.sampler = palette_index(a.sample->sampler);
+            if (!a.sample->transform.is_identity(a.format.component_count()))
+                out.transform = u32(slot_for(layout, i32(i), material_slot_kind::sample_transform).offset);
+            break;
+        }
+    }
+    return out;
+}
+
+/// Where `r`'s emission lives in `layout`, as its type declares it.
+[[nodiscard]] material_emission emission_of(resolved_material const& r, material_parameter_layout const& layout)
+{
+    if (!r.type->declares_emission())
+        return {};
+    return {.color = emission_factor_of(r, layout, r.type->emission_color_attribute),
+            .scale = emission_factor_of(r, layout, r.type->emission_scale_attribute)};
+}
+
 /// The header every generated source of one permutation opens with: what it is, what it requires, and the modules it joins.
 /// `extra_use` is one more module the stages join, or empty.
 [[nodiscard]] cc::string source_header(resolved_material const& r,
@@ -556,6 +615,18 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
             cc::format_append(src, "    {}", line);
         src += "\n";
         line_start = line_end + 1;
+    }
+
+    // A type declaring its emission has it written here, after the fragment, from the declared attributes alone.
+    // That is the value the light sampler reads as well, so the two strategies weighed against each other see one emission.
+    if (r.type->declares_emission())
+    {
+        src += "\n    // --- the declared emission ---\n";
+        cc::format_append(src, "    surface.emission_color = max(float3(0.0), {})\n", r.type->emission_color_attribute);
+        if (r.type->emission_scale_attribute.empty())
+            src += "    surface.emission_luminance = 1.0\n";
+        else
+            cc::format_append(src, "    surface.emission_luminance = max(0.0, {})\n", r.type->emission_scale_attribute);
     }
     src += "    return surface\n\n";
 
@@ -784,6 +855,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
 
     auto layout = build_layout(r);
     auto const opacity = opacity_of(r, layout);
+    auto const emission = emission_of(r, layout);
 
     auto source = generate_hit_group(r, layout, opts.kind, opacity.can_cut_out());
     auto shade_source = generate_shade_kernel(r, layout, opts.kind);
@@ -794,6 +866,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
             .raster_source = cc::move(raster_source),
             .layout = cc::move(layout),
             .opacity = opacity,
+            .emission = emission,
             .key = material_shader_key(r.permutation_key, opts)};
 }
 } // namespace sv

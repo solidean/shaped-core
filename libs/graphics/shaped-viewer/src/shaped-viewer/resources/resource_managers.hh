@@ -59,6 +59,18 @@ enum class sv::residency : sv::u8
     failed,
 };
 
+namespace sv
+{
+/// How many triangles one block of an emitter's area CDF covers — `tracer.emitter_block_size` and shaders/emitter_cdf.sgl's `block_size`.
+inline constexpr u32 emitter_cdf_block_size = 256;
+
+/// How many blocks an area CDF over `triangle_count` triangles holds.
+[[nodiscard]] constexpr u32 emitter_cdf_block_count(isize triangle_count)
+{
+    return u32((triangle_count + isize(emitter_cdf_block_size) - 1) / isize(emitter_cdf_block_size));
+}
+} // namespace sv
+
 /// One uploaded mesh: its geometry buffers, and the BLAS built from them once something traces it.
 ///
 /// **The BLAS is built on demand**, by the first trace that reaches the mesh through `mesh_manager::acquire_blas`.
@@ -87,6 +99,15 @@ struct sv::mesh_record
 
     /// Null until a trace asks `mesh_manager::acquire_blas` for it.
     sg::blas_handle blas;
+
+    /// The object-space surface area, summed over the triangles on the acquire that uploaded them.
+    /// What an emissive instance's selection weight starts from, so it is known before any CDF is built.
+    f32 surface_area = 0;
+
+    /// The area CDF next-event estimation picks one of the mesh's triangles by, null until a trace asks `mesh_manager::acquire_emitter_cdf` for it.
+    /// A mesh no emissive instance places never gets one.
+    /// `triangle_count + emitter_cdf_block_count(triangle_count) + 1` floats, laid out as shaders/emitter_cdf.sgl says.
+    sg::buffer<f32> emitter_cdf;
 
     /// The object-space box, when the payload declared one — the summary half of the record.
     ///
@@ -150,6 +171,17 @@ public:
     /// The first call charges the BLAS's size to the budget.
     [[nodiscard]] sg::blas_handle const& acquire_blas(sg::command_list& cmd, mesh_id id);
 
+    /// `id`'s area CDF, built onto `cmd` from the mesh's own buffers the first time a caller asks and held from then on.
+    ///
+    /// Null while the two kernels that build it are still compiling, and for good once they failed to, which is logged once:
+    /// an emissive instance of the mesh then lights nothing that frame, and its emission reaches the camera alone.
+    /// `id` must be `complete`, for the reason `acquire_blas` gives; no ray tracing is needed.
+    /// The first build charges the CDF's size to the budget.
+    [[nodiscard]] sg::buffer<f32> const* acquire_emitter_cdf(sg::command_list& cmd, mesh_id id);
+
+    /// False once the kernels behind `acquire_emitter_cdf` failed to build, after which no CDF ever will be.
+    [[nodiscard]] bool can_build_emitter_cdfs() const { return !_cdf_failed; }
+
     /// Blocks until every queued transfer has landed, then finishes them all.
     ///
     /// For a caller with no frame loop to drain the queue — a test tracing what it just built, or a one-pass tool.
@@ -182,7 +214,13 @@ private:
     /// Its contents are never read — it exists only so the trace's binding group is complete.
     [[nodiscard]] sg::buffer<u32> _acquire_index_stand_in(sg::command_list& cmd);
 
+    /// Whether the two kernels of shaders/emitter_cdf.sgl are built, starting them on first use; polled, never waited on.
+    [[nodiscard]] bool _emitter_cdf_kernels_ready();
+
     sg::context& _ctx;
+    sg::async_compute_pipeline _cdf_blocks;
+    sg::async_compute_pipeline _cdf_total;
+    bool _cdf_failed = false;
     sg::buffer<u32> _index_stand_in;
     sg::blas_handle _placeholder_blas;
     sg::buffer<tg::pos3f> _placeholder_vertices;

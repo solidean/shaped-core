@@ -212,6 +212,9 @@ void place_instance_record(shaders::tracer::instance_record& record,
 
     // A caller's offset counts two records per permutation, so it names the permutation the instance shades with.
     record.shade_group = instance.hit_group_offset / records_per_permutation;
+
+    // Lights nothing until the trace's light table names it, which only the trace knows.
+    record.emitter = no_emitter;
 }
 
 shaders::tracer::frame_constants default_frame_constants()
@@ -248,6 +251,9 @@ namespace
 [[nodiscard]] f32 selection_weight_of(shaders::tracer::light_record const& l)
 {
     auto const lum = cc::max(luminance_of(l.emission), 0.0f);
+    // An emissive instance's area is an estimate of its world area, and it emits from both faces.
+    if (l.path == light_path_mesh)
+        return lum * l.area * tg::pi<f32> * 2.0f;
     switch (light_path(l.path))
     {
     case light_path::point:
@@ -329,16 +335,18 @@ pt_light_table pt_light_table::grouped(cc::span<shaders::tracer::light_record co
     auto out = pt_light_table{};
     for (auto const& l : lights)
     {
-        CC_ASSERT(l.path < 4, "a light record names a path the frame block has no slot for");
+        CC_ASSERT(l.path <= light_path_mesh, "a light record names a path the frame block has no slot for");
         ++out.path_count[l.path];
     }
 
-    for (auto i = 1; i < 4; ++i)
+    for (auto i = 1; i < 5; ++i)
         out.path_offset[i] = out.path_offset[i - 1] + out.path_count[i - 1];
 
     // A counting sort: each light lands at its path's next free slot, so each run keeps the order it was given in.
+    // `light_path_mesh` is the last path, so the emissive instances' records follow every analytic one.
     out.records = cc::vector<shaders::tracer::light_record>::create_defaulted(lights.size());
-    auto next = cc::fixed_array<u32, 4>{out.path_offset[0], out.path_offset[1], out.path_offset[2], out.path_offset[3]};
+    auto next = cc::fixed_array<u32, 5>{out.path_offset[0], out.path_offset[1], out.path_offset[2], out.path_offset[3],
+                                        out.path_offset[4]};
     for (auto const& l : lights)
         out.records[next[l.path]++] = l;
 
@@ -366,6 +374,7 @@ void pt_light_table::describe_in(shaders::tracer::frame_constants& fc) const
         fc.path_offset[i] = path_offset[i];
         fc.path_count[i] = path_count[i];
     }
+    fc.emitter_offset = path_offset[light_path_mesh];
 }
 
 sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)

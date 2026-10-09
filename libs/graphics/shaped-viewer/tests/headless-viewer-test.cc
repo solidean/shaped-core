@@ -41,7 +41,8 @@ ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (s
     auto viewer = cc::move(v_r.value());
 
     auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    // Lit by its own lamp, an emissive mesh, which is the box's only light.
+    auto const lit = sv_test::as_lit_meshes(box, box.light.emission[0]);
 
     // Built once, outside the loop, exactly as an example builds its mesh — that is what pins the buffers and hashes
     // them, so placing it every frame uploads nothing after the first.
@@ -64,8 +65,8 @@ ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (s
         view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
 
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
 
         accumulated = view.accumulated_frames();
         pending_at_end = f.pending_resource_work();
@@ -123,7 +124,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop",
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    auto const lit = sv_test::as_lit_meshes(box, box.light.emission[0]);
 
     auto frames = 0;
     auto front_applied = 0;
@@ -154,8 +155,8 @@ ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop",
         f.register_capture("side", [&](sv::capture_context const&) { ++side_applied; });
 
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
 
         ++frames;
         // The capture ends the loop itself; this only stops a hang from becoming a test timeout.

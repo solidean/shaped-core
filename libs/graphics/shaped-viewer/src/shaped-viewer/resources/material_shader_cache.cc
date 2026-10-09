@@ -111,6 +111,7 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                                                      .layout = cc::move(generated.layout),
                                                      .kind = kind,
                                                      .opacity = procedural ? material_opacity() : generated.opacity,
+                                                     .emission = generated.emission,
                                                      .hit_group = cc::move(hit_group),
                                                      .source = cc::move(generated.source),
                                                      .shade_source = cc::move(generated.shade_source),

@@ -10,6 +10,10 @@ const light_path_point = 0u
 const light_path_area = 1u
 const light_path_distant_point = 2u
 const light_path_distant_disc = 3u
+/// An emissive instance: a record no `sv::light` makes, which the renderer appends after every analytic light.
+/// Its `emission` is the instance's constant radiance, and its `area` an estimate of its world area that only selection reads.
+/// `tracer.traced.emitters` holds the rest, at the record's index past `frame_constants::emitter_offset`.
+const light_path_mesh = 4u
 
 // Bits of `light.flags`, which `sv::light_flag_*` restates, since slib generates no const; 0 is the default for each.
 // Written as their values, `1 << 0` to `1 << 2`, since a `const` holds a literal.
@@ -102,7 +106,9 @@ struct instance:
     opacity_cutoff: uint
     /// the index of the permutation the instance shades with in this trace, which a wavefront hit is sorted by
     shade_group: uint
-    pad: uint
+    /// The index of the instance's own record in `tracer.traced.lights`, or `no_offset` where it lights nothing.
+    /// A bounce ray that meets an instance with one weighs its emission against next-event estimation.
+    emitter: uint
 
     /// The rows of the object-to-world transform the instance is placed by, which a hit stored for later shading needs.
     to_world_x: float4

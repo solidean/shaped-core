@@ -46,7 +46,8 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
     auto viewer = cc::move(v_r.value());
 
     auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    // Lit by its own lamp, an emissive mesh, which is the box's only light.
+    auto const lit = sv_test::as_lit_meshes(box, 4.0f);
 
     // Off, then on, then another member, then off again — each phase long enough for a trace to land in it.
     auto const phase_methods = cc::vector<sr::denoise_method>{
@@ -78,8 +79,8 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
         view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
 
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
         // The loop may run one more body after the close request; it then keeps the last phase's setting.
         auto const method = phase < phase_methods.size() ? phase_methods[phase] : phase_methods.back();
         scene.settings({.samples_per_pixel = 1, .reconstruct = {.denoiser = method}});
@@ -153,7 +154,8 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    // Lit by its own lamp, an emissive mesh, which is the box's only light.
+    auto const lit = sv_test::as_lit_meshes(box, 4.0f);
     auto const loop_start = cc::current_time_steady_secs();
 
     for (auto f : sv::interactive(ctx, "sv-test/denoise-capture"))
@@ -164,11 +166,9 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
         f.register_capture("front", [](sv::capture_context const&) {});
 
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        // Just under the ceiling rather than above it as the other viewer tests place it: only the analytic light is
-        // sampled directly, so from above the box is lit through its lamp mesh alone and comes out nearly black.
-        // Moderate, because nothing tone-maps and a bright box clips to flat white; either way the noise would hide.
-        scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
+        // Lit by its lamp alone, at a moderate luminance: nothing tone-maps, and a bright box clips to flat white, where the noise would hide.
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
         // No frame budget: it sizes a still frame by the GPU's own timing, so a capture at `accumulate` frames would hold
         // however many samples this machine reached, and two captures would compare different estimates.
         scene.settings({.samples_per_pixel = 1,
@@ -519,7 +519,8 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "20");
 
     auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    // Lit by its own lamp, an emissive mesh, which is the box's only light.
+    auto const lit = sv_test::as_lit_meshes(box, 4.0f);
     auto const loop_start = cc::current_time_steady_secs();
 
     for (auto f : sv::interactive(ctx, "sv-test/crossfade"))
@@ -529,8 +530,8 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
         f.register_capture("front", [](sv::capture_context const&) {});
 
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
         scene.settings({.samples_per_pixel = 1,
                         .reconstruct = {.denoiser = sr::denoise_method::automatic},
                         .temporal_denoise_frames = window,

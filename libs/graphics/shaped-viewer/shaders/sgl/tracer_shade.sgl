@@ -34,10 +34,12 @@ struct light_sample:
     distance: float
     /// 1 where the ray has to be tested; 0 where the sample contributes nothing, or comes from a light that casts no shadow
     tested: uint
+    /// 1 where the sample is a point on an emissive instance, which ReSTIR DI leaves to the path's own estimate
+    from_mesh: uint
 
 /// The sample that contributes nothing and tests nothing.
 fun no_light_sample() -> light_sample:
-    return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u)
+    return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u, 0u)
 
 /// Whether `s` arrives, tracing its shadow ray here and now where it has one.
 fun visible(s: light_sample){traced} -> bool:
@@ -49,15 +51,15 @@ fun visible(s: light_sample){traced} -> bool:
 /// One light is picked, in proportion to its power or uniformly where the table carries no probabilities, and its choice is part of the density.
 /// That keeps one shadow ray per hit an unbiased estimate of every light at once.
 /// A point or a parallel light is a delta no sampled ray can reach, so it takes no weighting and is divided by the probability of picking it alone.
-/// A rect and a disc are reachable by the raygen's continuation ray too, and weight against it.
-fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced}:
+/// A rect, a disc and an emissive instance are reachable by the raygen's continuation ray too, and weight against it.
+fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced, bindless}:
     let s = sample_light(b, f, wo_local, p, n_geom, last_bounce, mut rng)
     let arrives = visible(s)
     out_diffuse = if arrives => s.diffuse else float3(0.0)
     out_specular = if arrives => s.specular else float3(0.0)
 
 /// `estimate_light` without its visibility test: the sample, and the shadow ray it still owes.
-fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced} -> light_sample:
+fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced, bindless} -> light_sample:
     let count = traced.frame[0].light_count
     if count == 0u => return no_light_sample()
 
@@ -74,8 +76,50 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
     let mut incoming = float3(0.0)
     let mut pdf = 0.0
     let mut delta = false
+    let mut from_mesh = 0u
 
-    if l.path == scene.light_path_area:
+    if l.path == scene.light_path_mesh:
+        // A triangle of the instance by its area, then a uniform point on it: the density is the triangle's share over its world area.
+        let e = traced.emitters[(index - traced.frame[0].emitter_offset) as int]
+        let inst = scene.instance(..traced.instances[e.instance as int])
+        let mut p_tri = 0.0
+        let u_block = pt.rand(mut rng)
+        let u_triangle = pt.rand(mut rng)
+        let primitive = emitter_pick(e, u_block, u_triangle, mut p_tri)
+        let u1 = pt.rand(mut rng)
+        let u2 = pt.rand(mut rng)
+        if p_tri <= 0.0 => return no_light_sample()
+
+        let indices = inst.indices as int
+        let corner = material.triangle_corners(inst, bindless.buffers[nonuniform indices], primitive)
+        let w0 = instance_point_to_world(inst, instance_position(inst, corner.x))
+        let w1 = instance_point_to_world(inst, instance_position(inst, corner.y))
+        let w2 = instance_point_to_world(inst, instance_position(inst, corner.z))
+        let cross_w = cross(w1 - w0, w2 - w0)
+        let twice_area = length(cross_w)
+        if twice_area <= 0.0 => return no_light_sample()
+
+        // The square-root warp keeps the point uniform over the triangle; `bary` weighs corners 1 and 2, as a hit's barycentrics do.
+        let su = sqrt(u1)
+        let bary = float2(su * (1.0 - u2), su * u2)
+        let point = w0 * (1.0 - bary.x - bary.y) + w1 * bary.x + w2 * bary.y
+        let to_light = point - p
+        let dist2 = dot(to_light, to_light)
+        let dist = sqrt(dist2)
+        if dist <= 0.0 => return no_light_sample()
+        wi = to_light / dist
+
+        // Two-sided, as a bounce ray reaching it counts it.
+        let cos_light = abs(dot(cross_w, wi)) / twice_area
+        if cos_light <= 0.0 => return no_light_sample()
+
+        shadow_dist = dist - 2e-3
+        // A cutout emitter emits where it is there, as a bounce ray meets it with the probability of its opacity.
+        let ctx = material.make_context(inst, bindless.buffers[nonuniform indices], primitive, bary)
+        incoming = l.emission * instance_opacity(inst, ctx)
+        pdf = pt.mesh_light_pdf(pt.light_select_pdf(l, count), p_tri, 0.5 * twice_area, dist2, cos_light)
+        from_mesh = 1u
+    else if l.path == scene.light_path_area:
         // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
         let s = pt.rand(mut rng) * 2.0 - 1.0
         let t = pt.rand(mut rng) * 2.0 - 1.0
@@ -137,7 +181,7 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
 
     let scale = incoming * (wi_local.z / pdf) * w
     let tested = if scene.light_casts_shadows(l) => 1u else 0u
-    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, shadow_dist, tested)
+    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, shadow_dist, tested, from_mesh)
 
 /// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.
 ///
@@ -162,6 +206,80 @@ fun pick_light(u: float, count: uint){traced} -> uint:
             lo = mid + 1u
     return lo
 
+// ---- Emissive instances ---------------------------------------------------------------------------------------------
+
+/// Entry `i` of the area CDF in `bindless.buffers` element `cdf`.
+fun emitter_cdf_at(cdf: int, i: uint){bindless} -> float:
+    return reinterpret_as_float(bindless.buffers[nonuniform cdf].load(i * 4u))
+
+/// The triangle of emitter `e` the uniforms `u_block` and `u_triangle` pick in proportion to its area, and in `p_tri` the probability it had.
+///
+/// Two searches, the block and then the triangle within it, and the probability is the product of the two interval widths.
+/// Each search takes its own draw: one draw rescaled onto a narrow block keeps too few f32 steps to tell its triangles apart.
+/// A zero-area triangle has a zero-width interval, so no `u` picks it; where rounding lands on one anyway, `p_tri` is 0.
+fun emitter_pick(e: emitter_record, u_block: float, u_triangle: float, p_tri: mut float){bindless} -> uint:
+    p_tri = 0.0
+    let cdf = e.cdf as int
+    if e.triangle_count == 0u or e.block_count == 0u => return 0u
+    // The blocks' entries follow the triangles'.
+    let block_base = e.triangle_count
+    let mut lo = 0u
+    let mut hi = e.block_count - 1u
+    while lo < hi:
+        let mid = (lo + hi) / 2u
+        if u_block < emitter_cdf_at(cdf, block_base + mid):
+            hi = mid
+        else:
+            lo = mid + 1u
+    let block = lo
+    let block_low = if block > 0u => emitter_cdf_at(cdf, block_base + block - 1u) else 0.0
+    let block_width = emitter_cdf_at(cdf, block_base + block) - block_low
+    if block_width <= 0.0 => return 0u
+
+    let first = block * emitter_block_size
+    lo = first
+    hi = min(first + emitter_block_size, e.triangle_count) - 1u
+    while lo < hi:
+        let mid = (lo + hi) / 2u
+        if u_triangle < emitter_cdf_at(cdf, mid):
+            hi = mid
+        else:
+            lo = mid + 1u
+    let low = if lo > first => emitter_cdf_at(cdf, lo - 1u) else 0.0
+    p_tri = block_width * (emitter_cdf_at(cdf, lo) - low)
+    return lo
+
+/// The probability `emitter_pick` picks triangle `primitive` of emitter `e`.
+fun emitter_triangle_pdf(e: emitter_record, primitive: uint){bindless} -> float:
+    if primitive >= e.triangle_count => return 0.0
+    let cdf = e.cdf as int
+    let block = primitive / emitter_block_size
+    let first = block * emitter_block_size
+    let block_low = if block > 0u => emitter_cdf_at(cdf, e.triangle_count + block - 1u) else 0.0
+    let low = if primitive > first => emitter_cdf_at(cdf, primitive - 1u) else 0.0
+    return (emitter_cdf_at(cdf, e.triangle_count + block) - block_low) * (emitter_cdf_at(cdf, primitive) - low)
+
+/// The solid-angle density next-event estimation draws the point a ray met on triangle `primitive` of `inst` with.
+/// `edge1` and `edge2` are the triangle's world edges from its first corner, `dir` the ray's unit direction and `t` the distance it went.
+/// Negative where `inst` holds no record in the trace's light table: its emission then reaches the camera alone.
+/// 0 where it does but next-event estimation cannot draw this point, which leaves the bounce ray as its only strategy.
+fun emitter_pdf(inst: scene.instance, primitive: uint, edge1: float3, edge2: float3, dir: float3, t: float){traced, bindless} -> float:
+    if inst.emitter == scene.no_offset => return -1.0
+    let f = traced.frame[0]
+    let l = scene.light(..traced.lights[inst.emitter as int])
+    let e = traced.emitters[(inst.emitter - f.emitter_offset) as int]
+    let cross_w = cross(edge1, edge2)
+    let twice_area = length(cross_w)
+    if twice_area <= 0.0 => return 0.0
+    let cos_light = abs(dot(cross_w, dir)) / twice_area
+    let p_tri = emitter_triangle_pdf(e, primitive)
+    if p_tri <= 0.0 or cos_light <= 0.0 => return 0.0
+    return pt.mesh_light_pdf(pt.light_select_pdf(l, f.light_count), p_tri, 0.5 * twice_area, t * t, cos_light)
+
+/// `p` in world space, through the instance's placement rows.
+fun instance_point_to_world(inst: scene.instance, p: float3) -> float3:
+    return float3(dot(inst.to_world_x.xyz, p) + inst.to_world_x.w, dot(inst.to_world_y.xyz, p) + inst.to_world_y.w, dot(inst.to_world_z.xyz, p) + inst.to_world_z.w)
+
 /// `estimate_environment` without its visibility test.
 fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced} -> light_sample:
     // cos(theta) = u1 uniform in [0, 1] gives a uniform solid-angle pick about the normal.
@@ -184,7 +302,7 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     let w = if last_bounce => 1.0 else pt.mis_weight(pt.env_pdf(), openpbr.bsdf_pdf(b, wo_local, wi_local))
 
     let scale = scene.background_radiance(background_sh(), wi) * (wi_local.z / pt.env_pdf()) * w
-    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, 1e4, 1u)
+    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, 1e4, 1u, 0u)
 
 // ---- Decals ---------------------------------------------------------------------------------------------------------
 
@@ -259,7 +377,7 @@ fun paint_decal_shape(surface: mut openpbr.surface, d: decal_record, s: decal_sh
 /// `exiting` says the ray arrived from inside the surface, which a refraction needs, since the index ratio inverts between going in and coming back out.
 /// `ray_origin`, `ray_dir` and `hit_t` are the ray as the hit received it.
 /// `authored` is the material's tangent frame in world space, and means something only where `has_authored` holds.
-fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool){traced, slug.tables}:
+fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool){traced, bindless, slug.tables}:
     let mut light = no_light_sample()
     let mut env = no_light_sample()
     shade_sampled(mut payload, surface_in, n, v, exiting, ray_origin, ray_dir, hit_t, authored, has_authored, mut light, mut env)
@@ -269,11 +387,13 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
     payload.direct_specular = (if light_arrives => light.specular else float3(0.0)) + (if env_arrives => env.specular else float3(0.0))
 
 /// `shade` without its two visibility tests: the light and environment samples come back untested, and `direct_*` are left zero.
-fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool, light: mut light_sample, env: mut light_sample){traced, slug.tables}:
+fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool, light: mut light_sample, env: mut light_sample){traced, bindless, slug.tables}:
     light = no_light_sample()
     env = no_light_sample()
     payload.direct_diffuse = float3(0.0)
     payload.direct_specular = float3(0.0)
+    // A triangle hit writes its own once this returns; nothing else is a light of the trace.
+    payload.light_pdf = -1.0
     payload.normal = n
     payload.hit_t = hit_t
 
@@ -437,6 +557,7 @@ fun shade_triangle(h: triangle_hit, payload: mut surface_payload, ctx: material.
 
     let ray_origin = float3(h.ray.origin.x, h.ray.origin.y, h.ray.origin.z)
     shade(mut payload, surface, n, v, exiting, ray_origin, ray_dir, h.t, authored, supplied_tangent_frame)
+    payload.light_pdf = emitter_pdf(inst, ctx.primitive, instance_to_world(inst, v1 - v0), instance_to_world(inst, v2 - v0), -v, h.t * length(ray_dir))
 
 /// The shading context of a triangle the traversal could not decide alone, as `triangle_context` makes one for a hit.
 fun candidate_context(c: triangle_candidate){traced, bindless} -> material.shading_context:
@@ -558,7 +679,7 @@ fun quadric_context(h: procedural_hit[quadric_attributes]){traced} -> material.s
 ///
 /// A quadric is two-sided in earnest: an open cylinder's inside wall is a hit, whose outward gradient points away from the viewer.
 /// `supplied_tangent_frame` is what `shade_triangle` takes it as.
-fun shade_quadric(h: procedural_hit[quadric_attributes], payload: mut surface_payload, surface: openpbr.surface, supplied_tangent_frame: bool){traced, slug.tables}:
+fun shade_quadric(h: procedural_hit[quadric_attributes], payload: mut surface_payload, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables}:
     let n_obj = h.attributes.normal
     // By the inverse transpose: a batch under a non-uniform scale is a documented capability, a sphere becoming an ellipsoid.
     let n_world = h.normal_to_world(vec3(n_obj.x, n_obj.y, n_obj.z))

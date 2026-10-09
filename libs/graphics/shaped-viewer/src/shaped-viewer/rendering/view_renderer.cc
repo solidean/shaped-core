@@ -80,6 +80,20 @@ struct resolved_view
     /// What a raster frame draws per row; no trace reads it.
     cc::vector<u32> triangle_counts;
 
+    /// One per instance that lights the scene this frame, in item order: its light record, and what the sampler reads beyond it.
+    /// `emitters[k].instance` is the row of `records` it describes; `link_emitters` writes that row's light index once the table is grouped.
+    cc::vector<shaders::tracer::light_record> emitter_lights;
+    cc::vector<shaders::tracer::emitter_record> emitters;
+
+    /// How many traced instances qualify as lights, whether or not their area CDF is built yet.
+    /// What turns the fallback light off: a layer lit by its emitters is lit, even on the frames before they can be sampled.
+    /// A raster frame counts none, as it draws no emitter's light, and neither does a manager whose CDF kernels failed.
+    isize emissive_items = 0;
+
+    /// Whether some emissive instance lit nothing this frame because its area CDF is not built yet.
+    /// Such a frame is an image of a darker scene, so it restarts as a frame drawn through a stand-in does.
+    bool emitters_pending = false;
+
     /// Whether any item here is a quadric batch at all.
     ///
     /// It decides whether the trace is handed the PROCEDURAL stand-in, and it has to be this broad.
@@ -214,6 +228,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         auto const placement = is_pending ? placeholder_transform(mesh->bounds.value(), item.transform) : item.transform;
         auto const triangle_count
             = is_pending ? u32(resources.meshes.placeholder_vertices().element_count() / 3) : u32(mesh->triangle_count);
+        auto const object_area = mesh->surface_area;
         auto blas = sg::blas_handle();
         if (traced)
             blas = is_pending ? resources.meshes.placeholder_blas() : resources.meshes.acquire_blas(cmd, item.mesh);
@@ -229,6 +244,47 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
         out.parameter_blocks.push_back(item.instance);
         out.triangle_counts.push_back(triangle_count);
+
+        // An instance lights the scene where its own permutation declares an emission that is not zero.
+        // Only constant factors yet: the sampler reads them out of the record.
+        // A texture or a mesh attribute would need the reader P2 adds.
+        if (shade_fallback)
+            continue;
+        auto const radiance
+            = impl::emitter_radiance_of(out.hit_groups[permutation]->emission, resources.get_instance(item.instance));
+        if (!radiance.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
+            continue;
+        ++out.emissive_items;
+
+        // Not pending, so `triangle_count` is the mesh's own, read with `object_area` before any build could move `mesh`.
+        auto const triangles = isize(triangle_count);
+        auto const* const cdf = resources.meshes.acquire_emitter_cdf(cmd, item.mesh);
+        if (cdf == nullptr)
+        {
+            // Its kernels are still compiling: camera-only this frame.
+            out.emitters_pending = true;
+            continue;
+        }
+        auto const cdf_index = u32(resources.acquire_buffer(cdf->raw()->as_raw_readonly()));
+
+        out.emitter_lights.push_back({.position = {},
+                                      .path = light_path_mesh,
+                                      .u = {},
+                                      .area = impl::world_area_of(object_area, item.transform),
+                                      .v = {},
+                                      .flags = light_flag_two_sided,
+                                      .emission = radiance.value(),
+                                      .cone_scale = 0,
+                                      .normal = {},
+                                      .cone_offset = 1,
+                                      .one_minus_cos_angular_radius = 0,
+                                      .link_mask = ~0u,
+                                      .select_pdf = 0,
+                                      .select_cdf = 0});
+        out.emitters.push_back({.instance = u32(out.records.size() - 1),
+                                .cdf = cdf_index,
+                                .triangle_count = u32(triangles),
+                                .block_count = emitter_cdf_block_count(triangles)});
     }
 
     CC_ASSERT(!out.instances.empty(), "a view needs at least one drawable item to render");
@@ -244,18 +300,37 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
     return buffer;
 }
 
-/// The lights the path tracer samples, grouped by path: every light in the layer, or the layer's fallback when it has
-/// none — so a layer nobody lit is still visible, unless its fallback was turned off.
-[[nodiscard]] pt_light_table traced_lights(layer const& l)
+/// The lights the path tracer samples, grouped by path: every light in the layer, then every emissive instance `r` resolved.
+/// A layer with neither takes its fallback — so a layer nobody lit is still visible, unless its fallback was turned off.
+[[nodiscard]] pt_light_table traced_lights(layer const& l, resolved_view const& r)
 {
     auto records = cc::vector<shaders::tracer::light_record>();
     for (auto const& sl : l.lights)
         records.push_back(light_record_of(sl.light));
 
-    if (records.empty() && l.fallback_light.has_value())
+    if (records.empty() && r.emissive_items == 0 && l.fallback_light.has_value())
         records.push_back(light_record_of(l.fallback_light.value()));
 
+    // Last, as the table groups them: `light_path_mesh` follows every analytic path, and keeps this order within its run.
+    for (auto const& e : r.emitter_lights)
+        records.push_back(e);
+
     return pt_light_table::grouped(records);
+}
+
+/// Writes into each emissive instance's row of `r.records` the index of its light record in `lights`.
+void link_emitters(resolved_view& r, pt_light_table const& lights)
+{
+    for (auto k = isize(0); k < r.emitters.size(); ++k)
+        r.records[r.emitters[k].instance].emitter = lights.path_offset[light_path_mesh] + u32(k);
+}
+
+/// The emitter records `r` resolved, uploaded for this recording, or null for none.
+[[nodiscard]] sg::buffer<shaders::tracer::emitter_record> upload_emitters(sg::command_list& cmd, resolved_view const& r)
+{
+    if (r.emitters.empty())
+        return {};
+    return cmd.context().transient.create_buffer_from_data(cmd, r.emitters, sg::buffer_usage::readonly_buffer);
 }
 
 /// The table `lights` holds, uploaded for this recording.
@@ -453,9 +528,10 @@ struct ensured_slot
     if (resized)
     {
         // UAV-written by whatever fills it, sampled by whatever reads it back — every temporal resource needs both.
-        // A slot the renderer mints is a render target too, since a raster frame draws the very slots a trace writes;
-        // a caller's own keeps to the two, as its format need not be renderable.
-        auto usage = sg::texture_usage::texture | sg::texture_usage::image;
+        // A copy source too, so the image `execute` returns can be downloaded.
+        // A slot the renderer mints is a render target too, since a raster frame draws the very slots a trace writes.
+        // A caller's own is not, as its format need not be renderable.
+        auto usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src;
         if (temporal_id >= sv::temporal_id::caller_range_end)
             usage |= sg::texture_usage::render_target;
         auto const desc
@@ -768,6 +844,47 @@ struct raster_scene
 }
 } // namespace
 
+cc::optional<tg::vec3f> impl::emitter_radiance_of(material_emission const& emission, instance_record const& block)
+{
+    // Only constant factors yet: the sampler reads them out of the light record.
+    // A texture or a mesh attribute would need the reader P2 adds.
+    if (!emission.declares() || !emission.is_constant())
+        return {};
+
+    auto const constant_at = [&](u32 offset) -> instance_slot const*
+    {
+        for (auto const& slot : block.slots)
+            if (slot.kind == material_slot_kind::constant && u32(slot.offset) == offset)
+                return &slot;
+        return nullptr;
+    };
+
+    auto color = tg::vec3f(0, 0, 0);
+    if (auto const* const slot = constant_at(emission.color.offset); slot != nullptr && slot->constant.size() >= 12)
+        cc::memcpy(&color, slot->constant.data(), 12);
+    auto scale = 1.0f;
+    if (emission.scale.kind == material_opacity_kind::constant)
+    {
+        scale = 0.0f;
+        if (auto const* const slot = constant_at(emission.scale.offset); slot != nullptr && slot->constant.size() >= 4)
+            cc::memcpy(&scale, slot->constant.data(), 4);
+    }
+    scale = cc::max(scale, 0.0f);
+    auto const radiance
+        = tg::vec3f(cc::max(color[0], 0.0f) * scale, cc::max(color[1], 0.0f) * scale, cc::max(color[2], 0.0f) * scale);
+    if (radiance[0] <= 0.0f && radiance[1] <= 0.0f && radiance[2] <= 0.0f)
+        return {};
+    return radiance;
+}
+
+f32 impl::world_area_of(f32 object_area, tg::affine_transform3f const& placement)
+{
+    auto const l = placement.linear_mat();
+    auto const det = l[0, 0] * (l[1, 1] * l[2, 2] - l[2, 1] * l[1, 2]) - l[1, 0] * (l[0, 1] * l[2, 2] - l[2, 1] * l[0, 2])
+                   + l[2, 0] * (l[0, 1] * l[1, 2] - l[1, 1] * l[0, 2]);
+    return object_area * tg::pow(tg::abs(det), 2.0f / 3.0f);
+}
+
 cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
@@ -920,11 +1037,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (is_traced && !can_trace(ctx, l.settings.mode, rec, *slot))
         return sg::routine_outcome::declined;
 
-    auto const resolved = resolve_scene(cmd, l, resources, is_traced);
+    auto resolved = resolve_scene(cmd, l, resources, is_traced);
 
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.
-    auto const lights = traced_lights(l);
+    auto const lights = traced_lights(l, resolved);
+    link_emitters(resolved, lights);
     auto const decals = decals_of(l, resources.drawings.decal_atlas());
     auto fc = make_frame_constants(v, l, lights, tr.resolution);
     fc.decal_count = u32(decals.decals.size());
@@ -1132,6 +1250,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     auto const instance_table = upload_instances(cmd, resolved);
     auto const light_buffer = upload_lights(cmd, lights);
+    auto const emitter_buffer = upload_emitters(cmd, resolved);
     auto const decal_buffers = upload_decals(cmd, decals, resources.drawings.decal_atlas());
 
     // Held across the dispatch: the tables are what the closest-hit reaches every mesh and texture through, and
@@ -1201,6 +1320,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
          .sample_counts = sample_counts,
          .instance_table = instance_table,
          .lights = light_buffer,
+         .emitters = emitter_buffer,
          .hit_groups = resolved.hit_groups,
          // One material still compiling, or one that does not compile, degrades to gray
          // shading on its own meshes rather than costing the view its whole image.
@@ -1224,7 +1344,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     // A frame shaded by a stand-in material is an image of a different scene, so the next frame restarts rather than
     // averaging into it — the trace hash cannot see the substitution, which the routine alone decides.
-    if (stand_ins)
+    if (stand_ins || resolved.emitters_pending)
         slot->reset_hash = cc::combine_hash(hash, u64(1));
 
     // A scaled frame is no sample of the mean, which the next still frame restarts at full size.
@@ -1492,9 +1612,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
     // bindless index this trace reads.
-    auto const resolved = resolve_scene(cmd, *scene, resources, is_traced);
+    auto resolved = resolve_scene(cmd, *scene, resources, is_traced);
 
-    auto const lights = traced_lights(*scene);
+    auto const lights = traced_lights(*scene, resolved);
+    link_emitters(resolved, lights);
     auto const decals = decals_of(*scene, resources.drawings.decal_atlas());
     auto fc = make_frame_constants(v, *scene, lights, v.resolution);
     fc.decal_count = u32(decals.decals.size());
@@ -1541,6 +1662,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     auto const instance_table = upload_instances(cmd, resolved);
     auto const light_buffer = upload_lights(cmd, lights);
+    auto const emitter_buffer = upload_emitters(cmd, resolved);
     auto const decal_buffers = upload_decals(cmd, decals, resources.drawings.decal_atlas());
     auto const bindless = resources.freeze();
 
@@ -1560,6 +1682,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
          .output = slot.texture,
          .instance_table = instance_table,
          .lights = light_buffer,
+         .emitters = emitter_buffer,
          .hit_groups = resolved.hit_groups,
          // One material still compiling, or one that does not compile, degrades to gray
          // shading on its own meshes rather than costing the view its whole image.
@@ -1578,7 +1701,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // As above: a declined trace recorded nothing, so it must not count as a sample, and a frame shaded by a stand-in
     // must not be averaged with the next.
-    if (traced == sg::routine_outcome::executed && stand_ins)
+    if (traced == sg::routine_outcome::executed && (stand_ins || resolved.emitters_pending))
         slot.reset_hash = cc::combine_hash(hash, u64(1));
     if (traced == sg::routine_outcome::executed && slot.accum_frame < accumulation_frame_cap)
         ++slot.accum_frame;

@@ -169,6 +169,7 @@ target_compile_options(shaped-viewer
 )
 
 # sv's shader package: the path tracer (tracer_pipeline.sgl over module `tracer`, shaders/sgl), the raster path (raster_pass.sgl over module `raster`) and the compositing passes.
+# emitter_cdf.sgl builds an emissive mesh's area CDF, which the tracer's light sampler reads.
 # Module `tracer` is exported because a material's hit group, generated and compiled at run time, lists its bindings and traces its rays.
 # Module `raster` is exported for the same reason: a material's pixel shader is generated too, and lists its bindings and writes its targets.
 # The fullscreen blit lives in shaped-rendering (sr::blit_routine).
@@ -190,6 +191,7 @@ sc_add_shader_package(
         raster_pass.sgl:*
         layout.sgl:*
         depth_fill.sgl:*
+        emitter_cdf.sgl:*
 )
 
 # The examples corpus: the viewer as a caller actually reaches for it.
@@ -223,6 +225,7 @@ if(SC_BUILD_TESTS)
         tests/material-shader-generator-test.cc
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
+        tests/emitter-test.cc
         tests/asset-loading-test.cc
         tests/pt-packing-test.cc
     )
@@ -263,6 +266,7 @@ if(SC_BUILD_TESTS)
             tests/volumetric-furnace-test.cc
             tests/accumulated-mean-test.cc
             tests/cutout-trace-test.cc
+            tests/emitter-trace-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
             tests/raster-test.cc

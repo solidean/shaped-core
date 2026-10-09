@@ -625,13 +625,19 @@ fun shade_stored_triangle(slot: uint, ctx: material.shading_context, surface: op
     let v0 = instance_position(inst, ctx.corner.x)
     let v1 = instance_position(inst, ctx.corner.y)
     let v2 = instance_position(inst, ctx.corner.z)
-    shade_stored(slot, inst, normalize(cross(v1 - v0, v2 - v0)), surface, supplied_tangent_frame)
+    // The density next-event estimation draws this point with, which the emission of an emitter the ray reached is weighed by.
+    // The re-shade adds no emission, so it needs none.
+    let mut light_pdf = -1.0
+    if wavefront_step.mode != step_restir_shade:
+        let r = traced.path_rays[slot as int]
+        light_pdf = emitter_pdf(inst, hit.primitive, instance_to_world(inst, v1 - v0), instance_to_world(inst, v2 - v0), normalize(r.direction), hit.t * length(r.direction))
+    shade_stored(slot, inst, normalize(cross(v1 - v0, v2 - v0)), surface, supplied_tangent_frame, light_pdf)
 
 /// Shades the quadric hit of `slot` from the normal its intersection reported — the wavefront's `shade_quadric`.
 fun shade_stored_quadric(slot: uint, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables, wavefront_step}:
     let hit = stored_hit(slot)
     let inst = scene.instance(..traced.instances[hit.instance as int])
-    shade_stored(slot, inst, hit.normal, surface, supplied_tangent_frame)
+    shade_stored(slot, inst, hit.normal, surface, supplied_tangent_frame, -1.0)
 
 /// Writes one next-event sample of `slot`: a shadowless one counts now, one with a shadow ray waits for connect.
 /// `j` is which of the slot's two shadow rays it is.
@@ -649,7 +655,8 @@ fun defer_light(slot: uint, j: uint, sample: light_sample, throughput: float3, b
     return true
 
 /// The tail both geometry kinds share: the hit faced toward its ray, shaded, and the path moved on.
-fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openpbr.surface, supplied_tangent_frame: bool){traced, bindless, slug.tables, wavefront_step}:
+/// `light_pdf` is what `emitter_pdf` made of the hit, negative where the instance is no light of the trace.
+fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openpbr.surface, supplied_tangent_frame: bool, light_pdf: float){traced, bindless, slug.tables, wavefront_step}:
     if wavefront_step.mode == step_restir_shade:
         restir_shade_stored(slot, inst, n_obj, surface, supplied_tangent_frame)
         return
@@ -714,14 +721,35 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         st.flags = st.flags & ~path_flag_primary
         if path_is_specular => st.flags = st.flags | path_flag_specular
 
-    // A surface's own emission reaches the camera directly and contributes nothing indirectly.
-    if b == 0u => light.radiance += throughput * p.emission
+    // ReSTIR's `x_s`, the hit of a split path's segment leaving its visible point, whose record this shade updates.
+    let at_x_s = (st.flags & path_flag_split) != 0u and b == 1u
+    let mut at_s = if at_x_s => unpack_candidate(traced.restir_candidates[s]) else empty_candidate()
+    let mut at_s_changed = false
+
+    // A surface's own emission reaches the camera at full weight.
+    // Past the camera's ray only an emitter of the light table adds it, as the BSDF strategy of the hit's next-event estimate.
+    if b == 0u:
+        light.radiance += throughput * p.emission
+    else if light_pdf >= 0.0:
+        let prev_reachable = (st.flags & path_flag_prev_nee_reachable) != 0u
+        let w = if prev_reachable and light_pdf > 0.0 => pt.mis_weight(st.prev_pdf, light_pdf) else 1.0
+        let c = throughput * p.emission * w
+        let c_specular = if path_is_specular => c else float3(0.0)
+        // Reached from ReSTIR's visible point, it is that point's direct light at the factor the path was rebased by, as a rect it crossed is.
+        if at_x_s and prev_reachable:
+            at_s.direct += at_s.rebase * c
+            at_s.direct_specular += at_s.rebase * c_specular
+            at_s_changed = true
+        else:
+            light.radiance += c
+            light.specular += c_specular
 
     // At ReSTIR's visible point the light sample's shadow ray is marked as the light part of `direct`, the environment's as direct alone.
     // The light part is the next-event sample alone, and only toward the hemisphere ReSTIR DI's target covers; the rest stays the path's own.
     // A dispersive surface shaded one wavelength's closure, which the re-shade does not rebuild, so its light stays the path's own.
     let di_surface = not (surface.transmission_dispersion_scale > 0.0 and surface.transmission_weight > 0.0)
-    let di_reaches = di_surface and dot(n, light_s.direction) > 0.0
+    // A point on an emissive instance is no sample ReSTIR DI holds yet, so it stays the path's own too.
+    let di_reaches = di_surface and dot(n, light_s.direction) > 0.0 and light_s.from_mesh == 0u
     let light_marker = if restir_here => (if di_reaches => 2.0 else 1.0) else 0.0
     let env_marker = if restir_here => 1.0 else 0.0
     let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, light_marker, mut light)
@@ -747,13 +775,13 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
             cand.light_part += throughput * (light_s.diffuse + light_s.specular)
             cand.light_part_specular += throughput * light_s.specular
         light = path_light(float3(0.0), float3(0.0))
-    else if (st.flags & path_flag_split) != 0u and b == 1u:
+    else if at_x_s:
         // ReSTIR's `x_s`: the normal a reconnection is weighed by, and whether it is rough enough to reconnect to at all.
-        let mut at_s = unpack_candidate(traced.restir_candidates[s])
         if (at_s.flags & restir_flag_candidate) != 0u:
             at_s.n_s = p.normal
             if p.roughness >= restir_reconnect_roughness => at_s.flags = at_s.flags | restir_flag_reconnectable
-            traced.restir_candidates[s] = pack_candidate(at_s)
+            at_s_changed = true
+    if at_s_changed => traced.restir_candidates[s] = pack_candidate(at_s)
 
     let mut rng = p.rng
     let mut continues = not all(p.throughput <= float3(0.0))
@@ -1231,11 +1259,18 @@ fun di_sample(count: uint, rng: mut uint){traced} -> di_draw:
         let u2 = pt.rand(mut rng)
         let dir = pt.sample_cone(-l.normal, l.one_minus_cos_angular_radius, u1, u2)
         return di_draw(dir, index, select / max(2.0 * pt.pi * l.one_minus_cos_angular_radius, 1e-20))
+    // An emissive instance is no sample a reservoir holds yet: the path's own next-event estimate keeps it, so it is a candidate of weight 0.
+    if l.path == scene.light_path_mesh => return di_draw(float3(0.0), index, 0.0)
     return di_draw(l.position, index, select)
 
 /// What the light sample `point` on `l` sends toward the visible point `x`, in the light's measure: radiance times the geometry term.
 /// Writes the direction toward it and how far a shadow ray goes; 0 where the light's face is turned away.
 fun di_arriving(l: scene.light, point: float3, x: float3, wi: mut float3, distance: mut float) -> float3:
+    // An emissive instance is outside the reservoirs' domain, so a history naming one's index sends nothing.
+    if l.path == scene.light_path_mesh:
+        wi = float3(0.0, 0.0, 1.0)
+        distance = 0.0
+        return float3(0.0)
     if l.path == scene.light_path_area:
         let to = point - x
         let d2 = max(dot(to, to), 1e-12)

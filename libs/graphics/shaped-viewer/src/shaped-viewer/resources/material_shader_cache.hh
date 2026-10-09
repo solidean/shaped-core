@@ -31,6 +31,10 @@ struct sv::material_permutation
     /// Only a triangle group carries the cutout any-hits, so this is `none` for every quadric one.
     material_opacity opacity;
 
+    /// Where this permutation's emission lives, which decides whether an instance shading with it may light the scene.
+    /// `declares()` is false for a type declaring no emission, and for every stand-in.
+    material_emission emission;
+
     /// The hit group, a hit shader per ray type of the tracer's ray set, as a cold async node.
     ///
     /// Compiled through `slib::compile_hit_group` against `shaders/tracer_pipeline.sgl`'s pipeline once something starts it,

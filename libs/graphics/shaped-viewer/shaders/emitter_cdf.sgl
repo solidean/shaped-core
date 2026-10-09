@@ -1,0 +1,70 @@
+// An emissive mesh's area CDF, built on the GPU from the mesh's own buffers: what `sv::mesh_manager::acquire_emitter_cdf` dispatches, once per mesh.
+//
+// Two-level, so the f32 widths stay accurate over millions of triangles.
+// The buffer holds a float per triangle, cumulative within its block of `block_size` and normalized to the block.
+// Then one per block, cumulative over the mesh and normalized to it, then the mesh's whole object-space area.
+// A triangle's probability is its block's width times its own width within the block, and a zero-area triangle's is exactly 0.
+// Module `tracer` reads it through `emitter_record` (shaders/sgl/tracer_bindings.sgl), whose `emitter_block_size` is this `block_size`.
+
+/// How many triangles one block covers.
+const block_size = 256u
+
+/// The mesh the CDF is built from, and the CDF.
+binding emitter_cdf_io:
+    /// Positions, three floats each, as `sv::mesh_manager` uploads them.
+    vertices: bytes
+    /// Three indices per triangle where `emitter_cdf_shape.is_indexed` is set, and a stand-in nothing reads where it is not.
+    indices: bytes
+    /// `triangle_count + block_count + 1` floats, laid out as the file's header says.
+    cdf: mut buffer[float]
+
+/// The mesh's shape.
+@inline binding emitter_cdf_shape:
+    triangle_count: uint
+    block_count: uint
+    is_indexed: uint
+
+/// Vertex `v`'s object-space position.
+fun position(v: uint){emitter_cdf_io} -> float3:
+    return reinterpret_as_float(emitter_cdf_io.vertices.load3(v * 12u))
+
+/// Triangle `t`'s object-space area.
+fun triangle_area(t: uint){emitter_cdf_io, emitter_cdf_shape} -> float:
+    let base = t * 3u
+    let mut corner = uint3(base, base + 1u, base + 2u)
+    if emitter_cdf_shape.is_indexed != 0u:
+        corner = uint3(emitter_cdf_io.indices.load(4u * base), emitter_cdf_io.indices.load(4u * (base + 1u)), emitter_cdf_io.indices.load(4u * (base + 2u)))
+    let p0 = position(corner.x)
+    let p1 = position(corner.y)
+    let p2 = position(corner.z)
+    return 0.5 * length(cross(p1 - p0, p2 - p0))
+
+/// One thread per block: its triangles' cumulative areas normalized to the block, and the block's own area after the triangles.
+/// A block with no area keeps zeros, which no draw reaches, since its width over the mesh is 0 as well.
+@compute(64) fun blocks(@thread_id id: int3){emitter_cdf_io, emitter_cdf_shape}:
+    let block = id.x as uint
+    if block >= emitter_cdf_shape.block_count => return
+    let first = block * block_size
+    let last = min(first + block_size, emitter_cdf_shape.triangle_count)
+    let mut sum = 0.0
+    for i in (first as int) ..< (last as int):
+        sum += triangle_area(i as uint)
+        emitter_cdf_io.cdf[i] = sum
+    for i in (first as int) ..< (last as int):
+        emitter_cdf_io.cdf[i] = if sum > 0.0 => emitter_cdf_io.cdf[i] / sum else 0.0
+    // Exactly 1, so the search over the block always ends inside it.
+    if sum > 0.0 => emitter_cdf_io.cdf[(last - 1u) as int] = 1.0
+    emitter_cdf_io.cdf[(emitter_cdf_shape.triangle_count + block) as int] = sum
+
+/// One thread for the mesh, after `blocks`: the blocks' areas made cumulative and normalized, and the whole area after them.
+@compute(1) fun total(@thread_id id: int3){emitter_cdf_io, emitter_cdf_shape}:
+    let base = emitter_cdf_shape.triangle_count as int
+    let count = emitter_cdf_shape.block_count as int
+    let mut sum = 0.0
+    for b in 0 ..< count:
+        sum += emitter_cdf_io.cdf[base + b]
+        emitter_cdf_io.cdf[base + b] = sum
+    for b in 0 ..< count:
+        emitter_cdf_io.cdf[base + b] = if sum > 0.0 => emitter_cdf_io.cdf[base + b] / sum else 0.0
+    if sum > 0.0 => emitter_cdf_io.cdf[base + count - 1] = 1.0
+    emitter_cdf_io.cdf[base + count] = sum
