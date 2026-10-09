@@ -312,7 +312,7 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     let in_albedo = payload.medium_albedo
     let in_g = payload.medium_g
 
-    // A grazing hit whose shading frame turned away has no hemisphere to integrate over.
+    // `shading_frame` leaves the viewer in front of the frame, so only a degenerate input lands here.
     if wo_local.z <= 0.0:
         payload.throughput = float3(0.0)
         payload.direction = float3(0.0)

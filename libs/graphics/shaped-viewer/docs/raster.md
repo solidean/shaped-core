@@ -67,6 +67,7 @@ That is byte for byte the text the hit group holds, with two exceptions:
 Everything after the material is shared code too:
 
 - `openpbr.shading_frame` builds the shading frame — authored frame, normal map, anisotropy, coat normal — for a hit and a pixel alike; it was lifted out of `tracer.shade_sampled` for this.
+  It turns an authored frame to the side the turned geometric normal is on, and leans a normal the viewer is behind, or barely sees, toward the viewer.
 - `openpbr.bsdf_prepare` and `openpbr.bsdf_eval` are the closure and its evaluation.
 - `tracer.decal_reach` and `tracer.paint_decal_shape` paint the decals; `tracer.apply_decals` and `raster.apply_decals` are the two loops over them.
 - The face normal is the triangle's own, from its corners, turned toward the viewer as `tracer.shade_triangle` turns it.

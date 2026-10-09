@@ -1123,6 +1123,66 @@ ASYNC_INVOCABLE_TEST("sv - a surface whose authored normal leans off its face is
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// Which side a surface's authored normal is turned to is the face's to decide, never the camera's.
+//
+// The floor's authored normal leans toward -x, and the light is straight above.
+// From +x the camera is behind that normal yet in front of the face: the floor stays lit, only seen from elsewhere.
+ASYNC_INVOCABLE_TEST("sv - a surface lit along its authored normal stays lit from a camera behind that normal",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
+    auto ground = sv_test::cornell_box{};
+    sv_test::cb_push_quad(ground, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          white);
+    auto mesh = sv_test::as_mesh("leaning floor", ground.positions, ground.materials);
+
+    // A quarter turn about cross(+z, authored) carries +z onto the authored normal, 59 degrees off the floor's +y.
+    auto const authored = tg::normalize(tg::vec3f(-1.0f, 0.6f, 0.0f));
+    auto const half = tg::sqrt(0.5f);
+    auto const frame = tg::vec4f(-authored[1] * half, authored[0] * half, 0.0f, half);
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec4f>::create_filled(ground.positions.size(), frame)));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto from_front = sv::camera::looking_at(tg::pos3d(-3, 3, 0), tg::pos3d(0, 0, 0));
+    from_front.projection.aspect_ratio = 1.0;
+    auto from_behind = sv::camera::looking_at(tg::pos3d(4, 2, 0), tg::pos3d(0, 0, 0));
+    from_behind.projection.aspect_ratio = 1.0;
+
+    auto front_scene = make_light_scene(resources, mesh, from_front);
+    REQUIRE(front_scene.has_value());
+    front_scene.value().max_bounces = 1;
+    auto behind_scene = front_scene.value();
+    behind_scene.camera = from_behind;
+
+    auto const overhead = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2);
+    auto const front_traced
+        = trace_under(&ctx, &resources, front_scene.value(), {table_of(cc::span<sv::light const>(&overhead, 1))});
+    auto const& front_images = co_await front_traced;
+    auto const behind_traced
+        = trace_under(&ctx, &resources, behind_scene, {table_of(cc::span<sv::light const>(&overhead, 1))});
+    auto const& behind_images = co_await behind_traced;
+    REQUIRE(front_images.size() == 1);
+    REQUIRE(behind_images.size() == 1);
+
+    auto const size = behind_scene.size;
+    auto const seen_from_front = mean_brightness(front_images[0], size, 2);
+    CHECK(seen_from_front > 0.1f);
+    CHECK(mean_brightness(behind_images[0], size, 2) > 0.5f * seen_from_front);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // An opaque surface has no interior, so its back face reflects exactly as its front face does.
 //
 // The camera looks down and the light comes in low, more than 85 degrees from the view over every pixel measured.

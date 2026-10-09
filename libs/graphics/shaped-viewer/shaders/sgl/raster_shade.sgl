@@ -205,7 +205,7 @@ fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surfac
     let wo_local = openpbr.to_local(shading, v)
 
     let mut color = b.emission
-    // A grazing pixel whose shading frame turned away has no hemisphere to light.
+    // `shading_frame` leaves the viewer in front of the frame, so only a degenerate input fails this.
     if wo_local.z > 0.0:
         for i in 0 ..< (f.light_count as int):
             color += direct_light(scene.light(..drawn.lights[i]), b, shading, n, wo_local, p.world)
