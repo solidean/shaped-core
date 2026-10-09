@@ -115,6 +115,13 @@ const restir_flag_finished = 16u
 /// So the closure the re-shade prepares weighs the two strategies as the path did.
 const restir_flag_di = 32u
 
+/// The least distance from a visible point to `x_s` a reconnection needs, as a share of that point's distance from its camera.
+/// GRIS's distance criterion, relative to the view rather than the scene, since the spatial radius is in pixels.
+const restir_reconnect_distance = 0.02
+
+/// The largest factor a reconnection's Jacobian may scale a sample by, either way.
+const restir_jacobian_bound = 10.0
+
 /// The least roughness `x_s` needs to be reconnected to, GRIS's criterion.
 const restir_reconnect_roughness = 0.2
 
@@ -823,16 +830,25 @@ fun restir_target_toward(surf: restir_surface, eye: float3, wi: float3, radiance
 
 /// How solid angle at the visible point `to` relates to solid angle at `from`, for a sample at `x_s` with normal `n_s`.
 /// The reconnection shift keeps `x_s`, so it moves the sample's direction and nothing else: 0 where either point sees `x_s` from behind.
-fun reconnection_jacobian(x_s: float3, n_s: float3, from: float3, to: float3) -> float:
+/// Also 0, a failed shift, where `x_s` is nearer either point than `restir_reconnect_distance` of that point's distance from its eye.
+/// And where the Jacobian exceeds `restir_jacobian_bound` either way, or is not a number.
+/// Both ends are tested in every direction, so a sample's shift into a domain fails exactly when the reverse one does.
+fun reconnection_jacobian(x_s: float3, n_s: float3, from: float3, from_eye: float3, to: float3, to_eye: float3) -> float:
     let a = from - x_s
     let b = to - x_s
     let a2 = dot(a, a)
     let b2 = dot(b, b)
     if a2 <= 0.0 or b2 <= 0.0 => return 0.0
+    let from_near = restir_reconnect_distance * length(from - from_eye)
+    let to_near = restir_reconnect_distance * length(to - to_eye)
+    if a2 < from_near * from_near or b2 < to_near * to_near => return 0.0
     let cos_from = dot(n_s, a) / sqrt(a2)
     let cos_to = dot(n_s, b) / sqrt(b2)
     if cos_from <= 1e-4 or cos_to <= 1e-4 => return 0.0
-    return (cos_to / cos_from) * (a2 / b2)
+    let j = (cos_to / cos_from) * (a2 / b2)
+    let bounded = j <= restir_jacobian_bound and j * restir_jacobian_bound >= 1.0
+    if not bounded => return 0.0
+    return j
 
 /// Whether nothing blocks the segment from the visible point `from`, lifted off along `n`, to `x_s`.
 fun restir_unblocked(from: float3, n: float3, x_s: float3, launch: int3){traced, bindless} -> bool:
@@ -901,7 +917,7 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
     let mut jacobian_h = 0.0
     let mut p_h_there = 0.0
     if hist.weight > 0.0 and (hist.flags & restir_flag_reconnectable) != 0u:
-        jacobian_h = reconnection_jacobian(hist.x_s, hist.n_s, hist_surf.position, surf.position)
+        jacobian_h = reconnection_jacobian(hist.x_s, hist.n_s, hist_surf.position, hist_eye, surf.position, eye)
         if jacobian_h > 0.0:
             p_h_there = restir_target(hist_surf, hist_eye, hist.x_s, hist.radiance)
             p_h_here = restir_target(surf, eye, hist.x_s, hist.radiance)
@@ -913,7 +929,7 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
     let mut p_c_there = 0.0
     let shareable = has_candidate and (cand.flags & restir_flag_reconnectable) != 0u
     if confidence_h > 0.0 and shareable:
-        let jacobian_c = reconnection_jacobian(cand.x_s, cand.n_s, surf.position, hist_surf.position)
+        let jacobian_c = reconnection_jacobian(cand.x_s, cand.n_s, surf.position, eye, hist_surf.position, hist_eye)
         if jacobian_c > 0.0:
             p_c_there = restir_target(hist_surf, hist_eye, cand.x_s, cand.radiance) * jacobian_c
             if exact and p_c_there > 0.0 and not restir_unblocked(hist_surf.position, hist_surf.normal, cand.x_s, launch) => p_c_there = 0.0
@@ -956,10 +972,11 @@ fun restir_same_point(a: restir_surface, b: restir_surface, depth: float) -> boo
 
 /// The target of a sample at the visible point `from` as the domain of `to` would see it, in `from`'s solid-angle measure.
 /// That is `to`'s target after the reconnection shift, times the shift's Jacobian from `from` to `to`.
-/// It is 0 where `to` could not hold the sample: a non-reconnectable one, `x_s` seen from behind, or under `exact` a blocked segment.
+/// It is 0 where `to` could not hold the sample: a non-reconnectable one, a shift `reconnection_jacobian` fails, or under `exact` a blocked segment.
+/// Both surfaces are seen from the one `eye`, so they must be this frame's.
 fun restir_target_from(r: restir_reservoir, from: restir_surface, to: restir_surface, eye: float3, exact: bool, launch: int3){traced, bindless} -> float:
     if (r.flags & restir_flag_reconnectable) == 0u => return 0.0
-    let jacobian = reconnection_jacobian(r.x_s, r.n_s, from.position, to.position)
+    let jacobian = reconnection_jacobian(r.x_s, r.n_s, from.position, eye, to.position, eye)
     if jacobian <= 0.0 => return 0.0
     let target = restir_target(to, eye, r.x_s, r.radiance)
     if target <= 0.0 => return 0.0
@@ -1044,7 +1061,7 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
     let mut w_0 = 0.0
     let mut p_0 = 0.0
     if c_0 > 0.0 and n_res_0.weight > 0.0 and (n_res_0.flags & restir_flag_reconnectable) != 0u:
-        let jacobian = reconnection_jacobian(n_res_0.x_s, n_res_0.n_s, n_surf_0.position, center.position)
+        let jacobian = reconnection_jacobian(n_res_0.x_s, n_res_0.n_s, n_surf_0.position, eye, center.position, eye)
         if jacobian > 0.0:
             let there = restir_target(n_surf_0, eye, n_res_0.x_s, n_res_0.radiance)
             p_0 = restir_target(center, eye, n_res_0.x_s, n_res_0.radiance)
@@ -1053,14 +1070,14 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
             if p_0 > 0.0:
                 // Every domain's target of this sample, in the center's measure: here, at its own neighbor, at the other one.
                 let at_home = there / jacobian
-                let at_other = if c_1 > 0.0 => restir_target_from(n_res_0, n_surf_0, n_surf_1, eye, exact, launch) / jacobian else 0.0
+                let at_other = if c_1 > 0.0 => restir_target_from(n_res_0, center, n_surf_1, eye, exact, launch) else 0.0
                 let mis = c_0 * at_home / (c_own * p_0 + c_0 * at_home + c_1 * at_other)
                 w_0 = mis * p_0 * n_res_0.weight * jacobian
 
     let mut w_1 = 0.0
     let mut p_1 = 0.0
     if c_1 > 0.0 and n_res_1.weight > 0.0 and (n_res_1.flags & restir_flag_reconnectable) != 0u:
-        let jacobian = reconnection_jacobian(n_res_1.x_s, n_res_1.n_s, n_surf_1.position, center.position)
+        let jacobian = reconnection_jacobian(n_res_1.x_s, n_res_1.n_s, n_surf_1.position, eye, center.position, eye)
         if jacobian > 0.0:
             let there = restir_target(n_surf_1, eye, n_res_1.x_s, n_res_1.radiance)
             p_1 = restir_target(center, eye, n_res_1.x_s, n_res_1.radiance)
@@ -1068,7 +1085,7 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
             if worth_a_ray and not restir_unblocked(center.position, center.normal, n_res_1.x_s, launch) => p_1 = 0.0
             if p_1 > 0.0:
                 let at_home = there / jacobian
-                let at_other = if c_0 > 0.0 => restir_target_from(n_res_1, n_surf_1, n_surf_0, eye, exact, launch) / jacobian else 0.0
+                let at_other = if c_0 > 0.0 => restir_target_from(n_res_1, center, n_surf_0, eye, exact, launch) else 0.0
                 let mis = c_1 * at_home / (c_own * p_1 + c_0 * at_other + c_1 * at_home)
                 w_1 = mis * p_1 * n_res_1.weight * jacobian
 

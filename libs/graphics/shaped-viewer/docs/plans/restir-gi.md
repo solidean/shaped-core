@@ -508,6 +508,14 @@ A minimum, because a clearcoat over a diffuse base is glossy however rough the b
 **The middle row is the Lambertian simplification RTXDI documents**, bounded here by the roughness threshold rather than removed.
 Removing it means re-evaluating `x_s`'s BSDF on every shift with its stored incoming light, which is the step toward ReSTIR PT that decision 4 does not take.
 
+**A reconnection also needs distance**, GRIS's other criterion, tested at both ends of every shift.
+`x_s` must be farther from each visible point than 2% of that point's distance from its camera.
+That is relative to the view rather than the scene, since the spatial radius is in pixels.
+A nearer `x_s` turns a small move of the visible point into a large change of direction, which the Jacobian multiplies into a bright spot that reuse spreads.
+**A Jacobian beyond 10, either way, fails the shift too**, so one sample is never scaled into a firefly.
+The bound is symmetric, so the reverse shift fails with it.
+Measured on the Cornell box, the two cost a little reuse in corners: the indirect error with both kinds of reuse went from 0.117 to 0.121, with every mean unchanged.
+
 **Mirrors and caustics stay the later item they are.**
 A mirror at `x_v` could move the visible point to the first rough vertex behind it, as RTX Remix's primary surface replacement does, with its own motion and guides.
 Caustics — light through glass or off a mirror onto a diffuse surface — are what reconnection cannot carry.
