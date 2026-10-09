@@ -170,6 +170,7 @@ m.create_mesh(sv::mesh)                // -> resident_mesh const&, INTO the mesh
 m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
                                        //   material_id::invalid falls back to sv::default_material, so a mesh always draws
 m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_mesh followed by the resolution above
+                                       //   cached on the mesh: placing it again reuses the item until its content, a resident id or the material changes
 m.describe_instance(cmd, mesh_id, instance_id)  // -> shaders::tracer::instance_record, the per-item record a hit reads by its instance id
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
 m.attributes_resident(instance_id)              // -> bool; until true the item shades through the fallback, binding no still-streaming attribute
@@ -252,7 +253,7 @@ So every declaration resolves to something and a mesh carrying none of what a ty
 **The two keys are the point.**
 `permutation_key` covers only the SHAPE of the resolution, plus the type's hash — so gold and copper share one generated shader.
 That shape is which rank won, the geometric frequency, the uv attribute, the sampler, and the read part of the channel swizzle.
-`parameter_key` covers the resolved values (constant bytes, texture ids, each mesh attribute's own hash), and keys the per-instance slot they are written into.
+`parameter_key` covers the resolved values (constant bytes, texture ids, each mesh attribute's hash and id), and keys the per-instance slot they are written into.
 Only a texture sample forces a second permutation, which is what makes "the shader stays the same" mechanical rather than aspirational.
 Neither is what a shader cache is keyed on: `material_shader_key` folds `permutation_key` together with the options it is generated under, and a `scene_item::shader_key` is that.
 
