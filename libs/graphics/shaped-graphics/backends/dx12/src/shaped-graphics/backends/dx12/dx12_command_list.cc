@@ -41,10 +41,13 @@ namespace
 /// Folds one timeline's completion value into a list's wait set: raise the entry that shares its group, or add one.
 /// Waits on different timelines cannot be merged — that is the whole point of a group — so the set grows with the
 /// number of distinct resources the list touches that actually have a transfer pending, which is small.
+/// A value the fence has already reached is no wait at all: the fence only moves forward, and a list submitted after
+/// that is seen runs after the transfer finished.
+/// Skipping it is what keeps the set small, since a resource keeps the value of its last transfer forever.
 void fold_group_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
                      sg::backend::dx12::dx12_group_value const& wait)
 {
-    if (!wait.is_pending())
+    if (wait.has_reached())
         return;
     for (auto& existing : waits)
         if (existing.try_raise_to(wait))
@@ -68,7 +71,7 @@ void fold_stream_wait(cc::vector<sg::backend::dx12::dx12_group_value>& waits,
 {
     if (wait.group == nullptr || wait.value == 0)
         return;
-    // Only a stream still in flight stalls this list, so only that is worth saying; a settled one is still waited on.
+    // Only a stream still in flight stalls this list, so only that is worth saying.
     if (!wait.group->has_reached(wait.value) && resource->claim_stream_wait_warning(wait.value))
         CC_LOG_WARNING("a command list is waiting on an in-flight streaming transfer, which stalls it until the whole "
                        "transfer lands. Wait on the stream handle yourself before using the resource, or call "
@@ -878,7 +881,7 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
 
             // If this list reads a resource an async upload is still writing, make the direct queue wait on that
             // resource's upload timeline before executing, so the copy is visible.
-            // One Wait per timeline: over-waiting on a higher value is safe, and an already-signaled one returns at once.
+            // One Wait per timeline: over-waiting on a higher value is safe.
             for (auto const& w : cmd->_required_copy_waits)
                 _queue->Wait(w.group->fence.Get(), w.value);
 
@@ -913,6 +916,7 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
 
             _stats.fold(sg::impl::recorded_stats(*cmd));
             _stats.add(sg::stat::command_lists_submitted);
+            _stats.add(sg::stat::queue_waits, cmd->_required_copy_waits.size() + cmd->_required_download_waits.size());
             return t;
         });
 

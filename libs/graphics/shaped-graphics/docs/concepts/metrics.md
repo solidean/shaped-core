@@ -57,6 +57,15 @@ A fragment shader writing what the next draw reads costs vulkan an ended and reo
 A copy recorded inside the scope costs one too on a backend whose pass cannot hold a copy, which is every backend but dx12 today.
 Each is more expensive than a barrier, and invisible in a barrier count.
 
+## Waits on a transfer
+
+**`queue_waits` counts the cross-queue waits a list's queue makes on async transfers before it runs.**
+On dx12 a transfer whose fence was already reached at submit is no wait, so a frame touching only landed resources reads zero.
+vulkan waits on a reached timeline value too, since its validation layer cannot see the host's read of the counter.
+So there the count scales with the timelines a list touches.
+webgpu counts it and always reads zero, since it has the one queue.
+metal does not count it yet.
+
 ## Time blocked on the GPU
 
 **`gpu_wait_nanoseconds` is the time spent inside the context's own waits on the GPU, and which waits those are varies per backend.**

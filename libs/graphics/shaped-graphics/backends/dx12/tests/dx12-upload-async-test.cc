@@ -57,6 +57,36 @@ ASYNC_TEST("sg dx12 - async upload larger than a staging window packs across win
     CHECK(matches);
 }
 
+// A resource keeps the value of its last upload forever, so a list touching it would otherwise wait on that timeline in every frame.
+ASYNC_TEST("sg dx12 - a list touching a buffer whose upload has landed makes no queue wait")
+{
+    auto ctx = dx12::make_test_context({});
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
+    auto& c = *ctx.value();
+
+    auto const n = isize(256);
+    auto buf = c.persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+    c.upload.bytes_to_buffer(buf, make_bytes(n, [](isize i) { return i; }));
+
+    // A first read waits on the copy, so once its bytes are back the upload has landed.
+    auto first = c.create_command_list();
+    auto landed = first->download.bytes_from_buffer(buf, 0, n);
+    c.submit_command_list(cc::move(first));
+    REQUIRE((co_await landed.bytes()).size() == n);
+
+    auto const before = c.metrics.stats();
+    auto second = c.create_command_list();
+    auto again = second->download.bytes_from_buffer(buf, 0, n);
+    c.submit_command_list(cc::move(second));
+    CHECK((c.metrics.stats() - before)[sg::stat::queue_waits] == 0);
+
+    auto const bytes = co_await again.bytes();
+    REQUIRE(bytes.size() == n);
+    CHECK(bytes[n - 1] == byte(n - 1));
+}
+
 // Many uploads whose aggregate far exceeds the staging buffer must all land, forcing the actor to wait on the window fence and recycle windows repeatedly.
 // Each targets its own buffer; all must read back intact.
 // Window 0 shares its staging slot with window 3, so the window fence must observe window 0's completion before window 3 overwrites that slot.

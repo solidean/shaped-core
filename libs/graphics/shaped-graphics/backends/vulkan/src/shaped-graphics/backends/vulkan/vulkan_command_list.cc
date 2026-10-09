@@ -352,6 +352,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
 
             _stats.fold(sg::impl::recorded_stats(*cmd));
             _stats.add(sg::stat::command_lists_submitted);
+            _stats.add(sg::stat::queue_waits, async_waits.size());
             return t;
         });
 
