@@ -278,24 +278,26 @@ TEST("sg dx12 - texture copy chunking (2D split, 3D whole-slice batch + mid-slic
     }
 }
 
-ASYNC_TEST("sg dx12 - inline texture upload splits across the ring seam")
+ASYNC_INVOCABLE_TEST("sg dx12 - inline texture upload splits across the ring seam",
+                     (dx12::dx12_context_handle const& ctx))
 {
     // A ring that holds the region + its staging slack (tight 768 + padded 256 + 512 alignment = 1536).
     // Parking the cursor 512 bytes before the seam forces the 768-byte region to split — 2 padded rows
     // before the seam, 1 after.
     constexpr isize ring_bytes = 2048;
     constexpr isize park = ring_bytes - 512; // 512 < 768 staged -> the region cannot fit before the seam
-    auto ctx_r = dx12::make_test_context({.upload_ring_bytes = ring_bytes});
-    if (ctx_r.has_error())
-        SKIP("no dx12 adapter");
-    auto const ctx = ctx_r.value();
+    REQUIRE(ctx != nullptr);
     auto& c = *ctx;
+    auto const sizes = dx12::scoped_transfer_sizes(c, {.upload_ring_bytes = ring_bytes});
 
-    constexpr int W = 4, H = 3, N = W * H; // R32_FLOAT: 16-byte tight row -> 256 padded; 3 rows -> 768 staged
+    // R32_FLOAT: 16-byte tight row -> 256 padded; 3 rows -> 768 staged
+    constexpr int W = 4;
+    constexpr int H = 3;
+    constexpr int N = W * H;
     auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
     REQUIRE(tex.has_value());
 
-    float src[N];
+    float src[N] = {};
     for (int i = 0; i < N; ++i)
         src[i] = float(i) + 0.5f;
 
@@ -322,21 +324,22 @@ ASYNC_TEST("sg dx12 - inline texture upload splits across the ring seam")
     CHECK(ok);
 }
 
-ASYNC_TEST("sg dx12 - inline texture download splits across the ring seam")
+ASYNC_INVOCABLE_TEST("sg dx12 - inline texture download splits across the ring seam",
+                     (dx12::dx12_context_handle const& ctx))
 {
     constexpr isize ring_bytes = 2048; // >= tight 768 + padded 256 + 512 alignment slack
     constexpr isize park = ring_bytes - 512;
-    auto ctx_r = dx12::make_test_context({.download_ring_bytes = ring_bytes});
-    if (ctx_r.has_error())
-        SKIP("no dx12 adapter");
-    auto const ctx = ctx_r.value();
+    REQUIRE(ctx != nullptr);
     auto& c = *ctx;
+    auto const sizes = dx12::scoped_transfer_sizes(c, {.download_ring_bytes = ring_bytes});
 
-    constexpr int W = 4, H = 3, N = W * H;
+    constexpr int W = 4;
+    constexpr int H = 3;
+    constexpr int N = W * H;
     auto tex = c.create_dx12_texture(copy_desc(sg::pixel_format::r32_float, W, H), sg::allocation_info{});
     REQUIRE(tex.has_value());
 
-    float src[N];
+    float src[N] = {};
     for (int i = 0; i < N; ++i)
         src[i] = float(i) * 3.0f + 0.25f;
 
@@ -363,20 +366,21 @@ ASYNC_TEST("sg dx12 - inline texture download splits across the ring seam")
     CHECK(ok);
 }
 
-ASYNC_TEST("sg dx12 - async texture copy splits across staging windows")
+ASYNC_INVOCABLE_TEST("sg dx12 - async texture copy splits across staging windows", (dx12::dx12_context_handle const& ctx))
 {
+    REQUIRE(ctx != nullptr);
     // Tiny 512-byte async windows: each holds exactly one 256-padded row, so an 8x8 R32_FLOAT (8 rows)
     // is packed across several windows on both the upload and readback copy queues.
-    auto ctx_r = dx12::make_test_context({.async_upload_window_bytes = 512, .async_download_window_bytes = 512});
-    if (ctx_r.has_error())
-        SKIP("no dx12 adapter");
-    auto const ctx = ctx_r.value();
+    auto const sizes
+        = dx12::scoped_transfer_sizes(*ctx, {.async_upload_window_bytes = 512, .async_download_window_bytes = 512});
 
-    constexpr int W = 8, H = 8, N = W * H;
+    constexpr int W = 8;
+    constexpr int H = 8;
+    constexpr int N = W * H;
     auto tex = ctx->persistent.create_raw_texture(copy_desc(sg::pixel_format::r32_float, W, H));
     REQUIRE(tex != nullptr);
 
-    float src[N];
+    float src[N] = {};
     for (int i = 0; i < N; ++i)
         src[i] = float(i) - 0.5f;
 

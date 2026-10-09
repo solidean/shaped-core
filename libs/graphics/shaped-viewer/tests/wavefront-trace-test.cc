@@ -57,6 +57,26 @@ struct cornell_scene
     return s;
 }
 
+constexpr i32 k_max_bounces = 5;
+
+/// The rounds a draining frame of the Cornell box runs at `max_bounces`.
+/// The box holds no medium, so a path ends within `max_bounces + 1` rounds and the last round must find every slot empty.
+[[nodiscard]] constexpr int drain_rounds_of(i32 max_bounces)
+{
+    return max_bounces + 2;
+}
+
+/// Checks that the last round of a draining frame started with no live path, so its image holds every sample it started.
+/// A drain given too few rounds fails here, rather than as an image a few percent darker.
+void check_drained(sg::data_future<u32> const& live_paths, cc::string_view frame)
+{
+    auto const counts = live_paths.try_get_data();
+    REQUIRE(counts.has_value());
+    REQUIRE(counts.value().size() > 0);
+    auto const last = counts.value()[counts.value().size() - 1];
+    CHECK(last == 0u).context(cc::format("{}: {} paths entered the last round", frame, last));
+}
+
 [[nodiscard]] sv::shaders::tracer::frame_constants frame_of(cornell_scene const& s, u32 seed, u32 accum_frame, i32 spp)
 {
     auto fc = sv::default_frame_constants();
@@ -64,7 +84,7 @@ struct cornell_scene
     fc.previous_camera = fc.camera;
     s.lights.describe_in(fc);
     fc.samples_per_pixel = spp;
-    fc.max_bounces = 5;
+    fc.max_bounces = k_max_bounces;
     fc.rng_seed = seed;
     fc.accum_frame = accum_frame;
     return fc;
@@ -198,10 +218,13 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_cornell_at_fill(sg::context& ctx,
                                                               int frames,
                                                               sg::data_future<u32>* live_paths)
 {
+    REQUIRE(frames >= 3);
     auto const background = sv::background_gpu::from(sv::background{});
     auto const target = make_target(ctx);
     auto state = sv::wavefront_state::create(ctx, k_size, 4);
-    co_return co_await trace_frames(
+    auto first_drain = sg::data_future<u32>();
+    auto last_drain = sg::data_future<u32>();
+    auto image = co_await trace_frames(
         ctx, target, frames,
         [&](sg::command_list& cmd, int f)
         {
@@ -217,17 +240,22 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_cornell_at_fill(sg::context& ctx,
                 .lights = sv_test::upload_lights(cmd, scene.lights),
                 .hit_groups = scene.hit_groups,
                 .bindless = &bindless};
-            auto const draining = f == 0 || f == frames - 1;
+            auto const last = f == frames - 1;
+            auto const draining = f == 0 || last;
+            auto* const live = f == 0 ? &first_drain : f == 1 ? live_paths : last ? &last_drain : nullptr;
             return sv::wavefront_routine::execute(cmd, {.trace = trace,
                                                         .frame = frame_of(scene, 7u, 0u, 1),
                                                         .state = &state,
-                                                        .rounds = draining ? 16 : 6,
+                                                        .rounds = draining ? drain_rounds_of(k_max_bounces) : 6,
                                                         .restart = f == 0,
                                                         .regenerate = !draining,
                                                         .fill = fill,
                                                         .generation = 1,
-                                                        .live_paths = f == 1 ? live_paths : nullptr});
+                                                        .live_paths = live});
         });
+    check_drained(first_drain, "the restart");
+    check_drained(last_drain, "the last frame");
+    co_return image;
 }
 
 /// One drained frame of the Cornell box through the wavefront, ReSTIR's records kept where `restir` is set.
@@ -242,7 +270,8 @@ cc::shared_async<cc::vector<tg::vec3f>> drain_cornell(sg::context& ctx,
 {
     auto const background = sv::background_gpu::from(sv::background{});
     auto const target = make_target(ctx);
-    co_return co_await trace_frames(
+    auto drained = sg::data_future<u32>();
+    auto image = co_await trace_frames(
         ctx, target, 1,
         [&](sg::command_list& cmd, int)
         {
@@ -261,15 +290,18 @@ cc::shared_async<cc::vector<tg::vec3f>> drain_cornell(sg::context& ctx,
             auto const outcome = sv::wavefront_routine::execute(cmd, {.trace = trace,
                                                                       .frame = frame_of(scene, 7u, 0u, 1),
                                                                       .state = &state,
-                                                                      .rounds = 16,
+                                                                      .rounds = drain_rounds_of(k_max_bounces),
                                                                       .restart = true,
                                                                       .regenerate = false,
                                                                       .restir = restir,
-                                                                      .generation = 1});
+                                                                      .generation = 1,
+                                                                      .live_paths = &drained});
             if (outcome == sg::routine_outcome::executed)
                 read(cmd);
             return outcome;
         });
+    check_drained(drained, "the drained frame");
+    co_return image;
 }
 
 /// What a run of ReSTIR frames made of the Cornell box: each frame's re-shaded image, and their mean.
@@ -302,7 +334,7 @@ struct restir_reuse
     /// Whether the re-shade also replaces the visible point's next-event light sample by ReSTIR DI's.
     bool di = false;
     /// How many surface bounces a path takes.
-    i32 max_bounces = 5;
+    i32 max_bounces = k_max_bounces;
 };
 
 /// Traces `frames` drained frames of the Cornell box, each keeping ReSTIR's records, and reads back what the re-shade made of each.
@@ -347,10 +379,11 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
         previous.position[0] += f == 0 ? 0.0 : reuse.pan * f64((f - 1) % 2);
         fc.camera = sv::camera_record_of(camera);
         fc.previous_camera = sv::camera_record_of(reuse.honest_motion ? previous : camera);
+        auto drained = sg::data_future<u32>();
         auto const outcome = sv::wavefront_routine::execute(*cmd, {.trace = trace,
                                                                    .frame = fc,
                                                                    .state = &state,
-                                                                   .rounds = 16,
+                                                                   .rounds = drain_rounds_of(reuse.max_bounces),
                                                                    .restart = true,
                                                                    .regenerate = false,
                                                                    .restir = true,
@@ -359,7 +392,8 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
                                                                    .restir_spatial = reuse.spatial,
                                                                    .restir_radius = reuse.radius,
                                                                    .restir_di = reuse.di,
-                                                                   .generation = u32(f) + 1u});
+                                                                   .generation = u32(f) + 1u,
+                                                                   .live_paths = &drained});
         auto results = sg::data_future<sv::shaders::tracer::restir_result>();
         auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();
         auto reservoirs = sg::data_future<sv::shaders::tracer::packed_reservoir>();
@@ -382,6 +416,7 @@ cc::shared_async<restir_run> run_restir(sg::context& ctx,
             sv_test::drive_ambient_work();
             continue;
         }
+        check_drained(drained, cc::format("ReSTIR frame {}", f));
         auto const r = results.try_get_data();
         auto const t = tallies.try_get_data();
         REQUIRE(r.has_value());
@@ -1525,9 +1560,12 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         bool lossless = true;
         /// a lossy case's lower bound, where it has one, which then replaces the absorption checks
         f32 at_least = 0.0f;
+        /// whether a default run traces it, or only a thorough one
+        bool by_default = true;
     };
     auto cases = cc::vector<furnace_case>();
-    cases.push_back({.name = "clear interior", .bindings = base()});
+    // A default run keeps refraction, a medium walk and absorption; the clear interior and the rough glass only a thorough one.
+    cases.push_back({.name = "clear interior", .bindings = base(), .by_default = false});
     {
         // Rough glass sends the sky through transmitted directions next-event estimation never samples, so they weigh 1.
         // Weighed against next-event estimation it measures ~0.386; the bound sits between that and the ~0.420 it measures now.
@@ -1540,7 +1578,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
         cases.push_back({.name = "rough glass interior",
                          .bindings = cc::move(rough),
                          .lossless = false,
-                         .at_least = 0.81f * luminance_of(environment)});
+                         .at_least = 0.81f * luminance_of(environment),
+                         .by_default = false});
     }
     {
         auto glass = cc::vector<binding>();
@@ -1573,6 +1612,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
 
     for (auto const& c : cases)
     {
+        if (!c.by_default && !nx::is_thorough())
+            continue;
         auto const mesh = sv::mesh{.name = cc::format("wavefront {}", c.name),
                                    .geometry = sv::triangle_geometry::create_from_positions(closed_cube(0.6f)),
                                    .material = lib.acquire(sv::material::create(cc::string(c.name), type, c.bindings))};
@@ -1688,19 +1729,33 @@ ASYNC_TEST("sv vulkan - the wavefront raises no synchronization hazard")
     camera.projection.vertical_fov = tg::angle_d::make_from_degree(60.0);
     auto const environment = tg::vec3f(0.5f, 0.5f, 0.5f);
 
+    // A hazard is a property of one restart, carry and drain, so a default run traces each once.
+    // A thorough run traces the furnace's full length, which its mean is pinned against.
+    auto const thorough = nx::is_thorough();
+    auto const frames = thorough ? 24 : 3;
+    auto const rounds = thorough ? 12 : 4;
+
     auto resources = sv::gpu_resource_manager::create(ctx);
     {
         auto const cube = sv::mesh{.name = "vulkan wavefront cube",
                                    .geometry = sv::triangle_geometry::create_from_positions(closed_cube(0.6f)),
                                    .material = lib.acquire(sv::material::create("vulkan wavefront", type, bindings))};
-        auto const pixels = co_await trace_wavefront(
-            ctx, resources, cube,
-            {.camera = camera, .environment = sv::background::uniform(environment), .max_bounces = 12, .drain_rounds = 96});
+        auto const pixels = co_await trace_wavefront(ctx, resources, cube,
+                                                     {.camera = camera,
+                                                      .environment = sv::background::uniform(environment),
+                                                      .max_bounces = 12,
+                                                      .frames = frames,
+                                                      .rounds = rounds,
+                                                      .drain_rounds = thorough ? 96 : 16});
         auto mean = 0.0f;
         for (auto const& p : pixels)
             mean += luminance_of(p);
         mean /= f32(pixels.size());
-        CHECK(tg::abs(mean - luminance_of(environment)) <= 0.06f * luminance_of(environment)).dump("mean luminance", mean);
+        CHECK(tg::is_finite(mean)).dump("mean luminance", mean);
+        if (thorough)
+        {
+            CHECK(tg::abs(mean - luminance_of(environment)) <= 0.06f * luminance_of(environment)).dump("mean luminance", mean);
+        }
     }
     {
         auto const box = sv_test::make_cornell_box();
@@ -1708,7 +1763,11 @@ ASYNC_TEST("sv vulkan - the wavefront raises no synchronization hazard")
         box_camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
         auto const pixels = co_await trace_wavefront(
             ctx, resources, sv_test::as_mesh("vulkan wavefront box", box.positions, box.materials),
-            {.camera = box_camera, .environment = sv::background::uniform(environment)});
+            {.camera = box_camera,
+             .environment = sv::background::uniform(environment),
+             .frames = frames,
+             .rounds = rounds,
+             .drain_rounds = thorough ? 48 : drain_rounds_of(k_max_bounces)});
         auto finite = true;
         for (auto const& p : pixels)
             finite = finite && tg::is_finite(p[0]) && tg::is_finite(p[1]) && tg::is_finite(p[2]);

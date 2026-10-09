@@ -13,7 +13,8 @@
 //   - hardware: the real GPU; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //
-// A test whose subject is the context itself — pristine pool/epoch state, a backend knob, two contexts — stays an ordinary TEST and takes one from make_test_context.
+// A test whose subject is the context itself — pristine state, a creation-time knob, two contexts — stays an ordinary TEST and takes one from make_test_context.
+// A transfer size that has a runtime setter is no reason for a context of its own: scoped_transfer_sizes sets it on the shared one.
 
 namespace
 {

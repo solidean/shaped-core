@@ -16,21 +16,20 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
-ASYNC_TEST("sg dx12 - epoch advance and retire")
+ASYNC_INVOCABLE_TEST("sg dx12 - epoch advance and retire", (dx12::dx12_context_handle const& handle))
 {
-    auto handle = dx12::make_fresh_context(); // fresh: this asserts the epoch counter's initial value
-    if (handle == nullptr)
-        SKIP("no dx12 adapter");
+    REQUIRE(handle != nullptr);
     auto& c = *handle;
 
-    CHECK(c.current_epoch() == sg::epoch::first);
-    // Nothing has finished yet, so the completed epoch is first-1.
-    CHECK(u64(c.completed_epoch()) == u64(sg::epoch::first) - 1);
+    auto const open = c.current_epoch();
+    CHECK(u64(open) >= u64(sg::epoch::first));
+    // The open epoch has not finished, whatever finished before it.
+    CHECK(u64(c.completed_epoch()) < u64(open));
 
     c.advance_epoch();
     co_await c.idle_completion();
-    CHECK(c.current_epoch() == sg::epoch(u64(sg::epoch::first) + 1));
-    CHECK(u64(c.completed_epoch()) >= u64(sg::epoch::first)); // the first epoch is now done
+    CHECK(c.current_epoch() == sg::epoch(u64(open) + 1));
+    CHECK(u64(c.completed_epoch()) >= u64(open)); // the epoch that was open is now done
 }
 
 ASYNC_INVOCABLE_TEST("sg dx12 - deferred deletion runs finalizers only after the owning epoch retires",

@@ -36,7 +36,7 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
                                          sv::render_mode mode,
                                          cc::string const& path,
                                          int accumulate,
-                                         f32 frame_budget_ms = 16.0f)
+                                         f32 frame_budget_ms)
 {
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
@@ -141,8 +141,9 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
     auto const reference_path = cc::format("{}/sv-parity-megakernel.png", cc::temp_directory_path());
     auto const traced_path = cc::format("{}/sv-parity-wavefront.png", cc::temp_directory_path());
 
-    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 48);
-    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 96);
+    // No frame budget: a budgeted still frame grows to as many rounds as this GPU fits, up to 64 a frame.
+    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 48, 0.0f);
+    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 96, 0.0f);
 
     auto const reference = read_png(reference_path);
     auto const traced = read_png(traced_path);

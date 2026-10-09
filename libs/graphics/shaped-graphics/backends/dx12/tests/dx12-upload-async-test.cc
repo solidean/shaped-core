@@ -9,7 +9,7 @@
 using namespace cc::primitive_defines;
 
 // dx12 async-upload internals the backend-agnostic tier-1 suite (tests/transfer/upload-async-test.cc) can't reach.
-// That is the staging pipeline's window packing and recycling, forced with a deliberately tiny window size (a dx12_config knob).
+// That is the staging pipeline's window packing and recycling, forced by shrinking the shared context's window for one test.
 // The public upload/sync contract is pinned in tier 1.
 // See libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
 
@@ -29,15 +29,14 @@ cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
 } // namespace
 
 // A single upload larger than one staging window must pack across several windows, pipelining and recycling as it goes.
-// A fresh context with deliberately tiny windows forces it.
-ASYNC_TEST("sg dx12 - async upload larger than a staging window packs across windows")
+ASYNC_INVOCABLE_TEST("sg dx12 - async upload larger than a staging window packs across windows",
+                     (dx12::dx12_context_handle const& handle))
 {
-    auto ctx = dx12::make_test_context({.async_upload_window_bytes = 4096});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
-    auto& c = *ctx.value();
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+    auto const staging = dx12::scoped_transfer_sizes(c, {.async_upload_window_bytes = 4096});
 
-    isize const n = 20000; // several windows, non-aligned so partial windows are exercised
+    auto const n = isize(20000); // several windows, non-aligned so partial windows are exercised
     auto buf = c.persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
 
@@ -58,12 +57,11 @@ ASYNC_TEST("sg dx12 - async upload larger than a staging window packs across win
 }
 
 // A resource keeps the value of its last upload forever, so a list touching it would otherwise wait on that timeline in every frame.
-ASYNC_TEST("sg dx12 - a list touching a buffer whose upload has landed makes no queue wait")
+ASYNC_INVOCABLE_TEST("sg dx12 - a list touching a buffer whose upload has landed makes no queue wait",
+                     (dx12::dx12_context_handle const& handle))
 {
-    auto ctx = dx12::make_test_context({});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
-    auto& c = *ctx.value();
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
 
     auto const n = isize(256);
     auto buf = c.persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
@@ -91,12 +89,12 @@ ASYNC_TEST("sg dx12 - a list touching a buffer whose upload has landed makes no 
 // Each targets its own buffer; all must read back intact.
 // Window 0 shares its staging slot with window 3, so the window fence must observe window 0's completion before window 3 overwrites that slot.
 // That aliasing is what the 1-based window-fence values guard — see submit_window in dx12_upload_async.cc.
-ASYNC_TEST("sg dx12 - many async uploads recycle the staging windows")
+ASYNC_INVOCABLE_TEST("sg dx12 - many async uploads recycle the staging windows",
+                     (dx12::dx12_context_handle const& handle))
 {
-    auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
-    auto& c = *ctx.value();
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+    auto const staging = dx12::scoped_transfer_sizes(c, {.async_upload_window_bytes = 1024});
 
     int const count = 24;
     isize const each = 1024;
@@ -128,12 +126,12 @@ ASYNC_TEST("sg dx12 - many async uploads recycle the staging windows")
 // Uneven upload sizes (none a window multiple) force the actor to both pack several jobs into one window and split a single job across windows, all while recycling.
 // That is a shape the exact-fill and single-large-upload tests miss.
 // Distinct buffers; each must read back intact.
-ASYNC_TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
+ASYNC_INVOCABLE_TEST("sg dx12 - uneven async uploads pack and straddle staging windows",
+                     (dx12::dx12_context_handle const& handle))
 {
-    auto ctx = dx12::make_test_context({.async_upload_window_bytes = 1024});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
-    auto& c = *ctx.value();
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+    auto const staging = dx12::scoped_transfer_sizes(c, {.async_upload_window_bytes = 1024});
 
     // Sizes chosen so windows carry parts of two uploads and single uploads span windows.
     // The aggregate spans several windows, so slots recycle.

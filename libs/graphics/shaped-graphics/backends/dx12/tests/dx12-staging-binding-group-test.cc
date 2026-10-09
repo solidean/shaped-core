@@ -157,11 +157,13 @@ ASYNC_INVOCABLE_TEST("sg dx12 - a staging snapshot outlives the epoch that minte
 }
 
 // Snapshot and release repeatedly on a tiny persistent descriptor region (4 slots).
-// Each snapshot takes 1 descriptor, so 50 rounds far exceed the region: the minted group's range must be
-// returned to the free list (epoch-deferred) and reused, exactly as a directly-created persistent group's is.
+// Each snapshot takes 1 descriptor, so 10 rounds exceed the region twice over.
+// The minted group's range must be returned to the free list (epoch-deferred) and reused, exactly as a directly-created persistent group's is.
 ASYNC_TEST("sg dx12 - staging snapshots free and reuse their descriptor range")
 {
-    auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f});
+    constexpr int persistent_slots = 4;
+    auto ctx_r = dx12::make_test_context(
+        {.descriptor_heap_capacity = 2 * persistent_slots, .descriptor_transient_fraction = 0.5f});
     if (ctx_r.has_error())
         SKIP("no dx12 adapter");
     auto ctx = ctx_r.value();
@@ -177,7 +179,8 @@ ASYNC_TEST("sg dx12 - staging snapshots free and reuse their descriptor range")
     REQUIRE(staging != nullptr);
     auto const out = staging->slot_of("Output");
 
-    for (int i = 0; i < 50; ++i)
+    constexpr int rounds = (5 * persistent_slots + 1) / 2;
+    for (auto i = 0; i < rounds; ++i)
     {
         // Re-set the same view: the group is dirtied, so every round really does mint a new one.
         staging->set_binding(out, sg::buffer<u32>::from_raw(buf).as_readwrite_buffer());

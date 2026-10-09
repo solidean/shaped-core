@@ -81,11 +81,13 @@ cc::string observed(sgl::check::checked_module const& m, cc::span<sgl::check::mo
         out.appendf("entry point {}: {}, features {}, workgroup {} {} {}\n", e.name,
                     sgl::check::stage_name(e.entry_stage), e.features.bits, e.workgroup[0], e.workgroup[1],
                     e.workgroup[2]);
-        out.appendf("footprint {}\n",
-                    sgl::check::footprint_text(sgl::check::footprint_of(m, sgl::check::legalize(m, e))));
+        // legalize is a function of its arguments, and every target but wgsl takes the default options
+        auto const native = sgl::check::legalize(m, e);
+        auto const emulated = sgl::check::legalize(m, e, {.is_emulated = true});
+        out.appendf("footprint {}\n", sgl::check::footprint_text(sgl::check::footprint_of(m, native)));
         for (auto const target : sgl::emit::all_targets())
         {
-            auto const legal = sgl::check::legalize(m, e, {.is_emulated = target == sgl::emit::target::wgsl});
+            auto const& legal = target == sgl::emit::target::wgsl ? emulated : native;
             auto const emitted = sgl::emit::emit_entry_point(m, legal, target);
             out.appendf("{} as {}:\n{}\n", sgl::emit::to_string(target), emitted.entry_point, emitted.text);
             for (auto const& error : emitted.errors)
@@ -136,8 +138,10 @@ TEST("sgl checked prelude - every corpus file")
     auto files = cc::vector<program>();
     add_files_under(files, "corpus", SGL_CORPUS_DIR);
     REQUIRE(files.size() > 0);
-    for (auto const& p : files)
-        nx::invoke_tests(p.name, p);
+    // a default run takes every fourth file
+    auto const stride = nx::is_thorough() ? isize(1) : isize(4);
+    for (auto i = isize(0); i < files.size(); i += stride)
+        nx::invoke_tests(files[i].name, files[i]);
 }
 
 TEST("sgl checked prelude - every sample and sg shader")
