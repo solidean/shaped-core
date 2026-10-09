@@ -81,11 +81,17 @@ struct sv::render_settings
     /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
     f32 frame_budget_ms = 16.0f;
 
-    /// Whether the wavefront's restarting frames that feed a temporal denoiser resample their paths by ReSTIR GI.
+    /// Whether the wavefront's restarting frames that feed a temporal denoiser resample their paths by ReSTIR GI and DI.
     /// The converging mean stays plain path tracing; only what the denoiser is handed changes — libs/graphics/shaped-viewer/docs/plans/restir-gi.md.
-    /// So far phase G0: the records are kept and the primary hits shaded again, without reuse, so the image is the paths' own.
-    /// The records cost ~170 bytes per traced pixel, kept as long as the layer's path state.
+    /// The records cost ~390 bytes per traced pixel, kept as long as the layer's path state.
     bool restir = false;
+
+    /// How long a moving image keeps its moving stream after it last changed, in milliseconds.
+    ///
+    /// Under a `scale` below native a move traces at the upscaler's extent, and a still image restarts at full size.
+    /// A frame or two without input in the middle of a move would flip between them, and each switch starts the moving stream's denoiser over, which flickers.
+    /// 0 ends a move on the first frame the image holds still.
+    f32 motion_hold_ms = 250.0f;
 
     /// How this layer's image is denoised before its parent composites it; off unless asked for.
     ///

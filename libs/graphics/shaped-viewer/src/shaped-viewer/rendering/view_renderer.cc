@@ -2,6 +2,7 @@
 #include <clean-core/common/hash.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/time.hh>    // cc::current_time_steady_secs
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/span.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -966,6 +967,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Whether this frame's image differs from the last one's, which is what may trace it at the upscaler's extent.
     auto const image_changed = slot->reset_hash != hash;
 
+    // A move lasts a moment past the image's last change, so a frame without input in the middle of one keeps its stream.
+    auto const now = cc::current_time_steady_secs();
+    if (image_changed)
+        slot->last_change_seconds = now;
+    auto const moving = image_changed || (now - slot->last_change_seconds) * 1000.0 < f64(l.settings.motion_hold_ms);
+
     // A different image must not be averaged into the old one.
     // The tracer publishes its own hash as this slot's reset rule: it covers the bytes actually uploaded, so it
     // cannot drift away from what the shader reads the way a hand-declared one could.
@@ -1081,14 +1088,14 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.near_plane = f32(v.camera.projection.near_plane);
     }
 
-    // A frame whose image changed traces at the upscaler's input extent, every primary ray at one jitter, and the
-    // temporal member denoises it on its own samples before the upscaler brings it to the view's size.
-    // The first frame the image holds still restarts at full size and accumulates as any still frame does.
+    // A frame of a move traces at the upscaler's input extent, every primary ray at one jitter, and the temporal member
+    // denoises it on its own samples before the upscaler brings it to the view's size.
+    // The first frame past the move's hold restarts at full size and accumulates as any still frame does.
     // Only where the temporal member runs, since an upscaler does not denoise, and never under drawings, whose depth
     // test reads the primary depth at the view's own size.
     auto upscale_settings = schedule.temporal_settings;
     upscale_settings.upscaler = l.settings.reconstruct.upscaler;
-    auto const may_scale = image_changed && writes_temporal && depth_slot == nullptr;
+    auto const may_scale = moving && writes_temporal && depth_slot == nullptr;
     auto const input_extent = may_scale
                                 ? sr::reconstruct_input_extent(ctx, upscale_settings, tr.resolution, traceable_guides())
                                 : tr.resolution;

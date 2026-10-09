@@ -490,6 +490,8 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
         scene.items.push_back(item);
         scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
         scene.settings.reconstruct.scale = sr::render_scale_preset::performance;
+        // A move ends on the first still frame, so what each frame traces does not depend on the clock; the hold is tested below.
+        scene.settings.motion_hold_ms = 0.0f;
         def.views.push_back(cc::move(v));
 
         auto const root_node = def.nodes.add_container(sv::invalid_node);
@@ -583,6 +585,16 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
 
     (void)co_await frame(5, false);
     CHECK(accumulation().accum_frame == 2);
+
+    // Within a move's hold a frame that holds still stays in the moving stream, so a pause mid-move keeps its history.
+    sv::ensure_scene_3d(def.views[0]).settings.motion_hold_ms = 1e9f;
+    (void)co_await frame(6, true);
+    CHECK(accumulation().traced_scaled);
+    auto const scaled_before = accumulation().scaled_frame;
+    (void)co_await frame(7, false);
+    CHECK(accumulation().traced_scaled);
+    CHECK(accumulation().scaled_frame == scaled_before + 1);
+    CHECK(accumulation().accum_frame == 0);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

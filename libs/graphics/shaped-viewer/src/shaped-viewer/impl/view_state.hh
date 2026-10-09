@@ -72,11 +72,14 @@ struct temporal_slot
     cc::optional<wavefront_state> scaled_paths;
 
     /// Whether the last frame of this accumulation slot's layer was traced at the upscaler's input extent.
-    /// The next frame is full-size and restarts whenever the image did not change since, so this is what ends a move.
+    /// The next frame is full-size and restarts once the move's hold has passed, so this is what ends a move.
     bool traced_scaled = false;
 
     /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
     u32 scaled_frame = 0;
+
+    /// When the image last changed, on the steady clock; a move lasts `render_settings::motion_hold_ms` past it.
+    f64 last_change_seconds = -1e30;
 
     /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's.
     tg::vec2f last_jitter = tg::vec2f(0, 0);
