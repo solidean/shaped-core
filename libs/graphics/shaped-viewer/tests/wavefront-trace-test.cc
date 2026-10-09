@@ -1175,7 +1175,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's reuse keeps the light a g
 // Its mean is pinned at 12 pixels, a third of the image, so the shifts are long enough that a wrong Jacobian or MIS weight would move it.
 // With the reverse visibility traced the frames still average to the plain image, the box's two blocks occluding many of the shifts.
 // So is its mean at the image's own radius, the 2-pixel floor here, with the reverse visibility traced and without it, which darkens.
-// Its noise is measured at that radius, on the indirect half, which is what resamples, against many plain frames.
+// Under --thorough its noise is measured at that radius, on the indirect half, which is what resamples, against four times as many plain frames.
 // Neighbors alone cut that noise, and on top of the temporal reuse they cut it further.
 ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's spatial reuse keeps the box's image and cuts each frame's noise "
                      "further",
@@ -1202,11 +1202,9 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's spatial reuse keeps the b
     constexpr int frames = 48;
     constexpr int warm = 16;
     constexpr i32 wide = 12;
-    // The plain run is long, so its indirect mean is the reference each resampled frame is measured against.
-    auto const plain = co_await run_restir(ctx, resources, scene, 4 * frames, {.history = false});
-    auto const temporal = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true});
-    auto const alone
-        = co_await run_restir(ctx, resources, scene, frames, {.history = false, .exact = true, .spatial = true});
+    auto const thorough = nx::is_thorough();
+    // Under --thorough the plain run is four times as long.
+    auto const plain = co_await run_restir(ctx, resources, scene, thorough ? 4 * frames : frames, {.history = false});
     auto const spatial
         = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true, .spatial = true});
     auto const far = co_await run_restir(ctx, resources, scene, frames,
@@ -1223,26 +1221,34 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's spatial reuse keeps the b
         .context(cc::format("exact: {} against {} without reuse", spatial_mean, plain_mean));
     CHECK(tg::abs(fast_mean - plain_mean) < 0.03f * plain_mean)
         .context(cc::format("default: {} against {} without reuse", fast_mean, plain_mean));
+    CC_LOG_INFO("ReSTIR G2 on the box: means {} exact, {} at 12 pixels, {} default, {} plain", spatial_mean, far_mean,
+                fast_mean, plain_mean);
 
-    auto plain_error = 0.0f;
-    auto temporal_error = 0.0f;
-    auto alone_error = 0.0f;
-    auto spatial_error = 0.0f;
-    for (auto f = warm; f < frames; ++f)
+    if (thorough)
     {
-        plain_error += rms_error(plain.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
-        temporal_error += rms_error(temporal.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
-        alone_error += rms_error(alone.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
-        spatial_error += rms_error(spatial.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+        auto const temporal = co_await run_restir(ctx, resources, scene, frames, {.history = true, .exact = true});
+        auto const alone
+            = co_await run_restir(ctx, resources, scene, frames, {.history = false, .exact = true, .spatial = true});
+        auto plain_error = 0.0f;
+        auto temporal_error = 0.0f;
+        auto alone_error = 0.0f;
+        auto spatial_error = 0.0f;
+        for (auto f = warm; f < frames; ++f)
+        {
+            plain_error += rms_error(plain.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+            temporal_error += rms_error(temporal.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+            alone_error += rms_error(alone.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+            spatial_error += rms_error(spatial.indirect_frames[f], plain.indirect_mean) / f32(frames - warm);
+        }
+        CHECK(alone_error * 1.2f < plain_error)
+            .context(
+                cc::format("indirect per-frame error: {} reusing neighbors alone, {} plain", alone_error, plain_error));
+        CHECK(spatial_error < temporal_error)
+            .context(cc::format("indirect per-frame error: {} reusing both, {} temporal alone", spatial_error,
+                                temporal_error));
+        CC_LOG_INFO("ReSTIR G2 indirect per-frame error: {} both, {} temporal alone, {} neighbors alone, {} plain",
+                    spatial_error, temporal_error, alone_error, plain_error);
     }
-    CHECK(alone_error * 1.2f < plain_error)
-        .context(cc::format("indirect per-frame error: {} reusing neighbors alone, {} plain", alone_error, plain_error));
-    CHECK(spatial_error < temporal_error)
-        .context(
-            cc::format("indirect per-frame error: {} reusing both, {} temporal alone", spatial_error, temporal_error));
-    CC_LOG_INFO("ReSTIR G2 on the box: means {} exact, {} at 12 pixels, {} default, {} plain; "
-                "indirect per-frame error {} both, {} temporal alone, {} neighbors alone, {} plain",
-                spatial_mean, far_mean, fast_mean, plain_mean, spatial_error, temporal_error, alone_error, plain_error);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
@@ -1290,28 +1296,33 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
     powered.lights = sv::pt_light_table::grouped(records, sv::light_selection::power);
 
     constexpr int frames = 48;
-    auto const reference = co_await run_restir(ctx, resources, uniform, 4 * frames, {.history = false, .seeds = 1});
     auto const by_uniform = co_await run_restir(ctx, resources, uniform, frames, {.history = false});
     auto const by_power = co_await run_restir(ctx, resources, powered, frames, {.history = false});
-
-    // The lamp's jittered edge makes the image mean noisier than its pixel count suggests, so the bound is the other tests' 3%.
-    auto const reference_mean = mean_luminance_of(reference.mean);
     auto const uniform_mean = mean_luminance_of(by_uniform.mean);
     auto const power_mean = mean_luminance_of(by_power.mean);
-    CHECK(tg::abs(uniform_mean - reference_mean) < 0.03f * reference_mean)
-        .context(cc::format("uniform: {} against {}", uniform_mean, reference_mean));
-    CHECK(tg::abs(power_mean - reference_mean) < 0.03f * reference_mean)
-        .context(cc::format("by power: {} against {}", power_mean, reference_mean));
+    // The lamp's jittered edge makes the image mean noisier than its pixel count suggests, so the bound is the other tests' 3%.
+    CHECK(tg::abs(power_mean - uniform_mean) < 0.03f * uniform_mean)
+        .context(cc::format("by power: {} against {} uniform", power_mean, uniform_mean));
 
+    // Under --thorough each frame is measured against a long reference run on seeds of its own, and otherwise against the two runs' mean.
+    auto const thorough = nx::is_thorough();
+    auto reference = cc::vector<tg::vec3f>();
+    if (thorough)
+        reference = (co_await run_restir(ctx, resources, uniform, 4 * frames, {.history = false, .seeds = 1})).mean;
+    else
+        for (auto i = isize(0); i < by_uniform.mean.size(); ++i)
+            reference.push_back((by_uniform.mean[i] + by_power.mean[i]) * 0.5f);
     auto uniform_error = 0.0f;
     auto power_error = 0.0f;
     for (auto f = 0; f < frames; ++f)
     {
-        uniform_error += rms_error(by_uniform.frames[f], reference.mean) / f32(frames);
-        power_error += rms_error(by_power.frames[f], reference.mean) / f32(frames);
+        uniform_error += rms_error(by_uniform.frames[f], reference) / f32(frames);
+        power_error += rms_error(by_power.frames[f], reference) / f32(frames);
     }
     CHECK(power_error < uniform_error)
         .context(cc::format("per-frame error: {} by power, {} uniform", power_error, uniform_error));
+    CC_LOG_INFO("D0 through the wavefront: means {} by power, {} uniform; per-frame error {} by power, {} uniform",
+                power_mean, uniform_mean, power_error, uniform_error);
 
     // The megakernel, 16 frames of 8 samples each way.
     auto const megakernel_mean = [&](cornell_scene const& scene) -> cc::shared_async<f32>
@@ -1345,9 +1356,17 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
     auto const mk_power = co_await megakernel_mean(powered);
     CHECK(tg::abs(mk_power - mk_uniform) < 0.03f * mk_uniform)
         .context(cc::format("megakernel: {} by power, {} uniform", mk_power, mk_uniform));
-    CC_LOG_INFO("D0 on the box with a dim second light: means {} by power, {} uniform, {} reference; "
-                "per-frame error {} by power, {} uniform; megakernel {} by power, {} uniform",
-                power_mean, uniform_mean, reference_mean, power_error, uniform_error, mk_power, mk_uniform);
+    CC_LOG_INFO("D0 on the box with a dim second light: megakernel means {} by power, {} uniform", mk_power, mk_uniform);
+
+    if (thorough)
+    {
+        auto const reference_mean = mean_luminance_of(reference);
+        CC_LOG_INFO("D0 reference mean: {}", reference_mean);
+        CHECK(tg::abs(uniform_mean - reference_mean) < 0.03f * reference_mean)
+            .context(cc::format("uniform: {} against {}", uniform_mean, reference_mean));
+        CHECK(tg::abs(power_mean - reference_mean) < 0.03f * reference_mean)
+            .context(cc::format("by power: {} against {}", power_mean, reference_mean));
+    }
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
@@ -1356,6 +1375,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
 // With one next-event sample a frame a pixel sees one lamp of 22.
 // Resampling eight candidates, and the neighbors' and the last frame's choices, makes the one that matters to it close to certain.
 // The visibility is traced once, at the re-shade, so the estimate stays unbiased: its mean is the plain path tracer's.
+// A default run pins its mean against the plain tracer; --thorough also measures its noise against a reference four times as long.
 ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR DI keeps the image of many lights and cuts its noise",
                      (sg::context_handle const& ctx_h))
 {
@@ -1401,33 +1421,35 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR DI keeps the image of many 
 
     constexpr int frames = 48;
     constexpr int warm = 16;
-    auto const reference = co_await run_restir(ctx, resources, scene, 4 * frames, {.history = false, .seeds = 1});
     auto const plain = co_await run_restir(ctx, resources, scene, frames, {.history = false});
-    auto const gi = co_await run_restir(ctx, resources, scene, frames, {.history = true, .spatial = true});
     auto const di = co_await run_restir(ctx, resources, scene, frames, {.history = true, .spatial = true, .di = true});
 
-    auto const reference_mean = mean_luminance_of(reference.mean);
     auto const plain_mean = mean_luminance_of(plain.mean);
     auto const di_mean = mean_luminance_of(di.mean);
     CHECK(tg::abs(di_mean - plain_mean) < 0.03f * plain_mean)
         .context(cc::format("ReSTIR DI: {} against {} without", di_mean, plain_mean));
+    CC_LOG_INFO("D1 on the box with 22 lamps: means {} with ReSTIR DI, {} without", di_mean, plain_mean);
 
-    // DI's own gain, over the GI reuse it runs beside.
-    auto plain_error = 0.0f;
-    auto gi_error = 0.0f;
-    auto di_error = 0.0f;
-    for (auto f = warm; f < frames; ++f)
+    // DI's own gain, over the GI reuse it runs beside, against a reference four times as long.
+    if (nx::is_thorough())
     {
-        plain_error += rms_error(plain.frames[f], reference.mean) / f32(frames - warm);
-        gi_error += rms_error(gi.frames[f], reference.mean) / f32(frames - warm);
-        di_error += rms_error(di.frames[f], reference.mean) / f32(frames - warm);
+        auto const reference = co_await run_restir(ctx, resources, scene, 4 * frames, {.history = false, .seeds = 1});
+        auto const gi = co_await run_restir(ctx, resources, scene, frames, {.history = true, .spatial = true});
+        auto plain_error = 0.0f;
+        auto gi_error = 0.0f;
+        auto di_error = 0.0f;
+        for (auto f = warm; f < frames; ++f)
+        {
+            plain_error += rms_error(plain.frames[f], reference.mean) / f32(frames - warm);
+            gi_error += rms_error(gi.frames[f], reference.mean) / f32(frames - warm);
+            di_error += rms_error(di.frames[f], reference.mean) / f32(frames - warm);
+        }
+        // The continuation's hits on the lamps keep their half of the weight, and their noise, so the gain is bounded below what DI alone would give.
+        CHECK(di_error * 1.15f < gi_error)
+            .context(cc::format("per-frame error: {} with ReSTIR DI, {} with GI reuse alone", di_error, gi_error));
+        CC_LOG_INFO("D1 per-frame error against a reference of {}: {} with DI, {} with GI reuse alone, {} plain",
+                    mean_luminance_of(reference.mean), di_error, gi_error, plain_error);
     }
-    // The continuation's hits on the lamps keep their half of the weight, and their noise, so the gain is bounded below what DI alone would give.
-    CHECK(di_error * 1.15f < gi_error)
-        .context(cc::format("per-frame error: {} with ReSTIR DI, {} with GI reuse alone", di_error, gi_error));
-    CC_LOG_INFO("D1 on the box with 22 lamps: means {} with ReSTIR DI, {} without, {} reference; "
-                "per-frame error {} with DI, {} with GI reuse alone, {} plain",
-                di_mean, plain_mean, reference_mean, di_error, gi_error, plain_error);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

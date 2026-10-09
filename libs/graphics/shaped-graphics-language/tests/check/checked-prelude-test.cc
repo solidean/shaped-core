@@ -148,10 +148,20 @@ TEST("sgl checked prelude - every sample and sg shader")
 {
     auto files = cc::vector<program>();
     add_files_under(files, "samples", SGL_SAMPLES_DIR);
-    add_files_under(files, "sg", SGL_SG_SHADERS_DIR);
     REQUIRE(files.size() > 0);
-    for (auto const& p : files)
-        nx::invoke_tests(p.name, p);
+    auto const samples = files.size();
+    add_files_under(files, "sg", SGL_SG_SHADERS_DIR);
+    REQUIRE(files.size() > samples);
+    // A default run takes every third file.
+    auto const stride = nx::is_thorough() ? isize(1) : isize(3);
+    auto visited_sg = isize(0);
+    for (auto i = isize(0); i < files.size(); i += stride)
+    {
+        nx::invoke_tests(files[i].name, files[i]);
+        if (i >= samples)
+            ++visited_sg;
+    }
+    REQUIRE(visited_sg > 0);
 }
 
 TEST("sgl checked prelude - programs written to report")

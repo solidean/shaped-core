@@ -6,6 +6,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -221,18 +222,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a cutout cuts where its opacity sa
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
-    {
-        auto bindings = cc::vector<binding>{black, binding::of("opacity", 0.0f)};
-        auto const c = co_await trace_cut(ctx, resources, quad_of("cutout constant", unlit, cc::move(bindings), {}));
-        check_counts(c, expect_cut::all, "a constant opacity of 0");
-    }
-    {
-        auto attributes = cc::vector<sv::mesh_attribute>();
-        attributes.push_back(per_triangle("opacity", 0.0f, 1.0f));
-        auto const c = co_await trace_cut(
-            ctx, resources, quad_of("cutout attribute", unlit, cc::vector<binding>{black}, cc::move(attributes)));
-        check_counts(c, expect_cut::half, "a per-triangle opacity of 0 and 1");
-    }
+    // A default run traces a thresholded attribute and a texture channel; --thorough traces every source.
     {
         auto attributes = cc::vector<sv::mesh_attribute>();
         attributes.push_back(per_triangle("opacity", 0.3f, 0.7f));
@@ -240,12 +230,27 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a cutout cuts where its opacity sa
             ctx, resources, quad_of("cutout threshold", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
         check_counts(c, expect_cut::half, "a cutoff of 0.5 over opacities of 0.3 and 0.7");
     }
+    if (nx::is_thorough())
     {
-        auto attributes = cc::vector<sv::mesh_attribute>();
-        attributes.push_back(per_triangle("opacity", 0.6f, 0.9f));
-        auto const c = co_await trace_cut(
-            ctx, resources, quad_of("cutout threshold kept", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
-        check_counts(c, expect_cut::none, "a cutoff of 0.5 over opacities of 0.6 and 0.9");
+        {
+            auto bindings = cc::vector<binding>{black, binding::of("opacity", 0.0f)};
+            auto const c = co_await trace_cut(ctx, resources, quad_of("cutout constant", unlit, cc::move(bindings), {}));
+            check_counts(c, expect_cut::all, "a constant opacity of 0");
+        }
+        {
+            auto attributes = cc::vector<sv::mesh_attribute>();
+            attributes.push_back(per_triangle("opacity", 0.0f, 1.0f));
+            auto const c = co_await trace_cut(
+                ctx, resources, quad_of("cutout attribute", unlit, cc::vector<binding>{black}, cc::move(attributes)));
+            check_counts(c, expect_cut::half, "a per-triangle opacity of 0 and 1");
+        }
+        {
+            auto attributes = cc::vector<sv::mesh_attribute>();
+            attributes.push_back(per_triangle("opacity", 0.6f, 0.9f));
+            auto const c = co_await trace_cut(
+                ctx, resources, quad_of("cutout threshold kept", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
+            check_counts(c, expect_cut::none, "a cutoff of 0.5 over opacities of 0.6 and 0.9");
+        }
     }
     {
         // A 2x1 texture whose left texel is transparent and right one opaque, read through its alpha channel.
