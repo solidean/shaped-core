@@ -272,7 +272,7 @@ rays path_rays:
 
                 // Escaped to the SH environment, whose radiance the miss wrote back in `emission`.
                 // The primary ray sees the sky at full weight; a bounce ray is the BSDF strategy of the hit's own environment estimate.
-                // The environment's sample reaches only the shading frame's upper hemisphere, and a medium scatter takes none.
+                // The environment's sample reaches only the shading frame's upper hemisphere on the face's own side, and a medium scatter takes none.
                 let w = if b == 0 or not prev_nee_reachable => 1.0 else pt.mis_weight(prev_pdf, pt.env_pdf())
                 let c = throughput * emission * w
                 radiance += c

@@ -121,8 +121,8 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
     if all(incoming <= float3(0.0)) => return no_light_sample()
 
     let wi_local = openpbr.to_local(f, wi)
-    // below the surface, so the BSDF is zero there anyway
-    if wi_local.z <= 0.0 => return no_light_sample()
+    // Light reaches only the face's own side, wherever the shading normal leans.
+    if wi_local.z <= 0.0 or dot(wi, n_geom) <= 0.0 => return no_light_sample()
 
     // Split at the evaluation rather than after it, since the two halves reach different denoiser signals.
     let mut f_diffuse = float3(0.0)
@@ -172,6 +172,8 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
 
     let wi_local = float3(r * cos(phi), r * sin(phi), u1)
     let wi = openpbr.to_world(f, wi_local)
+    // On the face's own side only, as a light's sample is.
+    if dot(wi, n_geom) <= 0.0 => return no_light_sample()
 
     let mut f_diffuse = float3(0.0)
     let mut f_specular = float3(0.0)
@@ -332,7 +334,14 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     let u1 = pt.rand(mut rng)
     let u2 = pt.rand(mut rng)
     let u3 = pt.rand(mut rng)
-    let s = openpbr.bsdf_sample_direction(b, wo_local, float3(u1, u2, u3))
+    let mut s = openpbr.bsdf_sample_direction(b, wo_local, float3(u1, u2, u3))
+    let continuation = openpbr.to_world(f, s.direction)
+
+    // A reflection has to leave on the face's own side and a transmission through it, whatever the shading frame says.
+    // The ones that do not would pass through the face they reflected off, or back out of the one they refracted into.
+    let crosses = dot(continuation, n) < 0.0
+    if s.valid and crosses == (s.direction.z > 0.0):
+        s.valid = false
 
     if s.valid:
         // The cosine is the one at the SURFACE, so a refracted direction contributes its own magnitude rather than a negative weight.
@@ -344,7 +353,7 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
             weight *= mask * 3.0
 
         payload.throughput = weight
-        payload.direction = openpbr.to_world(f, s.direction)
+        payload.direction = continuation
         payload.bsdf_pdf = s.pdf
         payload.nee_reachable = if s.direction.z > 0.0 => 1u else 0u
         payload.lobe = s.lobe

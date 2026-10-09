@@ -139,7 +139,7 @@ On a path's last surface hit no bounce ray follows, so next-event estimation tak
 weighting it against a ray that never flies would darken every rect and sun by the share left to that ray.
 A rect and a sun have both strategies: the bounce ray credits every rect it crosses and every sun it escapes into, each weighted against its own density.
 A bounce ray that left by transmission, or after a medium scatter, takes the full weight instead.
-Next-event estimation samples only the upper hemisphere of the surface's shading frame, and a medium scatter takes no sample.
+Next-event estimation samples only directions above both the shading frame and the geometric face, and a medium scatter takes no sample.
 
 Lights occlude nothing — a shadow ray toward one passes straight through another — so the bounce ray credits every area light it crosses before the surface, not only the nearest.
 Treating lights as transparent on one side and opaque on the other would leave part of the integral to neither strategy.

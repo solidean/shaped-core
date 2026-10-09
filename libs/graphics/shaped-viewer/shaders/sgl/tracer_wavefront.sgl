@@ -543,7 +543,7 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
     if hit_t < 0.0 and not (ended or escaped_inside):
         // Escaped to the SH environment: the primary ray sees it at full weight, a bounce ray as the BSDF strategy of the hit's own estimate.
         let emission = scene.background_radiance(background_sh(), normalize(dir))
-        // The environment's sample reaches only the shading frame's upper hemisphere, and a medium scatter takes none.
+        // The environment's sample reaches only the shading frame's upper hemisphere on the face's own side, and a medium scatter takes none.
         let w = if b == 0u or not prev_nee_reachable => 1.0 else pt.mis_weight(st.prev_pdf, pt.env_pdf())
         let c = throughput * emission * w
         light.radiance += c
@@ -1155,12 +1155,14 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
         let wi = normalize(kept.x_s - (x_v + n * 1e-3))
         let wo_local = openpbr.to_local(frame, v)
         let wi_local = openpbr.to_local(frame, wi)
-        let mut f_diffuse = float3(0.0)
-        let mut f_specular = float3(0.0)
-        openpbr.bsdf_eval_split(closure, wo_local, wi_local, mut f_diffuse, mut f_specular)
-        let weight = abs(wi_local.z) * kept.weight
-        diffuse = f_diffuse * weight * kept.radiance
-        specular = f_specular * weight * kept.radiance
+        // A reflection, as the path's own continuation is: above the shading frame and on the face's own side.
+        if wi_local.z > 0.0 and dot(wi, n) > 0.0:
+            let mut f_diffuse = float3(0.0)
+            let mut f_specular = float3(0.0)
+            openpbr.bsdf_eval_split(closure, wo_local, wi_local, mut f_diffuse, mut f_specular)
+            let weight = wi_local.z * kept.weight
+            diffuse = f_diffuse * weight * kept.radiance
+            specular = f_specular * weight * kept.radiance
     // ReSTIR DI replaces the light part of the visible point's own light by its kept sample, shaded exactly behind one shadow ray.
     let mut own_light = cand.direct
     let mut own_specular = cand.direct_specular
@@ -1175,7 +1177,7 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
             let mut distance = 0.0
             let arriving = di_arriving(l, di.point, x_v, mut wi, mut distance)
             let wi_local = openpbr.to_local(frame, wi)
-            let ahead = wi_local.z > 0.0 and any(arriving > float3(0.0))
+            let ahead = wi_local.z > 0.0 and dot(wi, n) > 0.0 and any(arriving > float3(0.0))
             if ahead:
                 let px = slot_pixel(slot)
                 let launch = int3(px.x as int, px.y as int, 0)

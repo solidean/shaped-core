@@ -547,14 +547,13 @@ struct light_scene
     sv::background environment = {};
 };
 
-/// The mesh `positions` / `materials` describe, acquired and ready to trace, or empty when it did not build.
+/// `placed`, acquired and ready to trace, or empty when it did not build.
 [[nodiscard]] cc::optional<light_scene> make_light_scene(sv::gpu_resource_manager& resources,
-                                                         cc::vector<tg::pos3f> const& positions,
-                                                         cc::vector<sv_test::pbr_material> const& materials,
+                                                         sv::mesh const& placed,
                                                          sv::camera const& camera)
 {
     auto scene = light_scene{};
-    scene.item = resources.acquire_scene_item(sv_test::as_mesh("light scene", positions, materials));
+    scene.item = resources.acquire_scene_item(placed);
     resources.wait_for_pending_uploads();
 
     auto const* const mesh = resources.meshes.get_ptr(scene.item.mesh);
@@ -567,6 +566,15 @@ struct light_scene
     scene.hit_groups.push_back(permutation);
     scene.camera = camera;
     return scene;
+}
+
+/// The mesh `positions` / `materials` describe, acquired and ready to trace, or empty when it did not build.
+[[nodiscard]] cc::optional<light_scene> make_light_scene(sv::gpu_resource_manager& resources,
+                                                         cc::vector<tg::pos3f> const& positions,
+                                                         cc::vector<sv_test::pbr_material> const& materials,
+                                                         sv::camera const& camera)
+{
+    return make_light_scene(resources, sv_test::as_mesh("light scene", positions, materials), camera);
 }
 
 /// Traces `scene` once per table — all of them in one frame, with one seed, so the images differ only by their lights —
@@ -1040,6 +1048,76 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
         // The cover really is in the way — or the comparison below proves nothing.
         CHECK(shadowed < 0.5f * clear);
         CHECK(tg::abs(ignored - clear) < 0.03f * clear);
+    }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A surface reflects only light on its face's own side, however far its authored normal leans off the face.
+//
+// The light here comes from below the floor and casts no shadow, so nothing but that rule keeps it off the side the camera sees.
+// The same light mirrored above the floor shows the setup lights at all.
+ASYNC_INVOCABLE_TEST("sv - a surface whose authored normal leans off its face is not lit from behind",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 0.5f};
+    auto ground = sv_test::cornell_box{};
+    sv_test::cb_push_quad(ground, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          white);
+    auto mesh = sv_test::as_mesh("tilted floor", ground.positions, ground.materials);
+
+    // The authored normal leans 55 degrees off the floor's +y toward -x: it faces both lights and the camera.
+    // The frame is +z turned a quarter turn about cross(+z, authored), which carries +z onto it.
+    auto const authored = tg::normalize(tg::vec3f(-1.0f, 0.7f, 0.0f));
+    auto const half = tg::sqrt(0.5f);
+    auto const frame = tg::vec4f(-authored[1] * half, authored[0] * half, 0.0f, half);
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec4f>::create_filled(ground.positions.size(), frame)));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+    auto scene = make_light_scene(resources, mesh, cam);
+    REQUIRE(scene.has_value());
+    // The second segment is the continuation, which reaches the rect below the floor directly.
+    scene.value().max_bounces = 2;
+
+    // A parallel light reaches the floor through next-event alone, and a rect off toward -x through the continuation too.
+    struct mirrored
+    {
+        sv::light above;
+        sv::light below;
+    };
+    auto const pairs = cc::vector<mirrored>{
+        {.above = sv::light::directional(tg::vec3f(1, -1, 0)).lux(2).casts_shadows(false),
+         .below = sv::light::directional(tg::vec3f(1, 1, 0)).lux(2).casts_shadows(false)},
+        {.above
+         = sv::light::rect(tg::pos3f(-3, 1, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 2)).nits(4).casts_shadows(false),
+         .below
+         = sv::light::rect(tg::pos3f(-3, -1, 0), tg::vec3f(0, 0, 2), tg::vec3f(1, 0, 0)).nits(4).casts_shadows(false)},
+    };
+    for (auto const& pair : pairs)
+    {
+        auto const traced = trace_under(
+            &ctx, &resources, scene.value(),
+            {table_of(cc::span<sv::light const>(&pair.above, 1)), table_of(cc::span<sv::light const>(&pair.below, 1))});
+        auto const& images = co_await traced;
+        REQUIRE(images.size() == 2);
+
+        auto const size = scene.value().size;
+        auto const lit = mean_brightness(images[0], size, 2);
+        CHECK(lit > 0.1f);
+        CHECK(mean_brightness(images[1], size, 2) < 0.01f * lit);
     }
 
     co_await cc::async_settled(sv::background_work(ctx));
