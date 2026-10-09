@@ -517,6 +517,7 @@ if(SC_BUILD_TESTS)
         tests/platform/console-test.cc
         tests/platform/environment-test.cc
         tests/platform/file_path-test.cc
+        tests/platform/native-test.cc
         tests/platform/stack-capture-test.cc
         tests/platform/wasm-frames-test.cc
         tests/platform/stacktrace-test.cc
