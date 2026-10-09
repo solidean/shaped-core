@@ -524,7 +524,8 @@ inline constexpr isize cornell_lamp_triangles = 2;
 /// The Cornell box lit by its own lamp, as the view-level tests place it: no rect light, so the lamp is the box's only light.
 ///
 /// The lamp quad is a mesh of its own whose `pbr` material sets `emissive` to `lamp_nits` as a constant, which is what makes it a light of the trace.
-/// The box's own per-triangle `emissive` is a mesh attribute, which reaches the camera alone.
+/// The enclosure's per-triangle `emissive` is zero throughout, so the enclosure is no light.
+/// A lamp left in the enclosure's list would make the whole box one emitter, its area CDF spending most samples on dark walls.
 /// The enclosure is the rest of the list, with its per-triangle materials.
 struct sv_test::lit_cornell_box
 {

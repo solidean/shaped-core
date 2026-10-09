@@ -52,6 +52,16 @@ inline constexpr u32 light_path_mesh = 4;
 
 /// What an instance record's `emitter` holds where the instance lights nothing, `scene.no_offset`.
 inline constexpr u32 no_emitter = 0xffffffffu;
+
+/// What next-event estimation reads of an emissive instance beyond its light record, `traced.emitters`' element.
+///
+/// `instance` is the instance's row of the instance table, and `cdf` the bindless index of its mesh's area CDF over `triangle_count` triangles in `block_count` blocks.
+/// `emission` is the permutation the instance shades with, whose factors `tracer.emitter_radiance` reads at the sampled point.
+[[nodiscard]] shaders::tracer::emitter_record emitter_record_of(u32 instance,
+                                                                u32 cdf,
+                                                                u32 triangle_count,
+                                                                u32 block_count,
+                                                                material_emission const& emission);
 } // namespace sv
 
 /// How next-event estimation picks among a table's lights.

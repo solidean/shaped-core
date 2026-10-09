@@ -42,6 +42,7 @@ add_library(shaped-viewer
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/impl/wavefront_pacing.cc
     src/shaped-viewer/resources/resource_managers.cc
+    src/shaped-viewer/resources/value_summary.cc
     src/shaped-viewer/resources/bindless_tables.cc
     src/shaped-viewer/resources/gpu_resource_manager.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
@@ -52,6 +53,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/depth_fill_routine.cc
     src/shaped-viewer/rendering/view_renderer.cc
+    src/shaped-viewer/rendering/impl/emitters.cc
     src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
     src/shaped-viewer/resources/material_shader_cache.cc
@@ -226,6 +228,7 @@ if(SC_BUILD_TESTS)
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
         tests/emitter-test.cc
+        tests/value-summary-test.cc
         tests/asset-loading-test.cc
         tests/pt-packing-test.cc
     )

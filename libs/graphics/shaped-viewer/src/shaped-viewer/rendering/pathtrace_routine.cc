@@ -12,6 +12,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/slug_atlas.hh>
 #include <shaped-shader-library/raytracing_pipeline.hh>
+#include <shaped-viewer/rendering/impl/emitters.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/resources/material_shader_cache.hh>
@@ -217,6 +218,36 @@ void place_instance_record(shaders::tracer::instance_record& record,
     record.emitter = no_emitter;
 }
 
+shaders::tracer::emitter_record emitter_record_of(u32 instance,
+                                                  u32 cdf,
+                                                  u32 triangle_count,
+                                                  u32 block_count,
+                                                  material_emission const& emission)
+{
+    auto const& color = emission.color;
+    auto const& scale = emission.scale;
+    return {.instance = instance,
+            .cdf = cdf,
+            .triangle_count = triangle_count,
+            .block_count = block_count,
+            .color_kind = u32(color.kind),
+            .color_offset = color.offset,
+            .color_uv_offset = color.uv_offset,
+            .color_frequency = color.frequency,
+            .color_channels = color.channels[0] | (color.channels[1] << 8) | (color.channels[2] << 16),
+            .color_sampler = color.sampler,
+            .color_transform = color.transform,
+            .scale_kind = u32(scale.kind),
+            .scale_offset = scale.offset,
+            .scale_uv_offset = scale.uv_offset,
+            .scale_frequency = scale.frequency,
+            .scale_channel = scale.channels[0],
+            .scale_sampler = scale.sampler,
+            .scale_transform = scale.transform,
+            .pad0 = 0,
+            .pad1 = 0};
+}
+
 shaders::tracer::frame_constants default_frame_constants()
 {
     auto fc = shaders::tracer::frame_constants{};
@@ -248,28 +279,40 @@ namespace
 
 /// What a light offers next-event estimation, before it is normalized against the others of its kind.
 /// A local light's power, its shaping ignored, which only overweighs a narrow spot; a distant light's irradiance, since it has no finite power.
+/// Always finite: a weight that is NaN reads as 0, which the floor below lifts, and one that overflows as the largest f32.
 [[nodiscard]] f32 selection_weight_of(shaders::tracer::light_record const& l)
 {
-    auto const lum = cc::max(luminance_of(l.emission), 0.0f);
-    // An emissive instance's area is an estimate of its world area, and it emits from both faces.
-    if (l.path == light_path_mesh)
-        return lum * l.area * tg::pi<f32> * 2.0f;
-    switch (light_path(l.path))
+    auto const weight = [&]() -> f32
     {
-    case light_path::point:
-        return lum * 4.0f * tg::pi<f32>;
-    case light_path::area:
-        return lum * l.area * tg::pi<f32> * ((l.flags & light_flag_two_sided) != 0 ? 2.0f : 1.0f);
-    case light_path::distant_point:
-        return lum;
-    case light_path::distant_disc:
-        return lum * 2.0f * tg::pi<f32> * l.one_minus_cos_angular_radius;
-    }
-    return 0.0f;
+        auto const lum = cc::max(luminance_of(l.emission), 0.0f);
+        // An emissive instance's area is an estimate of its world area, and it emits from both faces.
+        if (l.path == light_path_mesh)
+            return lum * l.area * tg::pi<f32> * 2.0f;
+        switch (light_path(l.path))
+        {
+        case light_path::point:
+            return lum * 4.0f * tg::pi<f32>;
+        case light_path::area:
+            return lum * l.area * tg::pi<f32> * ((l.flags & light_flag_two_sided) != 0 ? 2.0f : 1.0f);
+        case light_path::distant_point:
+            return lum;
+        case light_path::distant_disc:
+            return lum * 2.0f * tg::pi<f32> * l.one_minus_cos_angular_radius;
+        }
+        return 0.0f;
+    }();
+    if (!(weight > 0.0f))
+        return 0.0f;
+    return cc::min(weight, impl::largest_finite_f32);
 }
 
+/// The share of the choice a kind made only of `light_flag_unseen_emission` records takes beside a kind that has light.
+/// Above zero, since such a record may emit; small, since nothing says it does.
+constexpr auto unseen_kind_share = 1e-3;
+
 /// Writes each record's selection probability and the running sum of them, the last of which is 1.
-/// Local and distant lights are normalized apart and share the choice half and half where both exist, since their weights do not compare.
+/// Local and distant lights are normalized apart and share the choice half and half where both have light, since their weights do not compare.
+/// A record whose emission no read saw above zero is no evidence of light: a kind made only of those takes `unseen_kind_share` beside one that has light.
 /// Every weight is floored at a thousandth of its kind's mean, so no light is impossible to pick while its record says it may be.
 void weigh_by_power(cc::span<shaders::tracer::light_record> records)
 {
@@ -277,14 +320,23 @@ void weigh_by_power(cc::span<shaders::tracer::light_record> records)
         return;
     auto const is_distant = [](shaders::tracer::light_record const& l)
     { return light_path(l.path) == light_path::distant_point || light_path(l.path) == light_path::distant_disc; };
+    auto const is_unseen = [](shaders::tracer::light_record const& l)
+    { return l.path == light_path_mesh && (l.flags & light_flag_unseen_emission) != 0; };
 
     auto raw_total = cc::fixed_array<f64, 2>{0.0, 0.0};
+    auto seen_total = cc::fixed_array<f64, 2>{0.0, 0.0};
     auto count = cc::fixed_array<i32, 2>{0, 0};
+    auto local_unseen = false;
     for (auto const& l : records)
     {
         auto const kind = is_distant(l) ? 1 : 0;
-        raw_total[kind] += f64(selection_weight_of(l));
+        auto const w = f64(selection_weight_of(l));
+        raw_total[kind] += w;
         ++count[kind];
+        if (is_unseen(l))
+            local_unseen = true;
+        else
+            seen_total[kind] += w;
     }
     auto min_weight = cc::fixed_array<f64, 2>{1.0, 1.0};
     for (auto k = 0; k < 2; ++k)
@@ -300,10 +352,18 @@ void weigh_by_power(cc::span<shaders::tracer::light_record> records)
         total[is_distant(l) ? 1 : 0] += weight(l);
 
     // A kind takes half the choice only where it has light to offer and the other kind has too.
-    auto const local_lit = count[0] > 0 && raw_total[0] > 0.0;
-    auto const distant_lit = count[1] > 0 && raw_total[1] > 0.0;
+    // Local lights made only of stand-ins take a sliver beside a lit sun, and the whole of the choice beside none; a distant light is never one.
+    auto const local_lit = seen_total[0] > 0.0;
+    auto const distant_lit = seen_total[1] > 0.0;
     auto const unlit_share = count[0] == 0 ? 0.0 : (count[1] == 0 ? 1.0 : 0.5);
-    auto const local_share = local_lit ? (distant_lit ? 0.5 : 1.0) : (distant_lit ? 0.0 : unlit_share);
+    auto const local_share = [&]
+    {
+        if (local_lit)
+            return distant_lit ? 0.5 : 1.0;
+        if (distant_lit)
+            return local_unseen ? unseen_kind_share : 0.0;
+        return local_unseen ? 1.0 : unlit_share;
+    }();
     auto const share = cc::fixed_array<f64, 2>{local_share, 1.0 - local_share};
 
     // The search picks a light with the width of its interval between two f32 cdfs, so that width is the pdf it is given.

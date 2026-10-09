@@ -619,6 +619,7 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
 
     // A type declaring its emission has it written here, after the fragment, from the declared attributes alone.
     // That is the value the light sampler reads as well, so the two strategies weighed against each other see one emission.
+    // A traced spelling samples a texture at level 0, the level `tracer.emission_factor` reads too; a raster pixel's level is no light strategy.
     if (r.type->declares_emission())
     {
         src += "\n    // --- the declared emission ---\n";

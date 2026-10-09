@@ -1,12 +1,15 @@
 #include <clean-core/container/array.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/bit.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/resolve.hh>
 #include <shaped-viewer/material/shader_generator.hh>
+#include <shaped-viewer/rendering/impl/emitters.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
-#include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/resources/instance_data.hh>
+#include <shaped-viewer/resources/resource_managers.hh> // sv::residency
+#include <shaped-viewer/resources/value_summary.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 #include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -50,7 +53,8 @@ namespace
     return sv::generate_material_shader(sv::resolve_material(lib, id, mesh));
 }
 
-/// The parameter block of `type_name` under `overrides` as the resource manager keeps it: its constant slots, by the layout.
+/// The parameter block of `type_name` under `overrides` as the resource manager keeps it, by the layout.
+/// Constants and sample transforms carry their bytes, and a texture slot its id; a descriptor slot names no uploaded attribute.
 [[nodiscard]] sv::instance_record block_of(sv::material_library& lib,
                                            cc::string_view type_name,
                                            cc::vector<sv::material_attribute_binding> overrides,
@@ -64,11 +68,16 @@ namespace
     for (auto const& slot : g.layout.slots)
     {
         auto s = sv::instance_slot{.kind = slot.kind, .offset = slot.offset, .size_bytes = slot.size_bytes};
+        auto const& a = resolved.attributes[slot.attribute_index];
         if (slot.kind == sv::material_slot_kind::constant)
+            s.constant = cc::vector<byte>::create_copy_of(a.constant);
+        if (slot.kind == sv::material_slot_kind::sample_transform)
         {
-            auto const constant = resolved.attributes[slot.attribute_index].constant;
-            s.constant = cc::vector<byte>::create_copy_of(constant);
+            auto const t = a.sample->transform;
+            s.constant = cc::vector<byte>::create_copy_of(cc::span<sv::sample_transform const>(&t, 1).as_bytes());
         }
+        if (slot.kind == sv::material_slot_kind::texture_index)
+            s.texture = a.sample->texture;
         record.slots.push_back(cc::move(s));
     }
     return record;
@@ -131,6 +140,43 @@ TEST("sv - the generator writes a declared emission after the fragment, clamped 
     CHECK(!unlit.source.contains("the declared emission"));
 }
 
+namespace
+{
+/// A mesh offering a per-vertex `uv` and the texture `texture` as `name`, read through `swizzle` and `transform`.
+[[nodiscard]] sv::resident_mesh textured_mesh(cc::string name,
+                                              sv::texture_id texture,
+                                              sv::channel_swizzle swizzle = {},
+                                              sv::sample_transform transform = {})
+{
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(
+        bind(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                        cc::array<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)})));
+    mesh.textures.push_back(
+        {.name = cc::move(name),
+         .source = {.texture = texture, .uv_attribute = "uv", .swizzle = swizzle, .transform = transform}});
+    return mesh;
+}
+
+/// A mesh carrying `name` per triangle, one value for its one triangle.
+[[nodiscard]] sv::resident_mesh attribute_mesh(cc::string name, tg::vec3f value)
+{
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(bind(sv::mesh_attribute::create(cc::move(name), sv::attribute_frequency::per_triangle,
+                                                              cc::array<tg::vec3f>{value})));
+    return mesh;
+}
+
+/// The summary of values whose mean is `mean` and range `lo` to `hi` in every color channel, alpha 1.
+[[nodiscard]] sv::value_summary summary_of(f32 mean, f32 lo, f32 hi, bool exact)
+{
+    return {.mean = tg::vec4f(mean, mean, mean, 1),
+            .min = tg::vec4f(lo, lo, lo, 1),
+            .max = tg::vec4f(hi, hi, hi, 1),
+            .exact = exact};
+}
+} // namespace
+
 TEST("sv - an emission descriptor says where each of its factors lives")
 {
     auto lib = make_library();
@@ -139,7 +185,6 @@ TEST("sv - an emission descriptor says where each of its factors lives")
     {
         auto const g = generate(lib, sv::builtin_material::openpbr, {});
         CHECK(g.emission.declares());
-        CHECK(g.emission.is_constant());
         CHECK(g.emission.color.kind == sv::material_opacity_kind::constant);
         CHECK(g.emission.scale.kind == sv::material_opacity_kind::constant);
         auto color_offset = -1;
@@ -160,92 +205,368 @@ TEST("sv - an emission descriptor says where each of its factors lives")
         auto const e = emission_of(lib, sv::builtin_material::pbr, {});
         CHECK(e.color.is_constant());
         CHECK(e.scale.kind == sv::material_opacity_kind::none);
-        CHECK(e.is_constant());
     }
 
-    SECTION("a mesh attribute is read through its descriptor, which next-event estimation does not sample yet")
+    SECTION("a mesh attribute is read through its descriptor, at its frequency")
     {
-        auto mesh = make_mesh();
-        mesh.attributes.push_back(bind(sv::mesh_attribute::create("emissive", sv::attribute_frequency::per_triangle,
-                                                                  cc::array<tg::vec3f>{tg::vec3f(1, 1, 1)})));
-        auto const e = emission_of(lib, sv::builtin_material::pbr, {}, mesh);
+        auto const e = emission_of(lib, sv::builtin_material::pbr, {}, attribute_mesh("emissive", tg::vec3f(1, 1, 1)));
         CHECK(e.color.kind == sv::material_opacity_kind::attribute);
         CHECK(e.color.frequency == 0u); // `material.frequency_per_triangle`
-        CHECK(!e.is_constant());
+        CHECK(e.color.offset != sv::material_opacity::no_offset);
     }
 
-    SECTION("a texture keeps its uv, its sampler and the channels it reads")
+    SECTION("a texture keeps its uv, its sampler, the channels it reads and its transform")
     {
-        auto mesh = make_mesh();
-        mesh.attributes.push_back(
-            bind(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
-                                            cc::array<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)})));
-        mesh.textures.push_back({.name = "emissive",
-                                 .source = {.texture = sv::texture_id(1),
-                                            .uv_attribute = "uv",
-                                            .swizzle = sv::channel_swizzle::of(
-                                                sv::texture_channel::b, sv::texture_channel::g, sv::texture_channel::r)}});
-        auto const e = emission_of(lib, sv::builtin_material::pbr, {}, mesh);
+        auto const mesh = textured_mesh(
+            "emissive", sv::texture_id(1),
+            sv::channel_swizzle::of(sv::texture_channel::b, sv::texture_channel::g, sv::texture_channel::r),
+            {.scale = tg::vec4f(2, 2, 2, 1), .bias = tg::vec4f(0, 0, 0, 0)});
+        auto const g = generate(lib, sv::builtin_material::pbr, {}, mesh);
+        auto const& e = g.emission;
         CHECK(e.color.kind == sv::material_opacity_kind::texture);
         CHECK(e.color.uv_offset != sv::material_opacity::no_offset);
+        CHECK(e.color.frequency == 1u); // `material.frequency_per_vertex`, the uv's
         CHECK(e.color.channels[0] == 2u);
         CHECK(e.color.channels[1] == 1u);
         CHECK(e.color.channels[2] == 0u);
-        CHECK(!e.is_constant());
+        CHECK(e.color.transform != sv::material_opacity::no_offset);
+        // The generated hit and shade kernel sample at level 0, the level the light sampler's reader samples at.
+        CHECK(g.source.contains("level = 0.0"));
+        CHECK(g.shade_source.contains("level = 0.0"));
+    }
+
+    SECTION("an emitter record carries both factors, the color's three selectors packed a byte each")
+    {
+        auto const mesh = textured_mesh(
+            "emissive", sv::texture_id(1),
+            sv::channel_swizzle::of(sv::texture_channel::b, sv::texture_channel::one, sv::texture_channel::r));
+        auto const textured = emission_of(lib, sv::builtin_material::pbr, {}, mesh);
+        auto const r = sv::emitter_record_of(7, 9, 300, 2, textured);
+        CHECK(r.instance == 7u);
+        CHECK(r.cdf == 9u);
+        CHECK(r.triangle_count == 300u);
+        CHECK(r.block_count == 2u);
+        CHECK(r.color_kind == u32(sv::material_opacity_kind::texture));
+        CHECK(r.color_offset == textured.color.offset);
+        CHECK(r.color_uv_offset == textured.color.uv_offset);
+        CHECK(r.color_frequency == textured.color.frequency);
+        CHECK(r.color_channels == (2u | (5u << 8)));
+        CHECK(r.color_sampler == textured.color.sampler);
+        CHECK(r.color_transform == sv::material_opacity::no_offset);
+        CHECK(r.scale_kind == u32(sv::material_opacity_kind::none));
+
+        auto const openpbr = emission_of(lib, sv::builtin_material::openpbr, {});
+        auto const o = sv::emitter_record_of(0, 0, 1, 1, openpbr);
+        CHECK(o.scale_kind == u32(sv::material_opacity_kind::constant));
+        CHECK(o.scale_offset == openpbr.scale.offset);
+        CHECK(o.scale_channel == 0u);
     }
 }
 
-TEST("sv - an instance qualifies as a light by a constant emission above zero")
+TEST("sv - an instance qualifies as a light unless its emission is dark wherever it is read")
 {
     auto lib = make_library();
-    auto const radiance = [&](cc::string_view type, cc::vector<sv::material_attribute_binding> overrides,
-                              sv::resident_mesh const& mesh = make_mesh())
+    auto texture = cc::optional<sv::value_summary>();
+    auto attribute = cc::optional<sv::value_summary>();
+    auto texture_source = [&](sv::texture_id) { return texture; };
+    auto attribute_source = [&](sv::attribute_id) { return attribute; };
+    auto const estimate_of
+        = [&](cc::string_view type, cc::vector<sv::material_attribute_binding> overrides, sv::resident_mesh const& mesh)
     {
         auto copy = overrides;
         auto const emission = emission_of(lib, type, cc::move(copy), mesh);
-        return sv::impl::emitter_radiance_of(emission, block_of(lib, type, cc::move(overrides), mesh));
+        return sv::impl::emitter_estimate_of(emission, block_of(lib, type, cc::move(overrides), mesh),
+                                             {.texture = texture_source, .attribute = attribute_source});
+    };
+    // The radiance alone, which most sections ask about.
+    auto const estimate = [&](cc::string_view type, cc::vector<sv::material_attribute_binding> overrides,
+                              sv::resident_mesh const& mesh = make_mesh())
+    {
+        auto const e = estimate_of(type, cc::move(overrides), mesh);
+        return e.has_value() ? cc::optional<tg::vec3f>(e.value().radiance) : cc::optional<tg::vec3f>();
     };
 
     SECTION("openpbr's default luminance is 0, so a material that sets none lights nothing")
     {
-        CHECK(!radiance(sv::builtin_material::openpbr, {}).has_value());
+        CHECK(!estimate(sv::builtin_material::openpbr, {}).has_value());
     }
 
-    SECTION("a positive one lights, each factor clamped at 0 as the generated emission is")
+    SECTION("a positive constant lights, each factor clamped at 0 as the generated emission is")
     {
-        auto const r = radiance(sv::builtin_material::openpbr,
+        auto const r = estimate(sv::builtin_material::openpbr,
                                 {sv::material_attribute_binding::of("emission_luminance", 2.0f),
                                  sv::material_attribute_binding::of("emission_color", tg::vec3f(1.0f, 0.5f, -1.0f))});
         REQUIRE(r.has_value());
         CHECK(r.value() == tg::vec3f(2.0f, 1.0f, 0.0f));
     }
 
-    SECTION("a negative scale lights nothing")
+    SECTION("a negative constant scale lights nothing")
     {
-        CHECK(!radiance(sv::builtin_material::openpbr, {sv::material_attribute_binding::of("emission_luminance", -3.0f)})
+        CHECK(!estimate(sv::builtin_material::openpbr, {sv::material_attribute_binding::of("emission_luminance", -3.0f)})
                    .has_value());
     }
 
     SECTION("pbr's emissive lights at a scale of 1, and its black default lights nothing")
     {
         auto const r
-            = radiance(sv::builtin_material::pbr, {sv::material_attribute_binding::of("emissive", tg::vec3f(3, 4, 5))});
+            = estimate(sv::builtin_material::pbr, {sv::material_attribute_binding::of("emissive", tg::vec3f(3, 4, 5))});
         REQUIRE(r.has_value());
         CHECK(r.value() == tg::vec3f(3, 4, 5));
-        CHECK(!radiance(sv::builtin_material::pbr, {}).has_value());
+        CHECK(!estimate(sv::builtin_material::pbr, {}).has_value());
     }
 
-    SECTION("an emission from a mesh attribute is camera-only until the reader samples it")
+    SECTION("a mesh attribute lights at the mean of its elements")
     {
-        auto mesh = make_mesh();
-        mesh.attributes.push_back(bind(sv::mesh_attribute::create("emissive", sv::attribute_frequency::per_triangle,
-                                                                  cc::array<tg::vec3f>{tg::vec3f(1, 1, 1)})));
-        CHECK(!radiance(sv::builtin_material::pbr, {}, mesh).has_value());
+        attribute = summary_of(0.25f, 0.0f, 1.0f, true);
+        auto const r = estimate(sv::builtin_material::pbr, {}, attribute_mesh("emissive", tg::vec3f(1, 1, 1)));
+        REQUIRE(r.has_value());
+        CHECK(r.value() == tg::vec3f(0.25f, 0.25f, 0.25f));
+    }
+
+    SECTION("a mesh attribute that is zero in every element lights nothing, as the test Cornell box's walls do not")
+    {
+        attribute = summary_of(0.0f, 0.0f, 0.0f, true);
+        CHECK(!estimate(sv::builtin_material::pbr, {}, attribute_mesh("emissive", tg::vec3f(0, 0, 0))).has_value());
+    }
+
+    SECTION("a mesh attribute nothing is known of counts as 1, times the constant scale")
+    {
+        attribute = cc::nullopt;
+        auto const r
+            = estimate(sv::builtin_material::openpbr, {sv::material_attribute_binding::of("emission_luminance", 3.0f)},
+                       attribute_mesh("emission_color", tg::vec3f(1, 1, 1)));
+        REQUIRE(r.has_value());
+        CHECK(r.value() == tg::vec3f(3, 3, 3));
+    }
+
+    SECTION("a texture lights at its mean, through its swizzle and its scale and bias")
+    {
+        texture = sv::value_summary{.mean = tg::vec4f(0.1f, 0.2f, 0.4f, 1.0f),
+                                    .min = tg::vec4f(0, 0, 0, 1),
+                                    .max = tg::vec4f(1, 1, 1, 1),
+                                    .exact = true};
+        auto const mesh = textured_mesh(
+            "emissive", sv::texture_id(1),
+            sv::channel_swizzle::of(sv::texture_channel::b, sv::texture_channel::one, sv::texture_channel::r),
+            {.scale = tg::vec4f(2, 3, 4, 1), .bias = tg::vec4f(0.5f, 0, 0, 0)});
+        auto const r = estimate(sv::builtin_material::pbr, {}, mesh);
+        REQUIRE(r.has_value());
+        CHECK(tg::abs(r.value()[0] - (0.4f * 2 + 0.5f)) < 1e-6f);
+        CHECK(tg::abs(r.value()[1] - 3.0f) < 1e-6f);
+        CHECK(tg::abs(r.value()[2] - 0.1f * 4) < 1e-6f);
+    }
+
+    SECTION("a texture read whole and black throughout lights nothing")
+    {
+        texture = summary_of(0.0f, 0.0f, 0.0f, true);
+        CHECK(!estimate(sv::builtin_material::pbr, {}, textured_mesh("emissive", sv::texture_id(1))).has_value());
+    }
+
+    SECTION("a texture whose strided scan read only black still lights, at a weight above zero but tiny")
+    {
+        // As an importer's black emission map: nothing proves it dark, and nothing says it emits much.
+        texture = summary_of(0.0f, 0.0f, 0.0f, false);
+        auto const r = estimate_of(sv::builtin_material::pbr, {}, textured_mesh("emissive", sv::texture_id(1)));
+        REQUIRE(r.has_value());
+        for (auto c = 0; c < 3; ++c)
+        {
+            CHECK(r.value().radiance[c] > 0.0f);
+            CHECK(r.value().radiance[c] < 1e-3f);
+        }
+        // A stand-in is no evidence of light, which selection is told.
+        CHECK(r.value().unseen);
+    }
+
+    SECTION("an estimate from means or bounds that saw light is not a stand-in")
+    {
+        texture = summary_of(0.25f, 0.0f, 1.0f, false);
+        auto const by_mean = estimate_of(sv::builtin_material::pbr, {}, textured_mesh("emissive", sv::texture_id(1)));
+        REQUIRE(by_mean.has_value());
+        CHECK(!by_mean.value().unseen);
+
+        // A bias that clamps the mean to zero leaves the bound, which saw light.
+        auto const mesh = textured_mesh("emissive", sv::texture_id(1), {},
+                                        {.scale = tg::vec4f(1, 1, 1, 1), .bias = tg::vec4f(-0.5f, -0.5f, -0.5f, 0)});
+        auto const by_bound = estimate_of(sv::builtin_material::pbr, {}, mesh);
+        REQUIRE(by_bound.has_value());
+        CHECK(!by_bound.value().unseen);
+    }
+
+    SECTION("a bias that cancels the brightest texel to about zero proves nothing, while one well below it does")
+    {
+        // Texels up to 1 under a scale of 2: a bias of -2 meets the bound at exactly 0 on the CPU, which the GPU's rounding may leave just above.
+        texture = summary_of(0.5f, 0.0f, 1.0f, true);
+        auto const at_zero = textured_mesh("emissive", sv::texture_id(1), {},
+                                           {.scale = tg::vec4f(2, 2, 2, 1), .bias = tg::vec4f(-2, -2, -2, 0)});
+        auto const r = estimate_of(sv::builtin_material::pbr, {}, at_zero);
+        REQUIRE(r.has_value());
+        CHECK(r.value().unseen);
+
+        // Within the margin below zero is no proof either.
+        auto const just_below
+            = textured_mesh("emissive", sv::texture_id(1), {},
+                            {.scale = tg::vec4f(2, 2, 2, 1), .bias = tg::vec4f(-2.001f, -2.001f, -2.001f, 0)});
+        CHECK(estimate(sv::builtin_material::pbr, {}, just_below).has_value());
+
+        // Well below zero is dark.
+        auto const below = textured_mesh("emissive", sv::texture_id(1), {},
+                                         {.scale = tg::vec4f(2, 2, 2, 1), .bias = tg::vec4f(-2.1f, -2.1f, -2.1f, 0)});
+        CHECK(!estimate(sv::builtin_material::pbr, {}, below).has_value());
+
+        // With no bias the bound is a product, which the GPU rounds to zero as this does.
+        texture = summary_of(0.0f, 0.0f, 0.0f, true);
+        auto const unbiased = textured_mesh("emissive", sv::texture_id(1), {},
+                                            {.scale = tg::vec4f(2, 2, 2, 1), .bias = tg::vec4f(0, 0, 0, 0)});
+        CHECK(!estimate(sv::builtin_material::pbr, {}, unbiased).has_value());
+    }
+
+    SECTION("a texture whose mean clamps to zero but whose range does not is weighed by its bound")
+    {
+        // A bias of -0.5 over texels in [0, 1] averaging 0.25: dark on average, and bright where a texel is above a half.
+        texture = summary_of(0.25f, 0.0f, 1.0f, true);
+        auto const mesh = textured_mesh("emissive", sv::texture_id(1), {},
+                                        {.scale = tg::vec4f(1, 1, 1, 1), .bias = tg::vec4f(-0.5f, -0.5f, -0.5f, 0)});
+        auto const r = estimate(sv::builtin_material::pbr, {}, mesh);
+        REQUIRE(r.has_value());
+        CHECK(r.value() == tg::vec3f(0.5f, 0.5f, 0.5f));
+    }
+
+    SECTION("a texture nothing is known of counts as 1")
+    {
+        texture = cc::nullopt;
+        auto const r = estimate(sv::builtin_material::pbr, {}, textured_mesh("emissive", sv::texture_id(1)));
+        REQUIRE(r.has_value());
+        CHECK(r.value() == tg::vec3f(1, 1, 1));
+    }
+
+    SECTION("a textured color under a zero constant scale lights nothing")
+    {
+        texture = summary_of(0.5f, 0.0f, 1.0f, true);
+        CHECK(!estimate(sv::builtin_material::openpbr, {}, textured_mesh("emission_color", sv::texture_id(1))).has_value());
+    }
+
+    SECTION("a texture nothing is known of reads as 1 through its swizzle and its scale and bias")
+    {
+        texture = cc::nullopt;
+        auto const mesh = textured_mesh(
+            "emissive", sv::texture_id(1),
+            sv::channel_swizzle::of(sv::texture_channel::r, sv::texture_channel::zero, sv::texture_channel::g),
+            {.scale = tg::vec4f(2, 2, 3, 1), .bias = tg::vec4f(0.5f, 0.25f, -1, 0)});
+        auto const r = estimate(sv::builtin_material::pbr, {}, mesh);
+        REQUIRE(r.has_value());
+        CHECK(r.value() == tg::vec3f(2.5f, 0.25f, 2.0f));
+    }
+
+    SECTION("a mean that clamps to zero gives way to an inexact bound above zero, before the unknown 1")
+    {
+        // A strided scan that averaged below the bias but saw texels above it.
+        texture = summary_of(0.25f, 0.0f, 0.8f, false);
+        auto const mesh = textured_mesh("emissive", sv::texture_id(1), {},
+                                        {.scale = tg::vec4f(1, 1, 1, 1), .bias = tg::vec4f(-0.5f, -0.5f, -0.5f, 0)});
+        auto const r = estimate(sv::builtin_material::pbr, {}, mesh);
+        REQUIRE(r.has_value());
+        CHECK(tg::abs(r.value()[0] - 0.3f) < 1e-6f);
+        CHECK(tg::abs(r.value()[2] - 0.3f) < 1e-6f);
+    }
+
+    SECTION("a factor whose inexact summary saw nothing above zero stands in tiny, beside a factor that keeps its "
+            "value")
+    {
+        // A textured scale whose strided scan read only black, under a constant color that keeps its own value.
+        texture = summary_of(0.0f, 0.0f, 0.0f, false);
+        auto const r = estimate(sv::builtin_material::openpbr,
+                                {sv::material_attribute_binding::of("emission_color", tg::vec3f(2, 3, 4))},
+                                textured_mesh("emission_luminance", sv::texture_id(1)));
+        REQUIRE(r.has_value());
+        CHECK(r.value()[0] > 0.0f);
+        CHECK(r.value()[0] < 1e-3f);
+        // The color's proportions survive the stand-in.
+        CHECK(tg::abs(r.value()[1] / r.value()[0] - 1.5f) < 1e-4f);
+        CHECK(tg::abs(r.value()[2] / r.value()[0] - 2.0f) < 1e-4f);
+    }
+
+    SECTION("a lane under a transform scale of 0 reads its bias alone, whatever the texture holds")
+    {
+        // Nothing is known of the texture, yet a scale of 0 and a bias at or below zero prove every lane dark.
+        texture = cc::nullopt;
+        auto const dark = textured_mesh("emissive", sv::texture_id(1), {},
+                                        {.scale = tg::vec4f(0, 0, 0, 1), .bias = tg::vec4f(0, -1, 0, 0)});
+        CHECK(!estimate(sv::builtin_material::pbr, {}, dark).has_value());
+
+        // An inexact scan that saw bright texels changes nothing: the lanes do not read them.
+        texture = summary_of(0.5f, 0.0f, 1.0f, false);
+        CHECK(!estimate(sv::builtin_material::pbr, {}, dark).has_value());
+
+        // A positive bias is the lane's exact value, and its estimate.
+        auto const lit = textured_mesh("emissive", sv::texture_id(1), {},
+                                       {.scale = tg::vec4f(0, 0, 0, 1), .bias = tg::vec4f(0.5f, 0, 0.25f, 0)});
+        auto const r = estimate(sv::builtin_material::pbr, {}, lit);
+        REQUIRE(r.has_value());
+        CHECK(r.value() == tg::vec3f(0.5f, 0, 0.25f));
+
+        // A textured scale of 0 and a bias of -1 is a scale dark throughout, under however bright a color.
+        auto const scale = textured_mesh("emission_luminance", sv::texture_id(1), {},
+                                         {.scale = tg::vec4f(0, 1, 1, 1), .bias = tg::vec4f(-1, 0, 0, 0)});
+        CHECK(!estimate(sv::builtin_material::openpbr,
+                        {sv::material_attribute_binding::of("emission_color", tg::vec3f(10, 10, 10))}, scale)
+                   .has_value());
+    }
+
+    SECTION("only every lane known proves a texture dark: one the texels decide still lights")
+    {
+        // Red and green under a scale of 0 and no bias, blue read through a scan that saw only black.
+        texture = summary_of(0.0f, 0.0f, 0.0f, false);
+        auto const mesh = textured_mesh("emissive", sv::texture_id(1), {},
+                                        {.scale = tg::vec4f(0, 0, 1, 1), .bias = tg::vec4f(0, 0, 0, 0)});
+        auto const r = estimate(sv::builtin_material::pbr, {}, mesh);
+        REQUIRE(r.has_value());
+        CHECK(r.value()[2] > 0.0f);
+
+        // Once that scan is exact, every lane is known, and dark.
+        texture = summary_of(0.0f, 0.0f, 0.0f, true);
+        CHECK(!estimate(sv::builtin_material::pbr, {}, mesh).has_value());
+    }
+
+    SECTION("a swizzle of constant zeros is dark whatever the texture holds")
+    {
+        texture = cc::nullopt;
+        auto const mesh = textured_mesh(
+            "emissive", sv::texture_id(1),
+            sv::channel_swizzle::of(sv::texture_channel::zero, sv::texture_channel::zero, sv::texture_channel::zero));
+        CHECK(!estimate(sv::builtin_material::pbr, {}, mesh).has_value());
+    }
+
+    SECTION("a non-finite constant or transform lights nothing, rather than poisoning the selection CDF")
+    {
+        auto const nan = cc::bit_cast<f32>(0x7fc00000u);
+        auto const inf = cc::bit_cast<f32>(0x7f800000u);
+        CHECK(!estimate(sv::builtin_material::pbr, {sv::material_attribute_binding::of("emissive", tg::vec3f(nan, 1, 1))})
+                   .has_value());
+        CHECK(!estimate(sv::builtin_material::pbr, {sv::material_attribute_binding::of("emissive", tg::vec3f(inf, 1, 1))})
+                   .has_value());
+        CHECK(!estimate(sv::builtin_material::openpbr, {sv::material_attribute_binding::of("emission_luminance", nan)})
+                   .has_value());
+
+        texture = summary_of(0.5f, 0.0f, 1.0f, true);
+        auto const mesh = textured_mesh("emissive", sv::texture_id(1), {},
+                                        {.scale = tg::vec4f(1, nan, 1, 1), .bias = tg::vec4f(0, 0, 0, 0)});
+        CHECK(!estimate(sv::builtin_material::pbr, {}, mesh).has_value());
+    }
+
+    SECTION("finite factors whose product overflows give a finite estimate")
+    {
+        auto const r = estimate(sv::builtin_material::openpbr,
+                                {sv::material_attribute_binding::of("emission_luminance", 1e30f),
+                                 sv::material_attribute_binding::of("emission_color", tg::vec3f(1e30f, 1, 0))});
+        REQUIRE(r.has_value());
+        CHECK(tg::is_finite(r.value()[0]));
+        CHECK(r.value()[0] > 1e38f);
+        CHECK(r.value()[1] == 1e30f);
     }
 
     SECTION("unlit declares no emission, so however bright it is it lights nothing")
     {
-        CHECK(!radiance(sv::builtin_material::unlit, {sv::material_attribute_binding::of("color", tg::vec3f(10, 10, 10))})
+        CHECK(!estimate(sv::builtin_material::unlit, {sv::material_attribute_binding::of("color", tg::vec3f(10, 10, 10))})
                    .has_value());
     }
 }
@@ -291,6 +612,46 @@ TEST("sv - emissive instances' records follow every analytic light, and are pick
     CHECK(tg::abs(table.records[1].select_pdf - 0.5f) < 1e-6f);
     CHECK(table.records.back().select_cdf == 1.0f);
 
+    SECTION("an emitter whose scan saw only black is picked rarely, at the floor of its kind, yet never not at all")
+    {
+        auto lib = make_library();
+        auto texture_source = [](sv::texture_id) { return cc::optional<sv::value_summary>(summary_of(0, 0, 0, false)); };
+        auto attribute_source = [](sv::attribute_id) { return cc::optional<sv::value_summary>(); };
+        auto const black_map = textured_mesh("emissive", sv::texture_id(1));
+        auto const estimate = sv::impl::emitter_estimate_of(emission_of(lib, sv::builtin_material::pbr, {}, black_map),
+                                                            block_of(lib, sv::builtin_material::pbr, {}, black_map),
+                                                            {.texture = texture_source, .attribute = attribute_source});
+        REQUIRE(estimate.has_value());
+        REQUIRE(estimate.value().unseen);
+
+        auto dim = mesh(0);
+        dim.emission = estimate.value().radiance;
+        dim.flags |= sv::light_flag_unseen_emission;
+        auto const with_lamp = sv::pt_light_table::grouped(cc::vector<sv::shaders::tracer::light_record>{dim, mesh(1)});
+        REQUIRE(with_lamp.records.size() == 2);
+        // The floor is a thousandth of the kind's mean weight, here half the lamp's.
+        CHECK(with_lamp.records[0].select_pdf > 0.0f);
+        CHECK(tg::abs(with_lamp.records[0].select_pdf - 5e-4f) < 1e-5f);
+
+        // Beside a sun, local lights made only of stand-ins take a sliver of the choice rather than half of it.
+        auto const with_sun = sv::pt_light_table::grouped(cc::vector<sv::shaders::tracer::light_record>{dim, sun});
+        REQUIRE(with_sun.records.size() == 2);
+        REQUIRE(with_sun.records[1].path == sv::light_path_mesh);
+        CHECK(with_sun.records[1].select_pdf > 0.0f);
+        CHECK(with_sun.records[1].select_pdf < 2e-3f);
+        CHECK(with_sun.records[0].select_pdf > 0.998f);
+
+        // A lamp among them is light again, and the local kind takes its half.
+        auto const lamp_and_sun
+            = sv::pt_light_table::grouped(cc::vector<sv::shaders::tracer::light_record>{dim, mesh(1), sun});
+        REQUIRE(lamp_and_sun.records.size() == 3);
+        CHECK(tg::abs(lamp_and_sun.records[0].select_pdf - 0.5f) < 1e-6f);
+
+        // Alone, stand-ins take the whole choice: nothing else may emit.
+        auto const alone = sv::pt_light_table::grouped(cc::vector<sv::shaders::tracer::light_record>{dim});
+        CHECK(alone.records[0].select_pdf == 1.0f);
+    }
+
     SECTION("a table of emitters alone starts them at 0")
     {
         auto const alone = sv::pt_light_table::grouped(cc::vector<sv::shaders::tracer::light_record>{mesh(0)});
@@ -299,6 +660,44 @@ TEST("sv - emissive instances' records follow every analytic light, and are pick
         CHECK(fc_alone.emitter_offset == 0);
         CHECK(alone.records[0].select_pdf == 1.0f);
     }
+}
+
+TEST("sv - a texture's summary weighs an emitter only once the texture samples its own texels")
+{
+    auto const black = summary_of(0.0f, 0.0f, 0.0f, true);
+    // A pending texture samples a placeholder, and a failed one magenta: neither is what the summary read.
+    CHECK(!sv::impl::sampled_texture_summary(sv::residency::pending, black).has_value());
+    CHECK(!sv::impl::sampled_texture_summary(sv::residency::failed, black).has_value());
+    REQUIRE(sv::impl::sampled_texture_summary(sv::residency::base_resident, black).has_value());
+    CHECK(sv::impl::sampled_texture_summary(sv::residency::complete, black).value().exact);
+    CHECK(!sv::impl::sampled_texture_summary(sv::residency::complete, cc::nullopt).has_value());
+}
+
+TEST("sv - a light whose weight is not finite still leaves a finite selection CDF")
+{
+    auto const nan = cc::bit_cast<f32>(0x7fc00000u);
+    auto const record = [](tg::vec3f emission, f32 area)
+    {
+        return sv::shaders::tracer::light_record{.path = sv::light_path_mesh,
+                                                 .area = area,
+                                                 .flags = sv::light_flag_two_sided,
+                                                 .emission = emission};
+    };
+    // An overflowing weight, a NaN one, and an ordinary one beside them.
+    auto const given = cc::vector<sv::shaders::tracer::light_record>{record(tg::vec3f(1e30f, 1e30f, 1e30f), 1e30f),
+                                                                     record(tg::vec3f(nan, 1, 1), 1.0f),
+                                                                     record(tg::vec3f(1, 1, 1), 1.0f)};
+    auto const table = sv::pt_light_table::grouped(given);
+    REQUIRE(table.records.size() == 3);
+    auto previous = 0.0f;
+    for (auto const& l : table.records)
+    {
+        CHECK(tg::is_finite(l.select_pdf));
+        CHECK(l.select_pdf > 0.0f);
+        CHECK(l.select_cdf >= previous);
+        previous = l.select_cdf;
+    }
+    CHECK(table.records.back().select_cdf == 1.0f);
 }
 
 TEST("sv - an emitter's world area follows its placement, exactly under a similarity")

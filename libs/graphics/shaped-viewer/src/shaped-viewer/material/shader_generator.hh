@@ -117,6 +117,7 @@ struct sv::material_emission_factor
 /// **This is what decides whether an instance may light the scene**: only a type declaring `emission_color_attribute` has one.
 /// The emitted radiance is `max(0, scale) * max(0, color)`, and a `scale` of kind `none` is a scale of 1.
 /// A constant reads its value out of the instance's block at `offset`, which is per instance rather than per permutation.
+/// `tracer.emitter_radiance` reads every kind, through the `emitter_record` that `sv::emitter_record_of` fills from this.
 struct sv::material_emission
 {
     material_emission_factor color;
@@ -124,12 +125,6 @@ struct sv::material_emission
 
     /// Whether the type declares where its emission comes from at all.
     [[nodiscard]] bool declares() const { return color.kind != material_opacity_kind::none; }
-
-    /// Whether both factors are constants of the parameter block, which is all next-event estimation reads yet.
-    [[nodiscard]] bool is_constant() const
-    {
-        return color.is_constant() && (scale.kind == material_opacity_kind::none || scale.is_constant());
-    }
 };
 
 /// A material permutation as an SGL hit group, plus the parameter layout it reads.

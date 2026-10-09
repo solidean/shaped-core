@@ -22,6 +22,7 @@ struct manager_config;
 struct mesh_record;
 struct texture_record;
 struct attribute_record;
+struct value_summary; // what a texture's texels or an attribute's elements hold, for an emitter's selection weight
 struct instance_slot;
 struct instance_record;
 struct quadric_gpu;  // one quadric as the intersection shader reads it, by PrimitiveIndex() (resources/quadric_data.hh)

@@ -424,9 +424,12 @@ importance-samples the continuation — so what is left is coverage of the model
   reflects a blur whatever the roughness says; only the analytic lights — rects and suns — give a real highlight.
   An equirect HDR environment with 2D-CDF importance sampling is the fix; babel already reads it, through `babel::hdr` and `babel::image`.
   How such a map relates to a sun light is open — see "Designed, not landed" in [lights.md](lights.md).
-- **An emissive mesh lights the scene only where its emission is a constant.**
+- **An emissive mesh is sampled by area, whatever its emission.**
   A type declaring its emission makes an instance a light, sampled by area and balanced against the bounce ray in both tracers ([lights.md](lights.md#emissive-instances)).
-  An emission from a texture or a mesh attribute still reaches the camera alone, until the reader of [plans/emissive-triangles.md](plans/emissive-triangles.md)'s P2 samples it.
+  A mostly dark textured or per-vertex emitter spends most of its samples where it emits nothing.
+  A power-weighted triangle CDF is the fix, under Later in [plans/emissive-triangles.md](plans/emissive-triangles.md).
+  `sv::summarize_texels` weighs a block-compressed level by the mean of its decoded blocks, but no acquire supplies one yet: the texture manager uploads uncompressed levels alone.
+  Bistro's FBX import decodes each texture to rgba8 mip 0, and the manager's later BC7 encoding keeps the summary of those source pixels, made inexact.
   ReSTIR DI leaves emitters to the path until that plan's P3.
   A raster layer draws no emitter's light yet.
 - **A partly-covered surface is expressible now**, through the cutout any hits a generated hit group carries.

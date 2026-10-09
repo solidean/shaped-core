@@ -65,8 +65,8 @@ struct instance_record:
     to_world_y: float4
     to_world_z: float4
 
-/// What next-event estimation reads of one emissive instance beyond its light record, as `traced.emitters` holds it, 16 bytes.
-/// The host fills it in `sv::view_renderer`, one per record of path `scene.light_path_mesh`, in the order those records stand.
+/// What next-event estimation reads of one emissive instance beyond its light record, as `traced.emitters` holds it, 80 bytes.
+/// The host fills it in `sv::view_renderer` through `sv::emitter_record_of`, one per record of path `scene.light_path_mesh`, in the order those records stand.
 struct emitter_record:
     /// the row of `traced.instances` the emitter is
     instance: uint
@@ -75,6 +75,28 @@ struct emitter_record:
     cdf: uint
     triangle_count: uint
     block_count: uint
+
+    /// Where the emission color lives in the instance's parameter block and how it is read — `sv::material_emission_factor` says per field.
+    /// `color_channels` packs the swizzle's three selectors a byte each, the first lowest.
+    /// The kinds are `scene.opacity_*`, since the four ways a value is read are the same whatever it is.
+    color_kind: uint
+    color_offset: uint
+    color_uv_offset: uint
+    color_frequency: uint
+    color_channels: uint
+    color_sampler: uint
+    color_transform: uint
+
+    /// The same for the scale, whose `scene.opacity_none` is a scale of 1; `scale_channel` is its one selector.
+    scale_kind: uint
+    scale_offset: uint
+    scale_uv_offset: uint
+    scale_frequency: uint
+    scale_channel: uint
+    scale_sampler: uint
+    scale_transform: uint
+    pad0: uint
+    pad1: uint
 
 /// How many triangles one block of an emitter's area CDF covers; `sv::emitter_cdf_block_size` restates it.
 const emitter_block_size = 256u

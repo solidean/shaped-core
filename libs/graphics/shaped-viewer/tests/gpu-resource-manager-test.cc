@@ -229,6 +229,10 @@ ASYNC_INVOCABLE_TEST("sv - a texture acquire is content-addressed and pins its e
     CHECK(record->state == sv::residency::base_resident);
     CHECK(record->texture.raw() != nullptr);
 
+    // The base level alone was read whole, so its summary bounds every texel an emission may sample.
+    REQUIRE(record->summary.has_value());
+    CHECK(record->summary.value().exact);
+
     // The budget is charged for the chain that was allocated rather than the one level that was uploaded:
     // a record's byte size is fixed at insert, so nothing could correct it once the rest of the mips land.
     auto chain_bytes = isize(0);
@@ -289,6 +293,10 @@ ASYNC_INVOCABLE_TEST("sv - a texture given every mip is complete", (sg::context_
     // Nothing is left for a follow-up to do, which is what `complete` means — the policy asked for mips and got them.
     CHECK(record->state == sv::residency::complete);
     CHECK(record->uploaded_mips == record->total_mips);
+
+    // The summary read the 1x1 level, whose range need not bound the base's, so it may never prove an emission dark.
+    REQUIRE(record->summary.has_value());
+    CHECK(!record->summary.value().exact);
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -454,6 +462,8 @@ ASYNC_INVOCABLE_TEST("sv - a completed RGBA8 texture is replaced by its BC7 enco
     m.wait_for_pending_uploads();
     auto const uncompressed_bytes = m.textures.used_bytes();
     auto const uploaded = std::weak_ptr<sg::raw_texture const>(m.textures.get_ptr(id)->texture.raw());
+    REQUIRE(m.textures.get_ptr(id)->summary.has_value());
+    CHECK(m.textures.get_ptr(id)->summary.value().exact);
     (void)element_of(m, id); // sampled before the swap, as a frame drawing it meanwhile does
 
     // WORKAROUND, the one the mip tests above carry: a tick drives only routines that are already registered.
@@ -479,6 +489,10 @@ ASYNC_INVOCABLE_TEST("sv - a completed RGBA8 texture is replaced by its BC7 enco
     CHECK(record->compressed);
     CHECK(record->state == sv::residency::complete);
     CHECK(record->texture.format() == sg::pixel_format::bc7_rgba_unorm);
+
+    // The summary is of the pixels before their lossy encoding, so it still estimates the mean and bounds nothing.
+    REQUIRE(record->summary.has_value());
+    CHECK(!record->summary.value().exact);
     CHECK(record->texture.mip_levels() == sv::impl::mip_count_of(128, 128));
 
     // The budget was charged for the full RGBA8 chain at insert; BC7 is a quarter of it, but for the levels below

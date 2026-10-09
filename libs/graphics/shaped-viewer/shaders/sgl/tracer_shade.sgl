@@ -114,9 +114,10 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
         if cos_light <= 0.0 => return no_light_sample()
 
         shadow_dist = dist - 2e-3
+        // The emission at the point, read from data rather than from the record, whose `emission` is selection's estimate alone.
         // A cutout emitter emits where it is there, as a bounce ray meets it with the probability of its opacity.
         let ctx = material.make_context(inst, bindless.buffers[nonuniform indices], primitive, bary)
-        incoming = l.emission * instance_opacity(inst, ctx)
+        incoming = emitter_radiance(e, ctx) * instance_opacity(inst, ctx)
         pdf = pt.mesh_light_pdf(pt.light_select_pdf(l, count), p_tri, 0.5 * twice_area, dist2, cos_light)
         from_mesh = 1u
     else if l.path == scene.light_path_area:
@@ -275,6 +276,49 @@ fun emitter_pdf(inst: scene.instance, primitive: uint, edge1: float3, edge2: flo
     let p_tri = emitter_triangle_pdf(e, primitive)
     if p_tri <= 0.0 or cos_light <= 0.0 => return 0.0
     return pt.mesh_light_pdf(pt.light_select_pdf(l, f.light_count), p_tri, 0.5 * twice_area, t * t, cos_light)
+
+/// The radiance emitter `e` sends from where `ctx` sits: `max(0, scale) * max(0, color)`, each factor read through the record's descriptor.
+///
+/// This is what the generated material writes into `surface.emission_*` after its fragment, read by one reader for every material, as `instance_opacity` reads a cutout.
+/// The closest hit's emission and this one have to agree, or the balance heuristic's two weights would not sum to one.
+fun emitter_radiance(e: emitter_record, ctx: material.shading_context){traced, bindless} -> float3:
+    let color = emission_factor(e.color_kind, e.color_offset, e.color_uv_offset, e.color_frequency, e.color_channels, e.color_sampler, e.color_transform, 3u, ctx)
+    let scale = emission_factor(e.scale_kind, e.scale_offset, e.scale_uv_offset, e.scale_frequency, e.scale_channel, e.scale_sampler, e.scale_transform, 1u, ctx)
+    return max(0.0, scale.x) * max(float3(0.0), color)
+
+/// One factor of an emission at `ctx`, `lanes` wide: a constant of the parameter block, a mesh attribute, or a texture, as `kind` says.
+/// `channels` holds up to three swizzle selectors a byte each, and a one-lane factor comes back in `.x`, its other lanes meaning nothing.
+/// `scene.opacity_none` is a factor of 1.
+///
+/// A texture is sampled at level 0 through the palette, as a generated closest hit and a wavefront shade kernel sample it, since neither has derivatives.
+/// So the sample here and the hit's are one value: a level picked by a footprint on one side alone would weigh two different integrands against each other.
+fun emission_factor(kind: uint, offset: uint, uv_offset: uint, frequency: uint, channels: uint, palette: uint, transform_offset: uint, lanes: uint, ctx: material.shading_context){traced, bindless} -> float3:
+    if kind == scene.opacity_none => return float3(1.0)
+    let block = ctx.param_buffer as int
+
+    if kind == scene.opacity_constant:
+        // A one-lane constant may be the last word of its block, so it loads one float rather than three.
+        if lanes == 1u => return float3(reinterpret_as_float(bindless.buffers[nonuniform block].load(ctx.param_offset + offset)), 0.0, 0.0)
+        return reinterpret_as_float(bindless.buffers[nonuniform block].load3(ctx.param_offset + offset))
+
+    if kind == scene.opacity_attribute:
+        let desc = material.load_attribute_desc(bindless.buffers[nonuniform block], ctx.param_offset + offset)
+        let desc_buffer = desc.buffer as int
+        if lanes == 1u => return float3(material.load_f1_at(bindless.buffers[nonuniform desc_buffer], desc, frequency, ctx), 0.0, 0.0)
+        return material.load_f3_at(bindless.buffers[nonuniform desc_buffer], desc, frequency, ctx)
+
+    let uv_desc = material.load_attribute_desc(bindless.buffers[nonuniform block], ctx.param_offset + uv_offset)
+    let uv_desc_buffer = uv_desc.buffer as int
+    let uv = material.load_f2_at(bindless.buffers[nonuniform uv_desc_buffer], uv_desc, frequency, ctx)
+    let image = bindless.buffers[nonuniform block].load(ctx.param_offset + offset) as int
+    let texel = sample_palette(image, uv, palette)
+    let mut value = float3(texel_channel(texel, channels & 255u), texel_channel(texel, (channels >> 8u) & 255u), texel_channel(texel, (channels >> 16u) & 255u))
+    if transform_offset != scene.no_offset:
+        // The scale and the bias are four lanes each, the bias 16 bytes after the scale, as the generated material reads them.
+        let scale = reinterpret_as_float(bindless.buffers[nonuniform block].load3(ctx.param_offset + transform_offset))
+        let bias = reinterpret_as_float(bindless.buffers[nonuniform block].load3(ctx.param_offset + transform_offset + 16u))
+        value = value * scale + bias
+    return value
 
 /// `p` in world space, through the instance's placement rows.
 fun instance_point_to_world(inst: scene.instance, p: float3) -> float3:

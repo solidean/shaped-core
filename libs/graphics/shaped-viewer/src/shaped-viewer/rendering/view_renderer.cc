@@ -13,6 +13,7 @@
 #include <shaped-rendering/slug_routine.hh> // sr::slug_instance
 #include <shaped-viewer/drawing/decal.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
+#include <shaped-viewer/rendering/impl/emitters.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/raster_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
@@ -245,14 +246,25 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         out.parameter_blocks.push_back(item.instance);
         out.triangle_counts.push_back(triangle_count);
 
-        // An instance lights the scene where its own permutation declares an emission that is not zero.
-        // Only constant factors yet: the sampler reads them out of the record.
-        // A texture or a mesh attribute would need the reader P2 adds.
+        // An instance lights the scene where its own permutation declares an emission that is not dark throughout.
+        // The GPU reads each factor at the sampled point, so a constant, a texture and a mesh attribute all qualify; the estimate weighs selection alone.
         if (shade_fallback)
             continue;
-        auto const radiance
-            = impl::emitter_radiance_of(out.hit_groups[permutation]->emission, resources.get_instance(item.instance));
-        if (!radiance.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
+        // A texture that does not sample its own texels yet, or ever, is unknown rather than proven by them.
+        auto texture_summary = [&](texture_id id) -> cc::optional<value_summary>
+        {
+            auto const* const r = resources.textures.get_ptr(id);
+            return r != nullptr ? impl::sampled_texture_summary(r->state, r->summary) : cc::optional<value_summary>();
+        };
+        auto attribute_summary = [&](attribute_id id) -> cc::optional<value_summary>
+        {
+            auto const* const r = resources.attributes.get_ptr(id);
+            return r != nullptr ? r->summary : cc::optional<value_summary>();
+        };
+        auto const& emission = out.hit_groups[permutation]->emission;
+        auto const estimate = impl::emitter_estimate_of(emission, resources.get_instance(item.instance),
+                                                        {.texture = texture_summary, .attribute = attribute_summary});
+        if (!estimate.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
             continue;
         ++out.emissive_items;
 
@@ -267,24 +279,24 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         }
         auto const cdf_index = u32(resources.acquire_buffer(cdf->raw()->as_raw_readonly()));
 
-        out.emitter_lights.push_back({.position = {},
-                                      .path = light_path_mesh,
-                                      .u = {},
-                                      .area = impl::world_area_of(object_area, item.transform),
-                                      .v = {},
-                                      .flags = light_flag_two_sided,
-                                      .emission = radiance.value(),
-                                      .cone_scale = 0,
-                                      .normal = {},
-                                      .cone_offset = 1,
-                                      .one_minus_cos_angular_radius = 0,
-                                      .link_mask = ~0u,
-                                      .select_pdf = 0,
-                                      .select_cdf = 0});
-        out.emitters.push_back({.instance = u32(out.records.size() - 1),
-                                .cdf = cdf_index,
-                                .triangle_count = u32(triangles),
-                                .block_count = emitter_cdf_block_count(triangles)});
+        out.emitter_lights.push_back(
+            {.position = {},
+             .path = light_path_mesh,
+             .u = {},
+             .area = impl::world_area_of(object_area, item.transform),
+             .v = {},
+             .flags = light_flag_two_sided | (estimate.value().unseen ? light_flag_unseen_emission : 0u),
+             // selection's estimate alone: the sampled point's emission is read from data
+             .emission = estimate.value().radiance,
+             .cone_scale = 0,
+             .normal = {},
+             .cone_offset = 1,
+             .one_minus_cos_angular_radius = 0,
+             .link_mask = ~0u,
+             .select_pdf = 0,
+             .select_cdf = 0});
+        out.emitters.push_back(emitter_record_of(u32(out.records.size() - 1), cdf_index, u32(triangles),
+                                                 emitter_cdf_block_count(triangles), emission));
     }
 
     CC_ASSERT(!out.instances.empty(), "a view needs at least one drawable item to render");
@@ -843,47 +855,6 @@ struct raster_scene
     return outcome;
 }
 } // namespace
-
-cc::optional<tg::vec3f> impl::emitter_radiance_of(material_emission const& emission, instance_record const& block)
-{
-    // Only constant factors yet: the sampler reads them out of the light record.
-    // A texture or a mesh attribute would need the reader P2 adds.
-    if (!emission.declares() || !emission.is_constant())
-        return {};
-
-    auto const constant_at = [&](u32 offset) -> instance_slot const*
-    {
-        for (auto const& slot : block.slots)
-            if (slot.kind == material_slot_kind::constant && u32(slot.offset) == offset)
-                return &slot;
-        return nullptr;
-    };
-
-    auto color = tg::vec3f(0, 0, 0);
-    if (auto const* const slot = constant_at(emission.color.offset); slot != nullptr && slot->constant.size() >= 12)
-        cc::memcpy(&color, slot->constant.data(), 12);
-    auto scale = 1.0f;
-    if (emission.scale.kind == material_opacity_kind::constant)
-    {
-        scale = 0.0f;
-        if (auto const* const slot = constant_at(emission.scale.offset); slot != nullptr && slot->constant.size() >= 4)
-            cc::memcpy(&scale, slot->constant.data(), 4);
-    }
-    scale = cc::max(scale, 0.0f);
-    auto const radiance
-        = tg::vec3f(cc::max(color[0], 0.0f) * scale, cc::max(color[1], 0.0f) * scale, cc::max(color[2], 0.0f) * scale);
-    if (radiance[0] <= 0.0f && radiance[1] <= 0.0f && radiance[2] <= 0.0f)
-        return {};
-    return radiance;
-}
-
-f32 impl::world_area_of(f32 object_area, tg::affine_transform3f const& placement)
-{
-    auto const l = placement.linear_mat();
-    auto const det = l[0, 0] * (l[1, 1] * l[2, 2] - l[2, 1] * l[1, 2]) - l[1, 0] * (l[0, 1] * l[2, 2] - l[2, 1] * l[0, 2])
-                   + l[2, 0] * (l[0, 1] * l[1, 2] - l[1, 1] * l[0, 2]);
-    return object_area * tg::pow(tg::abs(det), 2.0f / 3.0f);
-}
 
 cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
 {

@@ -13,6 +13,7 @@
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/resources/resource_data.hh>
+#include <shaped-viewer/resources/value_summary.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh> // attribute_format / attribute_frequency, which a record carries
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -332,6 +333,10 @@ struct sv::attribute_record
     attribute_format format = attribute_format::of_scalar(scalar_type::f32);
     attribute_frequency frequency = attribute_frequency::per_vertex;
     isize element_count = 0;
+
+    /// What the elements hold, read at the acquire that uploaded them; empty for a format other than f32 lanes.
+    /// An emissive instance whose emission reads this attribute is weighed by its mean, and is no light at all where it is dark throughout.
+    cc::optional<value_summary> summary;
 };
 
 /// Hands out `attribute_id`s for arbitrary mesh attributes, with LRU budgeting (see resource_budget).
@@ -390,6 +395,12 @@ struct sv::texture_record
 
     /// Whether `texture` is the BC7 encoding that replaced what was uploaded.
     bool compressed = false;
+
+    /// What the smallest level the acquire supplied holds, as the sampler reads it; empty for a format `summarize_texels` does not decode.
+    /// Only a summary of the base level read whole is exact, since a smaller level's range need not bound the base's.
+    /// `replace_with_compressed` makes it inexact, since it summarizes the pixels before their lossy encoding.
+    /// An emissive instance whose emission samples this texture is weighed by its mean.
+    cc::optional<value_summary> summary;
 };
 
 /// Hands out `texture_id`s and owns the texture behind each, with LRU budgeting (see resource_budget).

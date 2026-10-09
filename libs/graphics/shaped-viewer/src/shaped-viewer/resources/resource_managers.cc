@@ -544,6 +544,11 @@ void texture_manager::replace_with_compressed(texture_id id, sg::texture_2d comp
     record->texture = cc::move(compressed);
     record->compressed = true;
     add_bytes(id, after - before);
+
+    // The summary read the source pixels, and the encoding's error may lift a texel off the bound that proved it dark.
+    // It still estimates the mean, which is all selection needs of it.
+    if (record->summary.has_value())
+        record->summary.value().exact = false;
 }
 
 texture_id texture_manager::acquire(texture_data const& texture)
@@ -597,6 +602,10 @@ texture_id texture_manager::acquire(texture_data const& texture)
         offset += size;
     }
 
+    // Summarized while the pixels are at hand.
+    // Every texture is, since which ones a material reads as an emission is not known here; the scan is capped and cheap.
+    auto const summary = summarize_texture(texture);
+
     // The budget is charged for the whole allocated chain rather than the levels supplied so far.
     // A record's byte size is fixed at insert, so `mark_mips_complete` could not revise it afterwards, and a
     // completed texture would sit in the budget at three quarters of what it costs.
@@ -608,7 +617,8 @@ texture_id texture_manager::acquire(texture_data const& texture)
                            {.texture = cc::move(gpu),
                             .state = residency::pending,
                             .uploaded_mips = texture.mip_count,
-                            .total_mips = total_mips},
+                            .total_mips = total_mips,
+                            .summary = summary},
                            chain_bytes);
 
     _settling[id] = cc::move(transfers);
@@ -704,12 +714,14 @@ attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
     auto transfer = _ctx.stream.bytes_to_buffer(data.raw(), attribute.data);
     transfer.set_priority(impl::attribute_stream_priority);
 
+    // Summarized while the payload is at hand, since it is the stream's from here on.
     auto const id = insert(attribute.hash,
                            {.state = residency::pending,
                             .data = cc::move(data),
                             .format = attribute.format,
                             .frequency = attribute.frequency,
-                            .element_count = attribute.element_count()},
+                            .element_count = attribute.element_count(),
+                            .summary = summarize_elements(bytes, attribute.format, attribute.element_count())},
                            bytes.size());
 
     _settling[id] = cc::move(transfer);

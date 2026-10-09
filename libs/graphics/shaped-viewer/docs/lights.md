@@ -168,14 +168,41 @@ So emitters and analytic lights share one selection CDF, and a frame's work grow
 The radiance is `max(0, scale) * max(0, color)`, and the generator writes it into `surface` after the fragment, so the closest hit and the light sampler read one value.
 openpbr declares `emission_color` and `emission_luminance`, pbr declares `emissive` at a scale of 1, and unlit declares none: it is a display material, which the camera sees and nothing else does.
 
-**An instance qualifies** where its own permutation declares an emission whose factors are constants that are not zero.
+**An instance qualifies** where its own permutation declares an emission that is not dark wherever it is read.
+Each factor may be a constant, a texture or a mesh attribute, per vertex, per corner or per triangle.
+Dark means a constant at or below zero, or a texture or an attribute whose every value is, which its summary proves only where it read them all.
+A texture's lane under a transform scale of exactly 0 reads its bias whatever the texels hold, so that lane is known without them.
+So the test Cornell box's walls, whose per-triangle `emissive` is zero throughout, light nothing.
+A constant or a texture transform that is not finite makes no light either, since no estimate could weigh it.
 It must also be a resident triangle mesh, shaded by that permutation rather than by the fallback a streaming mesh takes.
-`sv::impl::emitter_radiance_of` is the material half of that rule.
-An emission sourced from a texture or a mesh attribute stays camera-only until P2's reader samples it; so does a quadric batch.
+`sv::impl::emitter_estimate_of` (rendering/impl/emitters.hh) is the material half of that rule; a quadric batch is camera-only.
 
-**Its record** carries the radiance as `emission`, two-sided, and an estimate of its world area — the object area times `|det M|^(2/3)` — which only selection reads.
+**An instance that does not qualify is camera-only**: the camera sees its emission, and no bounce meets it as a light, since `tracer.emitter_pdf` finds no record for it.
+So exclusion must be proven rather than guessed, which is why only an exact summary may exclude.
+A summary is exact only where it read every value the sampler reads: the base level, whole, uncompressed.
+A texture the manager re-encodes to BC7 keeps the summary of its source pixels, made inexact, since the encoding's error may lift a texel off zero.
+**A texture's summary counts only once the texture samples its own texels**, at `base_resident` or `complete` (`sv::impl::sampled_texture_summary`).
+A pending texture samples a placeholder and a failed one magenta, so either is unknown, whatever its summary proved, and qualifies at an unknown 1.
+A dark texture thus lights nothing from the frame its upload lands.
+Under a bias that is not zero, a texture's lane must stay a margin below zero to be dark, since the GPU's filtering, sRGB decode and fused multiply-add round otherwise than the CPU does.
+
+**Its record** carries an estimate of the radiance as `emission`, two-sided, and an estimate of its world area — the object area times `|det M|^(2/3)` — and only selection reads either.
 Its weight is that area times π times two faces times the luminance, beside the local lights.
-`traced.emitters` holds the rest, one `emitter_record` per mesh record from `frame_constants::emitter_offset`: the instance's row and its mesh's area CDF.
+The estimate takes each factor's mean: a constant's value, a texture's through its swizzle and its scale and bias, an attribute's over its elements.
+A texture's and an attribute's means are `sv::value_summary`s, read on the CPU at the acquire that uploads them, while the payload is at hand.
+A texture's comes from the smallest level the acquire supplied, read whole up to 65536 texels and in short row runs on a coarser grid beyond.
+An attribute's is read whole up to 65536 elements and in short runs beyond, so a larger one is never proven dark.
+An 8-bit sRGB texel decodes through a 256-entry table, so the scan costs a table lookup per channel.
+Every texture is summarized, since which ones a material reads as an emission is not known at the acquire.
+A block-compressed level is decoded by `babel::bcn`, which estimates the mean, and its summary is never exact.
+A format it cannot decode has none, and reads as 1 before the factor's swizzle and its scale and bias.
+Where the means multiply to zero, each factor's bound stands in, exact or not, else its mean, so an emitter that can emit is always picked sometimes.
+A factor no read saw above zero, as a strided scan that met only black, stands in as a tiny value above zero, and its record carries `sv::light_flag_unseen_emission`.
+Such a record is no evidence of light: beside a lit sun, local lights made only of those take a thousandth of the choice rather than half of it.
+Among other local lights its weight is the light table's floor, a thousandth of the mean of its kind, so an importer's black emission map costs a scene little.
+The estimate is finite, and so is each light's selection weight: a NaN weight reads as 0 and an overflowing one as the largest f32.
+The weight shapes the noise and never the mean.
+`traced.emitters` holds the rest, one `emitter_record` per mesh record from `frame_constants::emitter_offset`: the instance's row, its mesh's area CDF, and where each factor of its emission lives.
 The instance record's `emitter` names the light record back, so a bounce ray that meets the instance finds its density.
 
 **The area CDF is the mesh's, built on the GPU** by shaders/emitter_cdf.sgl the first time a trace needs it, and cached with the mesh as its BLAS is (`mesh_manager::acquire_emitter_cdf`).
@@ -185,7 +212,10 @@ While its kernels compile an instance is camera-only, and the frame its CDF land
 
 **Next-event estimation** picks a triangle by the CDF and a uniform point on it.
 Its solid-angle density, `pt.mesh_light_pdf`, is the record's pick probability times the triangle's width over its world area, times the squared distance over the cosine at the light.
-The emission at the point is the record's, scaled by the instance's cutout opacity there, read by the one opacity reader a cutout already has.
+The emission at the point is read from data by one reader for every material, `tracer.emitter_radiance`, and scaled by the instance's cutout opacity there.
+It reads a constant out of the parameter block, interpolates an attribute at the point, and samples a texture through its uv, palette sampler, swizzle and transform.
+**A texture is sampled at level 0 on both sides**: a closest hit and a shade kernel have no derivatives, so the generated material samples level 0 too.
+The two strategies weighed against each other thus read one value, which the balance heuristic needs.
 **A bounce ray that meets an emitter** forms the same density at its hit (`tracer.emitter_pdf`) and weighs the emission by the balance heuristic; the camera's own view keeps its full weight.
 
 ReSTIR GI takes a weighted emitter its visible point's continuation reaches as that point's direct light, as it does a rect.
@@ -213,6 +243,7 @@ ReSTIR DI leaves a point on an emissive instance to the path's own estimate, and
 7. **Power-weighted selection.** Landed, in both tracers.
    `pt_light_table::grouped` writes each record's `select_pdf` and the running `select_cdf`, and next-event estimation picks by a binary search over them.
    Local lights are weighed by power and distant ones by irradiance, which do not compare, so the two kinds share the choice half and half where both have light.
+   An emissive instance whose emission no read saw above zero is no light for that rule, and only keeps its kind a thousandth of the choice.
    Every weight is floored at a thousandth of its kind's mean, so no light the multiple-importance weights count on is impossible to pick.
    A table of `light_selection::uniform` writes both 0, which the tracer reads as every light alike.
    A record no table wrote says the same.

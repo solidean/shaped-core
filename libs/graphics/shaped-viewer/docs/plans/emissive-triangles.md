@@ -1,8 +1,8 @@
 # Emissive triangles as lights
 
-**A plan, being built: phase P1 has landed, and P2 and P3 follow in the same push.**
+**A plan, being built: phases P1 and P2 have landed, and P3 follows in the same push.**
 An emissive surface used to light nothing but the camera; since P1 an instance whose emission is a constant is a light of the trace.
-P1 builds the area CDF on the GPU, and samples only constant emission, so an instance with a textured or attribute emission stays camera-only until P2.
+Since P2 one whose emission is a texture or a mesh attribute is too, its emission read at the sampled point from data.
 This plan makes emissive triangles lights, sampled by next-event estimation and balanced against the bounce ray, in the megakernel, the wavefront and ReSTIR DI.
 
 ## Decisions
@@ -23,11 +23,11 @@ So the closest hit and the light sampler read one emission, which the balance he
 openpbr declares (`emission_color`, `emission_luminance`), pbr declares (`emissive`, none), and unlit declares none.
 
 **An emissive instance is one light record.**
-An instance qualifies where its permutation declares emission, and both factors are constants whose product is above zero in some channel.
+An instance qualifies where its permutation declares emission that is not dark wherever it is read: each factor a constant, a texture or a mesh attribute.
 It must also be a resident triangle mesh shaded by its own permutation rather than the fallback.
 Each such instance appends one record of path `light_path_mesh` to the trace's light table, after the analytic lights.
 So emitters and analytic lights share one selection CDF, and a frame's work grows with emissive instances, never with triangles.
-Its selection weight is its power, 2π times its world area times its emitted luminance, as a two-sided rect's is, and it joins the local half of the power-weighted choice.
+Its selection weight is its power, 2π times its world area times its estimated emitted luminance, as a two-sided rect's is, and it joins the local half of the power-weighted choice.
 
 **An emissive mesh carries an area CDF over its triangles.**
 It is built on the GPU from the mesh's own buffers, the first time a trace needs it, and cached with the mesh as its BLAS is.
@@ -49,7 +49,10 @@ The camera's own view of an emitter keeps its full weight, and an emitter outsid
 
 - **P1**: the type contract, constant factors, the per-mesh area CDF, instance records, sampling and the bounce-ray weight in both tracers.
   ReSTIR GI routes a weighted emitter at the visible point's first bounce into the direct light, and ReSTIR DI leaves mesh samples to the path.
-- **P2**: texture and mesh-attribute emission through the reader, and a per-texture average luminance for selection, read once from the texture's smallest mip.
+- **P2, landed**: texture and mesh-attribute emission through the reader, and a per-texture average luminance for selection.
+  The average is read on the CPU at the acquire, from the smallest level supplied, since the pixels are at hand there and a GPU readback would land frames later.
+  An attribute is weighed by the mean of its elements, read there too.
+  A texture or an attribute read whole and dark throughout makes no light, as a constant at or below zero makes none.
 - **P3**: ReSTIR DI over triangle samples: a reservoir holds an instance's record and a point on one of its triangles, and history is dropped when the table changes.
 - **Later**: a power-weighted triangle CDF for mostly-dark textured emitters, quadric emitters, one-sided emitters, and an alias table if profiling asks for it.
 
@@ -66,4 +69,9 @@ Artificial scenes, in both tracers:
 - The area CDF is monotone, ends at one, and gives a zero-area triangle zero width.
 - An emitter of many uneven triangles, spanning three blocks of the CDF, lights as a rect of its size does.
 - P2: a half-black, half-white textured emitter lights as a rect over its white half, and the camera sees the texture.
+- P2: a per-vertex emitter's mean is the same sampled or reached by bounce rays almost alone, and the Cornell box's per-triangle lamp lights as a constant one does.
+- P2: an indexed emitter reads a per-vertex and a per-corner ramp at the indexed vertex, the per-vertex one unbiased against bounce rays and the per-corner one lighting alike.
+- P2: a per-triangle lamp of two different triangles lights as two constant ones do.
+- P2: a textured color under a scale and a bias, times a textured luminance, lights as its constant halves do.
+- P2, on the CPU: an exact summary alone excludes an emitter, a block-compressed level's summary is inexact, and a non-finite factor makes no light.
 - P3: the 22-lamp ReSTIR DI test with the lamps as emissive quads keeps the plain mean and cuts its noise.

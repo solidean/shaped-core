@@ -11,7 +11,8 @@
 #include <typed-geometry/scalar/scalar.hh>
 #include <typed-geometry/transform/compose.hh>
 
-// Emissive triangles as lights, in both tracers: an instance whose material declares a constant emission is sampled by next-event estimation and weighed against the bounce ray that meets it.
+// Emissive triangles as lights, in both tracers: an instance whose material declares an emission is sampled by next-event estimation and weighed against the bounce ray that meets it.
+// Its emission may be a constant, a texture or a mesh attribute, which the light sample reads at its point as the closest hit does.
 // Every scene is traced through `sv::view_renderer`, which is where an instance qualifies, gets its area CDF and joins the light table.
 // The comparisons are of block means, so what is left between two images of one expectation is Monte Carlo noise.
 // libs/graphics/shaped-viewer/docs/plans/emissive-triangles.md lists what these pin.
@@ -230,6 +231,38 @@ void check_blocks_match(cc::span<tg::vec3f const> image,
             auto const want = luminance_of(block_mean(expected, bx, by));
             auto const err = tg::abs(got - want) / (want + 0.05f * brightest);
             CHECK(err < tolerance).context(cc::format("{}: block ({}, {}) holds {}, expected {}", what, bx, by, got, want));
+        }
+}
+
+/// `check_blocks_match` per channel: every block of `image` holds each channel `expected` does, to `tolerance` relative to the expected block's channel.
+/// That tolerance is floored at a twentieth of the brightest channel of any block, so a dim channel is held to the image's scale.
+/// Luminance alone barely sees red and blue, so an emission read with its channels swapped, or at its mean, passes it where it fails this.
+void check_channels_match(cc::span<tg::vec3f const> image,
+                          cc::span<tg::vec3f const> expected,
+                          f32 tolerance,
+                          cc::string_view what)
+{
+    auto brightest = 0.0f;
+    for (auto by = 0; by < k_size[1] / k_block; ++by)
+        for (auto bx = 0; bx < k_size[0] / k_block; ++bx)
+        {
+            auto const m = block_mean(expected, bx, by);
+            brightest = cc::max(brightest, cc::max(m[0], cc::max(m[1], m[2])));
+        }
+    REQUIRE(brightest > 0.0f);
+
+    for (auto by = 0; by < k_size[1] / k_block; ++by)
+        for (auto bx = 0; bx < k_size[0] / k_block; ++bx)
+        {
+            auto const got = block_mean(image, bx, by);
+            auto const want = block_mean(expected, bx, by);
+            for (auto c = 0; c < 3; ++c)
+            {
+                auto const err = tg::abs(got[c] - want[c]) / (want[c] + 0.05f * brightest);
+                CHECK(err < tolerance)
+                    .context(cc::format("{}: block ({}, {}) channel {} holds {}, expected {}", what, bx, by, c, got[c],
+                                        want[c]));
+            }
         }
 }
 
@@ -605,4 +638,429 @@ ASYNC_INVOCABLE_TEST("sv - an emitter's area CDF is monotone, ends at one, and g
     }
     CHECK(monotone);
     CHECK(proportional);
+}
+
+namespace
+{
+/// A uv per vertex of `positions`, a horizontal patch spanning `center ± half`: u runs with x across it, v with z.
+[[nodiscard]] cc::vector<tg::vec2f> patch_uvs(cc::span<tg::pos3f const> positions, tg::pos3f center, tg::vec2f half)
+{
+    auto out = cc::vector<tg::vec2f>();
+    for (auto const& p : positions)
+        out.push_back(
+            tg::vec2f((p[0] - center[0] + half[0]) / (2 * half[0]), (p[2] - center[2] + half[1]) / (2 * half[1])));
+    return out;
+}
+
+/// The patch at `center ± half`, emitting `nits` times a 2x1 texture whose left texel is black and right one white.
+/// Nearest and clamped, so its left half emits nothing and its right half `nits`, split exactly where x is `center`'s.
+[[nodiscard]] sv::mesh half_white_lamp(tg::pos3f center, tg::vec2f half, f32 nits)
+{
+    auto const positions = ceiling_quad(center, half);
+    auto mesh = mesh_of("half-white lamp", positions, lambert(tg::vec3f(0, 0, 0), nits));
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, patch_uvs(positions, center, half)));
+
+    auto pixels = cc::array<byte>::create_filled(2 * 4, byte(255));
+    for (auto i = 0; i < 3; ++i)
+        pixels[i] = byte(0);
+    mesh.textures.push_back(
+        {.name = "emission_color",
+         .source = {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, 2, 1),
+                    .uv_attribute = "uv",
+                    .sampler = {.mag_filter = sg::sampler_filter::nearest,
+                                .address_u = sg::sampler_address_mode::clamp_edge,
+                                .address_v = sg::sampler_address_mode::clamp_edge}}});
+    return mesh;
+}
+
+/// The brightest block of `image`, by luminance.
+[[nodiscard]] f32 brightest_block(cc::span<tg::vec3f const> image)
+{
+    auto brightest = 0.0f;
+    for (auto by = 0; by < k_size[1] / k_block; ++by)
+        for (auto bx = 0; bx < k_size[0] / k_block; ++bx)
+            brightest = cc::max(brightest, luminance_of(block_mean(image, bx, by)));
+    return brightest;
+}
+} // namespace
+
+// A textured emitter's light sample reads its emission from the texture at the sampled point, as its closest hit does.
+// Half black and half white, it lights the floor as a rect over its white half does, the full patch a black shade in the rect's scene.
+// And the camera sees its texture: the patch split into a black mesh and a constant emitter of the white half's luminance looks the same.
+// Two bounces, so the bounce ray that meets the patch is weighed against the light sample at a texel of either color.
+ASYNC_INVOCABLE_TEST("sv - a half-black, half-white textured emitter lights as a rect over its white half",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (auto const why = skip_reason(ctx); !why.empty())
+        SKIP(why);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto const center = tg::pos3f(0, 1.5f, 0.3f);
+    auto const half = tg::vec2f(0.5f, 0.4f);
+    auto const quarter = 0.5f * half[0];
+    constexpr auto nits = 5.0f;
+
+    auto textured = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    textured.meshes.push_back({.mesh = half_white_lamp(center, half, nits)});
+
+    auto rect = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    rect.meshes.push_back({.mesh = mesh_of("shade", ceiling_quad(center, half), lambert(tg::vec3f(0, 0, 0)))});
+    rect.lights.push_back(
+        sv::light::rect(center + tg::vec3f(quarter, -1e-3f, 0), tg::vec3f(quarter, 0, 0), tg::vec3f(0, 0, half[1]))
+            .nits(nits));
+
+    // Looking up at the patch from below and in front, so the image holds both halves and the floor and wall they light.
+    auto const up = sv::camera::looking_at(tg::pos3d(0, 0.3, -0.9), tg::pos3d(0, 1.5, 0.3));
+    auto seen = textured;
+    seen.camera = up;
+    auto split = emitter_scene{.meshes = room(), .camera = up};
+    split.meshes.push_back(
+        {.mesh = mesh_of("black half", ceiling_quad(center - tg::vec3f(quarter, 0, 0), tg::vec2f(quarter, half[1])),
+                         lambert(tg::vec3f(0, 0, 0)))});
+    split.meshes.push_back(
+        {.mesh = mesh_of("white half", ceiling_quad(center + tg::vec3f(quarter, 0, 0), tg::vec2f(quarter, half[1])),
+                         lambert(tg::vec3f(0, 0, 0), nits))});
+
+    for (auto const mode : k_modes)
+    {
+        if (!can_trace(ctx, mode))
+            continue;
+        auto const settings = settings_of(mode, 2);
+        auto const lit = co_await render(ctx, resources, textured, settings, frames_for(mode));
+        auto const reference = co_await render(ctx, resources, rect, settings, frames_for(mode));
+        check_blocks_match(lit, reference, 0.08f, cc::format("{}, the floor", name_of(mode)));
+
+        auto const looked_at = co_await render(ctx, resources, seen, settings, frames_for(mode));
+        auto const halves = co_await render(ctx, resources, split, settings, frames_for(mode));
+        check_blocks_match(looked_at, halves, 0.08f, cc::format("{}, the patch seen", name_of(mode)));
+    }
+}
+
+namespace
+{
+/// The emission ramp the per-vertex and per-corner emitters carry: linear in x across the patch at `center ± half`, so any triangle interpolates it exactly.
+/// Red and green rise from 0.2 to 1.8 while blue falls, so the luminance follows the ramp and the channels tell its ends apart.
+/// A read at the mean, or with red and blue swapped, then lights the floor askew in the luminance and in each channel.
+[[nodiscard]] tg::vec3f ramp_at(tg::pos3f p, tg::pos3f center, tg::vec2f half)
+{
+    auto const u = (p[0] - center[0] + half[0]) / (2 * half[0]);
+    return tg::vec3f(0.2f + 1.6f * u, 0.2f + 1.6f * u, 1.8f - 1.6f * u);
+}
+} // namespace
+
+// A per-vertex emission ramps across the patch, which the light sample interpolates at its point as the closest hit does at its own.
+// Were the two to read different values, the balance heuristic's weights would no longer sum to one, and the mean would move with how often the patch is sampled.
+// So the image lit by the patch alone matches the one where a point light below the floor takes nearly every pick, as for a constant emitter.
+// Compared per channel, at the 0.1 the bounced comparisons take: the room is near gray, so a channel's noise is the luminance's.
+ASYNC_INVOCABLE_TEST("sv - a per-vertex emitter's mean is the same sampled or reached by bounce rays almost alone",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (auto const why = skip_reason(ctx); !why.empty())
+        SKIP(why);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto const center = tg::pos3f(0, 1.4f, 0.4f);
+    auto const half = tg::vec2f(0.6f, 0.6f);
+    auto const positions = ceiling_quad(center, half);
+    auto ramp = cc::vector<tg::vec3f>();
+    for (auto const& p : positions)
+        ramp.push_back(ramp_at(p, center, half));
+    auto lamp = mesh_of("ramped lamp", positions, lambert(tg::vec3f(0, 0, 0), 3.0f));
+    lamp.attributes.push_back(
+        sv::mesh_attribute::create("emission_color", sv::attribute_frequency::per_vertex, cc::move(ramp)));
+
+    auto sampled = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    sampled.meshes.push_back({.mesh = lamp});
+    auto bounced = sampled;
+    bounced.lights.push_back(sv::light::point(tg::pos3f(0, -0.5f, 3)).candela(1e5f));
+
+    for (auto const mode : k_modes)
+    {
+        if (!can_trace(ctx, mode))
+            continue;
+        auto const settings = settings_of(mode, 3);
+        auto const alone = co_await render(ctx, resources, sampled, settings, frames_for(mode));
+        auto const mostly_bounced = co_await render(ctx, resources, bounced, settings, 2 * frames_for(mode));
+
+        // A patch that lit nothing would match too, so the floor must be lit at all.
+        auto const brightest = brightest_block(alone);
+        CHECK(brightest > 0.1f).context(cc::format("{}: the brightest block holds {}", name_of(mode), brightest));
+        check_channels_match(mostly_bounced, alone, 0.1f, name_of(mode));
+    }
+}
+
+// The test Cornell box's lamp carries its emission as a per-triangle `emissive` attribute of the `pbr` type, which makes it a light.
+// It lights the box as the same lamp does with that emission bound as a constant, the rest of its material alike.
+// The walls carry the attribute too, zero throughout, which keeps them out of the light table.
+ASYNC_INVOCABLE_TEST("sv - the Cornell box's per-triangle lamp lights the box as a constant one does",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (auto const why = skip_reason(ctx); !why.empty())
+        SKIP(why);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto const box = sv_test::make_cornell_box();
+    auto const lamp_vertices = 3 * sv_test::cornell_lamp_triangles;
+    auto const walls = box.positions.size() - lamp_vertices;
+    auto const lamp_positions
+        = cc::span<tg::pos3f const>(box.positions).subspan(cc::offset_size{.offset = walls, .size = lamp_vertices});
+    auto const lamp_materials
+        = cc::span<sv_test::pbr_material const>(box.materials)
+              .subspan(cc::offset_size{.offset = box.materials.size() - sv_test::cornell_lamp_triangles,
+                                       .size = sv_test::cornell_lamp_triangles});
+    auto const& lamp = lamp_materials[0];
+
+    auto& lib = sv_test::shared_material_library();
+    auto const pbr = lib.acquire_type(sv::builtin_material::pbr).value();
+    auto const constant_material
+        = lib.acquire(sv::material::create("cornell lamp, constant", pbr,
+                                           {sv::material_attribute_binding::of("base_color", lamp.base_color),
+                                            sv::material_attribute_binding::of("metallic", lamp.metallic),
+                                            sv::material_attribute_binding::of("roughness", lamp.roughness),
+                                            sv::material_attribute_binding::of("emissive", lamp.emissive)}));
+
+    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto const enclosure = sv_test::as_lit_meshes(box, lamp.emissive[0]).enclosure;
+
+    auto per_triangle = emitter_scene{.camera = camera};
+    per_triangle.meshes.push_back({.mesh = enclosure});
+    per_triangle.meshes.push_back(
+        {.mesh = sv_test::as_mesh("cornell lamp, per triangle", lamp_positions, lamp_materials)});
+
+    auto constant = emitter_scene{.camera = camera};
+    constant.meshes.push_back({.mesh = enclosure});
+    constant.meshes.push_back({.mesh = mesh_of("cornell lamp, constant", lamp_positions, constant_material)});
+
+    for (auto const mode : k_modes)
+    {
+        if (!can_trace(ctx, mode))
+            continue;
+        auto const settings = settings_of(mode, 3);
+        auto const lit = co_await render(ctx, resources, per_triangle, settings, frames_for(mode));
+        auto const reference = co_await render(ctx, resources, constant, settings, frames_for(mode));
+        CHECK(brightest_block(reference) > 0.1f);
+        check_blocks_match(lit, reference, 0.08f, name_of(mode));
+    }
+}
+
+// The ramp above on an INDEXED patch, where a per-vertex element is the position buffer's and a per-corner one the index buffer's.
+// So the light sample's `ctx.corner` must name the indexed vertex, and a per-corner read the triangle's own three elements.
+// The per-vertex patch alone must match itself reached by bounce rays almost alone, as the non-indexed one does above.
+// And the same ramp per corner must light the floor as per vertex does, since both interpolate one linear function.
+// A per-corner read that took the vertex index, or a per-vertex read that took the corner, would light one of them askew.
+// 0.1 for the bounced comparison, as above, since its bounce-ray estimate is the noisier; 0.08 between two sampled images, as elsewhere; both per channel.
+ASYNC_INVOCABLE_TEST("sv - an indexed emitter reads its per-vertex and per-corner emission at the indexed vertex",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (auto const why = skip_reason(ctx); !why.empty())
+        SKIP(why);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto const center = tg::pos3f(0, 1.4f, 0.4f);
+    auto const half = tg::vec2f(0.6f, 0.6f);
+    auto const welded = sv_test::weld_triangle_list(ceiling_quad(center, half));
+    REQUIRE(welded.positions.size() == 4);
+
+    auto per_vertex = cc::vector<tg::vec3f>();
+    for (auto const& p : welded.positions)
+        per_vertex.push_back(ramp_at(p, center, half));
+    auto per_corner = cc::vector<tg::vec3f>();
+    for (auto const i : welded.indices)
+        per_corner.push_back(ramp_at(welded.positions[i], center, half));
+
+    auto const material = lambert(tg::vec3f(0, 0, 0), 3.0f);
+    auto const lamp = [&](cc::string name, sv::attribute_frequency frequency, cc::vector<tg::vec3f> values)
+    {
+        auto m = sv::mesh{
+            .name = cc::move(name),
+            .geometry = sv::triangle_geometry::create_from_indexed_triangles(welded.positions, welded.indices),
+            .material = material};
+        m.attributes.push_back(sv::mesh_attribute::create("emission_color", frequency, cc::move(values)));
+        return m;
+    };
+
+    auto vertex_lit = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    vertex_lit.meshes.push_back(
+        {.mesh = lamp("indexed ramp, per vertex", sv::attribute_frequency::per_vertex, per_vertex)});
+    auto vertex_bounced = vertex_lit;
+    vertex_bounced.lights.push_back(sv::light::point(tg::pos3f(0, -0.5f, 3)).candela(1e5f));
+    auto corner_lit = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    corner_lit.meshes.push_back(
+        {.mesh = lamp("indexed ramp, per corner", sv::attribute_frequency::per_corner, per_corner)});
+
+    for (auto const mode : k_modes)
+    {
+        if (!can_trace(ctx, mode))
+            continue;
+        auto const settings = settings_of(mode, 3);
+        auto const alone = co_await render(ctx, resources, vertex_lit, settings, frames_for(mode));
+        auto const brightest = brightest_block(alone);
+        CHECK(brightest > 0.1f).context(cc::format("{}: the brightest block holds {}", name_of(mode), brightest));
+
+        auto const mostly_bounced = co_await render(ctx, resources, vertex_bounced, settings, 2 * frames_for(mode));
+        check_channels_match(mostly_bounced, alone, 0.1f, cc::format("{}, per vertex bounced", name_of(mode)));
+
+        auto const cornered = co_await render(ctx, resources, corner_lit, settings, frames_for(mode));
+        check_channels_match(cornered, alone, 0.08f, cc::format("{}, per corner", name_of(mode)));
+    }
+}
+
+// The Cornell box's lamp with its two triangles emitting different colors and luminances, as one per-triangle emitter.
+// It lights the box as two constant emitters do, one per triangle, so the light sample reads each triangle's own element.
+// The two lean red and blue, so a read of the other triangle's element, or of the mean, shows in the channels the walls reflect apart.
+// Its record's estimate is the mean of the two, which shapes the noise alone, so the tolerance is the file's 0.08, per channel.
+ASYNC_INVOCABLE_TEST("sv - a per-triangle lamp of two different triangles lights as two constant ones do",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (auto const why = skip_reason(ctx); !why.empty())
+        SKIP(why);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto const box = sv_test::make_cornell_box();
+    auto const lamp_vertices = 3 * sv_test::cornell_lamp_triangles;
+    auto const walls = box.positions.size() - lamp_vertices;
+    auto const lamp_positions
+        = cc::span<tg::pos3f const>(box.positions).subspan(cc::offset_size{.offset = walls, .size = lamp_vertices});
+    auto lamp_materials = cc::vector<sv_test::pbr_material>();
+    lamp_materials.push_back(box.materials[box.materials.size() - 2]);
+    lamp_materials.push_back(box.materials[box.materials.size() - 1]);
+    lamp_materials[0].emissive = tg::vec3f(24, 18, 9);
+    lamp_materials[1].emissive = tg::vec3f(6, 12, 21);
+
+    auto& lib = sv_test::shared_material_library();
+    auto const pbr = lib.acquire_type(sv::builtin_material::pbr).value();
+    auto const constant_of = [&](sv_test::pbr_material const& m, i32 triangle)
+    {
+        return lib.acquire(sv::material::create(cc::format("cornell lamp triangle {}, constant", triangle), pbr,
+                                                {sv::material_attribute_binding::of("base_color", m.base_color),
+                                                 sv::material_attribute_binding::of("metallic", m.metallic),
+                                                 sv::material_attribute_binding::of("roughness", m.roughness),
+                                                 sv::material_attribute_binding::of("emissive", m.emissive)}));
+    };
+
+    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto const enclosure = sv_test::as_lit_meshes(box, 15.0f).enclosure;
+
+    auto per_triangle = emitter_scene{.camera = camera};
+    per_triangle.meshes.push_back({.mesh = enclosure});
+    per_triangle.meshes.push_back(
+        {.mesh = sv_test::as_mesh("cornell lamp, two triangles", lamp_positions, lamp_materials)});
+
+    auto constants = emitter_scene{.camera = camera};
+    constants.meshes.push_back({.mesh = enclosure});
+    for (auto t = 0; t < 2; ++t)
+        constants.meshes.push_back({.mesh = mesh_of(cc::format("cornell lamp triangle {}", t),
+                                                    lamp_positions.subspan(cc::offset_size{.offset = 3 * t, .size = 3}),
+                                                    constant_of(lamp_materials[t], t))});
+
+    for (auto const mode : k_modes)
+    {
+        if (!can_trace(ctx, mode))
+            continue;
+        auto const settings = settings_of(mode, 3);
+        auto const lit = co_await render(ctx, resources, per_triangle, settings, frames_for(mode));
+        auto const reference = co_await render(ctx, resources, constants, settings, frames_for(mode));
+        CHECK(brightest_block(reference) > 0.1f);
+        check_channels_match(lit, reference, 0.08f, name_of(mode));
+    }
+}
+
+namespace
+{
+/// An openpbr material that reflects nothing and emits `color` at `luminance`.
+[[nodiscard]] sv::material_id glow(tg::vec3f color, f32 luminance)
+{
+    auto& lib = sv_test::shared_material_library();
+    auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
+    return lib.acquire(
+        sv::material::create(cc::format("emitter test glow {} {} {} {}", color[0], color[1], color[2], luminance), type,
+                             {sv::material_attribute_binding::of("base_color", tg::vec3f(0, 0, 0)),
+                              sv::material_attribute_binding::of("specular_weight", 0.0f),
+                              sv::material_attribute_binding::of("emission_color", color),
+                              sv::material_attribute_binding::of("emission_luminance", luminance)}));
+}
+
+/// A 2x1 rgba8 texture of `left` then `right`, sampled nearest and clamped, so each half of a patch reads one texel.
+[[nodiscard]] sv::texture_sample two_texel_texture(tg::vec4f left,
+                                                   tg::vec4f right,
+                                                   sv::sample_transform transform = {},
+                                                   sv::channel_swizzle swizzle = {})
+{
+    auto pixels = cc::array<byte>::create_filled(2 * 4, byte(0));
+    for (auto c = 0; c < 4; ++c)
+    {
+        pixels[c] = byte(u8(left[c] * 255.0f + 0.5f));
+        pixels[4 + c] = byte(u8(right[c] * 255.0f + 0.5f));
+    }
+    return {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, 2, 1),
+            .uv_attribute = "uv",
+            .sampler = {.mag_filter = sg::sampler_filter::nearest,
+                        .address_u = sg::sampler_address_mode::clamp_edge,
+                        .address_v = sg::sampler_address_mode::clamp_edge},
+            .swizzle = swizzle,
+            .transform = transform};
+}
+} // namespace
+
+// A textured color under a swizzle, a scale and a bias, times a textured luminance: the light sample's one-lane read and its transform.
+// The color's texels are (0.2, 0.4, 0) and (0.6, 0.8, 1), which the swizzle (b, r, g) reads as (0, 0.2, 0.4) and (1, 0.6, 0.8).
+// A scale of 4 and that bias lift them to (1, 1.3, 1.85) and (5, 2.9, 3.45).
+// The luminance's red channel is 1 on the left and 0.6 on the right, so the halves emit (1, 1.3, 1.85) and (3, 1.74, 2.07).
+// Its other channels are 0, 0.2 and 0.4 on both halves, so a scale read from any channel but red lights the halves otherwise.
+// Every texel is a multiple of 51, which an 8-bit unorm stores exactly.
+// It lights the floor as two constant emitters of those halves do; 0.08, as the half-white texture's test above.
+ASYNC_INVOCABLE_TEST("sv - a textured emitter under a transform and a textured luminance lights as its constant halves",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (auto const why = skip_reason(ctx); !why.empty())
+        SKIP(why);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto const center = tg::pos3f(0, 1.5f, 0.3f);
+    auto const half = tg::vec2f(0.5f, 0.4f);
+    auto const quarter = 0.5f * half[0];
+
+    auto const positions = ceiling_quad(center, half);
+    auto lamp = mesh_of("transformed textured lamp", positions, lambert(tg::vec3f(0, 0, 0), 1.0f));
+    lamp.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, patch_uvs(positions, center, half)));
+    lamp.textures.push_back(
+        {.name = "emission_color",
+         .source = two_texel_texture(
+             tg::vec4f(0.2f, 0.4f, 0, 1), tg::vec4f(0.6f, 0.8f, 1, 1),
+             {.scale = tg::vec4f(4, 4, 4, 1), .bias = tg::vec4f(1, 0.5f, 0.25f, 0)},
+             sv::channel_swizzle::of(sv::texture_channel::b, sv::texture_channel::r, sv::texture_channel::g))});
+    lamp.textures.push_back({.name = "emission_luminance",
+                             .source = two_texel_texture(tg::vec4f(1, 0, 0.2f, 0.4f), tg::vec4f(0.6f, 0, 0.2f, 0.4f))});
+
+    auto textured = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    textured.meshes.push_back({.mesh = cc::move(lamp)});
+
+    auto halves = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    halves.meshes.push_back(
+        {.mesh = mesh_of("left half", ceiling_quad(center - tg::vec3f(quarter, 0, 0), tg::vec2f(quarter, half[1])),
+                         glow(tg::vec3f(1, 1.3f, 1.85f), 1.0f))});
+    halves.meshes.push_back(
+        {.mesh = mesh_of("right half", ceiling_quad(center + tg::vec3f(quarter, 0, 0), tg::vec2f(quarter, half[1])),
+                         glow(tg::vec3f(5, 2.9f, 3.45f), 0.6f))});
+
+    for (auto const mode : k_modes)
+    {
+        if (!can_trace(ctx, mode))
+            continue;
+        auto const settings = settings_of(mode, 2);
+        auto const lit = co_await render(ctx, resources, textured, settings, frames_for(mode));
+        auto const reference = co_await render(ctx, resources, halves, settings, frames_for(mode));
+        CHECK(brightest_block(reference) > 0.1f);
+        check_blocks_match(lit, reference, 0.08f, name_of(mode));
+    }
 }
