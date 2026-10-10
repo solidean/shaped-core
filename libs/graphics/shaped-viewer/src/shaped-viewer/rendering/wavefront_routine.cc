@@ -25,6 +25,9 @@ constexpr isize dispatch_shadow = 2;
 constexpr isize dispatch_finished = 3;
 constexpr isize dispatch_shade = 4;
 
+/// `traced.counters`' sample floor, followed by its shortfall (`counter_sample_floor` in shaders/sgl/tracer_wavefront.sgl).
+constexpr isize counter_sample_floor = 5;
+
 /// `wavefront_step::fill` that starts every free slot (`fill_full` in shaders/sgl/tracer_wavefront.sgl).
 constexpr u32 fill_full = 65536;
 
@@ -305,7 +308,8 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
                                        .height = height,
                                        .fill = u32(cc::clamp(d.fill, 0.0f, 1.0f) * f32(fill_full) + 0.5f),
                                        .mode = 0,
-                                       .restir_radius = u32(cc::max(0, d.restir_radius))};
+                                       .restir_radius = u32(cc::max(0, d.restir_radius)),
+                                       .sample_target = d.sample_target};
 
     // What a kernel's groups are: `tracer.traced` at 0 always, then the bindless tables or the arguments at 1, and the decal tables at 2.
     enum class second_group
@@ -466,6 +470,14 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     }
     if (live.raw() != nullptr)
         *d.live_paths = cmd.download.data_from_buffer(live);
+    if (d.sample_floor != nullptr)
+    {
+        // Copied out before the next frame's reset raises it again.
+        auto const floor = ctx.transient.create_buffer<u32>(2, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+        cmd.copy.buffer_data_region<u32>(
+            {.src = d.state->counters.raw(), .dst = floor.raw(), .count = 2, .src_offset = counter_sample_floor});
+        *d.sample_floor = cmd.download.data_from_buffer(floor);
+    }
     if (t.traced_with_stand_ins != nullptr)
         *t.traced_with_stand_ins = substituted;
     return sg::routine_outcome::executed;

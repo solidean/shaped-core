@@ -794,6 +794,63 @@ TEST("sv - a raster layer implies its G-buffer and nothing a denoiser keeps")
     CHECK(plan.temporals.size() == 7);
 }
 
+// A layer at its sample target traces nothing, and denoises again only once something restarted its denoised image.
+// So the denoised slot's declaration is what notices a denoiser setting change there, and it must notice every one —
+// and nothing a viewer sets per frame, or a converged view would denoise every frame.
+TEST("sv - a denoised image's declaration restarts on its denoise settings and nothing else")
+{
+    auto const denoised_hash = [](sv::render_settings const& settings)
+    {
+        auto v = sv::view_data{};
+        v.id = sv::view_id::from_string("denoised");
+        auto& scene = sv::ensure_scene_3d(v);
+        scene.items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
+        scene.settings = settings;
+        for (auto const& t : sv::temporal_inputs_of(v))
+            if (t.id == sv::temporal_id::denoised(0))
+                return cc::optional<u64>(t.reset_hash);
+        return cc::optional<u64>();
+    };
+
+    auto base = sv::render_settings{};
+    base.reconstruct.denoiser = sr::denoise_method::atrous;
+    auto const reference = denoised_hash(base);
+    REQUIRE(reference.has_value());
+
+    // Asked twice of the same settings, one answer.
+    CHECK(denoised_hash(base) == reference);
+
+    auto member = base;
+    member.reconstruct.denoiser = sr::denoise_method::automatic;
+    CHECK(denoised_hash(member) != reference);
+
+    auto quality = base;
+    quality.reconstruct.quality = sr::denoise_quality::best;
+    CHECK(denoised_hash(quality) != reference);
+
+    auto sharpness = base;
+    sharpness.reconstruct.sharpness = 0.75f;
+    CHECK(denoised_hash(sharpness) != reference);
+
+    auto window = base;
+    window.temporal_denoise_frames += 1;
+    CHECK(denoised_hash(window) != reference);
+
+    // Neither of these decides the image: one is set per call, and the other a viewer would set per frame.
+    auto fresh = base;
+    fresh.reconstruct.fresh_samples = true;
+    CHECK(denoised_hash(fresh) == reference);
+
+    auto frame_time = base;
+    frame_time.reconstruct.frame_time_ms = 7.0f;
+    CHECK(denoised_hash(frame_time) == reference);
+
+    // Nor does what the trace already restarts on.
+    auto bounces = base;
+    bounces.max_bounces += 1;
+    CHECK(denoised_hash(bounces) == reference);
+}
+
 // A scene layer that is authored but holds no geometry.
 //
 // `f.add_scene().add_light(...)` before any mesh exists is ordinary authoring — you light a view, then fill it — and

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
@@ -42,7 +44,23 @@ struct temporal_slot
     /// every single frame, which looks exactly like the temporal reuse never having been wired up.
     u64 declared_hash = 0;
 
+    /// How many frames the mean holds, which the denoiser's hand-off and the trace's seed read.
     u32 accum_frame = 0;
+
+    /// The fewest samples per pixel the mean is known to hold, which is what convergence is asked of.
+    ///
+    /// A megakernel layer counts `samples_per_pixel` per frame, and a raster layer `sv::accumulation_sample_cap` once a frame lands.
+    /// A wavefront layer's pixels finish different numbers of paths, so it is raised as each frame's floor reads back, a frame or more late.
+    /// 0 whenever `accum_frame` is: `restart_accumulation` resets both.
+    u32 samples = 0;
+
+    /// How many pixels held fewer samples than the trace's target as of the last wavefront floor that landed, and 0 for any other layer.
+    /// What a capture that gives up names, since one stalled pixel holds the whole floor down.
+    u32 pixels_short = 0;
+
+    /// The wavefront frames' sample floors still in flight, oldest first, all of the paths' current generation.
+    /// A restart drops them, since they count samples of the image it threw away.
+    cc::vector<sg::data_future<u32>> sample_floors;
 
     /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
     ///
@@ -190,6 +208,9 @@ struct view_state
     u64 last_refresh_frame = 0;
 };
 
+/// Starts `slot`'s mean over: no frames, no samples, and no sample floor of the old image still to land.
+void restart_accumulation(temporal_slot& slot);
+
 // -- Folding over a view's traced layers.
 //
 // One rule in one place, because the alternative already went wrong: `view_ref::accumulated_frames` read
@@ -197,17 +218,20 @@ struct view_state
 // was not layer 0 reported zero forever and nothing waiting on it ever finished.
 // Every caller asking "how far has this view got" goes through these two.
 
-/// The lowest accumulated-frame count across every traced layer of `state`, and 0 when it has none.
+/// The fewest samples per pixel across every traced layer of `state`, and 0 when it has none.
 ///
 /// The lowest rather than the first: a view converges when its slowest layer does.
-[[nodiscard]] u32 min_accumulated_frames(view_state const& state);
+[[nodiscard]] u32 min_accumulated_samples(view_state const& state);
 
-/// Whether every traced layer of `state` has reached `frames`, or has stopped climbing and never will.
+/// How many pixels across every traced layer of `state` held fewer samples than their trace's target, as last read back.
+[[nodiscard]] u32 pixels_short_of_target(view_state const& state);
+
+/// Whether every traced layer of `state` holds `samples` per pixel, or has stopped climbing and never will.
 ///
-/// An unset `frames` asks only the second question — has this view finished as far as it can.
-/// The cap matters because it is reachable: a caller asking for more frames than `sv::accumulation_frame_cap` would
+/// An unset `samples` asks only the second question — has this view finished as far as it can.
+/// The cap matters because it is reachable: a caller asking for more samples than `sv::accumulation_sample_cap` would
 /// otherwise wait on a counter that stopped moving, which is a capture burning its whole timeout on an image that
 /// was already as converged as it gets.
 /// False for a view with no traced layer at all, since nothing there has converged.
-[[nodiscard]] bool is_accumulation_converged(view_state const& state, cc::optional<u32> frames);
+[[nodiscard]] bool is_accumulation_converged(view_state const& state, cc::optional<u32> samples);
 } // namespace sv::impl

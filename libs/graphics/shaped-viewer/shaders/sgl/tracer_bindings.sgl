@@ -210,7 +210,8 @@ struct path_state:
     generation: uint
     /// the primary ray's sub-pixel offset, which the motion guide reprojects
     jitter: float2
-    pad: uint
+    /// how many fill draws the slot has made since its sample last started, which keeps each of them fresh
+    fill_draws: uint
 
 /// The medium a path's next segment travels through, and the wavelength it has collapsed onto (3 while it carries all three).
 struct path_medium:
@@ -245,7 +246,8 @@ struct shadow_ray:
     /// What arrives belongs to the path's light at 0, to ReSTIR's direct light at the visible point at 1, and to its light part too at 2
     to_direct: float
     specular: float3
-    pad1: float
+    /// what a cutout the ray crosses draws its coverage from, `cutout_seed` of the path's stream where shade drew the sample
+    seed: uint
 
 /// One pixel's tallies: since the estimate last restarted, this frame alone, and the guides of its primary hits.
 struct pixel_tally:
@@ -654,10 +656,14 @@ binding dispatch:
     mode: uint
     /// the spatial pass's neighbor radius in pixels, or 0 for the image's own
     restir_radius: uint
+    /// the samples a pixel stops at: a free slot whose pixel holds this many starts none, and 0 sets no limit
+    sample_target: uint
 
 /// A shadow ray reads only visibility: the caller seeds `visible` with 0, and the shadow miss sets it to 1.
 struct shadow_payload:
     visible: float
+    /// what a cutout the ray crosses draws its coverage from, `cutout_seed` of the path's stream — written by the caller only
+    seed: uint
 
 /// The tracer's two rays, in the order their miss shaders and hit records stand.
 rays path_rays:

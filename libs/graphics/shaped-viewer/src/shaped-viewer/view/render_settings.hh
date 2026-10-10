@@ -5,7 +5,7 @@
 
 namespace sv
 {
-/// Where a layer stops accumulating, which bounds GPU LOAD rather than the estimate.
+/// The samples per pixel where a layer stops accumulating, which bounds GPU LOAD rather than the estimate.
 ///
 /// Nothing ages out below it: an rgba32_float target still moves its mean at a weight of 1 / (n + 1) here, so the estimate
 /// would go on improving for as long as anyone will watch it.
@@ -16,9 +16,13 @@ namespace sv
 /// gets", and a target above the cap would otherwise wait forever.
 /// `view_ref::is_accumulation_converged` is the answer that already applies it.
 ///
+/// Samples rather than frames, since what a frame holds is the integrator's and the GPU's: a megakernel frame holds
+/// `samples_per_pixel`, and a wavefront frame whatever its rounds finish.
+/// The wavefront starts no sample past it, and the megakernel traces nothing once its frames reach it, so a still view there costs no trace.
+///
 /// Per view rather than per process is the intended shape — see libs/graphics/shaped-viewer/docs/TODO.md, where this becomes
-/// `render_settings::max_accumulated_frames`, excluded from the trace hash.
-inline constexpr u32 accumulation_frame_cap = 4096;
+/// `render_settings::max_samples_per_pixel`, excluded from the trace hash.
+inline constexpr u32 accumulation_sample_cap = 16384;
 } // namespace sv
 
 /// How a layer's image is produced from its scene: traced by one of two path tracers, or rasterized.
@@ -95,9 +99,10 @@ struct sv::render_settings
 
     /// How this layer's image is denoised before its parent composites it; off unless asked for.
     ///
-    /// **Never restarts accumulation.**
+    /// **Never restarts accumulation short of the layer's sample target.**
     /// The mean is radiance only, and everything this selects is written beside it or computed after it, so none of it
-    /// reaches the trace hash — turning it on, off or to another member keeps a converged image converged.
+    /// reaches the trace hash — turning it on, off or to another member keeps the mean.
+    /// The exception is turning it on at the target: a layer there traces nothing, so the guides would never be written, and the mean starts over instead.
     /// While the mean is young a temporal member denoises this frame's own samples, then a spatial one takes over on
     /// the mean — see `temporal_denoise_frames`.
     ///

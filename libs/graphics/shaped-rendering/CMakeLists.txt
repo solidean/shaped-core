@@ -303,6 +303,7 @@ if(SC_BUILD_TESTS)
     add_executable(shaped-rendering-test
         tests/main.cc
         tests/smoke-test.cc
+        tests/capture-request-test.cc
         tests/input-test.cc
         tests/window-test.cc
         tests/window-manual-test.cc

@@ -40,9 +40,9 @@ inline constexpr cc::string_view capture_output_env_var = "SC_CAPTURE_OUT";
 /// The offscreen resolution, as `<width>x<height>`.
 inline constexpr cc::string_view capture_size_env_var = "SC_CAPTURE_SIZE";
 
-/// How many frames the program should be satisfied for before it captures.
+/// How much the program should accumulate before it captures, in the program's own unit.
 ///
-/// What "satisfied" means is the program's own: a path tracer counts accumulated samples, a raster app counts frames drawn.
+/// What the unit is belongs to the program: shaped-viewer counts samples per pixel in every traced view, a raster app counts frames drawn.
 /// Either way it is the knob a scene needing longer reaches for.
 inline constexpr cc::string_view capture_accumulate_env_var = "SC_CAPTURE_ACCUMULATE";
 
@@ -70,8 +70,8 @@ struct sr::capture_request
 
     tg::vec2i size = tg::vec2i(1920, 1080);
 
-    /// Frames to be satisfied for before capturing; see `capture_accumulate_env_var`.
-    u32 accumulate_frames = 60;
+    /// What to accumulate before capturing, in the program's own unit; see `capture_accumulate_env_var`.
+    u32 accumulate = 60;
 
     /// The time a capture may spend before it gives up and writes what it has, measured on `clock_seconds`.
     double timeout_seconds = 60.0;

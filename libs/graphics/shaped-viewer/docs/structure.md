@@ -33,7 +33,7 @@ view_renderer                            [done]         allocates every texture 
 viewer_renderer                          [done]         replays a plan: every trace first, then one layout_routine pass per refreshing target. Nesting falls out of the ordering
 headless capture (capture.hh)            [done]         SC_CAPTURE runs the loop with no window system, no window and no swapchain, composites into an offscreen texture,
                                                         waits for the image to settle and writes it. An example costs zero lines; docs/guides/examples.md is the workflow.
-                                                        Settled is a conjunction: accumulated frames per traced view, nothing still streaming or owing post-load work, AND a trace that dispatched —
+                                                        Settled is a conjunction: samples per pixel in every traced view, nothing still streaming or owing post-load work, AND a trace that dispatched —
                                                         the last is what stops an uncompiled pipeline from writing a black image at full count
 authoring API (interactive / refs)       [done]         sv::interactive -> frame -> window_ref -> view_ref -> layout_ref / leaf_ref / scene_ref.
                                                         A frame inherits the window surface, which inherits the view surface, so f.add_scene() == f.window().view().add_scene()

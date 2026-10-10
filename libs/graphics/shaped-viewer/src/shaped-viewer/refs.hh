@@ -388,7 +388,11 @@ public:
 
     [[nodiscard]] cc::string_view display_name() const;
 
-    /// How many frames this view's SLOWEST traced layer has blended into its accumulated image.
+    /// The fewest samples per pixel this view's SLOWEST traced layer holds in its accumulated image.
+    ///
+    /// Samples rather than frames, because what a frame holds is not fixed: a megakernel frame holds `samples_per_pixel`,
+    /// and a wavefront frame whatever its rounds finished, which depends on how fast the GPU is.
+    /// A wavefront layer's count reads back from the GPU, so it trails the image by a frame or more.
     ///
     /// The lowest across every traced layer rather than one layer's, because a view is only as converged as its worst
     /// one, and layer 0 is frequently not traced at all — a layout or a ui layer below the scene puts the trace at
@@ -399,19 +403,19 @@ public:
     /// So a caller watching it needs no "has anything changed" rule of its own; this counter already is one.
     /// 0 for a view with no traced layer, which is indistinguishable from one that just restarted —
     /// `is_accumulation_converged` is what tells those apart.
-    [[nodiscard]] u32 accumulated_frames() const;
+    [[nodiscard]] u32 accumulated_samples() const;
 
-    /// Whether every traced layer of this view has reached `frames`, or has stopped climbing and never will.
+    /// Whether every traced layer of this view holds `samples` per pixel, or has stopped climbing and never will.
     ///
     /// **This is what a caller waiting for a converged image should ask**, rather than comparing the counter itself.
-    /// A layer stops at `sv::accumulation_frame_cap`, so a target above it is one the counter can never reach: asking
-    /// for 5000 frames and waiting on `accumulated_frames() >= 5000` waits forever on an image that finished long ago.
+    /// A layer stops at `sv::accumulation_sample_cap`, so a target above it is one the counter can never reach: asking
+    /// for 20000 samples and waiting on `accumulated_samples() >= 20000` waits forever on an image that finished long ago.
     ///
-    /// An unset `frames` asks only whether this view has finished as far as it can.
+    /// An unset `samples` asks only whether this view has finished as far as it can.
     /// False for a view with no traced layer, since nothing there has converged.
     /// What it does NOT see is post-load work a resource still owes, which changes a texture's contents rather than
     /// its id — `frame::pending_resource_work` and `frame::streaming_resources` are the rest.
-    [[nodiscard]] bool is_accumulation_converged(cc::optional<u32> frames = {}) const;
+    [[nodiscard]] bool is_accumulation_converged(cc::optional<u32> samples = {}) const;
 
     [[nodiscard]] view_id id() const;
     [[nodiscard]] view_index index() const { return _view; }

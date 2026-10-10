@@ -490,13 +490,13 @@ ASYNC_INVOCABLE_TEST("sv - a raster layer's capture finishes on its first drawn 
     constexpr auto size = tg::vec2i(96, 64);
     auto const path = cc::format("{}/sv-raster-capture.png", cc::temp_directory_path());
 
-    // Asking for the cap, which a traced layer takes thousands of frames to reach: a raster layer is there at once.
+    // Asking for the cap, which a traced layer takes thousands of frames to reach: a raster layer holds it at once.
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", size[0], size[1]));
     auto const acc
-        = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", sv::accumulation_frame_cap));
+        = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", sv::accumulation_sample_cap));
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
 
     auto const box = sv_test::make_cornell_box();

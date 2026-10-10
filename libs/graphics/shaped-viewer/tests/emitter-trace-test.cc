@@ -124,7 +124,7 @@ struct emitter_scene
 
 [[nodiscard]] sv::render_settings settings_of(sv::render_mode mode, i32 max_bounces)
 {
-    // No frame budget: a budgeted still frame holds however many rounds this GPU fits, so two images would hold different counts.
+    // No frame budget: a budgeted still frame holds however many rounds this GPU fits, so the run's length would be this GPU's.
     return {.samples_per_pixel = 16,
             .max_bounces = max_bounces,
             .mode = mode,
@@ -132,14 +132,14 @@ struct emitter_scene
             .frame_budget_ms = 0.0f};
 }
 
-/// Traces `scene` through the single-view renderer until its mean holds `frames` frames, and reads it back.
+/// Traces `scene` through the single-view renderer until its mean holds `samples` per pixel, and reads it back.
 /// The count restarts whenever the image does, so the frames before an emitter's area CDF lands are never in it.
 /// One manager serves every image of a test, so a permutation compiles once for all of them.
 cc::shared_async<cc::vector<tg::vec3f>> render(sg::context& ctx,
                                                sv::gpu_resource_manager& resources,
                                                emitter_scene const& scene,
                                                sv::render_settings settings,
-                                               u32 frames)
+                                               u32 samples)
 {
     auto v = sv::view_data{};
     v.id = sv::view_id::from_string("emitter test");
@@ -168,7 +168,7 @@ cc::shared_async<cc::vector<tg::vec3f>> render(sg::context& ctx,
         store.begin_frame(u64(ctx.current_epoch()));
         auto const image = sv::view_renderer::execute(*cmd, v, resources, store);
         auto readback = sg::data_future<tg::vec4f>();
-        if (store.accumulated_frames(v.id) >= frames)
+        if (store.min_accumulated_samples(v.id) >= samples)
             readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(image.raw()));
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
@@ -191,11 +191,8 @@ cc::shared_async<cc::vector<tg::vec3f>> render(sg::context& ctx,
     }
 }
 
-/// The frames each tracer accumulates for one image: the megakernel's hold 16 samples, the wavefront's fewer.
-[[nodiscard]] u32 frames_for(sv::render_mode mode)
-{
-    return mode == sv::render_mode::megakernel ? 32u : 96u;
-}
+/// The samples per pixel an image accumulates, the same for both tracers so their noise compares: 32 megakernel frames of 16.
+constexpr u32 k_samples = 512;
 
 [[nodiscard]] tg::vec3f block_mean(cc::span<tg::vec3f const> image, int bx, int by)
 {
@@ -322,8 +319,8 @@ ASYNC_INVOCABLE_TEST("sv - an emissive quad lights a floor as a rect light of it
         for (auto const bounces : {1, 4})
         {
             auto const settings = settings_of(mode, bounces);
-            auto const lit = co_await render(ctx, resources, emitter, settings, frames_for(mode));
-            auto const reference = co_await render(ctx, resources, rect, settings, frames_for(mode));
+            auto const lit = co_await render(ctx, resources, emitter, settings, k_samples);
+            auto const reference = co_await render(ctx, resources, rect, settings, k_samples);
             check_blocks_match(lit, reference, 0.08f, cc::format("{}, {} bounces", name_of(mode), bounces));
         }
     }
@@ -373,8 +370,8 @@ ASYNC_INVOCABLE_TEST("sv - an emitter of many uneven triangles lights as a rect 
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 3);
-        auto const lit = co_await render(ctx, resources, emitter, settings, frames_for(mode));
-        auto const reference = co_await render(ctx, resources, rect, settings, frames_for(mode));
+        auto const lit = co_await render(ctx, resources, emitter, settings, k_samples);
+        auto const reference = co_await render(ctx, resources, rect, settings, k_samples);
         check_blocks_match(lit, reference, 0.08f, name_of(mode));
     }
 }
@@ -403,8 +400,8 @@ ASYNC_INVOCABLE_TEST("sv - an emitter's mean is the same sampled or reached by b
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 3);
-        auto const alone = co_await render(ctx, resources, sampled, settings, frames_for(mode));
-        auto const mostly_bounced = co_await render(ctx, resources, bounced, settings, 2 * frames_for(mode));
+        auto const alone = co_await render(ctx, resources, sampled, settings, k_samples);
+        auto const mostly_bounced = co_await render(ctx, resources, bounced, settings, 2 * k_samples);
         check_blocks_match(mostly_bounced, alone, 0.1f, name_of(mode));
     }
 }
@@ -438,7 +435,7 @@ ASYNC_INVOCABLE_TEST("sv - an emissive furnace converges to its geometric series
     {
         if (!can_trace(ctx, mode))
             continue;
-        auto const image = co_await render(ctx, resources, furnace, settings_of(mode, bounces), frames_for(mode));
+        auto const image = co_await render(ctx, resources, furnace, settings_of(mode, bounces), k_samples);
         auto mean = tg::vec3f(0, 0, 0);
         for (auto const& p : image)
             mean += p;
@@ -481,8 +478,8 @@ ASYNC_INVOCABLE_TEST("sv - an emitter placed by a non-uniform scale and a rotati
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 3);
-        auto const a = co_await render(ctx, resources, placed, settings, frames_for(mode));
-        auto const b = co_await render(ctx, resources, baked, settings, frames_for(mode));
+        auto const a = co_await render(ctx, resources, placed, settings, k_samples);
+        auto const b = co_await render(ctx, resources, baked, settings, k_samples);
         check_blocks_match(a, b, 0.08f, name_of(mode));
     }
 }
@@ -512,9 +509,9 @@ ASYNC_INVOCABLE_TEST("sv - power selection over a dim large and a bright small e
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 3);
-        auto const both = co_await render(ctx, resources, make(0.5f, 40.0f), settings, frames_for(mode));
-        auto const large_alone = co_await render(ctx, resources, make(0.5f, 0.0f), settings, frames_for(mode));
-        auto const small_alone = co_await render(ctx, resources, make(0.0f, 40.0f), settings, frames_for(mode));
+        auto const both = co_await render(ctx, resources, make(0.5f, 40.0f), settings, k_samples);
+        auto const large_alone = co_await render(ctx, resources, make(0.5f, 0.0f), settings, k_samples);
+        auto const small_alone = co_await render(ctx, resources, make(0.0f, 40.0f), settings, k_samples);
         auto sum = cc::vector<tg::vec3f>();
         for (auto i = isize(0); i < both.size(); ++i)
             sum.push_back(large_alone[i] + small_alone[i]);
@@ -545,8 +542,8 @@ ASYNC_INVOCABLE_TEST("sv - a cutout emitter at opacity one half delivers half th
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 2);
-        auto const half = co_await render(ctx, resources, make(0.5f), settings, frames_for(mode));
-        auto const whole = co_await render(ctx, resources, make(1.0f), settings, frames_for(mode));
+        auto const half = co_await render(ctx, resources, make(0.5f), settings, k_samples);
+        auto const whole = co_await render(ctx, resources, make(1.0f), settings, k_samples);
         auto halved = cc::vector<tg::vec3f>();
         for (auto const& p : whole)
             halved.push_back(p * 0.5f);
@@ -728,12 +725,12 @@ ASYNC_INVOCABLE_TEST("sv - a half-black, half-white textured emitter lights as a
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 2);
-        auto const lit = co_await render(ctx, resources, textured, settings, frames_for(mode));
-        auto const reference = co_await render(ctx, resources, rect, settings, frames_for(mode));
+        auto const lit = co_await render(ctx, resources, textured, settings, k_samples);
+        auto const reference = co_await render(ctx, resources, rect, settings, k_samples);
         check_blocks_match(lit, reference, 0.08f, cc::format("{}, the floor", name_of(mode)));
 
-        auto const looked_at = co_await render(ctx, resources, seen, settings, frames_for(mode));
-        auto const halves = co_await render(ctx, resources, split, settings, frames_for(mode));
+        auto const looked_at = co_await render(ctx, resources, seen, settings, k_samples);
+        auto const halves = co_await render(ctx, resources, split, settings, k_samples);
         check_blocks_match(looked_at, halves, 0.08f, cc::format("{}, the patch seen", name_of(mode)));
     }
 }
@@ -782,8 +779,8 @@ ASYNC_INVOCABLE_TEST("sv - a per-vertex emitter's mean is the same sampled or re
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 3);
-        auto const alone = co_await render(ctx, resources, sampled, settings, frames_for(mode));
-        auto const mostly_bounced = co_await render(ctx, resources, bounced, settings, 2 * frames_for(mode));
+        auto const alone = co_await render(ctx, resources, sampled, settings, k_samples);
+        auto const mostly_bounced = co_await render(ctx, resources, bounced, settings, 2 * k_samples);
 
         // A patch that lit nothing would match too, so the floor must be lit at all.
         auto const brightest = brightest_block(alone);
@@ -841,8 +838,8 @@ ASYNC_INVOCABLE_TEST("sv - the Cornell box's per-triangle lamp lights the box as
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 3);
-        auto const lit = co_await render(ctx, resources, per_triangle, settings, frames_for(mode));
-        auto const reference = co_await render(ctx, resources, constant, settings, frames_for(mode));
+        auto const lit = co_await render(ctx, resources, per_triangle, settings, k_samples);
+        auto const reference = co_await render(ctx, resources, constant, settings, k_samples);
         CHECK(brightest_block(reference) > 0.1f);
         check_blocks_match(lit, reference, 0.08f, name_of(mode));
     }
@@ -899,14 +896,14 @@ ASYNC_INVOCABLE_TEST("sv - an indexed emitter reads its per-vertex and per-corne
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 3);
-        auto const alone = co_await render(ctx, resources, vertex_lit, settings, frames_for(mode));
+        auto const alone = co_await render(ctx, resources, vertex_lit, settings, k_samples);
         auto const brightest = brightest_block(alone);
         CHECK(brightest > 0.1f).context(cc::format("{}: the brightest block holds {}", name_of(mode), brightest));
 
-        auto const mostly_bounced = co_await render(ctx, resources, vertex_bounced, settings, 2 * frames_for(mode));
+        auto const mostly_bounced = co_await render(ctx, resources, vertex_bounced, settings, 2 * k_samples);
         check_channels_match(mostly_bounced, alone, 0.1f, cc::format("{}, per vertex bounced", name_of(mode)));
 
-        auto const cornered = co_await render(ctx, resources, corner_lit, settings, frames_for(mode));
+        auto const cornered = co_await render(ctx, resources, corner_lit, settings, k_samples);
         check_channels_match(cornered, alone, 0.08f, cc::format("{}, per corner", name_of(mode)));
     }
 }
@@ -966,8 +963,8 @@ ASYNC_INVOCABLE_TEST("sv - a per-triangle lamp of two different triangles lights
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 3);
-        auto const lit = co_await render(ctx, resources, per_triangle, settings, frames_for(mode));
-        auto const reference = co_await render(ctx, resources, constants, settings, frames_for(mode));
+        auto const lit = co_await render(ctx, resources, per_triangle, settings, k_samples);
+        auto const reference = co_await render(ctx, resources, constants, settings, k_samples);
         CHECK(brightest_block(reference) > 0.1f);
         check_channels_match(lit, reference, 0.08f, name_of(mode));
     }
@@ -1058,8 +1055,8 @@ ASYNC_INVOCABLE_TEST("sv - a textured emitter under a transform and a textured l
         if (!can_trace(ctx, mode))
             continue;
         auto const settings = settings_of(mode, 2);
-        auto const lit = co_await render(ctx, resources, textured, settings, frames_for(mode));
-        auto const reference = co_await render(ctx, resources, halves, settings, frames_for(mode));
+        auto const lit = co_await render(ctx, resources, textured, settings, k_samples);
+        auto const reference = co_await render(ctx, resources, halves, settings, k_samples);
         CHECK(brightest_block(reference) > 0.1f);
         check_blocks_match(lit, reference, 0.08f, name_of(mode));
     }

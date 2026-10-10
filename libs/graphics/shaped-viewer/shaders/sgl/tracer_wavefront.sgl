@@ -33,13 +33,17 @@ const hit_none = 0u
 const hit_triangle = 1u
 const hit_procedural = 2u
 
-/// `traced.counters`: each queue's count, then from `counter_permutations` a count per permutation and after those a cursor per permutation.
+/// `traced.counters`: each queue's count, the sample floor and its shortfall, then from `counter_permutations` a count per permutation and after those a cursor per permutation.
 const counter_queue_a = 0
 const counter_queue_b = 1
 const counter_hits = 2
 const counter_shadow = 3
 const counter_finished = 4
-const counter_permutations = 5
+/// The fewest samples any pixel holds after the frame's resolve, which the view reads back to know how far its image has got.
+const counter_sample_floor = 5
+/// How many pixels hold fewer than `sample_target` after the frame's resolve, which a capture that gives up names.
+const counter_samples_short = 6
+const counter_permutations = 7
 
 /// `dispatch.args`: the round's segments, the hits to sort, the shadow rays, the finished paths, and from `dispatch_shade` one per permutation.
 const dispatch_round = 0
@@ -321,16 +325,24 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
         traced.restir_candidates[s] = pack_candidate(empty_candidate())
         traced.restir_surfaces[restir_index(slot, false)] = pack_surface(no_surface())
 
+/// Whether the pixel of a slot holding `count` samples takes another: below `sample_target`, or always where it is 0.
+fun wants_sample(count: float){wavefront_step} -> bool:
+    return wavefront_step.sample_target == 0u or count < (wavefront_step.sample_target as float)
+
 /// Whether a free slot starts a sample now: always at a full fill, and below it with probability `fill / fill_full`.
-/// Below a full fill the draw advances the slot's own stream `rng`, so a slot passed over draws afresh the next time.
-fun fills(rng: mut uint){wavefront_step} -> bool:
+/// The draw is a stream of its own, from the slot, the frame's seed, the pixel's `count` and the slot's `draws` since its sample last started.
+/// It never advances the path's stream, so a pixel's k-th sample traces the same path whatever the fill and however the frames split the rounds.
+fun fills(slot: uint, count: float, draws: mut uint){traced, wavefront_step} -> bool:
     if wavefront_step.fill >= fill_full => return true
+    let f = traced.frame[0]
+    let mut rng = pt.hash(slot ^ pt.hash(f.rng_seed * 7919u + 505u + pt.hash((count as uint) * 9781u + draws)))
+    draws += 1u
     return pt.rand(mut rng) < (wavefront_step.fill as float) / (fill_full as float)
 
 // ---- begin: one thread per pixel, before the first round ------------------------------------------------------------
 
 /// Clears what this frame tallies, kills every path on a restart, and starts a sample in every slot without one.
-/// A carrying frame starts one only in the share of those slots `fill` asks for.
+/// A carrying frame starts one only in the share of those slots `fill` asks for, and none where the pixel holds `sample_target` samples.
 /// Every live slot is queued for the first round, whose input is `queue_a`.
 fun wavefront_begin(slot: uint){traced, wavefront_step}:
     if slot >= wavefront_step.width * wavefront_step.height => return
@@ -351,12 +363,14 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
     let alive = (st.flags & path_flag_alive) != 0u and st.generation == f.generation and not restart
     if not alive:
         let px = slot_pixel(slot)
-        let mut rng = if restart => pt.hash(px.x + px.y * wavefront_step.width + f.rng_seed * 9781u) else st.rng
-        let starts = restart or fills(mut rng)
+        let rng = if restart => pt.hash(px.x + px.y * wavefront_step.width + f.rng_seed * 9781u) else st.rng
+        let mut draws = if restart => 0u else st.fill_draws
+        let starts = wants_sample(tally.count) and (restart or fills(slot, tally.count, mut draws))
         if not starts:
             let mut waiting = st
             waiting.flags = 0u
             waiting.rng = rng
+            waiting.fill_draws = draws
             traced.path_states[s] = waiting
             return
         start_sample(slot, rng)
@@ -372,10 +386,10 @@ fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
     let slot = round_slot(index)
     let s = slot as int
     let r = traced.path_rays[s]
-    let px = slot_pixel(slot)
-    let launch = int3(px.x as int, px.y as int, 0)
+    // The path's own stream where the segment leaves, so a cutout's draw belongs to the sample and the bounce, never to the frame.
+    let cutouts = cutout_seed(traced.path_states[s].rng, cutout_ray_surface)
     let pr = ray(origin = pos3(r.origin.x, r.origin.y, r.origin.z), direction = vec3(r.direction.x, r.direction.y, r.direction.z), t_min = 1e-3, t_max = 1e4)
-    let h = traced.world.trace(pr, any_hit = c => cutout(c, launch, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
+    let h = traced.world.trace(pr, any_hit = c => cutout(c, cutouts, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
 
     if h.kind == hit_kind.triangle:
         traced.hits[s] = hit_record(h.instance_id as uint, h.primitive_index as uint, hit_triangle, h.t, float2(h.barycentrics.y, h.barycentrics.z), float3(0.0))
@@ -642,16 +656,17 @@ fun shade_stored_quadric(slot: uint, surface: openpbr.surface, supplied_tangent_
 /// Writes one next-event sample of `slot`: a shadowless one counts now, one with a shadow ray waits for connect.
 /// `j` is which of the slot's two shadow rays it is.
 /// `marker` sends what arrives to ReSTIR's direct light rather than the path's: 1 for it alone, 2 for its light part too.
-fun defer_light(slot: uint, j: uint, sample: light_sample, throughput: float3, b: uint, path_is_specular: bool, marker: float, light: mut path_light){traced} -> bool:
+/// `seed` is what a cutout the shadow ray crosses draws from, which connect reads back with the ray.
+fun defer_light(slot: uint, j: uint, sample: light_sample, throughput: float3, b: uint, path_is_specular: bool, marker: float, seed: uint, light: mut path_light){traced} -> bool:
     let radiance = throughput * (sample.diffuse + sample.specular)
     let specular = if b == 0u => throughput * sample.specular else (if path_is_specular => radiance else float3(0.0))
     let at = (2u * slot + j) as int
     if sample.tested == 0u:
         light.radiance += radiance
         light.specular += specular
-        traced.shadow_rays[at] = shadow_ray(sample.origin, 0.0, sample.direction, 0u, float3(0.0), 0.0, float3(0.0), 0.0)
+        traced.shadow_rays[at] = shadow_ray(sample.origin, 0.0, sample.direction, 0u, float3(0.0), 0.0, float3(0.0), 0u)
         return false
-    traced.shadow_rays[at] = shadow_ray(sample.origin, sample.distance, sample.direction, 1u, radiance, marker, specular, 0.0)
+    traced.shadow_rays[at] = shadow_ray(sample.origin, sample.distance, sample.direction, 1u, radiance, marker, specular, seed)
     return true
 
 /// The tail both geometry kinds share: the hit faced toward its ray, shaded, and the path moved on.
@@ -752,8 +767,9 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     let di_reaches = di_surface and dot(n, light_s.direction) > 0.0 and light_s.from_mesh == 0u
     let light_marker = if restir_here => (if di_reaches => 2.0 else 1.0) else 0.0
     let env_marker = if restir_here => 1.0 else 0.0
-    let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, light_marker, mut light)
-    let env_waits = defer_light(slot, 1u, env_s, throughput, b, path_is_specular, env_marker, mut light)
+    // Seeded from the stream where shade left it, as the megakernel's closest hit seeds its own two shadow rays.
+    let light_waits = defer_light(slot, 0u, light_s, throughput, b, path_is_specular, light_marker, cutout_seed(p.rng, cutout_ray_light), mut light)
+    let env_waits = defer_light(slot, 1u, env_s, throughput, b, path_is_specular, env_marker, cutout_seed(p.rng, cutout_ray_environment), mut light)
     if light_waits or env_waits => push_shadow(slot)
 
     if restir_here:
@@ -878,15 +894,21 @@ fun reconnection_jacobian(x_s: float3, n_s: float3, from: float3, from_eye: floa
     if not bounded => return 0.0
     return j
 
+/// The cutout seed of ReSTIR's visibility rays from `slot` in the pass `pass` names.
+/// The frame's, unlike a path's: these rays only weigh what the denoiser is handed, and never reach the pixel's mean.
+fun restir_cutout_seed(slot: uint, pass: uint){traced} -> uint:
+    return cutout_seed(pt.hash(slot ^ pt.hash(traced.frame[0].rng_seed * 7919u + pass + 606u)), cutout_ray_restir)
+
 /// Whether nothing blocks the segment from the visible point `from`, lifted off along `n`, to `x_s`.
-fun restir_unblocked(from: float3, n: float3, x_s: float3, launch: int3){traced, bindless} -> bool:
+/// `seed` is what a cutout the ray crosses draws from, `restir_cutout_seed` of the pass.
+fun restir_unblocked(from: float3, n: float3, x_s: float3, seed: uint){traced, bindless} -> bool:
     let origin = from + n * 1e-3
     let to = x_s - origin
     let distance = length(to)
     if distance <= 2e-3 => return true
     let dir = to / distance
     let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = distance - 1e-3)
-    let h = traced.world.trace(r, any_hit = c => cutout(c, launch, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
+    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
     return h.kind == hit_kind.none
 
 /// ReSTIR's temporal reuse for `slot`: this frame's candidate merged with the reservoir its visible point kept last frame.
@@ -906,8 +928,7 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
 
     let cam = scene.camera(..f.camera)
     let eye = cam.position
-    let px = slot_pixel(slot)
-    let launch = int3(px.x as int, px.y as int, 0)
+    let cutouts = restir_cutout_seed(slot, 101u)
     let exact = (f.wavefront_flags & wavefront_flag_restir_exact) != 0u
     // A stream of its own: the pixel, the frame's seed and the pass, so no other pass draws the same numbers.
     let mut rng = pt.hash(slot ^ pt.hash(f.rng_seed * 7919u + 101u))
@@ -950,7 +971,7 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
             p_h_there = restir_target(hist_surf, hist_eye, hist.x_s, hist.radiance)
             p_h_here = restir_target(surf, eye, hist.x_s, hist.radiance)
             let worth_a_ray = p_h_here > 0.0 and p_h_there > 0.0
-            if worth_a_ray and not restir_unblocked(surf.position, surf.normal, hist.x_s, launch) => p_h_here = 0.0
+            if worth_a_ray and not restir_unblocked(surf.position, surf.normal, hist.x_s, cutouts) => p_h_here = 0.0
 
     // The candidate as the history's domain would have produced it, in this domain's measure, for its MIS weight.
     // That domain shifts reconnectable samples alone, so a glossy `x_s` is the candidate's own whatever the history holds.
@@ -960,7 +981,7 @@ fun wavefront_restir_temporal(slot: uint){traced, bindless, wavefront_step}:
         let jacobian_c = reconnection_jacobian(cand.x_s, cand.n_s, surf.position, eye, hist_surf.position, hist_eye)
         if jacobian_c > 0.0:
             p_c_there = restir_target(hist_surf, hist_eye, cand.x_s, cand.radiance) * jacobian_c
-            if exact and p_c_there > 0.0 and not restir_unblocked(hist_surf.position, hist_surf.normal, cand.x_s, launch) => p_c_there = 0.0
+            if exact and p_c_there > 0.0 and not restir_unblocked(hist_surf.position, hist_surf.normal, cand.x_s, cutouts) => p_c_there = 0.0
 
     // Generalized balance heuristic over the two domains, then one pick in proportion to the resampling weights.
     let mis_c = if p_c > 0.0 => p_c / (p_c + confidence_h * p_c_there) else 0.0
@@ -1002,13 +1023,13 @@ fun restir_same_point(a: restir_surface, b: restir_surface, depth: float) -> boo
 /// That is `to`'s target after the reconnection shift, times the shift's Jacobian from `from` to `to`.
 /// It is 0 where `to` could not hold the sample: a non-reconnectable one, a shift `reconnection_jacobian` fails, or under `exact` a blocked segment.
 /// Both surfaces are seen from the one `eye`, so they must be this frame's.
-fun restir_target_from(r: restir_reservoir, from: restir_surface, to: restir_surface, eye: float3, exact: bool, launch: int3){traced, bindless} -> float:
+fun restir_target_from(r: restir_reservoir, from: restir_surface, to: restir_surface, eye: float3, exact: bool, cutouts: uint){traced, bindless} -> float:
     if (r.flags & restir_flag_reconnectable) == 0u => return 0.0
     let jacobian = reconnection_jacobian(r.x_s, r.n_s, from.position, eye, to.position, eye)
     if jacobian <= 0.0 => return 0.0
     let target = restir_target(to, eye, r.x_s, r.radiance)
     if target <= 0.0 => return 0.0
-    if exact and not restir_unblocked(to.position, to.normal, r.x_s, launch) => return 0.0
+    if exact and not restir_unblocked(to.position, to.normal, r.x_s, cutouts) => return 0.0
     return target * jacobian
 
 /// ReSTIR's spatial reuse for `slot`: its temporal reservoir, the canonical one, merged with a few neighbors' of this frame.
@@ -1029,7 +1050,7 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
     let cam = scene.camera(..f.camera)
     let eye = cam.position
     let px = slot_pixel(slot)
-    let launch = int3(px.x as int, px.y as int, 0)
+    let cutouts = restir_cutout_seed(slot, 202u)
     let exact = (f.wavefront_flags & wavefront_flag_restir_exact) != 0u
     let depth = dot(center.position - eye, normalize(cam.forward))
     let mut rng = pt.hash(slot ^ pt.hash(f.rng_seed * 7919u + 202u))
@@ -1080,8 +1101,8 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
     if own.weight > 0.0:
         p_own = restir_target(center, eye, own.x_s, own.radiance)
         if p_own > 0.0:
-            let from_0 = if c_0 > 0.0 => restir_target_from(own, center, n_surf_0, eye, exact, launch) else 0.0
-            let from_1 = if c_1 > 0.0 => restir_target_from(own, center, n_surf_1, eye, exact, launch) else 0.0
+            let from_0 = if c_0 > 0.0 => restir_target_from(own, center, n_surf_0, eye, exact, cutouts) else 0.0
+            let from_1 = if c_1 > 0.0 => restir_target_from(own, center, n_surf_1, eye, exact, cutouts) else 0.0
             let mis = c_own * p_own / (c_own * p_own + c_0 * from_0 + c_1 * from_1)
             w_own = mis * p_own * own.weight
 
@@ -1094,11 +1115,11 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
             let there = restir_target(n_surf_0, eye, n_res_0.x_s, n_res_0.radiance)
             p_0 = restir_target(center, eye, n_res_0.x_s, n_res_0.radiance)
             let worth_a_ray = p_0 > 0.0 and there > 0.0
-            if worth_a_ray and not restir_unblocked(center.position, center.normal, n_res_0.x_s, launch) => p_0 = 0.0
+            if worth_a_ray and not restir_unblocked(center.position, center.normal, n_res_0.x_s, cutouts) => p_0 = 0.0
             if p_0 > 0.0:
                 // Every domain's target of this sample, in the center's measure: here, at its own neighbor, at the other one.
                 let at_home = there / jacobian
-                let at_other = if c_1 > 0.0 => restir_target_from(n_res_0, center, n_surf_1, eye, exact, launch) else 0.0
+                let at_other = if c_1 > 0.0 => restir_target_from(n_res_0, center, n_surf_1, eye, exact, cutouts) else 0.0
                 let mis = c_0 * at_home / (c_own * p_0 + c_0 * at_home + c_1 * at_other)
                 w_0 = mis * p_0 * n_res_0.weight * jacobian
 
@@ -1110,10 +1131,10 @@ fun wavefront_restir_spatial(slot: uint){traced, bindless, wavefront_step}:
             let there = restir_target(n_surf_1, eye, n_res_1.x_s, n_res_1.radiance)
             p_1 = restir_target(center, eye, n_res_1.x_s, n_res_1.radiance)
             let worth_a_ray = p_1 > 0.0 and there > 0.0
-            if worth_a_ray and not restir_unblocked(center.position, center.normal, n_res_1.x_s, launch) => p_1 = 0.0
+            if worth_a_ray and not restir_unblocked(center.position, center.normal, n_res_1.x_s, cutouts) => p_1 = 0.0
             if p_1 > 0.0:
                 let at_home = there / jacobian
-                let at_other = if c_0 > 0.0 => restir_target_from(n_res_1, center, n_surf_0, eye, exact, launch) else 0.0
+                let at_other = if c_0 > 0.0 => restir_target_from(n_res_1, center, n_surf_0, eye, exact, cutouts) else 0.0
                 let mis = c_1 * at_home / (c_own * p_1 + c_0 * at_other + c_1 * at_home)
                 w_1 = mis * p_1 * n_res_1.weight * jacobian
 
@@ -1207,13 +1228,11 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
             let wi_local = openpbr.to_local(frame, wi)
             let ahead = wi_local.z > 0.0 and dot(wi, n) > 0.0 and any(arriving > float3(0.0))
             if ahead:
-                let px = slot_pixel(slot)
-                let launch = int3(px.x as int, px.y as int, 0)
                 let lifted = x_v + n * 1e-3
                 let mut arrives = true
                 if scene.light_casts_shadows(l):
                     let r = ray(origin = pos3(lifted.x, lifted.y, lifted.z), direction = vec3(wi.x, wi.y, wi.z), t_min = 1e-3, t_max = distance)
-                    let h = traced.world.trace(r, any_hit = c => cutout(c, launch, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
+                    let h = traced.world.trace(r, any_hit = c => cutout(c, restir_cutout_seed(slot, 303u), candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
                     arrives = h.kind == hit_kind.none
                 if arrives:
                     let wo_local = openpbr.to_local(frame, v)
@@ -1510,8 +1529,6 @@ fun wavefront_restir_di_spatial(slot: uint){traced, wavefront_step}:
 fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
     if index >= traced.counters[counter_shadow].load() => return
     let slot = traced.queue_shadow[index as int]
-    let px = slot_pixel(slot)
-    let launch = int3(px.x as int, px.y as int, 0)
     let mut light = traced.path_lights[slot as int]
     let mut direct = path_light(float3(0.0), float3(0.0))
     let mut light_part = path_light(float3(0.0), float3(0.0))
@@ -1520,7 +1537,7 @@ fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
         let sr = traced.shadow_rays[((2u * slot) as int) + j]
         if sr.tested == 0u => continue
         let r = ray(origin = pos3(sr.origin.x, sr.origin.y, sr.origin.z), direction = vec3(sr.direction.x, sr.direction.y, sr.direction.z), t_min = 1e-3, t_max = sr.distance)
-        let h = traced.world.trace(r, any_hit = c => cutout(c, launch, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
+        let h = traced.world.trace(r, any_hit = c => cutout(c, sr.seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
         if h.kind == hit_kind.none:
             if sr.to_direct > 0.5:
                 direct.radiance += sr.radiance
@@ -1543,8 +1560,8 @@ fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
 
 // ---- finalize: the paths that ended ---------------------------------------------------------------------------------
 
-/// Folds the path at `index` of `queue_finished` into its pixel, then starts the slot's next sample where the frame still takes them
-/// and the slot's draw against `fill` lets it.
+/// Folds the path at `index` of `queue_finished` into its pixel, then starts the slot's next sample where the frame still takes them,
+/// the pixel holds fewer than `sample_target`, and the slot's draw against `fill` lets it.
 fun wavefront_finalize(index: uint){traced, wavefront_step}:
     if index >= traced.counters[counter_finished].load() => return
     let slot = traced.queue_finished[index as int]
@@ -1565,31 +1582,36 @@ fun wavefront_finalize(index: uint){traced, wavefront_step}:
             cand.direct = light.radiance
             cand.direct_specular = light.specular
             cand.radiance = float3(0.0)
-        // A path the mean drops as non-finite below is never re-shaded either, or it would poison the denoiser's history instead.
+        // A path the mean counts as nothing below, being non-finite, is never re-shaded either, or it would poison the denoiser's history instead.
         if pt.is_finite(light.radiance) => cand.flags = cand.flags | restir_flag_finished
         traced.restir_candidates[s] = pack_candidate(cand)
 
-    // One non-finite path would poison its pixel for good, since the sum is never re-derived: dropping it costs one sample.
-    if st.generation == f.generation and pt.is_finite(light.radiance):
-        let specular = clamp(light.specular, float3(0.0), max(light.radiance, float3(0.0)))
+    // One non-finite path would poison its pixel for good, since the sum is never re-derived: it counts as a sample of nothing.
+    // Nothing rather than no sample, as the megakernel's frame mean counts it, so a pixel whose paths all go non-finite still reaches a capture's target.
+    if st.generation == f.generation:
+        let finite = pt.is_finite(light.radiance)
+        let radiance = if finite => light.radiance else float3(0.0)
+        let specular = if finite => clamp(light.specular, float3(0.0), max(light.radiance, float3(0.0))) else float3(0.0)
         let mut tally = traced.tallies[s]
-        tally.sum += light.radiance
+        tally.sum += radiance
         tally.sum_specular += specular
         tally.count += 1.0
-        tally.frame_sum += light.radiance
+        tally.frame_sum += radiance
         tally.frame_sum_specular += specular
         tally.frame_count += 1.0
         traced.tallies[s] = tally
 
-    let mut rng = st.rng
-    let starts = wavefront_step.regenerate != 0u and fills(mut rng)
+    // The next sample continues the path's stream from where this one left it.
+    let count = traced.tallies[s].count
+    let mut draws = st.fill_draws
+    let starts = wavefront_step.regenerate != 0u and wants_sample(count) and fills(slot, count, mut draws)
     if starts:
-        start_sample(slot, rng)
+        start_sample(slot, st.rng)
         push_next(slot)
     else:
         let mut dead = st
         dead.flags = 0u
-        dead.rng = rng
+        dead.fill_draws = draws
         traced.path_states[s] = dead
 
 // ---- resolve: one thread per pixel, after the last round ------------------------------------------------------------
@@ -1604,6 +1626,8 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
 
     let mean = if tally.count > 0.0 => tally.sum / tally.count else float3(0.0)
     traced.output[xy] = float4(..mean, 1.0)
+    traced.counters[counter_sample_floor].min(tally.count as uint)
+    if wavefront_step.sample_target != 0u and wants_sample(tally.count) => traced.counters[counter_samples_short].add(1u)
 
     // ReSTIR's re-shade replaces what the frame hands the denoiser wherever it shaded the pixel; the mean stays the paths'.
     // A frame without ReSTIR binds one-slot stand-ins, so the results are read only under the branch.
@@ -1651,11 +1675,12 @@ fun wavefront_resolve(slot: uint){traced, wavefront_step}:
 
 // ---- The counting kernels, one thread each --------------------------------------------------------------------------
 
-/// Zeroes every counter, before begin fills the first round's queue.
+/// Zeroes every counter, before begin fills the first round's queue, and raises the sample floor for resolve to lower.
 fun wavefront_reset(){traced}:
     let total = counter_permutations + 2 * (traced.frame[0].permutation_count as int)
     for i in 0 ..< total:
         traced.counters[i].store(0u)
+    traced.counters[counter_sample_floor].store(0xffffffffu)
 
 /// The round's arguments from its input queue's count, and every queue it fills emptied.
 fun wavefront_args_round(){traced, dispatch, wavefront_step}:

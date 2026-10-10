@@ -152,12 +152,39 @@ There the frame runs one round, and a free slot starts a new sample only with pr
 - Each pixel still averages whole samples, and which slots start is independent of what any sample returns, so the mean is unchanged.
 - A round's cost grows slower than `fill`, since the paths a round carries stay, so each correction is partial and the fill settles over a few frames.
 - A restart's first one-round still frames steer nothing, since the drain left their slots empty and they cost less than they will.
+- Nor does a still frame whose pixels all held their sample target when it started: it starts nothing, and its near-empty rounds would plan too many after the next move.
 - A fill moving toward a target within 5% of 1 snaps to 1 once it is that close itself, so a view turned toward something cheap regains whole rounds.
 - Below a full fill a round's queue is never full, so it loses the pixel-order fast path of `round_slot`, and a segment costs more than at full occupancy.
 
 The depth and the hit-distance guides carry over a still frame, since few of its slots start a primary ray and the camera has not moved.
 The depth is kept as view depth and made clip depth at resolve, since a drawing that starts needing it sets the near plane without a restart.
 `sv.wavefront.still_rounds` and `sv.wavefront.still_fill` record what each still frame ran.
+
+### A pixel's samples do not depend on how the frames split them
+
+A capture waits for samples per pixel rather than frames, since how many samples a frame finishes is the GPU's and the budget's.
+For that to give one image on any GPU, a pixel's k-th sample has to trace the same path however it got there.
+
+- **A pixel's paths continue one random stream from sample to sample**, and the fill draws from a stream of its own.
+  That stream hashes the slot, the frame's seed, the pixel's count and the slot's draws since its sample last started, so it never advances the path's.
+- **`wavefront_step::sample_target` stops a pixel**: a free slot whose pixel holds that many samples starts none.
+  The view passes `accumulation_sample_cap`, or a capture's target where that is lower, and the target is no part of the trace hash, so raising it carries on.
+- **Resolve lowers `counter_sample_floor` to the fewest samples any pixel holds**, and the view reads it back a frame or more late.
+  That is the layer's `temporal_slot::samples`, which convergence and a capture wait on.
+- **A frame whose floor already holds the target dispatches nothing**, the megakernel's included, and counts nothing.
+  Its denoiser does not run either: the temporal member would read the last frame's samples a second time as fresh ones, so the view keeps what was last denoised.
+  The exception is a mean nothing has denoised yet, such as one that reached the target while its denoiser compiled, or one whose denoise settings changed since: that frame denoises once.
+- **Guides or a primary depth first asked for at the target restart the mean.**
+  No frame there traces, so nothing would write them: a denoiser turned on would read blank guides, and a drawing added would test against blank depth.
+  Short of the target the next frame that traces writes them for every pixel, the wavefront's from its tallies, so the mean carries on.
+- **A capture restarts every traced view when owed work drains**, a BC7 encode or a mip chain, since that work replaces a texture's contents under the same id.
+  So its image is traced against the final resources alone, whatever the GPU's speed, where pixels stopped at the target would otherwise hold samples of the old contents.
+- **A stochastic cutout draws from the path too.**
+  Each ray seeds its coverage draws with `cutout_seed` of the path's stream where it leaves, salted by the kind of ray, and a shadow ray carries its seed in its record.
+  The megakernel seeds its any hits the same way, from the payload.
+- **A non-finite path is a sample of nothing**: it counts, and adds no light, as the megakernel's frame mean counts it.
+  Dropping it instead would leave a pixel whose every path goes non-finite at no samples, and stall a capture on it until the timeout.
+- **A capture that gives up names how many pixels hold the floor below its target**, which resolve counts beside the floor.
 
 ### Where the generic kernels live
 
@@ -275,4 +302,6 @@ What is still open:
   It runs `max_bounces + 17` rounds, enough for every surface bounce and for a medium walk up to where its roulette starts.
   A deeper walk finishes on the next still frame, or is dropped by the next restart.
 - **A moving frame is one sample per pixel**, where the megakernel's is `samples_per_pixel`; starting several per pixel on a draining frame is the fix, if a moving image turns out too noisy.
-- **A capture does not drain before it reads.** Its mean is consistent but holds the paths that finished, which favors short ones until the carry catches up.
+- **A still image is an exact mean only once its pixels stop.**
+  A capture's target stops every pixel, and so does `accumulation_sample_cap` an interactive view's: once the floor reaches either, no path is in flight.
+  Below that, a mean favors short paths until the carry catches up.

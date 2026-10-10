@@ -798,8 +798,8 @@ sv::view_renderer::execute(cmd, view_data, resources, store) -> sg::texture_2d
                                                           //   the store owns it: holding it past the next execute/begin_frame for that id is invalid
                                                           //   assumes ONE traced layer per view; the plan path below is per (view, layer)
 store.accumulated_frames(view_id) -> u32                  // frames accumulated so far; 0 after a restart. For tests and debug overlays
-store.min_accumulated_frames(id) / .is_accumulation_converged(id, frames = {})
-                                                         // the same folded over EVERY traced layer — what convergence actually means
+store.min_accumulated_samples(id) / .is_accumulation_converged(id, samples = {})
+                                                         // samples per pixel folded over EVERY traced layer — what convergence actually means
 
 // The whole frame, from its plan: every trace first, then one pass per refreshing target, the output last.
 sv::viewer_renderer::execute(cmd, def, plan, resources, store, output)   // output = a sg::color_target, e.g. rt.cleared(clear_color)
@@ -875,7 +875,7 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **Only the plan path denoises.** `view_renderer::execute`, the single-view entry point, still returns the raw accumulator.
 
 **Raster layers** (`render_settings::mode = render_mode::raster`, [docs/raster.md](docs/raster.md)) go through the same plan trace, and draw instead.
-- **Every frame is final**: the accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `is_accumulation_converged` and a capture finish at once.
+- **Every frame is final**: the accumulation slot holds `accumulation_sample_cap` samples the frame it lands, so `is_accumulation_converged` and a capture finish at once.
   A frame drawn through a stand-in material is not final, and restarts next frame.
 - **The G-buffer is written every frame, denoised or not**, into the guide slots of the same meaning.
   Those are `normal_guide`, `depth_guide`, `albedo_guide`, `specular_albedo_guide`, `roughness_guide` and `motion_guide`.
@@ -888,7 +888,9 @@ The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
 
 **Temporal accumulation** rides on that persistent target: `accum_frame == 0` overwrites, anything above blends into it in place at a weight of `1 / (accum_frame + 1)`.
-It stops at `sv::accumulation_frame_cap` (4096), which bounds GPU LOAD rather than the estimate.
+It stops at `sv::accumulation_sample_cap` (16384 samples per pixel), which bounds GPU LOAD rather than the estimate.
+**Convergence counts samples per pixel, never frames**: a megakernel frame holds `samples_per_pixel`, a wavefront frame whatever its rounds finish.
+A wavefront layer's count is the fewest any pixel holds, read back from the GPU a frame or more late.
 The target is `rgba32_float` and the mean stays exact, so what the cap costs is only a mean nobody is still looking at.
 Restarting is therefore the whole policy, and the signal is a hash of the bytes the trace uploads — camera, size, lights, background, settings, every instance transform, geometry identity.
 Hashing what is uploaded rather than what the view holds is what keeps it from drifting away from the shader.
@@ -905,11 +907,12 @@ store.begin_frame(u64(ctx.current_epoch()))   // reclaim against the just-finish
 store.get_or_create(id) / get / get_ptr       // get asserts the id exists; get_ptr is null when absent; both mark it used
 store.peek(id) / peek_ptr(id)                 // the same pair without touching, so a hit-test cannot keep a view alive
 store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
-store.accumulated_frames(id) -> u32           // one named slot, defaulting to accumulation(0) — the layer, not the view
-store.min_accumulated_frames(id) -> u32       // the lowest across every traced layer; sv::impl::min_accumulated_frames is the rule
-store.is_accumulation_converged(id, frames = {}) -> bool   // every traced layer reached `frames`, or stopped at sv::accumulation_frame_cap
+store.accumulated_frames(id) -> u32           // one named slot's frame counter, defaulting to accumulation(0) — the layer, not the view
+store.min_accumulated_samples(id) -> u32      // the fewest samples per pixel across every traced layer; sv::impl::min_accumulated_samples is the rule
+store.is_accumulation_converged(id, samples = {}) -> bool  // every traced layer holds `samples`, or stopped at sv::accumulation_sample_cap
 sv::impl::view_state                 // the record: display_name, controller, camera, placement, zoom, composite, temporal, last_refresh_frame
-sv::impl::temporal_slot              // { texture_2d texture; u64 reset_hash; u32 accum_frame; }
+sv::impl::temporal_slot              // { texture_2d texture; u64 reset_hash; u32 accum_frame; u32 samples; ... }
+sv::impl::restart_accumulation(slot) // frames, samples and the sample floors still in flight, all back to nothing
 st.temporal                          // cc::map<u64, temporal_slot> — KEYED by temporal_input::id, not indexed by layer
 
 sv::impl::keyed_cache<Key, Record>   // what it is built on — lru_pool's counterpart for NAMED state
@@ -967,12 +970,13 @@ frame.present()                                                // flatten + reco
 frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)
 frame.background_work() -> cc::shared_async<cc::unit>          // settles once the background work so far is done, including process-wide compiles and cache writes; what it covers is internal
                                                                //   0 does NOT mean settled, and it never restarts accumulation: that work
-                                                               //   changes a texture's contents, not its id, so accumulated_frames cannot see it
-view.accumulated_frames() -> u32                                // the SLOWEST traced layer's count; 0 for a view with none
+                                                               //   changes a texture's contents, not its id, so accumulated_samples cannot see it
+view.accumulated_samples() -> u32                               // the SLOWEST traced layer's samples per pixel; 0 for a view with none
                                                                //   never layer 0 by fiat: a layout or ui layer below the scene puts the trace at 1
-view.is_accumulation_converged(frames = {}) -> bool             // ASK THIS, not the counter: a layer stops at sv::accumulation_frame_cap (4096),
-                                                               //   so a target above the cap is one `accumulated_frames()` can never reach
-                                                               //   unset frames = "finished as far as it can"; false for a view with no traced layer
+                                                               //   a wavefront layer's reads back from the GPU, so it trails the image by a frame or more
+view.is_accumulation_converged(samples = {}) -> bool            // ASK THIS, not the counter: a layer stops at sv::accumulation_sample_cap (16384),
+                                                               //   so a target above the cap is one `accumulated_samples()` can never reach
+                                                               //   unset samples = "finished as far as it can"; false for a view with no traced layer
 frame.register_capture("name", body)                           // a named capture; body runs INLINE here, every frame, only when it is the one taken
 frame.hold_capture("why")                                      // this frame is not the finished image (a load of your own); holds THIS frame only
                                                                //   takes sv::capture_context { first_frame, name, size }

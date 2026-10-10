@@ -692,12 +692,14 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
 
     // The cutout test twice, since an any hit takes the payload of the one ray type its record serves.
     // Neither reads the material's code: opacity comes through the instance's record, the same for every material.
-    src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload, @launch_id id: "
-           "int3){tracer.traced, tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, id, tracer.candidate_opacity(c))\n\n";
-    src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload, @launch_id id: "
-           "int3){tracer.traced, tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, id, tracer.candidate_opacity(c))\n\n";
+    // Each draws from its payload: a surface ray from the path's stream as the ray left, a shadow ray from the seed its caller wrote.
+    src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload){tracer.traced, "
+           "tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, tracer.cutout_seed(p.rng, tracer.cutout_ray_surface), "
+           "tracer.candidate_opacity(c))\n\n";
+    src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload){tracer.traced, "
+           "tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, p.seed, tracer.candidate_opacity(c))\n\n";
     src += "hit_group sv_material for path_rays:\n"
            "    surface = (closest_hit = sv_closest_hit, any_hit = sv_any_hit)\n"
            "    occlusion = (any_hit = sv_shadow_any_hit)\n";

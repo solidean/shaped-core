@@ -16,9 +16,10 @@ use slug
 ///
 /// Callers offset the origin along the GEOMETRIC normal rather than the shading one, so a normal map cannot start the ray below the surface.
 /// It skips the closest hit, since only visibility matters, and the shadow miss is what sets `visible` on a clear path.
-fun occluded(origin: float3, dir: float3, dist: float){traced} -> bool:
+/// `seed` is what a cutout the ray crosses draws its coverage from, `cutout_seed` of the path's stream.
+fun occluded(origin: float3, dir: float3, dist: float, seed: uint){traced} -> bool:
     // assume occluded; only the shadow miss flips this
-    let mut sp = shadow_payload(0.0)
+    let mut sp = shadow_payload(0.0, seed)
     let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = dist)
     trace(traced.world, r, path_rays.occlusion, mut sp, flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit)
     return sp.visible < 0.5
@@ -41,10 +42,10 @@ struct light_sample:
 fun no_light_sample() -> light_sample:
     return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u, 0u)
 
-/// Whether `s` arrives, tracing its shadow ray here and now where it has one.
-fun visible(s: light_sample){traced} -> bool:
+/// Whether `s` arrives, tracing its shadow ray here and now where it has one, with `seed` for the cutouts it crosses.
+fun visible(s: light_sample, seed: uint){traced} -> bool:
     if s.tested == 0u => return true
-    return not occluded(s.origin, s.direction, s.distance)
+    return not occluded(s.origin, s.direction, s.distance, seed)
 
 /// Direct light from one of the trace's lights, with the BSDF folded in and weighted against the BSDF sampler.
 ///
@@ -54,7 +55,7 @@ fun visible(s: light_sample){traced} -> bool:
 /// A rect, a disc and an emissive instance are reachable by the raygen's continuation ray too, and weight against it.
 fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced, bindless}:
     let s = sample_light(b, f, wo_local, p, n_geom, last_bounce, mut rng)
-    let arrives = visible(s)
+    let arrives = visible(s, cutout_seed(rng, cutout_ray_light))
     out_diffuse = if arrives => s.diffuse else float3(0.0)
     out_specular = if arrives => s.specular else float3(0.0)
 
@@ -189,7 +190,7 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
 /// One uniform-hemisphere sample: the probe has no sharp features, so a radiance-proportional sampler is not worth its cost.
 fun estimate_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced}:
     let s = sample_environment(b, f, wo_local, p, n_geom, last_bounce, mut rng)
-    let arrives = visible(s)
+    let arrives = visible(s, cutout_seed(rng, cutout_ray_environment))
     out_diffuse = if arrives => s.diffuse else float3(0.0)
     out_specular = if arrives => s.specular else float3(0.0)
 
@@ -425,8 +426,8 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
     let mut light = no_light_sample()
     let mut env = no_light_sample()
     shade_sampled(mut payload, surface_in, n, v, exiting, ray_origin, ray_dir, hit_t, authored, has_authored, mut light, mut env)
-    let light_arrives = visible(light)
-    let env_arrives = visible(env)
+    let light_arrives = visible(light, cutout_seed(payload.rng, cutout_ray_light))
+    let env_arrives = visible(env, cutout_seed(payload.rng, cutout_ray_environment))
     payload.direct_diffuse = (if light_arrives => light.diffuse else float3(0.0)) + (if env_arrives => env.diffuse else float3(0.0))
     payload.direct_specular = (if light_arrives => light.specular else float3(0.0)) + (if env_arrives => env.specular else float3(0.0))
 
@@ -680,19 +681,29 @@ fun candidate_opacity(c: triangle_candidate){traced, bindless} -> float:
 /// The cutout test, run at every intersection a non-opaque instance reports, for a surface whose material evaluated to `opacity`.
 ///
 /// STOCHASTIC rather than a fixed threshold: `geometry_opacity` is a coverage fraction, so accepting the hit that fraction of the time converges to a partly covered surface.
-/// The draw comes from the pixel, the frame's seed, the primitive and the instance rather than from the payload, which an any hit may not advance.
+/// The draw comes from `seed`, the primitive and the instance, since an any hit may not advance the path's stream.
+/// `seed` is `cutout_seed` of the path's stream where the ray leaves, so each sample and each of its rays draws afresh, whatever frame traces it.
 /// The instance is in the hash so two instances sharing one geometry cut out independently.
-fun cutout(c: triangle_candidate, launch: int3, opacity: float){traced} -> hit_decision:
+fun cutout(c: triangle_candidate, seed: uint, opacity: float) -> hit_decision:
     // fully covered: the common case, and it accepts without drawing anything
     if opacity >= 1.0 => return hit_decision.accept
-    let x = launch.x as uint
-    let y = launch.y as uint
     let primitive = c.primitive_index as uint
     let instance = c.instance_id as uint
-    let h = pt.hash(x + y * 65536u + traced.frame[0].rng_seed * 9781u + primitive * 2654435761u + instance * 2246822519u)
+    let h = pt.hash(seed ^ pt.hash(primitive * 2654435761u + instance * 2246822519u))
     let u = (h as float) * (1.0 / 4294967296.0)
     if opacity < u => return hit_decision.ignore
     return hit_decision.accept
+
+/// `cutout_seed`'s ray kinds: a path's own segment, its light sample's shadow ray, its environment sample's, and ReSTIR's visibility rays.
+const cutout_ray_surface = 1u
+const cutout_ray_light = 2u
+const cutout_ray_environment = 3u
+const cutout_ray_restir = 4u
+
+/// The seed of the cutout draws of a ray of `kind` leaving a path whose stream stands at `rng`.
+/// A hash rather than `rng` itself, so neither the draws the path makes next nor another ray leaving from the same state repeat them.
+fun cutout_seed(rng: uint, kind: uint) -> uint:
+    return pt.hash(rng ^ (kind * 2654435769u + 1013904223u))
 
 // ---- Quadrics -------------------------------------------------------------------------------------------------------
 

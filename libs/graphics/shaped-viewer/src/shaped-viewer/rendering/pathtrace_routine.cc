@@ -212,6 +212,9 @@ void place_instance_record(shaders::tracer::instance_record& record,
     record.opacity_cutoff = opacity.cutoff;
 
     // A caller's offset counts two records per permutation, so it names the permutation the instance shades with.
+    // An odd one would shade the instance through its neighbor's material, reading its parameter block in another layout.
+    CC_ASSERT(instance.hit_group_offset % records_per_permutation == 0, "an instance's hit_group_offset counts two "
+                                                                        "records per permutation, so it must be even");
     record.shade_group = instance.hit_group_offset / records_per_permutation;
 
     // Lights nothing until the trace's light table names it, which only the trace knows.

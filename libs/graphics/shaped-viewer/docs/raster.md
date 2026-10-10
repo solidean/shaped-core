@@ -21,7 +21,7 @@ one draw per triangle item ─▶ environment where nothing was drawn
   It builds the hit's `material.shading_context` from the triangle and its barycentrics, evaluates the material, and hands the surface to `raster.shade`.
 - **The environment** is a fullscreen pass on the far plane, depth-tested `less_equal`, so it lands only where no surface was drawn.
 - **Every frame is final.**
-  The layer's accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `view_ref::is_accumulation_converged` holds at once and a capture finishes on its first drawn frame.
+  The layer's accumulation slot holds `accumulation_sample_cap` samples the frame it lands, so `view_ref::is_accumulation_converged` holds at once and a capture finishes on its first drawn frame.
   A frame drawn through a stand-in material is not final: it restarts next frame, as a trace with a stand-in does.
 - **Nothing denoises.** `render_settings::reconstruct` is ignored, and neither the denoised slot nor the frame-samples slots are declared.
 

@@ -2,6 +2,7 @@
 
 #include <clean-core/common/macros.hh> // CC_ARCH_ARM64
 #include <clean-core/common/time.hh>
+#include <clean-core/container/array.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -745,6 +746,270 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a partial fill starts its share of
         .context(cc::format("image mean: fill {} gives {}, a full fill {}", fill, partial_mean, full_mean));
     CC_LOG_INFO("wavefront at fill {}: first round {} live of {}, image means {} / {} at a full fill", fill,
                 partial_counts.value()[0], slots, partial_mean, full_mean);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+namespace
+{
+/// One leg of a run toward a sample target: `frames` carrying frames of `rounds` rounds at `fill`, none past `target`.
+struct target_leg
+{
+    u32 target = 0;
+    int frames = 0;
+    int rounds = 6;
+    f32 fill = 1.0f;
+};
+
+/// What a run toward a sample target leaves: the drained image, every pixel's sample count, and the floor and shortfall read back.
+struct target_run
+{
+    cc::vector<tg::vec3f> image;
+    cc::vector<f32> counts;
+    u32 floor = 0;
+    u32 short_pixels = 0;
+};
+
+/// The Cornell box with a veil inside it: a square of openpbr at half opacity, its own instance, hung between the lamp and the floor.
+/// Half opacity rather than a cutoff, so every ray crossing it, a camera ray or a shadow ray, draws its coverage.
+struct veiled_scene
+{
+    cornell_scene box;
+    sv::scene_item veil;
+};
+
+[[nodiscard]] veiled_scene make_veiled_scene(sv::gpu_resource_manager& resources)
+{
+    auto out = veiled_scene{.box = make_scene(resources)};
+    auto& lib = sv_test::shared_material_library();
+    auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto bindings = cc::vector<sv::material_attribute_binding>();
+    bindings.push_back(sv::material_attribute_binding::of("base_color", tg::vec3f(0.5f, 0.5f, 0.5f)));
+    bindings.push_back(sv::material_attribute_binding::of("opacity", 0.5f));
+    auto const material = lib.acquire(sv::material::create("wavefront veil", type, cc::move(bindings)));
+
+    // Level at y = 0.5, under the lamp (y = 0.998, |x|, |z| <= 0.35) and above the tall block (top at y = 0.25), wider than the lamp.
+    // So the shadow rays carrying the box's direct light cross it, which a veil outside the box would not: no light reaches it from there,
+    // and the black background gives an escaping ray nothing to carry either.
+    // A shadow ray seeded by the frame rather than by its path would draw other coverage in the sparse run, and the image would move.
+    // Camera rays toward the ceiling cross it too.
+    auto positions = cc::vector<tg::pos3f>();
+    positions.push_back(tg::pos3f(-0.6f, 0.5f, -0.6f));
+    positions.push_back(tg::pos3f(0.6f, 0.5f, -0.6f));
+    positions.push_back(tg::pos3f(0.6f, 0.5f, 0.6f));
+    positions.push_back(tg::pos3f(-0.6f, 0.5f, -0.6f));
+    positions.push_back(tg::pos3f(0.6f, 0.5f, 0.6f));
+    positions.push_back(tg::pos3f(-0.6f, 0.5f, 0.6f));
+    out.veil = resources.acquire_scene_item({.name = "wavefront veil",
+                                             .geometry = sv::triangle_geometry::create_from_positions(positions),
+                                             .material = material});
+    resources.wait_for_pending_uploads();
+    auto const* const permutation = resources.shaders.find(out.veil.shader_key);
+    REQUIRE(permutation != nullptr);
+    REQUIRE(permutation->opacity.can_cut_out());
+    out.box.instances.push_back(sg::tlas_instance{.blas = sv_test::blas_of(resources, out.veil.mesh),
+                                                  .instance_id = 1,
+                                                  .hit_group_offset = 2,
+                                                  .opaque_override = false});
+    out.box.hit_groups.push_back(permutation);
+    return out;
+}
+
+/// Traces the Cornell box toward sample targets: a restart, every leg's carrying frames in turn, then a drain that reads the state back.
+/// The restart is at seed 7 in every run, so each pixel's paths start from the same stream.
+/// Each carrying frame draws its fill against a seed of its own, `seed_base` plus its index, as a view's frames do.
+/// `veil`, where set, is the second instance `scene` lists.
+cc::shared_async<target_run> trace_to_target(sg::context& ctx,
+                                             sv::gpu_resource_manager& resources,
+                                             cornell_scene const& scene,
+                                             cc::span<target_leg const> legs,
+                                             u32 seed_base,
+                                             sv::scene_item const* veil = nullptr)
+{
+    REQUIRE(!legs.empty());
+    auto frames = 2;
+    for (auto const& leg : legs)
+        frames += leg.frames;
+
+    auto const background = sv::background_gpu::from(sv::background{});
+    auto const target = make_target(ctx);
+    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+    auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();
+    auto floor = sg::data_future<u32>();
+    auto out = target_run{};
+    out.image = co_await trace_frames(
+        ctx, target, frames,
+        [&](sg::command_list& cmd, int f)
+        {
+            // The leg frame `f` belongs to; the restart takes the first leg's target and the drain the last's.
+            auto leg = legs[0];
+            auto first = 1;
+            for (auto const& l : legs)
+            {
+                leg = l;
+                if (f < first + l.frames)
+                    break;
+                first += l.frames;
+            }
+            auto const restart = f == 0;
+            auto const last = f == frames - 1;
+            auto const draining = restart || last;
+
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
+            records.push_back(resources.describe_instance(cmd, scene.item.mesh, scene.item.instance));
+            sv::place_instance_record(records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+            if (veil != nullptr)
+            {
+                records.push_back(resources.describe_instance(cmd, veil->mesh, veil->instance));
+                sv::place_instance_record(records.back(), scene.instances[1], scene.hit_groups[1]->opacity);
+            }
+            auto const bindless = resources.freeze();
+            auto const trace = sv::pt_trace_desc{
+                .background = ctx.transient.create_buffer_from_pod(cmd, background, sg::buffer_usage::readonly_buffer),
+                .instances = scene.instances,
+                .output = target,
+                .instance_table = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer),
+                .lights = sv_test::upload_lights(cmd, scene.lights),
+                .hit_groups = scene.hit_groups,
+                .bindless = &bindless};
+            auto const seed = restart ? 7u : seed_base + u32(f);
+            auto const outcome
+                = sv::wavefront_routine::execute(cmd, {.trace = trace,
+                                                       .frame = frame_of(scene, seed, 0u, 1),
+                                                       .state = &state,
+                                                       .rounds = draining ? drain_rounds_of(k_max_bounces) : leg.rounds,
+                                                       .restart = restart,
+                                                       .regenerate = !draining,
+                                                       .fill = draining ? 1.0f : leg.fill,
+                                                       .generation = 1,
+                                                       .sample_target = leg.target,
+                                                       .sample_floor = last ? &floor : nullptr});
+            if (last && outcome == sg::routine_outcome::executed)
+                tallies = cmd.download.data_from_buffer(state.tallies);
+            return outcome;
+        });
+
+    auto const read_tallies = tallies.try_get_data();
+    REQUIRE(read_tallies.has_value());
+    for (auto const& t : read_tallies.value())
+        out.counts.push_back(t.count);
+    auto const read_floor = floor.try_get_data();
+    REQUIRE(read_floor.has_value());
+    REQUIRE(read_floor.value().size() == 2);
+    out.floor = read_floor.value()[0];
+    out.short_pixels = read_floor.value()[1];
+    co_return out;
+}
+
+/// Checks that every pixel of `run` holds exactly `target` samples, and that its floor read back says so.
+void check_at_target(target_run const& run, u32 target, cc::string_view name)
+{
+    auto off = 0;
+    for (auto const c : run.counts)
+        off += c == f32(target) ? 0 : 1;
+    CHECK(off == 0).context(cc::format("{}: {} pixels do not hold {} samples", name, off, target));
+    CHECK(run.floor == target).context(cc::format("{}: the floor read back {}", name, run.floor));
+    CHECK(run.short_pixels == 0).context(cc::format("{}: {} pixels read back as short", name, run.short_pixels));
+}
+
+/// The largest difference between two images, relative to the pixel's own value.
+[[nodiscard]] f32 worst_difference(cc::span<tg::vec3f const> a, cc::span<tg::vec3f const> b)
+{
+    REQUIRE(a.size() == b.size());
+    auto worst = 0.0f;
+    for (auto i = isize(0); i < a.size(); ++i)
+        for (auto c = 0; c < 3; ++c)
+            worst = cc::max(worst, tg::abs(a[i][c] - b[i][c]) / (1.0f + tg::abs(b[i][c])));
+    return worst;
+}
+} // namespace
+
+// A sample target stops every pixel where a capture asks it to: a free slot whose pixel holds it starts nothing.
+// The floor the routine reads back is what the view converges on, so it must say the same.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a sample target stops every pixel at it, and the floor reads it back",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+
+    // Six rounds finish every path of the box, so each carrying frame adds a sample to every pixel below the target.
+    constexpr u32 target = 6;
+    auto const legs = cc::array<target_leg>{{.target = target, .frames = 12, .rounds = 6, .fill = 1.0f}};
+    auto const run = co_await trace_to_target(ctx, resources, scene, legs, 100u);
+    check_at_target(run, target, "a full fill");
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// What makes a capture the same image whatever GPU takes it: a pixel's k-th sample traces the same path however it got there.
+// Its paths continue one stream from sample to sample, and the fill draws from a stream of its own, so neither the
+// fill nor the frames' split of the rounds — which is all a frame budget changes — moves a single sample.
+// A target raised part way carries on from the samples the pixels hold, which is what a capture asking for more does.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a pixel's samples are the same whatever the fill and the frames' rounds",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+
+    constexpr u32 target = 8;
+    auto const full_legs = cc::array<target_leg>{{.target = target, .frames = 16, .rounds = 6, .fill = 1.0f}};
+    // A third of the free slots a frame and two rounds: a sample takes several frames, so far more of them, every one seeded apart.
+    auto const sparse_legs = cc::array<target_leg>{{.target = target, .frames = 160, .rounds = 2, .fill = 0.3f}};
+    auto const raised_legs = cc::array<target_leg>{{.target = target / 2, .frames = 12, .rounds = 3, .fill = 1.0f},
+                                                   {.target = target, .frames = 16, .rounds = 3, .fill = 1.0f}};
+
+    auto const full = co_await trace_to_target(ctx, resources, scene, full_legs, 100u);
+    auto const sparse = co_await trace_to_target(ctx, resources, scene, sparse_legs, 5000u);
+    auto const raised = co_await trace_to_target(ctx, resources, scene, raised_legs, 9000u);
+    check_at_target(full, target, "a full fill");
+    check_at_target(sparse, target, "a sparse fill");
+    check_at_target(raised, target, "a raised target");
+
+    // The same samples summed in the same order, so the same floats; the tolerance only forgives a device that fuses differently.
+    auto const sparse_worst = worst_difference(sparse.image, full.image);
+    auto const raised_worst = worst_difference(raised.image, full.image);
+    CHECK(sparse_worst <= 1e-5f).context(cc::format("a sparse fill against a full one: worst {}", sparse_worst));
+    CHECK(raised_worst <= 1e-5f).context(cc::format("a raised target against one target: worst {}", raised_worst));
+
+    // A stochastic cutout draws its coverage from the path's stream, so the frames' split moves none of its draws either.
+    // Seeded by the frame instead, the sparse run's camera rays and shadow rays would cross the veil on other draws.
+    auto const veiled = make_veiled_scene(resources);
+    auto const veiled_full = co_await trace_to_target(ctx, resources, veiled.box, full_legs, 100u, &veiled.veil);
+    auto const veiled_sparse = co_await trace_to_target(ctx, resources, veiled.box, sparse_legs, 5000u, &veiled.veil);
+    check_at_target(veiled_full, target, "a full fill behind a cutout");
+    check_at_target(veiled_sparse, target, "a sparse fill behind a cutout");
+    auto const veiled_worst = worst_difference(veiled_sparse.image, veiled_full.image);
+    CHECK(veiled_worst <= 1e-5f).context(cc::format("a cutout, sparse fill against a full one: worst {}", veiled_worst));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

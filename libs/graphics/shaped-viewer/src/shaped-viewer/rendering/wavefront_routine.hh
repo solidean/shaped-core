@@ -110,12 +110,21 @@ struct sv::wavefront_trace_desc
     /// The bounce Russian roulette starts after, or 0 for a hard `max_bounces` alone.
     u32 roulette_after = 0;
 
+    /// The samples a pixel stops at, or 0 for no limit: a free slot whose pixel holds this many starts none, whatever `fill` says.
+    /// Never restarts anything, so raising it carries on from the samples the pixels hold.
+    u32 sample_target = 0;
+
     /// Where set, receives how many paths entered each of the frame's rounds, `rounds` values once the list has run.
     /// A diagnostic: it costs a copy per round and a readback, so nothing sets it on an ordinary frame.
     sg::data_future<u32>* live_paths = nullptr;
 
     /// Where set, receives the frame's stage timestamps, which the routine also records as `sv.wavefront.*` stats.
     wavefront_timing* timing = nullptr;
+
+    /// Where set, receives two values once the list has run: the fewest samples any pixel holds once the frame has resolved,
+    /// then how many pixels hold fewer than `sample_target`, 0 where that is 0.
+    /// A sample counts once its path finished, a non-finite one as a sample of nothing, so the first is what the image's mean is a mean of at worst.
+    sg::data_future<u32>* sample_floor = nullptr;
 };
 
 /// The wavefront path tracer: shaders/wavefront.sgl over module `tracer`, plus one generated shade kernel per material permutation.

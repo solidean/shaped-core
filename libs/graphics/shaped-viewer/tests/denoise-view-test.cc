@@ -56,7 +56,7 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
         sr::denoise_method::automatic,
         sr::denoise_method::none,
     };
-    constexpr u32 frames_per_phase = 3;
+    constexpr u32 samples_per_phase = 3;
 
     auto phase = isize(0);
     auto phase_start = u32(0);
@@ -85,7 +85,7 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
         auto const method = phase < phase_methods.size() ? phase_methods[phase] : phase_methods.back();
         scene.settings({.samples_per_pixel = 1, .reconstruct = {.denoiser = method}});
 
-        auto const accumulated = view.accumulated_frames();
+        auto const accumulated = view.accumulated_samples();
         // Bounded: a loop that never converges runs thousands of frames, and the first few hundred say what went wrong.
         if (history.size() < 2000)
             history += cc::format(" {}:{}", phase, accumulated);
@@ -98,7 +98,7 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
 
         // Nothing counts until the box has streamed in: its landing restarts the accumulation, and legitimately, since the
         // image stops being a picture of the placeholder — which is a restart this test is not about.
-        // The first resident frame still reads the placeholder's count, since the count lags a frame, so it waits too.
+        // The first resident frame still reads the placeholder's count, since the count lags a frame or more, so it waits too.
         auto const resident = f.streaming_resources() == 0 && f.pending_resource_work() == 0;
         auto const counting = resident && was_resident;
         was_resident = resident;
@@ -110,8 +110,8 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
                 history += " (streaming)";
         }
 
-        // A phase advances on frames that traced, not on frames: before the first trace lands nothing is being tested.
-        else if (accumulated >= phase_start + frames_per_phase)
+        // A phase advances on samples that landed, not on frames: before the first trace lands nothing is being tested.
+        else if (accumulated >= phase_start + samples_per_phase)
         {
             ++phase;
             phase_start = accumulated;
@@ -127,16 +127,17 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
 
     CHECK(phase == phase_methods.size());
     CHECK(never_dropped).context(cc::format("{}; frames (phase:count):{}", first_drop, history));
-    CHECK(last_accumulated >= frames_per_phase * u32(phase_methods.size()));
+    CHECK(last_accumulated >= samples_per_phase * u32(phase_methods.size()));
 }
 
 namespace
 {
-/// Captures the cornell box at `accumulate` frames of one sample each, denoised by `method`, as a PNG at `path`.
+/// Captures the cornell box at `accumulate` samples per pixel, denoised by `method`, as a PNG at `path`.
 /// PNG rather than the JPEG default, because JPEG's own smoothing would blur exactly the difference under test.
 ///
 /// `accumulate` is what decides which denoise phase the captured frame is in: at 2 the temporal member owns it, and
 /// past `temporal_denoise_frames + temporal_denoise_fade_frames` — 16 + 8 by default — the spatial one does.
+/// That counts frames, which the megakernel's one sample per frame makes the same number; a wavefront frame holds more.
 cc::shared_async<cc::unit> capture_box(sg::context& ctx,
                                        sr::denoise_method method,
                                        cc::string const& path,
@@ -169,8 +170,8 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
         // Lit by its lamp alone, at a moderate luminance: nothing tone-maps, and a bright box clips to flat white, where the noise would hide.
         scene.add_mesh(lit.enclosure);
         scene.add_mesh(lit.lamp);
-        // No frame budget: it sizes a still frame by the GPU's own timing, so a capture at `accumulate` frames would hold
-        // however many samples this machine reached, and two captures would compare different estimates.
+        // No frame budget: it sizes a still frame by the GPU's own timing, so the frame a wavefront capture settles on,
+        // which picks the denoise phase, would be this machine's.
         scene.settings({.samples_per_pixel = 1,
                         .mode = mode,
                         .frame_budget_ms = 0.0f,
@@ -240,10 +241,10 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
 // The wavefront tracer through the viewer: its restart, its drain on a changed frame, its carry on a still one, and the
 // per-pixel counts and guides it hands the denoisers.
 //
-// The megakernel's capture is the reference for the image, at a tolerance the noise of a 16-frame mean leaves room for.
+// The megakernel's capture is the reference for the image, at a tolerance the noise of a 16-sample mean leaves room for.
 // Denoised captures that come out smoother than the raw one are what show the guides and the count texture reaching a member:
-// à-trous at 32 frames is past the temporal window, so it runs spatially on the mean and reads the counts,
-// and `automatic` at 2 frames runs SVGF on the frame's own samples and the motion guide.
+// à-trous, named, runs spatially on the mean at 32 samples and reads the counts,
+// and `automatic` at 2 samples runs SVGF on the frame's own samples and the motion guide.
 ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's image",
                      (sg::context_handle const& ctx_h))
 {
@@ -382,7 +383,7 @@ ASYNC_INVOCABLE_TEST("sv - the viewer drives the split-signal denoiser", (sg::co
 // Carrying the named temporal member into it hands a temporal member the converging mean with no motion guide, which
 // the front refuses — so the layer presented the RAW MEAN from the hand-off onward, and logged a refusal per frame.
 //
-// Captured at 30 accumulated frames, past 16 + 8, which is the phase the two-frame captures above never reach.
+// Captured at 30 samples per pixel, one a frame, so past 16 + 8 frames, which is the phase the two-frame captures above never reach.
 // Nothing logged is half the assertion: the refusal warns, and the log rule fails the test on it.
 ASYNC_INVOCABLE_TEST("sv - a named temporal member still denoises past the hand-off", (sg::context_handle const& ctx_h))
 {
@@ -502,9 +503,9 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
         SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
 
     // A window of 2, so the hand-off is reached in a handful of frames rather than the 16 the default would take, and
-    // a fade as long as the accumulation can ever run — so no frame of this capture is past it.
+    // a fade far longer than this capture can run — so no frame of it is past the fade.
     constexpr u32 window = 2;
-    constexpr u32 fade = sv::accumulation_frame_cap;
+    constexpr u32 fade = u32(1) << 24;
 
     auto const path = cc::format("{}/sv-crossfade.png", cc::temp_directory_path());
     auto const partial = sv::impl::partial_capture_path(path);
@@ -579,9 +580,10 @@ ASYNC_INVOCABLE_TEST("sv - a ReSTIR layer reaches the tracer and keeps the image
     auto const plain_path = cc::format("{}/sv-restir-off.png", cc::temp_directory_path());
     auto const restir_path = cc::format("{}/sv-restir-on.png", cc::temp_directory_path());
 
-    // At 2 frames the temporal member owns the capture, and the first of them is the restart ReSTIR runs on.
-    co_await capture_box(ctx, sr::denoise_method::svgf, plain_path, 2, sv::render_mode::wavefront, false);
-    co_await capture_box(ctx, sr::denoise_method::svgf, restir_path, 2, sv::render_mode::wavefront, true);
+    // At 8 samples per pixel the temporal member still owns the capture, well inside its 16 frames, and the first frame is the restart ReSTIR runs on.
+    // Fewer would compare two firefly budgets rather than two brightnesses: the denoiser clamps a 2-sample image's outliers, which ReSTIR's re-shade has none of.
+    co_await capture_box(ctx, sr::denoise_method::svgf, plain_path, 8, sv::render_mode::wavefront, false);
+    co_await capture_box(ctx, sr::denoise_method::svgf, restir_path, 8, sv::render_mode::wavefront, true);
 
     auto restir_frames = 0.0;
     rec.sync().for_each_event(

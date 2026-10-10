@@ -23,14 +23,54 @@ using namespace cc::primitive_defines;
 // The wavefront tracer against the megakernel through the whole viewer, on what wavefront-trace-test.cc does not reach:
 // quadrics, which the wavefront intersects in its extend stage and shades with their own kernels, and decals painted at hits.
 //
-// Both captures are means of many frames, compared block by block, so what is left between them is Monte Carlo noise.
+// Both captures are means of the same samples per pixel, compared block by block, so what is left between them is Monte Carlo noise.
 
 namespace
 {
 constexpr auto k_size = tg::vec2i(96, 64);
 constexpr int k_block = 8;
 
-/// Captures the Cornell box with three spheres and a decal on its back wall, traced in `mode` for `accumulate` frames.
+/// The Cornell box with three spheres and a decal on its back wall, built once and placed into a view every frame.
+struct parity_scene
+{
+    sv_test::lit_cornell_box lit;
+    sv::drawing square;
+    sv::camera camera;
+
+    [[nodiscard]] static parity_scene create()
+    {
+        auto const box = sv_test::make_cornell_box();
+        // Lit by its own lamp, an emissive mesh, which is the box's only light: both tracers sample it.
+        auto out = parity_scene{.lit = sv_test::as_lit_meshes(box, 4.0f),
+                                .square = sv::drawing(),
+                                .camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)}};
+        out.square.add_fill(sv::path::rectangle(tg::aabb2f(tg::pos2f(-0.3f, -0.3f), tg::pos2f(0.3f, 0.3f))),
+                            {.color = tg::vec4f(1, 0, 0, 1)});
+        out.camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+        return out;
+    }
+
+    /// Places the scene in `view`, traced in `mode` under `frame_budget_ms`.
+    void place(sv::view_ref view, sv::render_mode mode, f32 frame_budget_ms) const
+    {
+        view.camera(camera);
+        auto scene = view.add_scene();
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
+        scene.add_sphere(tg::sphere3f(tg::pos3f(-0.45f, -0.65f, 0.2f), 0.35f));
+        scene.add_sphere(tg::sphere3f(tg::pos3f(0.45f, -0.7f, -0.2f), 0.3f));
+        scene.add_sphere(tg::sphere3f(tg::pos3f(0.0f, 0.3f, 0.5f), 0.2f));
+        // On the back wall, read from the camera: x to the right, y down, so it projects away from the reader into the wall.
+        scene.add_decal(square, {.at = tg::pos3f(0.45f, 0.35f, 1.0f),
+                                 .x_axis = tg::vec3f(1, 0, 0),
+                                 .y_axis = tg::vec3f(0, -1, 0),
+                                 .scale = 1,
+                                 .depth = 0.5f});
+        scene.settings({.samples_per_pixel = 4, .mode = mode, .frame_budget_ms = frame_budget_ms});
+    }
+};
+
+/// Captures the parity scene traced in `mode` at `accumulate` samples per pixel.
 /// PNG, so nothing but the tracer's own noise separates two captures.
 cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
                                          sv::render_mode mode,
@@ -47,37 +87,12 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
     // compiler takes about a minute for, before the first of its frames.
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
-    auto const box = sv_test::make_cornell_box();
-    // Lit by its own lamp, an emissive mesh, which is the box's only light: both tracers sample it.
-    auto const lit = sv_test::as_lit_meshes(box, 4.0f);
-
-    auto square = sv::drawing();
-    square.add_fill(sv::path::rectangle(tg::aabb2f(tg::pos2f(-0.3f, -0.3f), tg::pos2f(0.3f, 0.3f))),
-                    {.color = tg::vec4f(1, 0, 0, 1)});
-
-    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
-    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
-
+    auto const scene = parity_scene::create();
     auto const loop_start = cc::current_time_steady_secs();
     for (auto f : sv::interactive(ctx, "sv-test/wavefront-parity"))
     {
-        auto view = f.window().view();
-        view.camera(camera);
         f.register_capture("front", [](sv::capture_context const&) {});
-
-        auto scene = view.add_scene();
-        scene.add_mesh(lit.enclosure);
-        scene.add_mesh(lit.lamp);
-        scene.add_sphere(tg::sphere3f(tg::pos3f(-0.45f, -0.65f, 0.2f), 0.35f));
-        scene.add_sphere(tg::sphere3f(tg::pos3f(0.45f, -0.7f, -0.2f), 0.3f));
-        scene.add_sphere(tg::sphere3f(tg::pos3f(0.0f, 0.3f, 0.5f), 0.2f));
-        // On the back wall, read from the camera: x to the right, y down, so it projects away from the reader into the wall.
-        scene.add_decal(square, {.at = tg::pos3f(0.45f, 0.35f, 1.0f),
-                                 .x_axis = tg::vec3f(1, 0, 0),
-                                 .y_axis = tg::vec3f(0, -1, 0),
-                                 .scale = 1,
-                                 .depth = 0.5f});
-        scene.settings({.samples_per_pixel = 4, .mode = mode, .frame_budget_ms = frame_budget_ms});
+        scene.place(f.window().view(), mode, frame_budget_ms);
 
         REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
     }
@@ -142,9 +157,9 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
     auto const reference_path = cc::format("{}/sv-parity-megakernel.png", cc::temp_directory_path());
     auto const traced_path = cc::format("{}/sv-parity-wavefront.png", cc::temp_directory_path());
 
-    // No frame budget: a budgeted still frame grows to as many rounds as this GPU fits, up to 64 a frame.
-    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 48, 0.0f);
-    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 96, 0.0f);
+    // The same samples per pixel for both, so the noise left between them is the same: 48 megakernel frames of 4.
+    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 192, 0.0f);
+    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 192, 0.0f);
 
     auto const reference = read_png(reference_path);
     auto const traced = read_png(traced_path);
@@ -197,19 +212,38 @@ ASYNC_INVOCABLE_TEST("sv - a still wavefront view held to a budget no round fits
     auto rec = nx::test_recording();
     REQUIRE(rec.is_attached());
 
+    // A loop of its own rather than a capture, which would also wait out the loading under its own clock.
+    // At the fill this budget ends at, the slowest pixel's second sample is hundreds of frames away.
+    auto v_r = sv::viewer::try_create(ctx, "sv-test/starved-wavefront",
+                                      {.width = k_size[0], .height = k_size[1], .headless = true});
+    REQUIRE(v_r.has_value());
+    auto viewer = cc::move(v_r.value());
+
     // A microsecond: no round of any scene fits, so every measured frame lowers the fill.
-    auto const path = cc::format("{}/sv-starved-wavefront.png", cc::temp_directory_path());
-    co_await capture_scene(ctx, sv::render_mode::wavefront, path, 48, 0.001f);
+    auto const scene = parity_scene::create();
+    constexpr int still_frames = 48;
+    auto traced_frames = 0;
+    auto samples = u32(0);
+    auto const loop_start = cc::current_time_steady_secs();
+    for (auto f : viewer.frames())
+    {
+        auto view = f.window().view();
+        scene.place(view, sv::render_mode::wavefront, 0.001f);
+
+        // Counted from the first frame whose samples read back, since a trace declines until its kernels compiled.
+        // Past the restart's one sample, so the starved still frames are what raised the floor.
+        samples = view.accumulated_samples();
+        if (samples > 0)
+            ++traced_frames;
+        if (traced_frames >= still_frames && samples >= 2)
+            viewer.request_close();
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
+    }
+    co_await cc::async_settled(sv::background_work(ctx));
 
     auto const fill = least_stat(rec.sync(), "sv.wavefront.still_fill");
     CHECK(fill < 0.5).context(cc::format("the least fill a still frame ran at: {}", fill));
 
-    // Fewer samples per frame, but samples: the walls are lit.
-    auto const image = read_png(path);
-    auto sum = 0.0;
-    for (auto const p : image.pixels)
-        sum += f64(p);
-    CHECK(sum / f64(image.pixels.size()) > 10.0);
-
-    cc::remove_file(path);
+    // Fewer samples per frame, but samples: every pixel holds one past the restart's.
+    CHECK(samples >= 2).context(cc::format("the floor at the end: {}", samples));
 }

@@ -543,7 +543,16 @@ What follows is everything else the importer left behind.
   Losing the CURSOR is also still unhandled — only focus is — so a view whose cursor leaves the window mid-look keeps looking.
 - **Nothing tests `camera_style`.** The controllers have their own CPU tests, but the switch, the re-seeding across it and the
   unfocused release all live in `sv::viewer`, which needs a window — so they are only exercised by running an example.
-- `render_settings::max_accumulated_frames`, replacing the process-wide `sv::accumulation_frame_cap` in `render_settings.hh`.
+- **A denoised capture's hand-off from the temporal member to the spatial one is counted in frames.**
+  `temporal_denoise_frames` and the fade are frames of the mean, and a wavefront frame holds as many samples as the GPU finished.
+  So where a capture taken at N samples per pixel lands in the hand-off, and so what it denoised with, depends on how fast the GPU is.
+  Counting the hand-off in samples is the fix; no committed capture denoises yet.
+- **A layer that stops during the temporal phase keeps its last temporal image.**
+  At its target or at `accumulation_sample_cap` a frame traces nothing, so the frame count stops and the hand-off with it.
+  That is under `temporal_denoise_frames + temporal_denoise_fade_frames` frames, so at more than about 680 `samples_per_pixel` on the megakernel, or a low capture target.
+  Running the temporal member on would feed it the last frame's samples again as fresh ones.
+  If the spatial member on the finished mean turns out wanted there, one spatial-only denoise once the layer stops is the fix.
+- `render_settings::max_samples_per_pixel`, replacing the process-wide `sv::accumulation_sample_cap` in `render_settings.hh`.
   It is public rather than file-scope because a caller waiting for convergence has to tell "not there yet" from "as good as it gets" — `view_ref::is_accumulation_converged` applies it.
   It must then be excluded from the trace hash — lowering the cap should not restart the image.
 - **`shaped-viewer/hello-cube`'s reference image shows one of its six face colours.**

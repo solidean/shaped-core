@@ -19,11 +19,11 @@ template <sg::pixel_format Format>
     return (t.raw() != nullptr ? t : stand_in).as_image_view<Format>();
 }
 
-/// The counters a state with `max_permutations` needs: one per queue, then a count and a cursor per permutation.
-/// Five queues, which `tracer.counter_permutations` is the count of.
+/// The counters a state with `max_permutations` needs: one per queue, the sample floor and its shortfall, then a count and a cursor per permutation.
+/// Seven before the permutations', which `tracer.counter_permutations` is the count of.
 [[nodiscard]] isize counter_count(i32 max_permutations)
 {
-    return 5 + 2 * isize(max_permutations);
+    return 7 + 2 * isize(max_permutations);
 }
 } // namespace
 

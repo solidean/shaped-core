@@ -318,7 +318,8 @@ rays path_rays:
             channel = next_channel
             b += 1
 
-        // One non-finite path would poison this pixel forever, since the mean is blended in place: dropping it costs one sample.
+        // One non-finite path would poison this pixel forever, since the mean is blended in place.
+        // It counts as a sample of zero instead: the sum is still divided by `spp`, as the wavefront counts one.
         if pt.is_finite(radiance):
             accum += radiance
 
