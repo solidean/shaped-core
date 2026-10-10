@@ -211,10 +211,10 @@ fun unpack_reservoir(p: packed_reservoir) -> restir_reservoir:
     return restir_reservoir(p.x_s, p.weight, pt.unpack_unit(p.n_s), (p.confidence_flags & 255u) as float, pt.unpack_rgb(p.radiance), p.confidence_flags >> 8u)
 
 fun pack_di(r: di_reservoir) -> packed_di_reservoir:
-    return packed_di_reservoir(r.point, r.weight, (r.light & 0xffffffu) | (pt.pack_confidence(r.confidence) << 24u))
+    return packed_di_reservoir(r.point, r.weight, (r.light & 0xffffffu) | (pt.pack_confidence(r.confidence) << 24u), r.primitive)
 
 fun unpack_di(p: packed_di_reservoir) -> di_reservoir:
-    return di_reservoir(p.point, p.light_confidence & 0xffffffu, p.weight, (p.light_confidence >> 24u) as float)
+    return di_reservoir(p.point, p.light_confidence & 0xffffffu, p.weight, (p.light_confidence >> 24u) as float, p.primitive)
 
 /// A surface record of no visible point.
 fun no_surface() -> restir_surface:
@@ -763,8 +763,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
     // The light part is the next-event sample alone, and only toward the hemisphere ReSTIR DI's target covers; the rest stays the path's own.
     // A dispersive surface shaded one wavelength's closure, which the re-shade does not rebuild, so its light stays the path's own.
     let di_surface = not (surface.transmission_dispersion_scale > 0.0 and surface.transmission_weight > 0.0)
-    // A point on an emissive instance is no sample ReSTIR DI holds yet, so it stays the path's own too.
-    let di_reaches = di_surface and dot(n, light_s.direction) > 0.0 and light_s.from_mesh == 0u
+    let di_reaches = di_surface and dot(n, light_s.direction) > 0.0
     let light_marker = if restir_here => (if di_reaches => 2.0 else 1.0) else 0.0
     let env_marker = if restir_here => 1.0 else 0.0
     // Seeded from the stream where shade left it, as the megakernel's closest hit seeds its own two shadow rays.
@@ -1224,7 +1223,8 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
             let l = scene.light(..traced.lights[di.light as int])
             let mut wi = float3(0.0, 0.0, 1.0)
             let mut distance = 0.0
-            let arriving = di_arriving(l, di.point, x_v, mut wi, mut distance)
+            let mut to_solid_angle = 0.0
+            let arriving = di_arriving(l, di.light, di.point, di.primitive, x_v, mut wi, mut distance, mut to_solid_angle)
             let wi_local = openpbr.to_local(frame, wi)
             let ahead = wi_local.z > 0.0 and dot(wi, n) > 0.0 and any(arriving > float3(0.0))
             if ahead:
@@ -1242,7 +1242,7 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
                     // It replaces the next-event strategy, so it takes that strategy's half of the balance heuristic.
                     // The continuation's hits keep the other half in `direct`, which leaves a glossy reflection of a lamp to the BSDF.
                     let last_bounce = 1u >= (f.max_bounces as uint)
-                    let mis = di_nee_weight(l, di.point, x_v, wi, f.light_count, openpbr.bsdf_pdf(closure, wo_local, wi_local), last_bounce)
+                    let mis = di_nee_weight(l, di.light, di.point, di.primitive, x_v, wi, to_solid_angle, f.light_count, openpbr.bsdf_pdf(closure, wo_local, wi_local), last_bounce)
                     let scale = arriving * (wi_local.z * di.weight * mis)
                     own_light += (f_diffuse + f_specular) * scale
                     own_specular += f_specular * scale
@@ -1254,17 +1254,19 @@ fun restir_shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface
 
 /// A DI reservoir that kept nothing, having seen `confidence` candidates.
 fun empty_di(confidence: float) -> di_reservoir:
-    return di_reservoir(float3(0.0), 0u, 0.0, confidence)
+    return di_reservoir(float3(0.0), 0u, 0.0, confidence, 0u)
 
 /// One light sample drawn for ReSTIR DI: the point, the light's index, and the density of both in the light's own measure.
+/// On an emissive instance `point` holds the barycentrics of triangle `primitive`, as `di_reservoir::point` does.
 struct di_draw:
     point: float3
     light: uint
     pdf: float
+    primitive: uint
 
-/// Draws a light by the table's probabilities and a point on it uniformly: an area on a rect, a direction in a disc's cone.
+/// Draws a light by the table's probabilities and a point on it uniformly: an area on a rect or a triangle, a direction in a disc's cone.
 /// A point or a parallel light is its own one point, so its density is the probability of picking it alone.
-fun di_sample(count: uint, rng: mut uint){traced} -> di_draw:
+fun di_sample(count: uint, rng: mut uint){traced, bindless} -> di_draw:
     let mut index = 0u
     if count != 1u => index = pick_light(pt.rand(mut rng), count)
     let l = scene.light(..traced.lights[index as int])
@@ -1272,24 +1274,49 @@ fun di_sample(count: uint, rng: mut uint){traced} -> di_draw:
     if l.path == scene.light_path_area:
         let s = pt.rand(mut rng) * 2.0 - 1.0
         let t = pt.rand(mut rng) * 2.0 - 1.0
-        return di_draw(l.position + s * l.u + t * l.v, index, select / max(l.area, 1e-12))
+        return di_draw(l.position + s * l.u + t * l.v, index, select / max(l.area, 1e-12), 0u)
     if l.path == scene.light_path_distant_disc:
         let u1 = pt.rand(mut rng)
         let u2 = pt.rand(mut rng)
         let dir = pt.sample_cone(-l.normal, l.one_minus_cos_angular_radius, u1, u2)
-        return di_draw(dir, index, select / max(2.0 * pt.pi * l.one_minus_cos_angular_radius, 1e-20))
-    // An emissive instance is no sample a reservoir holds yet: the path's own next-event estimate keeps it, so it is a candidate of weight 0.
-    if l.path == scene.light_path_mesh => return di_draw(float3(0.0), index, 0.0)
-    return di_draw(l.position, index, select)
+        return di_draw(dir, index, select / max(2.0 * pt.pi * l.one_minus_cos_angular_radius, 1e-20), 0u)
+    if l.path == scene.light_path_mesh:
+        // A triangle by the instance's area CDF and a uniform point on it, drawn as next-event estimation draws it.
+        // In area, that is the record's choice times the triangle's, over the triangle's world area.
+        let e = traced.emitters[(index - traced.frame[0].emitter_offset) as int]
+        let drawn = draw_emitter_point(e, mut rng)
+        if drawn.p_tri <= 0.0 => return di_draw(float3(0.0), index, 0.0, 0u)
+        let area = 0.5 * length(emitter_triangle(emitter_instance(e), drawn.primitive, drawn.bary).cross_w)
+        if area <= 0.0 => return di_draw(float3(0.0), index, 0.0, 0u)
+        return di_draw(float3(drawn.bary.x, drawn.bary.y, 0.0), index, select * drawn.p_tri / area, drawn.primitive)
+    return di_draw(l.position, index, select, 0u)
 
-/// What the light sample `point` on `l` sends toward the visible point `x`, in the light's measure: radiance times the geometry term.
+/// What the light sample `point` on light `light`, whose record is `l`, sends toward the visible point `x`, in the light's measure: radiance times the geometry term.
 /// Writes the direction toward it and how far a shadow ray goes; 0 where the light's face is turned away.
-fun di_arriving(l: scene.light, point: float3, x: float3, wi: mut float3, distance: mut float) -> float3:
-    // An emissive instance is outside the reservoirs' domain, so a history naming one's index sends nothing.
+/// A point on an emissive instance is placed through the instance's placement and read through `emitter_point_radiance` here, at whichever visible point evaluates it.
+/// There `to_solid_angle` receives d²/(A·cos), which turns a density over the triangle's area into one over solid angle at `x`; 0 on any other light.
+fun di_arriving(l: scene.light, light: uint, point: float3, primitive: uint, x: float3, wi: mut float3, distance: mut float, to_solid_angle: mut float){traced, bindless} -> float3:
+    to_solid_angle = 0.0
     if l.path == scene.light_path_mesh:
         wi = float3(0.0, 0.0, 1.0)
         distance = 0.0
-        return float3(0.0)
+        let e = traced.emitters[(light - traced.frame[0].emitter_offset) as int]
+        if primitive >= e.triangle_count => return float3(0.0)
+        let inst = emitter_instance(e)
+        let tri = emitter_triangle(inst, primitive, point.xy)
+        let twice_area = length(tri.cross_w)
+        if twice_area <= 0.0 => return float3(0.0)
+        let to = tri.position - x
+        let d2 = max(dot(to, to), 1e-12)
+        let d = sqrt(d2)
+        wi = to / d
+        distance = d - 2e-3
+        // Two-sided, as next-event estimation and a bounce ray count it.
+        let cos_light = abs(dot(tri.cross_w, wi)) / twice_area
+        if cos_light <= 0.0 => return float3(0.0)
+        // As `pt.mesh_light_pdf` forms it, so the re-shade's weight and `emitter_pdf`'s sum to one.
+        to_solid_angle = dot(to, to) / max(0.5 * twice_area * cos_light, 1e-9)
+        return emitter_point_radiance(e, inst, primitive, point.xy) * (cos_light / d2)
     if l.path == scene.light_path_area:
         let to = point - x
         let d2 = max(dot(to, to), 1e-12)
@@ -1317,8 +1344,15 @@ fun di_arriving(l: scene.light, point: float3, x: float3, wi: mut float3, distan
 
 /// The next-event half of the balance heuristic for a light sample toward `wi`, against the BSDF density `bsdf_pdf` there.
 /// 1 for a point or a parallel light, which no sampled continuation can reach, and where no continuation follows.
-fun di_nee_weight(l: scene.light, point: float3, x: float3, wi: float3, count: uint, bsdf_pdf: float, last_bounce: bool) -> float:
+/// On an emissive instance it is the density `emitter_pdf` gives the bounce ray that meets the same point, so the two halves sum to one.
+/// There `to_solid_angle` is what `di_arriving` wrote for the same sample, so the triangle is not placed a second time.
+fun di_nee_weight(l: scene.light, light: uint, point: float3, primitive: uint, x: float3, wi: float3, to_solid_angle: float, count: uint, bsdf_pdf: float, last_bounce: bool){traced, bindless} -> float:
     if last_bounce => return 1.0
+    if l.path == scene.light_path_mesh:
+        let e = traced.emitters[(light - traced.frame[0].emitter_offset) as int]
+        let p_tri = emitter_triangle_pdf(e, primitive)
+        if to_solid_angle <= 0.0 or p_tri <= 0.0 => return 1.0
+        return pt.mis_weight(pt.light_select_pdf(l, count) * p_tri * to_solid_angle, bsdf_pdf)
     if l.path == scene.light_path_area:
         let to = point - x
         let cos_face = dot(l.normal, -wi)
@@ -1329,17 +1363,20 @@ fun di_nee_weight(l: scene.light, point: float3, x: float3, wi: float3, count: u
 
 /// ReSTIR DI's target function: what the light sample sends, through the surface's guides' lobe, unshadowed.
 /// Visibility is traced once, at the re-shade, which keeps every reuse free of rays and the estimate unbiased.
-fun di_target(surf: restir_surface, eye: float3, light: uint, point: float3){traced} -> float:
+fun di_target(surf: restir_surface, eye: float3, light: uint, point: float3, primitive: uint){traced, bindless} -> float:
     let l = scene.light(..traced.lights[light as int])
     let mut wi = float3(0.0, 0.0, 1.0)
     let mut distance = 0.0
-    let arriving = di_arriving(l, point, surf.position, mut wi, mut distance)
+    let mut to_solid_angle = 0.0
+    let arriving = di_arriving(l, light, point, primitive, surf.position, mut wi, mut distance, mut to_solid_angle)
     if all(arriving <= float3(0.0)) => return 0.0
     return restir_target_toward(surf, eye, wi, arriving)
 
 /// ReSTIR DI's first pass for `slot`: `restir_di_candidates` light samples resampled into one, then merged with the reservoir its visible point kept last frame.
 /// A light sample is the same sample at every visible point, so the history needs no shift: Jacobian 1, and no visibility ray.
-fun wavefront_restir_di_temporal(slot: uint){traced, wavefront_step}:
+/// That holds for a point on an emissive instance only under the placement it was drawn under, which the history flag guarantees:
+/// the light table's key covers every emitter's placement, so a frame after a move reuses no DI history at all.
+fun wavefront_restir_di_temporal(slot: uint){traced, bindless, wavefront_step}:
     if slot >= wavefront_step.width * wavefront_step.height => return
     let f = traced.frame[0]
     let s = slot as int
@@ -1365,12 +1402,12 @@ fun wavefront_restir_di_temporal(slot: uint){traced, wavefront_step}:
     for k in 0 ..< restir_di_candidates:
         let d = di_sample(count, mut rng)
         if d.pdf <= 0.0 => continue
-        let target = di_target(surf, eye, d.light, d.point)
+        let target = di_target(surf, eye, d.light, d.point, d.primitive)
         let w = target / ((restir_di_candidates as float) * d.pdf)
         if w <= 0.0 => continue
         total += w
         if pt.rand(mut rng) * total < w:
-            kept = di_reservoir(d.point, d.light, 0.0, 1.0)
+            kept = di_reservoir(d.point, d.light, 0.0, 1.0, d.primitive)
             kept_target = target
     let p_c = kept_target
     let weight_c = if p_c > 0.0 => total / p_c else 0.0
@@ -1401,13 +1438,13 @@ fun wavefront_restir_di_temporal(slot: uint){traced, wavefront_step}:
     // Generalized balance heuristic over the two domains, with the identity shift.
     let mut w_c = 0.0
     if p_c > 0.0:
-        let there = if confidence_h > 0.0 => di_target(hist_surf, hist_eye, kept.light, kept.point) else 0.0
+        let there = if confidence_h > 0.0 => di_target(hist_surf, hist_eye, kept.light, kept.point, kept.primitive) else 0.0
         w_c = p_c / (p_c + confidence_h * there) * p_c * weight_c
     let mut w_h = 0.0
     let mut p_h = 0.0
     if confidence_h > 0.0 and hist.weight > 0.0:
-        p_h = di_target(surf, eye, hist.light, hist.point)
-        let there = di_target(hist_surf, hist_eye, hist.light, hist.point)
+        p_h = di_target(surf, eye, hist.light, hist.point, hist.primitive)
+        let there = di_target(hist_surf, hist_eye, hist.light, hist.point, hist.primitive)
         if p_h > 0.0 and there > 0.0:
             w_h = confidence_h * there / (p_h + confidence_h * there) * p_h * hist.weight
 
@@ -1418,14 +1455,14 @@ fun wavefront_restir_di_temporal(slot: uint){traced, wavefront_step}:
         // Rounding can carry the draw up to the total; with no history weight the candidate is the pick then.
         let takes_candidate = pt.rand(mut rng) * all_weight < w_c or w_h <= 0.0
         if takes_candidate:
-            picked = di_reservoir(kept.point, kept.light, all_weight / p_c, confidence)
+            picked = di_reservoir(kept.point, kept.light, all_weight / p_c, confidence, kept.primitive)
         else:
-            picked = di_reservoir(hist.point, hist.light, all_weight / p_h, confidence)
+            picked = di_reservoir(hist.point, hist.light, all_weight / p_h, confidence, hist.primitive)
     traced.restir_di_reservoirs[at] = pack_di(picked)
 
 /// ReSTIR DI's spatial pass for `slot`: its temporal reservoir merged with two neighbors' of this frame, as GI's spatial pass.
 /// It shifts by the identity and traces no visibility ray.
-fun wavefront_restir_di_spatial(slot: uint){traced, wavefront_step}:
+fun wavefront_restir_di_spatial(slot: uint){traced, bindless, wavefront_step}:
     if slot >= wavefront_step.width * wavefront_step.height => return
     let f = traced.frame[0]
     let s = slot as int
@@ -1481,26 +1518,26 @@ fun wavefront_restir_di_spatial(slot: uint){traced, wavefront_step}:
     let mut w_own = 0.0
     let mut p_own = 0.0
     if own.weight > 0.0:
-        p_own = di_target(center, eye, own.light, own.point)
+        p_own = di_target(center, eye, own.light, own.point, own.primitive)
         if p_own > 0.0:
-            let at_0 = if c_0 > 0.0 => di_target(n_surf_0, eye, own.light, own.point) else 0.0
-            let at_1 = if c_1 > 0.0 => di_target(n_surf_1, eye, own.light, own.point) else 0.0
+            let at_0 = if c_0 > 0.0 => di_target(n_surf_0, eye, own.light, own.point, own.primitive) else 0.0
+            let at_1 = if c_1 > 0.0 => di_target(n_surf_1, eye, own.light, own.point, own.primitive) else 0.0
             w_own = c_own * p_own / (c_own * p_own + c_0 * at_0 + c_1 * at_1) * p_own * own.weight
     let mut w_0 = 0.0
     let mut p_0 = 0.0
     if c_0 > 0.0 and n_res_0.weight > 0.0:
-        p_0 = di_target(center, eye, n_res_0.light, n_res_0.point)
-        let at_home = di_target(n_surf_0, eye, n_res_0.light, n_res_0.point)
+        p_0 = di_target(center, eye, n_res_0.light, n_res_0.point, n_res_0.primitive)
+        let at_home = di_target(n_surf_0, eye, n_res_0.light, n_res_0.point, n_res_0.primitive)
         if p_0 > 0.0 and at_home > 0.0:
-            let at_other = if c_1 > 0.0 => di_target(n_surf_1, eye, n_res_0.light, n_res_0.point) else 0.0
+            let at_other = if c_1 > 0.0 => di_target(n_surf_1, eye, n_res_0.light, n_res_0.point, n_res_0.primitive) else 0.0
             w_0 = c_0 * at_home / (c_own * p_0 + c_0 * at_home + c_1 * at_other) * p_0 * n_res_0.weight
     let mut w_1 = 0.0
     let mut p_1 = 0.0
     if c_1 > 0.0 and n_res_1.weight > 0.0:
-        p_1 = di_target(center, eye, n_res_1.light, n_res_1.point)
-        let at_home = di_target(n_surf_1, eye, n_res_1.light, n_res_1.point)
+        p_1 = di_target(center, eye, n_res_1.light, n_res_1.point, n_res_1.primitive)
+        let at_home = di_target(n_surf_1, eye, n_res_1.light, n_res_1.point, n_res_1.primitive)
         if p_1 > 0.0 and at_home > 0.0:
-            let at_other = if c_0 > 0.0 => di_target(n_surf_0, eye, n_res_1.light, n_res_1.point) else 0.0
+            let at_other = if c_0 > 0.0 => di_target(n_surf_0, eye, n_res_1.light, n_res_1.point, n_res_1.primitive) else 0.0
             w_1 = c_1 * at_home / (c_own * p_1 + c_0 * at_other + c_1 * at_home) * p_1 * n_res_1.weight
 
     let total = w_own + w_0 + w_1
@@ -1515,11 +1552,11 @@ fun wavefront_restir_di_spatial(slot: uint){traced, wavefront_step}:
         if choice == 2 and w_1 <= 0.0 => choice = 1
         if choice == 1 and w_0 <= 0.0 => choice = 0
         if choice == 0:
-            picked = di_reservoir(own.point, own.light, total / p_own, confidence)
+            picked = di_reservoir(own.point, own.light, total / p_own, confidence, own.primitive)
         else if choice == 1:
-            picked = di_reservoir(n_res_0.point, n_res_0.light, total / p_0, confidence)
+            picked = di_reservoir(n_res_0.point, n_res_0.light, total / p_0, confidence, n_res_0.primitive)
         else:
-            picked = di_reservoir(n_res_1.point, n_res_1.light, total / p_1, confidence)
+            picked = di_reservoir(n_res_1.point, n_res_1.light, total / p_1, confidence, n_res_1.primitive)
     traced.restir_di_spatial[s] = pack_di(picked)
 
 // ---- connect: the shadow rays ---------------------------------------------------------------------------------------

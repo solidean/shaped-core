@@ -96,6 +96,18 @@ struct sv::pt_light_table
 
     /// Writes the count, the per-path table and where the emissive instances' records start into `fc`.
     void describe_in(shaders::tracer::frame_constants& fc) const;
+
+    /// A hash of the records, of `emitters`, the `traced.emitters` this table's mesh records name, in their order,
+    /// and of where each emitter's row of `instances`, the `traced.instances`, places it.
+    /// What ReSTIR DI keeps its history under (`wavefront_trace_desc::lights_key`): a reservoir names a light by its index and a triangle by its primitive,
+    /// so any change to what an index means drops it.
+    /// An emissive instance that moves, rigidly or not, changes it too, so a moved emitter drops every DI history, as the view's scene hash does.
+    /// Left out is what says how candidates are drawn rather than what a kept sample is: every record's `select_pdf` and `select_cdf`,
+    /// a mesh record's `area` and `emission`, which follow the placement anyway, and each emitter's `cdf`, whose bindless index is epoch-scoped.
+    /// Nothing of the camera is in it, nor the placement of an instance that lights nothing.
+    /// Nor an emitter's geometry: a mesh replaced under the same row, placement and triangle count is the caller's to reset, as the view's scene hash does.
+    [[nodiscard]] u64 key(cc::span<shaders::tracer::emitter_record const> emitters,
+                          cc::span<shaders::tracer::instance_record const> instances) const;
 };
 
 /// Everything one view's path trace binds.

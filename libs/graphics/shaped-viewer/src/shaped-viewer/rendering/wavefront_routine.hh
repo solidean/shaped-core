@@ -87,6 +87,7 @@ struct sv::wavefront_trace_desc
     /// Whether a ReSTIR frame may reuse the reservoirs the state last kept.
     /// They are reused only where `frame.previous_camera` is the camera they were kept under (`wavefront_state::restir_camera`).
     /// The view forgets a state's history on a scene change or a camera cut through `wavefront_state::restir_written`; this is the tests' switch.
+    /// The routine itself keeps GI's records across a moved instance, so a caller whose scene changed has to clear `restir_written`.
     bool restir_history = true;
 
     /// Whether reuse also traces the reverse visibility, which leaves it unbiased on a Lambertian scene at one more ray.
@@ -103,6 +104,12 @@ struct sv::wavefront_trace_desc
     /// Whether the re-shade also replaces the visible point's next-event light sample by ReSTIR DI's, at that sample's half of the balance heuristic.
     /// The emission, the environment and the continuation's hits on lights stay the path's own; the spatial pass runs for DI where it runs for GI.
     bool restir_di = false;
+
+    /// What `pt_light_table::key` makes of the table `trace.lights` and `trace.emitters` hold, and of where `trace.instance_table` places each emitter.
+    /// DI history is reused only under the key it was kept under (`wavefront_state::restir_di_lights`), since a reservoir names a light by its index.
+    /// An emitter that moved drops it too: a kept point's weight holds only under the placement it was drawn under.
+    /// A camera that moved changes nothing here; the camera's own rule is `restir_history`'s.
+    u64 lights_key = 0;
 
     /// Which camera generation this frame's paths start under; one of an older generation never reaches the image.
     u32 generation = 1;
@@ -199,3 +206,24 @@ private:
     /// Records every frame of `_timed` whose timestamps have all landed, and drops the oldest past a few that never do.
     void _record_landed_timings();
 };
+
+namespace sv::impl
+{
+/// `frame_constants::wavefront_flags`, as `wavefront_flag_*` in shaders/sgl/tracer_wavefront.sgl name them.
+inline constexpr u32 wavefront_flag_restart = 1;
+inline constexpr u32 wavefront_flag_restir = 2;
+/// the other half of the two-half records is the last ReSTIR frame's
+inline constexpr u32 wavefront_flag_restir_history = 4;
+inline constexpr u32 wavefront_flag_restir_parity = 8;
+inline constexpr u32 wavefront_flag_restir_exact = 16;
+inline constexpr u32 wavefront_flag_restir_spatial = 32;
+inline constexpr u32 wavefront_flag_restir_di = 64;
+/// so is the other half of DI's reservoirs
+inline constexpr u32 wavefront_flag_restir_di_history = 128;
+
+/// The history bits a ReSTIR frame of `d` sets, under a frame block whose `previous_camera` is `previous_camera`.
+/// GI's history needs the camera its records were kept under, so a camera that moved since is still history.
+/// DI's needs that too, and the light table its reservoirs were kept under, `d.lights_key`.
+[[nodiscard]] u32 restir_history_flags(wavefront_trace_desc const& d,
+                                       shaders::tracer::camera_record const& previous_camera);
+} // namespace sv::impl

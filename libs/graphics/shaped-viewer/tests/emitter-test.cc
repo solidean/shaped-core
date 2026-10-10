@@ -7,6 +7,7 @@
 #include <shaped-viewer/material/shader_generator.hh>
 #include <shaped-viewer/rendering/impl/emitters.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
+#include <shaped-viewer/rendering/wavefront_routine.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/resources/resource_managers.hh> // sv::residency
 #include <shaped-viewer/resources/value_summary.hh>
@@ -713,4 +714,123 @@ TEST("sv - an emitter's world area follows its placement, exactly under a simila
     // A non-uniform scale has no one factor; the estimate is the cube root of the volume's, squared.
     auto const stretched = tg::affine_transform3f::make_scaling(tg::vec3f(8, 1, 1));
     CHECK(tg::abs(sv::impl::world_area_of(1.0f, stretched) - 4.0f) < 1e-4f);
+}
+
+// ReSTIR DI names a light by its index in the table and a triangle by its primitive, so its history is kept under the table's key.
+// Any change to what an index names changes the key, and so does an emitter that moves.
+// A reservoir keeps its point as barycentrics, and its weight holds only under the placement it was drawn under.
+// Reusing it under another would need the history's resampling weight formed with the old placement, which the frame no longer has.
+// How candidates are drawn does not change the key: the selection's probabilities, an emissive record's area and emission, and the area CDF's bindless index.
+// An instance that lights nothing does not change it either, wherever it stands.
+TEST("sv - a light table's key follows what its indices name and where its emitters stand, not how candidates are "
+     "drawn")
+{
+    using records = cc::vector<sv::shaders::tracer::light_record>;
+    using emitter_records = cc::vector<sv::shaders::tracer::emitter_record>;
+    using instance_records = cc::vector<sv::shaders::tracer::instance_record>;
+
+    auto const rect = sv::shaders::tracer::light_record{.path = u32(sv::light_path::area),
+                                                        .area = 1.0f,
+                                                        .emission = tg::vec3f(1, 1, 1),
+                                                        .cone_offset = 1};
+    auto const mesh = [](f32 area)
+    {
+        return sv::shaders::tracer::light_record{.path = sv::light_path_mesh,
+                                                 .area = area,
+                                                 .flags = sv::light_flag_two_sided,
+                                                 .emission = tg::vec3f(1, 1, 1)};
+    };
+    auto const emitter = [](u32 instance, u32 cdf)
+    {
+        return sv::shaders::tracer::emitter_record{.instance = instance, .cdf = cdf, .triangle_count = 2, .block_count = 1};
+    };
+    // An instance record placed at `x` along the x axis, scaled by `scale` along it.
+    auto const placed_at = [](f32 x, f32 scale)
+    {
+        return sv::shaders::tracer::instance_record{.to_world_x = tg::vec4f(scale, 0, 0, x),
+                                                    .to_world_y = tg::vec4f(0, 1, 0, 0),
+                                                    .to_world_z = tg::vec4f(0, 0, 1, 0)};
+    };
+
+    auto const table = sv::pt_light_table::grouped(records{rect, mesh(1), mesh(2)});
+    auto const emitters = emitter_records{emitter(1, 7), emitter(2, 8)};
+    auto const instances = instance_records{placed_at(0, 1), placed_at(1, 1), placed_at(2, 1), placed_at(3, 1)};
+    auto const key = table.key(emitters, instances);
+
+    CHECK(sv::pt_light_table::grouped(records{rect, mesh(1), mesh(2)}).key(emitters, instances) == key);
+    CHECK(table.key(emitter_records{emitter(1, 70), emitter(2, 80)}, instances) == key);
+
+    // A scaled or rotated emitter's area, which reweighs every record's selection, and its selection's estimate of its emission.
+    CHECK(sv::pt_light_table::grouped(records{rect, mesh(1.0000001f), mesh(2)}).key(emitters, instances) == key);
+    CHECK(sv::pt_light_table::grouped(records{rect, mesh(1), mesh(5)}).key(emitters, instances) == key);
+    auto dimmer = mesh(1);
+    dimmer.emission = tg::vec3f(0.5f, 0.5f, 0.5f);
+    CHECK(sv::pt_light_table::grouped(records{rect, dimmer, mesh(2)}).key(emitters, instances) == key);
+
+    // An instance that lights nothing moves freely.
+    auto moved_other = instances;
+    moved_other[0] = placed_at(5, 1);
+    moved_other[3] = placed_at(5, 2);
+    CHECK(table.key(emitters, moved_other) == key);
+
+    // An emitter that moves, rigidly or not, changes it: a kept point is that sample only under the placement it was drawn under.
+    auto moved = instances;
+    moved[2] = placed_at(2.5f, 1);
+    CHECK(table.key(emitters, moved) != key);
+    auto stretched = instances;
+    stretched[1] = placed_at(1, 2);
+    CHECK(table.key(emitters, stretched) != key);
+
+    // An emitter landing appends a record, so every later index may mean another light.
+    auto const grown = sv::pt_light_table::grouped(records{rect, mesh(1), mesh(2), mesh(3)});
+    CHECK(grown.key(emitter_records{emitter(1, 7), emitter(2, 8), emitter(3, 9)}, instances) != key);
+
+    // Two emitters swapping their places in the table swap what their indices mean.
+    auto const swapped = sv::pt_light_table::grouped(records{rect, mesh(2), mesh(1)});
+    CHECK(swapped.key(emitter_records{emitter(2, 8), emitter(1, 7)}, instances) != key);
+
+    // The same record naming another instance's row names another mesh's triangles.
+    CHECK(table.key(emitter_records{emitter(1, 7), emitter(3, 8)}, instances) != key);
+
+    // An analytic light that changes changes the key too.
+    auto brighter = rect;
+    brighter.emission = tg::vec3f(2, 2, 2);
+    CHECK(sv::pt_light_table::grouped(records{brighter, mesh(1), mesh(2)}).key(emitters, instances) != key);
+}
+
+// A ReSTIR frame reuses GI's history under the camera its records were kept under, and DI's under the light table too.
+// A camera that moved is no reason to drop either: the frame is told where it was, which is the camera the records were kept under.
+TEST("sv::impl::restir_history_flags - DI history needs the light table it was kept under, and survives a camera move")
+{
+    auto const kept_under = sv::shaders::tracer::camera_record{.position = tg::vec3f(0, 0, -3)};
+    auto const elsewhere = sv::shaders::tracer::camera_record{.position = tg::vec3f(1, 0, -3)};
+    auto const gi = sv::impl::wavefront_flag_restir_history;
+    auto const both = sv::impl::wavefront_flag_restir_history | sv::impl::wavefront_flag_restir_di_history;
+
+    auto state = sv::wavefront_state{};
+    state.restir_written = true;
+    state.restir_di_written = true;
+    state.restir_camera = kept_under;
+    state.restir_di_lights = 42;
+    auto const trace = sv::pt_trace_desc{};
+    auto const desc = [&](u64 lights_key)
+    {
+        return sv::wavefront_trace_desc{.trace = trace,
+                                        .state = &state,
+                                        .restir = true,
+                                        .restir_di = true,
+                                        .lights_key = lights_key};
+    };
+
+    // The camera has moved since: this frame's camera is another, and its previous one is where the records were kept.
+    CHECK(sv::impl::restir_history_flags(desc(42), kept_under) == both);
+    CHECK(sv::impl::restir_history_flags(desc(43), kept_under) == gi);
+    // Frames between moved the camera without keeping records, so nothing reprojects.
+    CHECK(sv::impl::restir_history_flags(desc(42), elsewhere) == 0u);
+
+    state.restir_di_written = false;
+    CHECK(sv::impl::restir_history_flags(desc(42), kept_under) == gi);
+    state.restir_di_written = true;
+    state.restir_written = false;
+    CHECK(sv::impl::restir_history_flags(desc(42), kept_under) == 0u);
 }

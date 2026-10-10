@@ -219,7 +219,12 @@ The two strategies weighed against each other thus read one value, which the bal
 **A bounce ray that meets an emitter** forms the same density at its hit (`tracer.emitter_pdf`) and weighs the emission by the balance heuristic; the camera's own view keeps its full weight.
 
 ReSTIR GI takes a weighted emitter its visible point's continuation reaches as that point's direct light, as it does a rect.
-ReSTIR DI leaves a point on an emissive instance to the path's own estimate, and gives one it draws a weight of 0, until its P3.
+**ReSTIR DI resamples points on emissive instances** as it does points on rects, drawn as next-event estimation draws them.
+A reservoir keeps the record's index, the triangle and its barycentrics, so the point is placed through the instance's placement and its emission read through the reader wherever it is evaluated.
+Since a reservoir names a light by its index, its history is kept under `pt_light_table::key`, and a table whose indices name other lights reuses none of it.
+**An emitter that moves drops every DI history**, since the key covers each emitter's placement: a kept point's weight holds only under the placement it was drawn under.
+That is the view's behavior anyway, which forgets every ReSTIR history when its scene hash changes.
+The key ignores selection and an emitter record's area and emission, which say how candidates are drawn rather than what a kept sample is.
 
 ## Landing order
 

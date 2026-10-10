@@ -34,16 +34,6 @@ constexpr u32 fill_full = 65536;
 /// `wavefront_step::mode` of ReSTIR's re-shade (`step_restir_shade` in shaders/sgl/tracer_wavefront.sgl).
 constexpr u32 restir_shade_mode = 1;
 
-/// `frame_constants::wavefront_flags`, as `wavefront_flag_*` in shaders/sgl/tracer_wavefront.sgl name them.
-constexpr u32 wavefront_flag_restart = 1;
-constexpr u32 wavefront_flag_restir = 2;
-constexpr u32 wavefront_flag_restir_history = 4;
-constexpr u32 wavefront_flag_restir_parity = 8;
-constexpr u32 wavefront_flag_restir_exact = 16;
-constexpr u32 wavefront_flag_restir_spatial = 32;
-constexpr u32 wavefront_flag_restir_di = 64;
-constexpr u32 wavefront_flag_restir_di_history = 128;
-
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
 [[nodiscard]] cc::optional<sg::shader_format> sgl_format_for(sg::context const& ctx, slib::shader_library const& lib)
 {
@@ -199,6 +189,20 @@ void wavefront_routine::_record_landed_timings()
     }
 }
 
+u32 impl::restir_history_flags(wavefront_trace_desc const& d, tracer::camera_record const& previous_camera)
+{
+    auto const& s = *d.state;
+    // The temporal pass reprojects through `previous_camera`, so the records are history only if they were kept under it.
+    // Frames between, of another tracer or on the other path state, may have moved the camera.
+    auto const same_camera = cc::memcmp(&s.restir_camera, &previous_camera, sizeof(tracer::camera_record)) == 0;
+    if (!d.restir_history || !s.restir_written || !same_camera)
+        return 0;
+    auto flags = wavefront_flag_restir_history;
+    if (d.restir_di && s.restir_di_written && s.restir_di_lights == d.lights_key)
+        flags |= wavefront_flag_restir_di_history;
+    return flags;
+}
+
 sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_trace_desc const& d)
 {
     CC_RECORD_SCOPE("sv.wavefront");
@@ -261,29 +265,20 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     fc.generation = d.generation;
     if (d.restir)
         d.state->ensure_restir(ctx);
-    fc.wavefront_flags = (d.restart ? wavefront_flag_restart : 0u) | (d.restir ? wavefront_flag_restir : 0u);
+    fc.wavefront_flags = (d.restart ? impl::wavefront_flag_restart : 0u) | (d.restir ? impl::wavefront_flag_restir : 0u);
     if (d.restir)
     {
-        // The temporal pass reprojects through `previous_camera`, so the records are history only if they were kept under it.
-        // Frames between, of another tracer or on the other path state, may have moved the camera.
-        auto const same_camera
-            = cc::memcmp(&d.state->restir_camera, &fc.previous_camera, sizeof(tracer::camera_record)) == 0;
-        if (d.restir_history && d.state->restir_written && same_camera)
-        {
-            fc.wavefront_flags |= wavefront_flag_restir_history;
-            if (d.restir_di && d.state->restir_di_written)
-                fc.wavefront_flags |= wavefront_flag_restir_di_history;
-        }
+        fc.wavefront_flags |= impl::restir_history_flags(d, fc.previous_camera);
         if (d.state->restir_parity != 0)
-            fc.wavefront_flags |= wavefront_flag_restir_parity;
+            fc.wavefront_flags |= impl::wavefront_flag_restir_parity;
         if (d.restir_exact)
-            fc.wavefront_flags |= wavefront_flag_restir_exact;
+            fc.wavefront_flags |= impl::wavefront_flag_restir_exact;
         if (d.restir_spatial)
-            fc.wavefront_flags |= wavefront_flag_restir_spatial;
+            fc.wavefront_flags |= impl::wavefront_flag_restir_spatial;
         if (d.restir_di)
         {
             CC_ASSERT(fc.light_count < (1u << 24), "ReSTIR DI's reservoirs keep a light's index in 24 bits");
-            fc.wavefront_flags |= wavefront_flag_restir_di;
+            fc.wavefront_flags |= impl::wavefront_flag_restir_di;
         }
     }
     fc.permutation_count = u32(t.hit_groups.size());
@@ -423,11 +418,12 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         }
         if (d.restir_di)
         {
-            use(*self->_kernels.restir_di_temporal, second_group::none);
+            // Bindless, since a point on an emissive instance is placed and read through its mesh and its material's tables.
+            use(*self->_kernels.restir_di_temporal, second_group::bindless);
             cmd.compute.dispatch_threads(int(width * height));
             if (d.restir_spatial)
             {
-                use(*self->_kernels.restir_di_spatial, second_group::none);
+                use(*self->_kernels.restir_di_spatial, second_group::bindless);
                 cmd.compute.dispatch_threads(int(width * height));
             }
         }
@@ -453,6 +449,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         // This frame's half is the next one's history.
         d.state->restir_written = true;
         d.state->restir_di_written = d.restir_di;
+        d.state->restir_di_lights = d.lights_key;
         d.state->restir_parity ^= 1u;
         d.state->restir_camera = fc.camera;
     }

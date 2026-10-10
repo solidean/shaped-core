@@ -271,6 +271,7 @@ if(SC_BUILD_TESTS)
             tests/cutout-trace-test.cc
             tests/emitter-trace-test.cc
             tests/wavefront-trace-test.cc
+            tests/restir-di-emitter-test.cc
             tests/wavefront-view-test.cc
             tests/raster-test.cc
             tests/raster-without-raytracing-test.cc

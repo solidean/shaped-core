@@ -327,10 +327,12 @@ struct restir_reservoir:
     flags: uint
 
 /// A ReSTIR DI reservoir: one kept point on one of the trace's lights, and its weights.
-/// The sample lives in the light's own measure — area on a rect, solid angle on a disc, none on a point or a parallel light —
+/// The sample lives in the light's own measure — area on a rect or an emissive instance's triangle, solid angle on a disc, none on a point or a parallel light —
 /// so moving it to another visible point changes nothing about it, and the shift's Jacobian is 1.
 struct di_reservoir:
-    /// the point on the light, or for a disc the unit direction toward it
+    /// The point on the light, or for a disc the unit direction toward it.
+    /// On an emissive instance, the barycentrics of `primitive` in `xy` and 0 in `z`, placed through the instance wherever the point is read.
+    /// It is reused only under the placement it was drawn under, since the light table's key covers every emitter's placement.
     point: float3
     /// the light's index in `traced.lights`
     light: uint
@@ -338,6 +340,8 @@ struct di_reservoir:
     weight: float
     /// how many candidates it has seen, capped
     confidence: float
+    /// the triangle of an emissive instance's mesh the point lies on, and 0 on any other light
+    primitive: uint
 
 /// `restir_candidate` as `traced.restir_candidates` stores it.
 /// What finalize rebuilds the mean from stays a float, and so does what the re-shade subtracts from it; `n_s` and `L_i` are packed.
@@ -383,6 +387,7 @@ struct packed_di_reservoir:
     weight: float
     /// the light's index in the low 24 bits, and the confidence, a whole number, above them
     light_confidence: uint
+    primitive: uint
 
 /// What the re-shade made of a pixel: the frame's estimate and its specular share, where `valid` is 1.
 struct restir_result:

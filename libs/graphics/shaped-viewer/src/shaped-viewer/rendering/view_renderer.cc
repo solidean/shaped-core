@@ -696,13 +696,15 @@ void mark_unwritten(impl::temporal_slot* slot)
 /// A pixel starts no sample past `sample_target`, an `effective_sample_target`.
 /// Each full-size frame reads back the fewest samples any pixel holds, which raises `slot.samples` a frame or more later.
 /// Called only for a frame `frame_samples` says traces.
+/// `lights_key` is `pt_light_table::key` of the table `d` binds, which ReSTIR DI keeps its history under.
 [[nodiscard]] sg::routine_outcome trace_layer(sg::command_list& cmd,
                                               render_settings const& settings,
                                               pt_trace_desc const& d,
                                               shaders::tracer::frame_constants const& fc,
                                               impl::temporal_slot& slot,
                                               bool scaled,
-                                              u32 sample_target)
+                                              u32 sample_target,
+                                              u64 lights_key)
 {
     if (settings.mode == render_mode::megakernel)
         return pathtrace_routine::execute(cmd, d);
@@ -765,6 +767,7 @@ void mark_unwritten(impl::temporal_slot* slot)
                                                           .restir = restir,
                                                           .restir_spatial = true,
                                                           .restir_di = true,
+                                                          .lights_key = lights_key,
                                                           .generation = paths.generation,
                                                           .roulette_after = wavefront_roulette_after,
                                                           .sample_target = sample_target,
@@ -1430,7 +1433,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
              .decal_shapes = decal_buffers.shapes,
              .decal_atlas = decal_buffers.atlas,
              .traced_with_stand_ins = &stand_ins},
-            fc, *slot, scaled, target);
+            fc, *slot, scaled, target, lights.key(resolved.emitters, resolved.records));
     };
 
     // A frame that traces nothing stands as executed: the mean already is the image.
@@ -1811,7 +1814,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
          .decal_shapes = decal_buffers.shapes,
          .decal_atlas = decal_buffers.atlas,
          .traced_with_stand_ins = &stand_ins},
-        fc, slot, false, effective_sample_target(0));
+        fc, slot, false, effective_sample_target(0), lights.key(resolved.emitters, resolved.records));
 
     // As above: a declined trace recorded nothing, so it must not count as a sample, and a frame shaded by a stand-in
     // must not be averaged with the next.

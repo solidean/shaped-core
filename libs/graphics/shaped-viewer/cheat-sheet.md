@@ -831,6 +831,9 @@ sv::pt_light_table::grouped(span<light_record>, sel) // -> { records grouped by 
                                                    //   path sv::light_path_mesh (4) is an emissive instance's record, last; describe_in writes its offset as emitter_offset
                                                    //   sel = light_selection::power (default) writes each record's select_pdf/select_cdf; ::uniform writes 0s
 table.describe_in(fc)                                // writes light_count, the per-path table and emitter_offset into the frame block, so they cannot disagree
+table.key(emitters, instances) -> u64                // what each index names and where each emitter's instance record places it: ReSTIR DI's history key
+                                                     //   not selection, a mesh record's area/emission or a cdf index, nor a non-emitter's placement
+                                                     //   wavefront_trace_desc::lights_key takes it; a frame under another key, a moved emitter's included, reuses no DI history
 
 sv::shader_package()                                 // the one SGL package: tracer + module tracer, layout and depth fill; sv's default library adds it
 ```

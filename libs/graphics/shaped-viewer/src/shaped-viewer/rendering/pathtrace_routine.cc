@@ -1,5 +1,6 @@
 #include <clean-core/bytes/hash128.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/fixed_array.hh>
@@ -438,6 +439,42 @@ void pt_light_table::describe_in(shaders::tracer::frame_constants& fc) const
         fc.path_count[i] = path_count[i];
     }
     fc.emitter_offset = path_offset[light_path_mesh];
+}
+
+u64 pt_light_table::key(cc::span<shaders::tracer::emitter_record const> emitters,
+                        cc::span<shaders::tracer::instance_record const> instances) const
+{
+    // Every byte of both records is written, pads included, so equal tables hash equal.
+    auto h = u64(0);
+    for (auto const& l : records)
+    {
+        // Selection's numbers say how candidates are drawn, never what a kept sample is, so they are left out.
+        // An emissive instance's area and emission are such numbers too, and its area jitters by an ulp under a rotation.
+        auto anonymized = l;
+        anonymized.select_pdf = 0.0f;
+        anonymized.select_cdf = 0.0f;
+        if (l.path == light_path_mesh)
+        {
+            anonymized.area = 0.0f;
+            anonymized.emission = tg::vec3f(0, 0, 0);
+        }
+        h = cc::combine_hash(
+            h, cc::make_hash_of_bytes(cc::span<shaders::tracer::light_record const>(&anonymized, 1).as_bytes()));
+    }
+    for (auto const& e : emitters)
+    {
+        // The area CDF's bindless index is epoch-scoped, and says nothing a triangle's primitive means.
+        auto anonymized = e;
+        anonymized.cdf = 0;
+        h = cc::combine_hash(
+            h, cc::make_hash_of_bytes(cc::span<shaders::tracer::emitter_record const>(&anonymized, 1).as_bytes()));
+
+        // A reservoir's point is barycentrics, placed through the instance wherever it is read, so it is that sample only under this placement.
+        auto const& placed = instances[e.instance];
+        for (auto const* const row : {&placed.to_world_x, &placed.to_world_y, &placed.to_world_z})
+            h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<tg::vec4f const>(row, 1).as_bytes()));
+    }
+    return h;
 }
 
 sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)

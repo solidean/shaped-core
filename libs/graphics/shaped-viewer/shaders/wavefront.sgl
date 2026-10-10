@@ -45,10 +45,10 @@ use tracer
 @compute(64) fun restir_spatial(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
     tracer.wavefront_restir_spatial(id.x as uint)
 
-@compute(64) fun restir_di_temporal(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+@compute(64) fun restir_di_temporal(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
     tracer.wavefront_restir_di_temporal(id.x as uint)
 
-@compute(64) fun restir_di_spatial(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
+@compute(64) fun restir_di_spatial(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
     tracer.wavefront_restir_di_spatial(id.x as uint)
 
 @compute(1) fun args_round(@thread_id id: int3){tracer.traced, tracer.dispatch, tracer.wavefront_step}:

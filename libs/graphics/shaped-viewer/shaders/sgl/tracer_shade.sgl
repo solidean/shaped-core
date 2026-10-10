@@ -35,12 +35,10 @@ struct light_sample:
     distance: float
     /// 1 where the ray has to be tested; 0 where the sample contributes nothing, or comes from a light that casts no shadow
     tested: uint
-    /// 1 where the sample is a point on an emissive instance, which ReSTIR DI leaves to the path's own estimate
-    from_mesh: uint
 
 /// The sample that contributes nothing and tests nothing.
 fun no_light_sample() -> light_sample:
-    return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u, 0u)
+    return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u)
 
 /// Whether `s` arrives, tracing its shadow ray here and now where it has one, with `seed` for the cutouts it crosses.
 fun visible(s: light_sample, seed: uint){traced} -> bool:
@@ -77,50 +75,30 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
     let mut incoming = float3(0.0)
     let mut pdf = 0.0
     let mut delta = false
-    let mut from_mesh = 0u
 
     if l.path == scene.light_path_mesh:
         // A triangle of the instance by its area, then a uniform point on it: the density is the triangle's share over its world area.
         let e = traced.emitters[(index - traced.frame[0].emitter_offset) as int]
-        let inst = scene.instance(..traced.instances[e.instance as int])
-        let mut p_tri = 0.0
-        let u_block = pt.rand(mut rng)
-        let u_triangle = pt.rand(mut rng)
-        let primitive = emitter_pick(e, u_block, u_triangle, mut p_tri)
-        let u1 = pt.rand(mut rng)
-        let u2 = pt.rand(mut rng)
-        if p_tri <= 0.0 => return no_light_sample()
-
-        let indices = inst.indices as int
-        let corner = material.triangle_corners(inst, bindless.buffers[nonuniform indices], primitive)
-        let w0 = instance_point_to_world(inst, instance_position(inst, corner.x))
-        let w1 = instance_point_to_world(inst, instance_position(inst, corner.y))
-        let w2 = instance_point_to_world(inst, instance_position(inst, corner.z))
-        let cross_w = cross(w1 - w0, w2 - w0)
-        let twice_area = length(cross_w)
+        let inst = emitter_instance(e)
+        let drawn = draw_emitter_point(e, mut rng)
+        if drawn.p_tri <= 0.0 => return no_light_sample()
+        let tri = emitter_triangle(inst, drawn.primitive, drawn.bary)
+        let twice_area = length(tri.cross_w)
         if twice_area <= 0.0 => return no_light_sample()
 
-        // The square-root warp keeps the point uniform over the triangle; `bary` weighs corners 1 and 2, as a hit's barycentrics do.
-        let su = sqrt(u1)
-        let bary = float2(su * (1.0 - u2), su * u2)
-        let point = w0 * (1.0 - bary.x - bary.y) + w1 * bary.x + w2 * bary.y
-        let to_light = point - p
+        let to_light = tri.position - p
         let dist2 = dot(to_light, to_light)
         let dist = sqrt(dist2)
         if dist <= 0.0 => return no_light_sample()
         wi = to_light / dist
 
         // Two-sided, as a bounce ray reaching it counts it.
-        let cos_light = abs(dot(cross_w, wi)) / twice_area
+        let cos_light = abs(dot(tri.cross_w, wi)) / twice_area
         if cos_light <= 0.0 => return no_light_sample()
 
         shadow_dist = dist - 2e-3
-        // The emission at the point, read from data rather than from the record, whose `emission` is selection's estimate alone.
-        // A cutout emitter emits where it is there, as a bounce ray meets it with the probability of its opacity.
-        let ctx = material.make_context(inst, bindless.buffers[nonuniform indices], primitive, bary)
-        incoming = emitter_radiance(e, ctx) * instance_opacity(inst, ctx)
-        pdf = pt.mesh_light_pdf(pt.light_select_pdf(l, count), p_tri, 0.5 * twice_area, dist2, cos_light)
-        from_mesh = 1u
+        incoming = emitter_point_radiance(e, inst, drawn.primitive, drawn.bary)
+        pdf = pt.mesh_light_pdf(pt.light_select_pdf(l, count), drawn.p_tri, 0.5 * twice_area, dist2, cos_light)
     else if l.path == scene.light_path_area:
         // uniform sample on the oriented rectangle: center +/- along each world half-edge vector
         let s = pt.rand(mut rng) * 2.0 - 1.0
@@ -183,7 +161,7 @@ fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3,
 
     let scale = incoming * (wi_local.z / pdf) * w
     let tested = if scene.light_casts_shadows(l) => 1u else 0u
-    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, shadow_dist, tested, from_mesh)
+    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, shadow_dist, tested)
 
 /// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.
 ///
@@ -260,6 +238,52 @@ fun emitter_triangle_pdf(e: emitter_record, primitive: uint){bindless} -> float:
     let block_low = if block > 0u => emitter_cdf_at(cdf, e.triangle_count + block - 1u) else 0.0
     let low = if primitive > first => emitter_cdf_at(cdf, primitive - 1u) else 0.0
     return (emitter_cdf_at(cdf, e.triangle_count + block) - block_low) * (emitter_cdf_at(cdf, primitive) - low)
+
+/// A point drawn on emitter `e`: its triangle, its barycentrics, and the probability the triangle had, 0 where none was drawn.
+struct emitter_draw:
+    primitive: uint
+    /// weighs corners 1 and 2, as a hit's barycentrics do
+    bary: float2
+    p_tri: float
+
+/// A triangle of emitter `e` by its area and a uniform point on it, from four draws of `rng` whatever the outcome.
+/// Next-event estimation and ReSTIR DI's candidates both draw through it, so the two draw by one density.
+fun draw_emitter_point(e: emitter_record, rng: mut uint){bindless} -> emitter_draw:
+    let mut p_tri = 0.0
+    let u_block = pt.rand(mut rng)
+    let u_triangle = pt.rand(mut rng)
+    let primitive = emitter_pick(e, u_block, u_triangle, mut p_tri)
+    let u1 = pt.rand(mut rng)
+    let u2 = pt.rand(mut rng)
+    // The square-root warp keeps the point uniform over the triangle.
+    let su = sqrt(u1)
+    return emitter_draw(primitive, float2(su * (1.0 - u2), su * u2), p_tri)
+
+/// The instance emitter `e` is, which the helpers below take so a caller reading several of them fetches it once.
+fun emitter_instance(e: emitter_record){traced} -> scene.instance:
+    return scene.instance(..traced.instances[e.instance as int])
+
+/// Triangle `primitive` of an emitter's instance `inst` at `bary`, placed through the instance's current placement.
+struct emitter_triangle_point:
+    position: float3
+    /// the triangle's world edges from its first corner, crossed: its normal at twice its world area, 0 for a degenerate one
+    cross_w: float3
+
+fun emitter_triangle(inst: scene.instance, primitive: uint, bary: float2){bindless} -> emitter_triangle_point:
+    let indices = inst.indices as int
+    let corner = material.triangle_corners(inst, bindless.buffers[nonuniform indices], primitive)
+    let w0 = instance_point_to_world(inst, instance_position(inst, corner.x))
+    let w1 = instance_point_to_world(inst, instance_position(inst, corner.y))
+    let w2 = instance_point_to_world(inst, instance_position(inst, corner.z))
+    return emitter_triangle_point(w0 * (1.0 - bary.x - bary.y) + w1 * bary.x + w2 * bary.y, cross(w1 - w0, w2 - w0))
+
+/// The radiance emitter `e`, whose instance is `inst`, sends from triangle `primitive` at `bary`.
+/// Read from data rather than from its light record, whose `emission` is selection's estimate alone.
+/// A cutout emitter emits where it is there, as a bounce ray meets it with the probability of its opacity.
+fun emitter_point_radiance(e: emitter_record, inst: scene.instance, primitive: uint, bary: float2){traced, bindless} -> float3:
+    let indices = inst.indices as int
+    let ctx = material.make_context(inst, bindless.buffers[nonuniform indices], primitive, bary)
+    return emitter_radiance(e, ctx) * instance_opacity(inst, ctx)
 
 /// The solid-angle density next-event estimation draws the point a ray met on triangle `primitive` of `inst` with.
 /// `edge1` and `edge2` are the triangle's world edges from its first corner, `dir` the ray's unit direction and `t` the distance it went.
@@ -347,7 +371,7 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     let w = if last_bounce => 1.0 else pt.mis_weight(pt.env_pdf(), openpbr.bsdf_pdf(b, wo_local, wi_local))
 
     let scale = scene.background_radiance(background_sh(), wi) * (wi_local.z / pt.env_pdf()) * w
-    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, 1e4, 1u, 0u)
+    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, 1e4, 1u)
 
 // ---- Decals ---------------------------------------------------------------------------------------------------------
 

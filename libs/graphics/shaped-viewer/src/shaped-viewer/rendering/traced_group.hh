@@ -59,6 +59,9 @@ struct sv::wavefront_state
     /// Whether that frame also ran DI, so its DI reservoirs are a history too.
     bool restir_di_written = false;
 
+    /// The `wavefront_trace_desc::lights_key` that frame's DI reservoirs name lights under; a frame under another key reuses none of them.
+    u64 restir_di_lights = 0;
+
     /// The camera the records were last written under; a frame reuses them only if its `previous_camera` is this one.
     shaders::tracer::camera_record restir_camera = {};
 

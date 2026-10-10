@@ -9,6 +9,7 @@
 
 #include <clean-core/container/array.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
@@ -194,6 +195,25 @@ TEST("sv - a hit group compiles at every attribute frequency of the pbr type")
         sampled.textures.push_back({.name = "roughness", .source = {.texture = sv::texture_id(2), .uv_attribute = "uv"}});
         check_compiles(sv::resolve_material(materials, gold, sampled));
     }
+}
+
+// The wavefront's ReSTIR DI passes read a point on an emissive instance through its mesh and its material's tables, so they list the bindless group.
+// The wavefront's own kernels compile at run time on a device; these two are compiled here, where no device is needed.
+TEST("sv - the wavefront's ReSTIR DI passes compile, emissive instances' points included")
+{
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the wavefront's kernels");
+
+    auto const path = cc::string(SV_SGL_MODULE_DIR) + "/../wavefront.sgl";
+    auto adapter = cc::file_read_stream_adapter::open(path);
+    REQUIRE(adapter.has_value());
+    auto stream = adapter.value().stream();
+    auto const bytes = stream.read_all();
+    REQUIRE(bytes.has_value());
+    auto const source
+        = cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size()));
+    check_source_compiles(source, sg::shader_stage::compute, "restir_di_temporal");
+    check_source_compiles(source, sg::shader_stage::compute, "restir_di_spatial");
 }
 
 #endif // SLIB_HAS_DXC

@@ -430,8 +430,12 @@ importance-samples the continuation — so what is left is coverage of the model
   A power-weighted triangle CDF is the fix, under Later in [plans/emissive-triangles.md](plans/emissive-triangles.md).
   `sv::summarize_texels` weighs a block-compressed level by the mean of its decoded blocks, but no acquire supplies one yet: the texture manager uploads uncompressed levels alone.
   Bistro's FBX import decodes each texture to rgba8 mip 0, and the manager's later BC7 encoding keeps the summary of those source pixels, made inexact.
-  ReSTIR DI leaves emitters to the path until that plan's P3.
   A raster layer draws no emitter's light yet.
+- **An emitter that moves drops every ReSTIR DI history**, since the light table's key covers each emitter's placement ([plans/restir-gi.md](plans/restir-gi.md#di-track)).
+  The view drops it on its scene hash anyway, so this costs nothing until the view keeps a history across a scene change.
+  Keeping it then wants the proper shift across placements: the history's resampling weight formed with the placement its point was drawn under.
+  That needs last frame's instance transforms beside this frame's.
+  ReSTIR GI's records are the same case: the routine keeps them across a moved instance, and the view forgets them on its scene hash.
 - **A partly-covered surface is expressible now**, through the cutout any hits a generated hit group carries.
   Reaching it takes two things, and for a while it only had one.
   The hit group needs the any-hit attached, which `material_permutation::opacity` decides: a type names its

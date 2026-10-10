@@ -1,5 +1,6 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/common/time.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -687,6 +688,7 @@ ASYNC_INVOCABLE_TEST("sv - a layer at its target restarts for new guides and den
     // A declined frame is fine here: a hit group or a denoiser still compiling declines, and the loops below wait on state rather than on outcomes.
     auto const frame = [&](u64 index) -> cc::shared_async<cc::unit>
     {
+        (void)ctx.routines.tick();
         auto cmd = ctx.create_command_list();
         resources.advance_to(ctx.current_epoch());
         store.begin_frame(u64(ctx.current_epoch()));
@@ -714,11 +716,14 @@ ASYNC_INVOCABLE_TEST("sv - a layer at its target restarts for new guides and den
     (void)co_await ctx.routines.idle_completion();
 
     // Until the mean holds the target, which a stand-in still compiling restarts on the way.
+    // A cold shader compile runs as background work the loop has to drive, so the deadline is in seconds rather than frames.
     auto index = u64(1);
+    auto const start = cc::current_time_steady_secs();
     while (store.min_accumulated_samples(view_id) < 2)
     {
         (void)co_await frame(index++);
-        REQUIRE(index < 500);
+        REQUIRE(cc::current_time_steady_secs() - start < 240.0);
+        sv_test::drive_ambient_work();
     }
 
     // At the target nothing traces, so nothing counts.

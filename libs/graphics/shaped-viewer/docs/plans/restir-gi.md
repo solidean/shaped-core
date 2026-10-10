@@ -341,21 +341,21 @@ Per-pixel records, structure of arrays as the wavefront's state is:
 | sorted primary list | a slot index | 4 | one |
 
 That is ~256 bytes per traced pixel as planned; the DI reservoir adds ~40 more.
-As built, with the spatial pass's reservoirs beside the two halves, the records take 388 bytes, which the table counts.
+As built, with the spatial pass's reservoirs beside the two halves, the records take 400 bytes, which the table counts.
 Phase G1 has the layout.
 
 | traced extent | for | memory |
 |---|---|---|
-| 640x360 | 720p, upscaled 2x | ~89 MB |
-| 960x540 | 1080p, upscaled 2x | ~201 MB |
-| 1280x720 | 720p native | ~358 MB |
-| 1920x1080 | 1080p native | ~805 MB |
+| 640x360 | 720p, upscaled 2x | ~92 MB |
+| 960x540 | 1080p, upscaled 2x | ~207 MB |
+| 1280x720 | 720p native | ~369 MB |
+| 1920x1080 | 1080p native | ~829 MB |
 
 For comparison, the wavefront's own path state is about 500 MB at 1080p.
 
 **The records live on the accumulation slot, beside the path state, one set per extent.**
 `restir` sits beside `paths` and `scaled_restir` beside `scaled_paths`, in `impl::temporal_slot`, and the store's budget counts their bytes where it counts the paths'.
-A 720p view holding both carries ~450 MB; the full-size set is needed only while the young still frames feed the temporal member, and may be dropped after the fade.
+A 720p view holding both carries ~460 MB; the full-size set is needed only while the young still frames feed the temporal member, and may be dropped after the fade.
 
 **They reset on what the temporal member's history resets on**: the scene hash, kept on the `frame_samples` slot as `reset_hash`, and a camera cut.
 They do not reset on camera motion, which is what they exist to survive, nor on a change of extent ([The camera stops](#the-camera-stops)).
@@ -667,7 +667,7 @@ The other young still frames wait for the camera-stop fix.
 The view turns the history off after a scene change or a camera cut, on both of a slot's path states, the full-size and the scaled one.
 A visible point inside a medium, or on a material that collapses onto one wavelength, neither gives nor takes a history: its material decides, never a draw.
 A pixel whose path is left unfinished starts over at confidence 0, which costs reuse but no bias.
-The records are packed, GI's and DI's together: 388 bytes per traced pixel with both halves, ~800 MB at 1080p, from 520 bytes unpacked.
+The records are packed, GI's and DI's together: 400 bytes per traced pixel with both halves, ~830 MB at 1080p, from 532 bytes unpacked.
 What finalize rebuilds the mean from stays a float, `T_1` and the direct sums, so the mean does not move.
 So do `x_s`, every position and weight, and the light part the re-shade subtracts from the direct sum.
 Packing moves the reuse passes' targets and the re-shade, by a half's rounding.
@@ -757,8 +757,45 @@ Replacing both strategies by DI gave 0.210, but dropped the light only the BSDF 
 Folding the BSDF-sampled hit into DI's candidates, with its own source density, would win that back, and is open.
 Every kind of light at once — rects, a two-sided one, a coned point, a sun and a sky disc — over a glossy wall keeps the plain mean.
 
+**Emissive instances are lights of the same domain** ([emissive-triangles.md](emissive-triangles.md)'s P3).
+A candidate on one draws its triangle by the instance's area CDF and a uniform point on it, through `tracer.draw_emitter_point`, the draw next-event estimation makes.
+Its source density in area is the record's choice times the triangle's, over the triangle's world area.
+A reservoir keeps the light's index, the triangle as `di_reservoir::primitive`, and the barycentrics in `point`, never a world point.
+So every evaluation places the point through the instance's placement as it stands, and reads its emission through `tracer.emitter_point_radiance`, cutout opacity included.
+Its geometry term is a rect's, cos/d², with the cosine taken two-sided.
+The re-shade weighs it by the density `tracer.emitter_pdf` gives the bounce ray that meets the same point, so the two halves of the heuristic still sum to one.
+**A reservoir names a light by its index**, so DI's history is reused only under the light table it was kept under.
+That table is `wavefront_trace_desc::lights_key`, `pt_light_table::key` of the records, the emitters, and each emitter's placement in its instance record.
+An emitter landing or leaving changes it, and so does an analytic light that changes, or an emitter now naming another instance's row.
+**So does an emitter that moves, rigidly or not: a moved emitter drops every DI history**, in the routine as in the view.
+A history's point moves with its instance, but its resampling weight against the new frame's candidate would have to be formed with the placement it was drawn under.
+Formed with the current placement instead, even with the weight rescaled by the triangle's change of area, a lamp stretched every other frame read 4.5% low on its stretched frames.
+The proper shift across placements needs last frame's instance transforms, and is in [TODO.md](../TODO.md).
+What only says how candidates are drawn is left out: every record's selection, and an emitter record's area and emission, which are selection's estimates and follow the placement anyway.
+A camera that moved does not change the key, and neither does an instance that lights nothing.
+The view forgets every history when its scene hash changes too, which it checks where a temporal denoiser runs, the only frames ReSTIR runs on.
+
+Measured on the 22 lamps as emissive fans, 48 frames, under `--thorough` on dx12 hardware and on WARP: the mean 0.7190 with DI and 0.7184 plain.
+The per-frame error, without the 66 pixels whose camera ray met a lamp, is 0.750 plain, 0.584 with GI reuse, 0.500 with DI beside it, 1.17x.
+With those pixels it is 0.884, 0.750 and 0.681, 1.10x.
+A rect lamp is unseen by default, while the camera sees an emissive one, and at 32 pixels a lamp is a pixel or two that a jittered camera ray hits or misses.
+That is no estimator's noise, so the test leaves out every pixel whose camera ray met an emitter in any frame of its reference, as it leaves out the box's own lamp.
+The rects' 1.25x is measured with the lamps at 0.99 rather than 0.9, so the two gains are not compared directly.
+Rect and emissive lamps of three sizes and four brightnesses, alternating in one table: 0.6655 with DI, 0.6692 plain.
+A large emissive lamp seen in a glossy floor: 2.0805 with DI, 2.0919 plain.
+
+**The emissive lamps hang at 0.9, a tenth below the ceiling, rather than at the rects' 0.99.**
+A two-sided lamp a hundredth below the ceiling lights the ceiling beside it with an integrand near 1/h², close to singular.
+Its rare huge samples move a 32-pixel mean by several percent under any estimator, plain path tracing included.
+At 0.99 that read as a bias of DI at one bounce; with the samples capped, DI and plain agreed within 1%, so it was sampling noise.
+
 - Built: 22 small lamps, DI's error below the GI reuse it runs beside; every kind of light over a glossy wall, also without the spatial pass; one bounce on a matte box.
   Each holds the mean to the plain one's; ReSTIR DI has no `exact` variant, since its reuse traces no ray to skip.
+- Built and passing: the 22 lamps as emissive fans, the mean and, under `--thorough`, DI's error 1.15 times below GI reuse alone, without the pixels that see a lamp.
+- Built and passing: rect and emissive lamps alternating in one table, with the spatial pass and without, and at one bounce under `--thorough`.
+- Built and passing: a large emissive lamp seen in a glossy floor, where the bounce ray carries most of its light, so a re-shade weight of 1 would move the mean by far more than 3%.
+- Built: an emissive lamp stretched to twice its area every other frame, each placement's mean held to the same run's with GI reuse alone, since both carry GI's history across the move.
+  Its DI confidence stays at 1, since every frame drops the history; the 22 emissive lamps standing still hold theirs above 4.
 
 **Phase D2, later: unbiased ReSTIR DI in final renders.**
 
