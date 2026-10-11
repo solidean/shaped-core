@@ -195,7 +195,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   - **opacity micromaps**, behind an sg feature: per-micro-triangle opaque / transparent / unknown masks built with the BLAS.
     Most candidate hits on alpha-tested geometry then never reach an any-hit decision.
     DXR 1.2 and vulkan's `VK_EXT_opacity_micromap` expose them to ray queries too; metal's equivalent is unchecked.
-    The planned caller is shaped-viewer's wavefront tracer, which keeps cutout opacity as data so it can bake them — [wavefront.md](../../shaped-viewer/docs/wavefront.md).
+    The planned caller is a wavefront path tracer in shaped-viewer, which would keep cutout opacity as data so it can bake them.
 - **A group's implicit constant buffer is one upload each.**
   `create_binding_group` allocates a buffer for a generated group's plain members and fills it with one copy per group.
   On `ctx.transient` that copy is recorded inline into the `cmd` the call takes, and on `ctx.persistent` it goes through `ctx.upload`.
