@@ -1,5 +1,7 @@
 #include "fake_compiler.hh"
 
+#include <clean-core/common/utility.hh> // cc::exchange
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/filesystem/memory_filesystem.hh>
@@ -95,6 +97,38 @@ struct counting_filesystem final : slib::filesystem
 private:
     slib::memory_filesystem _inner;
     bool _can_watch;
+};
+
+/// A fake_compiler for spirv that runs one step of a test from inside a preprocess, once the source has been read.
+/// It holds a compile in flight while that step edits and reloads, with no thread to coordinate and nothing to wait for.
+class interrupting_compiler final : public slib::shader_compiler
+{
+public:
+    [[nodiscard]] slib::shader_language source_language() const override { return _inner.source_language(); }
+    [[nodiscard]] sg::shader_format target_format() const override { return _inner.target_format(); }
+
+    [[nodiscard]] cc::result<slib::preprocessed_source> preprocess(slib::shader_source_description const& desc,
+                                                                   slib::include_resolver resolve) const override
+    {
+        if (_step)
+        {
+            auto step = cc::exchange(_step, {});
+            step();
+        }
+        return _inner.preprocess(desc, resolve);
+    }
+
+    [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
+    {
+        return _inner.compile(desc);
+    }
+
+    /// `step` runs inside the next preprocess, and only that one.
+    void interrupt_next_preprocess(cc::unique_function<void()> step) { _step = cc::move(step); }
+
+private:
+    fake_compiler _inner = fake_compiler(slib::shader_language::hlsl, sg::shader_format::spirv);
+    mutable cc::unique_function<void()> _step = {};
 };
 
 /// reload_fixture over a counting_filesystem, with one shader already acquired so the watcher has
@@ -257,6 +291,34 @@ TEST("slib - each acquired format is reloaded", exclusive("slib-shader-library")
     auto const spirv_after = f.pkg.invert->acquire(sg::shader_format::spirv);
     CHECK(fake_compiler::source_of(*spirv_after->try_value()) == "v2");
     CHECK(spirv_after != spirv_before);
+}
+
+TEST("slib - an edit made during a format's first compile reaches that format", exclusive("slib-shader-library"))
+{
+    reload_fixture f;
+    auto compiler = std::make_unique<interrupting_compiler>();
+    auto* const spirv = compiler.get();
+    f.lib.add_compiler(cc::move(compiler));
+
+    CHECK(f.source() == "v1"); // dxil is acquired, so the file is watched
+    f.start();
+
+    // spirv's first compile has read v1 when the edit lands, and the reload it sets off finds no spirv shader to restage.
+    spirv->interrupt_next_preprocess(
+        [&]
+        {
+            f.fs->write("invert.hlsl", "v2");
+            f.lib.poll_hot_reload();
+        });
+    auto const first = f.pkg.invert->acquire(sg::shader_format::spirv);
+    REQUIRE(first->has_value());
+    CHECK(fake_compiler::source_of(*first->try_value()) == "v1");
+    CHECK(f.source() == "v2"); // the format the reload did see
+
+    // The watcher has marked the edit seen and will not fire again, so the overtaken compile staged its own recompile.
+    auto const next = f.pkg.invert->acquire(sg::shader_format::spirv);
+    REQUIRE(next->has_value());
+    CHECK(fake_compiler::source_of(*next->try_value()) == "v2");
 }
 
 TEST("slib - poll_hot_reload is a no-op before hot reload is started", exclusive("slib-shader-library"))

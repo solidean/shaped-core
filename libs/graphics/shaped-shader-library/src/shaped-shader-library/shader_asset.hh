@@ -89,6 +89,7 @@ public:
     /// Stages a recompile of every format and option set compiled so far.
     /// Called by the reload watcher; the next acquire() picks the results up.
     /// A pair nobody ever acquired is skipped — recompiling it would burn the compiler on a shader that is never used.
+    /// One whose first compile is still running is skipped too, and that compile's acquire stages the recompile once it installs.
     void stage_reload();
 
 private:
@@ -109,6 +110,8 @@ private:
         // Linear scan over a handful of entries — a shader is consumed by one or two backends, under a few option sets.
         cc::small_vector<format_entry, 2> formats;
         u64 generation = 0;
+        /// Bumped by every stage_reload as it picks what to recompile, so a first compile can tell that one passed it by.
+        u64 staged_reloads = 0;
         cc::optional<cc::string> last_error;
     };
 

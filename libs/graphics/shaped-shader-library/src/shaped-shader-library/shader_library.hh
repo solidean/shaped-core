@@ -113,7 +113,8 @@ public:
     /// The filesystem notifies where it can, and the watcher is otherwise asleep; where it cannot, it rescans on `interval_ms`.
     ///
     /// A reload is staged, never applied in place: the recompile runs on the watcher and the next acquire promotes it, so a reload costs a consumer only the pointer swap.
-    /// The first acquire of a format is the exception — it reads, preprocesses and dispatches the compile while holding the asset's lock.
+    /// The first acquire of a format and option set is the exception: it reads, preprocesses and dispatches the compile on its caller's thread, off the asset's lock.
+    /// A reload staged while that compile runs costs the same caller a second compile, staged like any other reload's.
     void start_hot_reload(reload_config config = {});
 
     /// Drives the watcher on the calling thread.

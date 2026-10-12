@@ -107,11 +107,13 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
         return s.formats.back();
     };
 
+    auto seen_reloads = u64(0);
     auto shader = _state.lock(
         [&](state& s) -> sg::async_compiled_shader
         {
             auto& entry = entry_of(s);
             promote_pending(*library, s, entry);
+            seen_reloads = s.staged_reloads;
             return entry.current;
         });
     if (shader != nullptr)
@@ -121,8 +123,11 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
     // A compile runs the front end and may wait on a persistent cache, which no other acquire of this asset should queue behind.
     auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
 
-    // Whoever installs first wins, and a compile that lost the race is dropped: both came from the same source.
-    auto recorded_dependencies = false;
+    // Whoever installs first wins, and a compile that lost the race is dropped.
+    // A reload staged while the winner compiled skipped this entry, which held no shader yet, so the winner stages what it would have.
+    // A reload staged after the install sees the entry itself.
+    auto installed = false;
+    auto overtaken = false;
     shader = _state.lock(
         [&](state& s) -> sg::async_compiled_shader
         {
@@ -131,14 +136,34 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
             {
                 entry.current = cc::move(outcome.shader);
                 entry.dependencies = cc::move(outcome.dependencies);
-                recorded_dependencies = true;
+                installed = true;
+                overtaken = s.staged_reloads != seen_reloads;
+                seen_reloads = s.staged_reloads;
             }
             return entry.current;
         });
 
+    if (overtaken)
+    {
+        // The file is read again, after the reload saw it change, and the result is staged for a later acquire to promote.
+        // Started rather than driven: this is a consumer's thread, which must not run other work where its caller may hold a lock.
+        auto again = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
+        cc::async_start(again.shader);
+        _state.lock(
+            [&](state& s)
+            {
+                // A reload staged since the install saw the entry, and stages a compile no older than this one.
+                if (s.staged_reloads != seen_reloads)
+                    return;
+                auto& entry = entry_of(s);
+                entry.pending = cc::move(again.shader);
+                entry.dependencies = cc::move(again.dependencies);
+            });
+    }
+
     // A first compile is what resolves the includes, so the dependency set only becomes real here, on a consumer's thread.
     // Off the lock: what this wakes turns straight around and reads us back.
-    if (recorded_dependencies)
+    if (installed)
         library->note_dependencies_changed();
 
     return shader;
@@ -237,8 +262,10 @@ void slib::shader_asset::stage_reload()
     };
     cc::small_vector<acquired, 2> pairs;
     _state.lock(
-        [&](state const& s)
+        [&](state& s)
         {
+            // A first compile in flight is skipped below, and this is how its acquire learns it was.
+            ++s.staged_reloads;
             for (auto const& entry : s.formats)
                 if (entry.current != nullptr)
                     pairs.push_back({.format = entry.format, .options = entry.options});
