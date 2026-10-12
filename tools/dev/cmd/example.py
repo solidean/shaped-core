@@ -164,10 +164,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     # The exact name alone, which reaches an example outside the swept bucket.
     # With --examples it would be a substring sweep, so `sponza` would also run `sponza-evening` and every other name containing it.
-    # Without it the run counts as a test run, whose watchdog would end an example sitting idle in its window, so it is turned off.
     # Mirrored, because watching the example run is the entire point of the command.
     result = dev.run_step(
-        [*launcher, str(artifact), example.name, "--watchdog", "0", *program_args],
+        [*launcher, str(artifact), example.name, *program_args],
         step_type="example", name=example.target,
         build_dir=preset.build_dir, cwd=_working_directory(ctx, example), env=env,
         timeout=args.timeout if args.timeout else None,
@@ -304,7 +303,7 @@ def _capture_one(ctx: Context, preset, example, artifact: Path, capture, args: a
     directory = image.parent
 
     result = dev.run_step(
-        [str(artifact), example.name, "--watchdog", "0"],
+        [str(artifact), example.name],
         step_type="example", name=f"{example.target}-capture",
         build_dir=preset.build_dir, cwd=_working_directory(ctx, example),
         env={**os.environ, **_capture_environment(capture, image, args)},

@@ -105,8 +105,8 @@ An epoch advance does **not** deliver a download — it drains the GPU, and the 
 **vulkan** creates devices and resources, but its recording paths are stubs.
 Only `raytracing.is_supported()` and `query.is_supported()` answer honestly, returning false; every other recording call is a `CC_UNREACHABLE` that aborts rather than a no-op.
 
-One gap in the dx12 path is worth knowing before you rely on it:
-`cmd.copy` is buffer-only; texture copies land under the same `<resource>_<bytes|data>_region` naming.
+One gap is worth knowing before you rely on it:
+`cmd.copy` copies buffer regions, and a buffer into a texture region (`buffer_to_texture`); texture→buffer and texture→texture copies do not exist yet.
 
 ## See also
 

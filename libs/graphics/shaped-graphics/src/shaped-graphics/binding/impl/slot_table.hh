@@ -135,7 +135,7 @@ private:
         if (e != _swept)
         {
             _swept = e;
-            _release_deferred(e, on_reclaimed);
+            _release_deferred(on_reclaimed);
         }
 
         if (auto const* slot = _by_key.get_ptr(key))
@@ -184,16 +184,14 @@ private:
                                   "working set, plus what is pinned, exceeds the configured capacity)");
     }
 
-    /// Frees the slots `release` deferred, now that `e` is a later epoch; one acquired again since is kept.
-    void _release_deferred(epoch e, auto&& on_reclaimed)
+    /// Frees the slots `release` deferred, now that a later epoch has begun; one pinned since is left to `unpin`.
+    /// It runs before the acquire that started the epoch stamps anything, so a key acquired again in the epoch it was
+    /// released in is freed too, and minted afresh by its next acquire.
+    void _release_deferred(auto&& on_reclaimed)
     {
         for (auto const& key : _deferred)
-            if (auto const* slot = _by_key.get_ptr(key); slot != nullptr)
-            {
-                auto const& entry = _entries[*slot];
-                if (!entry.pinned && entry.last_acquired != e)
-                    _free_slot(*slot, on_reclaimed);
-            }
+            if (auto const* slot = _by_key.get_ptr(key); slot != nullptr && !_entries[*slot].pinned)
+                _free_slot(*slot, on_reclaimed);
         _deferred.clear();
     }
 

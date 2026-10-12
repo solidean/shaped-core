@@ -53,6 +53,21 @@ void assert_texture_region_in_bounds(raw_texture_handle const& texture,
                "texture copy region offset ({}, {}, {}) + size ({}, {}, {}) exceeds subresource extent ({}, {}, {})",
                region.offset[0], region.offset[1], region.offset[2], region.size[0], region.size[1], region.size[2],
                full.size[0], full.size[1], full.size[2]);
+
+    // A block-compressed copy moves whole blocks, so the box is block-aligned except where it runs to the subresource's
+    // edge, which a mip whose extent is not a multiple of the block may end inside.
+    auto const block = format_block_extent(texture->format());
+    if (block > 1)
+    {
+        CC_ASSERTF(region.offset[0] % block == 0 && region.offset[1] % block == 0,
+                   "a block-compressed texture copy's offset ({}, {}) must be a multiple of the {}-texel block",
+                   region.offset[0], region.offset[1], block);
+        CC_ASSERTF((region.size[0] % block == 0 || region.offset[0] + region.size[0] == full.size[0])
+                       && (region.size[1] % block == 0 || region.offset[1] + region.size[1] == full.size[1]),
+                   "a block-compressed texture copy's size ({}, {}) must be a multiple of the {}-texel block, except "
+                   "where it runs to the subresource's edge",
+                   region.size[0], region.size[1], block);
+    }
 }
 
 isize packed_region_bytes(raw_texture_handle const& texture, texture_region const& region)

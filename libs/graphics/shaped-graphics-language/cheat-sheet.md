@@ -465,8 +465,10 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
                                          // a used module's option is set as `common.taps`, apart from the program's `taps` (CHK-354)
 if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
 fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
-@unroll                                  // on a `for`: the body once per index, the index a literal in each copy, and no
-for i in 0 ..< taps: ...                 // loop or hint in any text; the bounds are int constants, at most 256 (CHK-389)
+@unroll                                  // on a `for`: the body once per index, the index a literal in each copy (CHK-389)
+for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
+                                         // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
+                                         // a rule judging a constant judges each index: `1u << (i as uint)` past 31 is refused
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by

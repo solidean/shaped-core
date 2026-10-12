@@ -88,14 +88,19 @@ struct flattener
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
     cc::vector<origin> discards;
-    /// An unrolled `for` the tree could not unroll, which its caller reports once (CHK-389).
-    struct refused_unroll
+    /// An unrolled `for` the tree did not unroll, which its caller reports once (CHK-389): one whose bound is no
+    /// constant, an error, and one that would write too many copies and is a loop instead, a warning.
+    struct unroll_report
     {
+        diagnostic_kind kind = diagnostic_kind::invalid_constant_argument;
         i32 file = 0;
         source_span where;
         cc::string detail;
     };
-    cc::vector<refused_unroll> refused_unrolls;
+    cc::vector<unroll_report> unroll_reports;
+    /// How many times the statement being written is written: the product of the copies of every unrolled `for`
+    /// around it, which bounds what a nest of them writes as a whole (CHK-389).
+    i64 unrolled_copies = 1;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
     /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
@@ -329,19 +334,12 @@ struct flattener
         return local_id(entry.locals.size() - 1);
     }
 
+    /// The names of `entry.labels`, which are unique among the labels alone.
+    name_mint label_names;
+
     label_id add_label(cc::string_view desired)
     {
-        auto name = cc::string(desired);
-        auto const is_taken = [&]
-        {
-            for (auto const& l : entry.labels)
-                if (l.name == name)
-                    return true;
-            return false;
-        };
-        for (auto i = 1; is_taken(); ++i)
-            name = cc::format("{}_{}", desired, i);
-        entry.labels.push_back({.name = cc::move(name)});
+        entry.labels.push_back({.name = label_names.mint(desired)});
         return label_id(entry.labels.size() - 1);
     }
 
@@ -2683,8 +2681,9 @@ struct flattener
         return fail();
     }
 
-    /// The most copies of its body an unrolled `for` writes (CHK-389).
-    static constexpr i32 k_max_unrolled = 256;
+    /// The most copies of its body an unrolled `for` writes, each counted once per copy of the unrolled loops around it
+    /// (CHK-389).
+    static constexpr i64 k_max_unrolled = 256;
 
     /// The value of constant `bound`, an int, where it is one; nothing for anything else.
     [[nodiscard]] cc::optional<i32> constant_int(flat_expr_id bound) const
@@ -2700,6 +2699,7 @@ struct flattener
     /// CHK-389: `@unroll for i in a ..< b`, as one block holding a block per index, each a copy of the body in which
     /// `i` is that index's literal.
     /// A `break` leaves the outer block and a `continue` the copy it stands in, which is what they do in the loop.
+    /// A range whose copies would pass the limit is the loop it would be without the attribute, and a warning says so.
     void flatten_unrolled_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end)
     {
         if (!is_valid(first) || !is_valid(end))
@@ -2713,26 +2713,33 @@ struct flattener
         auto const range_where = c.span_of(range_file, loop.iterable);
         if (!low.has_value() || !high.has_value())
         {
-            refused_unrolls.push_back({.file = range_file,
-                                       .where = range_where,
-                                       .detail = "an unrolled for runs over a constant range: both bounds are int "
-                                                 "constants once the function is inlined, such as `0 ..< taps` with "
-                                                 "`taps` a const"});
+            unroll_reports.push_back({.file = range_file,
+                                      .where = range_where,
+                                      .detail = "an unrolled for runs over a constant range: both bounds are int "
+                                                "constants once the function is inlined, such as `0 ..< taps` with "
+                                                "`taps` a const"});
             is_failed = true;
             meets_error = true;
             return;
         }
-        auto const count = cc::max(0, high.value() - low.value());
-        if (count > k_max_unrolled)
+        // in 64 bits, since a range may hold more values than an int counts
+        auto const count = cc::max(i64(0), i64(high.value()) - i64(low.value()));
+        // the copies around it are at most k_max_unrolled, so this cannot overflow either
+        auto const copies = count * unrolled_copies;
+        if (copies > k_max_unrolled)
         {
-            refused_unrolls.push_back({.file = range_file,
-                                       .where = range_where,
-                                       .detail = cc::format("an unrolled for writes its body at most {} times, and "
-                                                            "this range holds {}",
-                                                            k_max_unrolled, count)});
-            is_failed = true;
-            meets_error = true;
-            return;
+            auto const detail
+                = unrolled_copies == 1
+                    ? cc::format("an unrolled for writes its body at most {} times, and this range holds {}, so it is "
+                                 "written as a loop",
+                                 k_max_unrolled, count)
+                    : cc::format("an unrolled for writes its body at most {} times, counted once per copy of the "
+                                 "unrolled loops around it, and this range of {} inside {} copies would write {}, so "
+                                 "it is written as a loop",
+                                 k_max_unrolled, count, unrolled_copies, copies);
+            unroll_reports.push_back(
+                {.kind = diagnostic_kind::unroll_too_long, .file = range_file, .where = range_where, .detail = detail});
+            return flatten_looped_for(from, id, loop, first, end);
         }
 
         auto const type = entry.at(first).type;
@@ -2748,10 +2755,13 @@ struct flattener
         auto const label = add_label("unrolled");
         auto const outer = cc::move(block);
         block = {};
-        for (auto i = 0; i < count; ++i)
+        auto const copies_around = unrolled_copies;
+        unrolled_copies = copies;
+        for (auto i = i64(0); i < count; ++i)
         {
             if (n != nullptr)
-                current()->bound[slot].literal = add_expr(type, index_from, flat_int_literal{.value = low.value() + i});
+                current()->bound[slot].literal
+                    = add_expr(type, index_from, flat_int_literal{.value = i32(i64(low.value()) + i)});
             auto const copy = add_label("unrolled_index");
             current()->loops.push_back({.loop = label, .continue_block = copy});
             auto const body = flatten_body(loop.body);
@@ -2759,23 +2769,15 @@ struct flattener
             current()->bound.resize_down_to(bound_before_body);
             add_stmt(from, flat_block{.label = copy, .body = body});
         }
-        auto const copies = add_list(block);
+        unrolled_copies = copies_around;
+        auto const written = add_list(block);
         block = cc::move(outer);
-        add_stmt(from, flat_block{.label = label, .body = copies});
+        add_stmt(from, flat_block{.label = label, .body = written});
     }
 
-    void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
+    /// `for i in a ..< b` as a loop of the flat tree, whose bounds `first` and `end` are flattened already.
+    void flatten_looped_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end)
     {
-        auto const* const r = ast::is_valid(loop.iterable) ? ast().at(loop.iterable).node.try_as<ast::range>() : nullptr;
-        if (r == nullptr)
-        {
-            is_failed = true;
-            return;
-        }
-        auto const first = flatten_expr(r->first);
-        auto const end = flatten_expr(r->last);
-        if (c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr)
-            return flatten_unrolled_for(from, id, loop, first, end);
         auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
         auto const int_type = is_valid(first) ? entry.at(first).type : type_id::none;
         auto const index
@@ -2792,6 +2794,21 @@ struct flattener
         if (is_test_loop)
             test_loops.remove_back();
         add_stmt(from, flat_for{.label = label, .index = index, .first = first, .end = end, .body = body});
+    }
+
+    void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
+    {
+        auto const* const r = ast::is_valid(loop.iterable) ? ast().at(loop.iterable).node.try_as<ast::range>() : nullptr;
+        if (r == nullptr)
+        {
+            is_failed = true;
+            return;
+        }
+        auto const first = flatten_expr(r->first);
+        auto const end = flatten_expr(r->last);
+        if (c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr)
+            return flatten_unrolled_for(from, id, loop, first, end);
+        flatten_looped_for(from, id, loop, first, end);
     }
 
     void flatten_stmt(ast::stmt_id id)
@@ -2991,8 +3008,8 @@ void checker::flatten_test(i32 index)
         report_reached(v, ": a run is one invocation, and has no subgroup");
 
     // CHK-389: once, however many trees inline the function the loop stands in
-    for (auto const& u : f.refused_unrolls)
-        report_once(diagnostic_kind::invalid_constant_argument, u.file, u.where, u.detail);
+    for (auto const& u : f.unroll_reports)
+        report_once(u.kind, u.file, u.where, u.detail);
 
     // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
     // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
@@ -3209,8 +3226,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     out.functions[s.info].features |= used;
     f.entry.features |= used;
     // CHK-389: once, however many trees inline the function the loop stands in
-    for (auto const& u : f.refused_unrolls)
-        report_once(diagnostic_kind::invalid_constant_argument, u.file, u.where, u.detail);
+    for (auto const& u : f.unroll_reports)
+        report_once(u.kind, u.file, u.where, u.detail);
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),

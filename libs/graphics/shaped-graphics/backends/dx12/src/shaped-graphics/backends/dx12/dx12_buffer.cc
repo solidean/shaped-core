@@ -79,12 +79,12 @@ void dx12_buffer::finalize_slot(sg::command_list_slot slot) const
     _access.lock(
         [&](access_tracking& t)
         {
-            // Only ever called for a buffer this list touched, since declare_access set the slot active — see the command list's submit path.
+            // Only ever called for a buffer this list touched, since track_access set the slot active — see the command list's submit path.
             // A buffer has no layout and no between-lists state, so finalize just frees the slot; its state is discarded, not carried.
             int const i = int(slot);
             CC_ASSERT(i < t.slots.size() && t.slots[i].active, "finalize of a buffer this list never touched");
             CC_ASSERT(!t.slots[i].state.has_pending_declares(), "a declared access was never flushed by a GPU op");
-            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + state
+            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + written + state
         });
 }
 
@@ -96,7 +96,7 @@ void dx12_buffer::discard_slot(sg::command_list_slot slot) const
             // Like finalize, only ever called for a buffer this list touched (its slot is active).
             int const i = int(slot);
             CC_ASSERT(i < t.slots.size() && t.slots[i].active, "discard of a buffer this list never touched");
-            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + state
+            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + written + state
         });
 }
 

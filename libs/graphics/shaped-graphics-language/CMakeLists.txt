@@ -429,6 +429,7 @@ if(SC_BUILD_TESTS)
 
         tests/driver/classify-test.cc
         tests/driver/compile-to-text-test.cc
+        tests/driver/compile-profile-test.cc
         tests/driver/options-test.cc
         tests/driver/describe-test.cc
         tests/driver/source-differential-test.cc
