@@ -130,6 +130,7 @@ The shape the seam is built for, and what is still `[planned]`:
   `SC_SG_COLD=shaders` turns the persistent tier off as it does DXC's.
   It is off on wasm and under `SC_THREADS=OFF` as well: a lookup waits for the store's own thread, which a page must not do and an unthreaded build does not have.
   A failed preprocess is never stored.
+  **A stored result keeps SGL's warnings**, and the edge logs them under `slib` each time it hands a result back, so a hit is not silent where the miss warned.
   `sgl::describe`, which a hit group and a pipeline read first, has an in-memory memo beside it.
   It carries [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the tier-1 compute and raster fixtures.
   A package generates host types from it: groups, `@inline` constants, vertex inputs, render targets, and raster and ray-tracing pipelines.

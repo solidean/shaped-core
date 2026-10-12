@@ -41,6 +41,9 @@ namespace
     // What SGL leaves empty for this source, so the byte form is held to every field.
     result.entry_point = "main_vs_renamed";
     result.used_modules.push_back(cc::string("view/frame.sgl"));
+    result.warnings.push_back(cc::string("cube.sgl:3:5: warning: no-effect: a statement that does nothing"));
+    result.warnings.push_back(cc::string("view/frame.sgl:7:14: warning: unroll-too-long: 257 values\n"
+                                         "view/frame.sgl:6:5: note: the loop"));
     result.layouts.push_back({.global = "constants", .stride = 0, .fields = {{.name = "view_projection", .offset = 0}}});
     result.declared_bindings.back().reflected_name = "sgl_constants";
     auto& stated = result.stated.value();
@@ -69,6 +72,11 @@ namespace
         return false;
     for (auto i = isize(0); i < a.used_modules.size(); ++i)
         if (a.used_modules[i] != b.used_modules[i])
+            return false;
+    if (a.warnings.size() != b.warnings.size())
+        return false;
+    for (auto i = isize(0); i < a.warnings.size(); ++i)
+        if (a.warnings[i] != b.warnings[i])
             return false;
     if (a.layouts.size() != b.layouts.size())
         return false;

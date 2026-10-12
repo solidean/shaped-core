@@ -695,7 +695,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   A 16-bit value packs at 2 bytes, crosses no stage edge and sits in no `@inline` binding (CHK-387), and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
 - **A warning never fails `compile_to_text`, and only a text carries one.** A failed compile's error holds its errors alone.
-  `sgl emit` prints them to stderr beside the text.
+  slib's SGL edge logs each warning under `slib`, and `sgl emit` prints them to stderr beside the text.
 - **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.
   `prelude/core.sgl` is the hand-written half, embedded at CONFIGURE time: editing it re-runs CMake, and a test pins the embedded text to the file.
 - **`*.sgl` is `eol=lf` in `.gitattributes`.** The generated text is compared byte for byte, and a diagnostic is a byte offset.

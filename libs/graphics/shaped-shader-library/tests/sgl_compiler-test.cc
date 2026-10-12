@@ -1021,6 +1021,32 @@ TEST("slib sgl compiler - a broken source fails with the place, the kind and the
     }
 }
 
+TEST("slib sgl compiler - a warning is logged under slib each time a compile is handed it, from the cache too",
+     exclusive("slib-shader-library"))
+{
+    // the second compile is the in-memory tier's answer, which must not swallow what the first one logged
+    nx::expect_warning("SGL warns of 'unrolled.sgl' main: unrolled.sgl:7:14: warning: unroll-too-long: ",
+                       nx::exactly(2, "slib"));
+
+    slib::shader_library lib;
+    lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler(), {.persistent_cache = nullptr}));
+    constexpr auto source = cc::string_view("binding work:\n"
+                                            "    values: mut buffer[int]\n"
+                                            "\n"
+                                            "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                                            "    let mut t = 0\n"
+                                            "    @unroll\n"
+                                            "    for i in 0 ..< 257:\n"
+                                            "        t += i\n"
+                                            "    work.values[id.x] = t\n");
+    auto const options = slib::compile_source_options{.language = slib::shader_language::sgl, .label = "unrolled.sgl"};
+    for (auto i = 0; i < 2; ++i)
+    {
+        auto const node = lib.compile_source(source, sg::shader_stage::compute, "main", sg::shader_format::wgsl, options);
+        CHECK(value_of(node).entry_point == "main");
+    }
+}
+
 TEST("slib sgl compiler - an entry point asked for as another stage is an error", exclusive("slib-shader-library"))
 {
     slib::shader_library lib;
