@@ -41,6 +41,7 @@ inline constexpr double k_sgl_lookup_patience_secs = 1.0;
 /// `persistent` is the persistent tier, and nullptr leaves it out.
 /// It must answer on its own thread, since a lookup only waits: one created `unthreaded` answers nothing meanwhile.
 /// A lookup waits `patience_secs` for it before computing instead, and nullopt waits for the answer however long it takes.
+/// So nullopt with an `unthreaded` store never returns.
 [[nodiscard]] cc::result<preprocessed_source> cached_sgl_preprocess(
     cc::hash128 key,
     cc::function_ref<cc::result<preprocessed_source>()> compute,

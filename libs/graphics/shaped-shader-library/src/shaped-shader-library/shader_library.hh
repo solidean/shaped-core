@@ -176,8 +176,8 @@ public:
     /// So a generated permutation does not hot-reload on an include edit — see [shaped-viewer's TODO](../../../shaped-viewer/docs/TODO.md).
     ///
     /// **slib adds no cache of its own at this seam** — which is not to say the path is uncached.
-    /// The compile goes through the same `ssc::dxc::shader_cache` every other compile does, in-memory tier and lazily-opened persistent tier both.
-    /// So a generated permutation already survives across runs.
+    /// A compiler that keeps its own cache still applies it here: DXC's and Metal's `shader_cache`, in-memory tier and
+    /// lazily-opened persistent tier both, so a generated permutation built by either survives across runs.
     /// An SGL source's front end is cached as well, by the SGL edge's preprocess, which every SGL compile goes through.
     /// What slib does not add is a cache of the compiled shader keyed on the source text.
     /// A caller generating a source already has a better key for it — a material permutation, say — so the dedup belongs there.
