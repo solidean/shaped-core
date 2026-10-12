@@ -134,6 +134,17 @@ enum class sgl::builtins::judged_operand : sgl::u8
     divisor,
 };
 
+/// The argument a call writes through, a local of the caller, whose value then differs between invocations as the call
+/// says (CHK-283).
+enum class sgl::builtins::written_argument : sgl::u8
+{
+    none,
+    /// The first, a ray query, which a trace or a step advances: it holds what its arguments and the control flow made.
+    first,
+    /// The one past its signature (`takes_element`), a payload or a callable's parameter: other shaders write it back.
+    element,
+};
+
 /// How every target writes a call of one builtin function.
 struct sgl::builtins::spelling
 {
@@ -246,6 +257,11 @@ struct sgl::builtins::function_record
     bool is_quad_operation = false;
     /// `workgroup_uniform_load`: a barrier whose argument is workgroup memory and whose result is uniform (CHK-374).
     bool is_uniform_load = false;
+    /// Gives what differs between the invocations of a stage whatever its arguments are: a ray-tracing stage's launch
+    /// index, its ray and its hit (CHK-283).
+    /// The size of the launch is the same in all of them, and gives no such thing.
+    bool differs_between_invocations = false;
+    written_argument writes_through = written_argument::none;
     /// The second argument is a lane, a mask or a delta, a constant `int` from 0 to below this (CHK-378); 0 for a call
     /// without one.
     i32 constant_lane_below = 0;

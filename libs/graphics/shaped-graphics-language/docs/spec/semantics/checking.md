@@ -905,8 +905,13 @@ Its rules start from WGSL's, but refusing all that Tint refuses is no goal; wher
   A note names the branch or the exit that made the flow so, and what the branch tested.
   `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy` and `fwidth` take derivatives.
   A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
-* **CHK-283** A value is **non-uniform** where it comes from a stage input other than `@workgroup_id`, from the stage struct, from a `mut` buffer or a `mut` image,
+* **CHK-283** A value is **non-uniform** where it comes from what the stage is handed, from a `mut` buffer or a `mut` image,
   from a non-uniform value, or from a local set anywhere in non-uniform control flow.
+  What a stage is handed is each of its parameters but `@workgroup_id` and `@launch_size`, which are the same in every invocation.
+  Among them are the stage struct, every other stage input, a tessellation stage's factors, and a ray-tracing stage's payload, ray, hit, candidate and box (CHK-326).
+  A trace's payload and a callable's parameter are non-uniform once the call returns, since the shaders it ran read what their own invocations are handed.
+  A ray query, raytracing.sgl's `trace` in any stage, finds what its ray and the decisions on its candidates make of it.
+  So one ray that every invocation traces and decides alike hits the same instance in each of them, and any other hit is non-uniform.
   A `mut` buffer or image is so whether it is named directly or as an element of a binding array.
   Every read of workgroup memory is non-uniform, whatever was stored to it, but one through `workgroup_uniform_load` (CHK-374).
   So is the result of every atomic and of every subgroup operation (CHK-377).
@@ -932,6 +937,26 @@ Its rules start from WGSL's, but refusing all that Tint refuses is no goal; wher
         spd.finished = work.counter[0].add(1u)
     if workgroup_uniform_load(spd.finished) == work.groups - 1u:
         workgroup_barrier()        // uniform control flow: the load's result is uniform
+```
+
+A closest hit indexes by the instance it hit, which differs between the invocations of one wave, so the index is marked (CHK-283, CHK-300):
+
+```sgl
+require raytracing_pipeline
+require binding_arrays
+
+binding scene:
+    textures: texture_2d[float4][64]
+    linear: sampler
+    materials: buffer[int]
+
+struct radiance:
+    color: float3
+
+@closest_hit fun shade(h: triangle_hit, p: mut radiance){scene}:
+    let t = scene.materials[h.instance_id]
+    let uv = float2(h.barycentrics.y, h.barycentrics.z)
+    p.color = scene.textures[nonuniform t].sample(uv, scene.linear, level = 0.0).xyz   // `[t]` is non-uniform-index
 ```
 
 ## Subgroups

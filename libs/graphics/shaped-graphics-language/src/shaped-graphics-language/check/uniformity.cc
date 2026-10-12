@@ -27,6 +27,9 @@ struct divergence
     /// Of a value, what it is said of: "comes from the stage input id".
     /// Of the control flow, a sentence of its own: "this branch tests a value that comes from the stage input id".
     cc::string why;
+    /// Of the control flow, the value its branch tested, which a note names of a local set under a branch of the prelude.
+    origin tested_where;
+    cc::string tested_why;
 
     [[nodiscard]] static divergence none() { return {}; }
 };
@@ -48,6 +51,8 @@ struct uniformity_pass
 {
     checked_module const& m;
     flat_entry_point const& e;
+    /// The files below it are the prelude's, which a note names only until the program reads what came from there.
+    i32 prelude_count = 0;
     /// Parallel to `e.locals`; a local that is assigned anywhere under divergence is divergent everywhere.
     cc::vector<divergence> locals;
     cc::vector<exit_scope> scopes;
@@ -94,10 +99,7 @@ struct uniformity_pass
     /// A local takes `stored`, in control flow `flow`.
     void settle_local(local_id id, divergence const& stored, divergence const& flow)
     {
-        auto const d = stored.is ? stored
-                     : flow.is
-                         ? divergence{.is = true, .where = flow.where, .why = "is set where the control flow differs"}
-                         : divergence::none();
+        auto const d = stored.is ? stored : set_under(flow);
         auto& slot = locals[index_of(id)];
         if (d.is && !slot.is)
         {
@@ -106,9 +108,31 @@ struct uniformity_pass
         }
     }
 
+    /// What a value set in control flow `flow` is said to come from.
+    /// A branch of the prelude is no line of the program, so a note names what that branch tested instead.
+    [[nodiscard]] divergence set_under(divergence const& flow) const
+    {
+        if (!flow.is)
+            return {};
+        if (flow.where.file < prelude_count && !flow.tested_why.empty())
+            return {.is = true, .where = flow.tested_where, .why = flow.tested_why};
+        return {.is = true, .where = flow.where, .why = cc::string("is set where the control flow differs")};
+    }
+
     [[nodiscard]] builtins::function_record const* record_of(flat_call const& c) const
     {
         return m.builtin_function(c.intrinsic);
+    }
+
+    /// Whether a note names the read `read` of a value that differs since `where`.
+    /// A stage input differs from the start, and is first seen where it is read.
+    /// What the prelude made differ, such as a ray-tracing stage's hit, is first seen where the program reads it.
+    [[nodiscard]] bool is_first_seen_at(origin const& where, origin const& read) const
+    {
+        auto const names_node = [](origin const& o) { return ast::is_valid(o.expr) || ast::is_valid(o.stmt); };
+        if (!names_node(where))
+            return true;
+        return where.file < prelude_count && names_node(read) && read.file >= prelude_count;
     }
 
     /// The divergence of a value, judging each call it makes against `flow`.
@@ -122,8 +146,7 @@ struct uniformity_pass
             [&](flat_local_ref const& l)
             {
                 result = locals[index_of(l.local)];
-                // a stage input differs from the start, and is first seen where it is read
-                if (result.is && !ast::is_valid(result.where.expr) && !ast::is_valid(result.where.stmt))
+                if (result.is && is_first_seen_at(result.where, x.from))
                     result.where = x.from;
             },
             [&](flat_binding_member const& b)
@@ -216,25 +239,55 @@ struct uniformity_pass
         // what another thread did to it first is what an atomic gives
         if (record->is_atomic && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
-        // an image or bytes the shader also stores to may hold what another invocation just stored, whether it is
-        // named directly or as an element of a binding array
-        if (arguments.empty() || result.is)
-            return result;
-        auto const& t = m.at(e.at(arguments[0]).type);
+        // CHK-283: a ray-tracing stage's launch index, its ray and its hit are each invocation's own
+        if (record->differs_between_invocations && !result.is)
+            result = {.is = true, .where = e.at(id).from, .why = cc::string("comes from what the stage is handed")};
+        if (!arguments.empty() && !result.is)
+            result = stored_to(id, arguments[0]);
+        write_through(id, *record, arguments, result, flow);
+        return result;
+    }
+
+    /// What a load from `object` gives where the shader also stores to it: what another invocation may just have
+    /// stored, whether it is named directly or as an element of a binding array.
+    [[nodiscard]] divergence stored_to(flat_expr_id id, flat_expr_id object) const
+    {
+        auto const& t = m.at(e.at(object).type);
         auto const is_stored_to = (t.kind == type_kind::image && t.access == access_mode::read_write)
                                || (t.kind == type_kind::bytes && t.is_mut);
         if (!is_stored_to)
-            return result;
-        auto named = arguments[0];
+            return {};
+        auto named = object;
         if (auto const* const element = e.at(named).node.try_as<flat_element>())
             named = element->object;
-        if (auto const* const member = e.at(named).node.try_as<flat_binding_member>())
-            result
-                = {.is = true,
-                   .where = e.at(id).from,
-                   .why = cc::format("is loaded from {}.{}, which the shader also stores to", m.at(member->binding).name,
-                                     m.at(m.bindings[m.at(member->binding).info].members)[member->member].name)};
-        return result;
+        auto const* const member = e.at(named).node.try_as<flat_binding_member>();
+        if (member == nullptr)
+            return {};
+        return {.is = true,
+                .where = e.at(id).from,
+                .why = cc::format("is loaded from {}.{}, which the shader also stores to", m.at(member->binding).name,
+                                  m.at(m.bindings[m.at(member->binding).info].members)[member->member].name)};
+    }
+
+    /// The local a call writes through takes what the call gives, in the control flow it stands in (CHK-283).
+    void write_through(flat_expr_id id,
+                       builtins::function_record const& record,
+                       tree_view<flat_expr_id> const& arguments,
+                       divergence const& given,
+                       divergence const& flow)
+    {
+        if (record.writes_through == builtins::written_argument::none || arguments.empty())
+            return;
+        auto const is_first = record.writes_through == builtins::written_argument::first;
+        auto const* const l = e.at(is_first ? arguments[0] : arguments.back()).node.try_as<flat_local_ref>();
+        if (l == nullptr)
+            return;
+        // a payload or a parameter comes back from the shaders the call ran, which read what their invocation is handed
+        auto const written = is_first ? given
+                                      : divergence{.is = true,
+                                                   .where = e.at(id).from,
+                                                   .why = cc::string("is what the shaders the call ran wrote back")};
+        settle_local(l->local, written, flow);
     }
 
     /// The flow inside a branch on a value of divergence `d`.
@@ -242,7 +295,11 @@ struct uniformity_pass
     {
         if (!d.is)
             return {};
-        return {.is = true, .where = where, .why = cc::format("this branch tests a value that {}", d.why)};
+        return {.is = true,
+                .where = where,
+                .why = cc::format("this branch tests a value that {}", d.why),
+                .tested_where = d.where,
+                .tested_why = d.why};
     }
 
     flow_out statements(ast::range_of<flat_stmt_id> range, divergence flow)
@@ -270,7 +327,7 @@ struct uniformity_pass
                 continue;
             // a switch's arms meet again after it, as a loop's iterations do not
             if (!scopes[i].is_switch && !scopes[i].divergent_exit.is)
-                scopes[i].divergent_exit = {.is = true, .where = flow.where, .why = flow.why};
+                scopes[i].divergent_exit = flow;
             return;
         }
     }
@@ -387,7 +444,9 @@ struct uniformity_pass
                          {
                              returned = {.is = true,
                                          .where = s.from,
-                                         .why = cc::string("some invocations return here, and the others go on")};
+                                         .why = cc::string("some invocations return here, and the others go on"),
+                                         .tested_where = flow.tested_where,
+                                         .tested_why = flow.tested_why};
                              // every loop around it runs on for the invocations that stayed
                              for (auto& scope : scopes)
                                  if (!scope.is_switch && !scope.divergent_exit.is)
@@ -425,15 +484,22 @@ void checker::judge_uniformity(flat_entry_point const& structured)
         return;
 
     auto const e = legalize(out, structured);
-    auto pass = uniformity_pass{.m = out, .e = e, .locals = cc::vector<divergence>::create_defaulted(e.locals.size())};
+    auto pass = uniformity_pass{.m = out,
+                                .e = e,
+                                .prelude_count = prelude_count,
+                                .locals = cc::vector<divergence>::create_defaulted(e.locals.size())};
 
-    // what differs between invocations from the start
+    // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id
+    for (auto i = isize(0); i < e.locals.size(); ++i)
+        if (e.locals[i].kind == local_kind::parameter)
+            pass.locals[i] = {.is = true, .why = cc::format("comes from the stage's parameter {}", e.locals[i].name)};
     if (is_valid(e.input))
         pass.locals[0] = {.is = true, .why = cc::string("comes from the stage's input struct")};
     for (auto const& input : e.stage_inputs)
-        if (input.input != stage_input::workgroup_id)
-            pass.locals[index_of(input.local)]
-                = {.is = true, .why = cc::format("comes from the stage input {}", e.at(input.local).name)};
+        pass.locals[index_of(input.local)]
+            = input.input == stage_input::workgroup_id
+                ? divergence::none()
+                : divergence{.is = true, .why = cc::format("comes from the stage input {}", e.at(input.local).name)};
 
     // a local only ever becomes divergent, so the walks settle within one per local
     for (auto rounds = isize(0); rounds <= e.locals.size(); ++rounds)
