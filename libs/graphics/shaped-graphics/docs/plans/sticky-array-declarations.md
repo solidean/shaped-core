@@ -316,25 +316,29 @@ Every live declaration naming an array applies to it, unioned exactly as today's
 
 ### What an op does
 
-At each dispatch, trace or draw, for each array binding of each bound group:
+At each dispatch, trace or draw, every array binding of every bound group meets the declarations first, and then each is planned and applied:
 
-1. **Plan.** Summarize the live declarations naming the array — named, any element, access union — and call `plan_array_declarations` exactly as today.
-   The summary is kept up to date at declare and withdraw time, so it costs O(1) here.
+1. **Meet and check.** An array whose name and family have live declarations marks them all met.
+   The first time a group's array meets a set of declarations, every element they list is checked for range and vacancy against *that* group's array.
+   The check is per declaration, not per name: a declaration made after its name already met a group bumps the name's generation, so that group checks the set again at its next op there.
+   Checking per group is what fixes the existing first-group-only bug, and a different group at the same name checks again.
+   Every array is met and checked before any is tracked ([array_declarations.hh:181-196](../../src/shaped-graphics/barrier/array_declarations.hh#L181-L196)).
+   So a declaration that asserts leaves the op untouched.
+2. **Plan.** Summarize the live declarations naming the array — named, any element, access union — and call `plan_array_declarations` exactly as today.
+   The summary is kept per name and family, recounted at every declare and end, so reading it here costs O(1).
    `skip` and `cover_all` behave exactly as today, per op.
-2. **Resolve on first meeting.** The first time a declaration meets a particular group, check every element's range and vacancy against *that* group's array.
-   The check is per declaration, not per name: one made after its name already met a group is still checked against that group, at its next op there.
-   Each index is resolved to its resource then.
-   Checking per group is what fixes the existing first-group-only bug.
-   A different group at the same name resolves and checks again.
 3. **Apply, or skip.** An `as_declared` read-only array is skipped iff it is [current](#a-write-between-two-reads) and its key is covered.
    Otherwise every element is tracked — and always for a declaration that writes, declared or widened by `widen_by`, as today.
+   An application keeps no resolved resource.
+   It indexes the group's array afresh for every element it tracks ([array_declarations.hh:243-260](../../src/shaped-graphics/barrier/array_declarations.hh#L243-L260)).
    No caller holds a writable table across ops, so stickiness never needs to cover that case.
 
 **The key.**
-An array's application record holds the group's identity, the generation of its name and family, and the texture layouts it applied.
-It also holds the stages and access applied since its last invalidation, as a union.
+An array's [application record](../../src/shaped-graphics/barrier/array_declarations.hh#L105-L124) is found by the group's identity and the array's binding.
+It holds the generation of the name and family it was applied at, and the stages and access applied since its last invalidation, as a union.
 The generation is per name and family: declaring or withdrawing a declaration of `tables.textures_2d` bumps that array's alone, so a one-op declaration of another name leaves this one current.
-The key is **covered** when the group and the generation match, the op's stages and access are within the recorded union, and every layout matches exactly.
+The key is **covered** when the generation matches and the op's stages and access are within the recorded union.
+The texture layouts need no compare of their own: they are the declared elements', which the generation stands for, and a layout another op moved is a member write.
 Covered rather than equal is sound because a read at stages already synced since the last write needs no barrier.
 It also absorbs the compute ↔ raytracing switch, which changes `op_stages` on the shared bind point, and the raster routine alternating fragment-only and vertex-plus-fragment pipelines.
 An invalidation clears the union.
@@ -398,13 +402,15 @@ A transfer enqueued mid-list into a member texture leaves its declared layout in
 ### Per backend
 
 **dx12, vulkan, metal.**
-Replace the four pending lists with two lists of live declarations, one per bind point.
-Each entry holds the token's id, the name, the family, the copied elements, its summary, whether it writes, and whether it has met its array.
-Each bind point keeps a per-(name, family) generation and a small application cache, one record per (group, array binding) as described under [the key](#what-an-op-does).
+Each replaces its four pending lists with two `array_declaration_book`s, one per bind point.
+A book's entry holds the token's id, an index into the book's names, the copied elements, and whether it has met its array.
+It also holds `std::uncaught_exceptions()` as it was when the declaration was made.
+Per name and family the book keeps the generation, the live and unmet counts, and the summary of the live declarations, recounted at every declare and end.
+It also keeps a small application cache, one record per (group, array binding), as described under [the key](#what-an-op-does).
 The list keeps `member_writes`.
 Withdraw erases the entry, bumps its name's generation, and runs the never-met check.
-`raster_end_rendering` ends the raster entries, running the never-met check on each.
-Submit asserts both lists empty and then ends what is left, and a drop ends them silently; neither runs the check.
+`raster_end_rendering` ends the raster entries last, so the never-met check, which asserts on the first that fails it, finds the scope closed.
+Submit asserts that no value is alive, then unlinks any that is, as a drop does; the entries go with the list, and neither runs the check.
 No end runs the check while an exception unwinds.
 `track_access` gains a "from an array application" argument and returns whether it hit a member in the write bucket, and whether the slot's current op already held a write or layout change.
 
@@ -424,7 +430,7 @@ Its withdraw keeps nothing, so the never-met check never runs there, and an empt
 ### What it costs
 
 Per op, for an array whose declaration is current: one summary read, one `plan_array_declarations` call, one key compare.
-That is O(bound arrays × live declarations) — sv binds eight tables — and no element is touched.
+The book finds the name and the record by linear search, so that is O(bound arrays × (names + records)) — sv binds eight tables — and no element is touched.
 The O(elements) work happens once per array per list, again after any member write, and again when a key is not covered.
 
 Back of the envelope for a moving Sponza frame:
@@ -558,7 +564,7 @@ cmd.compute.dispatch_groups(n);       // op 4
 
 | op | what happens | barriers |
 |---|---|---|
-| 1 | first meeting: resolve and check; apply — `e0..e2` read at compute and become members; snapshot `member_writes = 0`, unchanged at op end, so current | whatever the list's earlier writes need |
+| 1 | first meeting: meet and check; apply — `e0..e2` read at compute and become members; snapshot `member_writes = 0`, unchanged at op end, so current | whatever the list's earlier writes need |
 | 2 | the scalar write tracks `e1`, a member, in the write bucket → `member_writes = 1`; the array is not bound | `e1`: read → write (write-after-read) |
 | 3 | `member_writes` moved past the snapshot, so not current: apply in full — `e1`'s read meets an in-flight write; snapshot 1, unchanged at op end, so current | `e1`: write → read (read-after-write) |
 | 4 | current and the key is covered: skip, nothing tracked | none |
@@ -601,13 +607,13 @@ New tests, tier 1 (run against every backend that has binding arrays) unless not
 - **Two declarations at different layouts** holding one texture — on one bind point, across raster and compute, and as the A, B, A group alternation at one name.
   Each skip must leave the texture in the layout its op needs.
 - **A compute declaration alive across a rendering scope that writes a member** re-applies at the next dispatch.
-- **metal: a transient group freed and a new one allocated at the same address** is a new identity, resolved and checked again.
+- **metal: a transient group freed and a new one allocated at the same address** is a new identity, checked again.
 - **A one-op declaration of another name** leaves the sticky array current: no element tracks at the next op.
 - **An upload enqueued into a member after its application, before submit**, still makes the list wait, on dx12 (P2).
 - **The first-meeting check in `release`**: it runs on the release presets too, or the test documents that it compiles out with the other asserts.
 - **Pipeline and group rebinds keep it**: the wavefront's bind pattern, asserting zero element tracks after the first op.
 - **Covered keys skip**: compute then raytracing on one bind point, and two raster pipelines at different stages, re-apply once each and then skip.
-- **A different group at the same name** resolves and checks again: an out-of-range index for the second group asserts at its first op.
+- **A different group at the same name** checks again: an out-of-range index for the second group asserts at its first op.
 - **A second declaration on a name that already met a group** is checked against that group: an out-of-range index in it asserts at its next op there.
   That one needs no device, and is in `array-declaration-book-test.cc`.
 - **Two bound groups holding one name at different sizes**: an index valid only in the larger asserts — the first-group-only bug.
@@ -664,9 +670,9 @@ It still matters for the first application, every `cover_all`, every writing dec
 
 - **A value type, `[[nodiscard]]`** — not `void` "until replaced", whose leak into the next routine is silent.
 - **No [dedupe inside sg](#sg-dedupes-repeated-identical-declarations)** — its invalidation is the same work, and it keeps O(elements) per op.
-- **Covered by, not equal** — the applied stages and access are a union since the last invalidation; texture layouts must still match exactly.
+- **Covered by, not equal** — the applied stages and access are a union since the last invalidation; texture layouts still match exactly, through the generation.
 - **The typo assert is kept, moved to end of life** — a declaration that never met its array asserts at withdraw, destruction or scope close.
 - **The lifecycle's edge cases are settled** — submit ends declarations, unwinding and webgpu skip the never-met check, and first meeting is per declaration.
-- **A different group at the same name is resolved again**, per group, rather than ending the declaration.
+- **A different group at the same name is checked again**, per group, rather than ending the declaration.
 - **Transfer waits fold at submit** — a prerequisite, landed as P2.
 - **Lock fusion first and separately** — landed as P1.
