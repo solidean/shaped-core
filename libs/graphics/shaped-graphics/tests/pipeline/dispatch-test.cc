@@ -752,8 +752,8 @@ ASYNC_INVOCABLE_TEST("sg - an indirect dispatch refuses arguments it could not r
 
     // Vulkan and WebGPU read arguments only from a buffer created for it, so sg refuses the rest everywhere.
     CHECK_ASSERTS(cmd->compute.dispatch_groups_indirect(plain, 0));
-    CHECK_ASSERTS(cmd->compute.dispatch_groups_indirect(args.raw(), 2));
-    CHECK_ASSERTS(cmd->compute.dispatch_groups_indirect(args.raw(), args_bytes));
+    CHECK_ASSERTS(cmd->compute.dispatch_groups_indirect_bytes(args.raw(), 2));
+    CHECK_ASSERTS(cmd->compute.dispatch_groups_indirect_bytes(args.raw(), args_bytes));
 
     // `sizing` writes the very arguments the dispatch would read, which WebGPU refuses within one dispatch.
     CHECK_ASSERTS(cmd->compute.dispatch_groups_indirect(args.reinterpret_as<sg::dispatch_args>(), 0));

@@ -775,7 +775,7 @@ cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / wor
 cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group counts buffer<sg::dispatch_args> element `index` holds, read by the GPU at the dispatch
                                          //   sg::dispatch_args { u32 x = 0, y = 1, z = 1 } — a shader's own uint3 struct re-types with reinterpret_as<sg::dispatch_args>()
                                          //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)
-                                         //   the args must not be bound writable to the same dispatch (webgpu refuses it); raw form: (raw_buffer_handle, offset_in_bytes % 4 == 0)
+                                         //   the args must not be bound writable to the same dispatch (webgpu refuses it); bytes: dispatch_groups_indirect_bytes(raw_buffer_handle, offset_in_bytes % 4 == 0)
 //   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
 cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
