@@ -1178,7 +1178,7 @@ hit_group textured for path_rays:
 * **CHK-120** `return`, `break` and `continue` are statements; one that stands as the result of a `case` arm leaves as it says, and that arm produces no value (CHK-165).
   One that stands as a value anywhere else is `unsupported-yet`.
 * **CHK-209** `print value` takes a value of any type; a string is `unsupported-yet`.
-* **CHK-389** `@unroll` on a `for` writes its body once per value of the range, in order, and nothing of it runs as a loop ([why](why/checking.md#chk-389)).
+* **CHK-389** `@unroll` on a `for` writes its body once per value of the range, in order, and within the copy limit below nothing of it runs as a loop ([why](why/checking.md#chk-389)).
   The loop means what it means without the attribute, except that a rule judging a constant judges each copy's index as the constant it is.
   So `m |= 1u << (i as uint)` over `0 ..< 40` is `shift-out-of-range` (CHK-270), where the loop without the attribute compiles.
   The flat tree holds a block per value, and no target's text holds an unroll hint.
@@ -1192,6 +1192,7 @@ hit_group textured for path_rays:
   A loop that would write more is the warning `unroll-too-long`, and stays an ordinary loop, while the unrolled loops around it still unroll.
   So in a nest, the loop that stays a loop is the first one, from the outside in, whose copies pass the limit.
   An inner bound that reads an outer index is counted copy by copy, so only the copies whose range passes the limit keep a loop.
+  An outer loop that stays a loop leaves such a bound no constant, so that inner `@unroll` is `invalid-constant-argument`, an error rather than the warning.
   On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
 * **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
   Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.

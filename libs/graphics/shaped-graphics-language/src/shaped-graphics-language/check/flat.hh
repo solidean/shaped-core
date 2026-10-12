@@ -117,8 +117,8 @@ struct sgl::check::name_mint
     /// Both are written by `reserve` and `mint` alone.
     cc::vector<cc::string> taken;
     cc::set<cc::string> index;
-    /// Names taken outside this mint, which it never hands out and never writes: a mint it goes on from, and a set such
-    /// as every name a builtin writes; whoever owns either must outlive this mint and leave it unchanged meanwhile.
+    /// Names taken outside this mint, which it never hands out and never writes: a mint it goes on from, and a set such as every name a builtin writes.
+    /// Whoever owns either must outlive this mint and leave it unchanged meanwhile.
     /// What they hold is in neither `taken` nor `index`, so a mint that goes on from another copies none of its names.
     name_mint const* parent = nullptr;
     cc::set<cc::string> const* also_taken = nullptr;

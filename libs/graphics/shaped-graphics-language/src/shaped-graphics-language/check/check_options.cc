@@ -157,8 +157,8 @@ cc::vector<symbol_id> checker::options_reached(symbol_id function, symbol_id als
     };
     auto extents = cc::vector<extent>();
     auto declarations = cc::vector<symbol_id>();
-    // The prelude was checked before the program existed, so a declaration of it names nothing of the program's, and
-    // reaches an option only where the prelude holds a use of one, which today it never does.
+    // The prelude was checked before the program existed, so a declaration of it names nothing of the program's.
+    // It reaches an option only where the prelude holds a use of one, which today it never does.
     auto is_prelude_reaching = false;
     for (auto const& use : out.option_uses)
         is_prelude_reaching = is_prelude_reaching || is_prelude_file(use.file);

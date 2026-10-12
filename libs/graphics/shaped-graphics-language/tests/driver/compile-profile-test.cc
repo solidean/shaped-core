@@ -56,8 +56,8 @@ TEST("sgl profile - one compile of a file, sampled",
 {
     auto const path = cc::environment_variable("SGL_PROFILE_SOURCE");
     auto const entry = cc::environment_variable("SGL_PROFILE_ENTRY");
-    REQUIRE(path.has_value());
-    REQUIRE(entry.has_value());
+    if (!path.has_value() || !entry.has_value())
+        SKIP("set SGL_PROFILE_SOURCE and SGL_PROFILE_ENTRY to the file and entry point to profile");
     auto const target_name = cc::environment_variable("SGL_PROFILE_TARGET").value_or("hlsl-dx12");
     auto target = sgl::emit::target::hlsl_dx12;
     auto is_known = false;
