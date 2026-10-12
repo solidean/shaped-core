@@ -38,8 +38,9 @@ That is a clean cross-queue GPU wait, so `submit-upload → async-download` of t
 **Reverse — a later writer waits on the read.** A command list that **writes** the buffer after the download must not overwrite the bytes while the transfer queue is still reading them.
 
 - The download reserves a **completion value** on a monotonic counter and **stamps it onto the buffer** (atomic max) before the actor runs.
-  Any writer recorded afterwards therefore sees a value to wait on.
-- Every op that **writes** a buffer while recording folds that buffer's download value into the list's required wait — **only writes**, since two reads never conflict.
+  Any writer submitted afterwards therefore sees a value to wait on, whenever it recorded its write.
+- At submit, every buffer the list **writes** folds its download value into the list's required waits — **only writes**, since two reads never conflict.
+  A texture folds it whatever the list did to it, since the list's entry barrier can change the layout the read is using.
 - At **submit**, the main queue is told to **wait on that buffer's download timeline** for the value before executing the list.
   The transfer queue signals it once the window holding the read has completed, so the write lands strictly after the read.
 
@@ -154,8 +155,8 @@ Not invariants — v1 shortcuts:
   One left in a shader/attachment layout by a direct-queue list must be transitioned back, or read inline instead.
 - The per-resource stamps live on `dx12_buffer`: `_pending_async_download_value` (reverse) and the shared `_last_used_submission_token` (forward).
   The reverse one is a `dx12_download_fence_value`, distinct from the epoch / submission / async-upload fences.
-  `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) folds the reverse value into `_required_download_wait`.
-  It does so **only for write accesses** (`sg::is_unordered_write`), since two reads never conflict.
+  `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) records a written buffer in the list's written set.
+  At submit, `fold_transfer_waits` folds the reverse value into `_required_download_waits`, for each written buffer (`sg::is_unordered_write`) and each touched texture.
   The reverse wait is one `_queue->Wait(group->fence, value)` per download timeline, at command-list submit.
   The forward wait is `_copy_queue->Wait(_submission_fence, ...)`, issued before a window's reads.
   That path in [`dx12_download_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc) also enforces the window-level acyclicity rule.

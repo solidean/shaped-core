@@ -59,7 +59,7 @@ Each is more expensive than a barrier, and invisible in a barrier count.
 
 ## Waits on a transfer
 
-**`queue_waits` counts the cross-queue waits a list's queue makes on async transfers before it runs.**
+**`queue_waits` counts the cross-queue waits a list's queue makes on async and streaming transfers before it runs.**
 On dx12 a transfer whose fence was already reached at submit is no wait, so a frame touching only landed resources reads zero.
 vulkan waits on a reached timeline value too, since its validation layer cannot see the host's read of the counter.
 So there the count scales with the timelines a list touches.
