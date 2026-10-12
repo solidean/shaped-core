@@ -1,8 +1,26 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
+#include <shaped-shader-library/fwd.hh>
 
 #include <memory>
+
+namespace bcache
+{
+class blob_cache;
+}
+
+/// Where an SGL edge keeps SGL's front end, beside the in-memory tier every SGL edge in the process shares.
+struct slib::sgl_compiler_options
+{
+    /// The store a preprocess is kept in across runs.
+    /// Unset is `bcache::default_cache()`, looked up at each compile and left out under `SC_SG_COLD=shaders`.
+    /// A null store keeps it in memory alone, which is what a test that must not touch the user's cache passes.
+    /// A store given must outlive the compiler and answer on its own thread, since a lookup only waits for it.
+    /// There is no persistent tier on wasm or without threads, whatever is given.
+    cc::optional<bcache::blob_cache*> persistent_cache = {};
+};
 
 namespace slib
 {
@@ -14,6 +32,7 @@ namespace slib
 /// So the flattened source a `shader_asset` keeps and a compiler's cache hashes IS the emitted text, and `compile` is `inner`'s.
 /// Each compile hands `inner` what that text needs, `-enable-16bit-types` for DXC and MSL 3.2 for a metallib, so `inner` is built with no setting.
 /// Reflection is `inner`'s too: whatever it reads out of that text is what the shader reports.
+/// `preprocess` is cached under everything it reads, in memory and in the store `options` names.
 ///
 /// `inner` must not be null, and its format must be dxil, spirv, wgsl or metal_lib.
 /// Its `preprocess` is never called: SGL has no `#include`, and the emitted text has none either.
@@ -24,5 +43,6 @@ namespace slib
 ///
 /// Every target's text carries its final addresses, HLSL's registers included, so slib's binding pass never runs behind this edge.
 /// It needs no toolchain of its own, so it exists wherever `inner` does.
-[[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_compiler(std::unique_ptr<shader_compiler> inner);
+[[nodiscard]] std::unique_ptr<shader_compiler> create_sgl_compiler(std::unique_ptr<shader_compiler> inner,
+                                                                   sgl_compiler_options const& options = {});
 } // namespace slib

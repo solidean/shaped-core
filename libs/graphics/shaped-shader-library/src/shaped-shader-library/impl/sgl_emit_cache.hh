@@ -28,18 +28,23 @@ namespace slib::impl
 /// The cached value is slib's translation of SGL's output, so an edit to that translation has to miss too.
 [[nodiscard]] cc::string_view sgl_edge_fingerprint();
 
+/// The persistent tier of an SGL edge created with `chosen`, as of now: `chosen` itself, or `bcache::default_cache()` for nullopt.
+/// Nullptr where there is none: always on wasm and without threads, and for the default under `SC_SG_COLD=shaders`.
+[[nodiscard]] bcache::blob_cache* sgl_emit_store(cc::optional<bcache::blob_cache*> chosen);
+
+/// How long a lookup waits for the persistent tier, unless told otherwise, before it computes instead.
+inline constexpr double k_sgl_lookup_patience_secs = 1.0;
+
 /// `compute`'s result for `key`, from either tier where one holds it.
 /// `key` must cover everything `compute` reads; the tiers add the fingerprints themselves.
+/// `persistent` is the persistent tier, and nullptr leaves it out.
+/// It must answer on its own thread, since a lookup only waits: one created `unthreaded` answers nothing meanwhile.
+/// A lookup waits `patience_secs` for it before computing instead, and nullopt waits for the answer however long it takes.
 [[nodiscard]] cc::result<preprocessed_source> cached_sgl_preprocess(
     cc::hash128 key,
-    cc::function_ref<cc::result<preprocessed_source>()> compute);
-
-/// The same, with `persistent` as the persistent tier in place of the default one; nullptr leaves it out.
-/// For a test, which must neither read the user's cache nor change what every other compile uses.
-/// `persistent` must answer on its own thread: one created `unthreaded` waits out every lookup and misses.
-[[nodiscard]] cc::result<preprocessed_source> cached_sgl_preprocess(cc::hash128 key,
-                                                                    cc::function_ref<cc::result<preprocessed_source>()> compute,
-                                                                    bcache::blob_cache* persistent);
+    cc::function_ref<cc::result<preprocessed_source>()> compute,
+    bcache::blob_cache* persistent,
+    cc::optional<double> patience_secs = k_sgl_lookup_patience_secs);
 
 /// `sgl::describe(request)`, remembered for the rest of the process under everything the request holds.
 /// In memory only: a description is what the host reads before a compile, and a compile it leads to is cached already.
@@ -51,6 +56,6 @@ namespace slib::impl
 /// Nothing for any input `encode_preprocessed` did not write, so a corrupt entry is a miss.
 [[nodiscard]] cc::optional<preprocessed_source> decode_preprocessed(cc::span<byte const> bytes);
 
-/// Forgets every entry of the in-memory tier, so a test can tell the persistent tier's answer from it.
-void clear_sgl_emit_memory();
+/// Forgets `key` in the in-memory tier, so a test can tell the persistent tier's answer from it.
+void forget_sgl_emit(cc::hash128 key);
 } // namespace slib::impl

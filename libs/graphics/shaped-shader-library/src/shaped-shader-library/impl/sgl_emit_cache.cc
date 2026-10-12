@@ -123,22 +123,6 @@ cc::mutex<cc::map<cc::hash128, slib::preprocessed_source>>& memory_tier()
     return tier;
 }
 
-/// How long a lookup waits for the store before it compiles instead.
-constexpr double k_lookup_patience_secs = 1.0;
-
-/// The persistent tier a lookup uses by default, or nullptr where there is none to use.
-bcache::blob_cache* default_store()
-{
-#if defined(__EMSCRIPTEN__) || !CC_HAS_THREADS
-    // A lookup waits for the store's own thread, which a page must not do and an unthreaded build does not have.
-    return nullptr;
-#else
-    if (sg::cold_caches_from_environment().shaders)
-        return nullptr;
-    return &bcache::default_cache();
-#endif
-}
-
 bcache::cache_key persistent_key(cc::hash128 key)
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
@@ -153,15 +137,19 @@ bcache::cache_key persistent_key(cc::hash128 key)
 /// The store's answer for `key`, waited for without driving anything else on this thread.
 /// A compile may run where its caller holds a lock or a reference that other work could invalidate, so it only waits.
 /// The store answers on its own thread, which is what lets a wait alone see the answer arrive.
-/// Nothing within `k_lookup_patience_secs` is a miss.
-cc::optional<bcache::cache_hit> passive_get(bcache::blob_cache& store, cc::hash128 key)
+/// Nothing within `patience_secs` is a miss, and nullopt waits for the answer however long it takes.
+///
+/// TEMPORARY: a hand-rolled poll, standing in for a passive timed wait on a `cc::async` node, which clean-core lacks.
+/// `cc::try_async_blocking_get_for` is the timed wait it has, and that one drives the ambient scheduler, which this must not.
+/// Replace the loop with that wait once it lands, as libs/base/clean-core/docs/TODO.md records under async.
+cc::optional<bcache::cache_hit> passive_get(bcache::blob_cache& store, cc::hash128 key, cc::optional<double> patience_secs)
 {
     auto const node = store.get(persistent_key(key));
-    auto const deadline = cc::current_time_steady_secs() + k_lookup_patience_secs;
+    auto const deadline = cc::current_time_steady_secs() + patience_secs.value_or(0.0);
     auto yields = 0;
     while (!node->is_ready())
     {
-        if (cc::current_time_steady_secs() > deadline)
+        if (patience_secs.has_value() && cc::current_time_steady_secs() > deadline)
             return {};
         // A read is usually answered within a few yields; past those, a short sleep keeps the core free.
         if (yields < 256)
@@ -337,22 +325,32 @@ cc::result<sgl::module_description, cc::string> slib::impl::cached_describe(sgl:
     return described;
 }
 
-void slib::impl::clear_sgl_emit_memory()
+void slib::impl::forget_sgl_emit(cc::hash128 key)
 {
-    memory_tier().lock([](cc::map<cc::hash128, preprocessed_source>& tier) { tier.clear(); });
+    memory_tier().lock([&](cc::map<cc::hash128, preprocessed_source>& tier) { (void)tier.erase(key); });
 }
 
-cc::result<slib::preprocessed_source> slib::impl::cached_sgl_preprocess(
-    cc::hash128 key,
-    cc::function_ref<cc::result<preprocessed_source>()> compute)
+bcache::blob_cache* slib::impl::sgl_emit_store(cc::optional<bcache::blob_cache*> chosen)
 {
-    return cached_sgl_preprocess(key, compute, default_store());
+#if defined(__EMSCRIPTEN__) || !CC_HAS_THREADS
+    // A lookup waits for the store's own thread, which a page must not do and an unthreaded build does not have.
+    (void)chosen;
+    return nullptr;
+#else
+    if (chosen.has_value())
+        return chosen.value();
+    // Cold turns off the default store only: one given explicitly is a choice.
+    if (sg::cold_caches_from_environment().shaders)
+        return nullptr;
+    return &bcache::default_cache();
+#endif
 }
 
 cc::result<slib::preprocessed_source> slib::impl::cached_sgl_preprocess(
     cc::hash128 key,
     cc::function_ref<cc::result<preprocessed_source>()> compute,
-    bcache::blob_cache* persistent)
+    bcache::blob_cache* persistent,
+    cc::optional<double> patience_secs)
 {
     CC_RECORD_ACCUM("slib.sgl_emit.requests", cc::rec::unit_count, 1);
 
@@ -369,7 +367,7 @@ cc::result<slib::preprocessed_source> slib::impl::cached_sgl_preprocess(
     if (persistent != nullptr)
     {
         // A miss, an expired entry and a storage failure are one answer, and every one of them falls through to the front end.
-        auto const hit = passive_get(*persistent, key);
+        auto const hit = passive_get(*persistent, key, patience_secs);
         if (hit.has_value())
         {
             if (auto decoded = decode_preprocessed(hit.value().data.span()); decoded.has_value())

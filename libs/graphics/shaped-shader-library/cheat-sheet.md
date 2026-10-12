@@ -195,7 +195,7 @@ slib::create_metal_compiler()      // -> std::unique_ptr<shader_compiler>; metal
                                    //   reflection reads the SOURCE (see shaped-shader-compiler-msl/cheat-sheet.md)
 
 #include <shaped-shader-library/compiler/sgl_compiler.hh>   // wherever the inner compiler exists
-slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
+slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_options const& = {})
                                    // -> std::unique_ptr<shader_compiler>; sgl -> inner->target_format()
                                    //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL, metal_lib -> MSL
                                    //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
@@ -203,7 +203,12 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
                                    //   each compile hands it what the text needs, so ANY inner compiler will do:
                                    //   -enable-16bit-types for DXC (float16_t), metal3.2 for a metallib (coherent(device))
                                    //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
-                                   //   the binding pass runs behind it: the HLSL names each group, the pass writes registers
+                                   //   every target's text carries its final addresses, so the binding pass never runs behind it
+                                   //   preprocess is cached under everything it reads: in memory, and in a persistent store
+slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; }
+                                   //   unset = bcache::default_cache(), looked up per compile, off under SC_SG_COLD=shaders
+                                   //   nullptr = memory only (a test off the user's cache); a store given must outlive the edge
+                                   //   no persistent tier on wasm or without threads, whatever is given
 lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
 lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));  // ... and this is how a package reaches metal
 

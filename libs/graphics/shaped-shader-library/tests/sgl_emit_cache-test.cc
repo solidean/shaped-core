@@ -16,7 +16,8 @@ namespace
 /// A preprocess result with every field the byte form writes set to something other than its default.
 [[nodiscard]] slib::preprocessed_source rich_result()
 {
-    auto const compiler = slib::create_sgl_compiler(slib::create_wgsl_compiler());
+    // Off the persistent tier, which would be the user's cache.
+    auto const compiler = slib::create_sgl_compiler(slib::create_wgsl_compiler(), {.persistent_cache = nullptr});
     auto resolve = [](cc::string_view) -> cc::optional<cc::string> { return cc::nullopt; };
     auto text = compiler->preprocess({.source = "@inline binding constants:\n"
                                                 "    view_projection: mat4\n"
@@ -183,13 +184,14 @@ TEST("slib sgl emit cache - the persistent tier answers once memory has forgotte
         return value;
     };
 
+    // No patience bound: a store slow to open must not turn into a miss and fail the test.
     auto const key = fresh_key("persistent");
-    REQUIRE(slib::impl::cached_sgl_preprocess(key, compute, store.get()).has_value());
+    REQUIRE(slib::impl::cached_sgl_preprocess(key, compute, store.get(), cc::nullopt).has_value());
     CHECK(runs == 1);
 
     // The store's actor takes messages in order, so the lookup below sees the write the first call queued.
-    slib::impl::clear_sgl_emit_memory();
-    auto const reread = slib::impl::cached_sgl_preprocess(key, compute, store.get());
+    slib::impl::forget_sgl_emit(key);
+    auto const reread = slib::impl::cached_sgl_preprocess(key, compute, store.get(), cc::nullopt);
     REQUIRE(reread.has_value());
     CHECK(runs == 1);
     CHECK(same(value, reread.value()));
