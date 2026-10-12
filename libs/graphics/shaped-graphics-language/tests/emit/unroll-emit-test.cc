@@ -87,6 +87,9 @@ TEST("sgl emit - an unrolled for is written as straight-line code with no hint, 
         auto const text = text_of(k_unrolled, t);
         CHECK(text.contains("weights[2] *"));
         CHECK(!text.contains("weights[i]"));
+        // HLSL's hint and MSL's, which WGSL has none of
+        CHECK(!text.contains("[unroll]"));
+        CHECK(!text.contains("#pragma unroll"));
     }
 }
 
