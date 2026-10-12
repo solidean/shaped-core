@@ -298,8 +298,8 @@ template <class ArrayBinding>
 struct array_site; // one array binding of one bound group, as an op meets it
 // the counts `cmd` recorded, for its backend to fold in at submit; defined in command_list/command_list.cc
 stat_counts const& recorded_stats(command_list const& cmd);
-// asserts that no array declaration made on `cmd` is alive, which every backend's submit calls; command_list/command_list.cc
-void check_no_live_array_declarations(command_list const& cmd);
+// asserts that no array declaration made on `cmd` is alive and ends any that is, which every backend's submit calls; command_list/command_list.cc
+void end_array_declarations_at_submit(command_list& cmd);
 void record_stats(sg::stats const& delta); // each non-zero counted stat as one CC_RECORD_ACCUM; context/metrics.cc
 } // namespace impl
 

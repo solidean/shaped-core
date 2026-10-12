@@ -231,10 +231,12 @@ void vulkan_command_list::raster_end_rendering()
     _bound_raster_groups.clear();
     _bound_raster_footprint = nullptr;
     _bound_raster_footprint_owner = nullptr;
-    // The core ended the values' half already; this is the list's.
-    _raster_arrays.end_all();
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
+
+    // The core ended the values' half already; this is the list's.
+    // Last, since one that never met its array asserts here, and the scope must be closed whatever catches that.
+    _raster_arrays.end_all();
 }
 
 // --- draw recording (reached through cmd.raster / cmd.raster.manual) -----------------------------------

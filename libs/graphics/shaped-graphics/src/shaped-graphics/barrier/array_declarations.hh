@@ -47,10 +47,11 @@ public:
     void declare_textures(u32 id, cc::string_view name, cc::span<array_texture_access const> elements);
 
     /// Ends declaration `id` if it lives here, and says whether it did.
-    /// One that never met its array asserts, once it is gone.
+    /// One that never met its array asserts, once it is gone, unless an exception thrown since it was made is unwinding.
     bool withdraw(u32 id);
 
-    /// Ends every declaration here silently: a rendering scope closing, or the list dropped.
+    /// Ends every declaration here, as a rendering scope's close does.
+    /// Each owes the check withdraw runs, and the first that fails it asserts once all are gone.
     void end_all();
 
     [[nodiscard]] bool is_empty() const { return _declarations.empty(); }
@@ -96,6 +97,9 @@ private:
         cc::vector<array_buffer_access> buffers;
         cc::vector<array_texture_access> textures;
         bool met = false;
+
+        /// `std::uncaught_exceptions()` when it was made; an end that finds more in flight is unwinding past it.
+        int exceptions_in_flight = 0;
     };
 
     /// How one array binding of one group was last checked and applied.
@@ -125,6 +129,12 @@ private:
     void add(declaration d, cc::string_view name, bool is_texture);
     void recount(isize name_index);
     void meet(isize name_index);
+
+    /// Whether `d`, ending now, passes the never-met check: some op met it, or an exception thrown since it was made is unwinding.
+    [[nodiscard]] static bool passes_met_check(declaration const& d);
+
+    /// Asserts `passed`, the never-met check of a declaration of `name_index` that just ended: where a misspelled name is caught.
+    void check_met(isize name_index, bool passed) const;
 
     /// Asserts that every element the declarations naming `name_index` list is in range of `elements` and not vacant.
     template <class Elements>

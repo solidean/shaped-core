@@ -1,5 +1,6 @@
 #include <clean-core/common/assertf.hh>
-#include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/common/utility.hh>  // cc::move
+#include <clean-core/error/exception.hh> // std::uncaught_exceptions
 #include <shaped-graphics/barrier/array_declarations.hh>
 
 using namespace cc::primitive_defines;
@@ -8,7 +9,12 @@ void sg::impl::array_declaration_book::declare_buffers(u32 id,
                                                        cc::string_view name,
                                                        cc::span<array_buffer_access const> elements)
 {
-    auto d = declaration{.id = id, .name_index = 0, .buffers = {}, .textures = {}, .met = false};
+    auto d = declaration{.id = id,
+                         .name_index = 0,
+                         .buffers = {},
+                         .textures = {},
+                         .met = false,
+                         .exceptions_in_flight = std::uncaught_exceptions()};
     d.buffers.push_back_range(elements);
     add(cc::move(d), name, false);
 }
@@ -17,7 +23,12 @@ void sg::impl::array_declaration_book::declare_textures(u32 id,
                                                         cc::string_view name,
                                                         cc::span<array_texture_access const> elements)
 {
-    auto d = declaration{.id = id, .name_index = 0, .buffers = {}, .textures = {}, .met = false};
+    auto d = declaration{.id = id,
+                         .name_index = 0,
+                         .buffers = {},
+                         .textures = {},
+                         .met = false,
+                         .exceptions_in_flight = std::uncaught_exceptions()};
     d.textures.push_back_range(elements);
     add(cc::move(d), name, true);
 }
@@ -38,16 +49,12 @@ bool sg::impl::array_declaration_book::withdraw(u32 id)
             continue;
 
         auto const name_index = _declarations[i].name_index;
-        auto const met = _declarations[i].met;
+        auto const passed = passes_met_check(_declarations[i]);
         _declarations.remove_at(i);
         recount(name_index);
 
         // Gone before the assert, so a test that catches it finds the book consistent.
-        CC_ASSERTF(met,
-                   "an array declaration of '{}' ended without any op meeting it: no dispatch, trace or draw of its "
-                   "bind "
-                   "point had a bound group holding a {} array of that name. Is the name misspelled?",
-                   _names[name_index].name, _names[name_index].is_texture ? "texture" : "buffer");
+        check_met(name_index, passed);
         return true;
     }
     return false;
@@ -55,10 +62,34 @@ bool sg::impl::array_declaration_book::withdraw(u32 id)
 
 void sg::impl::array_declaration_book::end_all()
 {
+    auto failed = isize(-1);
+    for (auto const& d : _declarations)
+        if (failed < 0 && !passes_met_check(d))
+            failed = d.name_index;
+
     _declarations.clear();
     for (isize i = 0; i < _names.size(); ++i)
         if (_names[i].live > 0)
             recount(i);
+
+    // All gone before the assert, as at withdraw.
+    if (failed >= 0)
+        check_met(failed, false);
+}
+
+bool sg::impl::array_declaration_book::passes_met_check(declaration const& d)
+{
+    // A declaration is made after its list, so unwinding destroys it first, and an assert here would turn the
+    // exception into an abort.
+    return d.met || std::uncaught_exceptions() > d.exceptions_in_flight;
+}
+
+void sg::impl::array_declaration_book::check_met(isize name_index, bool passed) const
+{
+    CC_ASSERTF(passed,
+               "an array declaration of '{}' ended without any op meeting it: no dispatch, trace or draw of its bind "
+               "point had a bound group holding a {} array of that name. Is the name misspelled?",
+               _names[name_index].name, _names[name_index].is_texture ? "texture" : "buffer");
 }
 
 isize sg::impl::array_declaration_book::find(cc::string_view name, bool is_texture) const

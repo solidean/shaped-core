@@ -90,9 +90,11 @@ sg::impl::stat_counts const& sg::impl::recorded_stats(command_list const& cmd)
     return cmd._stats;
 }
 
-void sg::impl::check_no_live_array_declarations(command_list const& cmd)
+void sg::impl::end_array_declarations_at_submit(command_list& cmd)
 {
     CC_ASSERT(cmd._live_array_declarations.empty(),
               "a command list was submitted while an array declaration made on it is alive. Withdraw it, or let it go "
               "out of scope, before the submit");
+    // Ended all the same, so where the assert is compiled out no value outlives the submit still naming this list.
+    cmd.end_array_declarations(false);
 }

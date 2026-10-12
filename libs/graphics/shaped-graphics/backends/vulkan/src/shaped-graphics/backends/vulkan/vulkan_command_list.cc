@@ -101,7 +101,7 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
 sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
-    sg::impl::check_no_live_array_declarations(*cmd);
+    sg::impl::end_array_declarations_at_submit(*cmd);
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
 

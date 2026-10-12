@@ -57,7 +57,7 @@ The compute, raytracing and raster scopes each carry the pair, and an element is
 Compute and raytracing are one bind point, raster the other, and a raster declaration also ends when its rendering scope closes.
 Binding a pipeline or a group ends nothing, and an op where no bound group holds the array leaves the declaration dormant.
 Every live declaration naming an array applies to it, as several declarations before one op always have.
-Submitting the list while one is alive asserts; dropping the list ends them silently.
+Submitting the list while one is alive asserts, and ends it all the same; dropping the list ends them silently.
 
 What one declaration meeting many ops changes is the element work, and only that — the rules below still decide per op:
 
@@ -70,7 +70,9 @@ What one declaration meeting many ops changes is the element work, and only that
   Any tracked access landing in a member's write bucket — an unordered write or a layout change — counts.
   That covers every path: a scalar binding, a copy, an upload, a render target, a native scope, and an application's own layout transitions.
   An application whose op already wrote one of its elements, before it applied, is not current either.
-- **A declaration that never met its array asserts when it ends.** That is where a misspelled name is caught; a list drop skips the check.
+- **A declaration that never met its array asserts when it ends**, which is where a misspelled name is caught.
+  A withdraw or a destruction runs the check, and so does the rendering scope's close that ends a raster one.
+  A submit or a list drop skips it, and so does any end while an exception unwinds past the declaration.
 
 `ctx.metrics` counts the element work as `array_element_tracks`, declared or covered, so a skipped application shows as none.
 [plans/sticky-array-declarations.md](../plans/sticky-array-declarations.md) has the design and the reasoning.

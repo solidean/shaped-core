@@ -351,7 +351,7 @@ cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  /
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
 cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state; blend constants are 0 until set, per rendering scope
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
-cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // -> sg::array_access_declaration — as on cmd.compute, every draw while it lives; also ends with the scope
+cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // -> sg::array_access_declaration — as on cmd.compute, every draw while it lives; also ends with the scope, whose close ASSERTS on one never met
                                                          //   an element is tracked at the stages the code touches its array in (every stage of the op without a footprint)
 cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.size=1}})   // void — ranges are cc::offset_size {first, count}
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
@@ -784,8 +784,9 @@ cmd.compute.declare_array_texture_access(name, elements) // same for a texture a
 d.withdraw();                                            // ends it now; destroying it does the same. Move-only; a moved-from one ends nothing
                                                          // compute + raytracing are one bind point; a pipeline/group rebind ends nothing; an op binding no such array leaves it dormant
                                                          // once applied, a later op reading the array the same way skips the element work, until an element is written
-                                                         // GOTCHA: submitting the list while `d` lives ASSERTS — hold it in a scope that ends before the submit
+                                                         // GOTCHA: submitting the list while `d` lives ASSERTS, and ends `d` — hold it in a scope that ends before the submit
                                                          // GOTCHA: one that NO op met with a bound group holding its array asserts when it ends — a misspelled name, or declared where nothing binds it
+                                                         //   not while an exception unwinds past it, so unwinding never turns into an abort here
                                                          // a dropped list ends its declarations silently; a value outliving it then does nothing
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).

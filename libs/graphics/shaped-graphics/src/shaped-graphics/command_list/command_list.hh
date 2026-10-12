@@ -144,7 +144,7 @@ protected:
                                                                    cc::span<array_texture_access const> elements) = 0;
 
     // Ends declaration `id`, which is live: the token guarantees it.
-    // One that never met its array asserts.
+    // One that never met its array asserts, unless an exception is unwinding past it.
     virtual void withdraw_array_declaration(u32 id) = 0;
 
     // The id a backend's next array declaration takes, unique within this list.
@@ -257,7 +257,7 @@ protected:
     void note_render_pass_split(cc::string_view cause, split_remedy remedy = split_remedy::record_outside_scope);
 
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
-    friend void impl::check_no_live_array_declarations(command_list const& cmd);
+    friend void impl::end_array_declarations_at_submit(command_list& cmd);
 
     /// Wraps declaration `id`, just made on the compute or the raster bind point, in the value that keeps it in force.
     [[nodiscard]] array_access_declaration adopt_array_declaration(u32 id, bool raster);
@@ -268,7 +268,7 @@ private:
     /// Ends `link`'s declaration from its value's side: withdrawn, or destroyed.
     void end_array_declaration(impl::array_declaration_link& link);
 
-    /// Ends every live declaration from this list's side, silently: the raster ones at a rendering scope's end, or all at a drop.
+    /// Ends every live declaration from this list's side: the raster ones at a rendering scope's end, or all at a submit or a drop.
     void end_array_declarations(bool raster_only);
 
     // Every declaration made on this list and still in force, each shared with its value.

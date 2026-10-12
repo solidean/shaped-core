@@ -1,3 +1,4 @@
+#include <clean-core/common/macros.hh> // CC_ASSERT_ENABLED
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -848,13 +849,17 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: a draw resolves o
 
     // A raster declaration ends with its scope, and destroying its value afterwards does nothing.
     // Held past the scope on purpose: still in force, it would meet the next scope's group and assert on the vacant element.
+    // Its own scope binds no group, so it ends never met, and the close that ends it asserts.
     {
         auto outlived = sg::array_access_declaration();
-        {
-            auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
-            pass.bind_pipeline(*p.pipeline);
-            outlived = pass.declare_array_buffer_access("RasterBufs", vacant_access);
-        }
+        cmd->raster.manual.begin_rendering({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
+        cmd->raster.manual.bind_pipeline(*p.pipeline);
+        outlived = cmd->raster.manual.declare_array_buffer_access("RasterBufs", vacant_access);
+#if CC_ASSERT_ENABLED
+        CHECK_ASSERTS(cmd->raster.manual.end_rendering());
+#else
+        cmd->raster.manual.end_rendering();
+#endif
         {
             auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
             pass.bind_pipeline(*p.pipeline);

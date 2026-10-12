@@ -1,7 +1,6 @@
 # Plan: sticky array declarations
 
 Status: **built** — the [decisions](#decisions) record what an independent review settled, and [where it is built](#where-it-is-built) names the code.
-Three lifecycle rules were settled after the build and are not in the code yet; [when a declaration is in force](#when-a-declaration-is-in-force) names them.
 An array declaration used to cover one dispatch or draw, so a caller binding a large bindless table for many ops paid O(elements) per op.
 This plan makes a declaration live until the caller withdraws it, so sg pays O(elements) once and O(arrays) per op after that.
 Background: [barriers](../concepts/barriers.md) for the tracking model and [bindings — array bindings](../concepts/bindings.md#array-bindings) for the contract.
@@ -28,10 +27,11 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
 
 ## Where it is built
 
-- **The value and its lifetime**: [`sg::array_access_declaration`](../../src/shaped-graphics/command_list/array_access_declaration.hh#L27), made by the facades.
+- **The value and its lifetime**: [`sg::array_access_declaration`](../../src/shaped-graphics/command_list/array_access_declaration.hh#L28), made by the facades.
   The compute and trace facades make it in [compute.hh](../../src/shaped-graphics/command_list/compute.hh#L81-L91) and [raytracing.hh](../../src/shaped-graphics/command_list/raytracing.hh#L77-L85).
   The raster facades make it in [raster.hh](../../src/shaped-graphics/command_list/raster.hh#L159-L168).
   The core list keeps the links and ends them all when it dies ([command_list.cc:9-40](../../src/shaped-graphics/command_list/command_list.cc#L9-L40)).
+  Every backend's submit ends them too, after asserting there are none ([command_list.cc:93-100](../../src/shaped-graphics/command_list/command_list.cc#L93-L100)).
   It ends the raster ones at `close_rendering` ([raster.cc:109-110](../../src/shaped-graphics/command_list/raster.cc#L109-L110)).
 - **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one.
   The compute pair and the withdraw are at [command_list.hh:138-148](../../src/shaped-graphics/command_list/command_list.hh#L138-L148).
@@ -39,6 +39,7 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
 - **What every backend shares**: [`sg::impl::array_declaration_book`](../../src/shaped-graphics/barrier/array_declarations.hh#L40).
   It holds one bind point's declarations, their per-name generations and the application records.
   Its `apply` is the per-op procedure under [what an op does](#what-an-op-does).
+  Its `withdraw` and `end_all` are where a declaration ends, and where the never-met check runs ([array_declarations.cc:44-93](../../src/shaped-graphics/barrier/array_declarations.cc#L44-L93)).
 - **The backends** feed it their bound groups and their trackers, each from its own `declare_array_accesses`.
   dx12's is at [dx12_command_list.cc:498](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L498).
   vulkan's is at [vulkan_command_list.compute.cc:150](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc#L150).
@@ -287,7 +288,7 @@ webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list
 - **A raster declaration also ends when its rendering scope closes**, which keeps today's rule that a raster declaration goes with its scope.
 - **Submit ends every live declaration, as dropping the list does.**
   Submitting with one alive is still a bug, and submit asserts it.
-  Ending them as well means a `release` build, with that assert compiled out, never leaves a token naming a list the pool hands out again.
+  Ending them as well means a `release` build, with that assert compiled out, never leaves a token naming a submitted list.
 - **Dropping the list ends every declaration silently.**
   A drop is what exception unwinding does to a half-recorded list, and a value destroyed later must find its token dead rather than a freed list.
 - **Binding a pipeline or a group does not end it.**
@@ -305,20 +306,13 @@ webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list
   A submit and a list drop end a declaration without the check.
 - **The never-met check does not run while an exception unwinds.**
   A declaration is made after its list, so unwinding destroys it first, and the check would turn the exception into an abort.
-  The value records `std::uncaught_exceptions()` when it is made, and its end skips the check when that count has grown since.
+  Each declaration records `std::uncaught_exceptions()` when it is made, and its end skips the check when that count has grown since.
 - **webgpu never runs the never-met check.**
   It has no binding arrays, so no declaration there can meet one, and an empty declaration must still work as it does everywhere else.
 - **Compute and raytracing stay one bind point**, as they are on every backend today.
 
 A declaration is keyed by name and family, never by bind event.
 Every live declaration naming an array applies to it, unioned exactly as today's `gather` unions several declares before one op.
-
-**Not built yet.**
-The code differs from three of these rules, and their [tests](#tests) are not written:
-
-- submit asserts and ends nothing;
-- a rendering scope's close ends its raster declarations without the never-met check;
-- the never-met check runs while an exception unwinds.
 
 ### What an op does
 
@@ -614,19 +608,16 @@ New tests, tier 1 (run against every backend that has binding arrays) unless not
 - **Pipeline and group rebinds keep it**: the wavefront's bind pattern, asserting zero element tracks after the first op.
 - **Covered keys skip**: compute then raytracing on one bind point, and two raster pipelines at different stages, re-apply once each and then skip.
 - **A different group at the same name** resolves and checks again: an out-of-range index for the second group asserts at its first op.
+- **A second declaration on a name that already met a group** is checked against that group: an out-of-range index in it asserts at its next op there.
+  That one needs no device, and is in `array-declaration-book-test.cc`.
 - **Two bound groups holding one name at different sizes**: an index valid only in the larger asserts — the first-group-only bug.
 - **Withdraw makes the array undeclared**: the next op logs "declared no access" and covers it.
 - **A declaration that never met its array asserts at withdraw**, and a dropped list ends one silently.
 - **Scope close ends a raster one**, and destroying the value afterwards does nothing.
-- **Submit with a live declaration asserts.**
-
-The lifecycle rules settled after the build want these, not written yet:
-
-- **Submit ends a live declaration**: destroying the value afterwards does nothing, in `release` too.
-- **A raster declaration that never met its array asserts when its scope closes.**
-- **Unwinding past a declaration that never met its array does not assert.**
-- **A second declaration on a name that already met a group** is checked against that group: an out-of-range index in it asserts at its next op there.
-- **webgpu only: an empty declaration ends without asserting.**
+- **A raster declaration that never met its array asserts when its scope closes**, and the list is whole after.
+- **Unwinding past a declaration that never met its array does not assert**, for a value the unwinding destroys and for a scope it closes.
+- **Submit with a live declaration asserts, and ends it**: destroying the value afterwards does nothing, in `release` too.
+- **webgpu only: an empty declaration ends without asserting**, withdrawn or ended by its scope.
 
 Existing tests that change:
 
@@ -635,7 +626,7 @@ Existing tests that change:
   It becomes the end-of-life never-met assert, so the probe is the raster declaration's withdraw asserting.
 - `end-to-end-array-bindings-test.cc` "a draw resolves only its own bind point's declarations" keeps its cases, with the declarations held as values.
   "A declaration still pending when its scope closes goes with the scope" becomes "a raster declaration ends with its scope".
-  The declaration that case ends never meets its array, so once a scope close runs the never-met check, that close asserts and the case must expect it.
+  The declaration that case ends never meets its array, so the close that ends it asserts, and the case expects that.
   "A compute declaration waits for a dispatch" becomes "a compute declaration is never met by a draw".
 - The undeclared-array tests (dxc :205, :790, `vulkan-raster-test.cc:407`) keep their `nx::exactly(...)` counts.
 - The out-of-range test in `metal-vertex-input-test.cc:437` still asserts at the draw, since the check runs at first meeting.

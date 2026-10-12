@@ -1,3 +1,5 @@
+#include <clean-core/common/macros.hh>  // CC_ASSERT_ENABLED
+#include <clean-core/common/utility.hh> // CC_DEFER
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
@@ -87,6 +89,11 @@ struct fake_list
         out.push_back({.index = i, .access = sg::access_flag::shader_read});
     return out;
 }
+
+/// Thrown to unwind past a declaration.
+struct unwound
+{
+};
 } // namespace
 
 TEST("sg::impl::array_declaration_book - a current read-only application is skipped")
@@ -247,8 +254,19 @@ TEST("sg::impl::array_declaration_book - an undeclared array is covered at every
     CHECK(list.stats.values[int(sg::stat::array_element_tracks)] == 4);
 }
 
-TEST("sg::impl::array_declaration_book - a declaration that never met its array asserts at withdraw, and end_all is "
-     "silent")
+TEST("sg::impl::array_declaration_book - a declaration made after its name met a group is checked against that group")
+{
+    auto list = fake_list();
+    auto const table = buffers("tables.buffers", 4);
+    list.book.declare_buffers(1, "tables.buffers", reads(2));
+    list.op(table);
+
+    sg::array_buffer_access const past_the_end[] = {{.index = 4, .access = sg::access_flag::shader_read}};
+    list.book.declare_buffers(2, "tables.buffers", past_the_end);
+    CHECK_ASSERTS(list.op(table));
+}
+
+TEST("sg::impl::array_declaration_book - a declaration that never met its array asserts at withdraw")
 {
     // The array the misspelled declaration misses is undeclared, so it is covered, and that is logged once.
     nx::allow_errors("declared no access for a bound array");
@@ -257,9 +275,57 @@ TEST("sg::impl::array_declaration_book - a declaration that never met its array 
     list.book.declare_buffers(1, "tables.bufers", reads(1));
     list.op(table);
     CHECK_ASSERTS(list.book.withdraw(1));
+}
 
-    list.book.declare_buffers(2, "tables.bufers", reads(1));
+TEST("sg::impl::array_declaration_book - end_all ends every declaration, and one that never met its array asserts once "
+     "all are gone")
+{
+    auto list = fake_list();
+    auto const table = buffers("tables.buffers", 3);
+    list.book.declare_buffers(1, "tables.buffers", reads(1));
+    list.op(table);
     list.book.end_all();
     CHECK(list.book.is_empty());
+    CHECK(!list.book.withdraw(1));
+
+    list.book.declare_buffers(2, "tables.buffers", reads(1));
+    list.book.declare_buffers(3, "tables.bufers", reads(1));
+    list.op(table);
+#if CC_ASSERT_ENABLED
+    CHECK_ASSERTS(list.book.end_all());
+#else
+    list.book.end_all();
+#endif
+    CHECK(list.book.is_empty());
     CHECK(!list.book.withdraw(2));
+    CHECK(!list.book.withdraw(3));
+}
+
+TEST("sg::impl::array_declaration_book - an end while an exception unwinds past a declaration skips the never-met "
+     "check")
+{
+    auto list = fake_list();
+    list.book.declare_buffers(1, "tables.bufers", reads(1));
+    list.book.declare_buffers(2, "tables.bufers", reads(1));
+
+    // Ended from a destructor, as unwinding ends a declaration's value, and as it closes a rendering scope.
+    auto const withdraw_while_unwinding = [&]
+    {
+        CC_DEFER
+        {
+            CHECK(list.book.withdraw(1));
+        };
+        throw unwound{};
+    };
+    auto const end_all_while_unwinding = [&]
+    {
+        CC_DEFER
+        {
+            list.book.end_all();
+        };
+        throw unwound{};
+    };
+    CHECK_THROWS_AS(withdraw_while_unwinding(), unwound);
+    CHECK_THROWS_AS(end_all_while_unwinding(), unwound);
+    CHECK(list.book.is_empty());
 }

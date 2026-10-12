@@ -1,5 +1,6 @@
 #include "../shaders/shader_fixtures.hh"
 
+#include <clean-core/common/macros.hh> // CC_ASSERT_ENABLED
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
@@ -198,6 +199,11 @@ public:
 private:
     sg::context& _ctx;
     bool _was = false;
+};
+
+/// Thrown to unwind past a declaration.
+struct unwound
+{
 };
 } // namespace
 
@@ -815,7 +821,8 @@ ASYNC_INVOCABLE_TEST("sg - a raster array declaration ends with its rendering sc
     co_await ctx->idle_completion();
 }
 
-ASYNC_INVOCABLE_TEST("sg - submitting a list with an array declaration alive asserts", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - submitting a list with an array declaration alive asserts, and ends the declaration",
+                     (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     require_arrays(*ctx);
@@ -824,13 +831,101 @@ ASYNC_INVOCABLE_TEST("sg - submitting a list with an array declaration alive ass
     sg::buffer<i32> const sources[] = {make_source(*ctx, 0), make_source(*ctx, 1), make_source(*ctx, 2)};
     auto const tray = make_tray(*ctx);
 
-    // The refused submit unwinds past the list, which auto-drops it; where asserts are compiled out, the test's end does.
-    nx::expect_warning("destroyed without submit or drop", nx::exactly(1));
     auto cmd = ctx->create_command_list();
     auto const shelf = shelf_of(*cmd, sources);
-    auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
+    auto declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
     gather(*cmd, *kernel, *shelf, tray);
+#if CC_ASSERT_ENABLED
+    // The refused submit unwinds past the list, which auto-drops it.
+    nx::expect_warning("destroyed without submit or drop", nx::exactly(1));
     CHECK_ASSERTS(ctx->submit_command_list(cc::move(cmd)));
+#else
+    // With the assert compiled out the submit goes through, and ends the declaration as a drop would.
+    ctx->submit_command_list(cc::move(cmd));
+#endif
+    // Either way its list is gone, so the value finds nothing to end.
+    declared.withdraw();
+    co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - a raster array declaration that never met its array asserts when its rendering scope closes",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    require_arrays(*ctx);
+
+    auto const target = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
+
+    // No group of the scope holds its array, so the scope's close is where it ends, never met.
+    auto cmd = ctx->create_command_list();
+    auto outlived = sg::array_access_declaration();
+    cmd->raster.manual.begin_rendering({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
+    outlived = cmd->raster.manual.declare_array_buffer_access("shelf.sources", reads_of_three());
+#if CC_ASSERT_ENABLED
+    CHECK_ASSERTS(cmd->raster.manual.end_rendering());
+#else
+    cmd->raster.manual.end_rendering();
+#endif
+    // Ended by the close, which left the list whole: the value ends nothing, and the list drops.
+    outlived.withdraw();
+    ctx->drop_command_list(cc::move(cmd));
+    co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - unwinding past an array declaration that never met its array does not assert",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    require_arrays(*ctx);
+
+    auto const target = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
+    auto const color = target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0));
+
+    auto cmd = ctx->create_command_list();
+    // A declaration is made after its list, so unwinding destroys it while the list lives, before any op met it.
+    auto const unwind_past_value = [&]
+    {
+        auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
+        throw unwound{};
+    };
+    // A raster one held past its scope is ended by the close the unwinding runs.
+    auto outlived = sg::array_access_declaration();
+    auto const unwind_past_scope = [&]
+    {
+        auto pass = cmd->raster.render_to({.color_targets = {color}});
+        outlived = pass.declare_array_buffer_access("shelf.sources", reads_of_three());
+        throw unwound{};
+    };
+    CHECK_THROWS_AS(unwind_past_value(), unwound);
+    CHECK_THROWS_AS(unwind_past_scope(), unwound);
+    outlived.withdraw();
+    ctx->drop_command_list(cc::move(cmd));
+    co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - webgpu ends an empty array declaration without asserting, having no array it could meet",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (ctx->backend() != sg::backend_kind::webgpu)
+        SKIP("only webgpu has no binding arrays, which is what exempts it from the never-met check");
+
+    auto const target = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba8_unorm, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
+
+    // Withdrawn, and ended by a rendering scope's close: the two ends that check on every other backend.
+    auto cmd = ctx->create_command_list();
+    auto computed = cmd->compute.declare_array_buffer_access("shelf.sources", {});
+    auto drawn = sg::array_access_declaration();
+    {
+        auto pass
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
+        drawn = pass.declare_array_texture_access("gallery.images", {});
+    }
+    computed.withdraw();
+    ctx->drop_command_list(cc::move(cmd));
     co_await ctx->idle_completion();
 }
 
