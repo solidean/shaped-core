@@ -125,7 +125,8 @@ lib.backlog()                    // -> cc::async_backlog const&; every shader an
 slib::compile_source_options     // { shader_language language = hlsl; string_view include_dir; string_view label = "<generated>"; }
 // The door for GENERATED / downloaded / UI-authored shader text: compile_shader resolves the package owning a path, and such a
 // source is under none. Includes still resolve against the mount table, so generated code may pull in a package's .hlsli files.
-// NOTHING is cached — a caller generating a source already has a better key for it than a hash of the text would be.
+// slib adds no cache of the compiled shader here — a caller generating a source already has a better key for it.
+// A compiler's own cache still applies (DXC's and Metal's shader_cache), and an SGL source's preprocess is cached by its edge.
 
 slib::reload_config                         // { double interval_ms = 200; bool unthreaded = false;
                                             //   bool force_polling = false; }

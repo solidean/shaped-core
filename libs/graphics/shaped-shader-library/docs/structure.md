@@ -119,7 +119,10 @@ The shape the seam is built for, and what is still `[planned]`:
   Its key is everything it reads, plus two fingerprints the build generates over SGL's sources with the prelude and over slib's own.
   slib's also covers the sg headers whose enums the stored bytes hold.
   So a repeat costs a lookup rather than the front end, and an edit to either compiler misses at its next build.
+  **Neither fingerprint covers clean-core**, though it shapes the text too: SGL writes its numeric literals through `cc::to_string`.
+  So a clean-core change that alters SGL's output needs `SC_SG_COLD=shaders`, or a wiped cache, before a run shows it.
   `SC_SG_COLD=shaders` turns the persistent tier off as it does DXC's.
+  It is off on wasm and under `SC_THREADS=OFF` as well: a lookup waits for the store's own thread, which a page must not do and an unthreaded build does not have.
   A failed preprocess is never stored.
   `sgl::describe`, which a hit group and a pipeline read first, has an in-memory memo beside it.
   It carries [examples/graphics/sgl-cube](../../../../examples/graphics/sgl-cube/shaders/cube.sgl) and the tier-1 compute and raster fixtures.
