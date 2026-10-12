@@ -15,6 +15,7 @@
 #include <shaped-graphics-language/driver/prelude.hh>
 
 // Where one compile's time goes, from a file's text to one entry point's text: parse, check, flatten, legalize, emit.
+// The prelude is checked once per process, before the first of them, and timed apart.
 // Manual, since it measures rather than asserts, and it reads what it compiles from the environment:
 //
 //   SGL_PROFILE_SOURCE=<file.sgl> SGL_PROFILE_ENTRY=<name> uv run dev.py test "sgl profile - one compile" --manual
@@ -70,8 +71,6 @@ TEST("sgl profile - one compile of a file, sampled",
     auto const rounds = int_from_environment("SGL_PROFILE_ROUNDS", 1);
     auto const rate_hz = int_from_environment("SGL_PROFILE_RATE_HZ", 4000);
     auto const source = read_text(path.value());
-    // the prelude is checked once per process, which is not what this measures
-    REQUIRE(sgl::checked_prelude() != nullptr);
 
     auto captured = cc::rec::recording();
     {
@@ -79,6 +78,11 @@ TEST("sgl profile - one compile of a file, sampled",
         auto const handle = cc::rec::register_listener(capture);
         {
             auto const sampling = cc::rec::sampling_scope({.rate_hz = double(rate_hz)});
+            // once per process, before the first compile, so it is timed apart from them
+            {
+                CC_RECORD_SCOPE("check the prelude");
+                REQUIRE(sgl::checked_prelude() != nullptr);
+            }
             for (auto i = 0; i < rounds; ++i)
             {
                 CC_RECORD_SCOPE("compile to text");
@@ -92,6 +96,8 @@ TEST("sgl profile - one compile of a file, sampled",
         captured = capture.take().spliced_samples();
     }
 
+    for (auto const& s : captured.scopes("check the prelude"))
+        cc::println("the prelude checked in {:.2f} ms", s.duration_secs() * 1000);
     auto const compiles = captured.scopes("compile to text");
     auto total = 0.0;
     for (auto const& s : compiles)
