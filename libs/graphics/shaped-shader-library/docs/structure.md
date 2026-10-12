@@ -117,8 +117,12 @@ The shape the seam is built for, and what is still `[planned]`:
   It is not a chain in the sense below, since the hop is inside one edge: `preprocess` writes the target's text, and that text is what is cached, hashed and compiled.
   **That `preprocess` is cached too**: in memory for the process, and persistently in `bcache::default_cache()`, or the store `sgl_compiler_options` names.
   Its key is everything it reads, plus two fingerprints the build generates over SGL's sources with the prelude and over slib's own.
-  slib's also covers the sg headers whose enums the stored bytes hold.
+  slib's also covers the binding and capability headers of sg whose enums the stored bytes hold; `sg::access_flag` is guarded by `k_shader_codec_version` instead, as its header says.
   So a repeat costs a lookup rather than the front end, and an edit to either compiler misses at its next build.
+  **What the persistent tier saves is smaller than it was.**
+  The front end was profiled before the cache landed: a stage of sgl-cube now takes under 1 ms on `relwithdebinfo-clang`, about 8 ms on `debug-clang`.
+  The prelude check, once per process, is the larger cost, and the persistent tier does not skip it wherever a pipeline is acquired: `sgl::describe` runs it, and its memo is in memory only.
+  The SGL library's [TODO](../../shaped-graphics-language/docs/TODO.md) has what that check costs and the next cuts.
   **Neither fingerprint covers clean-core**, though it shapes the text too: SGL writes its numeric literals through `cc::to_string`.
   So a clean-core change that alters SGL's output needs `SC_SG_COLD=shaders`, or a wiped cache, before a run shows it.
   `SC_SG_COLD=shaders` turns the persistent tier off as it does DXC's.
