@@ -112,14 +112,66 @@ test:
         total += i
     total == 3
 
-// nor can a range longer than the compiler writes copies of
-@expect(error = "invalid-constant-argument")
+// a loop writes at most 256 copies of its body, so 256 values unroll
+fun sum_below_256() -> int:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 256:
+        total += i
+    return total
+
+test sum_below_256() == 32640
+
+// and 257 stay a loop, which a warning says
+@expect(warning = "unroll-too-long")
 test:
     let mut total = 0
     @unroll
-    for i in 0 ..< 1000:
+    for i in 0 ..< 257:
         total += i
-    total > 0
+    total == 32896
+
+// a nest counts each copy once per copy of the unrolled loops around it: 16 values inside 16 are 256 copies, and unroll
+fun products() -> int:
+    let mut total = 0
+    @unroll
+    for row in 0 ..< 16:
+        @unroll
+        for column in 0 ..< 16:
+            total += row * column
+    return total
+
+test products() == 14400
+
+// while 16 inside 17 are 272, so the inner loop stays a loop, and the outer one still unrolls
+@expect(warning = "unroll-too-long")
+test:
+    let mut total = 0
+    @unroll
+    for row in 0 ..< 17:
+        @unroll
+        for column in 0 ..< 16:
+            total += row * column
+    total == 16320
+
+// a range holding more values than an int counts is counted in full, and stays a loop
+@expect(warning = "unroll-too-long")
+test:
+    let mut count = 0
+    @unroll
+    for i in -2000000000 ..< 2000000000:
+        count += 1
+    count > 0
+
+// and one that wide the other way round is empty
+fun none_wide() -> int:
+    let mut count = 0
+    @unroll
+    for i in 2000000000 ..< -2000000000:
+        count += 1
+    return count
+
+test none_wide() == 0
 
 // the attribute takes no arguments
 @expect(error = "invalid-attribute-arguments")
