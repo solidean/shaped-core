@@ -88,8 +88,8 @@ struct flattener
     cc::vector<origin> effectful_asserts;
     /// Every `discard` the tree reaches, which only a pixel entry point may (CHK-277).
     cc::vector<origin> discards;
-    /// An unrolled `for` the tree did not unroll, which its caller reports once (CHK-389): one whose bound is no
-    /// constant, an error, and one that would write too many copies and is a loop instead, a warning.
+    /// An unrolled `for` the tree did not unroll, which its caller reports once (CHK-389).
+    /// One whose bound is no constant is an error, and one that would write too many copies is a loop instead, and a warning.
     struct unroll_report
     {
         diagnostic_kind kind = diagnostic_kind::invalid_constant_argument;
@@ -98,8 +98,8 @@ struct flattener
         cc::string detail;
     };
     cc::vector<unroll_report> unroll_reports;
-    /// How many times the statement being written is written: the product of the copies of every unrolled `for`
-    /// around it, which bounds what a nest of them writes as a whole (CHK-389).
+    /// How many times the statement being written is written: the product of the copies of every unrolled `for` around it.
+    /// It is what bounds a nest of them as a whole (CHK-389).
     i64 unrolled_copies = 1;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
     /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
@@ -2681,8 +2681,7 @@ struct flattener
         return fail();
     }
 
-    /// The most copies of its body an unrolled `for` writes, each counted once per copy of the unrolled loops around it
-    /// (CHK-389).
+    /// The most copies of its body an unrolled `for` writes, each counted once per copy of the unrolled loops around it (CHK-389).
     static constexpr i64 k_max_unrolled = 256;
 
     /// The value of constant `bound`, an int, where it is one; nothing for anything else.

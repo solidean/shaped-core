@@ -1,4 +1,4 @@
-// `@unroll` on a for writes its body once per index, runs nothing of it as a loop, and means what the loop means (CHK-389)
+// `@unroll` on a for writes its body once per index, within its copy limit runs nothing of it as a loop, and means what the loop means (CHK-389)
 
 fun weighted_sum(values: float[5]) -> float:
     let kernel = [0.0625, 0.25, 0.375, 0.25, 0.0625]
@@ -148,6 +148,7 @@ fun sum_below_256() -> int:
 test sum_below_256() == 32640
 
 // and 257 stay a loop, which a warning says
+// A test that expects a diagnostic is judged by it alone and never run (CHK-232), so the values below hold but are not checked.
 @expect(warning = "unroll-too-long")
 test:
     let mut total = 0
@@ -182,11 +183,11 @@ test:
 // a range holding more values than an int counts is counted in full, and stays a loop
 @expect(warning = "unroll-too-long")
 test:
-    let mut count = 0
+    let mut last = 0
     @unroll
     for i in -2000000000 ..< 2000000000:
-        count += 1
-    count > 0
+        last = i
+    last == 1999999999
 
 // and one that wide the other way round is empty
 fun none_wide() -> int:

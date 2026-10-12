@@ -316,7 +316,7 @@ struct sgl::builtins::registry
     cc::map<u64, cc::vector<builtin_id>> functions_by_signature;
     /// Per language, every name a function writes there, which `function_record::writes_name` takes one record at a time.
     /// Filled by `finalize` too.
-    cc::set<cc::string> written_names[3];
+    cc::set<cc::string> written_names[u8(language::msl) + 1];
 
     builtin_type_id add(type_record record);
     builtin_id add(function_record record);
