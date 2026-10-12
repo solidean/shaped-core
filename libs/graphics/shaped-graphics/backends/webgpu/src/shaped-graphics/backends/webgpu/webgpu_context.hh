@@ -116,6 +116,7 @@ public:
 
     [[nodiscard]] sg::execution_model execution() const override { return sg::execution_model::never_block; }
 
+    /// Free-threaded, so every case reads what creation recorded: `device()` asserts the device thread.
     [[nodiscard]] bool supports(sg::feature f) const override
     {
         switch (f)
@@ -159,8 +160,7 @@ public:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;
         case sg::feature::texture_compression_bc:
-            // Requested at creation wherever the adapter offers it, so the device has it exactly then.
-            return wgpuDeviceHasFeature(device(), WGPUFeatureName_TextureCompressionBC);
+            return _texture_compression_bc;
         }
         return false;
     }
@@ -475,6 +475,7 @@ public:
         bool extended_image_formats = false;  ///< texture-formats-tier1 and bgra8unorm-storage
         bool shader_f16 = false;              ///< shader-f16
         bool subgroups = false;               ///< subgroups
+        bool texture_compression_bc = false;  ///< texture-compression-bc
     };
 
     // Set once at creation.
@@ -496,6 +497,7 @@ private:
     bool _extended_image_formats = false;
     bool _shader_f16 = false; // shader-f16 was granted
     bool _subgroups = false;  // subgroups was granted
+    bool _texture_compression_bc = false;
 
     sg::epoch _current_epoch = sg::epoch::first;
     u64 _next_submission = u64(sg::submission_token::first);
