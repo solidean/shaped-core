@@ -18,7 +18,7 @@ namespace
 /// A preprocess result with every field the byte form writes set to something other than its default.
 [[nodiscard]] slib::preprocessed_source rich_result()
 {
-    // Off the persistent tier, which would be the user's cache.
+    // Off the persistent tier, so the value is the front end's own and no store answers it.
     auto const compiler = slib::create_sgl_compiler(slib::create_wgsl_compiler(), {.persistent_cache = nullptr});
     auto resolve = [](cc::string_view) -> cc::optional<cc::string> { return cc::nullopt; };
     auto text = compiler->preprocess({.source = "@inline binding constants:\n"
