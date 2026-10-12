@@ -1,3 +1,4 @@
+#include <clean-core/algorithm/search.hh>
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -29,6 +30,13 @@ symbol_id struct_of(checked_module const& m, type_id type)
     }
     return symbol_id::none;
 }
+
+/// An expression of a type that holds a struct, and the struct.
+struct struct_mention
+{
+    source_span where;
+    symbol_id structure = symbol_id::none;
+};
 } // namespace
 
 void checker::apply_option_value(symbol_id id, constant_info& info)
@@ -149,10 +157,15 @@ cc::vector<symbol_id> checker::options_reached(symbol_id function, symbol_id als
     };
     auto extents = cc::vector<extent>();
     auto declarations = cc::vector<symbol_id>();
+    // The prelude was checked before the program existed, so a declaration of it names nothing of the program's, and
+    // reaches an option only where the prelude holds a use of one, which today it never does.
+    auto is_prelude_reaching = false;
+    for (auto const& use : out.option_uses)
+        is_prelude_reaching = is_prelude_reaching || is_prelude_file(use.file);
     auto const add = [&](symbol_id id)
     {
         auto const& s = out.at(id);
-        if (!ast::is_valid(s.declaration))
+        if (!ast::is_valid(s.declaration) || (!is_prelude_reaching && is_prelude_file(s.file)))
             return;
         for (auto const known : declarations)
             if (known == id)
@@ -172,19 +185,30 @@ cc::vector<symbol_id> checker::options_reached(symbol_id function, symbol_id als
 
     // A struct a signature, a local or a member names shapes the text where its own fields name an option, such as an
     // array's length, so every struct an extent names is reached too, and every struct its fields name in turn.
+    // A file's expressions of a struct are found once, ordered by where they start, so an extent reads its own alone.
+    auto mentions_by_file = cc::vector<cc::vector<struct_mention>>();
+    mentions_by_file.resize_to_filled(out.files.size(), {});
+    auto is_indexed = cc::vector<bool>();
+    is_indexed.resize_to_filled(out.files.size(), false);
     for (auto e = isize(0); e < extents.size(); ++e)
     {
         auto const file = extents[e].file;
         auto const span = extents[e].span;
-        auto const& tables = out.files[file];
-        for (auto x = isize(0); x < tables.type_of.size(); ++x)
+        auto& mentions = mentions_by_file[file];
+        if (!is_indexed[file])
         {
-            auto const where = span_of(file, ast::expr_id(x));
-            if (where.offset < span.offset || where.end() > span.end())
-                continue;
-            if (auto const s = struct_of(out, tables.type_of[x]); is_valid(s))
-                add(s);
+            is_indexed[file] = true;
+            auto const& tables = out.files[file];
+            for (auto x = isize(0); x < tables.type_of.size(); ++x)
+                if (auto const s = struct_of(out, tables.type_of[x]); is_valid(s))
+                    mentions.push_back({.where = span_of(file, ast::expr_id(x)), .structure = s});
+            cc::sort_by(mentions, [](struct_mention const& m) { return m.where.offset; });
         }
+        auto const first
+            = cc::partition_point(mentions, [&](struct_mention const& m) { return m.where.offset < span.offset; });
+        for (auto i = first; i < mentions.size() && mentions[i].where.offset <= span.end(); ++i)
+            if (mentions[i].where.end() <= span.end())
+                add(mentions[i].structure);
     }
 
     auto result = cc::vector<symbol_id>();

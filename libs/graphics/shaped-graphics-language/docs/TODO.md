@@ -9,6 +9,9 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   With the whole-module passes that run over the prelude's part again, that is about 1.9 ms of the 2.9 ms a ten-line compute shader takes on `debug-linux-clang`.
   Sharing the prelude's part read-only, and running those passes over the program's part alone, would leave the program's own check.
   The test `sgl profile - checking a small program behind the prelude, sampled` measures both.
+- **Every flat tree takes every module-level name into a mint of its own.** `flatten_entry_point` reserves each symbol's name, the prelude's thousands included.
+  It is a tenth of a compile of the sgl-cube's vertex shader on `debug-clang`, which `sgl profile - one compile of a file, sampled` measures.
+  The emitter's mint already goes on from the tree's (`name_mint::parent`), and the tree's could go on from one set of the module's names, given an owner that outlives every tree.
 - **A source that stands in for a prelude file checks the whole prelude.** Such a source is checked as that file of the prelude (`prelude_file_of`).
   It is `prelude/core.sgl` open in an editor, or a user's `shaders/prelude/core.sgl`.
   Such a check has no checked prelude to continue, so it takes the full pass, which is the 50 ms a compile took before.

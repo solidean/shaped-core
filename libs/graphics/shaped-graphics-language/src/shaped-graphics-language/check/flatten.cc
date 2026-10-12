@@ -329,19 +329,12 @@ struct flattener
         return local_id(entry.locals.size() - 1);
     }
 
+    /// The names of `entry.labels`, which are unique among the labels alone.
+    name_mint label_names;
+
     label_id add_label(cc::string_view desired)
     {
-        auto name = cc::string(desired);
-        auto const is_taken = [&]
-        {
-            for (auto const& l : entry.labels)
-                if (l.name == name)
-                    return true;
-            return false;
-        };
-        for (auto i = 1; is_taken(); ++i)
-            name = cc::format("{}_{}", desired, i);
-        entry.labels.push_back({.name = cc::move(name)});
+        entry.labels.push_back({.name = label_names.mint(desired)});
         return label_id(entry.labels.size() - 1);
     }
 
