@@ -1,5 +1,6 @@
 #pragma once
 
+#include <blob-cache/keys.hh> // bcache::cache_key, returned by value below
 #include <clean-core/bytes/hash128.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -55,6 +56,9 @@ inline constexpr double k_sgl_lookup_patience_secs = 1.0;
 
 /// Nothing for any input `encode_preprocessed` did not write, so a corrupt entry is a miss.
 [[nodiscard]] cc::optional<preprocessed_source> decode_preprocessed(cc::span<byte const> bytes);
+
+/// Where the persistent tier keeps `key`'s result in this build, beside the fingerprints of both compilers.
+[[nodiscard]] bcache::cache_key sgl_emit_persistent_key(cc::hash128 key);
 
 /// Forgets `key` in the in-memory tier, so a test can tell the persistent tier's answer from it.
 void forget_sgl_emit(cc::hash128 key);

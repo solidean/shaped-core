@@ -1,7 +1,9 @@
 #include <blob-cache/blob_cache.hh>
 #include <clean-core/bytes/hash128.hh>
+#include <clean-core/container/pinned_data.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async.hh>
 #include <nexus/test.hh>
 #include <shaped-shader-library/compiler/sgl_compiler.hh>
 #include <shaped-shader-library/compiler/wgsl_compiler.hh>
@@ -101,6 +103,21 @@ namespace
     auto const text = cc::format("{}|{}", what, path);
     return cc::hash128::create(cc::span<char const>(text.data(), text.size()).as_bytes(), 0);
 }
+
+/// A store of the test's own, which starts empty, is shared with nothing, and is removed when the test ends.
+struct private_store
+{
+    cc::string path = cc::temp_file_path("slib-sgl-emit-test", ".db");
+    cc::unique_ptr<bcache::blob_cache> cache = bcache::blob_cache::create({.path = path});
+
+    ~private_store()
+    {
+        cache->close();
+        (void)cc::remove_file(path);
+        (void)cc::remove_file(cc::format("{}-wal", path));
+        (void)cc::remove_file(cc::format("{}-shm", path));
+    }
+};
 } // namespace
 
 TEST("slib sgl emit cache - a result round-trips its byte form")
@@ -172,10 +189,7 @@ TEST("slib sgl emit cache - the persistent tier answers once memory has forgotte
     if (!CC_HAS_THREADS)
         SKIP("the persistent tier waits for the store's own thread, which this build does not have");
 
-    // A store of this test's own: it has to start empty and stay unshared.
-    auto const path = cc::temp_file_path("slib-sgl-emit-test", ".db");
-    auto store = bcache::blob_cache::create({.path = path});
-
+    auto const store = private_store();
     auto const value = rich_result();
     auto runs = 0;
     auto compute = [&]() -> cc::result<slib::preprocessed_source>
@@ -186,18 +200,51 @@ TEST("slib sgl emit cache - the persistent tier answers once memory has forgotte
 
     // No patience bound: a store slow to open must not turn into a miss and fail the test.
     auto const key = fresh_key("persistent");
-    REQUIRE(slib::impl::cached_sgl_preprocess(key, compute, store.get(), cc::nullopt).has_value());
+    REQUIRE(slib::impl::cached_sgl_preprocess(key, compute, store.cache.get(), cc::nullopt).has_value());
     CHECK(runs == 1);
 
     // The store's actor takes messages in order, so the lookup below sees the write the first call queued.
     slib::impl::forget_sgl_emit(key);
-    auto const reread = slib::impl::cached_sgl_preprocess(key, compute, store.get(), cc::nullopt);
+    auto const reread = slib::impl::cached_sgl_preprocess(key, compute, store.cache.get(), cc::nullopt);
     REQUIRE(reread.has_value());
     CHECK(runs == 1);
     CHECK(same(value, reread.value()));
+}
 
-    store->close();
-    (void)cc::remove_file(path);
-    (void)cc::remove_file(cc::format("{}-wal", path));
-    (void)cc::remove_file(cc::format("{}-shm", path));
+TEST("slib sgl emit cache - an entry that fails to decode is replaced")
+{
+    if (!bcache::blob_cache::is_storage_available())
+        SKIP("no storage for a blob cache in this build");
+    if (!CC_HAS_THREADS)
+        SKIP("the persistent tier waits for the store's own thread, which this build does not have");
+
+    // Bytes the codec never wrote, under the key a lookup reads: what a torn write or a stale layout leaves behind.
+    auto const store = private_store();
+    auto const key = fresh_key("corrupt");
+    auto corrupt = cc::vector<byte>();
+    corrupt.push_back(byte(0xFF));
+    auto const planted
+        = store.cache->put(slib::impl::sgl_emit_persistent_key(key), cc::make_pinned_data(cc::move(corrupt)));
+
+    auto const value = rich_result();
+    auto runs = 0;
+    auto compute = [&]() -> cc::result<slib::preprocessed_source>
+    {
+        ++runs;
+        return value;
+    };
+    REQUIRE(slib::impl::cached_sgl_preprocess(key, compute, store.cache.get(), cc::nullopt).has_value());
+    CHECK(runs == 1);
+
+    // The store answered that lookup after the put queued before it, so the put has settled by now.
+    REQUIRE(planted->is_ready());
+    REQUIRE(planted->has_value());
+    REQUIRE(planted->value().is_present());
+
+    // The first writer wins, so only an entry dropped on the failed decode lets this read the recomputed one.
+    slib::impl::forget_sgl_emit(key);
+    auto const reread = slib::impl::cached_sgl_preprocess(key, compute, store.cache.get(), cc::nullopt);
+    REQUIRE(reread.has_value());
+    CHECK(runs == 1);
+    CHECK(same(value, reread.value()));
 }
