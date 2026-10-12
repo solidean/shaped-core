@@ -512,6 +512,8 @@ ASYNC_INVOCABLE_TEST("sg stream - a compressed texture streams whole block rows"
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
+    if (!c.supports(sg::feature::texture_compression_bc))
+        SKIP("this device has no BC textures");
 
     // 16x16 BC1 is 4x4 blocks of 8 bytes: 32 bytes per block row, four block rows, one slice.
     sg::texture_description desc;
@@ -701,6 +703,8 @@ ASYNC_INVOCABLE_TEST("sg stream - a compressed texture with a partial last block
 {
     REQUIRE(handle != nullptr);
     auto& c = *handle;
+    if (!c.supports(sg::feature::texture_compression_bc))
+        SKIP("this device has no BC textures");
 
     // 16x10 BC1 is 4x3 blocks of 8 bytes: 32 bytes per block row, three block rows, the last one half outside.
     sg::texture_description desc;

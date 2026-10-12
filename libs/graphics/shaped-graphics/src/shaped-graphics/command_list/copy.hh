@@ -48,7 +48,7 @@ inline constexpr isize buffer_texture_offset_alignment = 512;
 /// Arguments for a GPU copy from a buffer into one subresource of a texture (cmd.copy.buffer_to_texture).
 ///
 /// The buffer holds the region row after row, `src_row_pitch_in_bytes` apart, and depth slice after depth slice.
-/// A row of a block-compressed format is a row of blocks, so a 4x4-block format's region of height h is h / 4 rows.
+/// A row of a block-compressed format is a row of blocks, so a 4x4-block format's region of height h is ceil(h / 4) rows.
 /// This is the copy a compute shader's output takes into a texture it could not write directly, such as a BC encoder's.
 struct sg::buffer_texture_copy
 {
