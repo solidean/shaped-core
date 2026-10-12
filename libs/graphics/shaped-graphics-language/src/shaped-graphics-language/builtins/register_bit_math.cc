@@ -66,8 +66,8 @@ written write_bitwise(call_context const& c)
             .binds = precedence::bitwise};
 }
 
-/// Whether `text` is a bare decimal literal, which HLSL types only by context: `1`, `-1`, or how the emitter spells the
-/// lowest int, `(-2147483647 - 1)`.
+/// Whether `text` is a bare decimal literal, which HLSL types only by context.
+/// That is `1`, `-1`, or the lowest int as the emitter spells it, `(-2147483647 - 1)`.
 bool is_bare_decimal(cc::string_view text)
 {
     if (text == "(-2147483647 - 1)")
