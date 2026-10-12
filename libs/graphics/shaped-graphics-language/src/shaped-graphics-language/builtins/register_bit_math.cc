@@ -66,9 +66,14 @@ written write_bitwise(call_context const& c)
             .binds = precedence::bitwise};
 }
 
-/// Whether `text` is a bare decimal literal, which HLSL types only by context.
+/// Whether `text` is a bare decimal literal, which HLSL types only by context: `1`, `-1`, or how the emitter spells the
+/// lowest int, `(-2147483647 - 1)`.
 bool is_bare_decimal(cc::string_view text)
 {
+    if (text == "(-2147483647 - 1)")
+        return true;
+    if (text.starts_with("-"))
+        text = text.subview(1);
     if (text.empty())
         return false;
     for (auto const ch : text)
@@ -96,7 +101,7 @@ written write_shift(call_context const& c)
         count = Width == 1 ? cc::format("u32({})", count) : cc::format("vec{}u({})", Width, count);
     else if (c.target == language::msl)
         count = cc::format("({} & 31)", count);
-    // DXC refuses `1 << n`, whose left side is a literal it cannot type, so a bare one is written as the int it is.
+    // DXC refuses `1 << n` and `-1 << n`, whose left side is a literal it cannot type, so one is written as the int it is.
     auto left = operand(c.arguments[0]);
     if (c.target == language::hlsl && IsSigned && Width == 1 && is_bare_decimal(left))
         left = cc::format("int({})", left);
