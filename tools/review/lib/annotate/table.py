@@ -88,6 +88,10 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     A block's `context:`, or else the entry's, is the folder its short paths are looked for under first.
     It is itself a folder reference, and one that resolves to no single folder is a problem, since every path it
     was meant to settle would otherwise fall back to the repository-wide lookup without a word.
+    The entry's is the exception, since it is the one line every later round inherits.
+    A folder that was there at the head of a finalized round the entry has a block in is accepted, and names what it named there.
+    Gone now, it narrows nothing in the current tree, so a new round's short path is looked for repository-wide.
+    The rounds read at that head still resolve their short paths under it, as they did when they were written.
     A block's `planned:`, or else the entry's, is a folder the design will create, and is never resolved.
     A reference that resolves nowhere and lies under it is drawn as planned rather than failing — see FileProvider.
     A literal is resolved once per entry, in the first text naming it, because the page matches literals entry-wide.
@@ -100,12 +104,18 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
 
     contexts: dict[str, str] = {}
 
-    def context_of(raw: str, answered: bool) -> str:
-        """The folder a `context:` names, recording a problem once when it names none."""
+    def context_of(raw: str, answered: bool, trees: list[RepoIndex]) -> str:
+        """The folder a `context:` names, recording a problem once when it names none.
+
+        Where the current tree names none, the first of `trees` that names one decides it, and nothing is reported.
+        """
         if not raw:
             return ""
         if raw not in contexts:
             resolution = index.resolve_dir(raw)
+            if not resolution.ok:
+                then = next((r for r in (tree.resolve_dir(raw) for tree in trees) if r.ok), None)
+                resolution = then if then is not None else resolution
             contexts[raw] = resolution.path if resolution.ok else ""
             if not resolution.ok and not answered:
                 what = ("names several folders: " + ", ".join(f"`{c}`" for c in resolution.candidates)
@@ -116,7 +126,7 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
     def scan(text: str, then: tuple[RepoIndex | None, str] | None, context: str = "", planned: str = "") -> None:
         past, rev = then if then is not None else (None, "")
         answered = then is not None
-        folder = context_of(context, answered)
+        folder = context_of(context, answered, [past] if past is not None else [])
         files = FileProvider(index=index, seen=seen_files, answered=answered, history=past, history_rev=rev,
                              context=folder, planned=planned)
         dirs = DirProvider(index=index, seen=seen_dirs, answered=answered, history=past, history_rev=rev,
@@ -133,7 +143,6 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
             tokens.extend(glossary.tokens(text, skip_entry=entry.slug))
 
     entry_context = entry.front.get("context", "").strip()
-    context_of(entry_context, False)
     entry_planned = planned_folder(entry.front.get("planned", ""))
     texts: list[tuple[str, int, str, str]] = []
     retired: list[tuple[str, int, str, str]] = []
@@ -151,6 +160,13 @@ def build(entry: Entry, index: RepoIndex, *, answers: AnswerFile | None = None, 
                      for comment in answers.comments.values())
 
     then_of = {r: (history(r) if history is not None and r else None) for _, r, _, _ in [*texts, *retired]}
+
+    # Before any text is scanned, since a block inheriting it would otherwise resolve it against its own round alone.
+    # Newest first, so a folder that moved between rounds is where the latest of them read it.
+    rounds = sorted({block.round for block in entry.blocks}, reverse=True)
+    trees = [then_of[r][0] for r in rounds if then_of[r] is not None and then_of[r][0] is not None]
+    context_of(entry_context, False, trees)
+
     for text, r, context, planned in texts:
         if then_of[r] is None:
             scan(text, None, context, planned)

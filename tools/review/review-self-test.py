@@ -2010,6 +2010,50 @@ def test_the_open_round_decides_a_literal_both_rounds_name(root: Path) -> None:
     assert len(tokens) == 1 and "not a file" in tokens[0].problem, tokens
 
 
+# A tree the review's own fix moved: `docs/plans/` was there when round 1 was read, and is gone now.
+_PLANS_THEN = ["docs/plans/structure.md", "docs/structure.md", "lib/structure.md"]
+_PLANS_NOW = ["docs/structure.md", "lib/structure.md", "lib/only.md"]
+
+
+def _context_history_tokens(root: Path, context: str, rounds: list[tuple[int, str]]):
+    """An entry whose front matter names `context`, with round 1 finalized at `_PLANS_THEN` and every later round open."""
+    body = "".join(f"\n## prose\nround: {r}\n\n{text}\n" for r, text in rounds)
+    entry = parse_text(f"---\nid: 052\ntitle: t\ncontext: {context}\n---\n{body}", Path("entry.md"))
+    finalized = (_index_of(root, _PLANS_THEN), _THEN)
+    return build_tokens(entry, _index_of(root, _PLANS_NOW), history=lambda r: finalized if r == 1 else None)
+
+
+def test_an_entry_s_context_folder_a_fix_deleted_still_validates(root: Path) -> None:
+    """A land-changes fix can delete the very folder an entry is about, and every later round inherits the front matter.
+
+    Refusing it refused every append to the entry, though nothing the entry wrote had gone wrong.
+    The folder means what it named at the round's head, so that round's short paths still resolve under it there.
+    A new round's are looked for repository-wide, since nothing is under the folder now.
+    """
+    for context in ("docs/plans/", "plans/"):
+        tokens = _context_history_tokens(root, context, [(1, "See `structure.md`."), (2, "Now `only.md`.")])
+        assert not [t for t in tokens if t.problem], (context, [(t.text, t.problem) for t in tokens if t.problem])
+        by_text = {t.text: t for t in tokens}
+
+        # Read without the folder, three files would answer to it then and two now, and it would be a mere ambiguity.
+        was = by_text["structure.md"]
+        assert was.css == "ref-old" and "gone since" in was.note and _THEN[:8] in was.note, (context, was)
+        assert by_text["only.md"].path == "lib/only.md", (context, by_text["only.md"])
+
+
+def test_a_context_folder_no_finalized_round_of_its_entry_had_is_still_a_problem(root: Path) -> None:
+    """The leniency covers a folder the tree lost after the entry named it, never one the entry named without it.
+
+    A typo is a folder at no head at all.
+    An entry first written in round 2 named a folder that round 1's fix had already removed.
+    """
+    for context, rounds in (("docs/nope/", [(1, "See `only.md`."), (2, "Now `only.md`.")]),
+                            ("docs/plans/", [(2, "See `only.md`.")])):
+        tokens = _context_history_tokens(root, context, rounds)
+        problems = [t.problem for t in tokens if t.problem]
+        assert any(t.kind == "context" and context in t.problem for t in tokens), (context, problems)
+
+
 def test_a_round_head_is_recorded_and_survives_the_file(root: Path) -> None:
     """Rounds finalized before the record existed stay unknown, and are judged against the current tree."""
     from tools.review.lib.core.config import ReviewConfig, dump, load
