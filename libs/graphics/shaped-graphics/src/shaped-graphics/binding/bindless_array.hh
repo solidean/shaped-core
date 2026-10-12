@@ -20,6 +20,7 @@ public:
     /// An element left alone is reclaimed only once the array is full, so it holds its resource until then: a texture
     /// replaced or dropped would stay resident for as long as the array has room.
     /// Freed at once if no index from this epoch names it, otherwise at the first acquire of a later epoch.
+    /// An element `persistent` holds is left alone: dropping the last handle is what frees it.
     void release(raw_view const& view) { _state.release(view); }
 
     // Pinned to its array, which rebinds it on move.

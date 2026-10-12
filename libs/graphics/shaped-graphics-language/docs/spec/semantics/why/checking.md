@@ -669,4 +669,6 @@ HLSL's `[unroll]` is the one a compiler must obey, MSL has only clang's `#pragma
 So the compiler writes the copies itself, and every target compiles the same straight-line text.
 A hint over the loop would leave WebGPU the slow path on the very shaders that asked.
 Copying is also where the index can be a constant to SGL's own rules, which folds a branch on it as CHK-356 folds any other.
-The limit of 256 copies bounds the text a mistyped bound can write; a loop that long wants a loop.
+The limit of 256 copies bounds the text a mistyped bound can write, and nesting is where one multiplies, so a nest's copies count together.
+A loop that long wants a loop, and it means what it meant without the attribute, so it compiles as one and the warning tells its author the copies were not written.
+Unrolling every small constant-range loop without the attribute was not chosen: register pressure and text size would change behind the author's back, with no way to keep a loop a loop.

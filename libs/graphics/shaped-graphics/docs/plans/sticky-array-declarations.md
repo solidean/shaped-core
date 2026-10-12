@@ -1,6 +1,7 @@
 # Plan: sticky array declarations
 
 Status: **built** — the [decisions](#decisions) record what an independent review settled, and [where it is built](#where-it-is-built) names the code.
+Three lifecycle rules were settled after the build and are not in the code yet; [when a declaration is in force](#when-a-declaration-is-in-force) names them.
 An array declaration used to cover one dispatch or draw, so a caller binding a large bindless table for many ops paid O(elements) per op.
 This plan makes a declaration live until the caller withdraws it, so sg pays O(elements) once and O(arrays) per op after that.
 Background: [barriers](../concepts/barriers.md) for the tracking model and [bindings — array bindings](../concepts/bindings.md#array-bindings) for the contract.
@@ -18,27 +19,45 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
 - **(P1) one lock per element track.**
   `dx12_buffer::track_access` and its texture twin do declare, pending-barrier and recorded under one lock, as metal does.
 - **(P2) transfer waits fold at submit.**
-  dx12 folds every touched resource's pending transfer values at submit over `_touched_buffers` / `_touched_textures`, as vulkan does ([vulkan_command_list.cc:158-177][vk-cl-cc-submit]).
+  dx12 folds them in [`fold_transfer_waits`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) at submit, before `_next_submission` is taken.
+  It folds the upload value of every touched buffer and texture.
+  It folds the download value of every buffer the list writes, and of every texture it touches.
+  A texture owes that whatever the list does to it, since its entry barrier can change the layout a copy-queue readback is still using.
+  vulkan folds at the same point, before its own submission lock ([vulkan_command_list.cc:159-178](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc#L159-L178)).
   The record-time fold is gone from `track_*`.
 
 ## Where it is built
 
-- **The value and its lifetime**: [`sg::array_access_declaration`][aad-hh], made by the facades ([compute.hh][compute-hh], [raytracing.hh][raytracing-hh], [raster.hh][raster-hh]).
-  The core list keeps the links, ends the raster ones at `close_rendering` and all of them when it dies ([command_list.cc][cl-cc]).
-- **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one ([command_list.hh][command-list-hh]).
-- **What every backend shares**: [`sg::impl::array_declaration_book`][book-hh] holds one bind point's declarations, their per-name generations and the application records.
+- **The value and its lifetime**: [`sg::array_access_declaration`](../../src/shaped-graphics/command_list/array_access_declaration.hh#L27), made by the facades.
+  The compute and trace facades make it in [compute.hh](../../src/shaped-graphics/command_list/compute.hh#L81-L91) and [raytracing.hh](../../src/shaped-graphics/command_list/raytracing.hh#L77-L85).
+  The raster facades make it in [raster.hh](../../src/shaped-graphics/command_list/raster.hh#L159-L168).
+  The core list keeps the links and ends them all when it dies ([command_list.cc:9-40](../../src/shaped-graphics/command_list/command_list.cc#L9-L40)).
+  It ends the raster ones at `close_rendering` ([raster.cc:109-110](../../src/shaped-graphics/command_list/raster.cc#L109-L110)).
+- **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one.
+  The compute pair and the withdraw are at [command_list.hh:138-148](../../src/shaped-graphics/command_list/command_list.hh#L138-L148).
+  The raster pair is at [command_list.hh:191-196](../../src/shaped-graphics/command_list/command_list.hh#L191-L196).
+- **What every backend shares**: [`sg::impl::array_declaration_book`](../../src/shaped-graphics/barrier/array_declarations.hh#L40).
+  It holds one bind point's declarations, their per-name generations and the application records.
   Its `apply` is the per-op procedure under [what an op does](#what-an-op-does).
-- **The backends** feed it their bound groups and their trackers: [dx12][dx12-apply], [vulkan][vk-apply] and [metal][mtl-apply].
-  Each tracker reports `sg::impl::member_track` from the one lock it takes, and the list counts `member_writes`.
-  metal retains every bound group and reads it at each op ([bind_group_to_table][mtl-bind]); webgpu returns ids for its empty declarations.
-- **sv**: `bound_resources::declare_*_access` return an [`sv::declared_tables`][sv-declared], made once per [wavefront][wf-declare], [raster pass][raster-declare] and [trace][pt-declare].
+- **The backends** feed it their bound groups and their trackers, each from its own `declare_array_accesses`.
+  dx12's is at [dx12_command_list.cc:498](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L498).
+  vulkan's is at [vulkan_command_list.compute.cc:150](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc#L150).
+  metal's is at [metal_command_list.cc:925](../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L925).
+  Each tracker reports `sg::impl::member_track` from inside the lock its declare takes, and the list counts `member_writes`.
+  metal retains every bound group and reads it at each op ([bind_group_to_table](../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L742)).
+  webgpu returns ids for its empty declarations.
+- **sv**: `bound_resources::declare_*_access` return an [`sv::declared_tables`](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.hh#L134).
+  The wavefront makes one per `execute` ([wavefront_routine.cc:268](../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L268)).
+  A raster pass makes one when it has a draw to make ([raster_routine.cc:282](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L282)).
+  A trace makes one for itself ([pathtrace_routine.cc:339](../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc#L339)).
 - **The count** a test reads is `sg::stat::array_element_tracks`.
-- **Tests**: [array-declaration-book-test.cc][book-test] has no device; [sticky-array-test.cc][sticky-test] runs on every backend with binding arrays.
+- **Tests**: [array-declaration-book-test.cc](../../tests/barrier/array-declaration-book-test.cc) has no device.
+  [sticky-array-test.cc](../../tests/barrier/sticky-array-test.cc) runs on every backend with binding arrays.
 
 ## The problem
 
 sv's wavefront path tracer binds sv's bindless tables for many dispatches per round: extend, connect, and one shade dispatch per material permutation.
-Its `use` lambda declares every table before each of them ([wavefront_routine.cc:265-278][wf-use]):
+Until this plan was built, its `use` lambda declared every table before each of them:
 
 ```cpp
 cmd.compute.bind_pipeline(kernel);
@@ -51,7 +70,7 @@ if (second == second_group::bindless)
 ```
 
 `declare_compute_access` rebuilds one element vector per table from everything acquired this epoch, and hands it to sg.
-That is `declare_tables` in [gpu_resource_manager.cc:119-142][grm-cc].
+That is `declare_tables` in [gpu_resource_manager.cc:119-142](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L119-L142).
 On Intel's Sponza (405 meshes, 72 textures) that is on the order of 2000 buffer elements and a couple hundred textures, every time.
 
 What was measured (720p window, upscaled moving frames, `relwithdebinfo`, with other GPU work running on the machine, so indicative rather than exact):
@@ -65,60 +84,65 @@ What was measured (720p window, upscaled moving frames, `relwithdebinfo`, with o
 | main-thread stack samples in `dispatch_indirect` → `declare_array_accesses` | 10 of 12 |
 | ...of those, in `track_buffer_access` | 8 |
 
-A round dispatches extend, connect, and one shade per permutation ([wavefront_routine.cc:302-350][wf-rounds]).
-"~30 bindless dispatches per round" therefore assumes ~28 permutations.
+A round dispatches extend, connect, and one shade per permutation ([wavefront_routine.cc:303-351](../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L303-L351)).
+That is ~30 bindless dispatches per round, assuming ~28 permutations.
 A moving frame drains 22 rounds of those, so ~660 ops times ~2200 elements is ~1.45 M element tracks per frame.
 The megakernel does not suffer: it traces once per frame.
 
 ## Today, precisely
 
-This section describes the tree before P1 and P2, since that is what was measured, and before this plan was built (be346fb22).
-Its citations name the files of that tree; the code they quote is gone.
+This section describes sg before P1 and P2, since that is what was measured, and before this plan was built.
+Its links are pinned to commit [`78063ef95`](https://github.com/solidean/shaped-core/commit/78063ef950c4528b675a8ee1285450b6043a75c4), the last one before P1 and P2 landed.
+The tree that ships this doc has P1, P2 and the plan itself, which moved or removed the code these links cite.
 
 ### The API
 
-Every scope that runs shader code carries the pair, documented as "applied to the next dispatch only" ([compute.hh:80-89][compute-hh]):
+Every scope that runs shader code carries the pair, documented as "applied to the next dispatch only" ([command_list/compute.hh:80-89](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/src/shaped-graphics/command_list/compute.hh#L80-L89)):
 
 ```cpp
 void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
 void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
 ```
 
-The same pair sits on `command_list_raytracing_scope` ([raytracing.hh:76-83][raytracing-hh]).
-It sits on all three raster facades too: `rendering_scope`, `command_list_raster_manual_scope` and `command_list_raster_scope` ([raster.hh][raster-hh] :158-167, :228, :289).
-They forward to four backend virtuals ([command_list.hh][command-list-hh] :137-142 and :182-187).
-There are two bind points, not three: the raytracing scope forwards to the compute virtuals ([raytracing.cc:136-147][raytracing-cc]).
+The same pair sits on `command_list_raytracing_scope` ([command_list/raytracing.hh:76-83](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/src/shaped-graphics/command_list/raytracing.hh#L76-L83)).
+It sits on all three raster facades too: `rendering_scope`, `command_list_raster_manual_scope` and `command_list_raster_scope`.
+Their pairs start at [command_list/raster.hh:158-167](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/src/shaped-graphics/command_list/raster.hh#L158-L167), :228 and :289.
+They forward to four backend virtuals, at [command_list/command_list.hh:137-142](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/src/shaped-graphics/command_list/command_list.hh#L137-L142) and :182-187.
+There are two bind points, not three: the raytracing scope forwards to the compute virtuals ([command_list/raytracing.cc:133-144](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/src/shaped-graphics/command_list/raytracing.cc#L133-L144)).
 That is because DXR binds through the compute root signature.
 
 ### The lifecycle of a pending declaration
 
-**dx12.** A declare copies its name and elements into a pending list ([dx12_command_list.cc][dx12-cl-cc] :443-461).
+**dx12.** A declare copies its name and elements into a pending list ([dx12_command_list.cc:443-461](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L443-L461)).
 That is one heap-allocated `{cc::string, cc::vector}` per call.
-Compute and raytracing share `_pending_array_buffer_declares` / `_pending_array_texture_declares` ([dx12_command_list.hh][dx12-cl-hh] :149-150).
+Compute and raytracing share `_pending_array_buffer_declares` / `_pending_array_texture_declares` ([dx12_command_list.hh:149-150](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.hh#L149-L150)).
 Raster has its own pair (:174-175).
-`declare_array_accesses` consumes them at `compute_dispatch` (:338), `compute_dispatch_indirect` (:357) and `raytracing_dispatch_rays` (:424).
-Every draw consumes the raster pair, in `declare_raster_draw_barriers` ([dx12_command_list.raster.cc:382][dx12-raster-cc]).
-`declare_array_accesses` clears both lists at its end (:603-604), and `raster_end_rendering` clears the raster pair too (raster.cc:208-209).
+`declare_array_accesses` consumes them at `compute_dispatch` (dx12_command_list.cc:338), `compute_dispatch_indirect` (:357) and `raytracing_dispatch_rays` (:424).
+Every draw consumes the raster pair, in `declare_raster_draw_barriers` ([dx12_command_list.raster.cc:382](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.raster.cc#L382)).
+`declare_array_accesses` clears both lists at its end (dx12_command_list.cc:603-604), and `raster_end_rendering` clears the raster pair too (raster.cc:208-209).
 
-**vulkan** is the same shape: pending lists at [vulkan_command_list.hh][vk-cl-hh] :137-138 and :175-176.
+**vulkan** is the same shape: pending lists at [vulkan_command_list.hh:137-138](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.hh#L137-L138) and :175-176.
 They are consumed at compute.cc:275 and :293, vulkan_raytracing.cc:464 and raster.cc:413.
 They are cleared at the end of `declare_array_accesses` and at `raster_end_rendering` (raster.cc:234-235).
 
-**metal** keeps the same four lists ([metal_command_list.hh:480-486][mtl-cl-hh]).
+**metal** keeps the same four lists ([metal_command_list.hh:480-486](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_command_list.hh#L480-L486)).
 They are consumed at metal_command_list.cc:784, :802, :1192 and :1550, and cleared the same way (:1417-1418 for raster).
 Its barriers name stages and never a resource, so cover-all costs it one barrier.
-It does not hold a bound group: `bind_group_to_table` copies the group's buffers, textures, tlases and array bindings into per-slot vectors ([metal_command_list.cc:738-761][mtl-bind]).
+It does not hold a bound group: `bind_group_to_table` copies the group's buffers, textures, tlases and array bindings into per-slot vectors.
+That copy is [metal_command_list.cc:738-761](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L738-L761).
 The array copy is O(capacity), two shared pointers per element, at every bind.
 It also clears every bound group when a rendering scope begins (:1226-1229).
 
-**webgpu** has no binding arrays: both virtuals assert that `elements` is empty ([webgpu_command_list.compute.cc:163-174][wgpu-compute-cc]).
+**webgpu** has no binding arrays: all four virtuals assert that `elements` is empty.
+The compute pair is at [webgpu_command_list.compute.cc:163-174](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.compute.cc#L163-L174).
+The raster pair is at [webgpu_command_list.raster.cc:241-252](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.raster.cc#L241-L252).
 
-What `declare_array_accesses` does per op, on dx12 ([dx12_command_list.cc][dx12-cl-cc] :487-605) and identically on vulkan and metal:
+What `declare_array_accesses` does per op, on dx12 ([dx12_command_list.cc:487-605](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L487-L605)) and identically on vulkan and metal:
 
 1. For every pending declaration, find the *first* bound array of that name and family, and `CC_ASSERT` that each element is in range and not vacant (:496-526).
    That is two checks per element per op in `relwithdebinfo`, and none in `release`.
 2. For every array binding of every bound group, gather the pending declarations naming it into an `array_declarations` summary — named, any element, access union (:534-551).
-3. Ask `sg::impl::plan_array_declarations` how this op meets them ([footprint.cc:159-219][footprint-cc]).
+3. Ask `sg::impl::plan_array_declarations` how this op meets them ([barrier/footprint.cc:159-219](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/src/shaped-graphics/barrier/footprint.cc#L159-L219)).
    It answers `skip` when the code never indexes the array, or it was declared empty and the code does not write it.
    It answers `as_declared` with a `widen_by` that adds the code's access where the declaration missed it, logging once.
    It answers `cover_all` when the array was not declared, or was declared empty and is written, logging once.
@@ -126,27 +150,30 @@ What `declare_array_accesses` does per op, on dx12 ([dx12_command_list.cc][dx12-
 
 **An existing bug sits in step 1.**
 `find_array_binding` returns the first bound group holding the name, but step 4 indexes the array of *every* bound group holding it.
-A second group with a smaller array of the same name is indexed out of range unchecked.
+A second group with a smaller array of the same name is indexed out of range there.
+`cc::vector`'s own bounds assert catches that in `relwithdebinfo`, and nothing catches it in `release`.
 The per-group check at first meeting, below, fixes it.
 
 ### What one element costs
 
-`track_buffer_access` ([dx12_command_list.cc][dx12-cl-cc] :80-120), before P1 and P2, does for every element of every op:
+`track_buffer_access` ([dx12_command_list.cc:80-120](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L80-L120)), before P1 and P2, does for every element of every op:
 
 - for a read, two atomic loads of the buffer's pending upload values (four for a write), each folded into a per-list wait set (`fold_group_wait`, :44-53);
   the fold returns early when nothing is pending, so in the steady state it is the loads alone;
-- three separate locks of the buffer's `cc::mutex<access_tracking>` — `declare_access`, `mark_pending_barrier`, `mark_recorded` ([dx12_buffer.cc:37-95][dx12-buffer-cc]);
+- three separate locks of the buffer's `cc::mutex<access_tracking>` — `declare_access`, `mark_pending_barrier`, `mark_recorded`;
+  they are [dx12_buffer.cc:37-96](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc#L37-L96);
 - a push onto `_pending_barrier_buffers`, which `flush_barriers` (dx12_command_list.cc:184-216) then walks;
-  it takes the same lock a fourth time in `flush_access` ([dx12_buffer.cc:68-79][dx12-buffer-flush]).
+  it takes the same lock a fourth time in `flush_access` ([dx12_buffer.cc:68-79](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc#L68-L79)).
 
 P1 makes that two locks, P2 removes the loads, and both stay O(elements) per op.
-vulkan has the three-call shape ([vulkan_command_list.cc:423-440][vk-track]) and reads no transfer values while recording.
-metal already fuses the three into one lock ([metal_command_list.cc:205-243][mtl-declare]).
+vulkan has the three-call shape ([vulkan_command_list.cc:423-440](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc#L423-L440)).
+It folds no transfer value while recording, but it reads one per tracked texture, `has_pending_transfer()` (:455), as dx12 does (dx12_command_list.cc:159).
+metal already fuses the three into one lock ([metal_command_list.cc:205-243](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L205-L243)).
 
 ### A repeated read is already free barrier-wise
 
 The cost is CPU work that emits nothing.
-[resource_access_state.hh](../../src/shaped-graphics/barrier/resource_access_state.hh) flushes a read like this:
+[barrier/resource_access_state.hh:143-153](https://github.com/solidean/shaped-core/blob/78063ef950c4528b675a8ee1285450b6043a75c4/libs/graphics/shaped-graphics/src/shaped-graphics/barrier/resource_access_state.hh#L143-L153) flushes a read like this:
 
 ```cpp
 else if (!curr_read_access.is_empty())
@@ -171,18 +198,21 @@ Skipping that re-declaration drops a barrier nothing needed.
 
 ## Every caller
 
-| caller | where | today | after |
+These are the callers the change touched, at their lines in the tree that ships this doc.
+A test written for the new API, such as `sticky-array-test.cc`, is not among them.
+
+| caller | where | before | after |
 |---|---|---|---|
-| sv wavefront | [wavefront_routine.cc:273][wf-declare], in `use`, per bindless dispatch | ~660 declares per moving frame | one declaration before the round loop |
-| sv raster | [raster_routine.cc:287][raster-declare], per draw | one per draw — 405 on Sponza, the same O(elements) each | one declaration per rendering scope, before the draw loop |
-| sv megakernel | [pathtrace_routine.cc:338][pt-declare], once | one declare, one trace | the same, holding the result across the trace |
-| sv `bound_resources` | [gpu_resource_manager.cc:118-161][grm-declares] | three `void declare_*_access(cmd)` | return a value that holds the declarations |
-| sg tests | `tests/pipeline/dispatch-test.cc:797,804`, `tests/compute/compute-sync-test.cc:98,189` | declare, dispatch | hold the result across the op |
-| backend tests | `vulkan-raster-test.cc:381,444`, `metal-vertex-input-test.cc:429-600`, `metal-compute-test.cc:319` | the same | the same |
-| dxc tests | `shaped-shader-compiler-dxc/tests/end-to-end-array-bindings-test.cc`, 17 call sites | the same, plus lifecycle cases | see [tests](#tests) |
+| sv wavefront | [wavefront_routine.cc:268](../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L268) | in `use`, per bindless dispatch: ~660 declares per moving frame | one declaration before the round loop |
+| sv raster | [raster_routine.cc:282](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L282) | one per draw — 405 on Sponza, the same O(elements) each | one declaration per rendering scope, before the draw loop |
+| sv megakernel | [pathtrace_routine.cc:339](../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc#L339) | one declare, one trace | the same, holding the result across the trace |
+| sv `bound_resources` | [gpu_resource_manager.cc:118-167](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L118-L167) | three `void declare_*_access(cmd)` | return a value that holds the declarations |
+| sg tests | `tests/pipeline/dispatch-test.cc:799,807`, `tests/compute/compute-sync-test.cc:100,193` | declare, dispatch | hold the result across the op |
+| backend tests | `vulkan-raster-test.cc:381,444`, `metal-vertex-input-test.cc:429-605`, `metal-compute-test.cc:320` | the same | the same |
+| dxc tests | `shaped-shader-compiler-dxc/tests/end-to-end-array-bindings-test.cc` | the same, plus lifecycle cases | see [tests](#tests) |
 
 shaped-rendering, the examples and every other library declare nothing.
-`plan_array_declarations` is called only from the three backends and `tests/barrier/array-plan-test.cc`.
+`plan_array_declarations` is called only from the book's `apply`, which the three backends share, and from `tests/barrier/array-plan-test.cc`.
 
 ## The design
 
@@ -194,7 +224,7 @@ It is in force on its bind point for as long as it lives, and destroying it with
 ```cpp
 /// One array binding's declared per-element access, in force on the bind point it was made on while this value lives.
 /// Move-only: destroying or `withdraw`ing it ends the declaration, and a moved-from one ends nothing.
-/// Submitting its list while it is alive asserts; dropping the list ends it silently, so unwinding past a drop is safe.
+/// Dropping its list ends it silently; submitting the list asserts that it is gone, and ends it if it is not.
 /// A raster declaration also ends when its rendering scope closes.
 /// Once ended by any of those, destroying the value does nothing — it never touches a list that is gone.
 class sg::array_access_declaration
@@ -209,7 +239,7 @@ public:
     void withdraw();
 
 private:
-    // Shared with the list, which clears it when the declaration ends from its side — scope close, drop.
+    // Shared with the list, which clears it when the declaration ends from its side — scope close, submit, drop.
     // The value reaches the list only through a live token.
     impl::array_declaration_token _token;
 };
@@ -221,7 +251,7 @@ On every scope that has the pair today, it is replaced by:
 /// Declares per-element access for a *buffer* array / bindless binding, for every dispatch on this bind point while the result lives.
 /// Array element usage cannot be inferred, since a shader may index only some elements, or use them differently.
 /// Every live declaration naming an array applies to it, and an empty `elements` declares it unused.
-/// Elements are resolved against whichever bound group holds the array at each op, and checked the first time they meet that group.
+/// Elements are resolved against whichever bound group holds the array at each op, and checked the first time this declaration meets that group.
 [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
                                                                    cc::span<array_buffer_access const> elements);
 
@@ -249,28 +279,46 @@ sv shows how that goes wrong: `freeze()` hands back the *same* cached group when
 A later routine that binds that group and forgets to declare would inherit a declaration that misses elements — silently, where today it logs and covers the array.
 Tying the lifetime to a value keeps "forgetting is loud": once the value dies, the array is undeclared again.
 `rendering_scope` is the precedent for a recording guard tied to a list.
-webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list.cc:83][wgpu-cl-cc]).
+webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list.cc:83](../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.cc#L83)).
 
 ### When a declaration is in force
 
 - **From the call until the value is destroyed or withdrawn.**
 - **A raster declaration also ends when its rendering scope closes**, which keeps today's rule that a raster declaration goes with its scope.
+- **Submit ends every live declaration, as dropping the list does.**
+  Submitting with one alive is still a bug, and submit asserts it.
+  Ending them as well means a `release` build, with that assert compiled out, never leaves a token naming a list the pool hands out again.
 - **Dropping the list ends every declaration silently.**
   A drop is what exception unwinding does to a half-recorded list, and a value destroyed later must find its token dead rather than a freed list.
 - **Binding a pipeline or a group does not end it.**
   This is load-bearing: dx12 and vulkan reset every bound group when a pipeline is bound.
-  See [dx12_command_list.cc][dx12-cl-cc] :260 and [vulkan_command_list.compute.cc][vk-compute-cc] :36.
+  dx12 does it at [dx12_command_list.cc:265](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L265).
+  vulkan does it at [vulkan_command_list.compute.cc:36](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc#L36).
   The wavefront rebinds the pipeline and the bindless group before every dispatch, so a declaration that ended on a rebind would end at every op.
 - **An op where no bound group holds the array leaves the declaration dormant**, rather than asserting as today.
   The wavefront's segment, sort and argument kernels bind no bindless group, and its declaration has to survive them.
 - **A declaration that never met its array in its whole lifetime asserts when it ends.**
   That is where the misspelled name is caught, since a dormant declaration is otherwise legitimate.
   "Met" means some op had a bound group holding an array of that name and family.
-  The check runs at withdraw and destruction; a list drop skips it.
+  The check runs at withdraw, at destruction, and when a rendering scope's close ends a raster declaration.
+  The scope close matters most: raster declarations are scoped, so a misspelled raster name would otherwise never be reported.
+  A submit and a list drop end a declaration without the check.
+- **The never-met check does not run while an exception unwinds.**
+  A declaration is made after its list, so unwinding destroys it first, and the check would turn the exception into an abort.
+  The value records `std::uncaught_exceptions()` when it is made, and its end skips the check when that count has grown since.
+- **webgpu never runs the never-met check.**
+  It has no binding arrays, so no declaration there can meet one, and an empty declaration must still work as it does everywhere else.
 - **Compute and raytracing stay one bind point**, as they are on every backend today.
 
 A declaration is keyed by name and family, never by bind event.
 Every live declaration naming an array applies to it, unioned exactly as today's `gather` unions several declares before one op.
+
+**Not built yet.**
+The code differs from three of these rules, and their [tests](#tests) are not written:
+
+- submit asserts and ends nothing;
+- a rendering scope's close ends its raster declarations without the never-met check;
+- the never-met check runs while an exception unwinds.
 
 ### What an op does
 
@@ -279,7 +327,8 @@ At each dispatch, trace or draw, for each array binding of each bound group:
 1. **Plan.** Summarize the live declarations naming the array — named, any element, access union — and call `plan_array_declarations` exactly as today.
    The summary is kept up to date at declare and withdraw time, so it costs O(1) here.
    `skip` and `cover_all` behave exactly as today, per op.
-2. **Resolve on first meeting.** The first time the declarations on a name meet a particular group, check every element's range and vacancy against *that* group's array.
+2. **Resolve on first meeting.** The first time a declaration meets a particular group, check every element's range and vacancy against *that* group's array.
+   The check is per declaration, not per name: one made after its name already met a group is still checked against that group, at its next op there.
    Each index is resolved to its resource then.
    Checking per group is what fixes the existing first-group-only bug.
    A different group at the same name resolves and checks again.
@@ -320,7 +369,8 @@ An application snapshots `member_writes` right after its own tracking.
 It is current iff `member_writes` at the end of the op still equals that snapshot, and stays current while it does.
 A member written later in the same op — a vertex buffer, another array's application — moves the counter past the snapshot.
 
-A member written *earlier* in the same op, before the application, does not: `declare_group_accesses` runs before `declare_array_accesses` ([dx12_command_list.cc][dx12-cl-cc] :335, :338).
+A member written *earlier* in the same op, before the application, does not.
+`declare_group_accesses` runs before `declare_array_accesses` ([dx12_command_list.cc:340-343](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L340-L343)).
 So at application `track_access` also reports whether the slot's current-op state already holds a write (`has_curr_writes()`) or a pending layout change.
 Either makes the application not current.
 Without that, a scalar write to element `e1` in the op that first applies the array would leave it current, and the next op would skip `e1`'s read-after-write barrier.
@@ -344,7 +394,8 @@ The rules in [barriers.md](../concepts/barriers.md) are unchanged in what they d
 
 P2 moved dx12's transfer waits to submit, so a transfer enqueued into a member after its application still makes the list wait.
 One record-time read is left: a texture with a transfer in flight is tracked in `general` rather than its declared layout.
-That is `has_pending_transfer()` in `track_texture_access` ([dx12_command_list.cc][dx12-cl-cc] :159; vulkan the same).
+That is `has_pending_transfer()` in dx12's `track_texture_access` ([dx12_command_list.cc:127](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L127)).
+vulkan's texture track reads it the same way ([vulkan_command_list.cc:471](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc#L471)).
 Sticky freezes that choice at application, where today the next re-declaring op re-reads it.
 A transfer that finishes mid-list leaves the texture in `general`, which serves the read.
 A transfer enqueued mid-list into a member texture leaves its declared layout in place, where today a later op would move it to `general`.
@@ -358,7 +409,9 @@ Each entry holds the token's id, the name, the family, the copied elements, its 
 Each bind point keeps a per-(name, family) generation and a small application cache, one record per (group, array binding) as described under [the key](#what-an-op-does).
 The list keeps `member_writes`.
 Withdraw erases the entry, bumps its name's generation, and runs the never-met check.
-`raster_end_rendering` ends the raster entries; submit asserts both lists empty; drop ends them silently.
+`raster_end_rendering` ends the raster entries, running the never-met check on each.
+Submit asserts both lists empty and then ends what is left, and a drop ends them silently; neither runs the check.
+No end runs the check while an exception unwinds.
 `track_access` gains a "from an array application" argument and returns whether it hit a member in the write bucket, and whether the slot's current op already held a write or layout change.
 
 **metal** additionally retains each bound group, as dx12 does with `group.weak_from_this().lock()`, and reads its arrays through it.
@@ -366,16 +419,18 @@ That makes the group address a sound identity, since a retained group cannot be 
 It also removes the O(capacity) array copy at every bind, which would otherwise cost the wavefront what the skip saves, since it rebinds per dispatch.
 The scalar buffer, texture and tlas copies can move the same way; the arrays are the part this plan needs.
 Clearing bound groups at rendering-scope begin stays: it ends nothing, since bind events never do.
-metal counts barriers through `metal_command_list::barriers_emitted` rather than the context's barrier stats, so its tests read that.
+metal counts each barrier in `metal_command_list::barriers_emitted` and in the context's `global_barriers` and `barrier_calls`.
+An MTL4 barrier names no resource, so metal counts no `buffer_barriers`, `texture_barriers` or `texture_transitions`, and its tests read `barriers_emitted`.
 
 **webgpu.** Has no arrays: the virtuals assert empty spans as today, and return an id so the value works.
+Its withdraw keeps nothing, so the never-met check never runs there, and an empty declaration on webgpu never asserts.
 
 **The core.** `array_access_declaration`, its token, the facades returning it, and `plan_array_declarations` unchanged.
 
 ### What it costs
 
 Per op, for an array whose declaration is current: one summary read, one `plan_array_declarations` call, one key compare.
-That is O(bound arrays × live declarations) — sv binds four tables — and no element is touched.
+That is O(bound arrays × live declarations) — sv binds eight tables — and no element is touched.
 The O(elements) work happens once per array per list, again after any member write, and again when a key is not covered.
 
 Back of the envelope for a moving Sponza frame:
@@ -386,7 +441,7 @@ Back of the envelope for a moving Sponza frame:
 | locks per element track (dx12) | 4 | 2 | 2 |
 | per-op array work | O(elements) | O(elements) | O(arrays) |
 | `CC_ASSERT` element checks (`relwithdebinfo` only) | ~2.9 M | ~2.9 M | ~4400 |
-| heap allocations for pending declares | ~660 × 4 | ~660 × 4 | 4 |
+| heap allocations for pending declares | ~660 × 8 | ~660 × 8 | 8 |
 
 The 90–115 ms was measured in `relwithdebinfo`, so part of it is the assert loops, which `release` compiles out.
 At the ~70 ns per element track that figure implies, the array share drops from ~100 ms to well under 1 ms.
@@ -444,7 +499,7 @@ The kernels that bind no bindless group leave them dormant.
 
 ### The raster routine's per-draw declares
 
-Before — inside the draw loop ([raster_routine.cc:278-289][raster-loop]):
+Before — inside the draw loop, as sv had it until this plan was built:
 
 ```cpp
 for (auto const& draw : d.draws)
@@ -471,7 +526,7 @@ for (auto const& draw : d.draws)
 ```
 
 A pass whose draws list is empty never meets the tables, and the never-met check would assert at the end of `execute`.
-sv declares only when there is a draw to make.
+sv declares only when there is a draw to make ([raster_routine.cc:279-282](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L279-L282)).
 Pipelines touching the tables at different stages re-apply once each until the recorded union covers them both, then skip.
 The environment draw binds no bindless group, so the declaration is dormant there.
 
@@ -565,15 +620,25 @@ New tests, tier 1 (run against every backend that has binding arrays) unless not
 - **Scope close ends a raster one**, and destroying the value afterwards does nothing.
 - **Submit with a live declaration asserts.**
 
+The lifecycle rules settled after the build want these, not written yet:
+
+- **Submit ends a live declaration**: destroying the value afterwards does nothing, in `release` too.
+- **A raster declaration that never met its array asserts when its scope closes.**
+- **Unwinding past a declaration that never met its array does not assert.**
+- **A second declaration on a name that already met a group** is checked against that group: an out-of-range index in it asserts at its next op there.
+- **webgpu only: an empty declaration ends without asserting.**
+
 Existing tests that change:
 
-- `tests/pipeline/dispatch-test.cc` "a group bound for a dispatch is not bound at a later draw" probes with "names no array binding of a bound group" at the draw.
-  That per-op assert becomes the end-of-life never-met assert, so the probe is the raster declaration's withdraw asserting.
+- `tests/pipeline/dispatch-test.cc` "a group bound for a dispatch is not bound at a later draw" probed with the per-op assert at the draw.
+  That assert read "declare_array_buffer_access names no buffer array binding of a bound group".
+  It becomes the end-of-life never-met assert, so the probe is the raster declaration's withdraw asserting.
 - `end-to-end-array-bindings-test.cc` "a draw resolves only its own bind point's declarations" keeps its cases, with the declarations held as values.
   "A declaration still pending when its scope closes goes with the scope" becomes "a raster declaration ends with its scope".
+  The declaration that case ends never meets its array, so once a scope close runs the never-met check, that close asserts and the case must expect it.
   "A compute declaration waits for a dispatch" becomes "a compute declaration is never met by a draw".
-- The undeclared-array tests (dxc :203, :605, vulkan raster :444) keep their `nx::exactly(...)` counts.
-- The out-of-range test in `metal-vertex-input-test.cc:435` still asserts at the draw, since the check runs at first meeting.
+- The undeclared-array tests (dxc :205, :790, `vulkan-raster-test.cc:407`) keep their `nx::exactly(...)` counts.
+- The out-of-range test in `metal-vertex-input-test.cc:437` still asserts at the draw, since the check runs at first meeting.
 - `tests/barrier/array-plan-test.cc` is unchanged: `plan_array_declarations` is.
 
 ### Docs to update
@@ -588,7 +653,7 @@ Existing tests that change:
 
 ## Alternatives considered
 
-### 2. sg dedupes repeated identical declarations
+### sg dedupes repeated identical declarations
 
 Keep the per-op API, and have sg notice that this op's declaration equals the last one applied to the same group.
 
@@ -597,7 +662,7 @@ Keep the per-op API, and have sg notice that this op's declaration equals the la
   That is cheap next to today, but it is not O(arrays), and a span whose order shifts silently falls off the fast path.
 - **The same hard part:** skipping still needs the member-write invalidation, so it is no simpler inside sg.
 
-### 3. Make each element track cheaper
+### Make each element track cheaper
 
 P1 and P2 are this alternative's cheap half, and they landed first.
 The rest — running the range and vacancy asserts once per group, dropping the per-declare heap copies — is part of this plan.
@@ -607,47 +672,10 @@ It still matters for the first application, every `cover_all`, every writing dec
 ## Decisions
 
 - **A value type, `[[nodiscard]]`** — not `void` "until replaced", whose leak into the next routine is silent.
-- **Not option 2** — its invalidation is the same work, and it keeps O(elements) per op.
+- **No [dedupe inside sg](#sg-dedupes-repeated-identical-declarations)** — its invalidation is the same work, and it keeps O(elements) per op.
 - **Covered by, not equal** — the applied stages and access are a union since the last invalidation; texture layouts must still match exactly.
-- **The typo assert is kept, moved to end of life** — a declaration that never met its array asserts at withdraw or destruction.
+- **The typo assert is kept, moved to end of life** — a declaration that never met its array asserts at withdraw, destruction or scope close.
+- **The lifecycle's edge cases are settled** — submit ends declarations, unwinding and webgpu skip the never-met check, and first meeting is per declaration.
 - **A different group at the same name is resolved again**, per group, rather than ending the declaration.
 - **Transfer waits fold at submit** — a prerequisite, landed as P2.
 - **Lock fusion first and separately** — landed as P1.
-
-[vk-cl-cc-submit]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
-[vk-track]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc
-[wf-use]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc
-[wf-rounds]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc
-[wf-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L268
-[raster-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L282
-[raster-loop]: ../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc
-[pt-declare]: ../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc#L339
-[grm-cc]: ../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L120
-[grm-declares]: ../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L118-L167
-[compute-hh]: ../../src/shaped-graphics/command_list/compute.hh#L82-L93
-[raytracing-hh]: ../../src/shaped-graphics/command_list/raytracing.hh#L77-L87
-[raster-hh]: ../../src/shaped-graphics/command_list/raster.hh#L158-L170
-[command-list-hh]: ../../src/shaped-graphics/command_list/command_list.hh#L138-L151
-[raytracing-cc]: ../../src/shaped-graphics/command_list/raytracing.cc
-[dx12-cl-cc]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc
-[dx12-cl-hh]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.hh
-[dx12-raster-cc]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.raster.cc
-[dx12-buffer-cc]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc
-[dx12-buffer-flush]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_buffer.cc
-[vk-cl-hh]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.hh
-[vk-compute-cc]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc
-[mtl-cl-hh]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.hh
-[mtl-bind]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L742
-[mtl-declare]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc
-[wgpu-compute-cc]: ../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.compute.cc
-[wgpu-cl-cc]: ../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.cc
-[footprint-cc]: ../../src/shaped-graphics/barrier/footprint.cc#L159-L219
-[aad-hh]: ../../src/shaped-graphics/command_list/array_access_declaration.hh#L27
-[cl-cc]: ../../src/shaped-graphics/command_list/command_list.cc
-[book-hh]: ../../src/shaped-graphics/barrier/array_declarations.hh#L40
-[dx12-apply]: ../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L498
-[vk-apply]: ../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc#L150
-[mtl-apply]: ../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L925
-[sv-declared]: ../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.hh#L134
-[book-test]: ../../tests/barrier/array-declaration-book-test.cc
-[sticky-test]: ../../tests/barrier/sticky-array-test.cc

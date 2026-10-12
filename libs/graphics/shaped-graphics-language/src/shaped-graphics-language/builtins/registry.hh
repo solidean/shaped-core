@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
@@ -313,6 +314,9 @@ struct sgl::builtins::registry
     cc::map<cc::string, cc::vector<builtin_id>> functions_by_name;
     /// The overloads whose name, parameters and named-only names hash alike (`signature_hash`); filled by `finalize` too.
     cc::map<u64, cc::vector<builtin_id>> functions_by_signature;
+    /// Per language, every name a function writes there, which `function_record::writes_name` takes one record at a time.
+    /// Filled by `finalize` too.
+    cc::set<cc::string> written_names[3];
 
     builtin_type_id add(type_record record);
     builtin_id add(function_record record);
@@ -336,6 +340,8 @@ struct sgl::builtins::registry
                                            cc::span<cc::string_view const> parameters,
                                            cc::span<cc::string_view const> named_only) const;
     [[nodiscard]] bool has_function_named(cc::string_view name) const;
+    /// The names some function writes in `l`, which a name of the program written there must not be.
+    [[nodiscard]] cc::set<cc::string> const& names_written_in(language l) const { return written_names[u8(l)]; }
 
     /// The whole of `prelude/builtins.sgl`, byte for byte, in registration order.
     [[nodiscard]] cc::string prelude_text() const;

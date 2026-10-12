@@ -482,7 +482,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
                                                        .NumArgumentDescs = 1,
                                                        .pArgumentDescs = &argument};
         auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_dispatch_signature));
-        CC_ASSERT(SUCCEEDED(hr), "creating the indirect dispatch command signature failed");
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect dispatch)");
     }
 
     ctx->_epoch_fence = cc::move(epoch_fence);

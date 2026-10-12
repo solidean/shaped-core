@@ -72,7 +72,7 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 
 ## Plans
 
-Designs not yet built, each stating its status at the top.
+Designs, each stating its status at the top.
 
 - [sticky array declarations](plans/sticky-array-declarations.md) — an array declaration that lives until the caller withdraws it.
   A bindless table bound for many ops is then tracked once rather than per op.

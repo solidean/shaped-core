@@ -81,6 +81,13 @@ A commit's contribution is carried exactly the same way a commit-local hunk is, 
 The reason is mandatory, and that is the point.
 It forces the agent to say why it is not reading them, instead of quietly not reading them.
 
+## Which commits a change spans
+
+`changes --commit C` asks the commit-local question of a ledger ingested from the net diff.
+C's contribution is carried to net space exactly as a commit-local hunk is, and every change whose claim meets it is listed.
+A net hunk coalesces neighboring edits, so one change can meet several commits, and it is listed under each of them.
+That is what maps a stack of independent commits to one entry per commit without ingesting the range again.
+
 ## What carries no obligation
 
 A line added in one commit and deleted in another is not in net space, so nothing has to account for it.

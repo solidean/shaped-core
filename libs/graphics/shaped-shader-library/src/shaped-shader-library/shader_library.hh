@@ -113,7 +113,8 @@ public:
     /// The filesystem notifies where it can, and the watcher is otherwise asleep; where it cannot, it rescans on `interval_ms`.
     ///
     /// A reload is staged, never applied in place: the recompile runs on the watcher and the next acquire promotes it, so a reload costs a consumer only the pointer swap.
-    /// The first acquire of a format is the exception — it reads, preprocesses and dispatches the compile while holding the asset's lock.
+    /// The first acquire of a format and option set is the exception: it reads, preprocesses and dispatches the compile on its caller's thread, off the asset's lock.
+    /// A reload staged while that compile runs costs the same caller a second compile, staged like any other reload's.
     void start_hot_reload(reload_config config = {});
 
     /// Drives the watcher on the calling thread.
@@ -175,10 +176,11 @@ public:
     /// So a generated permutation does not hot-reload on an include edit — see [shaped-viewer's TODO](../../../shaped-viewer/docs/TODO.md).
     ///
     /// **slib adds no cache of its own at this seam** — which is not to say the path is uncached.
-    /// The compile goes through the same `ssc::dxc::shader_cache` every other compile does, in-memory tier and lazily-opened
-    /// persistent tier both, so a generated permutation already survives across runs.
-    /// What slib does not add is a second cache keyed on the source text: a caller generating a source already has a better key
-    /// for it — a material permutation, say — so the dedup belongs there.
+    /// The compile goes through the same `ssc::dxc::shader_cache` every other compile does, in-memory tier and lazily-opened persistent tier both.
+    /// So a generated permutation already survives across runs.
+    /// An SGL source's front end is cached as well, by the SGL edge's preprocess, which every SGL compile goes through.
+    /// What slib does not add is a cache of the compiled shader keyed on the source text.
+    /// A caller generating a source already has a better key for it — a material permutation, say — so the dedup belongs there.
     ///
     /// A missing compiler, a preprocessing failure, or a compile error all come back as an async error — never a throw.
     [[nodiscard]] sg::async_compiled_shader compile_source(cc::string_view source,

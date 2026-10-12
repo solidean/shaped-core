@@ -132,8 +132,6 @@ sg::impl::member_track dx12_command_list::track_texture_access(dx12_texture_hand
         _pending_barrier_textures.push_back(texture);
     if (tracked.first_this_list)
         _touched_textures.push_back(texture);
-    if (tracked.first_write_this_list)
-        _written_textures.push_back(texture);
     if (tracked.member_write)
         ++_member_writes;
     return {.held_write = tracked.held_write};
@@ -141,7 +139,9 @@ sg::impl::member_track dx12_command_list::track_texture_access(dx12_texture_hand
 
 void dx12_command_list::fold_transfer_waits()
 {
-    // Every touched resource owes the upload a transfer is still making, and only a written one the readback.
+    // Every touched resource owes the upload a transfer is still making.
+    // A buffer owes a readback only when this list writes it, since two reads never conflict.
+    // A texture owes it whatever this list does: its entry barrier can change the layout the copy queue is still reading.
     for (auto const& buffer : _touched_buffers)
     {
         fold_group_wait(_required_copy_waits,
@@ -165,9 +165,6 @@ void dx12_command_list::fold_transfer_waits()
         fold_stream_wait(_required_copy_waits,
                          {texture->_upload_group, texture->_pending_stream_copy_value.load(std::memory_order_acquire)},
                          texture);
-    }
-    for (auto const& texture : _written_textures)
-    {
         fold_group_wait(
             _required_download_waits,
             {texture->_download_group, texture->_pending_async_download_value.load(std::memory_order_acquire)});
@@ -764,6 +761,13 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     // finalize writes each touched resource's current layout and the ExecuteCommandLists below realizes it, so finalize order must equal execute order.
     // Running both under this one lock is what guarantees that, since submit is thread-safe / multi_threaded, and it is what lets a resource's current state mean "after everything submitted so far".
     // Work that neither changes a layout nor needs the ordering (the reverse upload/download stamp, pool returns, slot release) runs after the lock.
+    // The transfer waits, folded at submit rather than while recording: an upload or a readback enqueued after an
+    // access was recorded, and before this submit, is still waited on.
+    // That order is the calling thread's: a transfer another thread enqueues while this runs is the caller's hazard,
+    // as it is on every backend, so nothing here needs _next_submission and the fold stays out of it.
+    // The query resolve below tracks one more buffer, a transient one no transfer can name, so it owes no wait.
+    cmd->fold_transfer_waits();
+
     sg::submission_token const token = _next_submission.lock(
         [&](sg::submission_token& next) -> sg::submission_token
         {
@@ -810,11 +814,6 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
                     throw sg::device_lost_exception(device_loss_reason());
                 CC_ASSERT(false, "ID3D12GraphicsCommandList::Close failed");
             }
-
-            // The transfer waits, folded here rather than while recording: an upload or a readback enqueued after an
-            // access was recorded, and before this submit, must still be waited on, and only now is every one of them known.
-            // Under _next_submission, so a transfer enqueued by another thread lands either before this read or after this submit.
-            cmd->fold_transfer_waits();
 
             // If this list reads a resource an async upload is still writing, make the direct queue wait on that
             // resource's upload timeline before executing, so the copy is visible.
@@ -881,7 +880,6 @@ sg::submission_token dx12_context::submit_dx12_command_list(std::unique_ptr<dx12
     cmd->_touched_buffers.clear();
     cmd->_touched_textures.clear();
     cmd->_written_buffers.clear();
-    cmd->_written_textures.clear();
 
     // The allocator is in flight until this epoch retires, so hand it to the pool's epoch capture.
     // The list is already closed and can be reused now — resetting an in-flight list onto a fresh, GPU-safe allocator is legal — so return it to the pool for the next acquire.
@@ -933,7 +931,6 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
     cmd._touched_buffers.clear();
     cmd._touched_textures.clear();
     cmd._written_buffers.clear();
-    cmd._written_textures.clear();
 
     // Never submitted, so the GPU never touched this allocator.
     // Close the list so it is poolable, then return both to the pool: the list for reuse, the allocator straight to the free pool.

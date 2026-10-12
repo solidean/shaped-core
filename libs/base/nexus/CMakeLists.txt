@@ -5,6 +5,7 @@ project(nexus LANGUAGES CXX)
 add_library(nexus
     src/nexus/run.cc
     src/nexus/impl/host_loop.cc
+    src/nexus/impl/run_framing.cc
     src/nexus/impl/watchdog.cc
     src/nexus/args/builder.cc
     src/nexus/args/diagnostic.cc

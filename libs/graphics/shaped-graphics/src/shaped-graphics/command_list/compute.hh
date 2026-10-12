@@ -76,7 +76,7 @@ public:
     void dispatch_groups_indirect(buffer<dispatch_args> const& args, isize index = 0);
 
     /// The byte-addressed form: three `u32` counts at `offset_in_bytes`, which must be a multiple of 4.
-    void dispatch_groups_indirect(raw_buffer_handle const& args, isize offset_in_bytes);
+    void dispatch_groups_indirect_bytes(raw_buffer_handle const& args, isize offset_in_bytes);
 
     /// Declares per-element access for a *buffer* array / bindless binding, for every dispatch on this bind point while the result lives.
     /// Array element usage cannot be inferred, since a shader may index only some elements, or use them differently.

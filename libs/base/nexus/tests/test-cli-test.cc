@@ -1,6 +1,8 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
+#include <nexus/impl/run_framing.hh>
 #include <nexus/test.hh>
+#include <nexus/tests/registry.hh>
 #include <nexus/tests/schedule.hh>
 
 // The scheduler's own CLI, pinned.
@@ -285,4 +287,48 @@ TEST("test cli - help describes the flags the parser actually has")
                                    "--junit-xml", "--pgo-json", "--list-tests-json", "--match-files", "--match-names",
                                    "--record", "--no-recording", "--list-tests", "--reporter", "--test-args"})
         CHECK(help.contains(flag));
+}
+
+namespace
+{
+/// How nx::run frames a command line against a binary holding one example and one test.
+nx::impl::run_framing framing_of(cc::span<char const* const> args)
+{
+    auto reg = nx::test_registry();
+    reg.add_declaration("clean-core/vector", nx::config::cfg{.bucket = nx::config::test_bucket::example}, [] {});
+    reg.add_declaration("vector - grows", {}, [] { CHECK(true); });
+
+    auto config = parse(args);
+    config.resolve_filter_mode(reg);
+    auto const schedule = nx::test_schedule::create(config, reg);
+    REQUIRE(!schedule.instances.empty());
+    return nx::impl::frame_run(config, schedule, false);
+}
+} // namespace
+
+TEST("test cli - an example is framed as a program however it was reached")
+{
+    SECTION("named exactly, which is what dev.py and an IDE's test runner send")
+    {
+        auto const framing = framing_of({"clean-core/vector"});
+        CHECK(!framing.prints_seed);
+        CHECK(!framing.reports_resources);
+        CHECK(!framing.is_watched);
+    }
+
+    SECTION("swept under --examples")
+    {
+        auto const framing = framing_of({"--examples", "clean-core/vector"});
+        CHECK(!framing.prints_seed);
+        CHECK(!framing.reports_resources);
+        CHECK(!framing.is_watched);
+    }
+
+    SECTION("and a test scheduled beside it makes the run a test run")
+    {
+        auto const framing = framing_of({"clean-core/vector", "vector - grows"});
+        CHECK(framing.prints_seed);
+        CHECK(framing.reports_resources);
+        CHECK(framing.is_watched);
+    }
 }

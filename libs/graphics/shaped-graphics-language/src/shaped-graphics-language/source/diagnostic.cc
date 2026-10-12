@@ -234,6 +234,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "constant-not-representable";
     case diagnostic_kind::invalid_option:
         return "invalid-option";
+    case diagnostic_kind::unroll_too_long:
+        return "unroll-too-long";
     case diagnostic_kind::missing_sampler:
         return "missing-sampler";
     case diagnostic_kind::invalid_constant_argument:
@@ -484,6 +486,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an entry point that nests deeper than the compiler walks, once every call is inlined";
     case diagnostic_kind::invalid_option:
         return "a value for a name no option has, of another type than the option's, or for a name given twice";
+    case diagnostic_kind::unroll_too_long:
+        return "an unrolled for that would write more copies of its body than the compiler writes, and stays a loop";
     case diagnostic_kind::unknown_feature:
         return "a `require` of a name that is no feature a shader can use";
     case diagnostic_kind::feature_not_declared:
@@ -618,6 +622,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::redundant_yield:
     case diagnostic_kind::unreachable_code:
     case diagnostic_kind::unused_require:
+    case diagnostic_kind::unroll_too_long:
         return severity::warning;
     }
     CC_UNREACHABLE("unknown diagnostic_kind");

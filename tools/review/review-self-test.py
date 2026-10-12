@@ -2725,6 +2725,59 @@ def test_coverage_reports_discharge_progress(root: Path) -> None:
     assert json.loads(done.stdout)["discharged"] == 1, done.stdout
 
 
+def test_changes_lists_what_a_commit_touched(root: Path) -> None:
+    """A stack of independent commits is mapped one entry per commit, so `changes` answers by commit as it does by path.
+
+    A net hunk coalesces neighboring edits from several commits, and it is listed under each commit it spans.
+    """
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    lines = numbered(40).splitlines(keepends=True)
+    commit(repo, "base", {"a.txt": "".join(lines), "b.txt": numbered(10)})
+    lines[4] = "first\n"
+    first = commit(repo, "first", {"a.txt": "".join(lines)})
+    second = commit(repo, "second", {"b.txt": numbered(10) + "second\n"})
+    lines[8] = "third\n"
+    third = commit(repo, "third", {"a.txt": "".join(lines)})
+
+    cli = [sys.executable, str(REPO_ROOT / "review.py")]
+
+    def run(*argv: str) -> subprocess.CompletedProcess:
+        return subprocess.run(cli + list(argv), cwd=repo, capture_output=True, text=True, encoding="utf-8")
+
+    for argv in (["init", "r", "--goal", "pr-comment", "--range", "HEAD~3..HEAD"], ["ingest", "r"]):
+        done = run(*argv)
+        assert done.returncode == 0, done.stderr or done.stdout
+
+    ledger = Ledger.load(repo / ".tmp" / "reviews" / "r" / "changes" / "ledger.jsonl")
+    by_path = {c.path: c.id for c in ledger.live()}
+    assert sorted(by_path) == ["a.txt", "b.txt"], f"the fixture should ingest one change per file: {by_path}"
+
+    def ids(*argv: str) -> set[str]:
+        done = run("changes", "r", "--ids", *argv)
+        assert done.returncode == 0, done.stderr or done.stdout
+        return set(done.stdout.split())
+
+    assert ids("--commit", first) == {by_path["a.txt"]}
+    assert ids("--commit", second) == {by_path["b.txt"]}
+    assert ids("--commit", third) == {by_path["a.txt"]}, "the net hunk first and third share is listed under both"
+    assert ids("--commit", third[:10]) == {by_path["a.txt"]}, "a short sha names the commit as well"
+
+    # It narrows what the other filters already narrowed, rather than replacing them.
+    assert ids("--commit", first, "--path", "b.txt") == set()
+    (repo / ".tmp" / "reviews" / "r" / "entries" / "050-x.md").write_text(
+        f"---\nid: 050\ntitle: x\n---\n\n## ask  ok\ndischarges: {by_path['a.txt']}\n\nFine?\n\n- radio: yes\n",
+        encoding="utf-8")
+    assert ids("--commit", third, "--undischarged") == set()
+    assert ids("--commit", second, "--undischarged") == {by_path["b.txt"]}
+
+    # The base is no commit of the review, and an empty listing would read as "it changed nothing".
+    outside = run("changes", "r", "--commit", "HEAD~3")
+    assert outside.returncode != 0, outside.stdout
+    assert "not one of the 3 commits" in outside.stderr, outside.stderr
+
+
 def test_design_review_refuses_a_range(root: Path) -> None:
     """A design review has no changeset, so a range would be silently ignored rather than honoured."""
     repo = root / "repo"

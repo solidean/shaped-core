@@ -22,6 +22,7 @@ void assert_valid_subresource(raw_texture_handle const& texture, subresource_ind
 
 /// Asserts `region` lies within `texture`'s subresource `sub`: a non-negative offset, and offset+size within the mip extent.
 /// So a 2D or 1D texture's depth axis stays a single slice, at z 0 with size.z 1.
+/// A block-compressed region is also block-aligned, except where it runs to the subresource's edge.
 void assert_texture_region_in_bounds(raw_texture_handle const& texture,
                                      subresource_index const& sub,
                                      texture_region const& region);

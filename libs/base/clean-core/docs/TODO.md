@@ -182,6 +182,14 @@ Add entries as we discover them, and remove them as they land.
   The cost is a sweep: tests that block get `#if !CC_NEVER_BLOCK` or become async, and the few code paths that branch on it say so.
   Meanwhile sg has no blocking spellings of its own left, and `sv::viewer`'s synchronous frame loop is the one caller of `async_blocking_get` a wasm build would reach.
 
+- **A passive timed wait on a `cc::async` node.**
+  Waiting until a node is ready or a deadline passes, while running nothing else on the calling thread, has no spelling.
+  `cc::try_async_blocking_get_for` is the timed wait there is, and it drives: it steps the ambient scheduler and sweeps the pump registry until the node is ready.
+  A caller that may hold a lock, or a reference other work could invalidate, must not run that work, so it polls `is_ready()` by hand instead.
+  slib's `passive_get` (`impl/sgl_emit_cache.cc`) is the first, waiting on the blob cache's actor thread with a yield-then-sleep loop marked as this entry's stand-in.
+  The shape wanted parks on the node's completion, woken by it the way a parked driver is, rather than polling, and takes its bound in seconds.
+  It can only ever see work another thread finishes, so without threads it has nothing to wait for; the SGL cache switches its persistent tier off there.
+
 - **No general cancellation token.**
   `cc::async` can fail with a `cancelled` error, but nothing lets a caller *ask* running work to stop.
   `cnet::cancel_token` is the one token in the repo — copyable, thread-safe, hierarchical — and it is scoped to clean-net's socket operations.

@@ -184,7 +184,7 @@ public:
     }
 
     /// `declare`, then the two test-and-sets the command list files the texture by, under the one lock the caller holds.
-    /// Returns which firsts this access was: of this op, of this list, and of a write in this list.
+    /// Returns which firsts this access was, of this op and of this list; a texture is never filed as written.
     /// `from_array_application` marks the texture an array member of `slot`'s list.
     [[nodiscard]] dx12_track_result track(sg::command_list_slot slot,
                                           sg::subresource_range range,
@@ -195,15 +195,12 @@ public:
     {
         auto const report = declare(slot, range, stages, access, layout);
         auto& s = _slots[int(slot)];
-        auto const writes = sg::is_unordered_write(access);
         auto const result = dx12_track_result{.first_this_op = !s.pending_barrier,
                                               .first_this_list = !s.recorded,
-                                              .first_write_this_list = writes && !s.written,
                                               .member_write = report.writes && s.array_member,
                                               .held_write = report.held_write};
         s.pending_barrier = true;
         s.recorded = true;
-        s.written = s.written || writes;
         s.array_member = s.array_member || from_array_application;
         return result;
     }
@@ -326,7 +323,6 @@ private:
         bool active = false;
         bool recorded = false;        // this slot's command list has added the texture to its finalize set (dedup)
         bool pending_barrier = false; // declared for the current op, awaiting the pre-op flush (per-op dedup)
-        bool written = false;         // this slot's command list has added the texture to its written set (dedup)
         bool array_member = false;    // an array application of this slot's command list has tracked the texture
     };
 

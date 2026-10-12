@@ -1178,12 +1178,20 @@ hit_group textured for path_rays:
 * **CHK-120** `return`, `break` and `continue` are statements; one that stands as the result of a `case` arm leaves as it says, and that arm produces no value (CHK-165).
   One that stands as a value anywhere else is `unsupported-yet`.
 * **CHK-209** `print value` takes a value of any type; a string is `unsupported-yet`.
-* **CHK-389** `@unroll` on a `for` writes its body once per value of the range, in order, and no loop ([why](why/checking.md#chk-389)).
-  The loop means what it means without the attribute; the flat tree holds a block per value, and no target's text holds a loop or an unroll hint.
+* **CHK-389** `@unroll` on a `for` writes its body once per value of the range, in order, and nothing of it runs as a loop ([why](why/checking.md#chk-389)).
+  The loop means what it means without the attribute, except that a rule judging a constant judges each copy's index as the constant it is.
+  So `m |= 1u << (i as uint)` over `0 ..< 40` is `shift-out-of-range` (CHK-270), where the loop without the attribute compiles.
+  The flat tree holds a block per value, and no target's text holds an unroll hint.
+  Where a `break` may leave the copies, the block around them may become a `once` ([LEGAL-2](legalization.md#the-core-form)).
+  A target spells that as a loop that runs one time.
   In each copy the variable is that value, as a literal, so a branch on it is CHK-356's and keeps the one side that copy takes.
-  `continue` leaves the copy it stands in, and `break` skips every copy after it.
+  `continue` leaves the copy it stands in, and `break` leaves at once, skipping the rest of its copy and every copy after it.
   Both bounds are `int` constants (CHK-310) once the entry point is inlined: a literal, a `const`, an option, a literal argument, an enclosing unrolled variable, or a pure builtin of those.
-  A bound that is none of those, and a range of more than 256 values, is `invalid-constant-argument`.
+  A bound that is none of those is `invalid-constant-argument`.
+  A loop writes at most 256 copies, each counted once per copy of every unrolled loop around it: 8 values inside an unrolled loop of 4 values are 32 copies.
+  A loop that would write more is the warning `unroll-too-long`, and stays an ordinary loop, while the unrolled loops around it still unroll.
+  So in a nest, the loop that stays a loop is the first one, from the outside in, whose copies pass the limit.
+  An inner bound that reads an outer index is counted copy by copy, so only the copies whose range passes the limit keep a loop.
   On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
 * **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
   Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.
@@ -1328,7 +1336,8 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## Diagnostic kinds
 
-Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except `unreachable-code`, `no-effect` and `unused-require`, which are warnings.
+Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except five warnings.
+They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform` and `unroll-too-long`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
@@ -1388,6 +1397,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-index` | CHK-300 |
 | `needless-nonuniform` | CHK-300 |
 | `invalid-option` | CHK-354 |
+| `unroll-too-long` | CHK-389 |
 
 ## Open
 

@@ -237,9 +237,8 @@ inline constexpr bool has_abs = scalar_traits<T>::has_abs;
 template <class T>
 inline constexpr bool has_pow2 = scalar_traits<T>::has_pow2;
 
-/// true if the scalar has values that are no number — NaN and the infinities — and scalar_traits<T> provides
-/// is_nan() / is_inf() / is_finite() to tell them apart.
-/// The integers, bool and tg::fixed_int have none, so asking one is a compile error rather than a constant false.
+/// true if the scalar has values that are no number — NaN and the infinities — and scalar_traits<T> provides is_nan() / is_inf() / is_finite() to tell them apart.
+/// The integers, bool and tg::fixed_int have none, so asking one is a compile error rather than a constant answer.
 /// A scalar_traits that does not mention it has none.
 template <class T>
 inline constexpr bool has_non_finite = []

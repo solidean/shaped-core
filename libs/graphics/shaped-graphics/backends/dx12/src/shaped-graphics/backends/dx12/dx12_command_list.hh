@@ -112,13 +112,12 @@ public:
     // Buffers this list has touched: their slots are finalized at submit/drop, and each gets the reverse async-upload stamp at submit.
     cc::vector<dx12_buffer_handle> _touched_buffers;
 
-    // The resources this list writes, a subset of the touched ones: only a write conflicts with a readback still in flight,
-    // so only these owe a download wait.
+    // The buffers this list writes, a subset of the touched ones, which alone owe a download wait.
+    // Only a write conflicts with a buffer's readback still in flight; a touched texture owes one whatever this list does to it.
     cc::vector<dx12_buffer_handle> _written_buffers;
-    cc::vector<dx12_texture_handle> _written_textures;
 
     /// Folds every transfer this list must wait for into _required_copy_waits and _required_download_waits.
-    /// Called at submit, under the submission lock: a transfer enqueued after an access was recorded is still waited on.
+    /// Called at submit, before the submission lock: a transfer enqueued after an access was recorded is still waited on.
     void fold_transfer_waits();
 
     // Compute bind state, both reset on compute_bind_pipeline.

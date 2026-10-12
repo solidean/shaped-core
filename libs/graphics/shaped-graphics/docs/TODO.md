@@ -437,3 +437,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   A system none of whose windows match now says so, which rules its copies out: the next dump either shows the two copies or clears both systems.
   If the two copies overlap and were queued out of submission order it is a real bug; if they are disjoint or in order it is the layer.
   The experiment beside it is dropping `wait_token` and `download_wait` from a window submit once the host counter shows them reached, which the comment at that wait chose not to do.
+
+- **A transient bindless element is freed early only on request.**
+  `arr.transient.release(view)` frees an element its owner is done with; one nobody releases keeps its view, and the resource behind it, until the array fills.
+  If owners turn out to forget, the automatic step is freeing by age: once per epoch, free every slot nobody acquired for N epochs.
+  It costs a sweep or per-slot bookkeeping each epoch, N is a policy someone has to pick, and an element wanted every N+1 epochs is re-minted each time.

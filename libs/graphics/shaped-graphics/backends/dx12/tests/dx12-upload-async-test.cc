@@ -2,9 +2,13 @@
 
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
+#include <shaped-graphics/transfer/stream_source.hh>
+
+#include <atomic>
 
 using namespace cc::primitive_defines;
 
@@ -26,6 +30,38 @@ cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
         data.push_back(byte(fn(i)));
     return cc::make_pinned_data(cc::move(data));
 }
+
+/// A stream source that holds its one chunk back until release(), so its transfer is in flight for as long as a test needs.
+class gated_source final : public sg::stream_source
+{
+public:
+    explicit gated_source(cc::pinned_data<byte const> bytes) : _bytes(cc::move(bytes)) {}
+
+    [[nodiscard]] sg::stream_poll try_next_chunk() override
+    {
+        if (!_open.load(std::memory_order_acquire))
+            return {.status = sg::stream_source_status::not_yet};
+        if (_handed_over)
+            return {.status = sg::stream_source_status::done};
+        _handed_over = true;
+        return {.status = sg::stream_source_status::ready, .chunk = {.data = _bytes}};
+    }
+
+    void set_waker(cc::unique_function<void()> waker) override { _waker = cc::move(waker); }
+
+    void release()
+    {
+        _open.store(true, std::memory_order_release);
+        if (_waker)
+            _waker();
+    }
+
+private:
+    cc::pinned_data<byte const> _bytes;
+    std::atomic<bool> _open = false;
+    cc::unique_function<void()> _waker;
+    bool _handed_over = false;
+};
 } // namespace
 
 // A single upload larger than one staging window must pack across several windows, pipelining and recycling as it goes.
@@ -166,4 +202,36 @@ ASYNC_TEST("sg dx12 - uneven async uploads pack and straddle staging windows")
                 all_ok = false;
     }
     CHECK(all_ok);
+}
+
+// A transfer still in flight at submit is one queue wait, which the skip above must not swallow.
+// The stream's source holds its bytes back, so the wait is certain however fast the copy queue is.
+ASYNC_TEST("sg dx12 - a list touching a buffer whose transfer is in flight makes one queue wait")
+{
+    auto ctx = dx12::make_test_context({});
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
+    auto& c = *ctx.value();
+
+    auto const n = isize(256);
+    auto buf = c.persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
+    REQUIRE(buf != nullptr);
+    auto source = std::make_unique<gated_source>(make_bytes(n, [](isize i) { return i * 3 + 1; }));
+    auto* const gate = source.get();
+    auto stream = c.stream.from_source_to_buffer(buf, cc::move(source));
+    // The list below waits on purpose, so the stream does not warn about it.
+    stream.promote_to_async();
+
+    auto const before = c.metrics.stats();
+    auto list = c.create_command_list();
+    auto readback = list->download.bytes_from_buffer(buf, 0, n);
+    c.submit_command_list(cc::move(list));
+    CHECK((c.metrics.stats() - before)[sg::stat::queue_waits] == 1);
+
+    // The list ran after the stream landed, so it reads the streamed bytes.
+    gate->release();
+    auto const bytes = co_await readback.bytes();
+    REQUIRE(bytes.size() == n);
+    CHECK(bytes[0] == byte(1));
+    CHECK(bytes[n - 1] == byte((n - 1) * 3 + 1));
 }

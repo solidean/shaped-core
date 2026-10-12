@@ -90,10 +90,10 @@ void command_list_compute_scope::dispatch_threads(int x, int y, int z)
 void command_list_compute_scope::dispatch_groups_indirect(buffer<dispatch_args> const& args, isize index)
 {
     CC_ASSERT(index >= 0 && index < args.element_count(), "indirect dispatch arguments index is out of range");
-    dispatch_groups_indirect(args.raw(), index * isize(sizeof(dispatch_args)));
+    dispatch_groups_indirect_bytes(args.raw(), index * isize(sizeof(dispatch_args)));
 }
 
-void command_list_compute_scope::dispatch_groups_indirect(raw_buffer_handle const& args, isize offset_in_bytes)
+void command_list_compute_scope::dispatch_groups_indirect_bytes(raw_buffer_handle const& args, isize offset_in_bytes)
 {
     _cmd._stats.add(stat::dispatches);
     _cmd.dispatch_indirect(args, offset_in_bytes);
