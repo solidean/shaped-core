@@ -315,7 +315,11 @@ TEST("slib - an edit made during a format's first compile reaches that format", 
     CHECK(fake_compiler::source_of(*first->try_value()) == "v1");
     CHECK(f.source() == "v2"); // the format the reload did see
 
-    // The watcher has marked the edit seen and will not fire again, so the overtaken compile staged its own recompile.
+    // The watcher has marked the edit seen, so no file reads as changed again; the install flagged the asset instead.
+    CHECK(f.pkg.invert->missed_reload());
+    f.lib.poll_hot_reload();
+    CHECK(!f.pkg.invert->missed_reload());
+
     auto const next = f.pkg.invert->acquire(sg::shader_format::spirv);
     REQUIRE(next->has_value());
     CHECK(fake_compiler::source_of(*next->try_value()) == "v2");

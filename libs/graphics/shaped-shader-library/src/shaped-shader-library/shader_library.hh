@@ -114,7 +114,7 @@ public:
     ///
     /// A reload is staged, never applied in place: the recompile runs on the watcher and the next acquire promotes it, so a reload costs a consumer only the pointer swap.
     /// The first acquire of a format and option set is the exception: it reads, preprocesses and dispatches the compile on its caller's thread, off the asset's lock.
-    /// A reload staged while that compile runs costs the same caller a second compile, staged like any other reload's.
+    /// A reload staged while that compile runs skips it, so the install flags the asset and the watcher's next scan stages that reload again.
     void start_hot_reload(reload_config config = {});
 
     /// Drives the watcher on the calling thread.

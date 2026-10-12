@@ -181,28 +181,27 @@ void slib::impl::reload_watcher::scan()
     auto const assets = _library->assets();
 
     // Collect every change first: staging one asset's reload rewrites its dependency list, which would otherwise hide a trigger for the asset scanned after it.
-    cc::set<cc::string> changed;
+    auto changed = cc::set<cc::string>();
     for (auto const& asset : assets)
         for (auto const& dependency : asset->dependencies())
             if (note_revision(dependency))
                 changed.insert(dependency);
 
-    bool staged = false;
-    if (!changed.empty())
+    auto staged = false;
+    for (auto const& asset : assets)
     {
-        for (auto const& asset : assets)
-        {
-            bool affected = false;
+        // A reload that passed a first compile by is owed whether or not anything changed since: the change it saw is already marked seen.
+        auto affected = asset->missed_reload();
+        if (!changed.empty())
             for (auto const& dependency : asset->dependencies())
                 if (changed.contains(dependency))
                     affected = true;
 
-            // Staging only: the watcher never touches the shader a consumer is currently using.
-            if (affected)
-            {
-                asset->stage_reload();
-                staged = true;
-            }
+        // Staging only: the watcher never touches the shader a consumer is currently using.
+        if (affected)
+        {
+            asset->stage_reload();
+            staged = true;
         }
     }
 
