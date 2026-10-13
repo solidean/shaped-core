@@ -63,6 +63,7 @@ private:
 ///  - bindings 17 and 18, where any group holds an acceleration structure: the pool, and the roots as a uniform with a dynamic offset.
 /// A bound_sampler at an index a second one already takes is refused.
 ///
+/// The inline constants are bound, and placed, rounded up to 16 bytes, since WGSL rounds a uniform struct's size up to its alignment.
 /// The inline constants and the roots are placed as one block, so both dynamic offsets point into one constant page.
 /// The roots start at the first aligned offset past the constants, one u32 per acceleration member: groups in order, members by binding index.
 ///
@@ -121,6 +122,7 @@ private:
     cc::vector<webgpu_binding_group_layout_handle> _groups;
     int _slot_count = 0;
     isize _inline_constants_bytes = 0;
+    isize _inline_constants_bound_bytes = 0;
     bool _has_acceleration = false;
     cc::vector<isize> _acceleration_bases;
     isize _roots_offset_in_block = 0;
