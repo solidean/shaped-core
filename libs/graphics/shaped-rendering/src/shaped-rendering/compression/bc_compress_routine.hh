@@ -11,7 +11,7 @@
 /// A block-compressed texture is sampled at no cost beyond its smaller footprint, so a texture that is only ever
 /// sampled gives up little and keeps a quarter or an eighth of its memory:
 ///
-///   - **BC1** — RGB at 4 bits per texel, with an optional one-bit alpha; the cheapest color, and the coarsest.
+///   - **BC1** — RGB at 4 bits per texel, with an optional one-bit alpha (`bc_compress_options::bc1_alpha`); the cheapest color, and the coarsest.
 ///   - **BC3** — RGBA at 8: BC1's color beside a separate smooth alpha.
 ///   - **BC4** — one channel at 4 bits, from the source's red: roughness, occlusion, height.
 ///   - **BC5** — two channels at 8, from red and green: a tangent-space normal's x and y.
@@ -25,6 +25,22 @@
 ///
 /// The device must have `sg::feature::texture_compression_bc`; without it the target cannot even be created.
 ///
+/// What BC1 does with a texel's alpha.
+enum class sr::bc1_alpha : cc::u8
+{
+    /// alpha is ignored and every texel is opaque — the cheap color format it usually is
+    opaque,
+    /// a texel under half alpha decodes as transparent black, through BC1's three-color mode
+    cut_out,
+};
+
+/// Encode knobs.
+struct sr::bc_compress_options
+{
+    /// Opaque by default: a source whose alpha means nothing would otherwise come out with holes wherever it is low.
+    sr::bc1_alpha bc1_alpha = sr::bc1_alpha::opaque;
+};
+
 /// A render routine **parametrized on the target's format family**, its `_unorm` member: one compute pipeline each.
 class sr::bc_compress_routine : public sg::render_routine<bc_compress_routine, sg::pixel_format>
 {
@@ -39,7 +55,8 @@ public:
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd,
                                                      sg::texture_2d const& source,
                                                      sg::texture_2d const& target,
-                                                     int level);
+                                                     int level,
+                                                     bc_compress_options const& opts = {});
 
     /// Whether `format` is one this routine writes: BC1, BC3, BC4, BC5 and BC7 in their unsigned forms, sRGB included.
     [[nodiscard]] static bool is_supported_target(sg::pixel_format format);

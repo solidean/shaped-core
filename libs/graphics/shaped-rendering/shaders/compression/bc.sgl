@@ -8,11 +8,12 @@
 // A BC4 block holds one channel: two 8-bit endpoints and a 3-bit index per texel, fitted to the block's range and then
 // refitted by least squares; BC5 is two of them, red and green, and BC3 one for alpha beside a BC1 color block.
 // A BC1 block holds two RGB 5:6:5 endpoints on the block's principal axis and a 2-bit index per texel.
-// A BC1 block with a texel under half alpha switches to BC1's three-color mode, whose fourth index is transparent.
+// With `bc1_cut_out`, a BC1 block with a texel under half alpha switches to BC1's three-color mode, whose fourth index is transparent.
 //
 // BC7 uses four of its eight modes, which between them carry most of what a full mode search buys on photographic
 // textures.
 // Every block tries mode 6: one subset, RGBA, 7-bit endpoints with a p-bit each, 4-bit indices.
+// In an opaque block mode 6 is fitted on color alone, with both p-bits 1, so its alpha decodes to 255 rather than 254.
 // An opaque block also tries modes 1 (two subsets, 6-bit endpoints with a shared p-bit, 3-bit indices) and 3 (two
 // subsets, 7-bit endpoints with a p-bit each, 2-bit indices); any other block tries mode 7 (two subsets, RGBA, 5-bit
 // endpoints with a p-bit each, 2-bit indices).
@@ -33,6 +34,8 @@
     height: int
     // 1 when the source is sRGB: it reads back linear, and the format stores the encoded bytes
     srgb: int
+    // 1 when BC1 cuts out the texels under half alpha; 0 encodes every BC1 block opaque
+    bc1_cut_out: int
 
 // The 16-byte formats: BC3, BC5 and BC7.
 binding bc_io16:
@@ -106,6 +109,21 @@ fun quantize(x: float4, p: int, bits: int, has_p: bool) -> int4:
     let scaled = x * (total_top as float) / 255.0
     return clamp((round((scaled - (p as float)) * 0.5)) as int4, int4(0), int4(top))
 
+/// Where a power iteration toward a block's principal axis starts: the covariance column of the channel that varies most.
+/// It is non-zero whenever the block varies, and already the axis when the block holds two colors.
+/// A box diagonal is neither: two colors whose channels move in opposite directions, red against green, cancel against it exactly.
+fun largest_column(c0: float4, c1: float4, c2: float4, c3: float4) -> float4:
+    let mut axis = c0
+    let mut spread = c0.x
+    if c1.y > spread:
+        axis = c1
+        spread = c1.y
+    if c2.z > spread:
+        axis = c2
+        spread = c2.z
+    if c3.w > spread => axis = c3
+    return axis
+
 fun squared(v: float4, alpha: bool) -> float:
     let d = if alpha => v else float4(v.x, v.y, v.z, 0.0)
     return dot(d, d)
@@ -146,7 +164,9 @@ fun assign_indices(px: float4[16], mask: uint, subset: uint, a: int4, b: int4, i
     return error
 
 /// Endpoints for the floating-point pair `e0`, `e1`, with the p-bits that widen back closest: one per endpoint, or one shared.
+/// `pmode` 3 is one per endpoint held at 1, which is what widens a 7-bit alpha of 127 back to 255 exactly.
 fun quantize_pair(e0: float4, e1: float4, bits: int, pmode: int, alpha: bool) -> subset_fit:
+    if pmode == 3 => return subset_fit(quantize(e0, 1, bits, true), quantize(e1, 1, bits, true), 1, 1, 0.0)
     let mut fit = subset_fit(quantize(e0, 0, bits, pmode != 0), quantize(e1, 0, bits, pmode != 0), 0, 0, 0.0)
     if pmode == 0 => return fit
     let mut best0 = 1.0e30
@@ -176,20 +196,17 @@ fun quantize_pair(e0: float4, e1: float4, bits: int, pmode: int, alpha: bool) ->
 
 /// The best endpoints this encoder finds for one subset of `px`, with its indices written into `idx`.
 ///
-/// `pmode` is 0 for no p-bit, 1 for one shared by the subset, 2 for one per endpoint.
+/// `pmode` is 0 for no p-bit, 1 for one shared by the subset, 2 for one per endpoint, 3 for one per endpoint held at 1.
 /// Without `alpha` the subset is opaque: alpha is neither fitted nor counted, and decodes as 255.
+/// A mode that stores alpha decodes it as 255 only with `pmode` 3, since a free p-bit may give alpha up to save color.
 fun fit_subset(px: float4[16], mask: uint, subset: uint, bits: int, pmode: int, index_bits: int, alpha: bool, idx: mut int[16]) -> subset_fit:
-    // The mean and the box, then the principal axis by power iteration from the box's diagonal.
+    // The mean, then the principal axis by power iteration over the covariance.
     let mut n = 0.0
     let mut mean = float4(0.0)
-    let mut lo = float4(255.0)
-    let mut hi = float4(0.0)
     for i in 0 ..< 16:
         if ((mask >> (i as uint)) & 1u) != subset => continue
         n += 1.0
         mean += px[i]
-        lo = min(lo, px[i])
-        hi = max(hi, px[i])
     mean = mean / max(n, 1.0)
 
     let mut c0 = float4(0.0)
@@ -204,7 +221,7 @@ fun fit_subset(px: float4[16], mask: uint, subset: uint, bits: int, pmode: int, 
         c2 += d * d.z
         c3 += d * d.w
 
-    let mut axis = if alpha => hi - lo else float4(..(hi - lo).xyz, 0.0)
+    let mut axis = largest_column(c0, c1, c2, c3)
     for k in 0 ..< 4:
         let next = c0 * axis.x + c1 * axis.y + c2 * axis.z + c3 * axis.w
         let len = sqrt(dot(next, next))
@@ -283,7 +300,7 @@ fun partition_spread(px: float4[16], p: int, alpha: bool) -> float:
             c1 += d * d.y
             c2 += d * d.z
             c3 += d * d.w
-        let mut axis = float4(1.0, 1.0, 1.0, 1.0) * keep
+        let mut axis = largest_column(c0, c1, c2, c3)
         for k in 0 ..< 4:
             let next = c0 * axis.x + c1 * axis.y + c2 * axis.z + c3 * axis.w
             let len = sqrt(dot(next, next))
@@ -314,9 +331,10 @@ fun put(block: mut uint4, pos: mut int, value: uint, count: int):
         block.w = block.w | low
     pos += count
 
-fun encode_mode6(px: float4[16], error: mut float) -> uint4:
+/// Mode 6 over the whole block; an `opaque` block is fitted on color alone, its p-bits held at 1 so alpha is exactly 255.
+fun encode_mode6(px: float4[16], opaque: bool, error: mut float) -> uint4:
     let mut idx = int[16].filled(0)
-    let mut fit = fit_subset(px, 0u, 0u, 7, 2, 4, true, mut idx)
+    let mut fit = fit_subset(px, 0u, 0u, 7, if opaque => 3 else 2, 4, not opaque, mut idx)
     error = fit.error
 
     // Texel 0 drops its top index bit, so it must be in the lower half: otherwise the endpoints swap.
@@ -413,7 +431,7 @@ fun encode_two_subsets(px: float4[16], mode: int, p: int, error: mut float) -> u
         if px[i].w < 255.0 => opaque = false
 
     let mut best_error = 0.0
-    let mut best = encode_mode6(px, mut best_error)
+    let mut best = encode_mode6(px, opaque, mut best_error)
 
     // Modes 1 and 3 store no alpha, so they are for an opaque block; mode 7 is the two-subset mode that does.
     if best_error > 0.0:
@@ -592,17 +610,13 @@ fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
             if px[i].w < 128.0 => transparent = transparent | (1u << (i as uint))
     let four = transparent == 0u
 
-    // The principal axis of the opaque texels, from the diagonal of their box.
+    // The principal axis of the opaque texels, by power iteration over their covariance.
     let mut n = 0.0
     let mut mean = float3(0.0)
-    let mut lo = float3(255.0)
-    let mut hi = float3(0.0)
     for i in 0 ..< 16:
         if ((transparent >> (i as uint)) & 1u) != 0u => continue
         n += 1.0
         mean += px[i].xyz
-        lo = min(lo, px[i].xyz)
-        hi = max(hi, px[i].xyz)
     mean = mean / max(n, 1.0)
     let mut c0v = float3(0.0)
     let mut c1v = float3(0.0)
@@ -613,7 +627,7 @@ fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
         c0v += d * d.x
         c1v += d * d.y
         c2v += d * d.z
-    let mut axis = hi - lo
+    let mut axis = largest_column(float4(..c0v, 0.0), float4(..c1v, 0.0), float4(..c2v, 0.0), float4(0.0)).xyz
     for k in 0 ..< 4:
         let next = c0v * axis.x + c1v * axis.y + c2v * axis.z
         let len = sqrt(dot(next, next))
@@ -694,7 +708,7 @@ fun in_level(bx: int, by: int){bc_constants} -> bool:
     let mut px = float4[16].filled(float4(0.0))
     for i in 0 ..< 16:
         px[i] = stored(bc_io8.source.load(texel_xy(id.x, id.y, i)))
-    bc_io8.blocks[id.y * bc_constants.row_blocks + id.x] = bc1_block(px, true)
+    bc_io8.blocks[id.y * bc_constants.row_blocks + id.x] = bc1_block(px, bc_constants.bc1_cut_out != 0)
 
 @compute(8, 8) fun bc4_cs(@thread_id id: int3){bc_io8, bc_constants}:
     if not in_level(id.x, id.y) => return

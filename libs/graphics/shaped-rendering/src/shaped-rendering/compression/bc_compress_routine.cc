@@ -126,7 +126,8 @@ cc::shared_async<cc::unit> bc_compress_routine::init(sg::routine_init_scope scop
 sg::routine_outcome bc_compress_routine::execute(sg::command_list& cmd,
                                                  sg::texture_2d const& source,
                                                  sg::texture_2d const& target,
-                                                 int level)
+                                                 int level,
+                                                 bc_compress_options const& opts)
 {
     CC_ASSERT(can_compress(cmd.context(), source.format(), target.format()), "a target this routine cannot write from "
                                                                              "this source");
@@ -177,7 +178,8 @@ sg::routine_outcome bc_compress_routine::execute(sg::command_list& cmd,
                                                                .row_blocks = int(row_blocks),
                                                                .width = width,
                                                                .height = height,
-                                                               .srgb = sg::is_srgb_format(source.format()) ? 1 : 0}
+                                                               .srgb = sg::is_srgb_format(source.format()) ? 1 : 0,
+                                                               .bc1_cut_out = opts.bc1_alpha == bc1_alpha::cut_out ? 1 : 0}
                                          .to_block());
     cmd.compute.dispatch_threads(blocks_wide, blocks_high);
 

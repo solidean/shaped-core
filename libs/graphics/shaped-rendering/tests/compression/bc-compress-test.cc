@@ -111,6 +111,33 @@ image alpha_ramp(int size)
     return out;
 }
 
+/// A checker of single texels in two colors whose channels move in opposite directions, so the box diagonal of every
+/// block is orthogonal to the one line its colors lie on.
+image red_green_checker(int size)
+{
+    auto out = blank(size, size);
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+            if ((x + y) % 2 == 0)
+                out.set(x, y, 255, 0, 0, 255);
+            else
+                out.set(x, y, 0, 255, 0, 255);
+    return out;
+}
+
+/// Green, with one red texel in every block: a color the block's mean would erase.
+image one_red_dot(int size)
+{
+    auto out = blank(size, size);
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+            if (x % 4 == 1 && y % 4 == 1)
+                out.set(x, y, 255, 0, 0, 255);
+            else
+                out.set(x, y, 0, 255, 0, 255);
+    return out;
+}
+
 /// The gradient, with every third texel along a diagonal cut out: what BC1's one-bit alpha exists for.
 image cutout(int size)
 {
@@ -161,6 +188,7 @@ struct comparison
 {
     float max_error = 0.0f; ///< the largest difference in any compared channel, in units of 1/255
     float psnr = 0.0f;      ///< over the compared channels, in dB
+    float min_alpha = 1.0f; ///< the lowest alpha the compressed texture decodes to, compared or not
 };
 
 /// Compresses `source`, uploaded as `source_format`, into `target`, and compares the first `channels` of the two decodes.
@@ -170,7 +198,8 @@ cc::shared_async<comparison> compress_and_compare(sg::context& ctx,
                                                   sg::pixel_format source_format,
                                                   sg::pixel_format target,
                                                   int channels,
-                                                  bool opaque_only = false)
+                                                  bool opaque_only = false,
+                                                  sr::bc_compress_options const& opts = {})
 {
     auto const original = ctx.persistent.create_texture_2d(
         {.format = source_format, .width = source.width, .height = source.height, .usage = source_usage});
@@ -179,7 +208,7 @@ cc::shared_async<comparison> compress_and_compare(sg::context& ctx,
 
     auto cmd = ctx.create_command_list();
     cmd->upload.bytes_to_texture(original.raw(), cc::span<byte const>(source.rgba8));
-    auto const outcome = sr::bc_compress_routine::execute(*cmd, original, compressed, 0);
+    auto const outcome = sr::bc_compress_routine::execute(*cmd, original, compressed, 0, opts);
     ctx.submit_command_list(cc::move(cmd));
     REQUIRE(outcome == sg::routine_outcome::executed);
 
@@ -192,6 +221,7 @@ cc::shared_async<comparison> compress_and_compare(sg::context& ctx,
     auto count = isize(0);
     for (auto i = isize(0); i < want.size(); ++i)
     {
+        out.min_alpha = cc::min(out.min_alpha, got[i][3]);
         auto const cut = opaque_only && want[i][3] < 0.5f;
         for (auto c = 0; c < channels; ++c)
         {
@@ -239,6 +269,16 @@ ASYNC_INVOCABLE_TEST("sr - BC7 compression reproduces every two-subset partition
     auto const smooth = co_await compress_and_compare(ctx, gradient(64), sg::pixel_format::rgba8_unorm, bc7, 4);
     CHECK(smooth.psnr >= 38.0f).dump("psnr", smooth.psnr).dump("max error", smooth.max_error);
 
+    // An opaque source decodes opaque at every texel, exactly: mode 6 holds its p-bits at 1 for an opaque block.
+    CHECK(smooth.min_alpha == 1.0f).dump("min alpha", smooth.min_alpha);
+    CHECK(exact.min_alpha == 1.0f).dump("min alpha", exact.min_alpha);
+
+    // Two colors whose channels move in opposite directions, which no starting guess built from the box may lose.
+    auto const checker = co_await compress_and_compare(ctx, red_green_checker(16), sg::pixel_format::rgba8_unorm, bc7, 4);
+    CHECK(checker.max_error <= 2.0f).dump("max error", checker.max_error);
+    auto const dot = co_await compress_and_compare(ctx, one_red_dot(16), sg::pixel_format::rgba8_unorm, bc7, 4);
+    CHECK(dot.max_error <= 2.0f).dump("max error", dot.max_error);
+
     // Color and alpha each ramp along their own axis, so every block is a plane no one subset fits: mode 7's two do.
     auto const alpha = co_await compress_and_compare(ctx, alpha_ramp(32), sg::pixel_format::rgba8_unorm, bc7, 4);
     CHECK(alpha.psnr >= 38.0f).dump("psnr", alpha.psnr).dump("max error", alpha.max_error);
@@ -271,9 +311,21 @@ ASYNC_INVOCABLE_TEST("sr - BC1 and BC3 compression hold color, and BC1 cuts out 
     auto const smooth = co_await compress_and_compare(ctx, gradient(64), sg::pixel_format::rgba8_unorm, bc1, 3);
     CHECK(smooth.psnr >= 32.0f).dump("psnr", smooth.psnr).dump("max error", smooth.max_error);
 
-    // Every cut texel decodes with zero alpha and every other with full alpha, so alpha has no error at all.
-    auto const cut = co_await compress_and_compare(ctx, cutout(32), sg::pixel_format::rgba8_unorm, bc1, 4, true);
+    // Two colors whose channels move in opposite directions, which no starting guess built from the box may lose.
+    auto const checker = co_await compress_and_compare(ctx, red_green_checker(16), sg::pixel_format::rgba8_unorm, bc1, 3);
+    CHECK(checker.max_error <= 5.0f).dump("max error", checker.max_error);
+    auto const dot = co_await compress_and_compare(ctx, one_red_dot(16), sg::pixel_format::rgba8_unorm, bc1, 3);
+    CHECK(dot.max_error <= 5.0f).dump("max error", dot.max_error);
+
+    // Asked to, BC1 cuts out the texels under half alpha; color and alpha are held to 30 dB together.
+    auto const cut = co_await compress_and_compare(ctx, cutout(32), sg::pixel_format::rgba8_unorm, bc1, 4, true,
+                                                   {.bc1_alpha = sr::bc1_alpha::cut_out});
     CHECK(cut.psnr >= 30.0f).dump("psnr", cut.psnr).dump("max error", cut.max_error);
+
+    // By default the same source is encoded opaque: alpha is ignored, and nothing is cut out.
+    auto const kept = co_await compress_and_compare(ctx, cutout(32), sg::pixel_format::rgba8_unorm, bc1, 3);
+    CHECK(kept.min_alpha == 1.0f).dump("min alpha", kept.min_alpha);
+    CHECK(kept.psnr >= 32.0f).dump("psnr", kept.psnr);
 
     // BC3's alpha is a BC4 block of its own, so a smooth alpha survives where BC1's one bit could not hold it.
     auto const alpha = co_await compress_and_compare(ctx, alpha_ramp(32), sg::pixel_format::rgba8_unorm, bc3, 4);

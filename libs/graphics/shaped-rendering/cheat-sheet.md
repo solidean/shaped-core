@@ -388,10 +388,11 @@ BC1, BC3, BC4, BC5 and BC7 encoded on the GPU, a mip level per call; the target'
 ```cpp
 #include <shaped-rendering/compression/bc_compress_routine.hh>
 sr::bc_compress_routine::execute(cmd, source, target, level);    // encodes `level` of source into the same level of target
+sr::bc_compress_routine::execute(cmd, source, target, level, {.bc1_alpha = sr::bc1_alpha::cut_out}); // BC1 is opaque unless asked
 sr::bc_compress_routine::target_for(source_format, family);      // the family (bc1/bc3/bc7) in sRGB where the source is sRGB
 sr::bc_compress_routine::can_compress(ctx, source_format, target); // bool — BC on the device, a supported target, sRGB-ness agreed
 sr::bc_compress_routine::prewarm(ctx, family);                   // keyed by the family's _unorm format: one pipeline each
-// bc1 RGB + 1-bit alpha (under half alpha cuts out) | bc3 RGBA, smooth alpha | bc4 red | bc5 red, green | bc7 RGBA, the best
+// bc1 RGB, opaque by default or 1-bit alpha with cut_out | bc3 RGBA, smooth alpha | bc4 red | bc5 red, green | bc7 RGBA, the best
 // measured by the hardware decoder: bc7 ~40 dB, bc1 ~36, bc4 and bc5 ~49 on a smooth gradient
 // a level goes through a TRANSIENT buffer of blocks and cmd.copy.buffer_to_texture: 16 MiB for a 4096^2 BC7 top level
 // an sRGB source is encoded as the bytes it stores; BC4 and BC5 have no sRGB form, so their source must be linear
