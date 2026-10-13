@@ -117,6 +117,8 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     CC_ASSERT(is_set(in.output), "a denoise call needs an output texture");
     CC_ASSERT(in.output.raw() != in.color.raw(), "à-trous needs an output texture other than its input");
     CC_ASSERT(extent_of(in.output) == extent_of(in.color), "à-trous does not upscale: output and input extents differ");
+    CC_ASSERT(!is_set(in.sample_counts) || extent_of(in.sample_counts) == extent_of(in.color),
+              "per-pixel sample counts must cover the input extent");
     CC_ASSERT(options.iterations >= 1, "à-trous needs at least one pass");
 
     // Read-only: execute touches nothing init did not publish, and the ping-pong images are the caller's.

@@ -8,7 +8,7 @@
 // The luminance edge-stop is relative to the noise the input is expected to carry.
 // `luminance_scale` is the caller's sigma times 1/sqrt(sample count), so a one-sample frame is smoothed hard and a
 // deep mean is averaged only across differences a few of its own, much smaller, noise widths wide.
-// With `k_has_sample_counts` the count is per pixel instead, and the 1/sqrt is taken here at the centre pixel.
+// With `k_has_sample_counts` the count is per pixel instead, and the 1/sqrt is taken here at the center pixel.
 //
 // Guides are optional.
 // A missing one is bound to the colour texture as a stand-in with its flag clear, so every slot of the group is filled
