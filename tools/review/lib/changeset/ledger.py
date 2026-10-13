@@ -34,6 +34,8 @@ class Change:
     absorbed_by: str = ""
     has_body: bool = False
     claim: LineSpace = field(default_factory=LineSpace.empty)
+    # The hunks a `sync` retired that this one is the edited form of, which is what its interdiff is taken against.
+    supersedes: list[str] = field(default_factory=list)
 
     @property
     def is_bulk(self) -> bool:
@@ -58,6 +60,7 @@ class Change:
             "absorbed_by": self.absorbed_by,
             "has_body": self.has_body,
             "claim": self.claim.to_records(),
+            "supersedes": self.supersedes,
         }
 
     @staticmethod
@@ -75,6 +78,7 @@ class Change:
             absorbed_by=str(raw.get("absorbed_by", "")),
             has_body=bool(raw.get("has_body", False)),
             claim=LineSpace.from_records(raw.get("claim") or {}),
+            supersedes=[str(i) for i in raw.get("supersedes") or []],
         )
 
 

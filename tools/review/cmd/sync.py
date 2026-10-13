@@ -7,9 +7,12 @@ answers that matter — what is new, what is gone, and which entries were talkin
 A change whose content is gone from the range is **superseded**, never deleted.
 An entry that discussed it stays readable, and in a `land-changes` review the fact that its change is superseded
 is the evidence the fix actually landed.
+A hunk edited in place is gone in that sense too.
+The hunk replacing it records its id, which the page takes the interdiff against and the warning about an entry names.
 
 A change that survives keeps its id and gets a new claim, since the id is content-derived and the claim is
 positional — see `register` in lib/changeset/ingest.py.
+A superseded change whose content comes back, as an edit reverted, is made live again, since no ingest re-creates it.
 
 The base is only re-pinned when asked for.
 Silently following a moving integration branch would change the review's obligation underneath ids already handed out.
@@ -76,37 +79,51 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         context=moved.context, gap=moved.coalesce_gap, net=net,
     )
     gone = review.superseded_by_move(ledger, candidates, net)
+    returned = review.returned_by_move(ledger, candidates)
     entries = ctx.entries(paths)
-    stale = [
-        (entry.id, entry.title, sorted(set(entry.referenced_changes()) & {c.id for c in gone}))
-        for entry in entries
-    ]
-    stale = [(entry_id, title, ids) for entry_id, title, ids in stale if ids]
 
     known = ledger.by_digest()
     fresh = [c for c in candidates if c.digest not in known]
+    returned_digests = {c.digest for c in returned}
+    returning = {c.digest: c for c in candidates if c.digest in returned_digests}
+    review.link_successors(
+        [*fresh, *returning.values()], gone,
+        head_map=_line_map(ctx, cfg.head, new_head), base_map=_line_map(ctx, cfg.base, new_base),
+    )
+    successors: dict[str, list[review.Candidate]] = {}
+    for candidate in candidates:
+        for old_id in candidate.supersedes:
+            successors.setdefault(old_id, []).append(candidate)
 
-    print(f"{len(gone)} changes superseded, {len(fresh)} new changes to ingest")
-    for entry_id, title, ids in stale:
-        print(review.console.yellow(f"  entry {entry_id} {title} — references {', '.join(ids)}, now superseded"))
+    edited = f" ({len(successors)} edited in place)" if successors else ""
+    print(f"{len(gone)} changes superseded{edited}, {len(fresh)} new changes to ingest")
+    if returned:
+        print(f"{len(returned)} superseded change(s) back at the new head, live again")
 
     if args.dry_run:
+        _warn_stale(entries, gone, successors, known)
         print("(dry run: nothing written)")
         return
 
     for change in gone:
         change.superseded = True
         ledger.append(change)
+    for change in returned:
+        change.superseded = False
+        change.supersedes = returning[change.digest].supersedes or change.supersedes
+        ledger.append(change)
 
     def write_body(change_id: str, text: str) -> None:
         review.write_atomic(paths.change_diff(change_id), text.rstrip("\n") + "\n")
 
     result = review.register(ledger, candidates, round_number=moved.next_round, write_body=write_body)
+    _warn_stale(entries, gone, successors, ledger.by_digest())
 
     cfg.base, cfg.head = new_base, new_head
     review.save(paths.config, cfg)
     review.record(paths.log, "sync", head=new_head, base=new_base,
-                  superseded=len(gone), created=len(result.created), repointed=len(result.repointed))
+                  superseded=len(gone), edited=len(successors), revived=len(returned),
+                  created=len(result.created), repointed=len(result.repointed))
 
     uncovered = net.subtract(ledger.covered())
     print(f"{len(result.created)} changes created")
@@ -119,3 +136,33 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     else:
         print(review.console.yellow(f"{len(uncovered)} atoms unaccounted — `review ingest {args.name} --rest`"))
     print(f"refresh the generated entries with `{ctx.invocation} generate {args.name}`")
+
+
+def _line_map(ctx: Context, earlier: str, later: str) -> review.TreeMap:
+    """How lines moved from one commit to another; the identity where nothing moved or the earlier one is gone."""
+    if earlier == later:
+        return review.TreeMap()
+    try:
+        return review.build_line_map(ctx.git, earlier, later)
+    except review.GitError:
+        # A force-push can leave the old head unreachable and collected, and then successors are found on raw numbers.
+        return review.TreeMap()
+
+
+def _warn_stale(entries: list[review.Entry], gone: list[review.Change],
+                successors: dict[str, list[review.Candidate]], ids: dict[str, str]) -> None:
+    """Name every entry that references a change this sync retires, and what replaced it.
+
+    `ids` maps a digest to its change id, so a dry run, which allocates none, names a new successor by its summary.
+    """
+    retired = {c.id for c in gone}
+    for entry in entries:
+        hits = sorted(set(entry.referenced_changes()) & retired)
+        if not hits:
+            continue
+        named = []
+        for change_id in hits:
+            after = ", ".join(ids.get(c.digest) or c.summary for c in successors.get(change_id, []))
+            named.append(f"{change_id} (replaced by {after})" if after else change_id)
+        warning = f"  entry {entry.id} {entry.title} — references {', '.join(named)}, now superseded"
+        print(review.console.yellow(warning))
