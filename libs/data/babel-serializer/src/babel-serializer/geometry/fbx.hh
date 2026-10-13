@@ -8,6 +8,7 @@
 #include <clean-core/streams/stream.hh> // cc::read_stream
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/async.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -31,6 +32,11 @@
 //
 // What the reader skipped is recorded in `data::issues` rather than dropped silently: cameras, animation, skinning, blend shapes and non-mesh geometry are all `unsupported` today.
 // ufbx's own warnings about tolerated damage (a clamped index, a duplicated connection) arrive as `malformed`.
+//
+// A READ CAN BE SPREAD OVER A CALLER'S SCHEDULER, AND IT CAN HAND BACK THE SCENE IN TWO STAGES.
+// `read_options::scheduler` runs ufbx's parse and babel's copy of each mesh on a `cc::async_scheduler`; null keeps the whole read on the calling thread.
+// `read_structure` reads everything but the geometry, which is most of a file, so it returns in a fraction of a full read's time.
+// `read_async` runs both side by side and resolves each stage as it finishes, so a caller can fetch textures before the meshes exist.
 //
 //   auto const doc = babel::fbx::read(stream, {.triangulate = true}).value();
 //   for (auto const& n : doc.nodes)
@@ -496,6 +502,22 @@ struct babel::fbx::read_options
     /// A plain stream cannot say how long it is, so it gets 1 GiB, which a scene that size exceeds: read a large file through the span overload, or pass a limit.
     /// Exceeding it is a read error, never a truncated scene.
     i64 memory_limit = 0;
+
+    /// Where the read's parallel work runs: ufbx's parse, and babel's copy of each mesh.
+    /// Null keeps the whole read on the calling thread, one step after another.
+    /// The calling thread takes part either way, and the result is the same field for field, issues in the same order.
+    /// A pool such as the installed `cc::compute_scheduler()` is what it is for; the scheduler must outlive the read.
+    cc::async_scheduler* scheduler = nullptr;
+};
+
+/// The two stages of `read_async`: the scene's structure first, then all of it.
+struct babel::fbx::loading
+{
+    /// `read_structure`'s result: every node, material, texture and light, and every mesh named and empty.
+    cc::shared_async<data> structure;
+
+    /// `read`'s result, whose indices match `structure`'s.
+    cc::shared_async<data> complete;
 };
 
 namespace babel::fbx
@@ -512,4 +534,18 @@ namespace babel::fbx
 /// Convenience: parse from an in-memory buffer (wraps a span_read_stream_adapter).
 [[nodiscard]] cc::result<data> read(cc::span<byte const> bytes, read_options opts = {});
 [[nodiscard]] cc::result<data> read(cc::string_view text, read_options opts = {});
+
+/// Parse an FBX file without its geometry: nodes and their transforms, materials, textures, lights and settings.
+/// Every mesh is there and named, at the index the full read gives it, and holds no faces and no attributes.
+/// `issues` holds what this pass noticed, which leaves out what only the geometry shows.
+/// Vertex data is most of a file, so this returns in a fraction of a full read's time — what a caller needs to start fetching textures.
+[[nodiscard]] cc::result<data> read_structure(cc::read_stream& in, read_options opts = {});
+[[nodiscard]] cc::result<data> read_structure(cc::span<byte const> bytes, read_options opts = {});
+
+/// Read an FBX file on a scheduler, handing back each stage as soon as it exists.
+/// Both stages are scheduled before this returns, on `opts.scheduler`, or on `cc::compute_scheduler()` when that is null, and they run side by side.
+/// Each is its own parse of `bytes`: `structure` is `read_structure`'s and resolves first, `complete` is `read`'s.
+/// The input is pinned because the read outlives this call, and dropping the stages does not stop it.
+/// A file a stage cannot read fails that stage with the error its synchronous call returns.
+[[nodiscard]] loading read_async(cc::pinned_data<byte const> bytes, read_options opts = {});
 } // namespace babel::fbx

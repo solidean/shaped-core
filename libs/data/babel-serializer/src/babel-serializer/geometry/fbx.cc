@@ -1,6 +1,7 @@
 #include <babel-serializer/geometry/fbx.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/streams/span_stream.hh>
@@ -158,6 +159,51 @@ size_t read_from_stream(void* user, void* dst, size_t size)
     }
     return size_t(n.value());
 }
+
+/// ufbx's thread-pool hook, on a `cc::async_scheduler`.
+/// ufbx hands over batches of task indices by group and later waits for a group, so each task becomes a node scheduled at once.
+/// A wait drives the group's nodes to completion with the calling thread taking part, which is also what makes a pool with no workers finish them.
+struct scheduler_pool
+{
+    cc::async_scheduler* scheduler = nullptr;
+    cc::fixed_array<cc::vector<cc::shared_async<cc::unit>>, UFBX_THREAD_GROUP_COUNT> running = {};
+};
+
+void run_on_scheduler(void* user, ufbx_thread_pool_context ctx, u32 group, u32 start_index, u32 count)
+{
+    auto& pool = *static_cast<scheduler_pool*>(user);
+    for (auto index = start_index; index < start_index + count; ++index)
+    {
+        auto task = cc::make_async_lazy(
+            [ctx, index]
+            {
+                ufbx_thread_pool_run_task(ctx, index);
+                return cc::unit{};
+            });
+        task->schedule_on(*pool.scheduler);
+        pool.running[isize(group)].push_back(cc::move(task));
+    }
+}
+
+void wait_on_scheduler(void* user, ufbx_thread_pool_context ctx, u32 group, u32 max_index)
+{
+    CC_UNUSED(ctx);
+    CC_UNUSED(max_index);
+    auto& pool = *static_cast<scheduler_pool*>(user);
+    for (auto const& task : pool.running[isize(group)])
+        pool.scheduler->participate_until_ready(*task);
+    pool.running[isize(group)].clear();
+}
+
+/// One mesh's copy, kept apart until every mesh is done, so issues land in file order whichever mesh finished first.
+struct mesh_result
+{
+    bf::mesh mesh;
+    cc::vector<bf::issue> issues;
+
+    /// set when the mesh cannot be represented, which fails the read
+    cc::string error;
+};
 
 /// Copies one ufbx scene into a babel::fbx::data.
 struct fbx_converter
@@ -382,13 +428,20 @@ struct fbx_converter
         return largest <= fbx_max_count;
     }
 
-    void convert_mesh(ufbx_mesh const& m)
+    /// Reads `scene` and `opts` and writes nothing else, so meshes can be copied in parallel.
+    [[nodiscard]] mesh_result convert_mesh(ufbx_mesh const& m) const
     {
-        auto mesh = bf::mesh{.name = to_string(m.name)};
+        auto result = mesh_result();
+        auto& mesh = result.mesh;
+        mesh.name = to_string(m.name);
+        auto const note = [&](bf::issue_kind kind, cc::string message)
+        { result.issues.push_back({.kind = kind, .message = cc::move(message)}); };
+
         if (!fits_indices(m))
         {
-            error = cc::format("fbx: mesh '{}' has more corners, faces or values than an i32 index reaches", mesh.name);
-            return;
+            result.error
+                = cc::format("fbx: mesh '{}' has more corners, faces or values than an i32 index reaches", mesh.name);
+            return result;
         }
 
         // The source corner of every output corner, and the faces over them.
@@ -488,14 +541,47 @@ struct fbx_converter
                 mesh.face_materials.push_back(i32(m.face_material.data[f]));
         }
 
-        out.meshes.push_back(cc::move(mesh));
+        return result;
     }
 
+    /// Every mesh, on `opts.scheduler` when there is one, and then in file order into `out`.
     void convert_meshes()
     {
-        out.meshes.reserve(isize(scene.meshes.count));
-        for (auto i = size_t(0); i < scene.meshes.count && error.empty(); ++i)
-            convert_mesh(*scene.meshes.data[i]);
+        auto const count = isize(scene.meshes.count);
+        auto results = cc::vector<mesh_result>::create_defaulted(count);
+        if (opts.scheduler == nullptr)
+        {
+            for (auto i = isize(0); i < count; ++i)
+                results[i] = convert_mesh(*scene.meshes.data[i]);
+        }
+        else
+        {
+            auto tasks = cc::vector<cc::shared_async<cc::unit>>();
+            tasks.reserve(count);
+            for (auto i = isize(0); i < count; ++i)
+            {
+                auto task = cc::make_async_lazy(
+                    [this, &results, i]
+                    {
+                        results[i] = convert_mesh(*scene.meshes.data[i]);
+                        return cc::unit{};
+                    });
+                task->schedule_on(*opts.scheduler);
+                tasks.push_back(cc::move(task));
+            }
+            for (auto const& task : tasks)
+                opts.scheduler->participate_until_ready(*task);
+        }
+
+        out.meshes.reserve(count);
+        for (auto& r : results)
+        {
+            for (auto& i : r.issues)
+                out.issues.push_back(cc::move(i));
+            if (error.empty() && !r.error.empty())
+                error = cc::move(r.error);
+            out.meshes.push_back(cc::move(r.mesh));
+        }
     }
 
     // lights
@@ -720,7 +806,8 @@ cc::string data::issue_report() const
 namespace
 {
 /// The one parse every overload reaches; `input_size` is -1 when the source cannot say how long it is.
-cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_size)
+/// Without `geometry`, ufbx skips every mesh's vertex data and the meshes come back named and empty.
+cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_size, bool geometry)
 {
     CC_RECORD_SCOPE("fbx.read");
 
@@ -736,6 +823,13 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
     load.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_PRESERVE;
     load.inherit_mode_handling = UFBX_INHERIT_MODE_HANDLING_PRESERVE;
     load.node_depth_limit = babel::impl::fbx_node_depth_limit;
+    load.ignore_geometry = !geometry;
+
+    auto pool = babel::impl::scheduler_pool{.scheduler = opts.scheduler};
+    if (opts.scheduler != nullptr)
+        load.thread_opts.pool = ufbx_thread_pool{.run_fn = &babel::impl::run_on_scheduler,
+                                                 .wait_fn = &babel::impl::wait_on_scheduler,
+                                                 .user = &pool};
 
     // ufbx allocates a binary array's stated count before it inflates the array, so the ceiling is what makes a crafted count a read error rather than an allocation of whatever it asked for.
     // The allocation count is bounded alongside, since ufbx counts both.
@@ -779,18 +873,51 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
 
 cc::result<data> read(cc::read_stream& in, read_options opts)
 {
-    return read_sized(in, opts, -1);
+    return read_sized(in, opts, -1, true);
 }
 
 cc::result<data> read(cc::span<byte const> bytes, read_options opts)
 {
     auto adapter = cc::span_read_stream_adapter(bytes);
     cc::read_stream stream = adapter;
-    return read_sized(stream, opts, bytes.size());
+    return read_sized(stream, opts, bytes.size(), true);
 }
 
 cc::result<data> read(cc::string_view text, read_options opts)
 {
     return read(text.as_bytes(), opts);
+}
+
+cc::result<data> read_structure(cc::read_stream& in, read_options opts)
+{
+    return read_sized(in, opts, -1, false);
+}
+
+cc::result<data> read_structure(cc::span<byte const> bytes, read_options opts)
+{
+    auto adapter = cc::span_read_stream_adapter(bytes);
+    cc::read_stream stream = adapter;
+    return read_sized(stream, opts, bytes.size(), false);
+}
+
+loading read_async(cc::pinned_data<byte const> bytes, read_options opts)
+{
+    auto& scheduler = opts.scheduler != nullptr ? *opts.scheduler : cc::compute_scheduler();
+    opts.scheduler = &scheduler;
+
+    auto const stage = [&](bool geometry)
+    {
+        auto node = cc::make_async_lazy<data>(
+            [bytes, opts, geometry](cc::async_context<data>& ctx) -> cc::async_step_status
+            {
+                auto read = geometry ? babel::fbx::read(bytes.span(), opts) : read_structure(bytes.span(), opts);
+                if (read.has_error())
+                    return ctx.resolve_to_error(cc::async_error::make_error(cc::move(read).error()));
+                return ctx.resolve_to_value(cc::move(read).value());
+            });
+        node->schedule_on(scheduler);
+        return node;
+    };
+    return {.structure = stage(false), .complete = stage(true)};
 }
 } // namespace babel::fbx

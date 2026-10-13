@@ -1,8 +1,14 @@
 #include "fbx_fixtures.hh"
 
 #include <babel-serializer/geometry/fbx.hh>
+#include <clean-core/common/time.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/async_thread_pool.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
 using namespace cc::primitive_defines;
@@ -36,6 +42,74 @@ namespace bf = babel::fbx;
 {
     auto const* const m = doc.find(i);
     return m != nullptr ? cc::string_view(m->name) : cc::string_view("<none>");
+}
+
+template <class T>
+[[nodiscard]] bool same_attribute(bf::corner_attribute<T> const& a, bf::corner_attribute<T> const& b)
+{
+    if (a.values.size() != b.values.size() || a.indices.size() != b.indices.size())
+        return false;
+    for (auto i = isize(0); i < a.values.size(); ++i)
+        if (a.values[i] != b.values[i])
+            return false;
+    for (auto i = isize(0); i < a.indices.size(); ++i)
+        if (a.indices[i] != b.indices[i])
+            return false;
+    return true;
+}
+
+/// The first place two reads of one file differ, or empty when they agree on everything a reader reads.
+/// Exact, floats included: both reads run the same arithmetic on the same input, whatever thread ran it.
+[[nodiscard]] cc::string first_difference(bf::data const& a, bf::data const& b)
+{
+    if (a.issue_report() != b.issue_report())
+        return cc::format("issues:\n{}\nagainst\n{}", a.issue_report(), b.issue_report());
+    if (a.nodes.size() != b.nodes.size() || a.meshes.size() != b.meshes.size() || a.materials.size() != b.materials.size()
+        || a.textures.size() != b.textures.size() || a.lights.size() != b.lights.size())
+        return "the element counts";
+    if (a.node_children.size() != b.node_children.size() || a.node_materials.size() != b.node_materials.size())
+        return "the flattened node runs";
+
+    for (auto i = isize(0); i < a.nodes.size(); ++i)
+    {
+        auto const& x = a.nodes[i];
+        auto const& y = b.nodes[i];
+        if (x.name != y.name || x.parent != y.parent || x.mesh != y.mesh || x.light != y.light
+            || x.first_child != y.first_child || x.child_count != y.child_count || x.first_material != y.first_material
+            || x.material_count != y.material_count || x.local.translation != y.local.translation
+            || x.node_to_world.transform(tg::pos3f(1, 2, 3)) != y.node_to_world.transform(tg::pos3f(1, 2, 3)))
+            return cc::format("node {} '{}'", i, x.name);
+    }
+    for (auto i = isize(0); i < a.meshes.size(); ++i)
+    {
+        auto const& x = a.meshes[i];
+        auto const& y = b.meshes[i];
+        auto same = x.name == y.name && x.faces.size() == y.faces.size()
+                 && x.face_materials.size() == y.face_materials.size() && x.uv_sets.size() == y.uv_sets.size()
+                 && same_attribute(x.positions, y.positions) && same_attribute(x.normals, y.normals);
+        for (auto f = isize(0); same && f < x.faces.size(); ++f)
+            same = x.faces[f].first_corner == y.faces[f].first_corner
+                && x.faces[f].corner_count == y.faces[f].corner_count && x.material_slot_of(f) == y.material_slot_of(f);
+        for (auto s = isize(0); same && s < x.uv_sets.size(); ++s)
+            same = x.uv_sets[s].name == y.uv_sets[s].name && same_attribute(x.uv_sets[s].uvs, y.uv_sets[s].uvs);
+        if (!same)
+            return cc::format("mesh {} '{}'", i, x.name);
+    }
+    for (auto i = isize(0); i < a.materials.size(); ++i)
+        if (a.materials[i].name != b.materials[i].name
+            || a.materials[i].properties.size() != b.materials[i].properties.size()
+            || a.materials[i].textures.size() != b.materials[i].textures.size())
+            return cc::format("material {} '{}'", i, a.materials[i].name);
+    for (auto i = isize(0); i < a.textures.size(); ++i)
+        if (a.textures[i].name != b.textures[i].name || a.textures[i].relative_filename != b.textures[i].relative_filename
+            || a.textures[i].content.size() != b.textures[i].content.size())
+            return cc::format("texture {} '{}'", i, a.textures[i].name);
+    return {};
+}
+
+[[nodiscard]] cc::pinned_data<byte const> pinned_copy(cc::span<byte const> bytes)
+{
+    return cc::make_pinned_data(cc::vector<byte>::create_copy_of(bytes));
 }
 } // namespace
 
@@ -392,6 +466,90 @@ TEST("fbx - textures embedding one blob share it rather than each holding a copy
     CHECK(doc.textures[0].content.data() == doc.textures[1].content.data());
 }
 
+// Spreading a read over a scheduler
+// -------------------------------------------------------------------------------------------------
+
+TEST("fbx - a read spread over a pool is the read on the calling thread, field for field")
+{
+    auto pool = cc::async_thread_pool(2);
+
+    // ASCII, and binary with compressed arrays, which is where ufbx's own tasks do their work.
+    auto const text = babel::test::fbx_scene();
+    auto const binary = babel::test::fbx_binary_scene();
+    for (auto const triangulate : {false, true})
+    {
+        auto const plain = REQUIRED_VALUE(bf::read(cc::string_view(text), {.triangulate = triangulate}));
+        auto const spread
+            = REQUIRED_VALUE(bf::read(cc::string_view(text), {.triangulate = triangulate, .scheduler = &pool}));
+        CHECK(first_difference(plain, spread).empty()).dump("difference", first_difference(plain, spread));
+
+        auto const plain_binary = REQUIRED_VALUE(bf::read(cc::span<byte const>(binary), {.triangulate = triangulate}));
+        auto const spread_binary
+            = REQUIRED_VALUE(bf::read(cc::span<byte const>(binary), {.triangulate = triangulate, .scheduler = &pool}));
+        CHECK(first_difference(plain_binary, spread_binary).empty())
+            .dump("difference", first_difference(plain_binary, spread_binary));
+    }
+}
+
+TEST("fbx - read_structure names every mesh and fills none, and reads everything else as read does")
+{
+    auto const text = babel::test::fbx_scene();
+    auto const full = REQUIRED_VALUE(bf::read(cc::string_view(text)));
+    auto const structure = REQUIRED_VALUE(bf::read_structure(cc::span<byte const>(cc::string_view(text).as_bytes())));
+
+    REQUIRE(structure.meshes.size() == full.meshes.size());
+    for (auto i = isize(0); i < full.meshes.size(); ++i)
+    {
+        CHECK(structure.meshes[i].name == full.meshes[i].name);
+        CHECK(structure.meshes[i].faces.empty());
+        CHECK(!structure.meshes[i].positions.exists());
+        CHECK(!full.meshes[i].faces.empty());
+    }
+
+    // The same indices for everything a caller fetches or places before the geometry arrives.
+    REQUIRE(structure.nodes.size() == full.nodes.size());
+    for (auto i = isize(0); i < full.nodes.size(); ++i)
+    {
+        CHECK(structure.nodes[i].name == full.nodes[i].name);
+        CHECK(structure.nodes[i].mesh == full.nodes[i].mesh);
+        CHECK(structure.nodes[i].local.translation == full.nodes[i].local.translation);
+        CHECK(structure.materials_of(structure.nodes[i]).size() == full.materials_of(full.nodes[i]).size());
+    }
+    REQUIRE(structure.materials.size() == full.materials.size());
+    REQUIRE(structure.textures.size() == full.textures.size());
+    CHECK(structure.textures[0].relative_filename == full.textures[0].relative_filename);
+    CHECK(structure.materials[0].find_texture("DiffuseColor") == full.materials[0].find_texture("DiffuseColor"));
+}
+
+ASYNC_TEST("fbx - read_async resolves the structure and the whole scene, each as its synchronous call would")
+{
+    auto const text = babel::test::fbx_scene();
+    auto const bytes = cc::string_view(text).as_bytes();
+
+    // No scheduler named, so both stages run on the installed compute scheduler.
+    auto const loading = bf::read_async(pinned_copy(bytes), {.triangulate = true});
+    auto const structure = co_await loading.structure;
+    auto const complete = co_await loading.complete;
+
+    auto const expected_structure = REQUIRED_VALUE(bf::read_structure(bytes, {.triangulate = true}));
+    auto const expected_complete = REQUIRED_VALUE(bf::read(bytes, {.triangulate = true}));
+    CHECK(first_difference(structure, expected_structure).empty())
+        .dump("difference", first_difference(structure, expected_structure));
+    CHECK(first_difference(complete, expected_complete).empty())
+        .dump("difference", first_difference(complete, expected_complete));
+}
+
+ASYNC_TEST("fbx - read_async on bytes that are not FBX fails both stages")
+{
+    auto const not_fbx = cc::string_view("this is not an FBX file at all, in either encoding");
+
+    auto const loading = bf::read_async(pinned_copy(not_fbx.as_bytes()));
+    co_await cc::async_settled(loading.structure);
+    co_await cc::async_settled(loading.complete);
+    CHECK(loading.structure->has_error());
+    CHECK(loading.complete->has_error());
+}
+
 // The real thing, when a developer has fetched it with extern/bistro/fetch-bistro.py.
 // Parsing the 114 MB exterior takes seconds rather than milliseconds, so only the thorough run does it.
 TEST("fbx - Bistro exterior reads when present")
@@ -404,13 +562,31 @@ TEST("fbx - Bistro exterior reads when present")
         SKIP("Bistro is not fetched; uv run extern/bistro/fetch-bistro.py installs it");
 
     auto stream = adapter.value().stream();
-    cc::read_stream plain = cc::move(stream);
-    // A plain stream gets 1 GiB, which the exterior's 630 MB scene plus ufbx's working half exceeds.
-    auto const doc = REQUIRED_VALUE(bf::read(plain, {.triangulate = true, .memory_limit = i64(4) << 30}));
+    auto const bytes = REQUIRED_VALUE(stream.read_all());
+
+    auto const start = cc::current_time_steady_secs();
+    auto const doc = REQUIRED_VALUE(bf::read(cc::span<byte const>(bytes), {.triangulate = true}));
+    auto const plain_secs = cc::current_time_steady_secs() - start;
 
     CHECK(doc.meshes.size() == 1296);
     CHECK(doc.materials.size() == 132);
     CHECK(doc.lights.size() == 1);
     CHECK(near(f32(doc.settings.unit_meters), 1.0f));
     CHECK(doc.settings.up == bf::axis::positive_y);
+
+    // The same read spread over a pool, which is what a scene this size is for; the timings are logged, not judged.
+    auto pool = cc::async_thread_pool();
+    auto const spread_start = cc::current_time_steady_secs();
+    auto const spread = REQUIRED_VALUE(bf::read(cc::span<byte const>(bytes), {.triangulate = true, .scheduler = &pool}));
+    auto const spread_secs = cc::current_time_steady_secs() - spread_start;
+    CHECK(first_difference(doc, spread).empty()).dump("difference", first_difference(doc, spread));
+
+    auto const structure_start = cc::current_time_steady_secs();
+    auto const structure = REQUIRED_VALUE(bf::read_structure(cc::span<byte const>(bytes), {.scheduler = &pool}));
+    auto const structure_secs = cc::current_time_steady_secs() - structure_start;
+    CHECK(structure.meshes.size() == doc.meshes.size());
+    CHECK(structure.textures.size() == doc.textures.size());
+
+    CC_LOG_INFO("fbx: Bistro exterior read in {} s, {} s over {} workers; its structure alone in {} s", plain_secs,
+                spread_secs, pool.worker_count(), structure_secs);
 }

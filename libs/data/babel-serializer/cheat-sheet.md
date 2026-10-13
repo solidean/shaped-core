@@ -190,7 +190,14 @@ Both encodings, every version from 6100 on; the parse is the vendored ufbx's, co
 #include <babel-serializer/geometry/fbx.hh>
 
 cc::result<babel::fbx::data> read(cc::read_stream& in, read_options = {});   // + span / string_view overloads
-struct read_options { bool triangulate = false; i64 memory_limit = 0; };  // ear clip; 0 = 32x input + 64 MiB, at most 4 GiB
+struct read_options { bool triangulate = false; i64 memory_limit = 0; cc::async_scheduler* scheduler = nullptr; };
+// triangulate: ear clip | memory_limit: 0 = 32x input + 64 MiB, at most 4 GiB | scheduler: ufbx's parse + the per-mesh copy spread over it
+cc::result<babel::fbx::data> read_structure(cc::read_stream& in, read_options = {});   // + span; no geometry: every mesh named and empty
+babel::fbx::loading read_async(cc::pinned_data<byte const> bytes, read_options = {});   // { structure, complete }: cc::shared_async<data> each, both scheduled at once
+
+auto const loading = babel::fbx::read_async(cc::make_pinned_data(cc::move(file_bytes)), {.scheduler = &cc::compute_scheduler()});
+fetch_textures((co_await loading.structure).textures);   // milliseconds in: nodes, materials, textures, lights
+draw(co_await loading.complete);                          // then everything, the same indices
 
 auto const doc = babel::fbx::read(stream, {.triangulate = true}).value();
 doc.info;       // file_info { version (7500 = FBX 2016), encoding (binary | ascii), creator, application, application_version }
@@ -224,6 +231,8 @@ Gotchas:
 - **Materials belong to the node, not the mesh.** Two instances of one mesh may draw with different materials, so a face's slot means nothing without the node placing it.
 - **Nothing is converted.** Positions are in the file's axes and unit; `settings` says which, and a Z-up centimeter scene stays one.
   Axes that are not a permutation of X, Y and Z, or a unit outside 1e-9 to 1e9 meters, fall back to FBX's default with a `malformed` issue.
+- **A read spread over a scheduler is the same read**, field for field and issue for issue: only where the work runs changes.
+  Bistro's 114 MB exterior reads about five times faster over a 15-worker pool, and its structure alone in a few tens of milliseconds.
 - **A memory ceiling bounds every read** (`memory_limit`): an array's stated count is allocated before its bytes are, so a crafted file is an error rather than gigabytes.
   A plain stream cannot say how long it is and gets 1 GiB; the span overloads scale it to the input, at most 4 GiB, split evenly between ufbx's working memory and the scene.
 - **A mesh past `i32` counts is an error**, since every index here is an `i32`.
