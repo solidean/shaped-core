@@ -31,6 +31,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--commit", metavar="SHA", default="",
                    help="only changes whose atoms this commit contributed; a change spanning several commits is listed under each")
     p.add_argument("--ids", action="store_true", help="bare ids on one line, for pasting into `discharges:`")
+    p.add_argument("--interdiff", action="store_true",
+                   help="under a change that replaced an edited hunk at `sync`, the diff between the two hunk bodies")
     return p
 
 
@@ -126,7 +128,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(json.dumps([{
             "id": change.id, "kind": change.kind, "path": change.path,
             "summary": change.summary, "reason": change.reason,
-            "atoms": len(change.claim), "discharged_by": holders,
+            "atoms": len(change.claim), "discharged_by": holders, "supersedes": change.supersedes,
         } for change, holders in rows], indent=2))
         return
 
@@ -139,6 +141,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         print(f"{mark} {change.id}  {change.kind:<11} {change.summary}")
         if holders:
             print(review.console.dim(f"    discharged by {holders}"))
+        if change.supersedes:
+            print(review.console.dim(f"    replaces {', '.join(change.supersedes)}"))
+        if args.interdiff:
+            for diff in review.interdiffs(change, paths):
+                print(f"    since {diff.replaced}:")
+                print("\n".join(f"      {line}" for line in diff.text.splitlines()))
 
     accounted = sum(1 for _, holders in rows if holders)
     print(f"\n{accounted}/{len(rows)} discharged")

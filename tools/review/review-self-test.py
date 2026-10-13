@@ -43,7 +43,7 @@ from tools.review.lib.serve.app import _forge_commit_url as forge_url, favicon_s
 from tools.review.lib.changeset import commits as commit_ingest  # noqa: E402
 from tools.review.lib.changeset.ids import allocate, allocate_many, digest_of  # noqa: E402
 from tools.review.lib.changeset.ingest import (  # noqa: E402
-    bulk_candidate, candidates_for, group_hunks, register, superseded_by_move,
+    bulk_candidate, candidates_for, group_hunks, interdiff, link_successors, register, superseded_by_move,
 )
 from tools.review.lib.changeset.ingest import _adopt_residue as adopt_residue, _claim_of as ingest_claim_of  # noqa: E402
 from tools.review.lib.changeset.ledger import Change, Ledger  # noqa: E402
@@ -65,6 +65,7 @@ from tools.review.lib.render.media import (  # noqa: E402
 from tools.review.lib.git.diffparse import parse as parse_diff  # noqa: E402
 from tools.review.lib.git.run import Git  # noqa: E402
 from tools.review.lib.space.intervals import IntervalList  # noqa: E402
+from tools.review.lib.space.linemap import TreeMap, build as build_line_map  # noqa: E402
 from tools.review.lib.space.netspace import ADDED, REMOVED, build as build_net, space_of  # noqa: E402
 
 VERBOSE = "-v" in sys.argv
@@ -472,6 +473,184 @@ def test_a_bulk_absorbs_the_unread_hunks_under_it(root: Path) -> None:
         assert reloaded.get(unread.id).absorbed_by == bulk.id
         assert not reloaded.get(unread.id).superseded, "absorbed is not superseded: the content is still in the range"
         assert net.subtract(reloaded.covered()).is_empty
+
+
+def test_a_hunk_edited_in_place_is_superseded_by_its_successor(root: Path) -> None:
+    """A one-line edit inside a reviewed hunk leaves the hunk's lines in net space and its content gone.
+
+    `sync` used to supersede only a change whose claim had left net space.
+    A 70-line spec hunk edited by one line therefore stayed live beside its successor, claiming the same atoms twice.
+    """
+    git = git_init(root)
+    base = commit(root, "base", {"spec.md": numbered(200)})
+    block = numbered(70, mark="spec")
+    head_one = commit(root, "spec", {"spec.md": numbered(200).replace("line 100\n", "line 100\n" + block)})
+    bodies: dict[str, str] = {}
+
+    def write_body(change_id: str, text: str) -> None:
+        bodies[change_id] = text
+
+    net_one = build_net(git, base, head_one)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        path = Path(ledger_dir) / "ledger.jsonl"
+        ledger = Ledger(path)
+        first = candidates_for(git, base, head_one, context=8, gap=20, net=net_one)
+        created = register(ledger, first, round_number=1, write_body=write_body).created
+        assert len(created) == 1, [c.summary for c in created]
+        old = created[0]
+
+        edited = block.replace("spec 35\n", "spec 35 edited\n")
+        head_two = commit(root, "one line", {"spec.md": numbered(200).replace("line 100\n", "line 100\n" + edited)})
+        net_two = build_net(git, base, head_two)
+        second = candidates_for(git, base, head_two, context=8, gap=20, net=net_two)
+        assert not old.claim.intersect(net_two).is_empty, "the scenario needs the old claim to stay in net space"
+
+        gone = superseded_by_move(ledger, second, net_two)
+        assert [c.id for c in gone] == [old.id], [c.summary for c in gone]
+        link_successors(second, gone, head_map=build_line_map(git, head_one, head_two), base_map=TreeMap())
+        for change in gone:
+            change.superseded = True
+            ledger.append(change)
+        new = register(ledger, second, round_number=2, write_body=write_body).created
+        assert [c.supersedes for c in new] == [[old.id]], [(c.summary, c.supersedes) for c in new]
+
+        reloaded = Ledger.load(path)
+        assert reloaded.get(new[0].id).supersedes == [old.id], "the link must survive a reload"
+        live = reloaded.live()
+        assert [c.id for c in live] == [new[0].id], [c.summary for c in live]
+        assert net_two.subtract(reloaded.covered()).is_empty
+        assert sum(len(c.claim) for c in live) == len(net_two), "every atom must be claimed exactly once"
+
+        text = interdiff(bodies[old.id], bodies[new[0].id])
+        changed = [line for line in text.splitlines() if line.startswith(("+", "-"))]
+        assert changed == ["-+spec 35", "++spec 35 edited"], text
+
+
+def test_a_bulk_claim_and_a_commit_hunk_survive_a_sync(root: Path) -> None:
+    """No candidate carries the digest of a bulk claim or a commit-local hunk, since neither is cut from the net diff.
+
+    Retired on the digest alone, as an edited net hunk is, both would be superseded on every sync.
+    """
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(20), "b.txt": numbered(20)})
+    a_edited = numbered(20).replace("line 5\n", "line 5 edited\n")
+    work = commit(root, "work", {"a.txt": a_edited, "b.txt": numbered(20).replace("line 7\n", "line 7 edited\n")})
+
+    net_one = build_net(git, base, work)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        ledger = Ledger(Path(ledger_dir) / "ledger.jsonl")
+        bulk = bulk_candidate(net_one, selector="a.txt", reason="mechanical", matches=lambda p: p == "a.txt")
+        per_commit = commit_ingest.candidates_for_commit(
+            git, work, base=base, head=work, context=8, gap=20, net=net_one,
+        )
+        on_b = [c for c in per_commit if c.path == "b.txt"]
+        kept = register(ledger, [bulk, *on_b], round_number=1, write_body=lambda *_: None).created
+        assert sorted(c.kind for c in kept) == ["bulk", "commit-hunk"], [c.kind for c in kept]
+
+        head = commit(root, "more", {"a.txt": a_edited.replace("line 15\n", "line 15 edited\n")})
+        net_two = build_net(git, base, head)
+        gone = superseded_by_move(ledger, candidates_for(git, base, head, context=8, gap=20, net=net_two), net_two)
+        assert not gone, [c.summary for c in gone]
+
+
+def _cli(repo: Path, *argv: str) -> str:
+    """One `review.py` run in `repo`, which must succeed; what it printed."""
+    done = subprocess.run([sys.executable, str(REPO_ROOT / "review.py"), *argv], cwd=repo,
+                          capture_output=True, text=True, encoding="utf-8")
+    assert done.returncode == 0, f"{argv}: {done.stderr or done.stdout}"
+    return done.stdout
+
+
+def _review_ledger(repo: Path) -> Ledger:
+    return Ledger.load(repo / ".tmp" / "reviews" / "r" / "changes" / "ledger.jsonl")
+
+
+def _added_file_review(root: Path) -> Path:
+    """A land-changes review of a range adding one file, with an entry discharging that file's one change."""
+    repo = root / "repo"
+    repo.mkdir()
+    git_init(repo)
+    # Ignored, since every later `commit` stages the whole tree and the review folder would become part of the range.
+    commit(repo, "base", {".gitignore": ".tmp/\n"})
+    commit(repo, "add", {"impl/cache.cc": numbered(60, mark="cache")})
+    _cli(repo, "init", "r", "--goal", "land-changes", "--range", "HEAD~1..HEAD")
+    _cli(repo, "ingest", "r")
+    old = _review_ledger(repo).live()[0].id
+    (repo / ".tmp" / "reviews" / "r" / "entries" / "050-x.md").write_text(
+        f"---\nid: 050\ntitle: cache\n---\n\n## ask  ok\ndischarges: {old}\n\nFine?\n\n- radio: yes\n",
+        encoding="utf-8")
+    return repo
+
+
+def test_sync_supersedes_an_added_file_edited_in_a_few_lines(root: Path) -> None:
+    """A file the branch adds is one hunk, and an edit to it leaves every line of that hunk in net space.
+
+    The old hunk stayed live through every such sync, so one added file ended up with three live changes.
+    The page drew three bodies for it, two of them text the tree no longer held.
+    """
+    from tools.review.lib.core.paths import ReviewPaths
+    from tools.review.lib.render.entryview import change_cards
+    from tools.review.lib.serve.app import ReviewApp
+    from tools.review.lib.serve.watch import Watcher
+
+    repo = _added_file_review(root)
+    old = _review_ledger(repo).live()[0].id
+    edited = numbered(60, mark="cache")
+    for n in (10, 30, 50):
+        edited = edited.replace(f"cache {n}\n", f"cache {n} edited\n")
+    commit(repo, "edit", {"impl/cache.cc": edited})
+
+    preview = _cli(repo, "sync", "r", "--dry-run")
+    assert f"references {old} (replaced by impl/cache.cc:1-60" in preview, "a dry run names a successor by place"
+
+    out = _cli(repo, "sync", "r")
+    assert "1 changes superseded (1 edited in place), 1 new changes to ingest" in out, out
+    ledger = _review_ledger(repo)
+    live = ledger.live()
+    assert [c.supersedes for c in live] == [[old]], [(c.summary, c.supersedes) for c in live]
+    new = live[0].id
+    assert ledger.get(old).superseded
+    assert f"references {old} (replaced by {new}), now superseded" in out, out
+
+    coverage = json.loads(_cli(repo, "coverage", "r", "--json"))
+    assert coverage["uncovered"] == 0 and coverage["changes"] == 1, coverage
+    assert len(live[0].claim) == coverage["atoms"]
+
+    listing = _cli(repo, "changes", "r", "--interdiff")
+    assert f"replaces {old}" in listing and f"since {old}:" in listing, listing
+    for n in (10, 30, 50):
+        assert f"-+cache {n}\n" in listing and f"++cache {n} edited\n" in listing, listing
+
+    paths = ReviewPaths(repo / ".tmp" / "reviews" / "r")
+    fetched = ReviewApp(repo, paths, Watcher(paths)).change_diff(new)
+    assert fetched[0] == 200 and f"since <code>{old}</code>" in fetched[1]["html"], fetched
+    inline = change_cards([new], ledger=ledger, paths=paths, visible=True)
+    assert inline.index('class="interdiff"') < inline.index('data-off="0"'), "the interdiff is drawn above the diff"
+    folded = inline.split('class="interdiff"')[1].split("</details>")[0]
+    assert "dl-add" in folded and "data-off" not in folded, "an interdiff line is no line of the change to comment on"
+
+
+def test_sync_brings_back_a_hunk_whose_edit_was_reverted(root: Path) -> None:
+    """A superseded change is never re-pointed and its digest never re-created, so content coming back must revive it.
+
+    Superseding a hunk edited in place made that ordinary work: edit a reviewed hunk, sync, revert the edit, sync.
+    Left superseded, the original hunk's lines had no live change, and no ingest could give them one.
+    """
+    repo = _added_file_review(root)
+    original = numbered(60, mark="cache")
+    old = _review_ledger(repo).live()[0].id
+    commit(repo, "edit", {"impl/cache.cc": original.replace("cache 10\n", "cache 10 edited\n")})
+    _cli(repo, "sync", "r")
+    edit = _review_ledger(repo).live()[0].id
+
+    commit(repo, "revert", {"impl/cache.cc": original})
+    out = _cli(repo, "sync", "r")
+    assert "1 superseded change(s) back at the new head, live again" in out, out
+    ledger = _review_ledger(repo)
+    assert [c.id for c in ledger.live()] == [old], [c.summary for c in ledger.live()]
+    assert ledger.get(edit).superseded
+    assert ledger.get(old).supersedes == [edit], "the revived hunk replaced the edit, so its interdiff is the revert"
+    assert json.loads(_cli(repo, "coverage", "r", "--json"))["uncovered"] == 0
 
 
 # ---- commit-local mapping ---------------------------------------------------

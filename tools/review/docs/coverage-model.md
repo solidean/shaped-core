@@ -105,12 +105,25 @@ It is reported, never enforced: a review is allowed to be unfinished, and rounds
 ## Superseding
 
 `sync` recomputes net space against the moved head.
-A change whose claim no longer meets net space, and whose content no hunk at the new head carries, is marked **superseded**.
+A net hunk whose content no hunk at the new head carries is marked **superseded**.
 It is never deleted, so an entry that discussed it stays readable.
-**Both conditions, never the claim alone.**
-A hunk that only moved — a comment removed above it — has its claim miss the new net space too.
-Superseding it would be permanent, because a superseded change is never re-pointed and a known digest is never re-created, so its lines would stay unaccounted however often `ingest` ran.
 In a `land-changes` review that mark is the evidence: the fix landed, so the hunk it was about is gone.
+
+**The content decides, never the claim alone.**
+A hunk that only moved — a comment removed above it — has its claim miss the new net space.
+Superseding it would be permanent, because a superseded change is never re-pointed and a known digest is never re-created, so its lines would stay unaccounted however often `ingest` ran.
+A hunk edited in place is the opposite case: its claim still meets net space, and its content is gone.
+Kept live, it would claim its atoms a second time beside the hunk that replaced it, with a body the tree no longer holds.
+
+A bulk claim or a commit-local hunk is superseded only once its claim has left net space as well.
+Neither is cut from the net diff, so no hunk at the new head ever carries its content, and the content rule alone would retire every one of them on every `sync`.
+
+**A hunk that replaces an edited one records it**, as `supersedes` on its ledger row.
+It replaces a superseded hunk when it meets what survived of that hunk's claim, carried from the old head to the new one the way a commit-local hunk is carried.
+Its card on the page carries the interdiff, folded above its diff, and `changes --interdiff` prints it.
+`sync` names the replacement in its warning about an entry that references the superseded hunk.
+
+A superseded change whose content comes back, as an edit reverted, is made live again, for the same permanence reason.
 
 ## Absorbing into a bulk claim
 
