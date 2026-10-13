@@ -454,6 +454,7 @@ sg::is_depth_format(f)          // bool  — depth or depth-stencil
 sg::is_depth_stencil_format(f)  // bool  — depth AND stencil planes
 sg::has_stencil(f)              // bool  — carries a stencil plane
 sg::is_srgb_format(f)           // bool  — hardware applies the sRGB transfer function on read/write
+sg::is_integer_format(f)        // bool  — _uint / _sint: loaded as integers, never filtered, never block-compressed
 sg::is_compressed_format(f)     // bool  — BC block-compressed (4x4 blocks)
 sg::supports_typed_uav(f)       // bool  — can carry a typed UAV, i.e. texture_usage::image; false for sRGB, BC and depth
                                 //         an sRGB format is still RENDERABLE, so a raster pass is how you write one (sr::raster_box_filter_mipmap_routine)

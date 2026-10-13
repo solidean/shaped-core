@@ -10,7 +10,8 @@ namespace sr
 {
 namespace
 {
-/// The `_unorm` member of `format`'s family, which is what an instance of the routine is keyed by.
+/// The unsigned linear member of `format`'s family, which is what an instance of the routine is keyed by.
+/// A signed BC4 or BC5 shares its unsigned sibling's encoder: only the endpoints' encoding differs, which a constant says.
 sg::pixel_format family_of(sg::pixel_format format)
 {
     switch (format)
@@ -19,11 +20,21 @@ sg::pixel_format family_of(sg::pixel_format format)
         return sg::pixel_format::bc1_rgba_unorm;
     case sg::pixel_format::bc3_unorm_srgb:
         return sg::pixel_format::bc3_unorm;
+    case sg::pixel_format::bc4_r_snorm:
+        return sg::pixel_format::bc4_r_unorm;
+    case sg::pixel_format::bc5_rg_snorm:
+        return sg::pixel_format::bc5_rg_unorm;
     case sg::pixel_format::bc7_rgba_unorm_srgb:
         return sg::pixel_format::bc7_rgba_unorm;
     default:
         return format;
     }
+}
+
+/// Whether `format` is a signed BC4 or BC5, whose endpoints the encoder writes as signed bytes.
+bool is_snorm_target(sg::pixel_format format)
+{
+    return format == sg::pixel_format::bc4_r_snorm || format == sg::pixel_format::bc5_rg_snorm;
 }
 
 /// Whether a family's blocks are 16 bytes, which is the binding its entry point writes through.
@@ -69,11 +80,14 @@ sg::pixel_format bc_compress_routine::target_for(sg::pixel_format source, sg::pi
 bool bc_compress_routine::can_compress(sg::context const& ctx, sg::pixel_format source, sg::pixel_format target)
 {
     return ctx.supports(sg::feature::texture_compression_bc) && is_supported_target(target)
-        && !sg::is_compressed_format(source) && sg::is_srgb_format(source) == sg::is_srgb_format(target);
+        && !sg::is_compressed_format(source) && !sg::is_integer_format(source) && !sg::is_depth_format(source)
+        && sg::is_srgb_format(source) == sg::is_srgb_format(target);
 }
 
 cc::shared_async<cc::unit> bc_compress_routine::init(sg::routine_init_scope scope)
 {
+    CC_ASSERT(is_supported_target(params()) && family_of(params()) == params(),
+              "a bc_compress_routine instance is keyed by a family's unsigned linear member, as execute acquires it");
     auto& ctx = scope.context();
     auto const& shaders = sgl_shaders::compression_bc;
 
@@ -132,6 +146,8 @@ sg::routine_outcome bc_compress_routine::execute(sg::command_list& cmd,
     CC_ASSERT(can_compress(cmd.context(), source.format(), target.format()), "a target this routine cannot write from "
                                                                              "this source");
     CC_ASSERT(level >= 0 && level < source.mip_levels() && level < target.mip_levels(), "the level must exist on both");
+    CC_ASSERT(source.width() == target.width() && source.height() == target.height(), "source and target must have the "
+                                                                                      "same extent");
 
     auto const family = family_of(target.format());
     auto const self = try_acquire(cmd, family);
@@ -151,6 +167,7 @@ sg::routine_outcome bc_compress_routine::execute(sg::command_list& cmd,
     auto const block_bytes = isize(sg::format_block_size(target.format()));
     auto const row_blocks = pitch / block_bytes;
     auto const source_view = source.as_texture_view({.mips = {.start = level, .count = 1}});
+    auto const range = family == sg::pixel_format::bc4_r_unorm ? opts.bc4_range : opts.bc5_range;
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
 
     auto blocks = sg::raw_buffer_handle();
@@ -173,14 +190,17 @@ sg::routine_outcome bc_compress_routine::execute(sg::command_list& cmd,
 
     cmd.compute.bind_pipeline(**built);
     cmd.compute.bind_group(0, *group);
-    cmd.compute.set_inline_constants(sgl_shaders::bc_constants{.blocks_wide = blocks_wide,
-                                                               .blocks_high = blocks_high,
-                                                               .row_blocks = int(row_blocks),
-                                                               .width = width,
-                                                               .height = height,
-                                                               .srgb = sg::is_srgb_format(source.format()) ? 1 : 0,
-                                                               .bc1_cut_out = opts.bc1_alpha == bc1_alpha::cut_out ? 1 : 0}
-                                         .to_block());
+    cmd.compute.set_inline_constants(
+        sgl_shaders::bc_constants{.blocks_wide = blocks_wide,
+                                  .blocks_high = blocks_high,
+                                  .row_blocks = int(row_blocks),
+                                  .width = width,
+                                  .height = height,
+                                  .srgb = sg::is_srgb_format(source.format()) ? 1 : 0,
+                                  .bc1_cut_out = opts.bc1_alpha == bc1_alpha::cut_out ? 1 : 0,
+                                  .channel_range = range == bc_source_range::minus_one_to_one ? 1 : 0,
+                                  .snorm = is_snorm_target(target.format()) ? 1 : 0}
+            .to_block());
     cmd.compute.dispatch_threads(blocks_wide, blocks_high);
 
     cmd.copy.buffer_to_texture({.src = blocks,
