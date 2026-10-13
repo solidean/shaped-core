@@ -74,6 +74,9 @@ struct slib::preprocessed_source
     /// The module files the source reached through `use`, by virtual path: what it depends on beside itself.
     /// Only SGL fills it.
     cc::vector<cc::string> used_modules;
+    /// What the compiler warned of while writing the text, one diagnostic each, its notes on the lines under it.
+    /// Only SGL fills it, and its edge logs them each time it hands the result back, from its cache too.
+    cc::vector<cc::string> warnings;
 };
 
 /// A value one compile gives an option of an SGL source, by the option's name, spelled as SGL spells it: `16`, `true`, `.rgba16_float`.

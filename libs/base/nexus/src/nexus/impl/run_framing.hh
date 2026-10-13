@@ -11,6 +11,9 @@ struct run_framing
     /// The `nexus: run seed N` line a run starts with.
     bool prints_seed = false;
 
+    /// The `host` line before the tests and the `load` line after them, which a benchmark's numbers are a statement about.
+    bool describes_host = false;
+
     /// The CPU and RAM line after the result.
     bool reports_resources = false;
 
@@ -20,6 +23,6 @@ struct run_framing
 };
 
 /// Keyed on what `schedule` holds rather than on the bucket `config` swept.
-/// An example named exactly is reached from the normal sweep, without --examples, and is framed as an example all the same.
+/// An example or a benchmark named exactly is reached from the normal sweep, without its bucket flag, and is framed as that bucket's sweep frames it all the same.
 [[nodiscard]] run_framing frame_run(test_schedule_config const& config, test_schedule const& schedule, bool is_entry_run);
 } // namespace nx::impl

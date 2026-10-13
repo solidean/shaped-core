@@ -198,3 +198,29 @@ ASYNC_INVOCABLE_TEST("sg - inline constants set between two draws reach each its
     CHECK(pixels[0].rgba_float(2, 0) == tg::vec4f(2, 0, 7, 1));
     CHECK(pixels[0].rgba_float(5, 0) == tg::vec4f(5, 0, 9, 1));
 }
+
+ASYNC_INVOCABLE_TEST("sg - an inline constants block that ends short of its alignment reaches the shader whole",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // Otherwise the block is the size WGSL rounds it to, and this test is the one above.
+    static_assert(sizeof(shaders::tinted_tag) % 16 != 0);
+
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws.tinted_points);
+    auto const grid = point_grid(*ctx);
+
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx, grid_target(),
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            grid.bind(scope);
+            scope.set_inline_constants(shaders::tinted_tag{.tint = tg::vec4f(0, 0, 0, 4), .tag = 7.0f});
+            scope.draw({.vertex_range = {.offset = 2, .size = 1}});
+        });
+
+    CHECK(pixels[0].rgba_float(2, 0) == tg::vec4f(2, 0, 7, 4));
+}

@@ -594,17 +594,9 @@ int nx::run(int argc, char** argv)
 
     // A benchmark number is a statement about a machine, so the machine goes first — and it is meant to be copied
     // along with the result rather than read once.
-    // Keyed on what was SCHEDULED rather than on which bucket was swept: naming a benchmark exactly pulls it in
-    // across the bucket rule, and that run wants the machine described just as much as a sweep does.
-    auto has_benchmarks = false;
-    for (auto const& instance : schedule.instances)
-        if (instance.declaration != nullptr
-            && instance.declaration->test_config.bucket == nx::config::test_bucket::benchmark)
-            has_benchmarks = true;
-
     auto benchmark_load_before = nx::bench::load_sample{};
     auto benchmark_pinned = false;
-    if (has_benchmarks)
+    if (framing.describes_host)
     {
         auto const& sys = nx::bench::describe_system();
         cc::println("host  {} {}  |  {}  |  {} logical cores  |  build {}  CC_ASSERT={}{}", sys.os, sys.arch, sys.cpu,
@@ -648,7 +640,7 @@ int nx::run(int argc, char** argv)
     auto reporting = run_reporting{.registry = &registry,
                                    .is_entry_run = is_entry_run,
                                    .reports_resources = framing.reports_resources,
-                                   .has_benchmarks = has_benchmarks,
+                                   .has_benchmarks = framing.describes_host,
                                    .benchmark_load_before = benchmark_load_before,
                                    .benchmark_pinned = benchmark_pinned,
                                    .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>()};

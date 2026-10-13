@@ -231,6 +231,11 @@ context: src/stages/08_ring_ir/
 - **A block can narrow it again** with its own `context:`, which replaces the entry's for that block — the one block about the tests, say.
 - **The folder is itself a reference**, resolved the same three ways, so `08_ring_ir/` is enough where it is unique.
   One that names no folder, or several, is a validation error rather than a context silently doing nothing.
+- **The entry's folder may be one a fix has since deleted**, since a land-changes fix can remove the very folder an entry is about, and every later round inherits the front matter.
+  It is accepted when it resolved at the head of a finalized round the entry has a block in, and it then names what it named at the newest such head.
+  The rounds read at that head still resolve their short paths under it, and the current tree has nothing under it, so a new round's are looked for repository-wide.
+  Where that leaves a new block's short path ambiguous, the block settles it with its own `context:`.
+  A folder no such head had is still an error, a typo included, and so is a block's `context:` in the round being written.
 - The default is the repository root, which is what an entry without the key gets.
 - A literal is resolved once per entry, by the first block that names it, because the page matches literals entry-wide.
 

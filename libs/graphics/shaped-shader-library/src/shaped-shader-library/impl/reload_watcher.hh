@@ -80,6 +80,7 @@ protected:
 
 private:
     /// Reads every watched path's revision, stages a recompile on each asset a changed file feeds, then re-arms the watches.
+    /// An asset whose first compile missed a reload is staged too, which is how that reload is driven on this thread.
     /// Newly discovered paths are seeded, never treated as changed.
     void scan();
 

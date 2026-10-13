@@ -89,8 +89,13 @@ public:
     /// Stages a recompile of every format and option set compiled so far.
     /// Called by the reload watcher; the next acquire() picks the results up.
     /// A pair nobody ever acquired is skipped — recompiling it would burn the compiler on a shader that is never used.
-    /// One whose first compile is still running is skipped too, and that compile's acquire stages the recompile once it installs.
+    /// One whose first compile is still running is skipped too, and that compile's acquire sets missed_reload() once it installs.
+    /// Clears missed_reload(), since every installed pair is restaged.
     void stage_reload();
+
+    /// Whether a first compile installed a shader read before a reload that skipped it, so the asset still owes that reload.
+    /// The watcher's next scan calls stage_reload() for such an asset, on its own thread.
+    [[nodiscard]] bool missed_reload() const;
 
 private:
     /// One target format's state under one set of option values.
@@ -112,6 +117,8 @@ private:
         u64 generation = 0;
         /// Bumped by every stage_reload as it picks what to recompile, so a first compile can tell that one passed it by.
         u64 staged_reloads = 0;
+        /// Set by a first compile that one passed by, cleared by the stage_reload that makes up for it.
+        bool reload_missed = false;
         cc::optional<cc::string> last_error;
     };
 

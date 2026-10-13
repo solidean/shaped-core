@@ -73,6 +73,10 @@ struct slug_fixture
                                                                            isize first,
                                                                            isize count)
     {
+        // a helper is an unhomed async: it moves to where the device lives before its first bound call
+        if (auto* const home = ctx->device_home())
+            co_await cc::async_resume_on(*home);
+
         sr::slug_routine::prewarm(*ctx, {.color = target_format, .depth = sg::pixel_format::undefined});
         (void)co_await ctx->routines.idle_completion();
         nx::allow_warnings("was closed and reopened around a barrier", "sg");
@@ -102,6 +106,10 @@ struct slug_fixture
                                                                          cc::vector<sr::slug_quad> quads,
                                                                          cc::vector<f32> probe_depth = {})
     {
+        // a helper is an unhomed async: it moves to where the device lives before its first bound call
+        if (auto* const home = ctx->device_home())
+            co_await cc::async_resume_on(*home);
+
         sr::slug_routine::prewarm(*ctx, {.color = target_format, .depth = sg::pixel_format::undefined});
         (void)co_await ctx->routines.idle_completion();
         nx::allow_warnings("was closed and reopened around a barrier", "sg");
@@ -140,6 +148,10 @@ struct slug_fixture
     /// Draws every instance once, cleared to black, and reads the target back.
     [[nodiscard]] cc::shared_async<cc::pinned_data<byte const>> draw(cc::optional<f32> depth_clear = {})
     {
+        // a helper is an unhomed async: it moves to where the device lives before its first bound call
+        if (auto* const home = ctx->device_home())
+            co_await cc::async_resume_on(*home);
+
         auto const depth_format = depth_clear.has_value() ? sg::pixel_format::depth32_float : sg::pixel_format::undefined;
         sr::slug_routine::prewarm(*ctx, {.color = target_format, .depth = depth_format});
         (void)co_await ctx->routines.idle_completion();

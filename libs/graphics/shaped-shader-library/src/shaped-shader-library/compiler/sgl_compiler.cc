@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/container/byte_stream_builder.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <shaped-graphics-language/check/resources.hh>
@@ -12,6 +13,20 @@
 #include <shaped-shader-library/impl/sgl_library.hh>
 
 using namespace cc::primitive_defines;
+
+namespace slib::impl
+{
+namespace
+{
+/// Each of `source`'s warnings as a record of slib's domain, naming the shader it was written for.
+void log_warnings(shader_source_description const& desc, preprocessed_source const& source)
+{
+    auto const name = desc.label.empty() ? cc::string_view("<sgl>") : cc::string_view(desc.label);
+    for (auto const& w : source.warnings)
+        CC_LOG_WARNING("SGL warns of '{}' {}: {}", name, desc.entry_point, w);
+}
+} // namespace
+} // namespace slib::impl
 
 namespace
 {
@@ -182,8 +197,12 @@ public:
                                                                    slib::include_resolver resolve) const override
     {
         (void)resolve; // SGL has no include directive
-        return slib::impl::cached_sgl_preprocess(
+        auto result = slib::impl::cached_sgl_preprocess(
             key_of(desc), [&] { return preprocess_now(desc); }, slib::impl::sgl_emit_store(_persistent_cache));
+        // Every time, a cached result's too, so a warning is not seen once and then never again.
+        if (result.has_value())
+            slib::impl::log_warnings(desc, result.value());
+        return result;
     }
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
@@ -296,7 +315,8 @@ private:
                                           .entry_point = emitted.entry_point};
         auto result = slib::preprocessed_source{.source = emitted.text,
                                                 .entry_point = emitted.entry_point,
-                                                .used_modules = emitted.library_files};
+                                                .used_modules = emitted.library_files,
+                                                .warnings = emitted.warnings};
         for (auto const& b : emitted.bindings)
         {
             auto binding = binding_of(b, shader.format, shader.stage);

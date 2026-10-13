@@ -351,13 +351,15 @@ struct stage_read
     evaluator evaluate;
     /// A field of the hit record or of the context every metal function of a pipeline is handed (EMIT-139).
     cc::string_view msl = {};
+    /// The launch's size, which every invocation of the launch shares; every other read differs between them (CHK-283).
+    bool is_shared = false;
 };
 
 constexpr stage_read k_stage_reads[] = {
     {"@stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_index() -> int3",
      "int3(DispatchRaysIndex())", nothing, "int3(sgl_ctx.launch_id)"},
     {"@stages(.raygen, .miss, .closest_hit, .any_hit, .intersection, .callable) fun launch_dimensions() -> int3",
-     "int3(DispatchRaysDimensions())", nothing, "int3(sgl_ctx.launch_size)"},
+     "int3(DispatchRaysDimensions())", nothing, "int3(sgl_ctx.launch_size)", true},
     {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_origin() -> pos3", "WorldRayOrigin()",
      nothing, "sgl_hit.origin"},
     {"@stages(.miss, .closest_hit, .any_hit, .intersection) fun world_ray_direction() -> vec3", "WorldRayDirection()",
@@ -654,11 +656,15 @@ void sgl::builtins::register_raytracing(registry& r)
 
     auto const add = [&](cc::string signature, evaluator evaluate, query_op op, cc::string_view doc)
     {
+        // what a query finds depends on the ray it traced, and on what the shader committed and in which control flow
+        auto const advances = op == query_op::trace || op == query_op::proceed || op == query_op::commit_triangle
+                           || op == query_op::abort || op == query_op::commit_procedural;
         r.add(function_record{
             .signature = cc::format("@internal {}", signature),
             .doc = cc::string(doc),
             .evaluate = evaluate,
             .write = query_spelling(op),
+            .writes_through = advances ? written_argument::first : written_argument::none,
             .features = check::feature_set(check::feature::ray_query),
             .declares_only = op == query_op::begin,
         });
@@ -705,6 +711,7 @@ void sgl::builtins::register_raytracing(registry& r)
             .evaluate = k_stage_reads[i].evaluate,
             .write
             = {.kind = spelling_kind::custom, .custom = write_stage_read, .data = i, .hlsl_names = k_stage_reads_hlsl},
+            .differs_between_invocations = !k_stage_reads[i].is_shared,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
 
@@ -724,6 +731,7 @@ void sgl::builtins::register_raytracing(registry& r)
                       .writes_lines = is_not_wgsl,
                       .hlsl_names = k_trace_ray_hlsl,
                       .msl_names = k_trace_ray_msl},
+            .writes_through = written_argument::element,
             .takes_element = true,
             .features = check::feature_set(check::feature::raytracing_pipeline),
         });
@@ -738,6 +746,7 @@ void sgl::builtins::register_raytracing(registry& r)
                "signature.",
         .evaluate = nothing,
         .write = {.kind = spelling_kind::custom, .custom = write_call_callable, .hlsl_names = k_call_callable_hlsl},
+        .writes_through = written_argument::element,
         .takes_element = true,
         .features = check::feature_set(check::feature::raytracing_pipeline),
     });

@@ -386,3 +386,198 @@ TEST("sgl check - an if that is a value runs its branch in the flow its conditio
     // select evaluates all three of its arguments, so nothing in them is under its condition (CHK-365)
     CHECK(reports_for(pixel("    c.x = select(p.uv.x > 0.5, ddx(p.uv.x), 0.0)\n")) == "");
 }
+
+namespace
+{
+/// `stage` behind a ray set, and a binding with a binding array of bytes, which every ray-tracing stage here indexes.
+cc::string ray_stage(cc::string_view stage)
+{
+    return cc::format("require raytracing_pipeline\n"
+                      "require binding_arrays\n\n"
+                      "struct radiance:\n"
+                      "    color: float3\n\n"
+                      "struct operand:\n"
+                      "    x: float\n\n"
+                      "struct sphere:\n"
+                      "    radius: float\n\n"
+                      "rays path_rays:\n"
+                      "    surface: radiance\n\n"
+                      "binding tables:\n"
+                      "    world: acceleration_structure[.triangles]\n"
+                      "    buffers: bytes[8]\n"
+                      "    output: mut buffer[float]\n\n"
+                      "{}",
+                      stage);
+}
+
+/// The diagnostic a ray-tracing stage's unmarked `index` gets, with the note on what made it differ.
+cc::string unmarked(cc::string_view index, cc::string_view note)
+{
+    return cc::format("non-uniform-index user:[{0}] an index into a binding array that may differ between invocations: "
+                      "mark it `nonuniform ({0})`, or make it the same in all of them\n"
+                      "  note {1}\n",
+                      index, note);
+}
+} // namespace
+
+TEST("sgl check - what a ray-tracing stage is handed differs between its invocations, but the launch's size")
+{
+    // CHK-283: the lanes of one wave hit different instances and primitives, so an index made of a hit must be marked
+    auto const hit = [](cc::string_view index)
+    {
+        return reports_for(ray_stage(cc::format("@closest_hit fun shade(h: triangle_hit, p: mut radiance){{tables}}:\n"
+                                                "    p.color.x = tables.buffers[{}].load(0u) as float\n",
+                                                index)));
+    };
+    CHECK(hit("nonuniform (h.instance_id % 8)") == "");
+    CHECK(hit("h.instance_id % 8")
+          == unmarked("h.instance_id % 8", "user:[h] this value comes from what the stage is handed"));
+    CHECK(hit("h.primitive_index % 8").contains("non-uniform-index"));
+
+    auto const candidate = [](cc::string_view index)
+    {
+        return reports_for(
+            ray_stage(cc::format("@any_hit fun cut(c: triangle_candidate, p: mut radiance){{tables}} -> hit_decision:\n"
+                                 "    if tables.buffers[{}].load(0u) == 0u => return hit_decision.ignore\n"
+                                 "    return hit_decision.accept\n",
+                                 index)));
+    };
+    CHECK(candidate("nonuniform (c.primitive_index % 8)") == "");
+    CHECK(candidate("c.primitive_index % 8").contains("non-uniform-index"));
+
+    auto const box = [](cc::string_view index)
+    {
+        return reports_for(ray_stage(cc::format("@intersection fun boxed(b: procedural_box){{tables}} -> "
+                                                "report[sphere]:\n"
+                                                "    let t = tables.buffers[{}].load(0u) as float\n"
+                                                "    return report(t = t, attributes = sphere(1.0))\n",
+                                                index)));
+    };
+    CHECK(box("nonuniform (b.instance_id % 8)") == "");
+    CHECK(box("b.instance_id % 8").contains("non-uniform-index"));
+
+    // each invocation of a miss traced a ray of its own
+    auto const missed = [](cc::string_view index)
+    {
+        return reports_for(ray_stage(cc::format("@miss fun sky(p: mut radiance, r: ray){{tables}}:\n"
+                                                "    p.color.x = tables.buffers[{}].load(0u) as float\n",
+                                                index)));
+    };
+    CHECK(missed("nonuniform ((r.direction.x as int) % 8)") == "");
+    CHECK(missed("(r.direction.x as int) % 8")
+          == unmarked("(r.direction.x as int) % 8", "user:[r] this value comes from what the stage is handed"));
+
+    // a raygen's launch index is its own, and the launch's size every invocation's
+    auto const launched = [](cc::string_view index)
+    {
+        return reports_for(ray_stage(cc::format("@raygen fun primary(@launch_id id: int3, @launch_size size: "
+                                                "int3){{tables}}:\n"
+                                                "    tables.output[id.x] = tables.buffers[{}].load(0u) as float\n",
+                                                index)));
+    };
+    CHECK(launched("nonuniform (id.x % 8)") == "");
+    CHECK(launched("id.x % 8") == unmarked("id.x % 8", "user:[id] this value comes from what the stage is handed"));
+    CHECK(launched("size.x % 8") == "");
+    CHECK(launched("nonuniform (size.x % 8)").contains("needless-nonuniform"));
+}
+
+TEST("sgl check - what a trace or a callable writes back differs between invocations, whatever ray was traced")
+{
+    // the shaders the trace runs read what their own invocation is handed, its launch index among it
+    auto const traced = [](cc::string_view index)
+    {
+        return reports_for(ray_stage(cc::format("@raygen fun primary(@launch_id id: int3){{tables}}:\n"
+                                                "    let mut p = radiance(float3(0.0, 0.0, 0.0))\n"
+                                                "    trace(tables.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = "
+                                                "vec3(0.0, 0.0, 1.0)), "
+                                                "path_rays.surface, mut p)\n"
+                                                "    tables.output[id.x] = tables.buffers[{}].load(0u) as float\n",
+                                                index)));
+    };
+    CHECK(traced("nonuniform ((p.color.x as int) % 8)") == "");
+    CHECK(traced("(p.color.x as int) % 8")
+          == unmarked("(p.color.x as int) % 8",
+                      "user:[trace(tables.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), "
+                      "path_rays.surface, mut p)] this value is what the shaders the call ran wrote back"));
+
+    auto const called = [](cc::string_view index)
+    {
+        return reports_for(ray_stage(cc::format("@callable fun doubled(v: mut operand):\n"
+                                                "    v.x = v.x * 2.0\n\n"
+                                                "callables ops = (doubled)\n\n"
+                                                "@raygen fun primary(@launch_id id: int3){{tables}}:\n"
+                                                "    let mut v = operand(1.0)\n"
+                                                "    ops[0](mut v)\n"
+                                                "    tables.output[id.x] = tables.buffers[{}].load(0u) as float\n",
+                                                index)));
+    };
+    CHECK(called("nonuniform ((v.x as int) % 8)") == "");
+    CHECK(called("(v.x as int) % 8").contains("this value is what the shaders the call ran wrote back"));
+}
+
+TEST("sgl check - a ray query's hit differs where its ray does, or where the invocations decided its candidates apart")
+{
+    auto const queried = [](cc::string_view traced, cc::string_view index)
+    {
+        return reports_for(cc::format("require ray_query\n"
+                                      "require binding_arrays\n\n"
+                                      "binding scene:\n"
+                                      "    world: acceleration_structure[.triangles]\n"
+                                      "    results: mut buffer[uint]\n"
+                                      "    tables: bytes[8]\n"
+                                      "    origin_x: float\n\n"
+                                      "@compute(8, 8) fun cs(@thread_id id: int3){{scene}}:\n"
+                                      "    let h = {}\n"
+                                      "    scene.results[id.x] = scene.tables[{}].load(0u)\n",
+                                      traced, index));
+    };
+    auto const divergent
+        = "scene.world.trace(ray(origin = pos3(id.x as float, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)))";
+    auto const uniform
+        = "scene.world.trace(ray(origin = pos3(scene.origin_x, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0))";
+
+    // CHK-283: every invocation traced a ray of its own
+    CHECK(queried(divergent, "nonuniform (h.instance_id % 8)") == "");
+    CHECK(queried(divergent, "h.instance_id % 8")
+          == unmarked("h.instance_id % 8", "user:[id] this value comes from the stage input id"));
+
+    auto const deciding = [&](cc::string_view accepts)
+    { return cc::format("{}, c => if {} => hit_decision.accept else hit_decision.ignore)", uniform, accepts); };
+
+    // one ray, decided alike everywhere, hits the same instance in every invocation
+    CHECK(queried(cc::format("{})", uniform), "h.instance_id % 8") == "");
+    CHECK(queried(cc::format("{})", uniform), "nonuniform (h.instance_id % 8)").contains("needless-nonuniform"));
+    CHECK(queried(deciding("scene.origin_x > 0.0"), "h.instance_id % 8") == "");
+
+    // but where the invocations decide its candidates apart, what the query committed differs between them
+    CHECK(queried(deciding("id.x > 3"), "nonuniform (h.instance_id % 8)") == "");
+    CHECK(queried(deciding("id.x > 3"), "h.instance_id % 8").contains("non-uniform-index"));
+}
+
+TEST("sgl check - every parameter of a stage differs between its invocations, a tessellation's factors among them")
+{
+    // CHK-283: the invocations of one wave evaluate the domains of several patches
+    auto const evaluated = [](cc::string_view index)
+    {
+        return reports_for(cc::format("require tessellation_shader\n"
+                                      "require binding_arrays\n\n"
+                                      "struct control_point:\n"
+                                      "    position: float2\n\n"
+                                      "struct staged:\n"
+                                      "    @position position: hpos4\n\n"
+                                      "struct tri_factors:\n"
+                                      "    @edge_factors edges: float[3]\n"
+                                      "    @inside_factors inside: float\n\n"
+                                      "binding tables:\n"
+                                      "    buffers: bytes[8]\n\n"
+                                      "@tessellation_evaluation\n"
+                                      "fun domain_te(patch: control_point[3], f: tri_factors, @domain_location uvw: "
+                                      "float3){{tables}} -> staged:\n"
+                                      "    let k = tables.buffers[{}].load(0u) as float\n"
+                                      "    return {{ position = hpos4(k, 0.0, 0.5, 1.0) }}\n",
+                                      index));
+    };
+    CHECK(evaluated("nonuniform ((f.inside as int) % 8)") == "");
+    CHECK(evaluated("(f.inside as int) % 8")
+          == unmarked("(f.inside as int) % 8", "user:[f] this value comes from the stage's parameter f"));
+}
