@@ -23,13 +23,13 @@ struct divergence
 {
     bool is = false;
     /// The node that made it so: a branch, a loop's exit, or the read of a value that differs.
-    origin where;
+    origin where = {};
     /// Of a value, what it is said of: "comes from the stage input id".
     /// Of the control flow, a sentence of its own: "this branch tests a value that comes from the stage input id".
-    cc::string why;
+    cc::string why = {};
     /// Of the control flow, the value its branch tested, which a note names of a local set under a branch of the prelude.
-    origin tested_where;
-    cc::string tested_why;
+    origin tested_where = {};
+    cc::string tested_why = {};
 
     [[nodiscard]] static divergence none() { return {}; }
 };
