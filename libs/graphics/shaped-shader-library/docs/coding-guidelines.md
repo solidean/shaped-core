@@ -66,7 +66,8 @@ A consumer never waits on the compiler, a shader that no longer compiles leaves 
 Any shortcut that has the watcher assign `current` directly gives up all three.
 The corollary is that the watcher must also *drive* the compile it stages: a `cc::async` node is cold until someone runs it, and nobody else ever will.
 
-A reload skips a format whose first compile is still running, since it has no shader yet, so that compile's `acquire()` stages the recompile in its place.
-It writes `pending` too, and it *starts* the compile rather than driving it, because its thread is a consumer's.
+A reload skips a format whose first compile is still running, since it has no shader yet, so that compile's `acquire()` flags the asset once it installs.
+It never compiles a second time itself: its thread is a consumer's, which may neither run other work nor leave a compile cold.
+The watcher's next scan stages every flagged asset again, driving the compile as it drives any other.
 
 Where each half lives in code: `impl::reload_watcher` only ever stages, `shader_asset::acquire` promotes, and `shader_asset::last_error` is what a broken edit leaves behind.

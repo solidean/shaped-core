@@ -84,7 +84,8 @@ void finish_creation(webgpu_context& ctx)
                                .extended_image_formats
                                = has(WGPUFeatureName_TextureFormatsTier1) && has(WGPUFeatureName_BGRA8UnormStorage),
                                .shader_f16 = has(WGPUFeatureName_ShaderF16),
-                               .subgroups = has(WGPUFeatureName_Subgroups)});
+                               .subgroups = has(WGPUFeatureName_Subgroups),
+                               .texture_compression_bc = has(WGPUFeatureName_TextureCompressionBC)});
 }
 
 struct request_state

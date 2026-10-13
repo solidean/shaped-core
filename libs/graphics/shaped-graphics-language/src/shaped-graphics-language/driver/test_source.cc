@@ -8,7 +8,12 @@ sgl::tested_source sgl::test_source(cc::string_view source,
                                     cc::span<library_file const> library)
 {
     auto const front = driver::impl::run_front_end(source, source_name, library);
-    auto result = tested_source{.errors = front.errors, .warnings = front.warnings};
+    auto result = tested_source{.errors = front.errors};
+    for (auto const& w : front.warnings)
+    {
+        result.warnings += w;
+        result.warnings += "\n";
+    }
 
     for (auto const& t : front.module.tests)
         if (t.file == front.program_file())

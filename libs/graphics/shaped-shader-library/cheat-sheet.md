@@ -204,6 +204,9 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_o
                                    //   each compile hands it what the text needs, so ANY inner compiler will do:
                                    //   -enable-16bit-types for DXC (float16_t), metal3.2 for a metallib (coherent(device))
                                    //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
+                                   //   an SGL warning is a CC_LOG_WARNING under `slib`, logged each time preprocess returns, cached or not:
+                                   //   `SGL warns of 'pkg/cube.sgl' main: pkg/cube.sgl:7:14: warning: unroll-too-long: ...`
+                                   //   so a test compiling a shader that warns declares it: nx::expect_warning("unroll-too-long", ...)
                                    //   every target's text carries its final addresses, so the binding pass never runs behind it
                                    //   preprocess is cached under everything it reads: in memory, and in a persistent store
 slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; }

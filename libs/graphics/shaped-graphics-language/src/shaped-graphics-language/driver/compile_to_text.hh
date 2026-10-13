@@ -102,6 +102,10 @@ struct sgl::emitted_source
     cc::vector<emit::emitted_layout> layouts;
     /// The names of the library files the source reached through `use`, which an edit of any of them changes the text of.
     cc::vector<cc::string> library_files;
+    /// One entry per warning, `cube.sgl:12:5: warning: no-effect: ...` and its notes on the lines under it.
+    /// Each is written as an error is, but with no line end after its last line.
+    /// They are the source's and its library files', so every entry point of the source carries the same ones.
+    cc::vector<cc::string> warnings;
 };
 
 /// One entry point on one target, as `compile_all_to_text` wrote it or said why it could not.
@@ -119,7 +123,7 @@ namespace sgl
 /// Total: every failure is the error of the result, as text that is meant to be read.
 /// A diagnostic is one line, `cube.sgl:12:5: error: unknown-name: foo`, and an error of any phase means there is no text.
 /// An entry point the source does not hold, and one whose stage is not `request.stage`, are errors that name what the source does hold.
-/// Warnings alone do not fail, and are dropped: a caller that wants them runs the phases itself.
+/// Warnings alone do not fail, and come back as the text's `warnings`; a failure's error holds the errors alone.
 ///
 /// Deterministic, and it reads nothing but its arguments, so the text may be cached under the source and the request.
 /// A cache that outlives the process keys on `compiler_fingerprint()` too.

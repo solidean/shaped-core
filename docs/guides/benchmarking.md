@@ -258,6 +258,9 @@ What a consumer needs to know beyond the field names:
 
 `BENCHMARK` is a `TEST` in the `benchmark` bucket, so it never runs in a normal sweep.
 Naming one exactly still runs it, as with any other bucket.
+That run is framed as a `--benchmarks` sweep is: the run seed, the host line, the CPU and RAM line after the result, and no hang watchdog.
+A benchmark starts and finishes nothing while it measures, so a watchdog would read a long one as a hang.
+A test named beside it makes the run a test run, which the watchdog does watch.
 
 Three things are baked in: the bucket, `exclusive_global` (two tests sharing a machine share its caches and its
 memory bandwidth, so a timing taken while another runs is a timing of the pair), and `main_thread`.

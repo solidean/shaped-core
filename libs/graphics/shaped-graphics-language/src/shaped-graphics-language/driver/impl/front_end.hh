@@ -34,8 +34,8 @@ struct front_end
     /// Every error of every phase, one formatted diagnostic per line and its notes under it; empty when there is none.
     /// A diagnostic a test's `@expect` names is in neither this nor `warnings`.
     cc::string errors;
-    /// The warnings, formatted the same way; a driver that returns what it was asked for leaves them out.
-    cc::string warnings;
+    /// The warnings, one entry each, formatted the same way but without the line end after its last line.
+    cc::vector<cc::string> warnings;
 
     /// The source's file; behind the prelude it is the last one, and a file of the prelude stands in its own place.
     [[nodiscard]] i32 program_file() const { return program; }

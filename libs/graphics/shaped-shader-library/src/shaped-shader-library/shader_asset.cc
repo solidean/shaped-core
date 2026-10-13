@@ -124,10 +124,10 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
     auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
 
     // Whoever installs first wins, and a compile that lost the race is dropped.
-    // A reload staged while the winner compiled skipped this entry, which held no shader yet, so the winner stages what it would have.
-    // A reload staged after the install sees the entry itself.
+    // A reload staged while the winner compiled skipped this entry, which held no shader yet, so the winner flags the asset as having missed it.
+    // The watcher's next scan stages that reload again, compiling on the watcher's thread rather than this consumer's.
+    // A reload staged after the install sees the entry itself, and clears the flag.
     auto installed = false;
-    auto overtaken = false;
     shader = _state.lock(
         [&](state& s) -> sg::async_compiled_shader
         {
@@ -137,31 +137,14 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
                 entry.current = cc::move(outcome.shader);
                 entry.dependencies = cc::move(outcome.dependencies);
                 installed = true;
-                overtaken = s.staged_reloads != seen_reloads;
-                seen_reloads = s.staged_reloads;
+                if (s.staged_reloads != seen_reloads)
+                    s.reload_missed = true;
             }
             return entry.current;
         });
 
-    if (overtaken)
-    {
-        // The file is read again, after the reload saw it change, and the result is staged for a later acquire to promote.
-        // Started rather than driven: this is a consumer's thread, which must not run other work where its caller may hold a lock.
-        auto again = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
-        cc::async_start(again.shader);
-        _state.lock(
-            [&](state& s)
-            {
-                // A reload staged since the install saw the entry, and stages a compile no older than this one.
-                if (s.staged_reloads != seen_reloads)
-                    return;
-                auto& entry = entry_of(s);
-                entry.pending = cc::move(again.shader);
-                entry.dependencies = cc::move(again.dependencies);
-            });
-    }
-
     // A first compile is what resolves the includes, so the dependency set only becomes real here, on a consumer's thread.
+    // The same wake is what brings the watcher round to a reload the install owes.
     // Off the lock: what this wakes turns straight around and reads us back.
     if (installed)
         library->note_dependencies_changed();
@@ -205,6 +188,11 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::context const& ctx, cc
 u64 slib::shader_asset::generation() const
 {
     return _state.lock([](state const& s) { return s.generation; });
+}
+
+bool slib::shader_asset::missed_reload() const
+{
+    return _state.lock([](state const& s) { return s.reload_missed; });
 }
 
 cc::optional<cc::string> slib::shader_asset::read_source() const
@@ -266,6 +254,8 @@ void slib::shader_asset::stage_reload()
         {
             // A first compile in flight is skipped below, and this is how its acquire learns it was.
             ++s.staged_reloads;
+            // Every installed entry is restaged below, so a reload a first compile missed is covered by this one.
+            s.reload_missed = false;
             for (auto const& entry : s.formats)
                 if (entry.current != nullptr)
                     pairs.push_back({.format = entry.format, .options = entry.options});
