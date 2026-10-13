@@ -62,6 +62,7 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed; also names changes only a meta or orientation entry claims |
 | `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or gitignore-style globs, where `*` stays in one folder and `**` crosses them; `!` subtracts), `--ids` |
 | `changes --commit SHA` | only the changes whose atoms that commit contributed, for an entry per commit; a change spanning several commits is listed under each, and the other filters still apply |
+| `changes --interdiff` | under each change that replaced an edited hunk at `sync`, the diff between the two hunk bodies |
 | `list` | the reviews in this repository, and where each one stands |
 | `validate <name> [ENTRY...]` | every entry parses, every change id resolves, and no `## changes` heading or `discharges:` line is empty; run it before serving a round. Entries narrow it to a slug, a number or a range like `200..299`, and only those are parsed, so parallel writers each check their own block |
 | `generate <name>` | write or refresh the overview and coverage entries |
@@ -112,6 +113,9 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   That is what makes "bulk the merge of `main`" safe on a follow-up review, where the resolutions are the only part of the merge that is the branch's work.
 - **A plain `ingest` never re-creates what a bulk claim covers.**
   It skips a new hunk lying wholly inside one, so re-running it after a head move keeps the decision the bulk recorded.
+- **`sync` supersedes a hunk edited in place, and its replacement says so.**
+  The replacement records the superseded id, its card folds the interdiff above its diff, and `changes --interdiff` prints it.
+  A bulk claim is superseded only once nothing it claims is left in the range.
 - **A command's hint names the tool the way it was invoked.**
   `next: uv run C:/work/shaped-core/review.py --dir <dir> ingest <name>` is what `init` prints when run from another repository, so a hint pastes as it stands wherever the tool was run from.
 - **A review is scratch, so nothing outside it may cite an entry.**
