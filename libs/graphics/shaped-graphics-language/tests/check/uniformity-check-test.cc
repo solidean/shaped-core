@@ -515,6 +515,28 @@ TEST("sgl check - what a trace or a callable writes back differs between invocat
     CHECK(called("(v.x as int) % 8").contains("this value is what the shaders the call ran wrote back"));
 }
 
+TEST("sgl check - a payload that is a member of a local leaves that local differing between invocations")
+{
+    auto const traced = [](cc::string_view index)
+    {
+        return reports_for(ray_stage(cc::format("struct carried:\n"
+                                                "    p: radiance\n"
+                                                "    weight: float\n\n"
+                                                "@raygen fun primary(@launch_id id: int3){{tables}}:\n"
+                                                "    let mut s = carried(radiance(float3(0.0, 0.0, 0.0)), 1.0)\n"
+                                                "    trace(tables.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = "
+                                                "vec3(0.0, 0.0, 1.0)), "
+                                                "path_rays.surface, mut s.p)\n"
+                                                "    tables.output[id.x] = tables.buffers[{}].load(0u) as float\n",
+                                                index)));
+    };
+    CHECK(traced("nonuniform ((s.p.color.x as int) % 8)") == "");
+    CHECK(traced("(s.p.color.x as int) % 8")
+          == unmarked("(s.p.color.x as int) % 8",
+                      "user:[trace(tables.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), "
+                      "path_rays.surface, mut s.p)] this value is what the shaders the call ran wrote back"));
+}
+
 TEST("sgl check - a ray query's hit differs where its ray does, or where the invocations decided its candidates apart")
 {
     auto const queried = [](cc::string_view traced, cc::string_view index)
@@ -552,6 +574,44 @@ TEST("sgl check - a ray query's hit differs where its ray does, or where the inv
     // but where the invocations decide its candidates apart, what the query committed differs between them
     CHECK(queried(deciding("id.x > 3"), "nonuniform (h.instance_id % 8)") == "");
     CHECK(queried(deciding("id.x > 3"), "h.instance_id % 8").contains("non-uniform-index"));
+}
+
+TEST("sgl check - a note on a local set under a branch of the prelude names the value that branch tested")
+{
+    auto const queried = [](cc::string_view body)
+    {
+        return reports_for(cc::format("require ray_query\n"
+                                      "require binding_arrays\n\n"
+                                      "binding scene:\n"
+                                      "    world: acceleration_structure[.triangles]\n"
+                                      "    results: mut buffer[uint]\n"
+                                      "    tables: bytes[8]\n"
+                                      "    origin_x: float\n\n"
+                                      "@compute(8, 8) fun cs(@thread_id id: int3){{scene}}:\n"
+                                      "{}",
+                                      body));
+    };
+    auto const traced = "scene.world.trace(ray(origin = pos3(scene.origin_x, 0.0, -1.0), direction = vec3(0.0, 0.0, "
+                        "1.0)), c => if id.x > 3 => hit_decision.accept else hit_decision.ignore)";
+    auto const decided
+        = "user:[if id.x > 3 => hit_decision.accept else hit_decision.ignore] this value is set where the control flow "
+          "differs";
+
+    // the query commits under the prelude's branch on the decision, which no line of the program shows
+    CHECK(queried(cc::format("    let h = {}\n"
+                             "    scene.results[id.x] = scene.tables[h.instance_id % 8].load(0u)\n",
+                             traced))
+          == unmarked("h.instance_id % 8", decided));
+
+    // a break on a uniform condition, in the flow the query leaves behind, takes the decision out of the loop
+    CHECK(queried(cc::format("    let mut k = 0\n"
+                             "    for i in 0 ..< 4:\n"
+                             "        let h = {}\n"
+                             "        if scene.origin_x > 0.0 => break\n"
+                             "    k = 1\n"
+                             "    scene.results[id.x] = scene.tables[k % 8].load(0u)\n",
+                             traced))
+          == unmarked("k % 8", decided));
 }
 
 TEST("sgl check - every parameter of a stage differs between its invocations, a tessellation's factors among them")

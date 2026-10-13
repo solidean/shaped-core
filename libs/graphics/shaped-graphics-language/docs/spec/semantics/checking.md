@@ -922,7 +922,8 @@ Its rules start from WGSL's, but refusing all that Tint refuses is no goal; wher
   from a non-uniform value, or from a local set anywhere in non-uniform control flow.
   What a stage is handed is each of its parameters but `@workgroup_id` and `@launch_size`, which are the same in every invocation.
   Among them are the stage struct, every other stage input, a tessellation stage's factors, and a ray-tracing stage's payload, ray, hit, candidate and box (CHK-326).
-  A trace's payload and a callable's parameter are non-uniform once the call returns, since the shaders it ran read what their own invocations are handed.
+  A local a trace writes as its payload, or a callable as its parameter, is non-uniform throughout, as one set in non-uniform control flow is.
+  The shaders the call ran read what their own invocations are handed.
   A ray query, raytracing.sgl's `trace` in any stage, finds what its ray and the decisions on its candidates make of it.
   So one ray that every invocation traces and decides alike hits the same instance in each of them, and any other hit is non-uniform.
   A `mut` buffer or image is so whether it is named directly or as an element of a binding array.
