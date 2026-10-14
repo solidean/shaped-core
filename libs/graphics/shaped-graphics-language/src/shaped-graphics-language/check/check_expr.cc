@@ -361,6 +361,24 @@ cc::string_view family_of(value_kind kind)
 }
 } // namespace
 
+symbol_id checker::conversion_of(i32 file, source_span where, type_id from, type_id to)
+{
+    // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
+    auto const* const candidates = operators_seen_from(file).get_ptr("as");
+    if (candidates == nullptr)
+        return symbol_id::none;
+    for (auto const candidate : *candidates)
+    {
+        if (demand(candidate, file, where) != symbol_state::checked)
+            continue;
+        auto const& info = out.functions[out.at(candidate).info];
+        auto const parameters = out.at(info.parameters);
+        if (parameters.size() == 1 && parameters[0].type == from && info.result == to)
+            return candidate;
+    }
+    return symbol_id::none;
+}
+
 bool checker::is_texel_type_expr(i32 file, ast::expr_id type) const
 {
     auto const* const applied = ast::is_valid(type) ? ast_of(file).at(type).node.try_as<ast::index>() : nullptr;
@@ -390,9 +408,15 @@ type_id checker::check_texel_conversion(i32 file, ast::expr_id id, type_id from,
         auto const converted = source->leaf_count == 1
                                  ? cc::string(family_of(texel->leaf_kind))
                                  : cc::format("{}{}", family_of(texel->leaf_kind), source->leaf_count);
-        report(diagnostic_kind::type_mismatch, file, where,
-               cc::format("{} as {}: the texel is {}, and a kind converts first: `(v as {}) as {}`", out.name_of(from),
-                          spelled, out.name_of(to), converted, spelled));
+        auto const message = cc::format("{} as {}: the texel is {}", out.name_of(from), spelled, out.name_of(to));
+        // the two-step spelling is offered only where its first step is a conversion that exists
+        auto const intermediate = prelude_type(converted);
+        if (intermediate != type_id::none && is_valid(conversion_of(file, where, from, intermediate)))
+            report(diagnostic_kind::type_mismatch, file, where,
+                   cc::format("{}, and a kind converts first: `(v as {}) as {}`", message, converted, spelled));
+        else
+            report(diagnostic_kind::type_mismatch, file, where,
+                   cc::format("{}, and {} converts to no {}", message, out.name_of(from), converted));
         return error_type;
     }
     set_target(file, id, {.kind = target_kind::texel_conversion});
@@ -412,23 +436,14 @@ type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast co
     if (is_texel_type_expr(file, node.type))
         return check_texel_conversion(file, id, from, to, node.type);
 
-    // Overloads of `as` differ in their result as well, so the one that matches both ends is the conversion.
-    auto const* const candidates = operators_seen_from(file).get_ptr("as");
-    if (candidates != nullptr)
-        for (auto const candidate : *candidates)
-        {
-            if (demand(candidate, file, where) != symbol_state::checked)
-                continue;
-            auto const& info = out.functions[out.at(candidate).info];
-            auto const parameters = out.at(info.parameters);
-            if (parameters.size() != 1 || parameters[0].type != from || info.result != to)
-                continue;
-            set_target(file, id, {.kind = target_kind::overload, .symbol = candidate});
-            // A conversion the program declares is a call like any other, inlined where it stands.
-            if (!is_valid(out.at(candidate).intrinsic))
-                note_program_call(scope, candidate, where);
-            return to;
-        }
+    if (auto const candidate = conversion_of(file, where, from, to); is_valid(candidate))
+    {
+        set_target(file, id, {.kind = target_kind::overload, .symbol = candidate});
+        // A conversion the program declares is a call like any other, inlined where it stands.
+        if (!is_valid(out.at(candidate).intrinsic))
+            note_program_call(scope, candidate, where);
+        return to;
+    }
     report(diagnostic_kind::no_matching_overload, file, where,
            cc::format("{} as {}: no conversion", out.name_of(from), out.name_of(to)));
     return error_type;

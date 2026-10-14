@@ -165,18 +165,18 @@ So `texel[.rgba8_unorm]` is `float4`, `texel[.r16_float]` is `float`, and `texel
 That is what every target does with a four-wide store into a narrower format, and what a sampled texture's load does for the channels its format lacks.
 The conversion is written where it happens, so a store that drops a channel always says so.
 
-```sgl sketch
+```sgl
 @option const target_format: pixel_format = .rgba16_float
 
 binding mip:
     source: texture_2d[float4]
     target: out image_2d[target_format]
 
-@compute(8, 8, 1)
-fun downsample(id: uint3){mip}:
-    let sum = mip.source.load(int2(id.xy * 2u), 0) + mip.source.load(int2(id.xy * 2u + uint2(1u, 0u)), 0)
+@compute(8, 8) fun downsample(@thread_id id: int3){mip}:
+    let a = mip.source.load(id.xy * 2)
+    let b = mip.source.load(id.xy * 2 + int2(1, 0))
     // A float4 into whatever the host picked: .x for .r16_float, .xy for .rg16_float, all four for .rgba16_float.
-    mip.target[id.xy] = (sum * 0.5) as texel[target_format]
+    mip.target[id.xy] = ((a + b) * 0.5) as texel[target_format]
 ```
 
 Only the component's family is fixed: a `uint4` reaches `texel[.rgba8_unorm]` through `as float4` first, so a conversion of kind and a change of width are never one step.

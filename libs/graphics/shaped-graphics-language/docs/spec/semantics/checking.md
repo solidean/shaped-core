@@ -466,7 +466,7 @@ fun shade(k: float) -> float:
 * **CHK-390** `texel[F]` is a type: the texel of the image format `F`, which is what an image of that format loads and stores ([why](why/checking.md#chk-390)).
   `F` is judged as an image's argument is (CHK-200), so it may name an option, and the type is then decided per compile.
   Its component is `float` for a `_float`, `_unorm` or `_snorm` format, `uint` for a `_uint` one and `int` for a `_sint` one.
-  Its width is the format's channel count: 1 for `r`, 2 for `rg`, 3 for `rg11b10_float`, and 4 for `rgba` and `bgra`; a width of 1 is the scalar.
+  Its width is the format's channel count: 1 for `r`, 2 for `rg`, 3 for `rg11b10_float`, and 4 for a four-channel format such as `rgba`, `bgra` or `rgb10a2_unorm`; a width of 1 is the scalar.
   An argument that is no image format is `wrong-kind-of-name`.
   The type needs no feature of its own: `texel[.r8_unorm]` is a `float` anywhere, and only an image of that format needs `extended_image_formats` (CHK-201).
 * **CHK-391** `x as texel[F]` converts a scalar or a plain vector whose component is the texel's component to the texel ([why](why/checking.md#chk-391)).

@@ -879,6 +879,9 @@ struct checker
     void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
     [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
+    /// The `as` overload visible from `file` that converts `from` to `to`, or `none` where there is no such conversion
+    /// (CHK-197).
+    [[nodiscard]] symbol_id conversion_of(i32 file, source_span where, type_id from, type_id to);
     /// True where the type `type` of a cast is written `texel[F]`, which alone may change a width (CHK-392).
     [[nodiscard]] bool is_texel_type_expr(i32 file, ast::expr_id type) const;
     /// `x as texel[F]` of another type than the texel, `written` being its `texel[F]` (CHK-391, CHK-392).
