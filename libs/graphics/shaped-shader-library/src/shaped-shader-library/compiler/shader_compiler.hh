@@ -43,6 +43,8 @@ struct slib::module_library
 {
     cc::vector<cc::string> paths;
     cc::vector<cc::string> texts;
+    /// Each file's revision just before its text was read.
+    cc::vector<file_revision> revisions;
 
     /// Each file as a view of `paths` and `texts`, which must outlive the result.
     [[nodiscard]] cc::vector<module_source> files() const

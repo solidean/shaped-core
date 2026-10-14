@@ -149,11 +149,11 @@ public:
 
     // internal — the compile path an asset drives
 public:
-    /// What a compile produced: the async shader, plus every virtual path it was built from.
+    /// What a compile produced: the async shader, plus every file it was built from, at the revision it read.
     struct compile_outcome
     {
         sg::async_compiled_shader shader;
-        cc::vector<cc::string> dependencies; ///< the source itself, each resolved include, each module file reached
+        cc::vector<file_dependency> dependencies; ///< the source itself, each resolved include, each module file reached
     };
 
     /// Reads, preprocesses and compiles one shader for `format`, with `options` given to an SGL source's options.
