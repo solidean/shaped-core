@@ -173,7 +173,7 @@ Three rules distinguish an array binding from a scalar one:
 - **Every array the pipeline's code indexes must have a live declaration at each dispatch or draw.**
   A missing one logs an error and costs a global barrier over every element, since a hot-reloaded shader can start indexing an array at any frame.
   An empty element span says "unused" for every op it lives through, and an array the code never indexes needs no declaration at all.
-  A declaration that no op ever meets with a bound group holding its array asserts when it ends, which is where a misspelled name is caught.
+  A declaration asserts when it ends if ops of its bind point bound arrays of its family and none carried its name, which is where a misspelled name is caught.
 
 Element resources are still kept alive by the group, exactly like scalar bindings.
 Arrays of samplers, constants buffers or acceleration structures are not supported.

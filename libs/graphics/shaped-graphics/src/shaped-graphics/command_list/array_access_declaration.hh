@@ -21,8 +21,9 @@ struct sg::impl::array_declaration_link
 /// A raster declaration also ends when its rendering scope closes.
 /// Once ended by any of those, destroying the value does nothing — it never touches a list that is gone.
 ///
-/// A declaration that never met its array — no op of its bind point had a bound group holding an array of that name and family — asserts when it ends.
+/// A declaration that never met its array asserts when it ends, if some op of its bind point had a bound group holding an array of its family.
 /// That is where a misspelled name is caught, at a withdraw, a destruction, or the rendering scope's close that ends a raster one.
+/// A bind point that ran no op, or bound only arrays of the other family, proves nothing about the name, and ends its declarations silently.
 /// An end while an exception unwinds past the declaration skips the check, as a submit and a drop do.
 /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md#array-bindings.
 class sg::array_access_declaration

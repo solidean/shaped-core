@@ -49,7 +49,7 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
   webgpu returns ids for its empty declarations.
 - **sv**: `bound_resources::declare_*_access` return an [`sv::declared_tables`](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.hh#L134).
   The wavefront makes one per `execute` ([wavefront_routine.cc:268](../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L268)).
-  A raster pass makes one when it has a draw to make ([raster_routine.cc:282](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L282)).
+  A raster pass makes one once it opens ([raster_routine.cc:278](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L278)).
   A trace makes one for itself ([pathtrace_routine.cc:339](../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc#L339)).
 - **The count** a test reads is `sg::stat::array_element_tracks`.
 - **Tests**: [array-declaration-book-test.cc](../../tests/barrier/array-declaration-book-test.cc) has no device.
@@ -298,9 +298,12 @@ webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list
   The wavefront rebinds the pipeline and the bindless group before every dispatch, so a declaration that ended on a rebind would end at every op.
 - **An op where no bound group holds the array leaves the declaration dormant**, rather than asserting as today.
   The wavefront's segment, sort and argument kernels bind no bindless group, and its declaration has to survive them.
-- **A declaration that never met its array in its whole lifetime asserts when it ends.**
+- **A declaration that never met its array in its whole lifetime asserts when it ends, if some op of its bind point bound an array of its family.**
   That is where the misspelled name is caught, since a dormant declaration is otherwise legitimate.
   "Met" means some op had a bound group holding an array of that name and family.
+  Only an op binding arrays of the family, none of them named so, is evidence the name could be wrong.
+  A bind point that ran no op, or bound only arrays of the other family, proves nothing, so a frame with nothing to draw ends its declarations silently.
+  Each declaration records whether it saw its family, and the book skips that walk once every live declaration of the family has.
   The check runs at withdraw, at destruction, and when a rendering scope's close ends a raster declaration.
   The scope close matters most: raster declarations are scoped, so a misspelled raster name would otherwise never be reported.
   A submit and a list drop end a declaration without the check.
@@ -423,7 +426,7 @@ metal counts each barrier in `metal_command_list::barriers_emitted` and in the c
 An MTL4 barrier names no resource, so metal counts no `buffer_barriers`, `texture_barriers` or `texture_transitions`, and its tests read `barriers_emitted`.
 
 **webgpu.** Has no arrays: the virtuals assert empty spans as today, and return an id so the value works.
-Its withdraw keeps nothing, so the never-met check never runs there, and an empty declaration on webgpu never asserts.
+Its withdraw keeps nothing, so the never-met check never runs there; no op there could show a declaration an array anyway.
 
 **The core.** `array_access_declaration`, its token, the facades returning it, and `plan_array_declarations` unchanged.
 
@@ -525,8 +528,8 @@ for (auto const& draw : d.draws)
 }
 ```
 
-A pass whose draws list is empty never meets the tables, and the never-met check would assert at the end of `execute`.
-sv declares only when there is a draw to make ([raster_routine.cc:279-282](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L279-L282)).
+A pass whose draws list is empty never meets the tables, and binds no other array either, so its close ends the declarations silently.
+sv declares unconditionally once the pass is open ([raster_routine.cc:275-278](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L275-L278)).
 Pipelines touching the tables at different stages re-apply once each until the recorded union covers them both, then skip.
 The environment draw binds no bindless group, so the declaration is dormant there.
 
@@ -590,7 +593,9 @@ No shim keeps the old per-op form: a caller that wants one op writes `{ auto con
 - **A missed invalidation is a silent race.**
   Every path that tracks a resource must report member writes, and a backend that adds a new tracking path must too.
   The tests below pin it per path; the debug layers and synchronization validation catch the rest.
-- **A declaration that meets its array only on some frames** asserts as never met on the others; its owner must declare only where it will meet it.
+- **A declaration that meets its array only on some frames** asserts as never met on a frame whose ops bind other arrays of its family and never its own.
+  Its owner must declare only where it will meet it on such a frame.
+  A frame binding no array of its family, an empty one included, ends it silently.
 - **The `has_pending_transfer()` layout choice is frozen at application** — see [record-time reads that remain](#record-time-reads-that-remain).
 - **metal's group identity rests on retaining the group**; a backend that copies group contents instead must key on a group serial.
 
@@ -618,22 +623,26 @@ New tests, tier 1 (run against every backend that has binding arrays) unless not
   That one needs no device, and is in `array-declaration-book-test.cc`.
 - **Two bound groups holding one name at different sizes**: an index valid only in the larger asserts — the first-group-only bug.
 - **Withdraw makes the array undeclared**: the next op logs "declared no access" and covers it.
-- **A declaration that never met its array asserts at withdraw**, and a dropped list ends one silently.
+- **A declaration that never met its array, where an op bound one of its family, asserts at withdraw**, and a dropped list ends one silently.
 - **Scope close ends a raster one**, and destroying the value afterwards does nothing.
-- **A raster declaration that never met its array asserts when its scope closes**, and the list is whole after.
+- **A raster declaration that never met its array asserts when its scope closes**, where a draw bound an array of its family, and the list is whole after.
+  A scope that draws nothing ends one silently.
 - **Unwinding past a declaration that never met its array does not assert**, for a value the unwinding destroys and for a scope it closes.
 - **Submit with a live declaration ends it silently**, in every build, and destroying the value afterwards does nothing.
-- **webgpu only: an empty declaration ends without asserting**, withdrawn or ended by its scope.
+- **A declaration whose bind point saw no op ends without asserting**, withdrawn or ended by its scope, on every backend, webgpu included.
+- **Only an op binding an array of the declaration's family counts**: one that saw no op, or only the other family's arrays, ends silently, and one that saw its family under other names asserts.
+  That one needs no device, and is in `array-declaration-book-test.cc`.
 
 Existing tests that change:
 
 - `tests/pipeline/dispatch-test.cc` "a group bound for a dispatch is not bound at a later draw" probed with the per-op assert at the draw.
   That assert read "declare_array_buffer_access names no buffer array binding of a bound group".
-  It becomes the end-of-life never-met assert, so the probe is the raster declaration's withdraw asserting.
+  It becomes the end-of-life never-met assert, which fires only where a draw bound a buffer array the declaration did not meet.
+  So the probe is a raster declaration of another name, whose withdraw stays silent because the rects' draw binds no array.
 - `end-to-end-array-bindings-test.cc` "a draw resolves only its own bind point's declarations" keeps its cases, with the declarations held as values.
   "A declaration still pending when its scope closes goes with the scope" becomes "a raster declaration ends with its scope".
-  The declaration that case ends never meets its array, so the close that ends it asserts, and the case expects that.
-  "A compute declaration waits for a dispatch" becomes "a compute declaration is never met by a draw".
+  The declaration that case ends sees no draw, so the close ends it silently.
+  "A compute declaration waits for a dispatch" becomes "a compute declaration is never met by a draw", which its vacant element would assert on.
 - The undeclared-array tests (dxc :205, :790, `vulkan-raster-test.cc:407`) keep their `nx::exactly(...)` counts.
 - The out-of-range test in `metal-vertex-input-test.cc:437` still asserts at the draw, since the check runs at first meeting.
 - `tests/barrier/array-plan-test.cc` is unchanged: `plan_array_declarations` is.
@@ -672,6 +681,8 @@ It still matters for the first application, every `cover_all`, every writing dec
 - **No [dedupe inside sg](#sg-dedupes-repeated-identical-declarations)** — its invalidation is the same work, and it keeps O(elements) per op.
 - **Covered by, not equal** — the applied stages and access are a union since the last invalidation; texture layouts still match exactly, through the generation.
 - **The typo assert is kept, moved to end of life** — a declaration that never met its array asserts at withdraw, destruction or scope close.
+- **The typo assert fires only where it can mean a misspelling** — some op of its bind point bound an array of its family and none carried its name.
+  An empty frame proves nothing about a name, so a caller declares unconditionally rather than only where a draw or dispatch will happen.
 - **The lifecycle's edge cases are settled** — submit ends declarations silently, unwinding and webgpu skip the never-met check, and first meeting is per declaration.
 - **A different group at the same name is checked again**, per group, rather than ending the declaration.
 - **Transfer waits fold at submit** — a prerequisite, landed as P2.

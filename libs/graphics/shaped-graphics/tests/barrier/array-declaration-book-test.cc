@@ -30,16 +30,26 @@ struct fake_array
     cc::vector<fake_element> elements;
 };
 
-[[nodiscard]] fake_array buffers(cc::string_view name, int count)
+[[nodiscard]] fake_array array_of(cc::string_view name, int count, bool is_texture)
 {
     auto a = fake_array{.name = cc::string(name),
-                        .is_texture = false,
+                        .is_texture = is_texture,
                         .binding = 0,
                         .bound_as = sg::view_class::readonly,
                         .elements = {}};
     for (auto i = 0; i < count; ++i)
         a.elements.push_back({.resource = i});
     return a;
+}
+
+[[nodiscard]] fake_array buffers(cc::string_view name, int count)
+{
+    return array_of(name, count, false);
+}
+
+[[nodiscard]] fake_array textures(cc::string_view name, int count)
+{
+    return array_of(name, count, true);
 }
 
 /// One bind point's book and what a list around it keeps: the member-write count, the stats, and the tracked elements.
@@ -266,6 +276,46 @@ TEST("sg::impl::array_declaration_book - a declaration made after its name met a
     CHECK_ASSERTS(list.op(table));
 }
 
+TEST("sg::impl::array_declaration_book - a declaration no op bound an array of its family for ends silently")
+{
+    // No op at all, as on a frame with nothing to draw: dormant all its life, which proves nothing about its name.
+    auto list = fake_list();
+    list.book.declare_buffers(1, "tables.bufers", reads(1));
+    list.book.declare_textures(2, "tables.textrues", {});
+    CHECK(list.book.withdraw(1));
+    list.book.declare_buffers(3, "tables.bufers", reads(1));
+    list.book.end_all();
+    CHECK(list.book.is_empty());
+
+    // Ops binding only arrays of the other family, each met by a declaration of its own.
+    auto const images = textures("tables.textures", 2);
+    sg::array_texture_access const read_image[]
+        = {{.index = 0, .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture}};
+    list.book.declare_buffers(4, "tables.bufers", reads(1));
+    list.book.declare_textures(5, "tables.textures", read_image);
+    list.op(images);
+    list.op(images);
+    CHECK(list.book.withdraw(4));
+    CHECK(list.book.withdraw(5));
+}
+
+TEST("sg::impl::array_declaration_book - a declaration that saw only arrays of its family under other names asserts at "
+     "withdraw")
+{
+    auto list = fake_list();
+    auto const table = buffers("tables.buffers", 3);
+    auto const images = textures("tables.textures", 2);
+    list.book.declare_buffers(1, "tables.buffers", reads(1));
+    list.book.declare_textures(2, "tables.textures", {});
+    list.book.declare_textures(3, "tables.textrues", {});
+    list.op(table);
+    list.op(images);
+    CHECK(list.book.withdraw(1));
+    CHECK(list.book.withdraw(2));
+    CHECK_ASSERTS(list.book.withdraw(3));
+    CHECK(list.book.is_empty());
+}
+
 TEST("sg::impl::array_declaration_book - a declaration that never met its array asserts at withdraw")
 {
     // The array the misspelled declaration misses is undeclared, so it is covered, and that is logged once.
@@ -305,8 +355,13 @@ TEST("sg::impl::array_declaration_book - an end while an exception unwinds past 
      "check")
 {
     auto list = fake_list();
+    auto const table = buffers("tables.buffers", 3);
     list.book.declare_buffers(1, "tables.bufers", reads(1));
     list.book.declare_buffers(2, "tables.bufers", reads(1));
+
+    // An op binding a buffer array of another name, so both would fail the check outside an unwinding.
+    list.book.declare_buffers(3, "tables.buffers", reads(1));
+    list.op(table);
 
     // Ended from a destructor, as unwinding ends a declaration's value, and as it closes a rendering scope.
     auto const withdraw_while_unwinding = [&]
@@ -328,4 +383,5 @@ TEST("sg::impl::array_declaration_book - an end while an exception unwinds past 
     CHECK_THROWS_AS(withdraw_while_unwinding(), unwound);
     CHECK_THROWS_AS(end_all_while_unwinding(), unwound);
     CHECK(list.book.is_empty());
+    CHECK(!list.book.withdraw(3));
 }

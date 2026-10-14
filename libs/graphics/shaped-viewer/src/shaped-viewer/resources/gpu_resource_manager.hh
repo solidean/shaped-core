@@ -104,7 +104,7 @@ public:
     /// as empty — rather than skipped.
     /// So this covers the whole group rather than the tables a caller believes it touched, which is the only version
     /// that cannot silently under-declare.
-    /// Declare where a trace will bind `group()`: a declaration that never meets its tables asserts when it dies.
+    /// A trace binding arrays of a table's family, but never `group()`, leaves its declaration unmet, which asserts when it dies.
     [[nodiscard]] declared_tables declare_raytracing_access(sg::command_list& cmd) const;
 
     /// The same, for **every compute dispatch on `cmd`** while the result lives — what a wavefront's kernels reading the

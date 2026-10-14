@@ -828,26 +828,42 @@ ASYNC_INVOCABLE_TEST("sg - submitting a list ends a live array declaration silen
     check_gathered(co_await back.data(), 0, "the gather submitted with its declaration alive");
 }
 
-ASYNC_INVOCABLE_TEST("sg - a raster array declaration that never met its array asserts when its rendering scope closes",
+ASYNC_INVOCABLE_TEST("sg - a raster array declaration that never met its array asserts when its rendering scope "
+                     "closes, "
+                     "where a draw bound an array of its family",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     require_arrays(*ctx);
 
+    auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::sticky_arrays.shelf_in_both);
+    sg::buffer<i32> const sources[] = {make_source(*ctx, 0), make_source(*ctx, 1), make_source(*ctx, 2)};
     auto const target = ctx->persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba32_float, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
+    auto const color = target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0));
 
-    // No group of the scope holds its array, so the scope's close is where it ends, never met.
     auto cmd = ctx->create_command_list();
+    auto const shelf = shelf_of(*cmd, sources);
     auto outlived = sg::array_access_declaration();
-    cmd->raster.manual.begin_rendering({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
-    outlived = cmd->raster.manual.declare_array_buffer_access("shelf.sources", reads_of_three());
+
+    // A scope that draws nothing never shows its declarations a buffer array, so its close ends them silently.
+    cmd->raster.manual.begin_rendering({.color_targets = {color}, .target_set = shaders::shelf_target::name});
+    outlived = cmd->raster.manual.declare_array_buffer_access("shelf.source", {});
+    cmd->raster.manual.end_rendering();
+
+    // One whose draw binds the shelf, a buffer array of another name, ends never met: the close asserts.
+    cmd->raster.manual.begin_rendering({.color_targets = {color}, .target_set = shaders::shelf_target::name});
+    auto const declared = cmd->raster.manual.declare_array_buffer_access("shelf.sources", reads_of_three());
+    outlived = cmd->raster.manual.declare_array_buffer_access("shelf.source", {});
+    cmd->raster.manual.bind_pipeline(*draw);
+    cmd->raster.manual.bind_group(0, *shelf);
+    cmd->raster.manual.draw({.vertex_range = {.offset = 0, .size = 3}});
 #if CC_ASSERT_ENABLED
     CHECK_ASSERTS(cmd->raster.manual.end_rendering());
 #else
     cmd->raster.manual.end_rendering();
 #endif
-    // Ended by the close, which left the list whole: the value ends nothing, and the list drops.
+    // Ended by the close, which left the list whole: the values end nothing, and the list drops.
     outlived.withdraw();
     ctx->drop_command_list(cc::move(cmd));
     co_await ctx->idle_completion();
@@ -859,23 +875,35 @@ ASYNC_INVOCABLE_TEST("sg - unwinding past an array declaration that never met it
     REQUIRE(ctx != nullptr);
     require_arrays(*ctx);
 
+    auto const kernel = co_await shaders::sticky_arrays.gather_shelf.acquire_pipeline(*ctx);
+    auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::sticky_arrays.shelf_in_both);
+    sg::buffer<i32> const sources[] = {make_source(*ctx, 0), make_source(*ctx, 1), make_source(*ctx, 2)};
+    auto const tray = make_tray(*ctx);
     auto const target = ctx->persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba32_float, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
     auto const color = target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0));
 
+    // Each misspelled declaration sees an op bind the shelf, a buffer array of another name, so only the unwinding spares it.
     auto cmd = ctx->create_command_list();
-    // A declaration is made after its list, so unwinding destroys it while the list lives, before any op met it.
+    auto const shelf = shelf_of(*cmd, sources);
+    // A declaration is made after its list, so unwinding destroys it while the list lives.
     auto const unwind_past_value = [&]
     {
         auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
+        auto const misspelled = cmd->compute.declare_array_buffer_access("shelf.source", {});
+        gather(*cmd, *kernel, *shelf, tray);
         throw unwound{};
     };
     // A raster one held past its scope is ended by the close the unwinding runs.
     auto outlived = sg::array_access_declaration();
     auto const unwind_past_scope = [&]
     {
-        auto pass = cmd->raster.render_to({.color_targets = {color}});
-        outlived = pass.declare_array_buffer_access("shelf.sources", reads_of_three());
+        auto pass = cmd->raster.render_to({.color_targets = {color}, .target_set = shaders::shelf_target::name});
+        auto const declared = pass.declare_array_buffer_access("shelf.sources", reads_of_three());
+        outlived = pass.declare_array_buffer_access("shelf.source", {});
+        pass.bind_pipeline(*draw);
+        pass.bind_group(0, *shelf);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
         throw unwound{};
     };
     CHECK_THROWS_AS(unwind_past_value(), unwound);
@@ -885,17 +913,16 @@ ASYNC_INVOCABLE_TEST("sg - unwinding past an array declaration that never met it
     co_await ctx->idle_completion();
 }
 
-ASYNC_INVOCABLE_TEST("sg - webgpu ends an empty array declaration without asserting, having no array it could meet",
+ASYNC_INVOCABLE_TEST("sg - an array declaration whose bind point saw no op ends without asserting",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    if (ctx->backend() != sg::backend_kind::webgpu)
-        SKIP("only webgpu has no binding arrays, which is what exempts it from the never-met check");
 
     auto const target = ctx->persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba8_unorm, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
 
-    // Withdrawn, and ended by a rendering scope's close: the two ends that check on every other backend.
+    // A frame with nothing to dispatch or draw: dormant all its life, withdrawn or ended by its rendering scope's close.
+    // On every backend, webgpu included, where no declaration ever meets an array.
     auto cmd = ctx->create_command_list();
     auto computed = cmd->compute.declare_array_buffer_access("shelf.sources", {});
     auto drawn = sg::array_access_declaration();

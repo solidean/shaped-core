@@ -770,8 +770,8 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
     if (!ctx->supports(sg::feature::binding_arrays))
         SKIP("this context has no binding arrays");
 
-    // `lanes` carries the array `lanes.sources`, and a declaration that no op ever met with a bound group carrying it
-    // asserts when it ends.
+    // `lanes` carries the buffer array `lanes.sources`, and the rects' groups carry none.
+    // A declaration of another name asserts when it ends only where an op bound a buffer array it did not meet.
     // So a raster declaration's withdraw shows whether the dispatch's group is still bound at the draw.
     auto const gather = co_await shaders::binding_arrays.gather.acquire_pipeline(*ctx);
     auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::rects.floating);
@@ -802,9 +802,9 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
             = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},
                                      .target_set = shaders::rect_target::name});
         scope.bind_pipeline(*draw);
-        auto declared = scope.declare_array_buffer_access("lanes.sources", {});
+        auto declared = scope.declare_array_buffer_access("lanes.absent", {});
         batch.draw(scope, 0);
-        CHECK_ASSERTS(declared.withdraw());
+        declared.withdraw();
     }
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));

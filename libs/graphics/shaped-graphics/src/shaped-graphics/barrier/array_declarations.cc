@@ -13,7 +13,9 @@ void sg::impl::array_declaration_book::declare_buffers(u32 id,
                          .name_index = 0,
                          .buffers = {},
                          .textures = {},
+                         .is_texture = false,
                          .met = false,
+                         .saw_family = false,
                          .exceptions_in_flight = std::uncaught_exceptions()};
     d.buffers.push_back_range(elements);
     add(cc::move(d), name, false);
@@ -27,7 +29,9 @@ void sg::impl::array_declaration_book::declare_textures(u32 id,
                          .name_index = 0,
                          .buffers = {},
                          .textures = {},
+                         .is_texture = true,
                          .met = false,
+                         .saw_family = false,
                          .exceptions_in_flight = std::uncaught_exceptions()};
     d.textures.push_back_range(elements);
     add(cc::move(d), name, true);
@@ -37,6 +41,7 @@ void sg::impl::array_declaration_book::add(declaration d, cc::string_view name, 
 {
     auto const name_index = find_or_add(name, is_texture);
     d.name_index = name_index;
+    ++(is_texture ? _textures_unseen : _buffers_unseen);
     _declarations.push_back(cc::move(d));
     recount(name_index);
 }
@@ -50,6 +55,8 @@ bool sg::impl::array_declaration_book::withdraw(u32 id)
 
         auto const name_index = _declarations[i].name_index;
         auto const passed = passes_met_check(_declarations[i]);
+        if (!_declarations[i].saw_family)
+            --(_declarations[i].is_texture ? _textures_unseen : _buffers_unseen);
         _declarations.remove_at(i);
         recount(name_index);
 
@@ -68,6 +75,8 @@ void sg::impl::array_declaration_book::end_all()
             failed = d.name_index;
 
     _declarations.clear();
+    _buffers_unseen = 0;
+    _textures_unseen = 0;
     for (isize i = 0; i < _names.size(); ++i)
         if (_names[i].live > 0)
             recount(i);
@@ -79,17 +88,29 @@ void sg::impl::array_declaration_book::end_all()
 
 bool sg::impl::array_declaration_book::passes_met_check(declaration const& d)
 {
+    // One whose bind point never bound an array of its family is dormant, as on an empty frame, and proves nothing.
     // A declaration is made after its list, so unwinding destroys it first, and an assert here would turn the
     // exception into an abort.
-    return d.met || std::uncaught_exceptions() > d.exceptions_in_flight;
+    return d.met || !d.saw_family || std::uncaught_exceptions() > d.exceptions_in_flight;
 }
 
 void sg::impl::array_declaration_book::check_met(isize name_index, bool passed) const
 {
     CC_ASSERTF(passed,
-               "an array declaration of '{}' ended without any op meeting it: no dispatch, trace or draw of its bind "
-               "point had a bound group holding a {} array of that name. Is the name misspelled?",
-               _names[name_index].name, _names[name_index].is_texture ? "texture" : "buffer");
+               "an array declaration of '{}' ended without meeting its array: ops of its bind point bound groups "
+               "holding {} arrays, and none of those arrays was named '{}'. Is the name misspelled?",
+               _names[name_index].name, _names[name_index].is_texture ? "texture" : "buffer", _names[name_index].name);
+}
+
+void sg::impl::array_declaration_book::see_family(bool is_texture)
+{
+    auto& unseen = is_texture ? _textures_unseen : _buffers_unseen;
+    if (unseen == 0)
+        return;
+    for (auto& d : _declarations)
+        if (d.is_texture == is_texture)
+            d.saw_family = true;
+    unseen = 0;
 }
 
 isize sg::impl::array_declaration_book::find(cc::string_view name, bool is_texture) const

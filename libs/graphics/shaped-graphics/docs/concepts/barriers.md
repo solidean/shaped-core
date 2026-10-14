@@ -43,7 +43,7 @@ The inline-constants block is the exception: it is set on the list rather than b
 **A check a shader edit can flip logs and degrades; it never asserts.**
 Hot reload replaces a shader under a running program, so a declaration that disagreed with the old code may disagree with the new one at any frame.
 Such a mismatch logs an error once per pipeline, binding and kind of mismatch, and falls back to a barrier that covers both sides.
-Only a mistake in the host's own code — a declaration that never meets its array, an element out of range — asserts.
+Only a mistake in the host's own code — a declaration whose name no bound array of its family carries, an element out of range — asserts.
 
 Access is inferred everywhere except where sg cannot see into the code, and there the caller says what it will do.
 
@@ -70,7 +70,9 @@ What one declaration meeting many ops changes is the element work, and only that
   Any tracked access landing in a member's write bucket — an unordered write or a layout change — counts.
   That covers every path: a scalar binding, a copy, an upload, a render target, a native scope, and an application's own layout transitions.
   An application whose op already wrote one of its elements, before it applied, is not current either.
-- **A declaration that never met its array asserts when it ends**, which is where a misspelled name is caught.
+- **A declaration that never met its array asserts when it ends, if some op of its bind point bound an array of its family**, which is where a misspelled name is caught.
+  A bind point that ran no op, or bound only arrays of the other family, proves nothing about the name, so a frame with nothing to draw ends its declarations silently.
+  A frame whose ops bind other arrays of that family, and never this one, still asserts.
   A withdraw or a destruction runs the check, and so does the rendering scope's close that ends a raster one.
   A submit or a list drop skips it, and so does any end while an exception unwinds past the declaration.
 

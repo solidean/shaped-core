@@ -144,7 +144,7 @@ protected:
                                                                    cc::span<array_texture_access const> elements) = 0;
 
     // Ends declaration `id`, which is live: the token guarantees it.
-    // One that never met its array asserts, unless an exception is unwinding past it.
+    // One that never met its array, where an op bound an array of its family, asserts unless an exception is unwinding past it.
     virtual void withdraw_array_declaration(u32 id) = 0;
 
     // The id a backend's next array declaration takes, unique within this list.

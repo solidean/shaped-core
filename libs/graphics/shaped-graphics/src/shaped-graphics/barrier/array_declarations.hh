@@ -47,7 +47,8 @@ public:
     void declare_textures(u32 id, cc::string_view name, cc::span<array_texture_access const> elements);
 
     /// Ends declaration `id` if it lives here, and says whether it did.
-    /// One that never met its array asserts, once it is gone, unless an exception thrown since it was made is unwinding.
+    /// One that saw an op bind an array of its family yet never met its own asserts, once it is gone.
+    /// Not while an exception thrown since it was made is unwinding.
     bool withdraw(u32 id);
 
     /// Ends every declaration here, as a rendering scope's close does.
@@ -96,7 +97,11 @@ private:
         isize name_index = 0;
         cc::vector<array_buffer_access> buffers;
         cc::vector<array_texture_access> textures;
+        bool is_texture = false;
         bool met = false;
+
+        /// Whether some op had a bound group holding an array of its family, the only evidence a name can be misspelled.
+        bool saw_family = false;
 
         /// `std::uncaught_exceptions()` when it was made; an end that finds more in flight is unwinding past it.
         int exceptions_in_flight = 0;
@@ -130,7 +135,11 @@ private:
     void recount(isize name_index);
     void meet(isize name_index);
 
-    /// Whether `d`, ending now, passes the never-met check: some op met it, or an exception thrown since it was made is unwinding.
+    /// Marks every live declaration of the family `is_texture` names as having seen an op bind an array of it.
+    void see_family(bool is_texture);
+
+    /// Whether `d`, ending now, passes the never-met check.
+    /// It fails only where some op bound an array of its family and none carried its name, and never while an exception thrown since it was made is unwinding.
     [[nodiscard]] static bool passes_met_check(declaration const& d);
 
     /// Asserts `passed`, the never-met check of a declaration of `name_index` that just ended: where a misspelled name is caught.
@@ -143,6 +152,10 @@ private:
     cc::vector<name_state> _names;
     cc::vector<declaration> _declarations;
     cc::vector<application> _applications;
+
+    /// Live declarations of each family that have not seen an op bind an array of it, so an op skips the walk once all have.
+    int _buffers_unseen = 0;
+    int _textures_unseen = 0;
 };
 
 template <class Elements>
@@ -178,8 +191,13 @@ void sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> c
                                              TrackTexture&& track_texture,
                                              Cover&& cover)
 {
+    auto saw_buffers = false;
+    auto saw_textures = false;
     for (auto const& site : sites)
     {
+        saw_buffers = saw_buffers || !site.array->is_texture;
+        saw_textures = saw_textures || site.array->is_texture;
+
         auto const name_index = find(site.array->name, site.array->is_texture);
         if (name_index < 0 || _names[name_index].live == 0)
             continue;
@@ -194,6 +212,10 @@ void sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> c
             app.checked_generation = generation;
         }
     }
+    if (saw_buffers)
+        see_family(false);
+    if (saw_textures)
+        see_family(true);
 
     for (auto const& site : sites)
     {
