@@ -345,12 +345,13 @@ That is a ~1.5 MB download, once per machine, owned by [tools/bin/fetch-clang-fo
 The fetched binary is gitignored, and it outranks PATH precisely because its version is the one we chose.
 It **errors** only when that fails too, and `--allow-different-version` downgrades the surviving mismatch to a warning; `SC_SKIP_CLANG_FORMAT_FETCH=1` opts out of the fetch entirely.
 Like every other step, the clang-format run is captured under `build/run-logs/`.
-Before committing, prefer `uv run dev.py check --fix`, which runs this check and the others in one shot — see [Pre-commit checks](#pre-commit-checks).
+Before pushing, prefer `uv run dev.py check --fix`, which runs this check and the others in one shot — see [Pre-commit checks](#pre-commit-checks).
 
 ## Pre-commit checks
 
 `uv run dev.py check` runs the project's pre-commit gates and reports a single green/red verdict — the "everything green" gate.
-**`uv run dev.py check --fix` is the recommended move before committing.**
+**`uv run dev.py check --fix` must pass before every push.**
+Commits before that may be partially broken — they are grouped by topic, not by what compiles.
 It auto-applies every unambiguous fix it can (clang-tidy, shaped-linter, then clang-format over what they rewrote), runs the rest, and tells you what is left.
 
 ```bash
@@ -369,6 +370,7 @@ uv run dev.py check --list     # list the registered checks
 
 `lint`, `shaped-lint` and `format` default to **everything this branch changed, including what is not committed yet**.
 That is the merge base with `origin/main`, diffed against the working tree.
+On `main` itself that is the unpushed commits plus the working tree — exactly what the next push sends.
 
 This is not the obvious choice, and the obvious one is wrong.
 A gate scoped to dirty files alone *empties as you work*: commit, and the working tree is clean, so the next `check` inspects nothing and reports green for a branch it never looked at.
@@ -378,7 +380,8 @@ The consequence to know is that `check` re-examines files you committed earlier 
 That is the point, and it is also why the first `check` on an old branch can report more than you expect.
 
 `--dirty-only` is the tight edit loop's scope and is still what `dev.py lint` and `dev.py format` default to; `--all` is the whole tree; `--since <rev>` picks a different base.
-On `main` itself there is no branch to diff, so the default falls back to the working tree.
+**There is no working-tree fallback.**
+With no merge base to find — `main` with no `origin/main`, say — `check` refuses and asks for one of those flags rather than quietly inspecting less.
 
 Registered checks, **in the order they run**:
 

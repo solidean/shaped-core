@@ -42,20 +42,22 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def _branch_base(ctx: Context) -> str | None:
-    """The merge base with the default branch, or None when there is no sensible one.
+    """The merge base with the default branch, or None when there is none.
 
-    None falls the default back to the working tree, which is what a detached checkout, a shallow clone or a tree
-    already ON the default branch should get — on `main` itself "changed since main" is empty, and a gate that
-    inspects nothing is worse than one that inspects the dirty files.
+    On local `main` only `origin/main` is a base: the unpushed commits plus the working tree, what a push to `main` sends.
+    Comparing local `main` with itself would inspect nothing, so it is never a candidate there.
     """
     import subprocess
 
-    for base in ("origin/main", "main"):
+    try:
+        head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ctx.root),
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    on_main = head.returncode == 0 and head.stdout.strip() == "main"
+
+    for base in ("origin/main",) if on_main else ("origin/main", "main"):
         try:
-            head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ctx.root),
-                                  capture_output=True, text=True, timeout=30)
-            if head.returncode == 0 and head.stdout.strip() in ("main", "HEAD"):
-                return None
             out = subprocess.run(["git", "merge-base", base, "HEAD"], cwd=str(ctx.root),
                                  capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
@@ -436,13 +438,16 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     else:
         selected = list(checks)
 
-    # --all is the whole tree, --commit is that diff, and the default is the working tree.
-    # Default: everything this branch changed against the default branch, working tree included.
-    #
-    # A gate scoped to the working tree alone empties as you commit, so a run right before pushing — which is when it
-    # matters most — would inspect nothing and report green.
-    # `--dirty-only` is still there for the tight edit loop, and `--all` for the whole tree.
-    scope = a.scope_from_args(args, default_since=_branch_base(ctx))
+    # Default: everything changed against the default branch's merge base, working tree included.
+    # There is no working-tree fallback: a gate scoped to dirty files empties as you commit, so the run right before
+    # pushing would inspect nothing and report green.
+    # Without a base the default has no meaning, and an explicit scope flag is required instead.
+    explicit = args.since is not None or args.commit is not None or args.all or args.dirty_only
+    base = None if explicit else _branch_base(ctx)
+    if not explicit and base is None:
+        ctx.die("check found no merge base with origin/main (or main, off main) to scope its gates to; "
+                "fetch origin, or pass --since <rev>, --commit <rev>, --dirty-only or --all")
+    scope = a.scope_from_args(args, default_since=base)
     if scope is not None and scope.revision is not None:
         # Fail on a bad revision here, rather than once a gate is already running.
         try:
