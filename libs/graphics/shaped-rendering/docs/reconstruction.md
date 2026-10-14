@@ -181,6 +181,7 @@ So the member runs that network in five compute shaders of its own, with no vend
 They are SGL, as the other native members' are, so it builds wherever those do.
 
 **It is correct and portable, and far too slow for a frame loop** — roughly 0.2 s per megapixel, which is why `automatic` never picks it.
+That figure is the HLSL kernel's before the SGL port, which writes the same bits, and has not been re-taken.
 Two networks are fetched, both `rt_hdr_alb_nrm`: HDR radiance with an albedo and a normal, the guides the tracer writes.
 The base one is what OIDN's balanced quality runs, and the small one what its fast quality runs: the same topology with every encoder at 32 channels, at half the compute.
 `reconstruct_settings::quality` picks between them the same way, `fast` running the small one; there is no large network for these guides.
@@ -215,6 +216,7 @@ The base one is what OIDN's balanced quality runs, and the small one what its fa
 ### Measured
 
 One 1080p frame on the development machine's dx12 GPU, by tile cap; the default cap of 512 chooses a 480x432 tile.
+Every timing of our kernel in this section was taken on the HLSL kernel before the SGL port, which writes the same bits, and none has been re-taken.
 
 | cap | time | feature maps |
 |---|---|---|

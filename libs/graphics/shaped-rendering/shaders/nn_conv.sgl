@@ -23,6 +23,7 @@
 // So those reads are strided where the input reads are a broadcast, and there is no reuse of them across texels otherwise.
 //
 // 8 was swept rather than picked, over a whole 256x256 tile: 4 is 5.8 ms, 8 is 5.3, 12 is 6.3, 16 is 7.2 and 24 is 9.1.
+// Those times are the HLSL kernel's before the SGL port, which writes the same bits, and have not been re-taken.
 // Re-sweep it whenever the reads change width, since the window a thread holds in registers grows with them.
 // Blocking the output channels as well does not pay; reconstruction.md has the measurement.
 //
