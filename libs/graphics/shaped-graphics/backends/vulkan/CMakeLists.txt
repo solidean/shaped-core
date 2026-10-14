@@ -150,6 +150,7 @@ endif()
 if(SC_BUILD_TESTS)
     add_executable(shaped-graphics-vulkan-test
         tests/main.cc
+        tests/vulkan-attachment-view-benchmark.cc
         tests/vulkan-attachment-view-test.cc
         tests/vulkan-barrier-test.cc
         tests/vulkan-buffer-access-test.cc
