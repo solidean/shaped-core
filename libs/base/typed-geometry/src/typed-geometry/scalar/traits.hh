@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/math/float.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/scalar/fwd.hh>
 
@@ -93,9 +94,9 @@ struct tg::scalar_traits<cc::f32>
     [[nodiscard]] static f32 ceil(f32 x) { return std::ceil(x); }
     [[nodiscard]] static f32 abs(f32 x) { return std::fabs(x); }
 
-    [[nodiscard]] static bool is_nan(f32 x) { return std::isnan(x); }
-    [[nodiscard]] static bool is_inf(f32 x) { return std::isinf(x); }
-    [[nodiscard]] static bool is_finite(f32 x) { return std::isfinite(x); }
+    [[nodiscard]] static constexpr bool is_nan(f32 x) { return cc::is_nan(x); }
+    [[nodiscard]] static constexpr bool is_inf(f32 x) { return cc::is_inf(x); }
+    [[nodiscard]] static constexpr bool is_finite(f32 x) { return cc::is_finite(x); }
 
     /// x * 2^n, saturating to +-infinity or zero when the result leaves the representable range.
     [[nodiscard]] static f32 scale_by_pow2(f32 x, int n) { return std::ldexp(x, n); }
@@ -103,7 +104,7 @@ struct tg::scalar_traits<cc::f32>
     /// x must be finite and non-zero: a subnormal is normalized, but zero and the non-finites have no exponent.
     [[nodiscard]] static pow2_split<f32> split_pow2(f32 x)
     {
-        CC_ASSERT(std::isfinite(x) && x != f32(0), "split_pow2 needs a finite, non-zero scalar");
+        CC_ASSERT(cc::is_finite(x) && x != f32(0), "split_pow2 needs a finite, non-zero scalar");
 
         auto exponent = 0;
         auto const half = std::frexp(x, &exponent); // in [0.5, 1) — renormalized to [1, 2) below
@@ -141,9 +142,9 @@ struct tg::scalar_traits<cc::f64>
     [[nodiscard]] static f64 ceil(f64 x) { return std::ceil(x); }
     [[nodiscard]] static f64 abs(f64 x) { return std::fabs(x); }
 
-    [[nodiscard]] static bool is_nan(f64 x) { return std::isnan(x); }
-    [[nodiscard]] static bool is_inf(f64 x) { return std::isinf(x); }
-    [[nodiscard]] static bool is_finite(f64 x) { return std::isfinite(x); }
+    [[nodiscard]] static constexpr bool is_nan(f64 x) { return cc::is_nan(x); }
+    [[nodiscard]] static constexpr bool is_inf(f64 x) { return cc::is_inf(x); }
+    [[nodiscard]] static constexpr bool is_finite(f64 x) { return cc::is_finite(x); }
 
     /// x * 2^n, saturating to +-infinity or zero when the result leaves the representable range.
     [[nodiscard]] static f64 scale_by_pow2(f64 x, int n) { return std::ldexp(x, n); }
@@ -151,7 +152,7 @@ struct tg::scalar_traits<cc::f64>
     /// x must be finite and non-zero: a subnormal is normalized, but zero and the non-finites have no exponent.
     [[nodiscard]] static pow2_split<f64> split_pow2(f64 x)
     {
-        CC_ASSERT(std::isfinite(x) && x != f64(0), "split_pow2 needs a finite, non-zero scalar");
+        CC_ASSERT(cc::is_finite(x) && x != f64(0), "split_pow2 needs a finite, non-zero scalar");
 
         auto exponent = 0;
         auto const half = std::frexp(x, &exponent); // in [0.5, 1) — renormalized to [1, 2) below
