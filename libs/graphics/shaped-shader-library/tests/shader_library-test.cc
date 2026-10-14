@@ -267,8 +267,8 @@ TEST("slib - includes are inlined and recorded as dependencies", exclusive("slib
     // The include is tracked, which is what lets a later edit to it reload this shader.
     auto const dependencies = pkg.invert->dependencies();
     REQUIRE(dependencies.size() == 2);
-    CHECK(dependencies[0] == "test_pkg/invert.hlsl");
-    CHECK(dependencies[1] == "test_pkg/common.hlsli");
+    CHECK(dependencies[0].path == "test_pkg/invert.hlsl");
+    CHECK(dependencies[1].path == "test_pkg/common.hlsli");
 }
 
 TEST("slib - an include resolves relative to the including file first", exclusive("slib-shader-library"))
@@ -290,7 +290,7 @@ TEST("slib - an include resolves relative to the including file first", exclusiv
 
     // Like a C `"..."` include: the sibling wins over the one at the package root.
     CHECK(fake_compiler::source_of(await(invert->acquire(sg::shader_format::dxil))) == "SIBLING");
-    CHECK(invert->dependencies()[1] == "test_pkg/dir/common.hlsli");
+    CHECK(invert->dependencies()[1].path == "test_pkg/dir/common.hlsli");
 }
 
 TEST("slib - an include falls back to the package root", exclusive("slib-shader-library"))
@@ -309,7 +309,7 @@ TEST("slib - an include falls back to the package root", exclusive("slib-shader-
     lib.add_package(slib::shader_package{.name = "test_pkg", .definitions = definitions}, fs);
 
     CHECK(fake_compiler::source_of(await(invert->acquire(sg::shader_format::dxil))) == "ROOT");
-    CHECK(invert->dependencies()[1] == "test_pkg/common.hlsli");
+    CHECK(invert->dependencies()[1].path == "test_pkg/common.hlsli");
 }
 
 TEST("slib - a shared mount serves includes to several packages by a stable path", exclusive("slib-shader-library"))
@@ -340,7 +340,7 @@ TEST("slib - a shared mount serves includes to several packages by a stable path
     // Both packages reach it by the same virtual path, neither knows where it really is.
     CHECK(fake_compiler::source_of(await(a->acquire(sg::shader_format::dxil))) == "BRDF");
     CHECK(fake_compiler::source_of(await(b->acquire(sg::shader_format::dxil))) == "BRDF");
-    CHECK(a->dependencies()[1] == "common/brdf.hlsli");
+    CHECK(a->dependencies()[1].path == "common/brdf.hlsli");
 }
 
 TEST("slib - a missing include fails on the async channel", exclusive("slib-shader-library"))

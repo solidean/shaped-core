@@ -15,6 +15,7 @@ using namespace cc::primitive_defines;
 
 // virtual filesystem
 enum class file_revision : u64;
+struct file_dependency;
 struct embedded_file;
 class filesystem;
 class memory_filesystem;

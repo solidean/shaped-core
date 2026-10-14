@@ -325,6 +325,45 @@ TEST("slib - an edit made during a format's first compile reaches that format", 
     CHECK(fake_compiler::source_of(*next->try_value()) == "v2");
 }
 
+TEST("slib - an edit made during an asset's very first compile reaches it", exclusive("slib-shader-library"))
+{
+    reload_fixture f;
+    auto compiler = std::make_unique<interrupting_compiler>();
+    auto* const spirv = compiler.get();
+    f.lib.add_compiler(cc::move(compiler));
+    f.start();
+
+    // Nothing is acquired, so nothing is watched, and the edit stages no reload at all.
+    spirv->interrupt_next_preprocess(
+        [&]
+        {
+            f.fs->write("invert.hlsl", "v2");
+            f.lib.poll_hot_reload();
+        });
+    auto const first = f.pkg.invert->acquire(sg::shader_format::spirv);
+    REQUIRE(first->has_value());
+    CHECK(fake_compiler::source_of(*first->try_value()) == "v1");
+
+    // The watcher meets the file only now, after the edit, and has to learn from the compile that it read an older one.
+    f.lib.poll_hot_reload();
+    auto const next = f.pkg.invert->acquire(sg::shader_format::spirv);
+    REQUIRE(next->has_value());
+    CHECK(fake_compiler::source_of(*next->try_value()) == "v2");
+}
+
+TEST("slib - an edit landing after a first compile installs, before the watcher meets the file, reaches it",
+     exclusive("slib-shader-library"))
+{
+    reload_fixture f;
+    f.start();
+
+    CHECK(f.source() == "v1");
+    // The install has woken the watcher, which has not scanned yet when the edit lands.
+    f.fs->write("invert.hlsl", "v2");
+    f.lib.poll_hot_reload();
+    CHECK(f.source() == "v2");
+}
+
 TEST("slib - poll_hot_reload is a no-op before hot reload is started", exclusive("slib-shader-library"))
 {
     reload_fixture f;
