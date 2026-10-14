@@ -489,6 +489,20 @@ An async fuzz CHECK firing on any worker was first caught by a capture tag pushe
 It settled on one atomic pointer on `test_context`, read right after the `current_context()` lookup every check already makes: a relaxed load per check, nothing per step.
 The same review showed why **intercepting beats undoing**: a restore cannot take back the log line each failure writes, and a divert read before it happens has nothing to undo.
 
+### A per-resource cache is priced on how its parts are used, not on how long the resource lives
+
+A cache that lives as long as its resource is cheapest for a resource used the same way every frame, and that is the case a benchmark naturally measures.
+The resource's lifetime is the wrong axis when parts of it are used once and then never again.
+A review recommended that vulkan attachment views live as long as their texture.
+Its numbers had it equal for transient targets and 7× to 170× cheaper for persistent ones rendered every frame, and it got this back:
+
+```raw
+Many persistent textures get their lower mip levels as render targets but never use them again. Therefore they should not permanently hold views that they don't need.
+```
+
+The views stayed per epoch, at a create and a destroy per frame for a persistent target, and the reason went into the design doc.
+Before recommending a longer-lived cache, name the usage pattern each row of the benchmark stands for, and the one it leaves out.
+
 ### Out-of-order execution invalidates every collapsed maximum
 
 When a change lets work complete out of submission order, find every place that folds a set of values into one number and waits on it.
