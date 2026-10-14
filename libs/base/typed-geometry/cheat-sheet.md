@@ -428,7 +428,7 @@ tg::traits::is_zero(x);  tg::traits::is_one(x);   // bool — routed through the
 tg::one<T>();                             // T   — multiplicative identity (always)
 tg::sqrt(x);                              // T   — requires has_sqrt<T>
 tg::abs(x);                               // T   — constexpr; requires has_abs<T> (integers too, not bool)
-tg::is_finite(x); tg::is_nan(x); tg::is_inf(x);  // bool — requires has_non_finite<T>: f32, f64, f16; an integer is a compile error
+tg::is_finite(x); tg::is_nan(x); tg::is_inf(x);  // constexpr bool — requires has_non_finite<T>: f32, f64, f16; an integer is a compile error
 tg::sin(a); tg::cos(a); tg::tan(a);       // angle<T> -> T          — requires has_trigonometry<T>
 tg::sec(a); tg::csc(a); tg::cot(a);       // angle<T> -> T          — reciprocals (free == member a.sin()…)
 tg::sin_cos(a);                           // angle<T> -> cc::pair<T,T> {sin, cos}

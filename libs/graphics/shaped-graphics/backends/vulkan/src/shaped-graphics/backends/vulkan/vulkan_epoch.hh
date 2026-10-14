@@ -46,6 +46,7 @@ struct sg::backend::vulkan::vulkan_expiring_resource
     VkBuffer buffer = VK_NULL_HANDLE;
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
+    cc::vector<VkImageView> image_views; // destroyed ahead of `image`, which they may view
     cc::vector<cc::unique_function<void()>> finalizers;
 
     /// The heap a placed resource lives in, released only after `buffer` is destroyed.
@@ -100,6 +101,9 @@ inline void release_expiring(VkDevice device,
                              vulkan_expiring_resource& r,
                              cc::vector<cc::unique_function<void()>>& out_finalizers)
 {
+    for (auto const view : r.image_views)
+        vkDestroyImageView(device, view, nullptr);
+    r.image_views.clear();
     if (r.buffer != VK_NULL_HANDLE)
         vkDestroyBuffer(device, r.buffer, nullptr);
     if (r.image != VK_NULL_HANDLE)

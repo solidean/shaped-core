@@ -900,9 +900,11 @@ A barrier waits for every thread of its workgroup, and a derivative compares a p
 So each stands where every invocation of its group arrives together, which the check pass judges once every call is inlined.
 It judges the tree an emitter prints, and must be sound for every target: what it accepts reaches each call in uniform control flow.
 Its rules start from WGSL's, but refusing all that Tint refuses is no goal; where Tint refuses a sound program, the WGSL text silences it (EMIT-103).
+Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules where SGL's own are finer (CHK-284).
 
 * **CHK-282** A barrier, and a builtin that takes derivatives implicitly, in **non-uniform control flow** is `non-uniform-control-flow`, at the call.
   A note names the branch or the exit that made the flow so, and what the branch tested.
+  A branch of the prelude is no line of the program, so the note names the program's call that reached it instead.
   `sample` without a `level` or gradients, `sample_compare` without a `level`, `ddx`, `ddy` and `fwidth` take derivatives.
   A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
 * **CHK-283** A value is **non-uniform** where it comes from what the stage is handed, from a `mut` buffer or a `mut` image,
@@ -919,9 +921,12 @@ Its rules start from WGSL's, but refusing all that Tint refuses is no goal; wher
   Every other value is uniform: a literal, a `const`, a member of a constant block, and an element of a read-only buffer at a uniform index.
 * **CHK-284** Control flow is non-uniform inside an `if`, a `case` or a loop whose condition is non-uniform, and the right side of an `and` or an `or` whose left side is.
   It stays so after an `if` or a `case` one of whose sides leaves in non-uniform control flow, and for the rest of the entry point after such a `return`.
-  A loop some invocations leave early, by a `break`, a `continue` or a `return` in non-uniform control flow, is non-uniform throughout and after it.
+  A loop some invocations leave early, by a `break`, a `continue` or a `return` in non-uniform control flow, is non-uniform throughout.
   A `while` condition is tested again before every iteration, so such a loop's condition runs in non-uniform control flow too.
-  An inlined function's early `return` is such an exit of the block it became.
+  After a loop whose early exits are only `break` and `continue`, control flow is as uniform as it was before the loop ([why](why/checking.md#chk-284)).
+  An inlined function's early `return` leaves the block it became, so the rest of that block is non-uniform, and what follows it is as uniform as what came before it.
+  A barrier and `workgroup_uniform_load` keep WGSL's rule instead.
+  For them, control flow is non-uniform after a loop or a block some invocations leave early, and after a loop whose condition is non-uniform.
   A `discard` changes nothing, as in WGSL, where the pixel goes on as a helper of its quad.
 * **CHK-374** `workgroup_uniform_load(m)` waits at a workgroup barrier, then reads `m`, and its result is uniform ([why](why/checking.md#chk-374)).
   `m` is a member of a `@workgroup` binding, or a field of one at any depth; an index on the way is `unsupported-yet`, and an atomic or anything else is `wrong-kind-of-name`.
@@ -1199,14 +1204,18 @@ hit_group textured for path_rays:
   A target spells that as a loop that runs one time.
   In each copy the variable is that value, as a literal, so a branch on it is CHK-356's and keeps the one side that copy takes.
   `continue` leaves the copy it stands in, and `break` leaves at once, skipping the rest of its copy and every copy after it.
+  What a copy never runs is never written, so no rule judges it: nothing after an exit a constant decides, and no copy after one that a constant `break` or a `return` ends.
   Both bounds are `int` constants (CHK-310) once the entry point is inlined: a literal, a `const`, an option, a literal argument, an enclosing unrolled variable, or a pure builtin of those.
   A bound that is none of those is `invalid-constant-argument`.
   A loop writes at most 256 copies, each counted once per copy of every unrolled loop around it: 8 values inside an unrolled loop of 4 values are 32 copies.
   A loop that would write more is the warning `unroll-too-long`, and stays an ordinary loop, while the unrolled loops around it still unroll.
   So in a nest, the loop that stays a loop is the first one, from the outside in, whose copies pass the limit.
   An inner bound that reads an outer index is counted copy by copy, so only the copies whose range passes the limit keep a loop.
-  An outer loop that stays a loop leaves such a bound no constant, so that inner `@unroll` is `invalid-constant-argument`, an error rather than the warning.
+  An outer loop that stays a loop leaves such a bound no constant, so inside it an inner `@unroll` whose bound is no constant stays a loop too.
+  That is `unroll-too-long` as well, and its detail names the outer loop.
+  Outside an unrolled loop that stays a loop, a bound that is no constant stays `invalid-constant-argument`.
   On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
+  So are arguments, such as the count of `@unroll(4)`, which would unroll the loop in part.
 * **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
   Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.
   In the flat tree it is the block of CHK-170 around an `if`, so a branch under a non-uniform condition is in non-uniform control flow (CHK-284).
@@ -1350,13 +1359,13 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## Diagnostic kinds
 
-Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except five warnings.
+Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
 They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform` and `unroll-too-long`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
@@ -1425,3 +1434,6 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 * Whether a `case` over a constant scrutinee drops the arms it does not take, as CHK-356 drops a branch.
 * Whether a resource parameter takes a member of a narrower access, as a builtin's pattern does (CHK-207), rather than of exactly its type.
 * Whether `workgroup_uniform_load` takes an element of a workgroup array at a uniform index.
+* Whether `@subgroup_size` is uniform.
+* Whether a value loaded through an element a `nonuniform` index picked is non-uniform — it counts as uniform today, which is a soundness hole of the same kind.
+* Whether a ray query's committed hit may assume that traversal finds one ray's hits the same way in every lane.

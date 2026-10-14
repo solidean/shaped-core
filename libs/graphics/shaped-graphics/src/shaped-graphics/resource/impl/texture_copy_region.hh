@@ -12,6 +12,11 @@ namespace sg::impl
 /// `texture` must be non-null.
 void assert_valid_subresource(raw_texture_handle const& texture, subresource_index const& sub);
 
+/// Asserts `texture` is no depth or depth-stencil texture, which no copy or upload from bytes may write.
+/// The backends disagree on a depth texel's buffer layout, and WebGPU refuses the copy outright; downloads read depth back fine.
+/// `texture` must be non-null.
+void assert_writable_from_bytes(raw_texture_handle const& texture);
+
 /// The whole texel box of `texture`'s subresource `sub`: offset 0, and size the mip extent — depth 1 for a 2D or 1D texture, which is a single slice.
 /// `texture` must be non-null and `sub.mip_level` in range; unlike assert_valid_subresource it checks neither the array layer nor the aspect.
 [[nodiscard]] texture_region full_subresource_region(raw_texture_handle const& texture, subresource_index const& sub);

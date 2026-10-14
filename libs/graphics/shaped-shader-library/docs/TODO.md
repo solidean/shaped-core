@@ -14,6 +14,8 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   `sgl_host_code.py` types `bool`, `int` and `pixel_format` alone, so the file's options struct leaves such an option out, and a wrapper reaching one is a generator error.
   Generating the enum beside the struct, from the cases `sgl describe` would have to report, would close it.
 - **SGL modules are read whole on every compile.** Every SGL compile lists and reads every module directory of the library.
+- **An edit to one SGL module misses the preprocess cache for every SGL shader.** The SGL edge's key hashes every module file of the library, used or not.
+  Keying on the modules a result actually used, stored with their hashes and checked on read, would invalidate only that module's users.
 - **A module file that appears is not seen by hot reload.** A shader depends on the module files it reached, or on every one that existed when it failed.
   So a file created later is nobody's dependency.
   The way out is a dependency per module directory whose revision is its listing.

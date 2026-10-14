@@ -17,9 +17,11 @@ public:
 
     /// Frees `view`'s element, which the caller will not acquire again, and with it the view and what it keeps alive.
     ///
-    /// An element left alone is reclaimed only once the array is full, so it holds its resource until then: a texture
-    /// replaced or dropped would stay resident for as long as the array has room.
-    /// Freed at once if no index from this epoch names it, otherwise at the first acquire of a later epoch.
+    /// An element left alone is reclaimed only once the array is full, so it holds its resource until then.
+    /// A texture replaced or dropped would stay resident for as long as the array has room.
+    /// Freed at once if no index from this epoch names it, otherwise at the first acquire or release of a later epoch.
+    /// An array that sees neither after that keeps the deferred views alive until it is destroyed.
+    /// It mutates the staging group, so it takes the same owner and lock as `acquire`.
     /// An element `persistent` holds is left alone: dropping the last handle is what frees it.
     void release(raw_view const& view) { _state.release(view); }
 

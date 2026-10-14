@@ -3,6 +3,7 @@
 #include <shaped-graphics/resource/impl/texture_copy_region.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/resource/raw_buffer.hh>
+#include <shaped-graphics/resource/raw_texture.hh>
 
 namespace sg
 {
@@ -19,6 +20,9 @@ void command_list_copy_scope::buffer_to_texture(buffer_texture_copy args)
 {
     CC_ASSERT(args.src != nullptr, "copy source buffer is null");
     CC_ASSERT(args.dst != nullptr, "copy dest texture is null");
+    CC_ASSERT(args.src->usage().has(buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
+    CC_ASSERT(args.dst->usage().has(texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
+    impl::assert_writable_from_bytes(args.dst);
     impl::assert_valid_subresource(args.dst, args.subresource);
     _cmd.check_copy_outside_rendering_targets(args.dst.get(), args.subresource, "a copy into a texture");
 

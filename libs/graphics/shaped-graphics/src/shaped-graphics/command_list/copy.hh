@@ -50,6 +50,8 @@ inline constexpr isize buffer_texture_offset_alignment = 512;
 /// The buffer holds the region row after row, `src_row_pitch_in_bytes` apart, and depth slice after depth slice.
 /// A row of a block-compressed format is a row of blocks, so a 4x4-block format's region of height h is ceil(h / 4) rows.
 /// This is the copy a compute shader's output takes into a texture it could not write directly, such as a BC encoder's.
+/// `dst` must not have a depth or depth-stencil format: the backends disagree on a depth texel's buffer layout, and WebGPU refuses the copy.
+/// Reading depth back, through `cmd.download` or `ctx.download`, is fine on every backend.
 struct sg::buffer_texture_copy
 {
     raw_buffer_handle src;                    ///< copy source; must not be null; needs buffer_usage::copy_src

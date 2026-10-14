@@ -26,7 +26,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
-from tools.dev.lib.pipeline.benchmarks import collect_benchmarks, select_benchmarks
+from tools.dev.lib.pipeline.benchmarks import collect_benchmarks, select_benchmarks, unselected_overreach
 
 from tools.dev.lib.toolchain import jsruntime as jsr
 
@@ -114,6 +114,10 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if not selected:
         ctx.die(diagnostic)
 
+    if overreach := unselected_overreach(selected, benchmarks):
+        pairs = ", ".join(f"{name!r} would also run {other!r}" for name, other in overreach)
+        ctx.die(f"a binary selects benchmarks by substring, so {pairs}. Rename one so neither name contains the other")
+
     # Grouped by binary so one launch runs every benchmark it carries, which is what lets several rows share one
     # process — and one system summary, and one .ccrec.
     by_target: dict[str, list] = {}
@@ -133,6 +137,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             if artifact is None:
                 ctx.die(f"target {target!r} has no built artifact for preset {preset.name!r}")
 
+            # Each name is a substring filter within the bucket, which unselected_overreach has ruled safe above.
             command = [str(artifact), "--benchmarks"]
             for b in by_target[target]:
                 command.append(b.name)

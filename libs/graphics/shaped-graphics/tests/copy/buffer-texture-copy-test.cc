@@ -1,4 +1,7 @@
+#include <clean-core/container/pinned_data.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -312,4 +315,52 @@ INVOCABLE_TEST("sg - a BC texture is refused where texture_compression_bc is abs
                         .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst,
                     }),
                     sg::allocation_exception);
+
+    // A size off the block grid is refused too, and still for the missing feature rather than for the alignment.
+    auto message = cc::string();
+    try
+    {
+        (void)ctx->persistent.create_raw_texture({
+            .format = sg::pixel_format::bc1_rgba_unorm,
+            .dimension = sg::texture_dimension::d2,
+            .width = 6,
+            .height = 6,
+            .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst,
+        });
+    }
+    catch (sg::allocation_exception const& e)
+    {
+        message = cc::string(e.message());
+    }
+    CHECK(message.contains("texture_compression_bc"));
+}
+
+// Writing a depth texture from bytes means a different texel layout on each backend, so every entry point refuses it up front.
+// Reading one back stays legal, and is not covered here.
+INVOCABLE_TEST("sg - a depth texture is refused as the destination of a copy or an upload",
+               (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const depth = ctx->persistent.create_raw_texture({
+        .format = sg::pixel_format::depth32_float,
+        .dimension = sg::texture_dimension::d2,
+        .width = 4,
+        .height = 4,
+        .usage = sg::texture_usage::depth_stencil | sg::texture_usage::copy_dst,
+    });
+    auto const src = make_pattern_source(ctx, 256 * 4);
+    auto const pixels_owner = pattern_bytes(4 * 4 * 4);
+    auto const pixels = cc::span<byte const>(pixels_owner);
+    auto cmd = ctx->create_command_list();
+
+    auto const copy = [&] { cmd->copy.buffer_to_texture({.src = src, .dst = depth, .src_row_pitch_in_bytes = 256}); };
+    auto const inline_upload = [&] { cmd->upload.bytes_to_texture(depth, pixels); };
+    auto const async_upload = [&] { ctx->upload.bytes_to_texture(depth, cc::make_pinned_data(pixels)); };
+    auto const stream_upload = [&] { (void)ctx->stream.bytes_to_texture(depth, cc::make_pinned_data(pixels)); };
+    CHECK_ASSERTS(copy());
+    CHECK_ASSERTS(inline_upload());
+    CHECK_ASSERTS(async_upload());
+    CHECK_ASSERTS(stream_upload());
+    ctx->submit_command_list(cc::move(cmd));
 }

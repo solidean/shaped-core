@@ -27,6 +27,14 @@ void assert_valid_subresource(raw_texture_handle const& texture, subresource_ind
     CC_ASSERT(sub.aspect == texture_aspect::color, "only the color aspect is supported for texture copies yet");
 }
 
+void assert_writable_from_bytes(raw_texture_handle const& texture)
+{
+    CC_ASSERT(texture != nullptr, "texture is null");
+    CC_ASSERT(!is_depth_format(texture->description().format), "a depth or depth-stencil texture cannot be written "
+                                                               "from a buffer or from bytes; render or clear it "
+                                                               "instead");
+}
+
 texture_region full_subresource_region(raw_texture_handle const& texture, subresource_index const& sub)
 {
     CC_ASSERT(texture != nullptr, "texture is null");

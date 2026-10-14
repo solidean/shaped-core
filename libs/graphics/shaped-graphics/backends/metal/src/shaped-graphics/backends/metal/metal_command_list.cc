@@ -675,8 +675,6 @@ void metal_command_list::copy_buffer_to_texture(raw_buffer_handle src,
 {
     CC_ASSERT(!src->is_expired(), "copy source is a transient buffer used past its epoch");
     CC_ASSERT(!dst->is_expired(), "copy target is a transient texture used past its epoch");
-    CC_ASSERT(src->usage().has(sg::buffer_usage::copy_src), "copy source lacks copy_src usage");
-    CC_ASSERT(dst->usage().has(sg::texture_usage::copy_dst), "copy target lacks copy_dst usage");
 
     suspend_render_encoder("a copy");
 

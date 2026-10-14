@@ -755,7 +755,7 @@ sg::bindless_array::for_binding(ctx, sbg_handle, name)  // -> bindless_array (by
 arr.transient.acquire(raw_view)   // -> sg::bindless_index (enum class : u32) — valid ONLY for the epoch it was acquired in; re-acquire the working set every epoch
                                   //   same view -> SAME index, O(1), no descriptor touched; a miss writes exactly ONE staging descriptor
                                   //   a full array reclaims EVERY index not acquired this epoch at once; all-current-epoch = the working set exceeds the count -> asserts
-arr.transient.release(raw_view)   // the caller will not acquire it again: frees its element NOW, or at a later epoch's first acquire if this one acquired it
+arr.transient.release(raw_view)   // the caller will not acquire it again: frees its element NOW, or at a later epoch's first acquire or release if this one acquired it (neither ever → held until the array dies)
                                   //   an element left alone holds its view, and so its RESOURCE, until the array fills — release a texture you replaced
 arr.persistent.acquire(raw_view)  // -> sg::bindless_element_handle (shared_ptr<bindless_element const>) — pinned; the index outlives the epoch
                                   //   THE ONLY index you may write into GPU memory that outlives an epoch (a material buffer above all)
@@ -776,6 +776,7 @@ cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / wor
 cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group counts buffer<sg::dispatch_args> element `index` holds, read by the GPU at the dispatch
                                          //   sg::dispatch_args { u32 x = 0, y = 1, z = 1 } — a shader's own uint3 struct re-types with reinterpret_as<sg::dispatch_args>()
                                          //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)
+                                         //   each count must be at most 65535; larger is undefined, and webgpu skips the dispatch
                                          //   the args must not be bound writable to the same dispatch (webgpu refuses it); bytes: dispatch_groups_indirect_bytes(raw_buffer_handle, offset_in_bytes % 4 == 0)
 //   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
 cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only

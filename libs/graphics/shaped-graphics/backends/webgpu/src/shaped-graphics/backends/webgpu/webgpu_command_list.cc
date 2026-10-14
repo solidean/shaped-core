@@ -435,8 +435,6 @@ void webgpu_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
 {
     auto const& s = as_webgpu_buffer(src);
     auto const& d = as_webgpu_texture(dst);
-    CC_ASSERT(s.usage().has(sg::buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
-    CC_ASSERT(d.usage().has(sg::texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
 
     // WebGPU counts rows per image in block rows, the same unit sg's pitch is in.
     auto const extent = isize(sg::format_block_extent(d.format()));
