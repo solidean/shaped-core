@@ -1,7 +1,7 @@
 ---
 name: reviewing-a-pr
 description: Review a pull request, a branch or a design together with the maintainer, driving the review tool — pin the range, account for every change, write standalone entries with anticipated answers, and iterate in rounds. Use whenever you're asked to review a PR, look at a PR number or branch, give a second opinion, or think through a design before it is built.
-when_to_use: "review this PR", "look at PR #<n>", "what do you think of <pr url>", "review my branch", "second opinion on this change", "let's design X before building it"
+when_to_use: '"review this PR", "look at PR #<n>", "what do you think of <pr url>", "review my branch", "second opinion on this change", "let''s design X before building it"'
 allowed-tools: Bash Read Write Edit mcp__repo_tools__repo_search mcp__repo_tools__repo_view mcp__repo_tools__repo_structure mcp__repo_tools__file_structure mcp__repo_tools__build_diag mcp__repo_tools__test_diag
 ---
 

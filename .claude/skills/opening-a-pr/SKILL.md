@@ -1,7 +1,7 @@
 ---
 name: opening-a-pr
 description: How to open a pull request in shaped-core — which changes get one at all, branch naming, commit attribution, and the PR description style guide. Use whenever you're asked to open/create a PR, push a branch for review, or write a PR description.
-when_to_use: "open a PR", "create a pull request", "push this for review", "raise a PR", "write the PR description", "make a PR"
+when_to_use: '"open a PR", "create a pull request", "push this for review", "raise a PR", "write the PR description", "make a PR"'
 allowed-tools: Bash Read
 ---
 
