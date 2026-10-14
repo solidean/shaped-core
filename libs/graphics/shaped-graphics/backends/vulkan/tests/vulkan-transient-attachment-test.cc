@@ -8,13 +8,13 @@
 // A transient attachment recreated every epoch, with epochs actually pipelined — a per-frame depth buffer or
 // G-buffer, which is what every frame loop builds.
 //
-// The hazard is in the VkImageView cache rather than in the GPU work.
-// A cached view is dropped by its texture's own finalizer, which runs when the VkImage is destroyed at epoch retire;
-// the texture *object* dies a full pipeline depth earlier, and the allocator hands its address straight to the next
-// transient texture.
-// An entry keyed on that address is therefore inherited by a different texture, so the frame renders through a view
-// of an image that is about to be freed under the GPU — a use-after-free that surfaces as VK_ERROR_DEVICE_LOST
-// several frames later, nowhere near its cause.
+// The hazard is in the attachment views rather than in the GPU work.
+// A view is created per texture and epoch, and destroyed when that epoch retires, at the same point as the VkImage of
+// a transient texture expired in it.
+// The texture *object* dies a full pipeline depth earlier, and the allocator hands its memory straight to the next
+// transient texture, so any view cache keyed on the object's address would let the new texture render through a view
+// of an image about to be freed under the GPU — a use-after-free that surfaces as VK_ERROR_DEVICE_LOST several frames
+// later, nowhere near its cause.
 //
 // Nothing is read back inside the loop on purpose: a blocking readback retires every epoch immediately, which closes
 // the very window the test exists to hold open.

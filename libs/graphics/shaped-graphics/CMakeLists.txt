@@ -288,6 +288,7 @@ if(SC_BUILD_TESTS)
             tests/texture/texture-feature-test.cc
             tests/command_list/command_list-test.cc
             tests/command_list/index_buffer_alignment-test.cc
+            tests/command_list/parallel-rendering-test.cc
             tests/transfer/transfer-test.cc
             tests/transfer/transfer-fuzz-test.cc
             tests/transfer/upload-async-test.cc
@@ -310,7 +311,7 @@ if(SC_BUILD_TESTS)
             tests/present/present-test.cc
         )
         if(WIN32)
-            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc)
+            target_sources(shaped-graphics-test PRIVATE tests/backends/dx12-entry.cc tests/backends/dx12-rtv-record-time-test.cc)
         endif()
         if(Vulkan_FOUND)
             target_sources(shaped-graphics-test PRIVATE tests/backends/vulkan-entry.cc)

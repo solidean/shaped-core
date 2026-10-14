@@ -404,6 +404,10 @@ public:
     // Shared by drop_vulkan_command_list and the destructor's auto-drop — do not call directly, go through drop_vulkan_command_list.
     void reclaim_unsubmitted_command_list(vulkan_command_list& cmd);
 
+    // Hands the attachment views `cmd` created to the current epoch, which destroys them once it retires.
+    // Submit and drop both call it; see acquire_attachment_view.
+    void retire_attachment_views(vulkan_command_list& cmd);
+
     // sg::context overrides — forward to the backend-typed methods above.
     // The static_cast down is sound: backends never mix.
 

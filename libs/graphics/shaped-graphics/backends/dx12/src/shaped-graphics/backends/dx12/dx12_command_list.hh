@@ -155,11 +155,15 @@ public:
     cc::vector<dx12_texture_handle> _touched_textures;
 
     // Raster rendering-scope state; at most one scope is open at a time, since begin/end are balanced.
-    // begin_rendering sets _in_render_pass and records the RTV/DSV descriptor slots it created for the pass.
-    // end_rendering schedules their epoch-deferred free — they must outlive the list's GPU execution — and clears these.
     bool _in_render_pass = false;
-    cc::fixed_vector<cpu_descriptor_slot, sg::max_color_targets> _rendering_rtv_slots;
-    cpu_descriptor_slot _rendering_dsv_slot = cpu_descriptor_slot::invalid;
+
+    /// The RTV / DSV slots this list owns, grown to the most targets any of its scopes bound and freed with the list.
+    ///
+    /// **Every scope overwrites them, and nothing waits for the GPU before they are freed.**
+    /// D3D12 reads a CPU descriptor when OMSetRenderTargets or Clear*View records it, so a slot is free for reuse as
+    /// soon as the call that took it returns — tests/backends/dx12-rtv-record-time-test.cc pins that on the device.
+    cc::fixed_vector<cpu_descriptor_slot, sg::max_color_targets> _rtv_slots;
+    cpu_descriptor_slot _dsv_slot = cpu_descriptor_slot::invalid;
 
     // Raster (graphics) bind state, separate from the compute/RT state above: graphics binds through a distinct root-signature bind point.
     // That is SetGraphicsRootSignature / SetGraphicsRootDescriptorTable.

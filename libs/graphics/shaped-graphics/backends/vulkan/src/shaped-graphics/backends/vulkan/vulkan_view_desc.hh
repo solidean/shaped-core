@@ -17,6 +17,7 @@
 /// Buffers are named by device address rather than by VkBuffer handle, which is why every buffer carries one.
 /// Textures need a VkImageView, which is created here and cached by the view's own identity hash — sg already defines
 /// that hash over exactly the fields reaching a descriptor, so two equal views share one image view by construction.
+/// A rendering scope's attachment views live here too, under a different lifetime — see acquire_attachment_view.
 
 /// The identity of one cached VkImageView: the viewed texture plus every field that reaches vkCreateImageView.
 ///
@@ -50,6 +51,7 @@ struct sg::backend::vulkan::vulkan_image_view_key
 
 /// Creates and owns the VkImageViews a texture descriptor needs.
 /// One per context; a view is created on first use and lives until its texture is released.
+/// A rendering scope's attachment views are not here — see acquire_attachment_view.
 ///
 /// **A cached view is dropped with its texture, and that is load-bearing rather than tidy.**
 /// The drop rides the texture's own finalizer, so it happens exactly when the VkImage does: at epoch retire, once
@@ -70,17 +72,6 @@ public:
     /// this never conflates two views that would produce different descriptors.
     [[nodiscard]] VkImageView acquire(sg::raw_texture_view const& view);
 
-    /// The image view for a rendering-scope attachment, created on first request.
-    ///
-    /// A render-target or depth-stencil view never enters a descriptor, so it is keyed in its own map rather than
-    /// sharing the shader views' one — and it is cached at all, where dx12 allocates an RTV/DSV slot per scope and
-    /// frees it epoch-deferred at end_rendering.
-    /// Caching removes that entire dance: a scope's attachments are the same few views frame after frame.
-    [[nodiscard]] VkImageView acquire_attachment(sg::raw_texture_handle const& texture,
-                                                 sg::texture_view_dimension dimension,
-                                                 sg::pixel_format format,
-                                                 sg::subresource_range const& range);
-
     void shutdown();
 
 private:
@@ -92,11 +83,28 @@ private:
 
     vulkan_context& _ctx;
     cc::mutex<view_map> _views;
-    cc::mutex<view_map> _attachment_views;
 };
 
 namespace sg::backend::vulkan
 {
+/// The image view a rendering scope recorded in `epoch` attaches for `texture`, created on its first use that epoch.
+///
+/// **A view lives for one epoch, not for its texture.**
+/// It is cached on the texture, so every scope of the epoch that attaches the same view shares it, from any list on
+/// any thread.
+/// A view this call creates is appended to `created`, the recording list's own collection, which the list must hand
+/// to its epoch's deferred deletion at submit AND at drop — another list of the epoch may be using it.
+/// So a persistent target pays a create and a destroy per epoch it renders in, which a transient one pays anyway.
+/// A view held for the texture's life would save that, and pin views of subresources rendered once and never again —
+/// the lower mips a mip chain is generated into.
+[[nodiscard]] VkImageView acquire_attachment_view(vulkan_context& ctx,
+                                                  vulkan_texture const& texture,
+                                                  sg::epoch epoch,
+                                                  sg::texture_view_dimension dimension,
+                                                  sg::pixel_format format,
+                                                  sg::subresource_range const& range,
+                                                  cc::vector<VkImageView>& created);
+
 /// Writes the descriptor for `view` into `dst`, which must have room for the device's size for that descriptor type.
 ///
 /// `binding` says what kind of descriptor is expected, which is what lets a `vacant_view` be written at all: an empty
