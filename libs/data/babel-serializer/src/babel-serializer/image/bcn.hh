@@ -65,11 +65,13 @@ using large_block = cc::fixed_span<byte const, 16>;
 /// BC4 (ATI1): one interpolated channel, returned as (r, 0, 0, 255).
 /// A signed block's values span -127..127, and land in the 8-bit result biased: -1 reads as 0, 0 as 128 and 1 as 255,
 /// the same encoding an unsigned normal map uses.
+/// The bias applies to the exact interpolant, so a signed value is rounded once, as an unsigned one is.
+/// A signed block's green and blue are 128, the bias's zero, which is what a GPU samples there.
 /// decode_bc4_channel has the signed values themselves.
 [[nodiscard]] rgba8_block decode_bc4(small_block block, bool is_signed);
 
 /// BC5 (ATI2): two BC4 channels, the first block red and the second green, returned as (r, g, 0, 255).
-/// Signed blocks are biased exactly as in decode_bc4.
+/// Signed blocks are biased exactly as in decode_bc4, blue included.
 [[nodiscard]] rgba8_block decode_bc5(large_block block, bool is_signed);
 
 /// BC7: eight modes over one to three subsets, with optional channel rotation.
@@ -77,7 +79,8 @@ using large_block = cc::fixed_span<byte const, 16>;
 [[nodiscard]] rgba8_block decode_bc7(large_block block);
 
 /// BC6H: half-float RGB, fourteen modes, alpha always 1.
-/// Each value is the specification's half-float result, widened to a float without further rounding.
+/// Each value is the Khronos Data Format Specification's half-float result, widened to a float without further rounding.
+/// An interpolant of exactly -1 is therefore -0.0, where DirectXTex gives +0.0.
 /// A reserved mode decodes to opaque black, (0, 0, 0, 1).
 [[nodiscard]] rgba32f_block decode_bc6h(large_block block, bool is_signed);
 

@@ -3,11 +3,13 @@
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/span.hh>
 #include <nexus/test.hh>
+#include <typed-geometry/scalar/half_float.hh>
 
 using namespace cc::primitive_defines;
 
-// Every expectation here is computed by hand from the decoding rules stated in bcn.hh, never by running a decoder.
+// The expectations above the reference blocks are computed by hand from the decoding rules stated in bcn.hh.
 // The rounding cases are chosen so that truncating instead of rounding would land one below.
+// The reference blocks' expectations come from independent decoders, each named where its table starts.
 
 namespace
 {
@@ -223,15 +225,24 @@ TEST("bcn - BC4 decodes to red, unsigned and signed")
         CHECK(values[7] == -127);
     }
 
-    SECTION("signed values land in 8 bits biased")
+    SECTION("signed values land in 8 bits biased, and the unused channels read as the bias's zero")
     {
         int const indices[16] = {0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
         auto const out = decode_bc4(make_channel_block(0x81, 0x7F, indices), true);
-        CHECK(texel_is(out, 0, 0, 0, 0, 255));   // -127
-        CHECK(texel_is(out, 1, 255, 0, 0, 255)); // 127
+        CHECK(texel_is(out, 0, 0, 128, 128, 255));   // -127
+        CHECK(texel_is(out, 1, 255, 128, 128, 255)); // 127
 
         auto const zero = decode_bc4(make_channel_block(0, 0, indices), true);
-        CHECK(texel_is(zero, 0, 128, 0, 0, 255));
+        CHECK(texel_is(zero, 0, 128, 128, 128, 255));
+    }
+
+    SECTION("a signed value is rounded once, from the exact interpolant")
+    {
+        // 0 against 1 is the 6-value mode, and index 4 is 3/5, which biases to (0.6 + 127) * 255 / 254 = 128.1.
+        // Rounding 3/5 to 1 first would bias that to 128.98, one step high.
+        int const indices[16] = {4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        auto const out = decode_bc4(make_channel_block(0, 1, indices), true);
+        CHECK(texel_is(out, 0, 128, 128, 128, 255));
     }
 }
 
@@ -242,6 +253,11 @@ TEST("bcn - BC5 is red from the first block and green from the second")
     auto const out = decode_bc5(block, false);
     for (auto i = 0; i < 16; ++i)
         CHECK(texel_is(out, i, 50, 200, 0, 255));
+
+    // Signed, blue is the bias's zero.
+    auto const signed_out
+        = decode_bc5(concat(make_channel_block(0x81, 0x81, zeros), make_channel_block(0x7F, 0x7F, zeros)), true);
+    CHECK(texel_is(signed_out, 0, 0, 255, 128, 255));
 }
 
 TEST("bcn - BC7 mode 6 interpolates in 64ths with its p-bits")
@@ -335,8 +351,12 @@ TEST("bcn - BC6H mode 11 keeps 10-bit endpoints and interpolates in halves")
 // The blocks below are random, and their expected texels are Pillow 12.3's decode of them — an independent
 // implementation, run once to produce these numbers.
 // BC7 is integer-specified, so the match is exact; it covers every mode and the last rows of the three-subset table.
-// Pillow hands BC6H back as 8 bits, clamped to 0..1 and truncated, so that comparison allows one step.
+// Pillow hands BC6H back as 8 bits, clamped to 0..1 and truncated, and the test truncates babel's floats the same way.
+// Pillow's interpolation drops the specification's +32 rounding term, though, so that comparison allows one step.
 // Unsigned BC6H only: Pillow skips the sign extension after a signed block's inverse transform, and babel does not.
+//
+// The second BC6H table pins the six modes the first lacks, as half bits, so it is exact.
+// Its expectations are a Python port of DirectXTex's decoder, which Pillow agrees with within one step on every texel in 0..1.
 
 namespace
 {
@@ -352,6 +372,13 @@ struct bc6h_reference
     int code = 0;
     cc::fixed_array<u8, 16> block = {};
     cc::fixed_array<u8, 48> rgb = {};
+};
+
+struct bc6h_half_reference
+{
+    int code = 0;
+    cc::fixed_array<u8, 16> block = {};
+    cc::fixed_array<u16, 48> rgb = {};
 };
 
 constexpr bc7_reference bc7_references[] = {
@@ -443,6 +470,45 @@ constexpr bc6h_reference bc6h_references[] = {
       0x02, 0xFF, 0xFF, 0x02, 0xFF, 0xFF, 0x02, 0xFF, 0xFF, 0x02, 0xFF, 0xFF, 0x02, 0xFF, 0xFF, 0x02}},
 };
 
+constexpr bc6h_half_reference bc6h_half_references[] = {
+    {0x02,
+     {0xE2, 0xE6, 0xF0, 0x40, 0x78, 0x83, 0xD5, 0xB9, 0x1C, 0x0D, 0xB0, 0x5E, 0xA7, 0xE1, 0xA0, 0xD4},
+     {0x6FDC, 0x1D27, 0x3FF7, 0x703E, 0x1D0D, 0x400B, 0x6FD6, 0x1CE8, 0x402E, 0x6F7F, 0x1CCA, 0x4026,
+      0x701D, 0x1D15, 0x4004, 0x70C4, 0x1CE9, 0x4026, 0x7002, 0x1CF8, 0x4033, 0x6FAA, 0x1CD9, 0x402A,
+      0x6FDC, 0x1D27, 0x3FF7, 0x70A4, 0x1CF1, 0x401F, 0x7089, 0x1D27, 0x4040, 0x70B5, 0x1D36, 0x4045,
+      0x7083, 0x1CFA, 0x4019, 0x7062, 0x1D03, 0x4012, 0x705E, 0x1D18, 0x403C, 0x7032, 0x1D09, 0x4038}},
+    {0x06,
+     {0x66, 0xBC, 0x6A, 0xEC, 0xDE, 0x88, 0xF8, 0x46, 0xE6, 0xFA, 0x9F, 0xF9, 0xC3, 0x2D, 0x85, 0xCA},
+     {0x5B25, 0x0D07, 0x3599, 0x5B3B, 0x0CF5, 0x35A6, 0x5B81, 0x0CE4, 0x35AB, 0x5B86, 0x0D25, 0x359F,
+      0x5B93, 0x0DD5, 0x357E, 0x5AF8, 0x0D2B, 0x357E, 0x5B46, 0x0CED, 0x35AC, 0x5B8F, 0x0D9B, 0x3589,
+      0x5B8B, 0x0D60, 0x3594, 0x5B0E, 0x0D19, 0x358B, 0x5B19, 0x0D11, 0x3592, 0x5B7D, 0x0CA8, 0x35B5,
+      0x5B74, 0x0C33, 0x35CB, 0x5B8B, 0x0D60, 0x3594, 0x5B30, 0x0CFE, 0x359F, 0x5B03, 0x0D22, 0x3585}},
+    {0x0E,
+     {0x2E, 0x64, 0xAF, 0x8A, 0xC9, 0xCD, 0xD5, 0x18, 0x3C, 0xC1, 0x4F, 0xC1, 0xFA, 0xFB, 0xE0, 0x5E},
+     {0x4565, 0x5651, 0x2E4C, 0x4630, 0x54A8, 0x2E9E, 0x45E6, 0x5585, 0x2D40, 0x45A1, 0x5657, 0x2BF5,
+      0x4522, 0x56D8, 0x2DBB, 0x44E5, 0x5752, 0x2D38, 0x44A8, 0x57CC, 0x2CB5, 0x4699, 0x536F, 0x308F,
+      0x4609, 0x551D, 0x2DE5, 0x446B, 0x5847, 0x2C33, 0x4565, 0x5651, 0x2E4C, 0x461D, 0x54E3, 0x2FD5,
+      0x4676, 0x53D7, 0x2FE9, 0x4653, 0x5440, 0x2F43, 0x4699, 0x536F, 0x308F, 0x45A2, 0x55D7, 0x2ECF}},
+    {0x12,
+     {0x32, 0x55, 0x4A, 0x92, 0x1A, 0x50, 0xF0, 0x1A, 0x4B, 0x1B, 0xDE, 0x13, 0xCA, 0xC3, 0x9A, 0xB7},
+     {0x52B6, 0x4856, 0x215A, 0x5325, 0x48A0, 0x1FC5, 0x538E, 0x48E6, 0x1E46, 0x52F1, 0x487D, 0x2085,
+      0x4506, 0x4BCE, 0x1FBA, 0x5282, 0x4833, 0x221A, 0x524E, 0x4810, 0x22DA, 0x538E, 0x48E6, 0x1E46,
+      0x462E, 0x4C36, 0x20F3, 0x49C8, 0x4D7C, 0x24C4, 0x4AF1, 0x4DE4, 0x25FE, 0x5359, 0x48C3, 0x1F05,
+      0x49C8, 0x4D7C, 0x24C4, 0x4D42, 0x4EB6, 0x2872, 0x4C19, 0x4E4D, 0x2738, 0x4756, 0x4C9F, 0x222D}},
+    {0x16,
+     {0x56, 0x1A, 0x28, 0xCE, 0xC4, 0xE4, 0xF8, 0xBC, 0x9B, 0x08, 0x7E, 0x14, 0x72, 0x56, 0x3A, 0xB4},
+     {0x6453, 0x286C, 0x30B3, 0x6216, 0x2A62, 0x2EBE, 0x65F6, 0x26FE, 0x3222, 0x632D, 0x296D, 0x2FB2,
+      0x6C42, 0x27F6, 0x386E, 0x64DF, 0x27F2, 0x312D, 0x62A1, 0x29E7, 0x2F38, 0x656A, 0x2778, 0x31A7,
+      0x6689, 0x2A9E, 0x32E9, 0x6282, 0x2C7C, 0x2F07, 0x646A, 0x2B99, 0x30DE, 0x62A1, 0x29E7, 0x2F38,
+      0x6A59, 0x28D8, 0x3697, 0x646A, 0x2B99, 0x30DE, 0x609A, 0x2D5F, 0x2D30, 0x6871, 0x29BB, 0x34C0}},
+    {0x1A,
+     {0xDA, 0x89, 0x2E, 0x3C, 0x33, 0xDF, 0x26, 0x4C, 0x43, 0xEA, 0xA3, 0x05, 0x1A, 0x5D, 0xCF, 0xA4},
+     {0x2606, 0x2D4A, 0x4CC6, 0x26D7, 0x2BED, 0x500B, 0x23D9, 0x2F09, 0x4A0E, 0x24BC, 0x30E0, 0x4C93,
+      0x2682, 0x348E, 0x519E, 0x27B4, 0x2A7D, 0x537E, 0x2885, 0x2920, 0x56C3, 0x2682, 0x348E, 0x519E,
+      0x21FB, 0x2B27, 0x44BC, 0x273F, 0x2B3E, 0x51AD, 0x281C, 0x29CE, 0x5521, 0x2036, 0x277A, 0x3FB2,
+      0x22DE, 0x2CFE, 0x4741, 0x259F, 0x32B7, 0x4F18, 0x266E, 0x2C9B, 0x4E68, 0x281C, 0x29CE, 0x5521}},
+};
+
 block16 as_block(cc::fixed_array<u8, 16> const& bytes)
 {
     auto out = block16{};
@@ -478,6 +544,19 @@ TEST("bcn - unsigned BC6H matches an independent decoder")
                 auto const diff = mine - int(ref.rgb[t * 3 + c]);
                 matches = matches && diff >= -1 && diff <= 1;
             }
+        CHECK(matches);
+    }
+}
+
+TEST("bcn - BC6H matches DirectXTex exactly in the six modes Pillow's table lacks")
+{
+    for (auto const& ref : bc6h_half_references)
+    {
+        auto const out = decode_bc6h(as_block(ref.block), false);
+        auto matches = true;
+        for (auto t = 0; t < 16; ++t)
+            for (auto c = 0; c < 3; ++c)
+                matches = matches && out.rgba[t * 4 + c] == f32(tg::f16::make_from_bits(ref.rgb[t * 3 + c]));
         CHECK(matches);
     }
 }

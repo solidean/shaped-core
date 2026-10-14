@@ -416,8 +416,8 @@ g.type; g.run_length_encoded; g.pixel_depth; g.alpha_bits; g.stored_bottom_up; g
 
 babel::bcn::small_block(ptr); babel::bcn::large_block(ptr);   // fixed_span<byte const, 8 / 16>; the length is the constructor's precondition, unchecked
 babel::bcn::decode_bc1(block) / decode_bc2 / decode_bc3 / decode_bc7 -> rgba8_block;   // .rgba[texel * 4 + c]
-babel::bcn::decode_bc4(block, is_signed) / decode_bc5(block, is_signed) -> rgba8_block; // (r,0,0,1) / (r,g,0,1)
-babel::bcn::decode_bc6h(block, is_signed) -> rgba32f_block;  // half-float results widened, alpha 1
+babel::bcn::decode_bc4(block, is_signed) / decode_bc5(block, is_signed) -> rgba8_block; // (r,0,0,1) / (r,g,0,1); signed: 128 for 0
+babel::bcn::decode_bc6h(block, is_signed) -> rgba32f_block;  // Khronos's half-float results widened, alpha 1
 babel::bcn::decode_bc1_f32(block) ... decode_bc5_f32(block, is_signed);  // exact interpolants, before rounding
 babel::bcn::decode_bc4_channel(block, is_signed);            // the channel as integers: 0..255 or -127..127
 ```
@@ -499,7 +499,7 @@ Only what the signatures above cannot tell you.
   Use `babel::dds` for the rest, or for the blocks themselves.
 - **BC5 decodes to (x, y, 0, 1)**, and a normal's z is the consumer's to reconstruct; BC4 is (r, 0, 0, 1).
   The first BC5 block is red, ATI2 included.
-- **Signed BC4 / BC5 land biased in 8 bits** (-1 -> 0, 0 -> 128, 1 -> 255); `decode_rgba32f` has the signed values.
+- **Signed BC4 / BC5 land biased in 8 bits** (-1 -> 0, 0 -> 128, 1 -> 255), the unused channels as 128; `decode_rgba32f` has the signed values.
 - **The decode budget defaults to 256 MiB**: 8192 x 8192 in rgba8, but only 4096 x 4096 in rgba32f; the largest `isize` disables it.
 - **A DDS's stored pitch is ignored**: rows are read tightly packed, so a DWORD-padded legacy file reads skewed.
 - **A TGA has alpha only where its descriptor declares attribute bits**, at 16 and 32 bits alike; otherwise the image is rgb.
