@@ -180,6 +180,28 @@ test:
             total += row * column
     total == 16320
 
+// an outer loop that stays a loop leaves an inner bound that reads its index no constant, so the inner loop stays a loop too,
+// under the same warning; the emit tests pin that it is the only diagnostic
+@expect(warning = "unroll-too-long")
+test:
+    let mut count = 0
+    @unroll
+    for row in 0 ..< 300:
+        @unroll
+        for column in 0 ..< row + 1:
+            count += 1
+    count == 45150
+
+// while inside a loop that never was unrolled, such a bound stays an error
+@expect(error = "invalid-constant-argument")
+test:
+    let mut count = 0
+    for row in 0 ..< 3:
+        @unroll
+        for column in 0 ..< row + 1:
+            count += 1
+    count == 6
+
 // a range holding more values than an int counts is counted in full, and stays a loop
 @expect(warning = "unroll-too-long")
 test:

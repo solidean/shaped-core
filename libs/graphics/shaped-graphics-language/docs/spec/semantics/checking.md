@@ -1206,7 +1206,8 @@ hit_group textured for path_rays:
   A loop that would write more is the warning `unroll-too-long`, and stays an ordinary loop, while the unrolled loops around it still unroll.
   So in a nest, the loop that stays a loop is the first one, from the outside in, whose copies pass the limit.
   An inner bound that reads an outer index is counted copy by copy, so only the copies whose range passes the limit keep a loop.
-  An outer loop that stays a loop leaves such a bound no constant, so that inner `@unroll` is `invalid-constant-argument`, an error rather than the warning.
+  An outer loop that stays a loop leaves such a bound no constant, so inside it an inner `@unroll` whose bound is no constant stays a loop too, under `unroll-too-long`, whose detail names the outer loop.
+  Outside an unrolled loop that stays a loop, a bound that is no constant stays `invalid-constant-argument`.
   On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
 * **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
   Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.

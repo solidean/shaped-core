@@ -103,6 +103,14 @@ struct flattener
     i64 unrolled_copies = 1;
     /// How many copies of unrolled `for`s the statement being written stands in.
     i32 unrolled_depth = 0;
+    /// The innermost unrolled `for` around the statement being written that is written as a loop, by its range.
+    /// Inside it, an inner unrolled `for` whose bound reads its index has no constant bound, and is a loop too (CHK-389).
+    struct looped_unroll
+    {
+        i32 file = 0;
+        source_span where;
+    };
+    cc::optional<looped_unroll> looped_around;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
     /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
@@ -2752,6 +2760,19 @@ struct flattener
         auto const high = constant_int(end);
         auto const range_file = file();
         auto const range_where = c.span_of(range_file, loop.iterable);
+        if ((!low.has_value() || !high.has_value()) && looped_around.has_value())
+        {
+            auto const& around = looped_around.value();
+            unroll_reports.push_back(
+                {.kind = diagnostic_kind::unroll_too_long,
+                 .file = range_file,
+                 .where = range_where,
+                 .detail = cc::format("an unrolled for runs over a constant range, and this one is no constant inside "
+                                      "the unrolled for over `{}`, which is written as a loop, so this one is written "
+                                      "as a loop too",
+                                      c.text_of(around.file, around.where))});
+            return flatten_fallen_back_for(from, id, loop, first, end);
+        }
         if (!low.has_value() || !high.has_value())
         {
             unroll_reports.push_back({.file = range_file,
@@ -2780,7 +2801,7 @@ struct flattener
                                  k_max_unrolled, count, unrolled_copies, copies);
             unroll_reports.push_back(
                 {.kind = diagnostic_kind::unroll_too_long, .file = range_file, .where = range_where, .detail = detail});
-            return flatten_looped_for(from, id, loop, first, end);
+            return flatten_fallen_back_for(from, id, loop, first, end);
         }
 
         auto const type = entry.at(first).type;
@@ -2820,6 +2841,15 @@ struct flattener
         auto const written = add_list(block);
         block = cc::move(outer);
         add_stmt(from, flat_block{.label = label, .body = written});
+    }
+
+    /// An unrolled `for` written as a loop, which the unrolled `for`s inside it see.
+    void flatten_fallen_back_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end)
+    {
+        auto const around = looped_around;
+        looped_around = looped_unroll{.file = file(), .where = c.span_of(file(), loop.iterable)};
+        flatten_looped_for(from, id, loop, first, end);
+        looped_around = around;
     }
 
     /// `for i in a ..< b` as a loop of the flat tree, whose bounds `first` and `end` are flattened already.
