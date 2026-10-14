@@ -96,6 +96,8 @@ struct flattener
         i32 file = 0;
         source_span where;
         cc::string detail;
+        /// The call the loop's function was inlined through, the innermost one; none for a loop of the tree's own body.
+        call_site site = {};
     };
     cc::vector<unroll_report> unroll_reports;
     /// How many times the statement being written is written: the product of the copies of every unrolled `for` around it.
@@ -2700,6 +2702,13 @@ struct flattener
     static constexpr i64 k_max_unrolled = 256;
 
     /// The value of constant `bound`, an int, where it is one; nothing for anything else.
+    /// The innermost call the statement being written was inlined through, none in the tree's own body.
+    [[nodiscard]] call_site innermost_call() const
+    {
+        auto const chain = entry.at(frames.back().chain);
+        return chain.empty() ? call_site{} : chain[chain.size() - 1];
+    }
+
     [[nodiscard]] cc::optional<i32> constant_int(flat_expr_id bound) const
     {
         if (!is_valid(bound) || !is_constant(c.out, entry, bound))
@@ -2770,7 +2779,8 @@ struct flattener
                  .detail = cc::format("an unrolled for runs over a constant range, and this one is no constant inside "
                                       "the unrolled for over `{}`, which is written as a loop, so this one is written "
                                       "as a loop too",
-                                      c.text_of(around.file, around.where))});
+                                      c.text_of(around.file, around.where)),
+                 .site = innermost_call()});
             return flatten_fallen_back_for(from, id, loop, first, end);
         }
         if (!low.has_value() || !high.has_value())
@@ -2779,7 +2789,8 @@ struct flattener
                                       .where = range_where,
                                       .detail = "an unrolled for runs over a constant range: both bounds are int "
                                                 "constants once the function is inlined, such as `0 ..< taps` with "
-                                                "`taps` a const"});
+                                                "`taps` a const",
+                                      .site = innermost_call()});
             is_failed = true;
             meets_error = true;
             return;
@@ -2799,8 +2810,11 @@ struct flattener
                                  "unrolled loops around it, and this range of {} inside {} copies would write {}, so "
                                  "it is written as a loop",
                                  k_max_unrolled, count, unrolled_copies, copies);
-            unroll_reports.push_back(
-                {.kind = diagnostic_kind::unroll_too_long, .file = range_file, .where = range_where, .detail = detail});
+            unroll_reports.push_back({.kind = diagnostic_kind::unroll_too_long,
+                                      .file = range_file,
+                                      .where = range_where,
+                                      .detail = detail,
+                                      .site = innermost_call()});
             return flatten_fallen_back_for(from, id, loop, first, end);
         }
 
@@ -3036,6 +3050,19 @@ struct flattener
     static constexpr isize k_max_inline_depth = 256;
 };
 
+/// CHK-389: once, however many trees inline the function the loop stands in.
+/// A loop of an inlined function names the call it was reached through, whose arguments may be what its bounds read.
+void report_unroll(checker& c, flattener::unroll_report const& u)
+{
+    for (auto const& d : c.out.diagnostics)
+        if (d.what.kind == u.kind && d.file == u.file && d.what.where == u.where)
+            return;
+    auto& d = c.report(u.kind, u.file, u.where, u.detail);
+    if (ast::is_valid(u.site.call))
+        d.notes.push_back({.file = u.site.file,
+                           .where = c.span_of(u.site.file, u.site.call),
+                           .message = "reached through this call, whose arguments stand in for its parameters"});
+}
 } // namespace
 
 void checker::flatten_test(i32 index)
@@ -3084,9 +3111,8 @@ void checker::flatten_test(i32 index)
     for (auto const& v : f.subgroup_calls)
         report_reached(v, ": a run is one invocation, and has no subgroup");
 
-    // CHK-389: once, however many trees inline the function the loop stands in
     for (auto const& u : f.unroll_reports)
-        report_once(u.kind, u.file, u.where, u.detail);
+        report_unroll(*this, u);
 
     // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
     // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
@@ -3302,9 +3328,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         mark_requires_used(u.within, u.features);
     out.functions[s.info].features |= used;
     f.entry.features |= used;
-    // CHK-389: once, however many trees inline the function the loop stands in
     for (auto const& u : f.unroll_reports)
-        report_once(u.kind, u.file, u.where, u.detail);
+        report_unroll(*this, u);
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
