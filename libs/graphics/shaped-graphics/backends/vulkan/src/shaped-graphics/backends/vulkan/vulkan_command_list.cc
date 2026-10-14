@@ -808,8 +808,6 @@ void vulkan_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not vulkan resources");
     CC_ASSERT(!s->is_expired(), "copy source is a transient buffer used past its epoch (expired)");
     CC_ASSERT(!d->is_expired(), "copy target is a transient texture used past its epoch (expired)");
-    CC_ASSERT(s->usage().has(sg::buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
-    CC_ASSERT(d->usage().has(sg::texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
 
     track_buffer_access(*s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
     auto const dst_layout = track_texture_access(*d, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,
