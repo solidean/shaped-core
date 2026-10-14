@@ -44,9 +44,13 @@ struct babel::tga::data
     int height = 0;
 
     /// 1 gray, 2 gray + alpha, 3 rgb or 4 rgba — what the stored pixels hold, a palette's entries for a color-mapped image.
-    /// A 16-bit pixel has an alpha channel only when the header grants it the attribute bit.
-    /// That alpha is bit 15, which many writers leave 0 whatever the header says, so such a file reads fully transparent.
+    /// A 16- or 32-bit pixel has an alpha channel only when the descriptor declares attribute bits; otherwise its alpha
+    /// bit or byte is padding, and the image is rgb.
     int channels = 0;
+
+    /// True when the alpha channel was zero at every pixel and was read as opaque instead, as DirectXTex reads such a
+    /// file by default: a writer that left its alpha clear, rather than a fully transparent image.
+    bool alpha_was_all_zero = false;
 
     image_type type = image_type::true_color;
     bool run_length_encoded = false;

@@ -87,14 +87,29 @@ cc::result<cc::unit> check_header(raw_header const& h)
     return cc::unit{};
 }
 
-/// The channels a stored color of `bits` bits decodes to.
+/// The channels a stored color of `bits` bits decodes to: alpha only where the descriptor declares attribute bits, at
+/// every depth that can hold them.
 int channels_of_color(int bits, int alpha_bits)
 {
-    if (bits == 32)
-        return 4;
-    if (bits == 16 && alpha_bits > 0)
+    if ((bits == 32 || bits == 16) && alpha_bits > 0)
         return 4;
     return 3;
+}
+
+/// An alpha channel that is zero at every pixel was not meant as alpha — a writer that left the bits clear — so it
+/// becomes opaque, and `alpha_was_all_zero` says so; DirectXTex reads such a file the same way by default.
+void settle_all_zero_alpha(data& d)
+{
+    if (d.channels != 2 && d.channels != 4)
+        return;
+    auto* const out = reinterpret_cast<u8*>(d.pixels.data());
+    auto const count = d.pixels.size() / d.channels;
+    for (auto i = isize(0); i < count; ++i)
+        if (out[i * d.channels + d.channels - 1] != 0)
+            return;
+    for (auto i = isize(0); i < count; ++i)
+        out[i * d.channels + d.channels - 1] = 255;
+    d.alpha_was_all_zero = true;
 }
 
 /// One stored color (15/16, 24 or 32 bits, blue first) as r, g, b, a.
@@ -260,6 +275,7 @@ cc::result<data> read(cc::span<byte const> bytes, read_options opts)
     {
         for (auto i = isize(0); i < pixel_count; ++i)
             CC_RETURN_IF_ERROR(emit(i, offset + i * stored_bytes));
+        settle_all_zero_alpha(result);
         return cc::move(result);
     }
 
@@ -289,6 +305,7 @@ cc::result<data> read(cc::span<byte const> bytes, read_options opts)
         produced += count;
     }
 
+    settle_all_zero_alpha(result);
     return cc::move(result);
 }
 

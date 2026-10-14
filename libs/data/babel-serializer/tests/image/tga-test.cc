@@ -140,6 +140,50 @@ TEST("tga - 15/16-bit pixels widen each 5-bit channel")
     CHECK(without.value().channels == 3);
 }
 
+TEST("tga - the descriptor decides alpha at every depth, and an all-zero alpha reads opaque")
+{
+    SECTION("a 32-bit pixel with no attribute bits declared is rgb, its fourth byte padding")
+    {
+        u8 const body[] = {10, 20, 30, 0};
+        auto const decoded = tga::read(make_tga({.width = 1, .height = 1, .depth = 32}, body));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded.value().channels == 3);
+        int const expected[] = {30, 20, 10};
+        CHECK(pixel_is(decoded.value(), 0, 0, expected));
+    }
+
+    SECTION("32-bit alpha declared and zero everywhere reads opaque, and says so")
+    {
+        u8 const body[] = {10, 20, 30, 0, 40, 50, 60, 0};
+        auto const decoded = tga::read(make_tga({.width = 2, .height = 1, .depth = 32, .descriptor = 8}, body));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded.value().channels == 4);
+        CHECK(decoded.value().alpha_was_all_zero);
+        int const expected[] = {30, 20, 10, 255};
+        CHECK(pixel_is(decoded.value(), 0, 0, expected));
+    }
+
+    SECTION("16-bit with the attribute bit declared and bit 15 clear everywhere reads opaque")
+    {
+        u8 const body[] = {0x00, 0x7C}; // full red, bit 15 clear
+        auto const decoded = tga::read(make_tga({.width = 1, .height = 1, .depth = 16, .descriptor = 1}, body));
+        REQUIRE(decoded.has_value());
+        CHECK(decoded.value().alpha_was_all_zero);
+        int const expected[] = {255, 0, 0, 255};
+        CHECK(pixel_is(decoded.value(), 0, 0, expected));
+    }
+
+    SECTION("an alpha that is zero at only some pixels is kept as it is")
+    {
+        u8 const body[] = {10, 20, 30, 0, 40, 50, 60, 128};
+        auto const decoded = tga::read(make_tga({.width = 2, .height = 1, .depth = 32, .descriptor = 8}, body));
+        REQUIRE(decoded.has_value());
+        CHECK(!decoded.value().alpha_was_all_zero);
+        int const first[] = {30, 20, 10, 0};
+        CHECK(pixel_is(decoded.value(), 0, 0, first));
+    }
+}
+
 TEST("tga - run-length packets may cross rows")
 {
     // 3x2, 32-bit, top-down: a run of 4 red pixels spans row 0 into row 1, then 2 raw pixels.
@@ -274,7 +318,7 @@ TEST("tga - a decode larger than the budget is refused before allocating")
     auto packets = cc::vector<u8>();
     for (auto i = 0; i < 32; ++i)
         packets.push_back_range(cc::span<u8 const>(cc::fixed_array<u8, 5>{0xFF, 1, 2, 3, 4}));
-    auto const rle = make_tga({.type = 10, .width = 64, .height = 64, .depth = 32}, packets);
+    auto const rle = make_tga({.type = 10, .width = 64, .height = 64, .depth = 32, .descriptor = 8}, packets);
     CHECK(tga::read(rle, {.max_decoded_bytes = 64 * 64 * 4}).has_value());
     CHECK(tga::read(rle, {.max_decoded_bytes = 64 * 64 * 4 - 1}).has_error());
 }
