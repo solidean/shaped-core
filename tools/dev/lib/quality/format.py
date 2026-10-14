@@ -197,7 +197,9 @@ def lint_roots(root: Path, *, layout: Layout) -> list[Path]:
 def _is_lintable(path: Path, roots: list[Path], root: Path, layout: Layout) -> bool:
     if path.suffix not in _LINT_SUFFIXES:
         return False
-    if any(part in _LINT_EXCLUDED_DIRS for part in path.parts):
+    # Only the part below the root counts: a checkout that itself sits under a directory named `extern` or `build` —
+    # shaped-core as another project's submodule — is still entirely ours.
+    if any(part in _LINT_EXCLUDED_DIRS for part in path.relative_to(root).parts):
         return False
     if any(r in path.parents for r in roots):
         return True
