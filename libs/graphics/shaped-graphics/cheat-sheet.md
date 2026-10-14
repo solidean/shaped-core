@@ -784,10 +784,9 @@ cmd.compute.declare_array_texture_access(name, elements) // same for a texture a
 d.withdraw();                                            // ends it now; destroying it does the same. Move-only; a moved-from one ends nothing
                                                          // compute + raytracing are one bind point; a pipeline/group rebind ends nothing; an op binding no such array leaves it dormant
                                                          // once applied, a later op reading the array the same way skips the element work, until an element is written
-                                                         // GOTCHA: submitting the list while `d` lives ASSERTS, and ends `d` — hold it in a scope that ends before the submit
                                                          // GOTCHA: one that NO op met with a bound group holding its array asserts when it ends — a misspelled name, or declared where nothing binds it
                                                          //   not while an exception unwinds past it, so unwinding never turns into an abort here
-                                                         // a dropped list ends its declarations silently; a value outliving it then does nothing
+                                                         // a submitted or dropped list ends its declarations silently; a value outliving it then does nothing
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
 //   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()

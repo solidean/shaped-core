@@ -17,7 +17,7 @@ struct sg::impl::array_declaration_link
 
 /// One array binding's declared per-element access, in force on the bind point it was made on while this value lives.
 /// Move-only: destroying or `withdraw`ing it ends the declaration, and a moved-from one ends nothing.
-/// Submitting its list while it is alive asserts, and ends it all the same; dropping the list ends it silently.
+/// Submitting or dropping its list ends it silently.
 /// A raster declaration also ends when its rendering scope closes.
 /// Once ended by any of those, destroying the value does nothing — it never touches a list that is gone.
 ///

@@ -57,7 +57,7 @@ The compute, raytracing and raster scopes each carry the pair, and an element is
 Compute and raytracing are one bind point, raster the other, and a raster declaration also ends when its rendering scope closes.
 Binding a pipeline or a group ends nothing, and an op where no bound group holds the array leaves the declaration dormant.
 Every live declaration naming an array applies to it, as several declarations before one op always have.
-Submitting the list while one is alive asserts, and ends it all the same; dropping the list ends them silently.
+Submitting or dropping the list ends every live one silently, and a value outliving that does nothing.
 
 What one declaration meeting many ops changes is the element work, and only that — the rules below still decide per op:
 

@@ -316,10 +316,8 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
     auto declares = cc::vector<sg::array_buffer_access>();
     for (auto e = 0; e < k_inputs; ++e)
         declares.push_back({.index = e, .access = sg::access_flag::shader_read});
-    {
-        auto const declared = cmd->compute.declare_array_buffer_access("inputs", declares);
-        cmd->compute.dispatch_groups(k_count, 1, 1);
-    }
+    auto const declared = cmd->compute.declare_array_buffer_access("inputs", declares);
+    cmd->compute.dispatch_groups(k_count, 1, 1);
 
     auto future = cmd->download.bytes_from_buffer(output, 0, output->size_in_bytes());
     ctx->submit_command_list(cc::move(cmd));

@@ -186,11 +186,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     sg::array_texture_access const tex_access[] = {
         {.index = 1, .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture},
     };
-    {
-        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
-        auto const texs = disp->compute.declare_array_texture_access("Texs", tex_access);
-        disp->compute.dispatch_groups(1);
-    }
+    auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
+    auto const texs = disp->compute.declare_array_texture_access("Texs", tex_access);
+    disp->compute.dispatch_groups(1);
     ctx.submit_command_list(cc::move(disp));
 
     auto down = ctx.create_command_list();
@@ -282,11 +280,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: an undeclared array logs
         disp->compute.bind_group(0, *g0);
         disp->compute.bind_group(1, *g1);
         disp->compute.bind_group(2, *g2);
-        {
-            auto const bufs = disp->compute.declare_array_buffer_access("Bufs", {});
-            auto const texs = disp->compute.declare_array_texture_access("Texs", {});
-            disp->compute.dispatch_groups(1);
-        }
+        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", {});
+        auto const texs = disp->compute.declare_array_texture_access("Texs", {});
+        disp->compute.dispatch_groups(1);
         ctx.submit_command_list(cc::move(disp));
         ctx.advance_epoch();
         co_await ctx.idle_completion();
@@ -349,11 +345,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a declaration for an arr
     sg::array_buffer_access const buf_access[] = {
         {.index = 0, .access = sg::access_flag::shader_read},
     };
-    {
-        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
-        auto const texs = disp->compute.declare_array_texture_access("Texs", {});
-        disp->compute.dispatch_groups(1);
-    }
+    auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
+    auto const texs = disp->compute.declare_array_texture_access("Texs", {});
+    disp->compute.dispatch_groups(1);
     ctx.submit_command_list(cc::move(disp));
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -393,10 +387,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a write the declarations
         sg::array_buffer_access const reads[] = {
             {.index = 1, .access = sg::access_flag::storage_read},
         };
-        {
-            auto const rws = disp->compute.declare_array_buffer_access("Rws", reads);
-            disp->compute.dispatch_groups(1);
-        }
+        auto const rws = disp->compute.declare_array_buffer_access("Rws", reads);
+        disp->compute.dispatch_groups(1);
         ctx.submit_command_list(cc::move(disp));
     }
     ctx.advance_epoch();

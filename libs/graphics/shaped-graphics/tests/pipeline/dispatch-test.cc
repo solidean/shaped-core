@@ -795,10 +795,8 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    {
-        auto const declared = cmd->compute.declare_array_buffer_access("lanes.sources", reads);
-        cmd->compute.dispatch_threads(64);
-    }
+    auto const declared = cmd->compute.declare_array_buffer_access("lanes.sources", reads);
+    cmd->compute.dispatch_threads(64);
     {
         auto scope
             = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},

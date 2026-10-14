@@ -31,7 +31,7 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
   The compute and trace facades make it in [compute.hh](../../src/shaped-graphics/command_list/compute.hh#L81-L91) and [raytracing.hh](../../src/shaped-graphics/command_list/raytracing.hh#L77-L85).
   The raster facades make it in [raster.hh](../../src/shaped-graphics/command_list/raster.hh#L159-L168).
   The core list keeps the links and ends them all when it dies ([command_list.cc:9-40](../../src/shaped-graphics/command_list/command_list.cc#L9-L40)).
-  Every backend's submit ends them too, after asserting there are none ([command_list.cc:93-100](../../src/shaped-graphics/command_list/command_list.cc#L93-L100)).
+  Every backend's submit ends them too, silently ([command_list.cc:93-97](../../src/shaped-graphics/command_list/command_list.cc#L93-L97)).
   It ends the raster ones at `close_rendering` ([raster.cc:109-110](../../src/shaped-graphics/command_list/raster.cc#L109-L110)).
 - **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one.
   The compute pair and the withdraw are at [command_list.hh:138-148](../../src/shaped-graphics/command_list/command_list.hh#L138-L148).
@@ -225,7 +225,7 @@ It is in force on its bind point for as long as it lives, and destroying it with
 ```cpp
 /// One array binding's declared per-element access, in force on the bind point it was made on while this value lives.
 /// Move-only: destroying or `withdraw`ing it ends the declaration, and a moved-from one ends nothing.
-/// Dropping its list ends it silently; submitting the list asserts that it is gone, and ends it if it is not.
+/// Submitting or dropping its list ends it silently.
 /// A raster declaration also ends when its rendering scope closes.
 /// Once ended by any of those, destroying the value does nothing — it never touches a list that is gone.
 class sg::array_access_declaration
@@ -286,9 +286,9 @@ webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list
 
 - **From the call until the value is destroyed or withdrawn.**
 - **A raster declaration also ends when its rendering scope closes**, which keeps today's rule that a raster declaration goes with its scope.
-- **Submit ends every live declaration, as dropping the list does.**
-  Submitting with one alive is still a bug, and submit asserts it.
-  Ending them as well means a `release` build, with that assert compiled out, never leaves a token naming a submitted list.
+- **Submit ends every live declaration silently, as dropping the list does.**
+  After a submit no op is ever recorded on that list again, so a declaration still alive has nothing it could leak into.
+  The value outliving the submit is inert: its token is dead, and destroying it touches nothing.
 - **Dropping the list ends every declaration silently.**
   A drop is what exception unwinding does to a half-recorded list, and a value destroyed later must find its token dead rather than a freed list.
 - **Binding a pipeline or a group does not end it.**
@@ -410,7 +410,7 @@ It also keeps a small application cache, one record per (group, array binding), 
 The list keeps `member_writes`.
 Withdraw erases the entry, bumps its name's generation, and runs the never-met check.
 `raster_end_rendering` ends the raster entries last, so the never-met check, which asserts on the first that fails it, finds the scope closed.
-Submit asserts that no value is alive, then unlinks any that is, as a drop does; the entries go with the list, and neither runs the check.
+Submit unlinks any value still alive, as a drop does; the entries go with the list, and neither runs the check.
 No end runs the check while an exception unwinds.
 `track_access` gains a "from an array application" argument and returns whether it hit a member in the write bucket, and whether the slot's current op already held a write or layout change.
 
@@ -622,7 +622,7 @@ New tests, tier 1 (run against every backend that has binding arrays) unless not
 - **Scope close ends a raster one**, and destroying the value afterwards does nothing.
 - **A raster declaration that never met its array asserts when its scope closes**, and the list is whole after.
 - **Unwinding past a declaration that never met its array does not assert**, for a value the unwinding destroys and for a scope it closes.
-- **Submit with a live declaration asserts, and ends it**: destroying the value afterwards does nothing, in `release` too.
+- **Submit with a live declaration ends it silently**, in every build, and destroying the value afterwards does nothing.
 - **webgpu only: an empty declaration ends without asserting**, withdrawn or ended by its scope.
 
 Existing tests that change:
@@ -672,7 +672,7 @@ It still matters for the first application, every `cover_all`, every writing dec
 - **No [dedupe inside sg](#sg-dedupes-repeated-identical-declarations)** — its invalidation is the same work, and it keeps O(elements) per op.
 - **Covered by, not equal** — the applied stages and access are a union since the last invalidation; texture layouts still match exactly, through the generation.
 - **The typo assert is kept, moved to end of life** — a declaration that never met its array asserts at withdraw, destruction or scope close.
-- **The lifecycle's edge cases are settled** — submit ends declarations, unwinding and webgpu skip the never-met check, and first meeting is per declaration.
+- **The lifecycle's edge cases are settled** — submit ends declarations silently, unwinding and webgpu skip the never-met check, and first meeting is per declaration.
 - **A different group at the same name is checked again**, per group, rather than ending the declaration.
 - **Transfer waits fold at submit** — a prerequisite, landed as P2.
 - **Lock fusion first and separately** — landed as P1.
