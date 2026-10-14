@@ -342,6 +342,34 @@ def test_rest_only_claims_what_is_left(root: Path) -> None:
         assert len(again.reused) == 1 and again.skipped_covered == 1, (again.reused, again.skipped_covered)
 
 
+def test_every_sweep_honors_a_bulk_claim(root: Path) -> None:
+    """`register` itself skips a new hunk a live bulk covers, so `sync`, which calls it directly, cannot revive one.
+
+    Only a caller naming its candidates explicitly, as `ingest --commits` does, passes `honor_bulk=False`.
+    """
+    git = git_init(root)
+    base = commit(root, "base", {"a.txt": numbered(20), "b.txt": numbered(20)})
+    head = commit(root, "edit", {
+        "a.txt": numbered(20).replace("line 3\n", "line 3 edited\n"),
+        "b.txt": numbered(20).replace("line 7\n", "line 7 edited\n"),
+    })
+
+    net = build_net(git, base, head)
+    with tempfile.TemporaryDirectory(prefix="review-ledger-") as ledger_dir:
+        ledger = Ledger(Path(ledger_dir) / "ledger.jsonl")
+        bulk = bulk_candidate(net, selector="a.txt", reason="mechanical", matches=lambda p: p == "a.txt")
+        assert bulk is not None
+        register(ledger, [bulk], round_number=1, write_body=lambda *_: None)
+
+        everything = candidates_for(git, base, head, context=8, gap=20, net=net)
+        result = register(ledger, everything, round_number=2, write_body=lambda *_: None)
+        assert result.skipped_inside_bulk == 1, f"the bulk-covered hunk must be skipped, got {result.skipped_inside_bulk}"
+        assert [c.path for c in result.created] == ["b.txt"], [c.path for c in result.created]
+
+        named = register(ledger, everything, round_number=2, write_body=lambda *_: None, honor_bulk=False)
+        assert [c.path for c in named.created] == ["a.txt"], [c.path for c in named.created]
+
+
 def test_a_reused_claim_follows_its_hunk_after_a_head_move(root: Path) -> None:
     """A change id is content-derived and a claim is positional, so a shift moves one and not the other.
 
