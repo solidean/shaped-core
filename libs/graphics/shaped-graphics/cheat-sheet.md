@@ -777,7 +777,7 @@ cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group cou
                                          //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)
                                          //   the args must not be bound writable to the same dispatch (webgpu refuses it); bytes: dispatch_groups_indirect_bytes(raw_buffer_handle, offset_in_bytes % 4 == 0)
 //   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
-auto const d = cmd.compute.declare_array_buffer_access(name, elements)  // [[nodiscard]] -> sg::array_access_declaration — in force for EVERY dispatch/trace while `d` lives
+auto d = cmd.compute.declare_array_buffer_access(name, elements)  // [[nodiscard]] -> sg::array_access_declaration — in force for EVERY dispatch/trace while `d` lives
 cmd.compute.declare_array_texture_access(name, elements) // same for a texture array (elements also carry a layout)
                                                          // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pair)
                                                          // an array the code indexes and nobody declared LOGS and gets a global barrier; one it never indexes needs none

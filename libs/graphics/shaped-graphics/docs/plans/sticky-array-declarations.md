@@ -359,7 +359,9 @@ What can hurt is a **write or a layout change** — then the next reader needs a
 Each resource's per-slot tracking state gains a flag, `array_member`, set when an application tracks it.
 It lives behind the one lock P1's `track_access` takes, so reading it costs nothing extra.
 Any tracked access to a member that lands in the write bucket — an unordered write, or a layout change — bumps the list's `member_writes`.
-That covers every path: a scalar binding, a copy, an upload, a render target, a native scope, and **an application's own layout transitions**.
+That covers every path: a scalar binding, a copy, an upload, a native scope, and **an application's own layout transitions**.
+A render target counts through its layout change on dx12 and vulkan.
+On metal a render-target write is no unordered write and a texture has no layout, so it never counts; the render encoder's boundary orders it instead.
 The counter is per list rather than per bind point, because a compute declaration and a raster one can hold the same resource.
 There is no exemption for an application's own transition.
 Exempting it is unsound: declaration A applies texture T at `shader_texture`, declaration B applies T at `shader_image`, and A's later skip leaves T in B's layout.

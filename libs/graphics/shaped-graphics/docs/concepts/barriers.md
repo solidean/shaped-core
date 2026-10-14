@@ -68,7 +68,9 @@ What one declaration meeting many ops changes is the element work, and only that
   A write, declared or widened by the footprint, is applied at every op.
 - **A member write ends every current application.** A resource an application tracked is an array member of the list.
   Any tracked access landing in a member's write bucket — an unordered write or a layout change — counts.
-  That covers every path: a scalar binding, a copy, an upload, a render target, a native scope, and an application's own layout transitions.
+  That covers every path: a scalar binding, a copy, an upload, a native scope, and an application's own layout transitions.
+  A render target counts through its layout change on dx12 and vulkan.
+  On metal a render-target write is no unordered write and a texture has no layout, so it never counts; the render encoder's boundary orders it instead.
   An application whose op already wrote one of its elements, before it applied, is not current either.
 - **A declaration that never met its array asserts when it ends, if some op of its bind point bound an array of its family**, which is where a misspelled name is caught.
   A bind point that ran no op, or bound only arrays of the other family, proves nothing about the name, so a frame with nothing to draw ends its declarations silently.
