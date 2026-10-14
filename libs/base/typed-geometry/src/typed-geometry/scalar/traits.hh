@@ -240,15 +240,8 @@ inline constexpr bool has_pow2 = scalar_traits<T>::has_pow2;
 
 /// true if the scalar has values that are no number — NaN and the infinities — and scalar_traits<T> provides is_nan() / is_inf() / is_finite() to tell them apart.
 /// The integers, bool and tg::fixed_int have none, so asking one is a compile error rather than a constant answer.
-/// A scalar_traits that does not mention it has none.
 template <class T>
-inline constexpr bool has_non_finite = []
-{
-    if constexpr (requires { scalar_traits<T>::has_non_finite; })
-        return bool(scalar_traits<T>::has_non_finite);
-    else
-        return false;
-}();
+inline constexpr bool has_non_finite = scalar_traits<T>::has_non_finite;
 
 /// true if the scalar's arithmetic is exact: the integers, bool and tg::fixed_int.
 /// An exact scalar's caller wants an exact answer or a compile error, so a query that iterates to a tolerance (GJK)
