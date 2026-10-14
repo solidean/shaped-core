@@ -47,7 +47,8 @@ Consequences of that rule:
   `depth32_float_stencil8` is the portable depth-stencil format.
 - **BC** (BC1–BC7) *is* included, mapping in all four APIs, but it is a **runtime capability** every backend gates.
   Vk `textureCompressionBC`, WGPU `texture-compression-bc`, Metal `supportsBCTextureCompression`.
-  The enumerant always exists, and a future device-capability query will gate actual use.
+  The enumerant always exists, and `sg::feature::texture_compression_bc` gates actual use: creating a BC texture without it is a refusal.
+  No shader writes one, so a GPU encoder writes its blocks to a buffer and `cmd.copy.buffer_to_texture` moves them in.
   Mobile-only compression (ASTC / ETC / PVRTC) is out entirely.
 
 When in doubt, leave a format out until a concrete need plus a capability query justify it.
@@ -77,7 +78,7 @@ Deliberately **not** here yet:
 
 - **Placed / transient-bump textures** — the transient scope allocates *dedicated* for now; a
   texture-capable transient `memory_heap` is the missing piece.
-- **Device→device texture copies** (texture→texture `CopyTextureRegion`) — only host↔device copies exist.
+- **Texture→texture and texture→buffer copies on the device** — the one device-side copy into a texture is `cmd.copy.buffer_to_texture`.
 - **Mip generation / format conversion** — belongs in shaped-rendering (sr), on top of these copies.
 
 ## See also

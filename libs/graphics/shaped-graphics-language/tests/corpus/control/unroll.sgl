@@ -1,0 +1,286 @@
+// `@unroll` on a for writes its body once per index, within its copy limit runs nothing of it as a loop, and means what the loop means (CHK-389)
+
+fun weighted_sum(values: float[5]) -> float:
+    let kernel = [0.0625, 0.25, 0.375, 0.25, 0.0625]
+    let mut total = 0.0
+    @unroll
+    for i in 0 ..< 5:
+        total += kernel[i] * values[i]
+    return total
+
+test weighted_sum(float[5].filled(2.0)) == 2.0
+
+// the same loop without the attribute gives the same value, in the same order of operations
+fun weighted_sum_looped(values: float[5]) -> float:
+    let kernel = [0.0625, 0.25, 0.375, 0.25, 0.0625]
+    let mut total = 0.0
+    for i in 0 ..< 5:
+        total += kernel[i] * values[i]
+    return total
+
+test:
+    let v = [0.1, 0.7, 1.3, 2.9, 3.1]
+    weighted_sum(v) == weighted_sum_looped(v)
+
+// a local of the body is a local of each copy, holding that copy's value
+fun sum_of_squares() -> int:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 4:
+        let square = i * i
+        total += square
+    return total
+
+test sum_of_squares() == 14
+
+// a bound may be any int constant: a literal, a const, an option, and an expression of them
+const taps = 3
+
+fun spread(center: int) -> int:
+    let mut total = 0
+    @unroll
+    for d in -taps ..< taps + 1:
+        total += center + d
+    return total
+
+test spread(10) == 70
+
+@option const reach = 3
+
+fun reach_sum() -> int:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< reach:
+        total += i
+    return total
+
+// a test runs with every option at its default
+test reach_sum() == 3
+
+// `continue` moves on to the next index, and `break` leaves the loop
+fun odd_sum_below(limit: int) -> int:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 8:
+        if i >= limit => break
+        if i % 2 == 0 => continue
+        total += i
+    return total
+
+// 1 + 3 + 5
+test odd_sum_below(6) == 9 and odd_sum_below(100) == 16
+
+// `break` leaves at once: what its own copy holds after it does not run either
+fun sum_until(limit: int) -> int:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 8:
+        total += i
+        if total > limit => break
+        total += 100
+    return total
+
+// 0, then 100, then 101 is past 50, and the 100 of that copy is never added
+test sum_until(50) == 101
+
+// a return from a copy leaves the function, as it leaves it from the loop
+fun first_multiple_of(k: int) -> int:
+    @unroll
+    for i in 1 ..< 10:
+        if i % k == 0 => return i
+    return -1
+
+test first_multiple_of(4) == 4 and first_multiple_of(11) == -1
+
+// each copy sees its index as a constant, so a branch on the index keeps only the side that copy takes (CHK-356)
+fun edges_doubled(values: float[4]) -> float:
+    let mut total = 0.0
+    @unroll
+    for i in 0 ..< 4:
+        if i == 0 or i == 3:
+            total += values[i] * 2.0
+        else:
+            total += values[i]
+    return total
+
+test edges_doubled([1.0, 1.0, 1.0, 1.0]) == 6.0
+
+// unrolled loops nest, and an inner bound may read an outer index
+fun triangle(n: int) -> int:
+    let mut count = 0
+    @unroll
+    for row in 0 ..< 4:
+        @unroll
+        for column in 0 ..< row + 1:
+            count += n
+    return count
+
+test triangle(1) == 10
+
+// an empty range writes no copy at all
+fun none_run() -> int:
+    let mut count = 0
+    @unroll
+    for i in 4 ..< 2:
+        count += 1
+    return count
+
+test none_run() == 0
+
+// a bound held by a local is no constant, since a `let` holds none, so the loop cannot be unrolled
+@expect(error = "invalid-constant-argument")
+test:
+    let n = 3
+    let mut total = 0
+    @unroll
+    for i in 0 ..< n:
+        total += i
+    total == 3
+
+// a loop writes at most 256 copies of its body, so 256 values unroll
+fun sum_below_256() -> int:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 256:
+        total += i
+    return total
+
+test sum_below_256() == 32640
+
+// and 257 stay a loop, which a warning says
+// A test that expects a diagnostic is judged by it alone and never run (CHK-232), so the values below hold but are not checked.
+@expect(warning = "unroll-too-long")
+test:
+    let mut total = 0
+    @unroll
+    for i in 0 ..< 257:
+        total += i
+    total == 32896
+
+// a nest counts each copy once per copy of the unrolled loops around it: 16 values inside 16 are 256 copies, and unroll
+fun products() -> int:
+    let mut total = 0
+    @unroll
+    for row in 0 ..< 16:
+        @unroll
+        for column in 0 ..< 16:
+            total += row * column
+    return total
+
+test products() == 14400
+
+// while 16 inside 17 are 272, so the inner loop stays a loop, and the outer one still unrolls
+@expect(warning = "unroll-too-long")
+test:
+    let mut total = 0
+    @unroll
+    for row in 0 ..< 17:
+        @unroll
+        for column in 0 ..< 16:
+            total += row * column
+    total == 16320
+
+// an outer loop that stays a loop leaves an inner bound that reads its index no constant, so the inner loop stays a loop too,
+// under the same warning; the emit tests pin that it is the only diagnostic
+@expect(warning = "unroll-too-long")
+test:
+    let mut count = 0
+    @unroll
+    for row in 0 ..< 300:
+        @unroll
+        for column in 0 ..< row + 1:
+            count += 1
+    count == 45150
+
+// while inside a loop that never was unrolled, such a bound stays an error
+@expect(error = "invalid-constant-argument")
+test:
+    let mut count = 0
+    for row in 0 ..< 3:
+        @unroll
+        for column in 0 ..< row + 1:
+            count += 1
+    count == 6
+
+// a range holding more values than an int counts is counted in full, and stays a loop
+@expect(warning = "unroll-too-long")
+test:
+    let mut last = 0
+    @unroll
+    for i in -2000000000 ..< 2000000000:
+        last = i
+    last == 1999999999
+
+// and one that wide the other way round is empty
+fun none_wide() -> int:
+    let mut count = 0
+    @unroll
+    for i in 2000000000 ..< -2000000000:
+        count += 1
+    return count
+
+test none_wide() == 0
+
+// each copy's index is a constant to every rule that judges one, so a shift by one past 31 is refused,
+// where the same loop without the attribute shifts by a value and compiles
+@expect(error = "shift-out-of-range")
+test:
+    let mut m = 0u
+    @unroll
+    for i in 0 ..< 40:
+        m |= 1u << (i as uint)
+    m != 0u
+
+// while a copy a constant `break` ends is the last one written, and nothing after the `break` in it is written either,
+// so no rule judges the shift by 32 that the loop never reaches
+fun low_mask() -> uint:
+    let mut m = 0u
+    @unroll
+    for i in 0 ..< 40:
+        if i >= 32 => break
+        m |= 1u << (i as uint)
+    return m
+
+test low_mask() == 0xffffffffu
+
+// and a copy a constant `continue` ends writes nothing after it, while the copies after it are written
+fun skipped_mask() -> uint:
+    let mut m = 0u
+    @unroll
+    for i in 0 ..< 34:
+        if i >= 32 => continue
+        m |= 1u << (i as uint)
+    return m
+
+test skipped_mask() == 0xffffffffu
+
+// a count, which would unroll the loop in part, is not supported yet
+@expect(error = "unsupported-yet")
+test:
+    let mut total = 0
+    @unroll(2)
+    for i in 0 ..< 2:
+        total += 1
+    total == 2
+
+// and it stands on a for alone
+@expect(error = "unsupported-yet")
+test:
+    let mut total = 0
+    @unroll
+    while total < 2:
+        total += 1
+    total == 2
+
+// an unrolled loop in an entry point, which every target writes; the emit tests read what they write
+binding blur_io:
+    source: buffer[float]
+    target: mut buffer[float]
+
+@compute(64) fun blur(@thread_id id: int3){blur_io}:
+    let kernel = [0.25, 0.5, 0.25]
+    let mut total = 0.0
+    @unroll
+    for i in 0 ..< 3:
+        total += kernel[i] * blur_io.source[id.x + i]
+    blur_io.target[id.x] = total

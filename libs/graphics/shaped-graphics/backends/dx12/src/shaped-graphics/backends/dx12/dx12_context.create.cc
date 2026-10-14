@@ -435,7 +435,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     // failed query leaves the tier at NOT_SUPPORTED, which is the correct "no ray tracing" answer.
     D3D12_RAYTRACING_TIER raytracing_tier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-    if (SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
+    if (!config.withhold_raytracing
+        && SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
         raytracing_tier = options5.RaytracingTier;
 
     // A failed query is an older runtime, which requires block-aligned sizes.
@@ -473,6 +474,18 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     ctx->_extended_image_formats = extended_image_formats;
     ctx->_native_16bit_shader_ops = native_16bit_shader_ops;
     ctx->_wave_ops = wave_ops;
+
+    // One dispatch per argument record, no root-signature changes, so the signature takes no root signature.
+    {
+        auto const argument = D3D12_INDIRECT_ARGUMENT_DESC{.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH};
+        auto const desc = D3D12_COMMAND_SIGNATURE_DESC{.ByteStride = UINT(sizeof(D3D12_DISPATCH_ARGUMENTS)),
+                                                       .NumArgumentDescs = 1,
+                                                       .pArgumentDescs = &argument};
+        auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_dispatch_signature));
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect dispatch)");
+    }
+
     ctx->_epoch_fence = cc::move(epoch_fence);
     ctx->_submission_fence = cc::move(submission_fence);
 

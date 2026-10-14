@@ -22,11 +22,6 @@ Add entries as we discover them, and remove them as they land.
   A `shared_async<void>` dependency should contribute an ordering edge and NO argument to the `make_async_*` sugar.
   And it becomes indistinguishable from one deliberately carrying a `unit`.
 
-- **`cc::is_finite` (and friends) for floats.**
-  There is no float classification in cc at all, so a caller that must not emit a NaN hand-rolls one.
-  `babel::json`'s writer is the first, with an exponent-bit check in json_writer.cc — exact, and needing no `<cmath>`, which is not blessed there.
-  A `cc::is_finite` / `is_nan` / `is_inf` trio next to the other scalar utilities would take all three call sites this will grow.
-
 ## function
 
 - **`cc::function_ref` does not accept a plain function portably.**
@@ -181,6 +176,14 @@ Add entries as we discover them, and remove them as they land.
   A pthread worker may block but still should not — awaiting is strictly better — and a rule that is global is easier to hold than one that differs by thread.
   The cost is a sweep: tests that block get `#if !CC_NEVER_BLOCK` or become async, and the few code paths that branch on it say so.
   Meanwhile sg has no blocking spellings of its own left, and `sv::viewer`'s synchronous frame loop is the one caller of `async_blocking_get` a wasm build would reach.
+
+- **A passive timed wait on a `cc::async` node.**
+  Waiting until a node is ready or a deadline passes, while running nothing else on the calling thread, has no spelling.
+  `cc::try_async_blocking_get_for` is the timed wait there is, and it drives: it steps the ambient scheduler and sweeps the pump registry until the node is ready.
+  A caller that may hold a lock, or a reference other work could invalidate, must not run that work, so it polls `is_ready()` by hand instead.
+  slib's `passive_get` (`impl/sgl_emit_cache.cc`) is the first, waiting on the blob cache's actor thread with a yield-then-sleep loop marked as this entry's stand-in.
+  The shape wanted parks on the node's completion, woken by it the way a parked driver is, rather than polling, and takes its bound in seconds.
+  It can only ever see work another thread finishes, so without threads it has nothing to wait for; the SGL cache switches its persistent tier off there.
 
 - **No general cancellation token.**
   `cc::async` can fail with a `cancelled` error, but nothing lets a caller *ask* running work to stop.

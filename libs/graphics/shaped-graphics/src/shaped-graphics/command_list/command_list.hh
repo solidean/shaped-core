@@ -119,9 +119,19 @@ protected:
                                     isize dst_offset_in_bytes,
                                     isize size_in_bytes) = 0;
 
+    // The facade has resolved the region and checked the subresource, the alignments and the buffer's extent.
+    virtual void copy_buffer_to_texture(raw_buffer_handle src,
+                                        isize src_offset_in_bytes,
+                                        isize src_row_pitch_in_bytes,
+                                        raw_texture_handle dst,
+                                        subresource_index const& subresource,
+                                        texture_region const& region) = 0;
+
     virtual void compute_bind_pipeline(compute_pipeline const& pipeline) = 0;
     virtual void compute_bind_group(int group_index, binding_group const& group) = 0;
     virtual void compute_dispatch(int x, int y, int z) = 0;
+    // The facade has checked the usage, the alignment and the bounds; the backend declares `args` as an indirect read.
+    virtual void compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes) = 0;
     virtual void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;
 
     // Records explicit per-element access for an array/bindless binding (reached through cmd.compute).
@@ -150,6 +160,7 @@ protected:
     void bind_compute_pipeline(compute_pipeline const& pipeline);
     void bind_compute_group(int group_index, binding_group const& group);
     void dispatch(int x, int y, int z);
+    void dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes);
     void bind_raster_group(int group_index, binding_group const& group);
     void bind_raster_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views);
     void bind_raster_index_buffer(index_buffer_view const& view);

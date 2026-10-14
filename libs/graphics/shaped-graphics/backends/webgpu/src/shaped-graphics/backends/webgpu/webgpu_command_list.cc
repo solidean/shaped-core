@@ -425,4 +425,38 @@ void webgpu_command_list::copy_buffer_region(sg::raw_buffer_handle src,
     touch(src);
     touch(dst);
 }
+
+void webgpu_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
+                                                 isize src_offset_in_bytes,
+                                                 isize src_row_pitch_in_bytes,
+                                                 sg::raw_texture_handle dst,
+                                                 sg::subresource_index const& subresource,
+                                                 sg::texture_region const& region)
+{
+    auto const& s = as_webgpu_buffer(src);
+    auto const& d = as_webgpu_texture(dst);
+
+    // WebGPU counts rows per image in block rows, the same unit sg's pitch is in.
+    auto const extent = isize(sg::format_block_extent(d.format()));
+    auto const rows = (isize(region.size[1]) + extent - 1) / extent;
+
+    auto const source = WGPUTexelCopyBufferInfo{
+        .layout
+        = {.offset = u64(src_offset_in_bytes), .bytesPerRow = u32(src_row_pitch_in_bytes), .rowsPerImage = u32(rows)},
+        .buffer = s.raw(),
+    };
+    auto const destination = WGPUTexelCopyTextureInfo{
+        .texture = d.raw(),
+        .mipLevel = u32(subresource.mip_level),
+        .origin = {u32(region.offset[0]), u32(region.offset[1]),
+                   d.dimension() == sg::texture_dimension::d3 ? u32(region.offset[2]) : u32(subresource.array_layer)},
+        .aspect = to_wgpu_copy_aspect(d.format(), subresource.aspect),
+    };
+    auto const copy_extent = copy_extent_of(d.format(), region.size);
+
+    end_open_pass("a copy");
+    wgpuCommandEncoderCopyBufferToTexture(encoder(), &source, &destination, &copy_extent);
+    touch(src);
+    touch(dst);
+}
 } // namespace sg::backend::webgpu

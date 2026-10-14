@@ -144,9 +144,10 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
 - **A permutation's hit group does not reload with a module it uses.**
   It is compiled once per permutation key, which hashes the resolution and the geometry kind, so an edit to module `tracer` reaches the raygen and not the hit groups.
   What is needed is for `slib::compile_hit_group` to report the modules it read, so the cache can hash their contents and rebuild precisely what moved.
-- **The SGL front end runs once per entry point of a group.**
+- **The SGL front end runs once per entry point of a group, the first time.**
   `slib::compile_hit_group` compiles each stage from the source, and a cutout group has three, so the parse and the check run three times.
-  A compile that DXC answers from its cache still costs the SGL front end, about 70 ms a stage.
+  slib caches each in memory and across runs, so a repeat costs a lookup.
+  A group compiled for the first time still pays all three.
 - **A ray set a module declares is named by no other file.**
   `rays = tracer.path_rays` is `invalid-pipeline`, a trace of `tracer.path_rays.surface` is refused, and `sgl describe` lists no module's set for a file joining the module.
   So the pipeline file and each generated hit group restate `path_rays` over the module's payloads, which slib holds to the same names, sizes and shapes.

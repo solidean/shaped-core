@@ -9,6 +9,12 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   With the whole-module passes that run over the prelude's part again, that is about 1.9 ms of the 2.9 ms a ten-line compute shader takes on `debug-linux-clang`.
   Sharing the prelude's part read-only, and running those passes over the program's part alone, would leave the program's own check.
   The test `sgl profile - checking a small program behind the prelude, sampled` measures both.
+- **A process parses the generated `builtins.sgl` twice.** `registry::finalize` parses `prelude_text()` to read each record's names back, and `parsed_prelude()` parses the same text again.
+  Checking the prelude takes 42 ms on `relwithdebinfo-clang` and 660 ms on `debug-clang`, once per process, and the second parse is about a quarter of the debug one.
+  `sgl profile - one compile of a file, sampled` times that check apart from the compiles.
+- **Every flat tree takes every module-level name into a mint of its own.** `flatten_entry_point` reserves each symbol's name, the prelude's thousands included.
+  It is a tenth of a compile of the sgl-cube's vertex shader on `debug-clang`, which `sgl profile - one compile of a file, sampled` measures.
+  The emitter's mint already goes on from the tree's (`name_mint::parent`), and the tree's could go on from one set of the module's names, given an owner that outlives every tree.
 - **A source that stands in for a prelude file checks the whole prelude.** Such a source is checked as that file of the prelude (`prelude_file_of`).
   It is `prelude/core.sgl` open in an editor, or a user's `shaders/prelude/core.sgl`.
   Such a check has no checked prelude to continue, so it takes the full pass, which is the 50 ms a compile took before.
@@ -17,6 +23,8 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   It did so before the footprint became a linear pass too.
   The recursive passes each guard their own depth at 200, which a release frame fits and a debug frame does not.
   Either the limit shrinks to what the smallest stack carries, or the deepest walks stop recursing on an operand chain.
+- **Partial unrolling.** `@unroll(n)`, writing a loop's body `n` times per iteration, is `unsupported-yet` (CHK-389).
+  It is the form for a range too long to unroll whole, or one whose bound is no constant.
 - **Array equality and `const` arrays.** `==` of two arrays, and a `const` whose value is an array literal, are both `unsupported-yet`.
 - **Values as type arguments.** `image_2d[.rgba8_unorm]` takes an enum case, and the checker reads exactly that argument today, as a special case of image types.
   The general feature is a type parameterized on an integer or an enum value, which math templated on a dimension wants as well, and it lets code branch on the value.

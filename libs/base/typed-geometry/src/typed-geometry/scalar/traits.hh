@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/math/float.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/scalar/fwd.hh>
 
@@ -12,7 +13,8 @@
 /// Every scalar capability is routed through tg::scalar_traits<T>, a primary template specialized per scalar type.
 /// The tg::traits::* helpers and the free functions in scalar.hh are thin wrappers over its entries.
 /// That is tg::one, tg::sqrt, tg::abs, the trigonometry, tg::pow / tg::exp / tg::log, tg::round / tg::floor / tg::ceil,
-/// and the exact base-two family tg::pow2_by_int / tg::scale_by_pow2 / tg::exponent_of / tg::split_pow2.
+/// tg::is_finite / tg::is_nan / tg::is_inf, and the exact base-two family tg::pow2_by_int / tg::scale_by_pow2 /
+/// tg::exponent_of / tg::split_pow2.
 /// libs/base/typed-geometry/docs/modules/scalar.md has the why.
 ///
 /// The kernels here are the *raw numeric* layer: sin/cos take a bare radian T and return T, atan2 takes two T and returns radians.
@@ -56,6 +58,7 @@ struct tg::scalar_traits
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = false;
     static constexpr bool has_pow2 = false;
+    static constexpr bool has_non_finite = false;
     static constexpr bool is_exact = false;
 };
 
@@ -70,6 +73,7 @@ struct tg::scalar_traits<cc::f32>
     static constexpr bool has_rounding = true;
     static constexpr bool has_abs = true;
     static constexpr bool has_pow2 = true;
+    static constexpr bool has_non_finite = true;
 
     [[nodiscard]] static constexpr f32 one() { return 1.0f; }
     [[nodiscard]] static constexpr bool is_zero(f32 x) { return x == 0.0f; }
@@ -90,13 +94,17 @@ struct tg::scalar_traits<cc::f32>
     [[nodiscard]] static f32 ceil(f32 x) { return std::ceil(x); }
     [[nodiscard]] static f32 abs(f32 x) { return std::fabs(x); }
 
+    [[nodiscard]] static constexpr bool is_nan(f32 x) { return cc::is_nan(x); }
+    [[nodiscard]] static constexpr bool is_inf(f32 x) { return cc::is_inf(x); }
+    [[nodiscard]] static constexpr bool is_finite(f32 x) { return cc::is_finite(x); }
+
     /// x * 2^n, saturating to +-infinity or zero when the result leaves the representable range.
     [[nodiscard]] static f32 scale_by_pow2(f32 x, int n) { return std::ldexp(x, n); }
 
     /// x must be finite and non-zero: a subnormal is normalized, but zero and the non-finites have no exponent.
     [[nodiscard]] static pow2_split<f32> split_pow2(f32 x)
     {
-        CC_ASSERT(std::isfinite(x) && x != f32(0), "split_pow2 needs a finite, non-zero scalar");
+        CC_ASSERT(cc::is_finite(x) && x != f32(0), "split_pow2 needs a finite, non-zero scalar");
 
         auto exponent = 0;
         auto const half = std::frexp(x, &exponent); // in [0.5, 1) — renormalized to [1, 2) below
@@ -113,6 +121,7 @@ struct tg::scalar_traits<cc::f64>
     static constexpr bool has_rounding = true;
     static constexpr bool has_abs = true;
     static constexpr bool has_pow2 = true;
+    static constexpr bool has_non_finite = true;
 
     [[nodiscard]] static constexpr f64 one() { return 1.0; }
     [[nodiscard]] static constexpr bool is_zero(f64 x) { return x == 0.0; }
@@ -133,13 +142,17 @@ struct tg::scalar_traits<cc::f64>
     [[nodiscard]] static f64 ceil(f64 x) { return std::ceil(x); }
     [[nodiscard]] static f64 abs(f64 x) { return std::fabs(x); }
 
+    [[nodiscard]] static constexpr bool is_nan(f64 x) { return cc::is_nan(x); }
+    [[nodiscard]] static constexpr bool is_inf(f64 x) { return cc::is_inf(x); }
+    [[nodiscard]] static constexpr bool is_finite(f64 x) { return cc::is_finite(x); }
+
     /// x * 2^n, saturating to +-infinity or zero when the result leaves the representable range.
     [[nodiscard]] static f64 scale_by_pow2(f64 x, int n) { return std::ldexp(x, n); }
 
     /// x must be finite and non-zero: a subnormal is normalized, but zero and the non-finites have no exponent.
     [[nodiscard]] static pow2_split<f64> split_pow2(f64 x)
     {
-        CC_ASSERT(std::isfinite(x) && x != f64(0), "split_pow2 needs a finite, non-zero scalar");
+        CC_ASSERT(cc::is_finite(x) && x != f64(0), "split_pow2 needs a finite, non-zero scalar");
 
         auto exponent = 0;
         auto const half = std::frexp(x, &exponent); // in [0.5, 1) — renormalized to [1, 2) below
@@ -160,6 +173,7 @@ struct tg::scalar_traits<T>
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = true;
     static constexpr bool has_pow2 = false;
+    static constexpr bool has_non_finite = false;
     static constexpr bool is_exact = true;
 
     [[nodiscard]] static constexpr T one() { return T(1); }
@@ -185,6 +199,7 @@ struct tg::scalar_traits<bool>
     static constexpr bool has_rounding = false;
     static constexpr bool has_abs = false;
     static constexpr bool has_pow2 = false;
+    static constexpr bool has_non_finite = false;
     static constexpr bool is_exact = true;
 
     [[nodiscard]] static constexpr bool one() { return true; }
@@ -222,6 +237,11 @@ inline constexpr bool has_abs = scalar_traits<T>::has_abs;
 /// Integers deliberately do not: shifting one truncates, which is a different operation wearing the same name.
 template <class T>
 inline constexpr bool has_pow2 = scalar_traits<T>::has_pow2;
+
+/// true if the scalar has values that are no number — NaN and the infinities — and scalar_traits<T> provides is_nan() / is_inf() / is_finite() to tell them apart.
+/// The integers, bool and tg::fixed_int have none, so asking one is a compile error rather than a constant answer.
+template <class T>
+inline constexpr bool has_non_finite = scalar_traits<T>::has_non_finite;
 
 /// true if the scalar's arithmetic is exact: the integers, bool and tg::fixed_int.
 /// An exact scalar's caller wants an exact answer or a compile error, so a query that iterates to a tolerance (GJK)

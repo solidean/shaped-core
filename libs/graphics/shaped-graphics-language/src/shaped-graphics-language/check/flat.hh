@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/variant.hh>
@@ -116,6 +117,14 @@ struct sgl::check::name_mint
     /// Both are written by `reserve` and `mint` alone.
     cc::vector<cc::string> taken;
     cc::set<cc::string> index;
+    /// Names taken outside this mint, which it never hands out and never writes: a mint it goes on from, and a set such as every name a builtin writes.
+    /// Whoever owns either must outlive this mint and leave it unchanged meanwhile.
+    /// What they hold is in neither `taken` nor `index`, so a mint that goes on from another copies none of its names.
+    name_mint const* parent = nullptr;
+    cc::set<cc::string> const* also_taken = nullptr;
+    /// For each name `mint` found taken, the suffix it tries first the next time it is asked for that name.
+    /// A name once taken stays taken, so the first free suffix only grows, and minting a name a thousand times is linear.
+    cc::map<cc::string, i32> next_suffix;
 
     [[nodiscard]] bool is_taken(cc::string_view name) const;
 

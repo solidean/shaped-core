@@ -162,42 +162,43 @@ TEST("sg dx12 - a texture bound as sampled + storage in one op transitions to CO
     CHECK(b[0].barrier.dst_access.has_all(sg::access_flag::shader_read | sg::access_flag::shader_write));
 }
 
-TEST("sg dx12 - mark_pending_barrier enqueues a texture for the flush exactly once per op")
+TEST("sg dx12 - track reports the first access of an op and of a list")
 {
-    // The command list enqueues a texture for the pre-op barrier flush only when mark_pending_barrier returns true, on the first binding of the op.
-    // flush clears the flag, so the next op enqueues it again.
-    auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
-    dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
-    auto const slot = sg::command_list_slot(0);
-
-    acc.declare(slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
-                sg::texture_layout::shader_image);
-    CHECK(acc.mark_pending_barrier(slot));  // first binding this op -> enqueue
-    CHECK(!acc.mark_pending_barrier(slot)); // already enqueued this op
-    (void)acc.flush(slot);                  // flush clears the flag
-    CHECK(acc.mark_pending_barrier(slot));  // next op -> enqueue again
-}
-
-TEST("sg dx12 - mark_recorded reports the slot's first record")
-{
-    // The command list uses mark_recorded to add a texture to its finalize set exactly once, in O(1) with no scan.
-    // True the first time per slot, false after, and true again once the slot is cleared.
-    // In the real flow a slot is always declared (seeded active) before it is recorded, and discard requires an active slot.
+    // The command list files a texture for the pre-op barrier flush on the op's first access, and into its finalize set on the list's first.
+    // flush clears the per-op flag; only finalize or discard clears the per-list one.
     auto const d = desc_2d(sg::pixel_format::rgba8_unorm, 64, 64);
     dx12::dx12_texture_access acc(dx12::subresource_extent_of(d));
     auto const s0 = sg::command_list_slot(0);
     auto const s1 = sg::command_list_slot(1);
-    (void)acc.declare(s0, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
-                      sg::texture_layout::copy_dst);
-    (void)acc.declare(s1, whole_of(d), sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
-                      sg::texture_layout::copy_dst);
+    auto const track = [&](sg::command_list_slot slot)
+    {
+        return acc.track(slot, whole_of(d), sg::pipeline_stage_flag::compute, sg::access_flag::shader_read,
+                         sg::texture_layout::shader_image);
+    };
 
-    CHECK(acc.mark_recorded(s0));  // first record of slot 0
-    CHECK(!acc.mark_recorded(s0)); // already recorded
-    CHECK(acc.mark_recorded(s1));  // a different slot is independent
+    auto const first = track(s0);
+    CHECK(first.first_this_op);
+    CHECK(first.first_this_list);
 
-    acc.discard(s0);              // dropping slot 0 clears its recorded flag
-    CHECK(acc.mark_recorded(s0)); // records again
+    auto const again = track(s0);
+    CHECK(!again.first_this_op);
+    CHECK(!again.first_this_list);
+
+    (void)acc.flush(s0);
+    auto const next_op = track(s0);
+    CHECK(next_op.first_this_op);
+    CHECK(!next_op.first_this_list);
+
+    // A different slot is independent.
+    auto const other = track(s1);
+    CHECK(other.first_this_op);
+    CHECK(other.first_this_list);
+
+    // Dropping slot 0 clears both flags.
+    acc.discard(s0);
+    auto const after_discard = track(s0);
+    CHECK(after_discard.first_this_op);
+    CHECK(after_discard.first_this_list);
 }
 
 TEST("sg dx12 - texture access fragments per subresource range")
@@ -311,7 +312,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers", (dx12::dx12
     REQUIRE(cmd.has_value());
     auto const range = whole_of(d);
 
-    // Drive the declare → emit path by hand, the way track_texture_access does for a real op.
+    // Drive the track → flush → emit path by hand, the way a real op does.
     // The list enters at copy_dst and then transitions copy_dst → shader_texture in its own body; the entry
     // transition out of COMMON is finalize's, and goes into the pre-list executed ahead of this one — which is what
     // submit does for a real list.
@@ -322,11 +323,11 @@ ASYNC_INVOCABLE_TEST("sg dx12 - emits well-formed texture barriers", (dx12::dx12
             batch.push_back(dx12::make_texture_barrier(dtex->_resource.Get(), sb.range, sb.barrier));
         dx12::submit_barriers(list, {}, batch);
     };
-    dtex->declare_texture_access(cmd.value()->slot(), range, sg::pipeline_stage_flag::copy, sg::access_flag::copy_write,
-                                 sg::texture_layout::copy_dst);
+    (void)dtex->track_texture_access(cmd.value()->slot(), range, sg::pipeline_stage_flag::copy,
+                                     sg::access_flag::copy_write, sg::texture_layout::copy_dst);
     emit(cmd.value()->_list.Get(), dtex->flush_texture_access(cmd.value()->slot()));
-    dtex->declare_texture_access(cmd.value()->slot(), range, sg::pipeline_stage_flag::compute,
-                                 sg::access_flag::shader_read, sg::texture_layout::shader_texture);
+    (void)dtex->track_texture_access(cmd.value()->slot(), range, sg::pipeline_stage_flag::compute,
+                                     sg::access_flag::shader_read, sg::texture_layout::shader_texture);
     emit(cmd.value()->_list.Get(), dtex->flush_texture_access(cmd.value()->slot()));
     // The pre-list is created on demand, so a caller recording into it by hand has to ask for one.
     emit(c.acquire_pre_list(*cmd.value()), dtex->finalize_slot(cmd.value()->slot()));

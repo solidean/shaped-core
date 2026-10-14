@@ -169,6 +169,7 @@ target_sources(clean-core
     src/clean-core/platform/intrinsics.hh
 
     src/clean-core/math/bit.hh
+    src/clean-core/math/float.hh
     src/clean-core/math/random.hh
     src/clean-core/math/wide_arith.hh
 
@@ -524,6 +525,7 @@ if(SC_BUILD_TESTS)
         tests/platform/console-test.cc
         tests/platform/environment-test.cc
         tests/platform/file_path-test.cc
+        tests/platform/native-test.cc
         tests/platform/stack-capture-test.cc
         tests/platform/wasm-frames-test.cc
         tests/platform/stacktrace-test.cc
@@ -545,6 +547,7 @@ if(SC_BUILD_TESTS)
         tests/algorithm/sort-async-test.cc
 
         tests/math/bit-test.cc
+        tests/math/float-test.cc
         tests/math/random-test.cc
         tests/math/wide_arith-test.cc
 

@@ -14,6 +14,7 @@ and revalidated by (mtime, size) — a rebuilt binary re-probes, an untouched on
 Public API:
     collect_benchmarks(preset, targets, root, ...) -> list[Benchmark]
     select_benchmarks(benchmarks, match) -> (selected, diagnostic)
+    unselected_overreach(selected, benchmarks) -> [(selected name, other name)]
 """
 
 from __future__ import annotations
@@ -144,3 +145,19 @@ def select_benchmarks(benchmarks: list[Benchmark], match: str) -> tuple[list[Ben
     if suggestions := _suggest(match, [b.name for b in benchmarks]):
         message += ". Did you mean: " + ", ".join(suggestions)
     return [], message
+
+
+def unselected_overreach(selected: list[Benchmark], benchmarks: list[Benchmark]) -> list[tuple[str, str]]:
+    """(selected name, other name) for each benchmark a binary would also run, though `selected` left it out.
+
+    A binary filters `--benchmarks <name>` by substring, and nexus has no exact-name spelling.
+    So an exact name that is a substring of a sibling's runs both, which is the sweep `dev.py example` avoids by sending a bare name.
+    A bare name does not work here: it leaves the bucket open to every normal test containing it, which `benchmarks` cannot see.
+    """
+    chosen = {(b.target, b.name) for b in selected}
+    return [
+        (s.name, b.name)
+        for s in selected
+        for b in benchmarks
+        if b.target == s.target and (b.target, b.name) not in chosen and s.name in b.name
+    ]

@@ -181,6 +181,7 @@ struct call_context;
 struct helper_context;
 enum class spelling_kind : u8;
 enum class judged_operand : u8;
+enum class written_argument : u8;
 struct spelling;
 struct block_layout;
 struct type_record;

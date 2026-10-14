@@ -13,6 +13,7 @@ from __future__ import annotations
 import html
 from pathlib import Path
 
+from ..changeset.ingest import interdiffs
 from ..core.paths import ReviewPaths
 from ..entry.answers import Answer, AnswerFile, Comment
 from ..entry.parse import Block, Entry
@@ -46,7 +47,20 @@ def _summary_html(change) -> str:
             f'{_esc(text[len(path):])}</span>')
 
 
-def _change_card(change, body: str, *, has_body: bool, open_by_default: bool) -> str:
+def since_html(change, paths: ReviewPaths) -> str:
+    """One folded interdiff per hunk this change replaced at a `sync`, drawn above its diff.
+
+    Above rather than below, because the change is often a whole file.
+    The edit is what a reader who saw the old hunk looks for, and below it would sit under every line of that file.
+    """
+    return "".join(
+        f'<details class="interdiff"><summary>since <code>{_esc(diff.replaced)}</code></summary>'
+        f'{highlight_diff(diff.text, anchored=False)}</details>'
+        for diff in interdiffs(change, paths)
+    )
+
+
+def _change_card(change, body: str, *, has_body: bool, open_by_default: bool, since: str = "") -> str:
     """One change, with its diff inline when the block asked to show it and on demand when it did not.
 
     A collapsed diff used to ship anyway, and it is by far the largest thing a review sends: one entry here
@@ -65,7 +79,7 @@ def _change_card(change, body: str, *, has_body: bool, open_by_default: bool) ->
                 f'{summary}</div>{reason}</div>')
     head = (f'<summary class="change-head"><code>{_esc(change.id)}</code>{summary}</summary>{reason}')
     if open_by_default:
-        return f'<details class="change" open>{head}{highlight_diff(body, path=change.path)}</details>'
+        return f'<details class="change" open>{head}{since}{highlight_diff(body, path=change.path)}</details>'
     return (f'<details class="change" data-change="{_esc(change.id)}">{head}'
             f'<div class="change-body"><span class="change-pending">loading the diff…</span></div></details>')
 
@@ -227,7 +241,8 @@ def change_cards(change_ids: list[str], *, ledger, paths: ReviewPaths, visible: 
         has_body = change.has_body and diff_path.is_file()
         # Only an inline diff is read here: a collapsed card needs to know that a body exists, never what it says.
         body = diff_path.read_text(encoding="utf-8", errors="replace") if has_body and visible else ""
-        cards.append(_change_card(change, body, has_body=has_body, open_by_default=visible))
+        since = since_html(change, paths) if has_body and visible else ""
+        cards.append(_change_card(change, body, has_body=has_body, open_by_default=visible, since=since))
         on_lines = [c for c in comments or [] if c.change == change.id]
         if on_lines:
             cards.append(f'<div class="line-comments">{"".join(_comment_card(c) for c in on_lines)}</div>')

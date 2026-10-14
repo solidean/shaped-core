@@ -11,6 +11,8 @@ There is no public `declare_access`. What a resource is used as follows from the
 - `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source.
 - `cmd.copy` ⇒ `copy_read` on src plus `copy_write` on dst, and a self-copy is one combined access.
 - A dispatch, a draw or a trace ⇒ what the bound pipeline's code does to each bound view, which is its **footprint** (below).
+- `cmd.compute.dispatch_groups_indirect` ⇒ `indirect_read` at `draw_indirect` on the arguments buffer, besides the footprint.
+  The arguments are fetched before any shader runs, which is why the stage is its own.
 
 The mapping lives in [access_inference.hh](../../src/shaped-graphics/barrier/access_inference.hh), so every backend agrees on the semantics.
 

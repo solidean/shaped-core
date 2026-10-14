@@ -71,7 +71,9 @@ The raw `scalar_traits` kernels still work in plain radian `T`: the angle typing
 
 The `has_*` flags name families rather than single functions, so a new scalar opts into a coherent set at a time.
 Today: `has_sqrt`, `has_abs`, `has_trigonometry`, `has_exponential` (`pow`/`exp`/`log`), `has_rounding` (`round`/`floor`/`ceil`)
-and `has_pow2` (`pow2_by_int`/`scale_by_pow2`/`exponent_of`/`split_pow2`).
+`has_pow2` (`pow2_by_int`/`scale_by_pow2`/`exponent_of`/`split_pow2`), and `has_non_finite` (`is_finite`/`is_nan`/`is_inf`).
+`has_non_finite` is false for the integers, bool and `fixed_int`, so asking one whether it is finite is a compile error rather than a constant `true`.
+Like every `has_*` flag it has no default, so a specialization must spell it: a float wrapper that left it out would otherwise lose `is_nan` silently.
 A scalar that can do one member of a family can essentially always do the rest, and a per-function flag would multiply the seam without buying precision.
 
 `round`/`floor`/`ceil` return the **scalar** type, not an integer.

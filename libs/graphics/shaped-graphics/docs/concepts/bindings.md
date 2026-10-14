@@ -233,6 +233,10 @@ There are two ways in, reached through scopes as elsewhere in sg, and **which on
   It is valid **only for the epoch it was acquired in**, so re-acquire the working set every epoch.
   When the array is full, every index not acquired this epoch is reclaimed at once — the mint dirties the group and forces a snapshot anyway, so there is nothing to save by evicting less.
   If every index was acquired this epoch, the working set exceeds the binding's count and it asserts.
+- **`transient.release(view)` frees an element its owner will not acquire again**, and with it the view and the resource it keeps alive — what a scene unload calls.
+  It frees at once if no index from this epoch names the element, otherwise at the first acquire or release of a later epoch.
+  An array that sees neither after that keeps the deferred views until it is destroyed.
+  It mutates the staging group, so it takes the same owner and lock as acquire.
 - **`persistent.acquire(view)` returns a shared `bindless_element_handle`** whose index stays true for as long as any copy of the handle lives.
   That is the only index that may be written into GPU memory outliving the epoch — a material buffer above all.
   The refcount *is* the pin, so acquiring a view already held returns the same handle.

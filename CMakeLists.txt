@@ -170,6 +170,7 @@ include(PrecompiledHeaders)
 # Staging an executable's DLLs beside it on Windows (sc_stage_runtime_dlls), which the example and shader-package
 # helpers below both call.
 include(RuntimeDlls)
+include(SourceFingerprint) # sc_add_source_fingerprint — a cache key that moves with a library's own sources
 
 # RelWithDebInfo = Release codegen + assertions + debug info. MSVC/clang-cl default this config to /Ob1
 # (inline only functions explicitly marked inline) — a misleading dev default: /O2 is otherwise identical to

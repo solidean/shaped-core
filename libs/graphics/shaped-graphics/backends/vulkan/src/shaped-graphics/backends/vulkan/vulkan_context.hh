@@ -141,6 +141,7 @@ public:
         _sample_rate_shading = features.sampleRateShading == VK_TRUE;
         _wireframe_fill = features.fillModeNonSolid == VK_TRUE;
         _sampler_anisotropy = features.samplerAnisotropy == VK_TRUE;
+        _texture_compression_bc = features.textureCompressionBC == VK_TRUE;
 
         // A device must have D24S8 or D32S8 as a depth-stencil attachment, and not necessarily the one sg names.
         auto d32s8 = VkFormatProperties{};
@@ -265,6 +266,8 @@ public:
         case sg::feature::unaligned_block_compression:
         case sg::feature::multisampled_array_textures:
             return true;
+        case sg::feature::texture_compression_bc:
+            return _texture_compression_bc;
         case sg::feature::primitive_index:
             // SPIR-V's PrimitiveId in a fragment shader needs the Geometry capability, which the device feature grants.
             return _geometry_shader;
@@ -822,6 +825,7 @@ public:
     bool _extended_image_formats = false;
     /// The device features of the same names, enabled wherever the device has them.
     bool _geometry_shader = false;
+    bool _texture_compression_bc = false;
     bool _tessellation_shader = false;
     bool _sample_rate_shading = false;
     bool _wireframe_fill = false;

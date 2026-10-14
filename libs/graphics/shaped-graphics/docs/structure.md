@@ -65,7 +65,7 @@ src/shaped-graphics/
     command_list.hh/.cc           [in progress] abstract, single-use recorder; owns the seven scopes below and the backend seams they call
     upload.hh/.cc                 [done]        cmd.upload: inline host→device buffer + texture writes (both backends real)
     download.hh/.cc               [done]        cmd.download: inline readback of buffers + textures -> bytes_future (both backends real)
-    copy.hh/.cc                   [in progress] cmd.copy: device→device buffer regions (both backends real); texture copies pending
+    copy.hh/.cc                   [in progress] cmd.copy: buffer regions, and a buffer into a texture region; texture→buffer and texture→texture pending
     compute.hh/.cc                [done]        cmd.compute: bind_pipeline / bind_group / dispatch (both backends real)
     raster.hh/.cc                 [done]        cmd.raster: rendering scope, bindings, viewport/scissor state, draws (both backends real)
     raytracing.hh/.cc             [done]        cmd.raytracing: build_blas / build_tlas / dispatch_rays (dx12, vulkan, metal; webgpu builds only)
@@ -208,13 +208,12 @@ Still dedicated-only: **dx12 textures** and **all vulkan resources**, both of wh
 ## Planned surface (beyond the current stubs)
 
 ```text
-buffer transfer      [in progress]  command_list inline upload / download / copy (dx12 real, vulkan stub)
-texture transfer     [in progress]  inline + async host↔device texture copies, region- and subresource-scoped
-                                  (dx12 real, vulkan stub); device→device texture copy is the gap
+buffer transfer      [in progress]  command_list inline upload / download / copy
+texture transfer     [in progress]  inline + async host↔device texture copies, region- and subresource-scoped;
+                                  buffer→texture copy exists, texture→buffer and texture→texture are open
 barriers             [in progress]  inferred access + state tracking + concurrent-list slot model; dx12 enhanced
                                   barriers real for buffers + textures (subresource-range layout transitions,
-                                  entry-layout revert), driven by texture transfer and the rendering scope;
-                                  vulkan pending
+                                  entry-layout revert), driven by texture transfer and the rendering scope
 views                [in progress]  strongly-typed resource views; buffer + texture (SRV/UAV) views done (dx12 bindable
                                   in compute); render_target/depth_stencil views done and consumed by the rendering
                                   scope; texel buffers deferred

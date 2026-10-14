@@ -12,6 +12,11 @@ namespace sg::impl
 /// `texture` must be non-null.
 void assert_valid_subresource(raw_texture_handle const& texture, subresource_index const& sub);
 
+/// Asserts `texture` is no depth or depth-stencil texture, which no copy or upload from bytes may write.
+/// The backends disagree on a depth texel's buffer layout, and WebGPU refuses the copy outright; downloads read depth back fine.
+/// `texture` must be non-null.
+void assert_writable_from_bytes(raw_texture_handle const& texture);
+
 /// The whole texel box of `texture`'s subresource `sub`: offset 0, and size the mip extent — depth 1 for a 2D or 1D texture, which is a single slice.
 /// `texture` must be non-null and `sub.mip_level` in range; unlike assert_valid_subresource it checks neither the array layer nor the aspect.
 [[nodiscard]] texture_region full_subresource_region(raw_texture_handle const& texture, subresource_index const& sub);
@@ -22,6 +27,7 @@ void assert_valid_subresource(raw_texture_handle const& texture, subresource_ind
 
 /// Asserts `region` lies within `texture`'s subresource `sub`: a non-negative offset, and offset+size within the mip extent.
 /// So a 2D or 1D texture's depth axis stays a single slice, at z 0 with size.z 1.
+/// A block-compressed region is also block-aligned, except where it runs to the subresource's edge.
 void assert_texture_region_in_bounds(raw_texture_handle const& texture,
                                      subresource_index const& sub,
                                      texture_region const& region);

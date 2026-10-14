@@ -77,6 +77,7 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_triangles co
                                                       int hit_record_stride)
 {
     CC_ASSERT(hit_record_stride >= 1, "build_blas: hit_record_stride must be >= 1");
+    _cmd._stats.add(stat::blas_builds);
     auto blas = _cmd.raytracing_build_blas_triangles(geometries, flags, hit_record_stride);
     if (blas != nullptr)
         impl::set_build_record(*blas, blas_geometry::triangles, hit_record_stride);
@@ -88,6 +89,7 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_aabbs const>
                                                       int hit_record_stride)
 {
     CC_ASSERT(hit_record_stride >= 1, "build_blas: hit_record_stride must be >= 1");
+    _cmd._stats.add(stat::blas_builds);
     auto blas = _cmd.raytracing_build_blas_aabbs(geometries, flags, hit_record_stride);
     if (blas != nullptr)
         impl::set_build_record(*blas, blas_geometry::aabbs, hit_record_stride);
@@ -96,6 +98,7 @@ blas_handle command_list_raytracing_scope::build_blas(cc::span<blas_aabbs const>
 
 tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance const> instances, accel_build_flags flags)
 {
+    _cmd._stats.add(stat::tlas_builds);
     auto tlas = _cmd.raytracing_build_tlas(instances, flags);
 
     // Only what the hit-record check at dispatch_rays reads, and only where it runs.

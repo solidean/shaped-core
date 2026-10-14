@@ -43,6 +43,8 @@ struct slib::module_library
 {
     cc::vector<cc::string> paths;
     cc::vector<cc::string> texts;
+    /// Each file's revision just before its text was read.
+    cc::vector<file_revision> revisions;
 
     /// Each file as a view of `paths` and `texts`, which must outlive the result.
     [[nodiscard]] cc::vector<module_source> files() const
@@ -74,6 +76,9 @@ struct slib::preprocessed_source
     /// The module files the source reached through `use`, by virtual path: what it depends on beside itself.
     /// Only SGL fills it.
     cc::vector<cc::string> used_modules;
+    /// What the compiler warned of while writing the text, one diagnostic each, its notes on the lines under it.
+    /// Only SGL fills it, and a cached result keeps them; a shader_library logs each once.
+    cc::vector<cc::string> warnings;
 };
 
 /// A value one compile gives an option of an SGL source, by the option's name, spelled as SGL spells it: `16`, `true`, `.rgba16_float`.

@@ -144,7 +144,7 @@ struct sg::binding
     cc::string name; ///< reflection name — the key a binding_group matches a bound view against
 
     /// The name the shader's compiler reflected, where a compiler edge renamed it to `name`; empty otherwise.
-    /// For diagnostics only: no backend and no layout reads it, and a cached shader never carries it.
+    /// For diagnostics only: no backend and no layout reads it.
     cc::string reflected_name;
 
     /// The descriptor set / @group this binding lives in — reflected by SPIR-V and other languages where the set is part of the hardware binding.

@@ -125,7 +125,8 @@ lib.backlog()                    // -> cc::async_backlog const&; every shader an
 slib::compile_source_options     // { shader_language language = hlsl; string_view include_dir; string_view label = "<generated>"; }
 // The door for GENERATED / downloaded / UI-authored shader text: compile_shader resolves the package owning a path, and such a
 // source is under none. Includes still resolve against the mount table, so generated code may pull in a package's .hlsli files.
-// NOTHING is cached — a caller generating a source already has a better key for it than a hash of the text would be.
+// slib adds no cache of the compiled shader here — a caller generating a source already has a better key for it.
+// A compiler's own cache still applies (DXC's and Metal's shader_cache), and an SGL source's preprocess is cached by its edge.
 
 slib::reload_config                         // { double interval_ms = 200; bool unthreaded = false;
                                             //   bool force_polling = false; }
@@ -195,7 +196,7 @@ slib::create_metal_compiler()      // -> std::unique_ptr<shader_compiler>; metal
                                    //   reflection reads the SOURCE (see shaped-shader-compiler-msl/cheat-sheet.md)
 
 #include <shaped-shader-library/compiler/sgl_compiler.hh>   // wherever the inner compiler exists
-slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
+slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner, sgl_compiler_options const& = {})
                                    // -> std::unique_ptr<shader_compiler>; sgl -> inner->target_format()
                                    //   dxil -> HLSL for dx12, spirv -> HLSL for vulkan, wgsl -> WGSL, metal_lib -> MSL
                                    //   preprocess IS SGL's pipeline, so the flattened source is the EMITTED TEXT;
@@ -203,7 +204,15 @@ slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
                                    //   each compile hands it what the text needs, so ANY inner compiler will do:
                                    //   -enable-16bit-types for DXC (float16_t), metal3.2 for a metallib (coherent(device))
                                    //   an SGL error is a preprocess error: `pkg/cube.sgl:12:5: error: unknown-name: foo`
-                                   //   the binding pass runs behind it: the HLSL names each group, the pass writes registers
+                                   //   an SGL warning is in preprocessed_source::warnings; a shader_library logs it under `slib`, once per (label, warning):
+                                   //   `SGL warns of 'pkg/cube.sgl' main: pkg/cube.sgl:7:14: warning: unroll-too-long: ...`
+                                   //   so a test compiling a shader that warns declares it: nx::expect_warning("unroll-too-long", ...)
+                                   //   every target's text carries its final addresses, so the binding pass never runs behind it
+                                   //   preprocess is cached under everything it reads: in memory, and in a persistent store
+slib::sgl_compiler_options         // { cc::optional<bcache::blob_cache*> persistent_cache; }
+                                   //   unset = bcache::default_cache(), looked up per compile, off under SC_SG_COLD=shaders
+                                   //   nullptr = memory only (a test off the user's cache); a store given must outlive the edge
+                                   //   no persistent tier on wasm or without threads, whatever is given
 lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));   // one edge per format you can build
 lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));  // ... and this is how a package reaches metal
 

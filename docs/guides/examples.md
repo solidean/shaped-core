@@ -230,6 +230,9 @@ What follows from the bucket:
 
 * **A sweep never selects it.** Not `dev.py test`, not `--manual`, not a bulk "run disabled too" request.
   Only `--examples` or its exact name.
+* **It runs as a program rather than as a suite**, whether it was named exactly or swept by `--examples`.
+  It prints no `nexus: run seed` line and no CPU and RAM summary, so its transcript reads the same on every run.
+  No hang watchdog watches it either, so it may sit idle in its window.
 * **No CHECK is required.** A `CHECK` that fails still fails, so assert where asserting is part of the demonstration — but an example with none is a passing example.
 * **`main_thread` and `exclusive()` are baked in**, so the body runs on the thread `nx::run` was entered on, alone — which is what a window or a device context needs.
 * **The run installs an ambient async scheduler**, so an example may use `cc::async` without standing up a pool of its own.

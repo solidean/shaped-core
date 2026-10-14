@@ -28,6 +28,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/raytracing_pipeline.cc
     src/shaped-shader-library/shader_library.cc
     src/shaped-shader-library/impl/reload_watcher.cc
+    src/shaped-shader-library/impl/sgl_emit_cache.cc
 )
 
 # Public headers (co-located in src/, grouped by topic).
@@ -63,6 +64,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/impl/pipeline_field_support.hh
     src/shaped-shader-library/impl/pipeline_fields.hh
     src/shaped-shader-library/impl/sgl_library.hh
+    src/shaped-shader-library/impl/sgl_emit_cache.hh
 )
 
 # The OS file-watch backend behind real_filesystem::watch.
@@ -89,6 +91,25 @@ target_link_libraries(shaped-shader-library PUBLIC shaped-graphics)
 # shaped-graphics-language is what the SGL compiler edge runs, and no header of slib names it.
 # It is over clean-core alone, so it costs a consumer no graphics API and no toolchain.
 target_link_libraries(shaped-shader-library PRIVATE shaped-graphics-language)
+
+# The persistent tier of the SGL edge's cache.
+# sgl_compiler_options only forward-declares its store, so a caller that hands one over links blob-cache itself.
+target_link_libraries(shaped-shader-library PRIVATE blob-cache)
+
+# What that tier keys on beside SGL's own fingerprint: the edge translates SGL's output, and an edit to it has to miss.
+# sg's binding and capability headers are in it too, since the stored bytes hold their enums by number.
+file(GLOB_RECURSE _slib_fingerprinted CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/binding/*.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/context/capabilities.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/resource/pixel_format.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/resource/views.hh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shaped-graphics/src/shaped-graphics/barrier/footprint.hh")
+sc_add_source_fingerprint(shaped-shader-library
+    FUNCTION slib::impl::sgl_edge_fingerprint
+    HEADER shaped-shader-library/impl/sgl_emit_cache.hh
+    FILES ${_slib_fingerprinted})
 
 sc_target_pch(shaped-shader-library SG)
 
@@ -154,6 +175,7 @@ if(SC_BUILD_TESTS)
         tests/dxc_compiler-test.cc
         tests/wgsl_compiler-test.cc
         tests/sgl_compiler-test.cc
+        tests/sgl_emit_cache-test.cc
         tests/sgl_options-test.cc
         tests/sgl_layout-test.cc
         tests/sgl_modules-test.cc
@@ -223,7 +245,7 @@ if(SC_BUILD_TESTS)
     target_compile_definitions(shaped-shader-library-test PRIVATE SLIB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
     # The pipeline test walks the SGL prelude, which slib itself links privately.
-    target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library shaped-graphics-language nexus)
+    target_link_libraries(shaped-shader-library-test PRIVATE shaped-shader-library shaped-graphics-language blob-cache nexus)
 
     sc_target_pch(shaped-shader-library-test SG NEXUS)
 

@@ -205,7 +205,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - an inline readback waits on a pending async text
         src[i] = float(i) * 2.0f + 1.0f;
 
     // Async upload on the copy queue, then an inline readback in a direct-queue list.
-    // The inline list must wait on the async upload's completion fence, folded in via track_texture_access, to observe the write.
+    // The inline list must wait on the async upload's completion fence, folded in at submit (`fold_transfer_waits`), to observe the write.
     handle->upload.bytes_to_texture(tex, cc::make_pinned_data(cc::as_bytes(cc::span<float const>(src, N))));
 
     auto cmd = c.create_command_list();

@@ -119,6 +119,22 @@ TEST("sg dx12 - SC_DX12_ADAPTER=hardware hides WARP from every request", exclusi
         CHECK(fallback.has_error());
 }
 
+// A context that withholds ray tracing answers as one on an adapter without DXR, on every spelling of the question.
+TEST("sg dx12 - a context withholding ray tracing reports neither half of it")
+{
+    auto const ctx = dx12::make_test_context({.withhold_raytracing = true});
+    if (ctx.has_error())
+        SKIP("no dx12 adapter");
+    auto& c = *ctx.value();
+    CHECK(!c.supports(sg::feature::ray_query));
+    CHECK(!c.supports(sg::feature::raytracing_pipeline));
+    CHECK(!c.supports_raytracing());
+
+    auto probe = c.create_command_list();
+    CHECK(!probe->raytracing.is_supported());
+    c.drop_command_list(cc::move(probe));
+}
+
 TEST("sg dx12 - a context counts the textures and buffers alive against it")
 {
     // A context of its own: no other test's resources move the count.

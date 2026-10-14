@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/atomic.hh>
@@ -80,16 +81,13 @@ protected:
 
 private:
     /// Reads every watched path's revision, stages a recompile on each asset a changed file feeds, then re-arms the watches.
-    /// Newly discovered paths are seeded, never treated as changed.
+    /// An asset whose first compile missed a reload is staged too, which is how that reload is driven on this thread.
     void scan();
 
-    /// Compares `path` against the revision we last saw, returning whether it moved.
-    /// An unseen path is seeded and reported unchanged.
-    [[nodiscard]] bool note_revision(cc::string_view path);
-
-    /// Records `path`'s revision only if it is new.
-    /// Never reports a change — used after staging, where a path we have only now heard of was discovered by the compile that just read it.
-    void seed_revision(cc::string_view path);
+    /// Compares `dependency`'s file against the revision we last saw, returning whether it moved.
+    /// A path met for the first time is compared against the revision its compile read, and goes into `met`.
+    /// A path already in `met` is compared that way too, for each further build that read it at another revision.
+    [[nodiscard]] bool note_revision(file_dependency const& dependency, cc::set<cc::string>& met);
 
     /// The distinct parent directories of every current dependency, in a stable order.
     [[nodiscard]] cc::vector<cc::string> dependency_dirs() const;

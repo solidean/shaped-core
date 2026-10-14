@@ -81,8 +81,8 @@ TEST("sgl driver - a line and a column are 1-based, and end of file is a place")
 
 TEST("sgl driver - every diagnostic kind has a summary a reader understands without its name")
 {
-    // `nesting_too_deep` is the last kind; a kind added after it moves this bound
-    for (auto k = 0; k <= int(sgl::diagnostic_kind::nesting_too_deep); ++k)
+    // `unroll_too_long` is the last kind; a kind added after it moves this bound
+    for (auto k = 0; k <= int(sgl::diagnostic_kind::unroll_too_long); ++k)
     {
         auto const kind = sgl::diagnostic_kind(k);
         CHECK(!sgl::summary_of(kind).empty());
@@ -152,6 +152,53 @@ TEST("sgl driver - a broken source reports where and what, and gives no text")
                                         "    }\n");
     CHECK(error_of({.source = source, .source_name = "broken.sgl", .entry_point = "main_ps", .target = target::hlsl_dx12})
           == "broken.sgl:9:24: error: unknown-name: missing\n");
+}
+
+TEST("sgl driver - a warning does not fail the compile, and comes back with the text, one entry each")
+{
+    // a statement that does nothing is the AST pass's warning, and 257 values staying a loop is the check pass's
+    constexpr auto source = cc::string_view("binding work:\n"
+                                            "    values: mut buffer[int]\n"
+                                            "\n"
+                                            "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                                            "    let mut t = 0\n"
+                                            "    t + 1\n"
+                                            "    @unroll\n"
+                                            "    for i in 0 ..< 257:\n"
+                                            "        t += i\n"
+                                            "    work.values[id.x] = t\n");
+    auto const expected_no_effect = cc::string_view("warned.sgl:6:5: warning: no-effect: ");
+    auto const expected_unroll = cc::string_view("warned.sgl:8:14: warning: unroll-too-long: "
+                                                 "an unrolled for writes its body at most 256 times, "
+                                                 "and this range holds 257, so it is written as a loop");
+
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const r
+            = sgl::compile_to_text({.source = source, .source_name = "warned.sgl", .entry_point = "main", .target = t});
+        REQUIRE(r.has_value()).context(r.has_error() ? r.error() : cc::string());
+        auto const& warnings = r.value().warnings;
+        REQUIRE(warnings.size() == 2);
+        CHECK(warnings[0].starts_with(expected_no_effect)).context(warnings[0]);
+        CHECK(!warnings[0].contains("\n")).context(warnings[0]);
+        CHECK(warnings[1] == expected_unroll).context(warnings[1]);
+    }
+
+    // every entry point's text carries the source's warnings alike
+    auto const all
+        = sgl::compile_all_to_text({.source = source, .source_name = "warned.sgl", .targets = sgl::emit::all_targets()});
+    REQUIRE(all.has_value());
+    for (auto const& e : all.value())
+    {
+        REQUIRE(e.text.has_value());
+        REQUIRE(e.text.value().warnings.size() == 2);
+        CHECK(e.text.value().warnings[1] == expected_unroll);
+    }
+
+    // a failure's error holds its errors alone
+    auto const broken = cc::string(source) + "    work.values[id.x] = missing\n";
+    auto const e = error_of({.source = broken, .source_name = "warned.sgl", .entry_point = "main"});
+    CHECK(e == "warned.sgl:11:25: error: unknown-name: missing\n");
 }
 
 // `main_thread` for the stack: this is the one test that deliberately builds a tree AT the limit, and the check pass
