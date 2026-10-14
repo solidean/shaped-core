@@ -573,6 +573,13 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
             = make_failed_shader(cc::format("preprocessing '{}' failed: {}", label, preprocessed.error().to_string()));
         return;
     }
+    // Once per library, a cached result's included: one source's warnings come back for every entry point and format built from it.
+    auto const name = label.empty() ? cc::string_view("<sgl>") : label;
+    for (auto const& w : preprocessed.value().warnings)
+        if (_logged_warnings.lock([&](cc::set<cc::string>& logged)
+                                  { return logged.insert(cc::format("{}\n{}", name, w)); }))
+            CC_LOG_WARNING("SGL warns of '{}' {}: {}", name, entry_point, w);
+
     for (auto& path : preprocessed.value().used_modules)
     {
         if (!seen.insert(path))
