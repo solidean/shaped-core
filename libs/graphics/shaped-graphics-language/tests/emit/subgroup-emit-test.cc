@@ -54,7 +54,8 @@ TEST("sgl emit - a reduction and a quad swap are each target's own")
     auto const wgsl = text_of(k_reduce, target::wgsl);
     CHECK(wgsl.starts_with("// SGL compute entry point 'reduce', written as WGSL.\n"
                            "// Generated: the SGL source is what to edit.\n\n"
-                           "enable subgroups;\n\n"));
+                           "enable subgroups;\n\n"
+                           "diagnostic(off, subgroup_uniformity);\n\n"));
     CHECK(wgsl.contains("    let swapped: f32 = quadSwapX(v);\n"));
     CHECK(wgsl.contains("    let total: f32 = subgroupAdd(swapped);\n"));
 

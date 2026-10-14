@@ -93,7 +93,7 @@ TEST("sgl check - a barrier stands where every thread of the workgroup arrives")
               .contains("is set where the control flow differs"));
 }
 
-TEST("sgl check - a loop that some threads leave early is divergent all through, and after it")
+TEST("sgl check - a loop that some threads leave early is divergent all through, and a barrier after it too")
 {
     // the leaving thread misses the next iteration's barrier, even the one above the `break`
     auto const inside = reports_for(compute("    for i in 0 ..< work.count:\n"
@@ -603,7 +603,7 @@ TEST("sgl check - a note on a local set under a branch of the prelude names the 
                              traced))
           == unmarked("h.instance_id % 8", decided));
 
-    // a break on a uniform condition, in the flow the query leaves behind, takes the decision out of the loop
+    // CHK-284: every invocation is back after the query's loop, so a break on a uniform condition leaves them together
     CHECK(queried(cc::format("    let mut k = 0\n"
                              "    for i in 0 ..< 4:\n"
                              "        let h = {}\n"
@@ -611,7 +611,7 @@ TEST("sgl check - a note on a local set under a branch of the prelude names the 
                              "    k = 1\n"
                              "    scene.results[id.x] = scene.tables[k % 8].load(0u)\n",
                              traced))
-          == unmarked("k % 8", decided));
+          == "");
 }
 
 TEST("sgl check - every parameter of a stage differs between its invocations, a tessellation's factors among them")
@@ -640,4 +640,75 @@ TEST("sgl check - every parameter of a stage differs between its invocations, a 
     CHECK(evaluated("nonuniform ((f.inside as int) % 8)") == "");
     CHECK(evaluated("(f.inside as int) % 8")
           == unmarked("(f.inside as int) % 8", "user:[f] this value comes from the stage's parameter f"));
+}
+
+TEST("sgl check - a loop left only by break or continue reconverges after it, for a derivative and a subgroup "
+     "operation")
+{
+    // CHK-284: every pixel that entered the loop reaches the sample after it
+    CHECK(reports_for(pixel("    for i in 0 ..< 8:\n"
+                            "        if p.uv.x < 0.5 => break\n"
+                            "        c.x += 1.0\n"
+                            "    c = material.albedo.sample(p.uv)\n"))
+          == "");
+    CHECK(reports_for(pixel("    while c.x < p.uv.x:\n"
+                            "        c.x += 0.25\n"
+                            "        if p.uv.y < 0.5 => continue\n"
+                            "        c.y += 1.0\n"
+                            "    c = material.albedo.sample(p.uv)\n"))
+          == "");
+    // inside it, the pixels that left miss the later iterations
+    CHECK(reports_for(pixel("    for i in 0 ..< 8:\n"
+                            "        c = material.albedo.sample(p.uv)\n"
+                            "        if p.uv.x < 0.5 => break\n"))
+              .contains(kind));
+    // a pixel that returns from inside the loop never reaches what follows it
+    auto const returned = reports_for(pixel("    for i in 0 ..< 8:\n"
+                                            "        if p.uv.x < 0.5 => return {color = c}\n"
+                                            "    c = material.albedo.sample(p.uv)\n"));
+    CHECK(returned.contains(kind));
+    CHECK(returned.contains("some invocations return here, and the others go on"));
+
+    // a helper's early return leaves the rest of its block divergent, and its caller's flow as it was
+    auto const helper = cc::string("\nfun first(x: float) -> float:\n"
+                                   "    if x < 0.5 => return 0.0\n"
+                                   "    return 1.0\n");
+    CHECK(reports_for(pixel("    c.x = first(p.uv.x)\n    c = material.albedo.sample(p.uv)\n") + helper) == "");
+    auto const sampled_late = cc::string("\nfun late(x: float){material} -> float4:\n"
+                                         "    if x < 0.5 => return float4(0.0, 0.0, 0.0, 1.0)\n"
+                                         "    return material.albedo.sample(float2(x, x))\n");
+    CHECK(reports_for(pixel("    c = late(p.uv.x)\n") + sampled_late).contains(kind));
+    // and what stands ahead of its early return is reached by every pixel, since a block runs once
+    auto const sampled_early = cc::string("\nfun early(x: float){material} -> float4:\n"
+                                          "    let s = material.albedo.sample(float2(x, x))\n"
+                                          "    if x < 0.5 => return s\n"
+                                          "    return s * 2.0\n");
+    CHECK(reports_for(pixel("    c = early(p.uv.x)\n") + sampled_early) == "");
+}
+
+TEST("sgl check - a note on a branch of the prelude names the program's call that reached it")
+{
+    auto const queried = [](cc::string_view body)
+    {
+        return reports_for(cc::format("require ray_query\n\n"
+                                      "binding scene:\n"
+                                      "    world: acceleration_structure[.triangles]\n"
+                                      "    results: mut buffer[uint]\n\n"
+                                      "@compute(8, 8) fun cs(@thread_id id: int3){{scene}}:\n"
+                                      "{}",
+                                      body));
+    };
+    // a barrier keeps WGSL's rules, by which the flow after the query's loop differs, and the query is the line to blame
+    auto const traced
+        = "scene.world.trace(ray(origin = pos3(id.x as float, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)))";
+    auto const barred = queried(cc::format("    let h = {}\n"
+                                           "    workgroup_barrier()\n"
+                                           "    scene.results[id.x] = h.instance_id as uint\n",
+                                           traced));
+    CHECK(barred
+          == cc::format("non-uniform-control-flow user:[workgroup_barrier()] workgroup_barrier waits for every thread "
+                        "of "
+                        "the workgroup, and not every one reaches it here\n"
+                        "  note user:[{}] a branch inside this call tests a value that comes from the stage input id\n",
+                        traced));
 }
