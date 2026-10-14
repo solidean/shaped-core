@@ -316,17 +316,29 @@ if(SC_BUILD_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists
     add_subdirectory(examples)
 endif()
 
-# Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
-# one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
-sc_finalize_web_runners()
+# The end-of-configure registries: each collects what every target declared, so it runs once all of them exist.
+function(sc_finalize_build)
+    # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
+    # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
+    sc_finalize_web_runners()
 
-# Which executables are nexus binaries and what they carry, for dev.py. See libs/base/nexus/cmake/NexusBinaries.cmake.
-sc_write_nexus_binary_manifest()
+    # Which executables are nexus binaries and what they carry, for dev.py. See libs/base/nexus/cmake/NexusBinaries.cmake.
+    sc_write_nexus_binary_manifest()
 
-# Check that every declared shader package found the shaped-shader-library target. See
-# libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
-sc_finalize_shader_packages()
+    # Check that every declared shader package found the shaped-shader-library target. See
+    # libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
+    sc_finalize_shader_packages()
 
-# Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
-# Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
-sc_finalize_pch()
+    # Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
+    # Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
+    sc_finalize_pch()
+endfunction()
+
+# As a subdirectory of another project, "every target" includes the consumer's, which do not exist yet here.
+# So the finalizers run at the end of the top-level CMakeLists instead, and the consumer's tests, PCH requests and shader packages are seen with ours.
+# A consumer calls none of them itself: two writers of nexus-binaries.json would be a generate error.
+if(PROJECT_IS_TOP_LEVEL)
+    sc_finalize_build()
+else()
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL sc_finalize_build)
+endif()
