@@ -96,7 +96,7 @@ def _run(args: argparse.Namespace, ctx: Context) -> None:
         ctx.die(err)
     try:
         cov_results = dev.coverage_run(
-            presets, binary_names, root=ctx.root, test_name=test_name, html=args.html,
+            presets, binary_names, root=ctx.root, layout=ctx.policy.layout, test_name=test_name, html=args.html,
             timeout=args.timeout if args.timeout else None,
             mirror=args.mirror_output, verbose=args.verbose,
         )
@@ -110,7 +110,7 @@ def _report(args: argparse.Namespace, ctx: Context) -> None:
     binary_names = [t.name for t in ctx.discover(presets[0]) if ctx.is_test_target(t)]
     try:
         results = dev.coverage_report(
-            presets, binary_names, root=ctx.root, html=args.html,
+            presets, binary_names, root=ctx.root, layout=ctx.policy.layout, html=args.html,
             mirror=args.mirror_output, verbose=args.verbose,
         )
     except (dev.CoverageToolError, FileNotFoundError) as e:
@@ -126,7 +126,7 @@ def _merge(args: argparse.Namespace, ctx: Context) -> None:
     output_dir = Path(args.output) if args.output else (ctx.root / "build" / "coverage-merged")
     try:
         result = dev.coverage_merge(
-            presets, names_by_preset, root=ctx.root, output_dir=output_dir, html=args.html,
+            presets, names_by_preset, root=ctx.root, layout=ctx.policy.layout, output_dir=output_dir, html=args.html,
             mirror=args.mirror_output, verbose=args.verbose,
         )
     except (dev.CoverageToolError, FileNotFoundError) as e:

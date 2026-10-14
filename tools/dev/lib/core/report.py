@@ -378,7 +378,7 @@ def summarize_format(result, root: Path) -> bool:
     Offenders (check mode) go to stdout (pipeable); the verdict to stderr.
     """
     if result.nothing:
-        what = result.scope.phrase("libs/ sources") if result.scope else "libs/ sources"
+        what = result.scope.phrase("C++ sources") if result.scope else "C++ sources"
         ui.write_line(console.dim(f"No {what} to format."))
         return True
 

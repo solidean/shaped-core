@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .lib.core import console, profile, report, ui
 from .lib.core.archive import archive_diag, archive_logs
+from .lib.core.layout import DRIVER_ROOT, SHAPED_CORE_LAYOUT, Layout
 from .lib.core.logs import merge_junit, ninja_built_count
 from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
 from .lib.core.process import (
@@ -93,6 +94,9 @@ from .lib.perf.pgo import (
 )
 
 __all__ = [
+    "DRIVER_ROOT",
+    "Layout",
+    "SHAPED_CORE_LAYOUT",
     "archive_diag",
     "archive_logs",
     "build",

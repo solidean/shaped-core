@@ -18,15 +18,17 @@ import ctypes.util
 import re
 from pathlib import Path
 
+from ..core.layout import DRIVER_ROOT
 
-def _mbedtls_check(root: Path) -> tuple[str, bool | None, str]:
+
+def _mbedtls_check() -> tuple[str, bool | None, str]:
     """Which TLS backend cnet was built with, and which version of it.
 
     Vendored rather than fetched, so this reports the version rather than presence: a checkout that has it missing is
     a broken checkout, not a machine without a feature.
     """
     label = "TLS backend"
-    header = root / "extern" / "mbedtls" / "include" / "mbedtls" / "build_info.h"
+    header = DRIVER_ROOT / "extern" / "mbedtls" / "include" / "mbedtls" / "build_info.h"
 
     if not header.is_file():
         return (label, False, "extern/mbedtls is missing — the vendored sources are not optional")
@@ -81,7 +83,7 @@ def _libcurl_check() -> tuple[str, bool | None, str]:
     return (label, None, "not found — the native backend is the only one either way today")
 
 
-def _http_backends_check(root: Path, is_wasm: bool) -> tuple[str, bool | None, str]:
+def _http_backends_check(is_wasm: bool) -> tuple[str, bool | None, str]:
     """Which HTTP backends this build compiled in, so the automatic choice is inspectable rather than inferred.
 
     A capability ladder rather than a bag of booleans: code written against a level works on every backend at that
@@ -89,7 +91,7 @@ def _http_backends_check(root: Path, is_wasm: bool) -> tuple[str, bool | None, s
     """
     label = "HTTP backends"
 
-    if not (root / "libs" / "base" / "clean-net").is_dir():
+    if not (DRIVER_ROOT / "libs" / "base" / "clean-net").is_dir():
         return (label, None, "clean-net is not in this checkout")
 
     if is_wasm:
@@ -100,16 +102,18 @@ def _http_backends_check(root: Path, is_wasm: bool) -> tuple[str, bool | None, s
     return (label, True, "native (our own transport, HTTP/1.1)")
 
 
-def checks(root: Path, is_wasm: bool) -> list[tuple[str, bool | None, str]]:
+def checks(is_wasm: bool) -> list[tuple[str, bool | None, str]]:
     """The networking environment, as (label, ok, detail) triples in the order doctor prints them.
+
+    The TLS stack and clean-net are shaped-core's, so they are looked up in the driver's tree (core/layout.py), whatever project runs doctor.
 
     `is_wasm` is what separates "no sockets here, and never will be" from "not on this machine" — the same
     distinction `cnet::error_code::unsupported` draws, and the reason a caller decides once at startup rather than
     probing per call.
     """
     return [
-        _mbedtls_check(root),
+        _mbedtls_check(),
         _tls_platform_check(),
         _libcurl_check(),
-        _http_backends_check(root, is_wasm),
+        _http_backends_check(is_wasm),
     ]

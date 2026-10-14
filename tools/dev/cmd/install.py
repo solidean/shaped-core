@@ -160,7 +160,7 @@ def _emsdk_target(args: argparse.Namespace) -> Path:
 
 
 def _list_emsdk(ctx: Context) -> None:
-    pinned = dev.pinned_emsdk_version(ctx.root)
+    pinned = dev.pinned_emsdk_version()
     print(f"{console.bold(_EMSDK)}  the Emscripten SDK the WASM presets build with, pinned to {pinned} in tools/emsdk.version")
     root = dev.find_emsdk_root()
     if root is None:
@@ -191,7 +191,7 @@ def _install_emsdk(args: argparse.Namespace, ctx: Context) -> None:
         print(f"  emsdk is a folder rather than a link, so nothing here deletes it; remove {target} to uninstall it")
         return
 
-    pinned = dev.pinned_emsdk_version(ctx.root)
+    pinned = dev.pinned_emsdk_version()
     git = shutil.which("git")
     if git is None:
         ctx.die("emsdk installs from its git repository, and git is not on PATH")

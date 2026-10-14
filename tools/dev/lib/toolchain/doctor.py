@@ -250,7 +250,7 @@ def _coverage_tool_check(
         return (label, False, f"failed to run ({e})")
 
 
-def _emscripten_checks(repo_root: Path, emsdk_path: str | None) -> list[tuple[str, bool | None, str]]:
+def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, str]]:
     """Validate the Emscripten/emsdk toolchain used by the wasm-emscripten-* presets.
 
     Emscripten is an optional (Tier 2) target, so this stays advisory.
@@ -272,7 +272,7 @@ def _emscripten_checks(repo_root: Path, emsdk_path: str | None) -> list[tuple[st
 
     checks: list[tuple[str, bool | None, str]] = [("emsdk", True, str(root))]
 
-    pinned = pinned_emsdk_version(repo_root)
+    pinned = pinned_emsdk_version()
     installed = installed_emsdk_version(root)
     checks.append(
         ("emscripten version", installed == pinned,
@@ -390,13 +390,13 @@ def doctor(
     checks.append(_coverage_tool_check("llvm-cov", "llvm-cov", "LLVM_COV", cov_build_dir))
 
     # Emscripten/WASM toolchain (optional; advisory unless emsdk is signalled).
-    checks.extend(_emscripten_checks(root, emsdk_path))
+    checks.extend(_emscripten_checks(emsdk_path))
 
     # The graphics environment the sg backends, sr::window and the shader library need — advisory throughout.
     checks.extend(graphics.checks(root, cxx))
 
     # The networking environment cnet's TLS and HTTP backends resolve to — advisory throughout, for the same reason.
-    checks.extend(network.checks(root, preset is not None and preset.family == "emscripten"))
+    checks.extend(network.checks(preset is not None and preset.family == "emscripten"))
 
     # What this machine carries that we already know misbehaves under our code — a warning, never a failure.
     checks.extend(known_issues.doctor_rows())

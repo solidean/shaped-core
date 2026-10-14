@@ -58,8 +58,8 @@ class ChangeScope:
     def phrase(self, noun: str) -> str:
         """`noun` narrowed to this scope, as a summary line would say it.
 
-        The kinds want the qualifier in different places — "dirty libs/ sources", "libs/ sources in abc123",
-        "libs/ sources since origin/main" — so the caller hands over the noun rather than a prefix.
+        The kinds want the qualifier in different places — "dirty C++ sources", "C++ sources in abc123",
+        "C++ sources since origin/main" — so the caller hands over the noun rather than a prefix.
         """
         if self.since is not None:
             return f"{noun} since {self.since}"

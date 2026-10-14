@@ -165,9 +165,16 @@ PGO_BASELINE_PRESETS: dict[str, str] = {
 # Default preset for `test-web` (the browser runner is Emscripten-only, regardless of host platform).
 DEFAULT_WEB_PRESET = "emscripten-relwithdebinfo"
 
+# Where this repo keeps its first-party files: what format, lint, crossrefs and coverage walk.
+# A project reusing the driver declares its own (tools/dev/lib/core/layout.py).
+LAYOUT: dev.Layout = dev.SHAPED_CORE_LAYOUT
+
+# The integration branch `check` scopes itself against.
+DEFAULT_BRANCH = "main"
+
 
 def build_policy() -> cmd.Policy:
-    """Bundle the preset tables above into the Policy commands read through the Context."""
+    """Bundle the preset tables and the layout above into the Policy commands read through the Context."""
     return cmd.Policy(
         default_build=DEFAULT_BUILD_PRESETS,
         default_debug=DEFAULT_DEBUG_PRESETS,
@@ -180,6 +187,8 @@ def build_policy() -> cmd.Policy:
         pgo_use=PGO_USE_PRESETS,
         pgo_baseline=PGO_BASELINE_PRESETS,
         web_preset=DEFAULT_WEB_PRESET,
+        layout=LAYOUT,
+        default_branch=DEFAULT_BRANCH,
     )
 
 
