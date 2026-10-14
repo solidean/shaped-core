@@ -199,7 +199,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   **Never introduce a new version of one of our file formats** (`.vdoc` above all) — that is a question, not a migration you write unprompted.
   When a change breaks something, **ask whether compatibility must be preserved**; most current work is on unreleased features, so the answer is usually no.
   See [Stability & Evolution](docs/coding-guidelines.md#stability--evolution).
-* **Feature branches are mandatory** (see Git workflow) — don't commit to `main`.
+* **Most work goes straight to `main`; a PR is for big reworks and substantial new API** (see Git workflow).
+* **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**
 * **Opening a PR requires the `opening-a-pr` skill.** Activate it before any `gh pr create` — do not hand-roll the PR.
 
@@ -246,7 +247,7 @@ Writing several `.md` files before linting any of them turns a habit into a swee
 Linting the first one calibrates the rest.
 [docs/guides/prose.md](docs/guides/prose.md) is the workflow around it, including what `--fix` will and won't do for you.
 
-**Before committing, run `uv run dev.py check --fix`** — the pre-commit gate, and manual rather than a git hook.
+**Before pushing, run `uv run dev.py check --fix`** — the pre-push gate, and manual rather than a git hook.
 It runs the clang-tidy gates, shaped-linter, clang-format, a full-repo cross-reference check, then the test suite; `--no-test` skips that tail and `--list` shows the registry.
 The order is a correctness property rather than a listing convention, and [Pre-commit checks](docs/guides/building-and-testing.md#pre-commit-checks) says why.
 
@@ -437,10 +438,22 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 
 ## Git workflow
 
-* **`main` is the integration branch.** Feature branches are **mandatory**, namespaced per contributor: `u/<your-initials>/<feature>` (e.g. `u/pt/...` for Philip Trettner — use your own initials).
+* **`main` is the integration branch, and most changes are committed to it directly.**
+  That covers fixes, internal improvements, tests, CI fixes, docs, and API that was basically expected to be there — the missing overload, the accessor the type obviously lacked.
+* **A PR with a review is for big reworks and anything that adds substantial new API** — a new concept, type family or library, a public shape someone should weigh before it sets.
+  Those go on a feature branch namespaced per contributor, `u/<your-initials>/<feature>` (Philip Trettner is `u/pt/...`), through the `opening-a-pr` skill.
+  When a change could go either way, pick a lane and say which in one line, so the maintainer can redirect.
+* **CI is never waited on**, neither before a push to `main` nor before opening a PR.
+  Red CI is fixed after the fact and opportunistically, as its own commit on `main` — the `debugging-ci` skill reads the failing run.
+  It is usually small: an arm the local machine does not compile, a newer compiler's warning.
 * **`git pull` merges, not rebases** — merge commits preserve the order parallel work landed.
   On conflicts, resolve and commit the merge (default message fine).
-* **Before committing, run `uv run dev.py check --fix`.** Not a git hook — manual.
+  A push to `main` rejected as non-fast-forward is the same case: pull, resolve, push again.
+* **Commits are grouped by topic, and one may be partially broken.** A commit that does not compile on its own is fine.
+* **Before every push, `uv run dev.py check --fix` must pass.** Not a git hook — manual.
+  It is the local gate that makes skipping CI cheap, so it is not skipped.
+  Its default scope is everything since the merge base with `origin/main`, so on `main` it covers exactly the unpushed commits.
+* **An agent never pushes on its own initiative.** A push needs the user's intent: ask, or wait until told to push.
 * **The review workflow is: open the PR, then review it in a fresh session, which lands changes or comments.**
   The review with the tool always comes after the PR is open, never before.
   So "anything to add before the PR?" asks what this session should still do; "a proper review with the tool" is never the answer.
