@@ -121,3 +121,21 @@ TEST("sgl emit - an unrolled for past 256 copies is a loop, counting a nest's co
         CHECK(occurrences(rows.text, "for (") == 17).dump("text", rows.text);
     }
 }
+
+TEST("sgl emit - an unrolled index's arithmetic shifted in HLSL is written as the int it is, which DXC otherwise refuses")
+{
+    constexpr cc::string_view source = "binding io:\n"
+                                       "    target: mut buffer[int]\n"
+                                       "\n"
+                                       "@compute(64) fun masks(@thread_id id: int3){io}:\n"
+                                       "    let n = id.x & 7\n"
+                                       "    let mut m = 0\n"
+                                       "    @unroll\n"
+                                       "    for i in 0 ..< 3:\n"
+                                       "        m |= (i + 1) << n\n"
+                                       "    io.target[id.x] = m\n";
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("m = m | (int((0 + 1)) << n);\n")).dump("hlsl", hlsl);
+    CHECK(hlsl.contains("m = m | (int((2 + 1)) << n);\n")).dump("hlsl", hlsl);
+    CHECK(!hlsl.contains("((0 + 1) << n)")).dump("hlsl", hlsl);
+}

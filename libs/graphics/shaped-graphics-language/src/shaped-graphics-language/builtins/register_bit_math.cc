@@ -66,20 +66,20 @@ written write_bitwise(call_context const& c)
             .binds = precedence::bitwise};
 }
 
-/// Whether `text` is a bare decimal literal, which HLSL types only by context.
-/// That is `1`, `-1`, or the lowest int as the emitter spells it, `(-2147483647 - 1)`.
-bool is_bare_decimal(cc::string_view text)
+/// Whether `text` is arithmetic on bare decimal literals, which HLSL types only by context.
+/// That is `1`, `-1`, the lowest int as the emitter spells it, `(-2147483647 - 1)`, and what an unrolled index makes, `(0 + 1)`.
+/// A typed literal such as `1u`, and any name, holds a letter.
+bool is_literal_arithmetic(cc::string_view text)
 {
-    if (text == "(-2147483647 - 1)")
-        return true;
-    if (text.starts_with("-"))
-        text = text.subview(1);
-    if (text.empty())
-        return false;
+    auto has_digit = false;
     for (auto const ch : text)
-        if (ch < '0' || ch > '9')
+    {
+        if (ch >= '0' && ch <= '9')
+            has_digit = true;
+        else if (cc::string_view(" ()+-*/%").find(ch) < 0)
             return false;
-    return true;
+    }
+    return has_digit;
 }
 
 /// `a << b` everywhere, where HLSL masks the count to its low five bits and WGSL does at run time;
@@ -101,9 +101,9 @@ written write_shift(call_context const& c)
         count = Width == 1 ? cc::format("u32({})", count) : cc::format("vec{}u({})", Width, count);
     else if (c.target == language::msl)
         count = cc::format("({} & 31)", count);
-    // DXC refuses `1 << n` and `-1 << n`, whose left side is a literal it cannot type, so one is written as the int it is.
+    // DXC warns on `1 << n` and `(0 + 1) << n`, whose left side it cannot type, and `-WX` makes that an error.
     auto left = operand(c.arguments[0]);
-    if (c.target == language::hlsl && IsSigned && Width == 1 && is_bare_decimal(left))
+    if (c.target == language::hlsl && IsSigned && Width == 1 && is_literal_arithmetic(left))
         left = cc::format("int({})", left);
     return {.text = cc::format("{} {} {}", left, op, count), .binds = precedence::bitwise};
 }
