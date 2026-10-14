@@ -407,6 +407,7 @@ t.subresources;                                // file order: layer, then face, 
 t.find(layer, face, mip);                      // -> subresource const*, nullptr where absent
 babel::dds::decode_rgba8(t, sub, {.max_decoded_bytes = 1 << 28}); // -> result<vector<byte>> rgba8; errors for a float format or past the budget
 babel::dds::decode_rgba32f(t, sub);            // -> result<vector<float>>; every format, signed ones in -1..1, BC1-BC5 unrounded
+babel::dds::decode_rgba32f_into(t, sub, out);  // the same into caller memory, four floats per texel
 babel::dds::is_block_compressed(fmt); is_float(fmt); is_srgb(fmt); mip_extent(base, level);
 
 babel::tga::data g = babel::tga::read(bytes, {.max_decoded_bytes = 1 << 28}).value();  // the budget is checked before allocating

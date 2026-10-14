@@ -222,7 +222,7 @@ Arrays, cube maps (partial legacy ones included) and volumes are laid out in fil
 
 - `[done]` **decoding** — any subresource to rgba8 (every format but the float ones), or to rgba32f (every format), through `bcn`.
 - `[planned]` **the remaining DXGI formats** — 10:10:10:2, 11:11:10, 16-bit unorm, and the rest of the uncompressed table, each a mapping plus a texel decoder.
-  Legacy files reach most of them already through the bit-mask path.
+  Legacy files reach 10:10:10:2 and the 16-bit one- and two-channel ones already, through the bit-mask path; 11:11:10 is a float format and RGBA16 is 64 bits, which no 32-bit mask describes.
 
 ### tga [done]
 

@@ -701,6 +701,28 @@ TEST("dds - a decode larger than the budget is refused before allocating")
     CHECK(babel::image::read(file, {.max_decoded_bytes = 255}).has_error());
 }
 
+TEST("dds - a float DDS reaches the aggregator as f32, one buffer under the budget")
+{
+    // 2x2 rgba32_float through DX10: texel t holds (t, t + 0.25, t + 0.5, 1).
+    auto payload = cc::vector<byte>::create_filled(2 * 2 * 16, byte(0));
+    for (auto t = 0; t < 4; ++t)
+        for (auto c = 0; c < 4; ++c)
+            cc::store_bytes_le<float>(payload, (t * 4 + c) * 4, c == 3 ? 1.0f : float(t) + 0.25f * float(c));
+    auto const file = make_dds({.width = 2, .height = 2, .dx10 = true, .dxgi = 2}, payload);
+
+    auto const img = babel::image::read(file);
+    REQUIRE(img.has_value());
+    CHECK(img.value().comp == babel::image::component::f32);
+    auto const floats = img.value().samples_f32();
+    REQUIRE(floats.size() == 16);
+    CHECK(floats[2 * 4 + 1] == 2.25f);
+    CHECK(floats[3 * 4 + 3] == 1.0f);
+
+    // 64 bytes of floats: the budget is the image's own size, with nothing beside it.
+    CHECK(babel::image::read(file, {.max_decoded_bytes = 64}).has_value());
+    CHECK(babel::image::read(file, {.max_decoded_bytes = 63}).has_error());
+}
+
 TEST("dds - decoding checks a hand-built texture rather than trusting it")
 {
     auto tex = dds::data{.format = dds::pixel_format::masked, .width = 1, .height = 1};

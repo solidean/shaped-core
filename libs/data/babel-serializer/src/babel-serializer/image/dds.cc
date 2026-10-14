@@ -43,7 +43,7 @@ struct resolved_format
 
 cc::optional<pixel_format> from_dxgi(u32 dxgi)
 {
-    // The TYPELESS variants (70, 73, 76, 79, 82, 94, 97) read as their UNORM sibling.
+    // The TYPELESS variants (70, 73, 76, 79, 82, 94, 97) read as their unsigned sibling: UNORM, or UF16 for BC6H.
     switch (dxgi)
     {
     case 2:

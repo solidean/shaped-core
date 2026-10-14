@@ -200,7 +200,7 @@ cc::result<data> read(cc::span<byte const> bytes, read_options opts)
         break;
     }
 
-    // Run-length data describes up to about 128 times its length in pixels, so a plausible file can still demand
+    // A two-byte run-length packet describes up to 128 pixels, so a plausible file can still demand
     // gigabytes; the budget is what bounds the allocation, checked before anything is made.
     auto const pixel_count = isize(h.width) * isize(h.height);
     if (pixel_count * result.channels > opts.max_decoded_bytes)
