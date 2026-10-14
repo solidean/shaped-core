@@ -9,6 +9,12 @@ if(NOT SC_HAS_DXC_COMPILER)
     return()
 endif()
 
+# sc_add_example is a no-op without SC_BUILD_EXAMPLES, but the target_* calls and the shader package below are not.
+# Off is the default when shaped-core is another project's subdirectory, so this must return rather than configure a target that does not exist.
+if(NOT SC_BUILD_EXAMPLES)
+    return()
+endif()
+
 # dx12 and vulkan both take HLSL through DXC and both present through a swapchain, so one source serves them.
 sc_resolve_example_backend(_sr_backend _sr_mode SUPPORTS dx12 vulkan)
 if(_sr_mode STREQUAL "none")

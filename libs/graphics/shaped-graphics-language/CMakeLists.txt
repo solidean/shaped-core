@@ -327,7 +327,13 @@ if(SC_BUILD_TOOLS)
         tools/sgl/lsp/tests/language-server-test.cc
         tools/sgl/lsp/tests/language-server-benchmark.cc
     )
-    sc_nexus_binary(sgl KINDS tool tests)
+    # The language server's tests are compiled in either way, but run only where this build runs ours:
+    # as a subdirectory of another project (SC_BUILD_TESTS off) `sgl` is a tool, and that project's test runs must not reach it.
+    if(SC_BUILD_TESTS)
+        sc_nexus_binary(sgl KINDS tool tests)
+    else()
+        sc_nexus_binary(sgl KINDS tool)
+    endif()
     # babel-data writes `describe`'s JSON; the tool may take it, and the library must not.
     target_link_libraries(sgl PRIVATE shaped-graphics-language sgl-lsp-protocol babel-data nexus)
     target_compile_definitions(sgl PRIVATE SGL_SAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/samples"
