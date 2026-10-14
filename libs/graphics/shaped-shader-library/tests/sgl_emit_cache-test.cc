@@ -156,6 +156,15 @@ TEST("slib sgl emit cache - the byte form refuses anything it did not write")
     CHECK(!slib::impl::decode_preprocessed(wrong_version).has_value());
 }
 
+TEST("slib sgl emit cache - the byte form refuses a length that overflows its position")
+{
+    // The source's length follows the u32 version, and INT64_MAX added to any position overflows.
+    auto corrupt = slib::impl::encode_preprocessed(rich_result());
+    for (auto i = isize(0); i < 8; ++i)
+        corrupt[4 + i] = byte(i == 7 ? 0x7F : 0xFF);
+    CHECK(!slib::impl::decode_preprocessed(corrupt).has_value());
+}
+
 TEST("slib sgl emit cache - a repeat is answered without the front end, and a failure never is")
 {
     auto const value = rich_result();
