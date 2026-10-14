@@ -360,6 +360,34 @@ TEST("dds - a volume stores each level's slices together")
     CHECK(texels.value().size() == 8 * 4);
 }
 
+TEST("dds - a legacy volume is decided by DDSD_DEPTH, as DirectXTex reads it")
+{
+    // 4x4x4 DXT1, two levels: four blocks, then the 2x2x2 level's two.
+    auto const payload = counting_payload((4 + 2) * 8);
+    constexpr u32 flag_depth = 0x800000;
+    constexpr u32 caps2_volume = 0x200000;
+
+    SECTION("DDSD_DEPTH alone is a volume")
+    {
+        auto const tex = dds::read(
+            cc::span<byte const>(make_dds({.depth = 4, .mips = 2, .flags = 0x1007 | 0x20000 | flag_depth}, payload)));
+        REQUIRE(tex.has_value());
+        CHECK(tex.value().shape == dds::dimension::texture_3d);
+        CHECK(tex.value().depth == 4);
+        REQUIRE(tex.value().subresources.size() == 2);
+        CHECK(u8(tex.value().subresources[1].bytes[0]) == 4 * 8); // mip 1 starts after mip 0's four slices
+    }
+
+    SECTION("DDSCAPS2_VOLUME alone is a 2D texture")
+    {
+        auto const tex = dds::read(cc::span<byte const>(
+            make_dds({.depth = 4, .mips = 2, .flags = 0x1007 | 0x20000, .caps2 = caps2_volume}, payload)));
+        REQUIRE(tex.has_value());
+        CHECK(tex.value().shape == dds::dimension::texture_2d);
+        CHECK(tex.value().depth == 1);
+    }
+}
+
 TEST("dds - BC5 decodes x to red and y to green")
 {
     // Two channel blocks of constant value: red 50, green 200.

@@ -24,7 +24,6 @@ constexpr isize dx10_header_end = 148;
 // Header flags, as the format names them.
 constexpr u32 flag_depth = 0x800000;
 constexpr u32 caps2_cubemap = 0x200;
-constexpr u32 caps2_volume = 0x200000;
 constexpr u32 misc_texture_cube = 0x4;
 
 // D3D's numeric FourCCs, which legacy writers use for the float formats.
@@ -515,7 +514,8 @@ cc::result<data> read(cc::pinned_data<byte const> const& bytes)
             result.format = fmt.value().format;
         }
 
-        if ((h.caps2 & caps2_volume) != 0 && (h.flags & flag_depth) != 0)
+        // DDSD_DEPTH alone makes a volume, as DirectXTex reads it; DDSCAPS2_VOLUME without it says nothing about depth.
+        if ((h.flags & flag_depth) != 0)
         {
             result.shape = dimension::texture_3d;
             depth = h.depth;
