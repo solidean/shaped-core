@@ -165,26 +165,24 @@ TEST("sgl emit - an unrolled for of an inlined function names the call it was re
                                        "    target: mut buffer[float]\n"
                                        "\n";
     // a bound its argument leaves no constant
-    auto const runtime = check_sources(read_prelude(),
-                                       cc::format("{}@compute(64) fun cs(@thread_id id: int3){{io}}:\n"
-                                                  "    io.target[id.x] = sum_to(id.x)\n",
-                                                  callee));
+    auto const runtime = check_sources(read_prelude(), cc::format("{}@compute(64) fun cs(@thread_id id: int3){{io}}:\n"
+                                                                  "    io.target[id.x] = sum_to(id.x)\n",
+                                                                  callee));
     CHECK(reports_of(runtime)
           == "invalid-constant-argument user:[0 ..< n] an unrolled for runs over a constant range: both bounds are int "
              "constants once the function is inlined, such as `0 ..< taps` with `taps` a const\n"
              "  note user:[sum_to(id.x)] reached through this call, whose arguments stand in for its parameters\n");
     // and one its argument makes too long
-    auto const wide = check_sources(read_prelude(),
-                                    cc::format("{}@compute(64) fun cs(@thread_id id: int3){{io}}:\n"
-                                               "    io.target[id.x] = sum_to(300)\n",
-                                               callee));
+    auto const wide = check_sources(read_prelude(), cc::format("{}@compute(64) fun cs(@thread_id id: int3){{io}}:\n"
+                                                               "    io.target[id.x] = sum_to(300)\n",
+                                                               callee));
     CHECK(reports_of(wide)
           == "unroll-too-long user:[0 ..< n] an unrolled for writes its body at most 256 times, and this range holds "
              "300, so it is written as a loop\n"
              "  note user:[sum_to(300)] reached through this call, whose arguments stand in for its parameters\n");
 }
 
-TEST("sgl emit - an unrolled index's arithmetic shifted in HLSL is written as the int it is, which DXC otherwise refuses")
+TEST("sgl emit - an unrolled index's arithmetic shifted in HLSL is written as an int, which DXC otherwise refuses")
 {
     constexpr cc::string_view source = "binding io:\n"
                                        "    target: mut buffer[int]\n"

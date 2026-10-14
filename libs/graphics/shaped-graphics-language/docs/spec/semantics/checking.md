@@ -1206,7 +1206,8 @@ hit_group textured for path_rays:
   A loop that would write more is the warning `unroll-too-long`, and stays an ordinary loop, while the unrolled loops around it still unroll.
   So in a nest, the loop that stays a loop is the first one, from the outside in, whose copies pass the limit.
   An inner bound that reads an outer index is counted copy by copy, so only the copies whose range passes the limit keep a loop.
-  An outer loop that stays a loop leaves such a bound no constant, so inside it an inner `@unroll` whose bound is no constant stays a loop too, under `unroll-too-long`, whose detail names the outer loop.
+  An outer loop that stays a loop leaves such a bound no constant, so inside it an inner `@unroll` whose bound is no constant stays a loop too.
+  That is `unroll-too-long` as well, and its detail names the outer loop.
   Outside an unrolled loop that stays a loop, a bound that is no constant stays `invalid-constant-argument`.
   On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
   So are arguments, such as the count of `@unroll(4)`, which would unroll the loop in part.
@@ -1353,7 +1354,7 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## Diagnostic kinds
 
-Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except five warnings.
+Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
 They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform` and `unroll-too-long`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
