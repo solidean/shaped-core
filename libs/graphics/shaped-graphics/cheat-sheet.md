@@ -754,7 +754,7 @@ sg::bindless_array::for_binding(ctx, sbg_handle, name)  // -> bindless_array (by
 arr.transient.acquire(raw_view)   // -> sg::bindless_index (enum class : u32) — valid ONLY for the epoch it was acquired in; re-acquire the working set every epoch
                                   //   same view -> SAME index, O(1), no descriptor touched; a miss writes exactly ONE staging descriptor
                                   //   a full array reclaims EVERY index not acquired this epoch at once; all-current-epoch = the working set exceeds the count -> asserts
-arr.transient.release(raw_view)   // the caller will not acquire it again: frees its element NOW, or at a later epoch's first acquire if this one acquired it
+arr.transient.release(raw_view)   // the caller will not acquire it again: frees its element NOW, or at a later epoch's first acquire or release if this one acquired it (neither ever → held until the array dies)
                                   //   an element left alone holds its view, and so its RESOURCE, until the array fills — release a texture you replaced
 arr.persistent.acquire(raw_view)  // -> sg::bindless_element_handle (shared_ptr<bindless_element const>) — pinned; the index outlives the epoch
                                   //   THE ONLY index you may write into GPU memory that outlives an epoch (a material buffer above all)

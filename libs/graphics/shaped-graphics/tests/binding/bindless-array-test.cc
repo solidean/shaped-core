@@ -161,6 +161,45 @@ ASYNC_INVOCABLE_TEST("sg - a full bindless array clears the descriptors it recla
     co_await ctx->idle_completion();
 }
 
+ASYNC_INVOCABLE_TEST("sg - a bindless release deferred by its epoch is freed by a later release",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!ctx->supports(sg::feature::binding_arrays))
+        SKIP("this backend has no binding arrays");
+
+    // An owner that only releases, as a scene unload does, acquires nothing that would sweep the deferred element.
+    auto group = make_group(ctx, 4);
+    REQUIRE(group != nullptr);
+    auto textures = sg::bindless_array::for_binding(*ctx, group, "Textures");
+    (void)sg::bindless_array::for_binding(*ctx, group, "Buffers");
+
+    auto const tex = make_texture(ctx);
+    auto const other = make_texture(ctx);
+    auto const tex_count = tex.raw().use_count();
+    auto const other_count = other.raw().use_count();
+    (void)textures.transient.acquire(tex.as_texture_view());
+    (void)textures.transient.acquire(other.as_texture_view());
+    CHECK(tex.raw().use_count() > tex_count);
+
+    // Acquired this epoch, so its index may be in this epoch's work: the element and its texture stay.
+    textures.transient.release(tex.as_texture_view());
+    CHECK(textures.occupied_count() == 2);
+    CHECK(tex.raw().use_count() > tex_count);
+
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+
+    // Releasing something else is the first touch of the new epoch, and it frees both.
+    textures.transient.release(other.as_texture_view());
+    CHECK(textures.occupied_count() == 0);
+    CHECK(tex.raw().use_count() == tex_count);
+    CHECK(other.raw().use_count() == other_count);
+
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
+}
+
 ASYNC_INVOCABLE_TEST("sg - a moved bindless array keeps its binding and its table", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
