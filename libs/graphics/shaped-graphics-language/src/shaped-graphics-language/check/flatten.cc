@@ -101,6 +101,8 @@ struct flattener
     /// How many times the statement being written is written: the product of the copies of every unrolled `for` around it.
     /// It is what bounds a nest of them as a whole (CHK-389).
     i64 unrolled_copies = 1;
+    /// How many copies of unrolled `for`s the statement being written stands in.
+    i32 unrolled_depth = 0;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
     /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
@@ -2466,7 +2468,12 @@ struct flattener
         auto const outer = cc::move(block);
         block = {};
         for (auto const stmt : ast().at(body.statements))
+        {
+            // CHK-389: in a copy, what follows a constant exit is never written, so no rule judges it
+            if (unrolled_depth > 0 && !block.empty() && certain_exit(block.back()).has_value())
+                break;
             flatten_stmt(stmt);
+        }
         auto const range = add_list(block);
         block = cc::move(outer);
         return range;
@@ -2695,6 +2702,41 @@ struct flattener
         return o.result.leaves[0].as_int();
     }
 
+    /// The label a run of `id` certainly leaves to, `none` for a return, where no run of it reaches its end.
+    /// Nothing where a run may reach its end, or where two of them leave to different places.
+    [[nodiscard]] cc::optional<label_id> certain_exit(flat_stmt_id id) const
+    {
+        auto const& node = entry.at(id).node;
+        if (auto const* const leave = node.try_as<flat_leave>())
+            return leave->target;
+        if (auto const* const next = node.try_as<flat_continue>())
+            return next->target;
+        if (node.is<flat_return>())
+            return label_id::none;
+        if (auto const* const b = node.try_as<flat_block>())
+        {
+            auto const exit = certain_exit(b->body);
+            if (exit.has_value() && exit.value() == b->label)
+                return {};
+            return exit;
+        }
+        if (auto const* const branch = node.try_as<flat_if>())
+        {
+            auto const then_exit = certain_exit(branch->then_body);
+            if (then_exit.has_value() && then_exit == certain_exit(branch->else_body))
+                return then_exit;
+        }
+        return {};
+    }
+
+    [[nodiscard]] cc::optional<label_id> certain_exit(ast::range_of<flat_stmt_id> body) const
+    {
+        for (auto const stmt : entry.at(body))
+            if (auto const exit = certain_exit(stmt); exit.has_value())
+                return exit;
+        return {};
+    }
+
     /// CHK-389: `@unroll for i in a ..< b`, as one block holding a block per index, each a copy of the body in which
     /// `i` is that index's literal.
     /// A `break` leaves the outer block and a `continue` the copy it stands in, which is what they do in the loop.
@@ -2763,10 +2805,16 @@ struct flattener
                     = add_expr(type, index_from, flat_int_literal{.value = i32(i64(low.value()) + i)});
             auto const copy = add_label("unrolled_index");
             current()->loops.push_back({.loop = label, .continue_block = copy});
+            ++unrolled_depth;
             auto const body = flatten_body(loop.body);
+            --unrolled_depth;
             current()->loops.remove_back();
             current()->bound.resize_down_to(bound_before_body);
             add_stmt(from, flat_block{.label = copy, .body = body});
+            // a copy that leaves the loop whatever runs, such as one a constant `break` ends, has no copy after it
+            auto const exit = certain_exit(body);
+            if (exit.has_value() && exit.value() != copy)
+                break;
         }
         unrolled_copies = copies_around;
         auto const written = add_list(block);

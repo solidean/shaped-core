@@ -1199,6 +1199,7 @@ hit_group textured for path_rays:
   A target spells that as a loop that runs one time.
   In each copy the variable is that value, as a literal, so a branch on it is CHK-356's and keeps the one side that copy takes.
   `continue` leaves the copy it stands in, and `break` leaves at once, skipping the rest of its copy and every copy after it.
+  What a copy never runs is never written, so no rule judges it: nothing after an exit a constant decides, and no copy after one that a constant `break` or a `return` ends.
   Both bounds are `int` constants (CHK-310) once the entry point is inlined: a literal, a `const`, an option, a literal argument, an enclosing unrolled variable, or a pure builtin of those.
   A bound that is none of those is `invalid-constant-argument`.
   A loop writes at most 256 copies, each counted once per copy of every unrolled loop around it: 8 values inside an unrolled loop of 4 values are 32 copies.
