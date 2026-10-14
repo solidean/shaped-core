@@ -30,7 +30,7 @@
 // No triangulation by default (`read_options::triangulate` asks for it), no welding, no pixel decoding, no file I/O.
 // A texture is recorded by the file names it carries and by its embedded bytes when it has any; resolving a file name is the caller's business, as babel owns no filesystem policy.
 //
-// What the reader skipped is recorded in `data::issues` rather than dropped silently: cameras, animation, skinning, blend shapes and non-mesh geometry are all `unsupported` today.
+// What the reader skipped is recorded in `data::issues` rather than dropped silently: cameras, animation, skinning, blend shapes, LOD groups and non-mesh geometry are all `unsupported` today.
 // ufbx's own warnings about tolerated damage (a clamped index, a duplicated connection) arrive as `malformed`.
 //
 // A READ CAN BE SPREAD OVER A CALLER'S SCHEDULER, AND IT CAN HAND BACK THE SCENE IN TWO STAGES.
@@ -99,7 +99,8 @@ enum class babel::fbx::inherit_mode : babel::u8
 {
     /// the parent's whole transform applies (FBX's RSrs)
     normal,
-    /// the parent's scale is ignored and only its own applies (Maya's "segment scale compensate", FBX's Rrs)
+    /// the parent's scale does not reach this node's rotation and scale, but still scales its translation
+    /// (Maya's "segment scale compensate", FBX's Rrs)
     ignore_parent_scale,
     /// the parent's scale applies per component, after this node's rotation (FBX's RrSs)
     component_wise_scale,
@@ -223,7 +224,7 @@ struct babel::fbx::face
 ///
 /// FBX stores an attribute by control point, by polygon vertex, by polygon or once for the whole mesh, either directly or through an index array.
 /// All of these come back as this one shape, so a reader never branches on a mapping mode.
-/// An attribute the mesh does not carry has empty `values` AND empty `indices`.
+/// An attribute the mesh does not carry has empty `values` AND empty `indices`, and so does every attribute of a mesh with no corners.
 /// Otherwise `indices.size()` is the mesh's corner count and every index is in range, which the reader guarantees.
 template <class T>
 struct babel::fbx::corner_attribute
@@ -258,14 +259,20 @@ struct babel::fbx::color_set
 ///
 /// A mesh carries no materials of its own.
 /// `face_materials` holds per-face SLOT indices, and the materials in those slots belong to the node placing the mesh.
-/// So one mesh can draw with different materials on two instances (`data::materials_of`).
+/// So one mesh can draw with different materials on two instances, and `data::material_of` is the lookup.
+/// The slots follow the mesh's FIRST instance: a slot past its material count reads as 0, whatever a later instance lists.
+/// A mesh whose instances list different counts is recorded as an issue.
 struct babel::fbx::mesh
 {
     cc::string name;
 
     cc::vector<face> faces;
 
-    /// per corner, into the control points; always present
+    /// One flag per face, true for a face FBX marks as a hole, to be hidden; empty when the mesh has none.
+    /// Triangulation drops hole faces, so a triangulated mesh has none.
+    cc::vector<bool> face_holes;
+
+    /// per corner, into the control points; present unless the mesh has no corners
     corner_attribute<tg::pos3f> positions;
     corner_attribute<tg::vec3f> normals;
     /// the tangents and bitangents of the FIRST uv set, which is the only one FBX gives them for in practice
@@ -280,7 +287,11 @@ struct babel::fbx::mesh
     cc::vector<i32> face_materials;
 
     /// The slot face `f` draws with: `face_materials[f]`, or 0 for a single-slot mesh.
+    /// The node placing the mesh may have no material in that slot, or none at all; `data::material_of` checks.
     [[nodiscard]] i32 material_slot_of(isize f) const { return face_materials.empty() ? 0 : face_materials[f]; }
+
+    /// Whether face `f` is a hole.
+    [[nodiscard]] bool is_hole(isize f) const { return !face_holes.empty() && face_holes[f]; }
 
     /// how many corners the faces span, which is what every attribute's `indices` is sized by
     [[nodiscard]] isize corner_count() const { return positions.indices.size(); }
@@ -316,10 +327,17 @@ struct babel::fbx::material
     /// the `ShadingModel` as written, lowercased by convention: "phong", "lambert", or a renderer's own
     cc::string shading_model;
 
+    /// The properties the file wrote for this material.
     cc::vector<property> properties;
+
+    /// The defaults of the property template its type declares, empty without one.
+    /// SHARED by every material of that template, so a template is held once however many materials inherit it.
+    /// A default may repeat a name in `properties`, which overrides it.
+    cc::pinned_data<property const> defaults;
+
     cc::vector<material_texture> textures;
 
-    /// The property named `name`, or nullptr when the material does not carry it.
+    /// The material's own property named `name`, else its template's default, else nullptr — what the FBX SDK reports.
     [[nodiscard]] property const* find_property(cc::string_view name) const;
 
     /// The texture connected to the property named `name`, or `invalid` when none is.
@@ -330,6 +348,8 @@ struct babel::fbx::material
 ///
 /// File names arrive exactly as the file carries them, separators included — an FBX written on Windows says `Textures\wood.dds`.
 /// `absolute_filename` is wherever the file lived on the exporting machine, which is rarely anywhere now.
+/// BOTH NAMES ARE UNTRUSTED INPUT: either may be absolute, carry a drive letter or a UNC prefix, or climb out with `..`.
+/// `relative_filename` included, which ufbx documents may be absolute; confining a name to a directory is the caller's.
 struct babel::fbx::texture
 {
     cc::string name;
@@ -372,14 +392,15 @@ struct babel::fbx::light
     tg::vec3f local_direction = tg::vec3f(0, -1, 0);
 
     /// spot only: the FULL cone angles in degrees, inner fully lit and outer cut off
+    /// Both read as 0 when the file and its template leave them out.
     f32 inner_angle_degrees = 0;
-    f32 outer_angle_degrees = 45;
+    f32 outer_angle_degrees = 0;
 
     /// area only: true for a sphere, false for a rectangle
     bool area_shape_is_sphere = false;
 
     bool cast_light = true;
-    bool cast_shadows = true;
+    bool cast_shadows = false;
 };
 
 /// One FBX `Model`: a place in the hierarchy with what it carries.
@@ -468,11 +489,15 @@ public:
     }
 
     /// The node's material slots, indexed by a mesh's `face_materials`.
+    /// May be empty, or shorter than a slot the mesh uses: `material_of` is the bounds-checked lookup.
     [[nodiscard]] cc::span<material_index const> materials_of(node const& n) const
     {
         return cc::span<material_index const>(node_materials)
             .subspan({.offset = isize(n.first_material), .size = isize(n.material_count)});
     }
+
+    /// The material face `face` of `m` draws with where node `n` places it, or `invalid` when the node has none in that slot.
+    [[nodiscard]] material_index material_of(node const& n, mesh const& m, isize face) const;
 
     // implementation
 private:
@@ -488,13 +513,15 @@ private:
 struct babel::fbx::read_options
 {
     /// Split every polygon into triangles, ear-clipping a concave one rather than fanning it.
-    /// Faces with fewer than three corners are dropped, and each triangle keeps its polygon's material slot.
+    /// Each triangle keeps its polygon's material slot.
+    /// Hole faces are dropped, and so are point and line faces, with an issue.
     /// So is a face of more than 4096 corners, with an issue: the ear clip is quadratic in a face's size, and no modeling tool writes one that large.
     /// Corners are copied rather than re-indexed, so every attribute keeps its `values` and only its `indices` grow.
     bool triangulate = false;
 
     /// The most memory ufbx may hold while parsing, in bytes: half for its working memory, half for the scene it builds.
-    /// The copy into `data` comes on top, and is about the size of that scene.
+    /// The copy of the meshes into `data` is budgeted against the whole limit too, before any of it is made.
+    /// That copy writes per corner what ufbx may share — an attribute stored once for the whole mesh — so it can outgrow ufbx's scene.
     /// A binary FBX array states its element count before its compressed bytes, and ufbx allocates that count first.
     /// So without a ceiling a few crafted bytes can ask for tens of gigabytes.
     /// 0 picks one from the input: 32 times its size plus 64 MiB, capped at 4 GiB.

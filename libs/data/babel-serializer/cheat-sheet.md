@@ -210,17 +210,19 @@ n.parent;  doc.children_of(n);
 n.local;  n.geometry;                         // transform { translation, rotation, scale } — the pivot chain composed
 n.node_to_world;  n.geometry_to_world;        // tg::affine_transform3f, honoring n.inherit (FBX's scale inheritance)
 n.mesh;  n.light;                             // mesh_index / light_index; several nodes naming one mesh is instancing
-doc.materials_of(n);                          // span<material_index> — the node's material SLOTS
+doc.materials_of(n);                          // span<material_index> — the node's material SLOTS, possibly empty
+doc.material_of(n, m, f);                     // material_index face f draws with on node n; invalid where n has no such slot
 
-doc.meshes;     // mesh { name, faces, positions, normals, tangents, bitangents, uv_sets, color_sets, face_materials }
+doc.meshes;     // mesh { name, faces, face_holes, positions, normals, tangents, bitangents, uv_sets, color_sets, face_materials }
 m.faces[f];                    // face { first_corner, corner_count } — polygons unless read with triangulate
 m.positions.at(corner);        // corner_attribute<T> { values, indices }: one index per face corner, every mapping mode unified
 m.normals.exists();            // false: both arrays empty
 m.uv_sets[0].uvs.at(corner);   // V points UP the image, as FBX writes it
-m.material_slot_of(f);         // index into materials_of(node), NOT into doc.materials
+m.material_slot_of(f);         // index into materials_of(node), NOT into doc.materials — material_of does the lookup
+m.is_hole(f);                  // a face FBX marks hidden; triangulation drops these
 
-doc.materials;  // material { name, shading_model ("phong"), properties, textures }
-mat.find_property("DiffuseColor");   // property const* { name, type, value (vec4f), value_int, text }; template defaults included
+doc.materials;  // material { name, shading_model ("phong"), properties (own), defaults (template, SHARED pin), textures }
+mat.find_property("DiffuseColor");   // property const* { name, type, value (vec4f), value_int, text }; own, then template default
 mat.find_texture("NormalMap");       // texture_index — FBX connects a texture to a PROPERTY by name
 doc.textures;   // texture { name, relative_filename, absolute_filename (as written, backslashes too), content (embedded, SHARED pin), wrap_u/v, uv_set }
 doc.lights;     // light { type, decay, color, intensity (FBX Intensity / 100, no unit), local_direction (-Y), inner/outer_angle_degrees (FULL cone) }
@@ -229,15 +231,18 @@ doc.lights;     // light { type, decay, color, intensity (FBX Intensity / 100, n
 Gotchas:
 
 - **Materials belong to the node, not the mesh.** Two instances of one mesh may draw with different materials, so a face's slot means nothing without the node placing it.
+  The slots follow the FIRST instance's count, and an instance listing more is an `unsupported` issue.
 - **Nothing is converted.** Positions are in the file's axes and unit; `settings` says which, and a Z-up centimeter scene stays one.
   Axes that are not a permutation of X, Y and Z, or a unit outside 1e-9 to 1e9 meters, fall back to FBX's default with a `malformed` issue.
 - **A read spread over a scheduler is the same read**, field for field and issue for issue: only where the work runs changes.
   Bistro's 114 MB exterior reads about five times faster over a 15-worker pool, and its structure alone in a few tens of milliseconds.
 - **A memory ceiling bounds every read** (`memory_limit`): an array's stated count is allocated before its bytes are, so a crafted file is an error rather than gigabytes.
   A plain stream cannot say how long it is and gets 1 GiB; the span overloads scale it to the input, at most 4 GiB, split evenly between ufbx's working memory and the scene.
+  The copy of the meshes is budgeted against the whole limit before it starts, since it writes per corner what ufbx shares.
 - **A mesh past `i32` counts is an error**, since every index here is an `i32`.
 - **No file is opened.** A texture is its file names and its embedded bytes; resolving a name is the caller's policy, which babel owns none of.
-- **Cameras, animation, skinning, blend shapes and curves are not read**, and each is an `unsupported` issue rather than silence.
+  Both names are untrusted: absolute, drive-lettered, UNC or climbing out with `..`, `relative_filename` included.
+- **Cameras, animation, skinning, blend shapes, LOD groups and curves are not read**, and each is an `unsupported` issue rather than silence.
 
 ## SQLite (`babel::sqlite`)
 

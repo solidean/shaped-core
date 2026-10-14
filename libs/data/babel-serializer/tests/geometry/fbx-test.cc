@@ -85,8 +85,9 @@ template <class T>
         auto const& x = a.meshes[i];
         auto const& y = b.meshes[i];
         auto same = x.name == y.name && x.faces.size() == y.faces.size()
-                 && x.face_materials.size() == y.face_materials.size() && x.uv_sets.size() == y.uv_sets.size()
-                 && same_attribute(x.positions, y.positions) && same_attribute(x.normals, y.normals);
+                 && x.face_materials.size() == y.face_materials.size() && x.face_holes.size() == y.face_holes.size()
+                 && x.uv_sets.size() == y.uv_sets.size() && same_attribute(x.positions, y.positions)
+                 && same_attribute(x.normals, y.normals);
         for (auto f = isize(0); same && f < x.faces.size(); ++f)
             same = x.faces[f].first_corner == y.faces[f].first_corner
                 && x.faces[f].corner_count == y.faces[f].corner_count && x.material_slot_of(f) == y.material_slot_of(f);
@@ -98,6 +99,7 @@ template <class T>
     for (auto i = isize(0); i < a.materials.size(); ++i)
         if (a.materials[i].name != b.materials[i].name
             || a.materials[i].properties.size() != b.materials[i].properties.size()
+            || a.materials[i].defaults.size() != b.materials[i].defaults.size()
             || a.materials[i].textures.size() != b.materials[i].textures.size())
             return cc::format("material {} '{}'", i, a.materials[i].name);
     for (auto i = isize(0); i < a.textures.size(); ++i)
@@ -313,6 +315,107 @@ TEST("fbx - a clean file yields no issues")
     CHECK(doc.issue_report().empty());
 }
 
+TEST("fbx - material_of bounds the slot lookup, and is invalid where the node has no material there")
+{
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(babel::test::fbx_scene())));
+    auto const* const parent = node_named(doc, "parent");
+    auto const* const child = node_named(doc, "child");
+    REQUIRE(parent != nullptr);
+    REQUIRE(child != nullptr);
+    auto const& m = doc.meshes[0];
+    CHECK(material_name(doc, doc.material_of(*parent, m, 1)) == "glow");
+    CHECK(material_name(doc, doc.material_of(*child, m, 1)) == "red");
+
+    // The binary triangle's node has no materials at all, so slot 0 is past an empty list.
+    auto const bytes = babel::test::fbx_binary_scene();
+    auto const bare = REQUIRED_VALUE(bf::read(cc::span<byte const>(bytes)));
+    auto const* const tri = node_named(bare, "tri");
+    REQUIRE(tri != nullptr);
+    CHECK(bare.materials_of(*tri).empty());
+    CHECK(bare.material_of(*tri, bare.meshes[0], 0) == bf::material_index::invalid);
+}
+
+TEST("fbx - instances listing different numbers of material slots are an issue")
+{
+    // A third material on the child: three slots, where the parent has two.
+    // ufbx pads a node with fewer slots than the mesh uses, so only an instance listing MORE disagrees.
+    auto const text
+        = babel::test::fbx_scene_with("\tC: \"OO\",400,301\n", "\tC: \"OO\",400,301\n\tC: \"OO\",402,301\n");
+    auto patched = cc::string(text);
+    [[maybe_unused]] auto const added
+        = patched.replace_first("\tTexture: 500,", "\tMaterial: 402, \"Material::blue\", \"\" {\n\t\tShadingModel: "
+                                                   "\"phong\"\n\t}\n\tTexture: 500,");
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(patched)));
+    REQUIRE(doc.materials.size() == 3);
+    CHECK(doc.has_issue_of(bf::issue_kind::unsupported));
+    CHECK(cc::string_view(doc.issue_report()).contains("different numbers of material slots"));
+}
+
+TEST("fbx - hole faces are carried, and triangulation drops them")
+{
+    auto const holes = cc::string_view("\t\tLayerElementHole: 0 {\n"
+                                       "\t\t\tMappingInformationType: \"ByPolygon\"\n"
+                                       "\t\t\tReferenceInformationType: \"Direct\"\n"
+                                       "\t\t\tHole: *2 {\n\t\t\t\ta: 0,1\n\t\t\t}\n"
+                                       "\t\t}\n"
+                                       "\t\tLayer: 0 {\n");
+    auto const text = babel::test::fbx_scene_with("\t\tLayer: 0 {\n", holes);
+
+    auto const raw = REQUIRED_VALUE(bf::read(cc::string_view(text)));
+    auto const& m = raw.meshes[0];
+    REQUIRE(m.face_holes.size() == 2);
+    CHECK(!m.is_hole(0));
+    CHECK(m.is_hole(1));
+
+    // The quad's two triangles remain; the triangle was the hole.
+    auto const triangulated = REQUIRED_VALUE(bf::read(cc::string_view(text), {.triangulate = true}));
+    CHECK(triangulated.meshes[0].faces.size() == 2);
+    CHECK(triangulated.meshes[0].face_holes.empty());
+
+    // A mesh without holes keeps the flags empty.
+    auto const clean = REQUIRED_VALUE(bf::read(cc::string_view(babel::test::fbx_scene())));
+    CHECK(clean.meshes[0].face_holes.empty());
+    CHECK(!clean.meshes[0].is_hole(1));
+}
+
+TEST("fbx - a LOD group is an issue naming it")
+{
+    auto const text = babel::test::fbx_scene_with("\tModel: 302,", "\tNodeAttribute: 210, \"NodeAttribute::levels\", "
+                                                                   "\"LodGroup\" {\n\t\tTypeFlags: \"LodGroup\"\n\t}\n"
+                                                                   "\tModel: 302,");
+    auto patched = cc::string(text);
+    [[maybe_unused]] auto const connected
+        = patched.replace_first("\tC: \"OO\",200,302\n", "\tC: \"OO\",200,302\n\tC: \"OO\",210,301\n");
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(patched)));
+    CHECK(cc::string_view(doc.issue_report()).contains("LOD group 'levels'"));
+}
+
+TEST("fbx - an authoring unit outside a sane range falls back to the scene's, with an issue")
+{
+    auto const text
+        = babel::test::fbx_scene_with("\t\tP: \"UnitScaleFactor\", \"double\", \"Number\", \"\",1\n",
+                                      "\t\tP: \"UnitScaleFactor\", \"double\", \"Number\", \"\",1\n"
+                                      "\t\tP: \"OriginalUnitScaleFactor\", \"double\", \"Number\", \"\",0\n");
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(text)));
+    CHECK(near(f32(doc.settings.original_unit_meters), 0.01f));
+    CHECK(cc::string_view(doc.issue_report()).contains("authoring tool's unit"));
+}
+
+TEST("fbx - a mesh whose every face triangulation drops keeps no values either")
+{
+    // One line face: two corners, which triangulation drops, leaving no corners at all.
+    auto const text = babel::test::fbx_scene_with("a: 0,1,2,-4,1,4,-3", "a: 0,-2");
+    auto const raw = REQUIRED_VALUE(bf::read(cc::string_view(text)));
+    REQUIRE(raw.meshes[0].corner_count() == 2);
+
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(text), {.triangulate = true}));
+    auto const& m = doc.meshes[0];
+    CHECK(m.faces.empty());
+    CHECK(!m.positions.exists());
+    CHECK(m.positions.values.empty());
+    CHECK(m.normals.values.empty());
+}
+
 TEST("fbx - anything that is not FBX is an error, not an empty scene")
 {
     CHECK(bf::read(cc::string_view("solid not an fbx at all\n")).has_error());
@@ -349,9 +452,84 @@ TEST("fbx - an array stating more than the memory ceiling allows is an error, no
     // The ceiling is a knob, and a tiny one refuses even an honest file.
     auto const honest = babel::test::fbx_binary_scene();
     CHECK(bf::read(cc::span<byte const>(honest), {.memory_limit = 1024}).has_error());
-    // 1 halves to 0, which ufbx would read as unlimited; the reader holds it at 1 byte instead.
-    CHECK(bf::read(cc::span<byte const>(honest), {.memory_limit = 1}).has_error());
     CHECK(bf::read(cc::span<byte const>(honest), {.memory_limit = i64(256) << 20}).has_value());
+
+    // 1 halves to 0, which ufbx would read as unlimited; the reader holds it at 1 byte instead.
+    // The allocation count halves to 0 there too, and is held at 1, so only the memory clamp's own message pins it.
+    // That second clamp decides no read on its own: under 64 bytes, where it applies, the memory clamp refuses first.
+    auto const tiny = bf::read(cc::span<byte const>(honest), {.memory_limit = 1});
+    REQUIRE(tiny.has_error());
+    CHECK(cc::format("{}", tiny.error()).contains("Memory limit exceeded"));
+}
+
+TEST("fbx - a property template is held once, shared by every material inheriting it")
+{
+    // One template with a 64 KiB string, inherited by 200 materials that set nothing themselves.
+    // Copied into each, it would be 12.5 MiB from a file of 80 KB.
+    constexpr auto material_count = 200;
+    auto const big = cc::string::create_filled(64 << 10, 'x');
+    auto text = cc::string("; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n\tFBXVersion: 7400\n}\n");
+    text += cc::format("Definitions:  {{\n\tObjectType: \"Material\" {{\n\t\tPropertyTemplate: \"FbxSurfacePhong\" {{\n"
+                       "\t\t\tProperties70:  {{\n\t\t\t\tP: \"Big\", \"KString\", \"\", \"\", \"{}\"\n"
+                       "\t\t\t\tP: \"Shininess\", \"double\", \"Number\", \"\",5\n\t\t\t}}\n\t\t}}\n\t}}\n}}\n",
+                       big);
+    text += "Objects:  {\n";
+    for (auto i = 0; i < material_count; ++i)
+        text += cc::format(
+            "\tMaterial: {}, \"Material::m{}\", \"\" {{\n\t\tShadingModel: \"phong\"\n{}\t}}\n", 1000 + i, i,
+            i == 0 ? "\t\tProperties70:  {\n\t\t\tP: \"Shininess\", \"double\", \"Number\", \"\",20\n\t\t}\n" : "");
+    text += "}\n";
+
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(text)));
+    REQUIRE(doc.materials.size() == material_count);
+
+    // Every material points at the one copy.
+    auto const* const shared = doc.materials[0].defaults.data();
+    REQUIRE(shared != nullptr);
+    auto all_shared = true;
+    for (auto const& m : doc.materials)
+        all_shared = all_shared && m.defaults.data() == shared;
+    CHECK(all_shared);
+
+    // The lookup still reports what the FBX SDK would: the material's own value first, then the template's.
+    auto const* const inherited = doc.materials[1].find_property("Big");
+    REQUIRE(inherited != nullptr);
+    CHECK(inherited->text.size() == big.size());
+    CHECK(doc.materials[1].properties.empty());
+    CHECK(near(doc.materials[0].find_property("Shininess")->value[0], 20.0f));
+    CHECK(near(doc.materials[1].find_property("Shininess")->value[0], 5.0f));
+}
+
+TEST("fbx - copying the meshes is budgeted against the memory limit before any of it is made")
+{
+    // 30,000 corners and 300 uv layers, each one value for the whole mesh.
+    // ufbx stores every layer's indices as one shared buffer, babel's copy one array each: 36 MB from a file of 0.2 MB.
+    constexpr auto triangle_count = 10000;
+    constexpr auto layer_count = 300;
+    auto corners = cc::string();
+    for (auto i = 0; i < triangle_count; ++i)
+        corners += i == 0 ? "0,1,-3" : ",0,1,-3";
+    auto text = cc::string("; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n\tFBXVersion: 7400\n}\nObjects:  {\n");
+    text
+        += cc::format("\tGeometry: 100, \"Geometry::m\", \"Mesh\" {{\n\t\tVertices: *9 {{\n\t\t\ta: 0,0,0,1,0,0,0,1,0\n"
+                      "\t\t}}\n\t\tPolygonVertexIndex: *{} {{\n\t\t\ta: {}\n\t\t}}\n",
+                      triangle_count * 3, corners);
+    for (auto i = 0; i < layer_count; ++i)
+        text += cc::format(
+            "\t\tLayerElementUV: {} {{\n\t\t\tName: \"uv{}\"\n\t\t\tMappingInformationType: \"AllSame\"\n"
+            "\t\t\tReferenceInformationType: \"Direct\"\n\t\t\tUV: *2 {{\n\t\t\t\ta: 0,0\n\t\t\t}}\n\t\t}}\n",
+            i, i);
+    text += "\t}\n\tModel: 200, \"Model::m\", \"Mesh\" {\n\t}\n}\nConnections:  {\n\tC: \"OO\",200,0\n\tC: "
+            "\"OO\",100,200\n}\n";
+
+    // 32 MB leaves ufbx's parse 16 MB, which it fits in; the copy does not fit the 32.
+    auto const refused = bf::read(cc::string_view(text), {.memory_limit = i64(32) << 20});
+    REQUIRE(refused.has_error());
+    CHECK(cc::format("{}", refused.error()).contains("copying the meshes"));
+
+    auto const doc = REQUIRED_VALUE(bf::read(cc::string_view(text), {.memory_limit = i64(64) << 20}));
+    REQUIRE(doc.meshes.size() == 1);
+    CHECK(doc.meshes[0].uv_sets.size() == layer_count);
 }
 
 TEST("fbx - axes that do not name X, Y and Z once each fall back to FBX's default, with an issue")

@@ -3,7 +3,6 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/map.hh>
-#include <clean-core/container/set.hh>
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -219,6 +218,12 @@ struct fbx_converter
     /// the embedded blobs already pinned, by the address ufbx holds them at
     cc::map<isize, cc::pinned_data<byte const>> embedded;
 
+    /// the property templates already copied, by the address ufbx holds them at
+    cc::map<isize, cc::pinned_data<bf::property const>> templates;
+
+    /// what the copy of every mesh may take together, in bytes: the read's whole memory limit
+    i64 copy_limit = 0;
+
     void note(bf::issue_kind kind, cc::string message)
     {
         out.issues.push_back({.kind = kind, .message = cc::move(message)});
@@ -272,9 +277,16 @@ struct fbx_converter
             out.settings.unit_meters = 0.01;
         }
         if (!is_sane_unit(out.settings.original_unit_meters))
+        {
+            note(bf::issue_kind::malformed, cc::format("fbx: the authoring tool's unit is {} meters, outside a "
+                                                       "nanometer "
+                                                       "to a million kilometers, so the scene's unit stands in",
+                                                       out.settings.original_unit_meters));
             out.settings.original_unit_meters = out.settings.unit_meters;
+        }
 
-        // Deduplicated by ufbx: each kind is one warning carrying a count, so the list stays short on a damaged file.
+        // ufbx folds a repeat into the previous warning of the same element, as a count, for some kinds only.
+        // A duplicated connection or a truncated array is one warning each time.
         for (auto i = size_t(0); i < meta.warnings.count; ++i)
         {
             auto const& w = meta.warnings.data[i];
@@ -305,6 +317,15 @@ struct fbx_converter
         for (auto i = size_t(0); i < scene.anim_layers.count; ++i)
             animated += scene.anim_layers.data[i]->anim_values.count;
         skip(animated, "animated value(s) are", ", so every node stands at its static transform");
+
+        for (auto i = size_t(0); i < scene.lod_groups.count; ++i)
+        {
+            auto const& g = *scene.lod_groups.data[i];
+            note(bf::issue_kind::unsupported, cc::format("fbx: LOD group '{}' is not read, so its {} level(s) come "
+                                                         "back "
+                                                         "as ordinary visible nodes",
+                                                         to_string(g.name), g.lod_levels.count));
+        }
     }
 
     // materials and textures
@@ -350,6 +371,22 @@ struct fbx_converter
         }
     }
 
+    /// A property template's defaults, copied once and shared by every material ufbx points at that template.
+    [[nodiscard]] cc::pinned_data<bf::property const> template_defaults(ufbx_props const& defaults)
+    {
+        auto const key = reinterpret_cast<isize>(&defaults);
+        if (auto const* const shared = templates.get_ptr(key); shared != nullptr)
+            return *shared;
+
+        auto properties = cc::vector<bf::property>();
+        properties.reserve(isize(defaults.props.count));
+        for (auto p = size_t(0); p < defaults.props.count; ++p)
+            properties.push_back(to_property(defaults.props.data[p]));
+        auto pinned = cc::pinned_data<bf::property const>(cc::make_pinned_data(cc::move(properties)));
+        templates[key] = pinned;
+        return pinned;
+    }
+
     void convert_materials()
     {
         out.materials.reserve(isize(scene.materials.count));
@@ -358,23 +395,11 @@ struct fbx_converter
             auto const& m = *scene.materials.data[i];
             auto material = bf::material{.name = to_string(m.name), .shading_model = to_string(m.shading_model_name)};
 
-            // The file's own properties first, then the template defaults it did not override — what the FBX SDK would report.
-            // That is what a reader of `EmissiveFactor` expects when the file left it out.
-            // The names the file wrote, looked up as a set so the merge stays linear in the property count.
-            auto written = cc::set<cc::string_view>();
+            material.properties.reserve(isize(m.props.props.count));
             for (auto p = size_t(0); p < m.props.props.count; ++p)
-            {
-                auto const& own = m.props.props.data[p];
-                material.properties.push_back(to_property(own));
-                written.insert(cc::string_view(own.name.data, isize(own.name.length)));
-            }
+                material.properties.push_back(to_property(m.props.props.data[p]));
             if (m.props.defaults != nullptr)
-                for (auto p = size_t(0); p < m.props.defaults->props.count; ++p)
-                {
-                    auto const& d = m.props.defaults->props.data[p];
-                    if (!written.contains(cc::string_view(d.name.data, isize(d.name.length))))
-                        material.properties.push_back(to_property(d));
-                }
+                material.defaults = template_defaults(*m.props.defaults);
 
             for (auto t = size_t(0); t < m.textures.count; ++t)
             {
@@ -397,7 +422,7 @@ struct fbx_converter
                                                                    Convert&& convert)
     {
         auto out_attr = bf::corner_attribute<T>();
-        if (!a.exists)
+        if (!a.exists || corners.empty())
             return out_attr;
 
         out_attr.values.reserve(isize(a.values.count));
@@ -426,6 +451,29 @@ struct fbx_converter
         for (auto i = size_t(0); i < m.color_sets.count; ++i)
             consider(m.color_sets.data[i].vertex_color.values.count);
         return largest <= fbx_max_count;
+    }
+
+    /// About what copying `m` allocates: every attribute's values, and an index per output corner for each.
+    /// An attribute ufbx stores once for the whole mesh still costs a full index array here, which is why this is budgeted.
+    [[nodiscard]] i64 copy_bytes(ufbx_mesh const& m) const
+    {
+        auto const corners = i64(opts.triangulate ? m.num_triangles * 3 : m.num_indices);
+        auto const faces = i64(opts.triangulate ? m.num_triangles : m.faces.count);
+        auto bytes = corners * i64(sizeof(u32)) + faces * i64(sizeof(bf::face) + sizeof(i32) + sizeof(bool));
+        auto const add = [&](auto const& attribute, i64 value_size)
+        {
+            if (attribute.exists)
+                bytes += i64(attribute.values.count) * value_size + corners * i64(sizeof(i32));
+        };
+        add(m.vertex_position, i64(sizeof(tg::pos3f)));
+        add(m.vertex_normal, i64(sizeof(tg::vec3f)));
+        add(m.vertex_tangent, i64(sizeof(tg::vec3f)));
+        add(m.vertex_bitangent, i64(sizeof(tg::vec3f)));
+        for (auto i = size_t(0); i < m.uv_sets.count; ++i)
+            add(m.uv_sets.data[i].vertex_uv, i64(sizeof(tg::vec2f)));
+        for (auto i = size_t(0); i < m.color_sets.count; ++i)
+            add(m.color_sets.data[i].vertex_color, i64(sizeof(tg::vec4f)));
+        return bytes;
     }
 
     /// Reads `scene` and `opts` and writes nothing else, so meshes can be copied in parallel.
@@ -464,6 +512,8 @@ struct fbx_converter
             for (auto f = size_t(0); f < m.faces.count; ++f)
             {
                 auto const face = m.faces.data[f];
+                if (f < m.face_hole.count && m.face_hole.data[f])
+                    continue;
                 if (face.num_indices < 3)
                 {
                     ++dropped;
@@ -505,6 +555,17 @@ struct fbx_converter
                 mesh.faces.push_back({.first_corner = i32(face.index_begin), .corner_count = i32(face.num_indices)});
                 face_sources.push_back(u32(f));
             }
+
+            // Kept only when some face is a hole, as `face_materials` is kept only when some slot is not 0.
+            auto any_hole = false;
+            for (auto f = size_t(0); f < m.face_hole.count; ++f)
+                any_hole = any_hole || m.face_hole.data[f];
+            if (any_hole)
+            {
+                mesh.face_holes.reserve(isize(m.faces.count));
+                for (auto f = size_t(0); f < m.faces.count; ++f)
+                    mesh.face_holes.push_back(f < m.face_hole.count && m.face_hole.data[f]);
+            }
         }
 
         auto const pos = [](ufbx_vec3 const& v) { return tg::pos3f(f32(v.x), f32(v.y), f32(v.z)); };
@@ -541,6 +602,17 @@ struct fbx_converter
                 mesh.face_materials.push_back(i32(m.face_material.data[f]));
         }
 
+        // ufbx resolves the slots against the first instance alone, folding any slot past its count to 0.
+        for (auto i = size_t(1); i < m.instances.count; ++i)
+            if (m.instances.data[i]->materials.count != m.instances.data[0]->materials.count)
+            {
+                note(bf::issue_kind::unsupported,
+                     cc::format("fbx: mesh '{}' is placed by nodes with different numbers of material slots, and its "
+                                "faces follow the first's {}, so another instance's extra slots go unused",
+                                mesh.name, m.instances.data[0]->materials.count));
+                break;
+            }
+
         return result;
     }
 
@@ -548,6 +620,22 @@ struct fbx_converter
     void convert_meshes()
     {
         auto const count = isize(scene.meshes.count);
+
+        // The whole copy is budgeted before any of it is made, against the same limit ufbx parsed under.
+        auto total = i64(0);
+        for (auto i = isize(0); i < count; ++i)
+        {
+            auto const& m = *scene.meshes.data[i];
+            total += copy_bytes(m);
+            if (total > copy_limit)
+            {
+                error = cc::format("fbx: copying the meshes would take more than the {} bytes this read allows, "
+                                   "{} bytes by mesh '{}'",
+                                   copy_limit, total, to_string(m.name));
+                return;
+            }
+        }
+
         auto results = cc::vector<mesh_result>::create_defaulted(count);
         if (opts.scheduler == nullptr)
         {
@@ -760,7 +848,17 @@ property const* material::find_property(cc::string_view property_name) const
     for (auto const& p : properties)
         if (p.name == property_name)
             return &p;
+    for (auto const& p : defaults)
+        if (p.name == property_name)
+            return &p;
     return nullptr;
+}
+
+material_index data::material_of(node const& n, mesh const& m, isize face) const
+{
+    auto const slot = isize(m.material_slot_of(face));
+    auto const slots = materials_of(n);
+    return slot >= 0 && slot < slots.size() ? slots[slot] : material_index::invalid;
 }
 
 texture_index material::find_texture(cc::string_view property_name) const
@@ -835,7 +933,8 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
     // The allocation count is bounded alongside, since ufbx counts both.
     // One budget, split evenly between ufbx's working memory and the scene it builds, so the two together never pass it.
     // Both at least 1, since ufbx reads 0 as "unlimited" — a tiny budget must refuse rather than lift the ceiling.
-    auto const halved = babel::impl::memory_limit_of(opts.memory_limit, input_size) / 2;
+    auto const limit = babel::impl::memory_limit_of(opts.memory_limit, input_size);
+    auto const halved = limit / 2;
     auto const half = size_t(halved > 0 ? halved : 1);
     auto const allocations = half / 64 > 0 ? half / 64 : size_t(1);
     load.temp_allocator.memory_limit = half;
@@ -855,7 +954,7 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
         return cc::error(cc::format("fbx: {}", cc::string_view(message)));
     }
 
-    auto converter = babel::impl::fbx_converter{.scene = *scene, .opts = opts};
+    auto converter = babel::impl::fbx_converter{.scene = *scene, .opts = opts, .copy_limit = limit};
     converter.convert_info();
     converter.note_unsupported();
     converter.convert_textures();
