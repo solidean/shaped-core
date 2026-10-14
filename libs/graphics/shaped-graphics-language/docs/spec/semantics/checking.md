@@ -1430,3 +1430,6 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 * Whether a `case` over a constant scrutinee drops the arms it does not take, as CHK-356 drops a branch.
 * Whether a resource parameter takes a member of a narrower access, as a builtin's pattern does (CHK-207), rather than of exactly its type.
 * Whether `workgroup_uniform_load` takes an element of a workgroup array at a uniform index.
+* Whether `@subgroup_size` is uniform.
+* Whether a value loaded through an element a `nonuniform` index picked is non-uniform — it counts as uniform today, which is a soundness hole of the same kind.
+* Whether a ray query's committed hit may assume that traversal finds one ray's hits the same way in every lane.

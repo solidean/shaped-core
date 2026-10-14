@@ -55,6 +55,7 @@ That is stricter than HLSL, which defines them over the active lanes, and it rel
 
 ## Open
 
+* The questions the rules have left undecided are the `## Open` of [checking](../semantics/checking.md#open): `@subgroup_size`, a load through a `nonuniform` index, and a ray query's committed hit.
 * Where `@uniform` stands: on the branch, on the value it tests, or on a function's parameter.
 * Whether an annotated branch is trusted, or checked at run time in a debug build.
 * Whether a subgroup operation may stand in non-uniform control flow, over the invocations that reach it, and what WGSL's text then silences.
