@@ -1204,14 +1204,18 @@ hit_group textured for path_rays:
   A target spells that as a loop that runs one time.
   In each copy the variable is that value, as a literal, so a branch on it is CHK-356's and keeps the one side that copy takes.
   `continue` leaves the copy it stands in, and `break` leaves at once, skipping the rest of its copy and every copy after it.
+  What a copy never runs is never written, so no rule judges it: nothing after an exit a constant decides, and no copy after one that a constant `break` or a `return` ends.
   Both bounds are `int` constants (CHK-310) once the entry point is inlined: a literal, a `const`, an option, a literal argument, an enclosing unrolled variable, or a pure builtin of those.
   A bound that is none of those is `invalid-constant-argument`.
   A loop writes at most 256 copies, each counted once per copy of every unrolled loop around it: 8 values inside an unrolled loop of 4 values are 32 copies.
   A loop that would write more is the warning `unroll-too-long`, and stays an ordinary loop, while the unrolled loops around it still unroll.
   So in a nest, the loop that stays a loop is the first one, from the outside in, whose copies pass the limit.
   An inner bound that reads an outer index is counted copy by copy, so only the copies whose range passes the limit keep a loop.
-  An outer loop that stays a loop leaves such a bound no constant, so that inner `@unroll` is `invalid-constant-argument`, an error rather than the warning.
+  An outer loop that stays a loop leaves such a bound no constant, so inside it an inner `@unroll` whose bound is no constant stays a loop too.
+  That is `unroll-too-long` as well, and its detail names the outer loop.
+  Outside an unrolled loop that stays a loop, a bound that is no constant stays `invalid-constant-argument`.
   On any statement but a `for` the attribute is `unsupported-yet`, by CHK-39.
+  So are arguments, such as the count of `@unroll(4)`, which would unroll the loop in part.
 * **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
   Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.
   In the flat tree it is the block of CHK-170 around an `if`, so a branch under a non-uniform condition is in non-uniform control flow (CHK-284).
@@ -1355,13 +1359,13 @@ fun make_mvp(model: mat4){frame} => frame.proj * frame.view * model
 
 ## Diagnostic kinds
 
-Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except five warnings.
+Every kind below is a normal error by [DIAG-4](../syntax/diagnostics.md#rules), except some warnings.
 They are `unreachable-code`, `no-effect`, `unused-require`, `needless-nonuniform` and `unroll-too-long`.
 A diagnostic of this pass has a kind, a file, a byte span in that file, and a detail.
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
