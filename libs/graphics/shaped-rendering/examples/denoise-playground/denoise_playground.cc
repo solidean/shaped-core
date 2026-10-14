@@ -441,9 +441,8 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     slib::add_available_compilers(lib);
     if (lib.supported_formats(slib::shader_language::hlsl).empty())
     {
-        cc::eprintln("no shader compiler for HLSL, which SGL reaches dx12 and vulkan through: DXC did not load, and "
-                     "the "
-                     "warning above says why");
+        cc::eprintln("no shader compiler for HLSL, which SGL reaches dx12 and vulkan through: "
+                     "DXC did not load, and the warning above says why");
         co_return;
     }
     sr::add_shader_packages(lib);        // imgui, blit and the denoise members
