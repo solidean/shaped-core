@@ -72,6 +72,7 @@ public:
     /// `args` needs `buffer_usage::indirect_command_buffer`, and a shader writing it needs `readwrite_buffer` too.
     /// It must not be bound to the same dispatch as a writable binding, which WebGPU refuses.
     /// A count of 0 on any axis dispatches nothing.
+    /// Each count must be at most 65535; larger is undefined, and WebGPU skips the dispatch.
     void dispatch_groups_indirect(buffer<dispatch_args> const& args, isize index = 0);
 
     /// The byte-addressed form: three `u32` counts at `offset_in_bytes`, which must be a multiple of 4.
