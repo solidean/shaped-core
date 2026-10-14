@@ -148,6 +148,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-buffer-barrier-test.cc
         tests/dx12-texture-barrier-test.cc
         tests/dx12-texture-view-test.cc
+        tests/dx12-rtv-benchmark.cc
         tests/dx12-rtv-dsv-test.cc
         tests/dx12-clear-test.cc
         tests/dx12-swapchain-test.cc

@@ -208,13 +208,12 @@ Still dedicated-only: **dx12 textures** and **all vulkan resources**, both of wh
 ## Planned surface (beyond the current stubs)
 
 ```text
-buffer transfer      [in progress]  command_list inline upload / download / copy (dx12 real, vulkan stub)
-texture transfer     [in progress]  inline + async host↔device texture copies, region- and subresource-scoped
-                                  (dx12 real, vulkan stub); device→device texture copy is the gap
+buffer transfer      [in progress]  command_list inline upload / download / copy
+texture transfer     [in progress]  inline + async host↔device texture copies, region- and subresource-scoped;
+                                  buffer→texture copy exists, texture→buffer and texture→texture are open
 barriers             [in progress]  inferred access + state tracking + concurrent-list slot model; dx12 enhanced
                                   barriers real for buffers + textures (subresource-range layout transitions,
-                                  entry-layout revert), driven by texture transfer and the rendering scope;
-                                  vulkan pending
+                                  entry-layout revert), driven by texture transfer and the rendering scope
 views                [in progress]  strongly-typed resource views; buffer + texture (SRV/UAV) views done (dx12 bindable
                                   in compute); render_target/depth_stencil views done and consumed by the rendering
                                   scope; texel buffers deferred

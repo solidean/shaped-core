@@ -473,6 +473,7 @@ fun f(x: float, .fast: bool)             // ...and a literal argument is a const
 @unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
 for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
                                          // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
+                                         // ...and so does an inner one whose bound reads its index, under the same warning
                                          // a rule judging a constant judges each index: `1u << (i as uint)` past 31 is refused
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)

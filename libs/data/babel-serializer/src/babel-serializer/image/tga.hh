@@ -44,9 +44,13 @@ struct babel::tga::data
     int height = 0;
 
     /// 1 gray, 2 gray + alpha, 3 rgb or 4 rgba — what the stored pixels hold, a palette's entries for a color-mapped image.
-    /// A 16-bit pixel has an alpha channel only when the header grants it the attribute bit.
-    /// That alpha is bit 15, which many writers leave 0 whatever the header says, so such a file reads fully transparent.
+    /// A 16- or 32-bit pixel has an alpha channel only when the descriptor declares attribute bits; otherwise its alpha
+    /// bit or byte is padding, and the image is rgb.
     int channels = 0;
+
+    /// True when the alpha channel was zero at every pixel and was read as opaque instead, as DirectXTex reads such a
+    /// file by default: a writer that left its alpha clear, rather than a fully transparent image.
+    bool alpha_was_all_zero = false;
 
     image_type type = image_type::true_color;
     bool run_length_encoded = false;
@@ -72,7 +76,7 @@ struct babel::tga::data
 struct babel::tga::read_options
 {
     /// The most bytes the decoded pixels may take; a file describing more is an error before anything is allocated.
-    /// Run-length data describes up to about 128 times its length in pixels, so 67 MB of packets could still describe 17 GB.
+    /// A two-byte run-length packet describes up to 128 pixels, so 67 MB of packets could still describe 17 GB.
     /// The header and the data alone therefore never bound the allocation; this does.
     /// The default holds an 8192 x 8192 rgba image; the largest `isize` disables the check.
     isize max_decoded_bytes = isize(1) << 28;
@@ -83,9 +87,10 @@ namespace babel::tga
 /// True when `bytes` end in the TGA 2.0 footer, the one signature the format has.
 [[nodiscard]] bool has_footer(cc::span<byte const> bytes);
 
-/// True when `bytes` open with a header a TGA reader would accept: a known image type, a matching color map and a
-/// depth that type stores.
-/// A guess by construction, since TGA has no magic: data of another kind can pass it.
+/// True when `bytes` open with a header a TGA writer would produce: a known image type, a matching color map and a
+/// depth that type stores, with no obsolete interleave bits and no color-map fields on an image without a map.
+/// Stricter than `read`, which accepts those last two, because a looser test takes more data of other kinds for a TGA.
+/// A guess by construction, since TGA has no magic: data of another kind can still pass it.
 [[nodiscard]] bool has_plausible_header(cc::span<byte const> bytes);
 
 /// Decode a whole TGA buffer.

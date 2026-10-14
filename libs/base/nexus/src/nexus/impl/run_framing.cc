@@ -10,7 +10,7 @@ nx::impl::run_framing nx::impl::frame_run(test_schedule_config const& config,
     using nx::config::test_bucket;
 
     auto is_example_run = !schedule.instances.empty();
-    auto is_benchmark_run = !schedule.instances.empty();
+    auto is_unwatched_run = !schedule.instances.empty();
     auto has_benchmarks = false;
     for (auto const& instance : schedule.instances)
     {
@@ -18,7 +18,9 @@ nx::impl::run_framing nx::impl::frame_run(test_schedule_config const& config,
             = instance.declaration != nullptr ? instance.declaration->test_config.bucket : test_bucket::normal;
         is_example_run = is_example_run && bucket == test_bucket::example;
         // A PGO benchmark is a measured workload too, which --pgo-benchmarks leaves unwatched just as --benchmarks does.
-        is_benchmark_run = is_benchmark_run && (bucket == test_bucket::benchmark || bucket == test_bucket::pgo_benchmark);
+        is_unwatched_run = is_unwatched_run
+                        && (bucket == test_bucket::example || bucket == test_bucket::benchmark
+                            || bucket == test_bucket::pgo_benchmark);
         has_benchmarks = has_benchmarks || bucket == test_bucket::benchmark;
     }
 
@@ -36,7 +38,7 @@ nx::impl::run_framing nx::impl::frame_run(test_schedule_config const& config,
         .reports_resources = !is_program_run,
 
         // A program may legitimately sit idle, and a benchmark times itself, starting and finishing nothing for as long as that takes.
-        .is_watched = !is_program_run && !is_benchmark_run
+        .is_watched = !is_entry_run && !is_unwatched_run
                    && (config.selected_bucket == test_bucket::normal || config.selected_bucket == test_bucket::manual),
     };
 }

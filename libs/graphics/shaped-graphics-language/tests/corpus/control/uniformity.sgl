@@ -1,0 +1,42 @@
+// every invocation that enters a loop with no `return` in it reaches what follows it, together again (CHK-284)
+
+require ray_query
+require subgroups
+
+binding scene:
+    world: acceleration_structure[.triangles]
+    @sampler(linear) albedo: texture_2d[float4]
+    linear: sampler
+    hits: mut buffer[uint]
+
+struct shaded_input:
+    @position position: hpos4
+    uv: float2
+
+@pixel struct shaded_target:
+    color: float4
+
+// a shadow ray, then a sample that picks its own level: the trace's loop is every pixel's again after it
+@pixel fun shadowed_ps(p: shaded_input){scene} -> shaded_target:
+    let blocked = scene.world.trace(ray(origin = pos3(p.uv.x, p.uv.y, -1.0), direction = vec3(0.0, 0.0, 1.0))).is_hit
+    let c = scene.albedo.sample(p.uv)
+    return {color = if blocked => c * 0.5 else c}
+
+// a trace, then a sum over the subgroup, which every invocation reaches
+@compute(64) fun count_hits(@thread_id id: int3){scene}:
+    let h = scene.world.trace(ray(origin = pos3(id.x as float, 0.0, -1.0), direction = vec3(0.0, 0.0, 1.0)))
+    scene.hits[id.x] = subgroup_add(if h.is_hit => 1u else 0u)
+
+// a loop each invocation leaves at an iteration of its own, by `break` alone
+fun steps_to(lane: int) -> uint:
+    let mut n = 0u
+    for i in 0 ..< 128:
+        if i == lane => break
+        n += 1u
+    return n
+
+test steps_to(5) == 5u
+
+// then the same sum, which every lane is back for
+@compute(64) fun count_steps(@thread_id id: int3, @subgroup_invocation_id lane: int){scene}:
+    scene.hits[id.x] = subgroup_add(steps_to(lane))

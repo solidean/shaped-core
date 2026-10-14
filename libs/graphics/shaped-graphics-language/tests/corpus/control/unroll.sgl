@@ -180,6 +180,28 @@ test:
             total += row * column
     total == 16320
 
+// an outer loop that stays a loop leaves an inner bound that reads its index no constant, so the inner loop stays a loop too,
+// under the same warning; the emit tests pin that it is the only diagnostic
+@expect(warning = "unroll-too-long")
+test:
+    let mut count = 0
+    @unroll
+    for row in 0 ..< 300:
+        @unroll
+        for column in 0 ..< row + 1:
+            count += 1
+    count == 45150
+
+// while inside a loop that never was unrolled, such a bound stays an error
+@expect(error = "invalid-constant-argument")
+test:
+    let mut count = 0
+    for row in 0 ..< 3:
+        @unroll
+        for column in 0 ..< row + 1:
+            count += 1
+    count == 6
+
 // a range holding more values than an int counts is counted in full, and stays a loop
 @expect(warning = "unroll-too-long")
 test:
@@ -209,8 +231,31 @@ test:
         m |= 1u << (i as uint)
     m != 0u
 
-// the attribute takes no arguments
-@expect(error = "invalid-attribute-arguments")
+// while a copy a constant `break` ends is the last one written, and nothing after the `break` in it is written either,
+// so no rule judges the shift by 32 that the loop never reaches
+fun low_mask() -> uint:
+    let mut m = 0u
+    @unroll
+    for i in 0 ..< 40:
+        if i >= 32 => break
+        m |= 1u << (i as uint)
+    return m
+
+test low_mask() == 0xffffffffu
+
+// and a copy a constant `continue` ends writes nothing after it, while the copies after it are written
+fun skipped_mask() -> uint:
+    let mut m = 0u
+    @unroll
+    for i in 0 ..< 34:
+        if i >= 32 => continue
+        m |= 1u << (i as uint)
+    return m
+
+test skipped_mask() == 0xffffffffu
+
+// a count, which would unroll the loop in part, is not supported yet
+@expect(error = "unsupported-yet")
 test:
     let mut total = 0
     @unroll(2)

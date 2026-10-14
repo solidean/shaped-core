@@ -411,6 +411,19 @@ A call is no jump, so a path that discarded would still have had to produce a va
 The portable meaning is that the pixel has no effect after it — no target, no depth, no stencil, no store — which every target keeps.
 Whether the pixel keeps running as a helper for its quad's derivatives is where the targets differ, and the writers demote wherever a target offers the choice.
 
+## CHK-284
+
+WGSL holds a divergent `break` against everything after its loop.
+That refuses a pixel stage that traces a shadow ray and then samples, since the trace is a loop each pixel leaves when its own ray is done.
+Every invocation that enters a loop with no `return` in it reaches the statement after it, and every target's structured control flow reconverges there.
+SPIR-V states it for the core: control flow uniform on entry to a structured loop, which every invocation leaves through its merge block, is uniform again after that block.
+That needs no `SubgroupUniformControlFlowKHR`, which only extends the same promise to flow uniform within a subgroup and not the whole workgroup, and SGL never counts that as uniform (CHK-377).
+DXC emits neither that mode nor maximal reconvergence for vulkan, and nothing here needs it to.
+A `return` is the exit that does not come back, so a loop some invocations leave by one keeps WGSL's rule.
+SGL runs its own analysis, so inheriting Tint's pessimism would buy nothing but refusals, and the WGSL text switches Tint's verdict off (EMIT-103).
+A barrier is where that switch does not exist: WGSL refuses one in what Tint judges non-uniform, whatever the directive.
+So a barrier keeps WGSL's rule on every target, and one shader means the same on all of them.
+
 ## CHK-285
 
 `T[N]` reads the way a C, HLSL or GLSL reader writes an array, and `texture_2d[float4][64]` is a binding array by the same rule, with no second spelling.

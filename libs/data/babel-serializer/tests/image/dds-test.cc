@@ -3,7 +3,6 @@
 #include <clean-core/common/endian.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/platform/environment.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
@@ -361,6 +360,34 @@ TEST("dds - a volume stores each level's slices together")
     CHECK(texels.value().size() == 8 * 4);
 }
 
+TEST("dds - a legacy volume is decided by DDSD_DEPTH, as DirectXTex reads it")
+{
+    // 4x4x4 DXT1, two levels: four blocks, then the 2x2x2 level's two.
+    auto const payload = counting_payload((4 + 2) * 8);
+    constexpr u32 flag_depth = 0x800000;
+    constexpr u32 caps2_volume = 0x200000;
+
+    SECTION("DDSD_DEPTH alone is a volume")
+    {
+        auto const tex = dds::read(
+            cc::span<byte const>(make_dds({.depth = 4, .mips = 2, .flags = 0x1007 | 0x20000 | flag_depth}, payload)));
+        REQUIRE(tex.has_value());
+        CHECK(tex.value().shape == dds::dimension::texture_3d);
+        CHECK(tex.value().depth == 4);
+        REQUIRE(tex.value().subresources.size() == 2);
+        CHECK(u8(tex.value().subresources[1].bytes[0]) == 4 * 8); // mip 1 starts after mip 0's four slices
+    }
+
+    SECTION("DDSCAPS2_VOLUME alone is a 2D texture")
+    {
+        auto const tex = dds::read(cc::span<byte const>(
+            make_dds({.depth = 4, .mips = 2, .flags = 0x1007 | 0x20000, .caps2 = caps2_volume}, payload)));
+        REQUIRE(tex.has_value());
+        CHECK(tex.value().shape == dds::dimension::texture_2d);
+        CHECK(tex.value().depth == 1);
+    }
+}
+
 TEST("dds - BC5 decodes x to red and y to green")
 {
     // Two channel blocks of constant value: red 50, green 200.
@@ -580,20 +607,6 @@ TEST("dds - the aggregator detects DDS and keeps mip 0 of the first layer")
 
 namespace
 {
-/// Where the Amazon Lumberyard Bistro textures were extracted, when they were.
-/// `SC_BISTRO_TEXTURES` names the directory; otherwise it is `.tmp/` under the checkout this file is in.
-cc::string bistro_texture_dir()
-{
-    if (auto const dir = cc::environment_variable("SC_BISTRO_TEXTURES"); dir.has_value())
-        return dir.value();
-
-    auto const self = cc::string_view(__FILE__);
-    for (auto i = self.size() - 5; i >= 0; --i)
-        if (self.subview_clamped(i, 5) == "libs/" || self.subview_clamped(i, 5) == "libs\\")
-            return cc::format("{}.tmp/bistro-orca/extracted/Bistro_v5_2/Textures", self.subview_clamped(0, i));
-    return {};
-}
-
 cc::optional<cc::vector<byte>> read_file(cc::string_view path)
 {
     auto file = cc::file_read_stream_adapter::open(path);
@@ -609,7 +622,8 @@ cc::optional<cc::vector<byte>> read_file(cc::string_view path)
 
 TEST("dds - real Bistro textures decode, when present")
 {
-    auto const dir = bistro_texture_dir();
+    // Where extern/bistro/fetch-bistro.py installs them, beside the FBX files the fbx tests read.
+    auto const dir = cc::string_view(BABEL_TEST_BISTRO_DIR "/Textures");
 
     // The small files cover every encoding Bistro uses; the 2048 x 2048 ones run under --thorough only.
     struct sample
@@ -665,7 +679,7 @@ TEST("dds - real Bistro textures decode, when present")
     }
 
     if (found == 0)
-        SKIP("the Bistro textures are not extracted; set SC_BISTRO_TEXTURES to their directory");
+        SKIP("Bistro is not fetched; uv run extern/bistro/fetch-bistro.py installs it");
 }
 
 // Budgets and hand-built input
@@ -685,6 +699,28 @@ TEST("dds - a decode larger than the budget is refused before allocating")
 
     auto const file = make_dds({.width = 8, .height = 8}, payload);
     CHECK(babel::image::read(file, {.max_decoded_bytes = 255}).has_error());
+}
+
+TEST("dds - a float DDS reaches the aggregator as f32, one buffer under the budget")
+{
+    // 2x2 rgba32_float through DX10: texel t holds (t, t + 0.25, t + 0.5, 1).
+    auto payload = cc::vector<byte>::create_filled(2 * 2 * 16, byte(0));
+    for (auto t = 0; t < 4; ++t)
+        for (auto c = 0; c < 4; ++c)
+            cc::store_bytes_le<float>(payload, (t * 4 + c) * 4, c == 3 ? 1.0f : float(t) + 0.25f * float(c));
+    auto const file = make_dds({.width = 2, .height = 2, .dx10 = true, .dxgi = 2}, payload);
+
+    auto const img = babel::image::read(file);
+    REQUIRE(img.has_value());
+    CHECK(img.value().comp == babel::image::component::f32);
+    auto const floats = img.value().samples_f32();
+    REQUIRE(floats.size() == 16);
+    CHECK(floats[2 * 4 + 1] == 2.25f);
+    CHECK(floats[3 * 4 + 3] == 1.0f);
+
+    // 64 bytes of floats: the budget is the image's own size, with nothing beside it.
+    CHECK(babel::image::read(file, {.max_decoded_bytes = 64}).has_value());
+    CHECK(babel::image::read(file, {.max_decoded_bytes = 63}).has_error());
 }
 
 TEST("dds - decoding checks a hand-built texture rather than trusting it")

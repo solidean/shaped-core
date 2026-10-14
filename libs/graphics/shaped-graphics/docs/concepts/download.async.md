@@ -115,7 +115,9 @@ Preserve these; the rest is tuning:
 1. **Sync is automatic in both directions.**
    Forward: the read waits on the last command list that wrote the buffer — submission token stamped at submit, transfer queue waits before the read.
    Reverse: a later command list that *writes* the buffer waits on the read — completion value stamped before enqueue, main queue waits at submit.
-   Only writes fold in the reverse wait; waits point backward in submission order, so the graph is acyclic.
+   A buffer folds in the reverse wait only when the list writes it, since two reads never conflict.
+   A texture folds it in whatever the access, since the list's entry barrier can change the layout the copy queue is reading.
+   Waits point backward in submission order, so the graph is acyclic.
 2. **A download completes with a CPU memcpy on the actor**, deferred until the window's GPU read finishes.
    It never stalls the recording thread and never needs an epoch advance, and every window is drained before its slot is reused and before the actor sleeps.
 3. **The source is held strong across the read**, so no copy gate is needed; the destination is held weak, so dropping the future cancels the copy.

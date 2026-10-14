@@ -190,19 +190,11 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             context=cfg.context, gap=cfg.coalesce_gap, net=net, paths=selectors or None,
         )
 
-    # A bulk claim is a decision not to read those hunks, and a later plain sweep — typically run to re-point after a
-    # head move — must not quietly reverse it by handing each of them an id of its own.
-    inside_bulk = 0
-    if not bulking and not args.commits and not args.rest:
-        bulked = review.LineSpace.empty()
-        for change in ledger.live():
-            if change.is_bulk:
-                bulked = bulked.union(change.claim)
-        if not bulked.is_empty:
-            known = ledger.by_digest()
-            kept = [c for c in candidates if c.digest in known or not c.claim.subtract(bulked).is_empty]
-            inside_bulk = len(candidates) - len(kept)
-            candidates = kept
+    # Commits named explicitly are an answer a bulk claim does not overrule; every other sweep honors one.
+    honor_bulk = not args.commits
+    if honor_bulk and (args.stats or args.dry_run):
+        decided = {c.digest for c in review.inside_bulk(ledger, candidates)}
+        candidates = [c for c in candidates if c.digest not in decided]
 
     if args.stats:
         if args.rest:
@@ -226,7 +218,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     result = review.register(
         ledger, candidates, round_number=cfg.next_round,
-        write_body=write_body, only_uncovered=args.rest,
+        write_body=write_body, only_uncovered=args.rest, honor_bulk=honor_bulk,
     )
     # The bulk decides for the hunks under it that nobody has read yet, whichever came first.
     absorbed: list = []
@@ -243,8 +235,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     print(f"{len(result.created)} changes created, {len(result.reused)} already known")
     if absorbed:
         print(f"{len(absorbed)} earlier change(s) absorbed into the bulk claim; an entry already discharging one keeps it")
-    if inside_bulk:
-        print(f"{inside_bulk} skipped as lying wholly inside a bulk claim")
+    if result.skipped_inside_bulk:
+        print(f"{result.skipped_inside_bulk} skipped as lying wholly inside a bulk claim")
     if result.repointed:
         # A head move leaves a claim in the old coordinates; saying so is what keeps a changed count explicable.
         print(f"{len(result.repointed)} claim(s) re-pointed at their new line numbers")

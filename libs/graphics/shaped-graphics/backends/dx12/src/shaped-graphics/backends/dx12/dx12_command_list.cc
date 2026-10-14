@@ -683,8 +683,6 @@ void dx12_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not dx12 resources");
     CC_ASSERT(!s->is_expired(), "copy source is a transient buffer used past its epoch (expired)");
     CC_ASSERT(!d->is_expired(), "copy target is a transient texture used past its epoch (expired)");
-    CC_ASSERT(s->usage().has(sg::buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
-    CC_ASSERT(d->usage().has(sg::texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
 
     dx12_texture_footprint const fp = compute_texture_footprint(d->description(), subresource, region);
 
@@ -951,6 +949,12 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
 
 dx12_command_list::~dx12_command_list()
 {
+    // Freed straight away rather than when the epoch retires: the recorded commands read none of these slots.
+    for (auto const slot : _rtv_slots)
+        _ctx.free_dx12_render_target_view(slot);
+    if (_dsv_slot != cpu_descriptor_slot::invalid)
+        _ctx.free_dx12_depth_stencil_view(_dsv_slot);
+
     if (_consumed)
         return; // submitted or dropped explicitly — nothing to reclaim
 

@@ -15,6 +15,8 @@ using namespace sgl::check::impl;
 // It must be sound for every target: whatever it accepts reaches each barrier and derivative in uniform flow.
 // Refusing all that Tint refuses is no goal; where Tint's coarser analysis refuses a sound program, the WGSL text
 // silences Tint's check.
+// A barrier is the exception: Tint's verdict on one cannot be silenced, so barriers are judged by WGSL's rules,
+// and derivatives and subgroup operations by SGL's own, in a second walk.
 
 namespace
 {
@@ -30,6 +32,8 @@ struct divergence
     /// Of the control flow, the value its branch tested, which a note names of a local set under a branch of the prelude.
     origin tested_where = {};
     cc::string tested_why = {};
+    /// Of the control flow, the calls its branch was inlined through, outermost first.
+    ast::range_of<call_site> through = {};
 
     [[nodiscard]] static divergence none() { return {}; }
 };
@@ -64,6 +68,9 @@ struct uniformity_pass
     bool is_changed = false;
     /// Set for the last walk, once the locals are settled.
     bool is_reporting = false;
+    /// CHK-284: the flow after a loop is the flow before it, where WGSL's rules hold a divergent `break` against it.
+    /// Off, the walk judges barriers as WGSL does; on, derivatives, subgroup operations and indices as SGL does.
+    bool reconverges = false;
 
     struct violation
     {
@@ -183,7 +190,8 @@ struct uniformity_pass
                 auto const index = value(element.index, flow);
                 result = first_of(value(element.object, flow), index);
                 // an element of a binding array is the resource the index picks, read once per wave
-                if (is_reporting && e.at(element.object).node.is<flat_binding_member>() && is_resource(m.at(x.type).kind))
+                if (is_reporting && reconverges && e.at(element.object).node.is<flat_binding_member>()
+                    && is_resource(m.at(x.type).kind))
                 {
                     auto const marked = is_marked(element.index);
                     if (index.is != marked)
@@ -204,12 +212,12 @@ struct uniformity_pass
             {
                 auto const lhs = value(a.lhs, flow);
                 // `rhs` runs only where `lhs` is true, which is flow of its own
-                result = first_of(lhs, value(a.rhs, first_of(flow, as_branch(lhs, x.from))));
+                result = first_of(lhs, value(a.rhs, first_of(flow, as_branch(lhs, x.from, x.inlined_through))));
             },
             [&](flat_or const& o)
             {
                 auto const lhs = value(o.lhs, flow);
-                result = first_of(lhs, value(o.rhs, first_of(flow, as_branch(lhs, x.from))));
+                result = first_of(lhs, value(o.rhs, first_of(flow, as_branch(lhs, x.from, x.inlined_through))));
             },
             [&](auto const&) {});
         return result;
@@ -221,7 +229,7 @@ struct uniformity_pass
         // CHK-374: the load reads workgroup memory once every thread has arrived, and hands each the same value
         if (record != nullptr && record->is_uniform_load)
         {
-            if (flow.is && is_reporting)
+            if (flow.is && is_reporting && !reconverges)
                 violations.push_back({.call = id, .flow = flow});
             return {};
         }
@@ -231,7 +239,9 @@ struct uniformity_pass
             result = first_of(result, value(a, flow));
         if (record == nullptr)
             return result;
-        if ((record->is_barrier || record->uses_derivatives || record->is_subgroup_operation) && flow.is && is_reporting)
+        auto const is_judged
+            = reconverges ? record->uses_derivatives || record->is_subgroup_operation : record->is_barrier;
+        if (is_judged && flow.is && is_reporting)
             violations.push_back({.call = id, .flow = flow});
         // CHK-377: what the subgroup agrees on may still differ between the subgroups of a workgroup
         if (record->is_subgroup_operation && !result.is)
@@ -291,7 +301,7 @@ struct uniformity_pass
     }
 
     /// The flow inside a branch on a value of divergence `d`.
-    [[nodiscard]] static divergence as_branch(divergence const& d, origin const& where)
+    [[nodiscard]] static divergence as_branch(divergence const& d, origin const& where, ast::range_of<call_site> through)
     {
         if (!d.is)
             return {};
@@ -299,7 +309,8 @@ struct uniformity_pass
                 .where = where,
                 .why = cc::format("this branch tests a value that {}", d.why),
                 .tested_where = d.where,
-                .tested_why = d.why};
+                .tested_why = d.why,
+                .through = through};
     }
 
     flow_out statements(ast::range_of<flat_stmt_id> range, divergence flow)
@@ -332,16 +343,21 @@ struct uniformity_pass
         }
     }
 
-    /// A loop, a `once` among them: a divergent exit anywhere in it makes all of it divergent, and what follows it.
+    /// A loop, a `once` among them: a divergent exit anywhere in it makes all of it divergent.
+    /// What follows it is divergent too by WGSL's rules, and by SGL's only where some invocations returned (CHK-284).
     /// A `while` passes its `condition`, which runs at the top of every iteration, so under every flow the body meets.
+    /// A `once` runs no later iteration, so by SGL's rules what stands before its divergent exit is not divergent.
     flow_out loop(ast::range_of<flat_stmt_id> body,
                   divergence const& flow,
                   divergence const& bounds,
+                  bool repeats,
                   flat_expr_id condition = flat_expr_id::none,
-                  origin const& from = {})
+                  flat_stmt const* from = nullptr)
     {
         auto const returns_before = returns;
-        auto const tested = first_of(bounds, as_branch(value(condition, flow), from));
+        auto const branch = from != nullptr ? as_branch(value(condition, flow), from->from, from->inlined_through)
+                                            : divergence::none();
+        auto const tested = first_of(bounds, branch);
         scopes.push_back({.divergent_exit = tested});
         auto const entered = first_of(flow, tested);
         (void)statements(body, entered);
@@ -349,113 +365,115 @@ struct uniformity_pass
         // the later iterations run for the invocations that stayed, and test the condition again first
         if (exit.is && !flow.is)
             (void)value(condition, exit);
-        if (exit.is && !entered.is)
+        if (exit.is && !entered.is && (repeats || !reconverges))
             (void)statements(body, exit);
         scopes.pop_back();
         // a `break` or a `continue` stays inside it, and a `return` goes on out
-        return {.flow = first_of(flow, exit), .jumps = returns > returns_before};
+        auto const after = reconverges ? first_of(flow, returned) : first_of(flow, exit);
+        return {.flow = after, .jumps = returns > returns_before};
     }
 
     flow_out statement(flat_stmt const& s, divergence const& flow)
     {
         auto result = flow_out{.flow = flow};
-        s.node.visit([&](flat_let const& l) { settle_local(l.local, value(l.value, flow), flow); },
-                     [&](flat_var const& v) { settle_local(v.local, value(v.value, flow), flow); },
-                     [&](flat_assign const& a)
-                     {
-                         auto stored = value(a.value, flow);
-                         // the place's root local takes the value; a buffer element's index is only read
-                         auto place = a.place;
-                         while (is_valid(place))
-                         {
-                             auto const& p = e.at(place).node;
-                             if (auto const* const member = p.try_as<flat_member>())
-                                 place = member->object;
-                             // an element at a divergent index is a divergent part of the array
-                             else if (auto const* const element = p.try_as<flat_element>())
-                             {
-                                 stored = first_of(stored, value(element->index, flow));
-                                 place = element->object;
-                             }
-                             else if (auto const* const l = p.try_as<flat_local_ref>())
-                             {
-                                 settle_local(l->local, stored, flow);
-                                 break;
-                             }
-                             else
-                             {
-                                 (void)value(place, flow);
-                                 break;
-                             }
-                         }
-                     },
-                     [&](flat_eval const& v) { (void)value(v.value, flow); },
-                     [&](flat_print const& p) { (void)value(p.value, flow); },
-                     [&](flat_if const& i)
-                     {
-                         auto const inside = first_of(flow, as_branch(value(i.condition, flow), s.from));
-                         auto const then_out = statements(i.then_body, inside);
-                         auto const else_out = statements(i.else_body, inside);
-                         // the two sides meet again after it, unless one of them left: then only some invocations go on
-                         result.jumps = then_out.jumps || else_out.jumps;
-                         if (result.jumps)
-                             result.flow = first_of(inside, first_of(then_out.flow, else_out.flow));
-                     },
-                     [&](flat_loop const& l) { result = loop(l.body, flow, {}); },
-                     [&](flat_once const& o) { result = loop(o.body, flow, {}); },
-                     [&](flat_while const& w) { result = loop(w.body, flow, {}, w.condition, s.from); },
-                     [&](flat_for const& f)
-                     {
-                         auto const bounds = first_of(value(f.first, flow), value(f.end, flow));
-                         settle_local(f.index, bounds, flow);
-                         result = loop(f.body, flow, as_branch(bounds, s.from));
-                     },
-                     [&](flat_switch const& sw)
-                     {
-                         auto const inside = first_of(flow, as_branch(value(sw.scrutinee, flow), s.from));
-                         auto const jumps_before = returns + continues;
-                         scopes.push_back({.is_switch = true});
-                         auto left = divergence::none();
-                         for (auto const& a : e.at(sw.arms))
-                             left = first_of(left, statements(a.body, inside).flow);
-                         left = first_of(left, statements(sw.default_body, inside).flow);
-                         scopes.pop_back();
-                         // the arms meet again after it, unless one left the loop or the function around it
-                         result.jumps = returns + continues > jumps_before;
-                         if (result.jumps)
-                             result.flow = first_of(inside, left);
-                     },
-                     [&](flat_break const&)
-                     {
-                         exit(flow, false);
-                         result.jumps = true;
-                     },
-                     [&](flat_continue const&)
-                     {
-                         exit(flow, true);
-                         ++continues;
-                         result.jumps = true;
-                     },
-                     [&](flat_return const& r)
-                     {
-                         (void)value(r.value, flow);
-                         ++returns;
-                         if (flow.is && !returned.is)
-                         {
-                             returned = {.is = true,
-                                         .where = s.from,
-                                         .why = cc::string("some invocations return here, and the others go on"),
-                                         .tested_where = flow.tested_where,
-                                         .tested_why = flow.tested_why};
-                             // every loop around it runs on for the invocations that stayed
-                             for (auto& scope : scopes)
-                                 if (!scope.is_switch && !scope.divergent_exit.is)
-                                     scope.divergent_exit = returned;
-                         }
-                         result.jumps = true;
-                     },
-                     // a discard demotes the invocation to a helper, which still takes part in its quad's derivatives
-                     [&](flat_discard const&) {}, [&](auto const&) {});
+        s.node.visit(
+            [&](flat_let const& l) { settle_local(l.local, value(l.value, flow), flow); },
+            [&](flat_var const& v) { settle_local(v.local, value(v.value, flow), flow); },
+            [&](flat_assign const& a)
+            {
+                auto stored = value(a.value, flow);
+                // the place's root local takes the value; a buffer element's index is only read
+                auto place = a.place;
+                while (is_valid(place))
+                {
+                    auto const& p = e.at(place).node;
+                    if (auto const* const member = p.try_as<flat_member>())
+                        place = member->object;
+                    // an element at a divergent index is a divergent part of the array
+                    else if (auto const* const element = p.try_as<flat_element>())
+                    {
+                        stored = first_of(stored, value(element->index, flow));
+                        place = element->object;
+                    }
+                    else if (auto const* const l = p.try_as<flat_local_ref>())
+                    {
+                        settle_local(l->local, stored, flow);
+                        break;
+                    }
+                    else
+                    {
+                        (void)value(place, flow);
+                        break;
+                    }
+                }
+            },
+            [&](flat_eval const& v) { (void)value(v.value, flow); },
+            [&](flat_print const& p) { (void)value(p.value, flow); },
+            [&](flat_if const& i)
+            {
+                auto const inside = first_of(flow, as_branch(value(i.condition, flow), s.from, s.inlined_through));
+                auto const then_out = statements(i.then_body, inside);
+                auto const else_out = statements(i.else_body, inside);
+                // the two sides meet again after it, unless one of them left: then only some invocations go on
+                result.jumps = then_out.jumps || else_out.jumps;
+                if (result.jumps)
+                    result.flow = first_of(inside, first_of(then_out.flow, else_out.flow));
+            },
+            [&](flat_loop const& l) { result = loop(l.body, flow, {}, true); },
+            [&](flat_once const& o) { result = loop(o.body, flow, {}, false); },
+            [&](flat_while const& w) { result = loop(w.body, flow, {}, true, w.condition, &s); },
+            [&](flat_for const& f)
+            {
+                auto const bounds = first_of(value(f.first, flow), value(f.end, flow));
+                settle_local(f.index, bounds, flow);
+                result = loop(f.body, flow, as_branch(bounds, s.from, s.inlined_through), true);
+            },
+            [&](flat_switch const& sw)
+            {
+                auto const inside = first_of(flow, as_branch(value(sw.scrutinee, flow), s.from, s.inlined_through));
+                auto const jumps_before = returns + continues;
+                scopes.push_back({.is_switch = true});
+                auto left = divergence::none();
+                for (auto const& a : e.at(sw.arms))
+                    left = first_of(left, statements(a.body, inside).flow);
+                left = first_of(left, statements(sw.default_body, inside).flow);
+                scopes.pop_back();
+                // the arms meet again after it, unless one left the loop or the function around it
+                result.jumps = returns + continues > jumps_before;
+                if (result.jumps)
+                    result.flow = first_of(inside, left);
+            },
+            [&](flat_break const&)
+            {
+                exit(flow, false);
+                result.jumps = true;
+            },
+            [&](flat_continue const&)
+            {
+                exit(flow, true);
+                ++continues;
+                result.jumps = true;
+            },
+            [&](flat_return const& r)
+            {
+                (void)value(r.value, flow);
+                ++returns;
+                if (flow.is && !returned.is)
+                {
+                    returned = {.is = true,
+                                .where = s.from,
+                                .why = cc::string("some invocations return here, and the others go on"),
+                                .tested_where = flow.tested_where,
+                                .tested_why = flow.tested_why};
+                    // every loop around it runs on for the invocations that stayed
+                    for (auto& scope : scopes)
+                        if (!scope.is_switch && !scope.divergent_exit.is)
+                            scope.divergent_exit = returned;
+                }
+                result.jumps = true;
+            },
+            // a discard demotes the invocation to a helper, which still takes part in its quad's derivatives
+            [&](flat_discard const&) {}, [&](auto const&) {});
         return result;
     }
 
@@ -471,46 +489,58 @@ struct uniformity_pass
 void checker::judge_uniformity(flat_entry_point const& structured)
 {
     // most entry points call nothing that asks, and index no binding array, and legalizing is not free
-    auto asks = false;
+    auto asks_barrier = false;
+    auto asks_reconverged = false;
     for (auto const& x : structured.exprs)
     {
         if (auto const* const c = x.node.try_as<flat_call>())
             if (auto const* const record = out.builtin_function(c->intrinsic))
-                asks = asks || record->is_barrier || record->uses_derivatives || record->is_subgroup_operation;
+            {
+                asks_barrier = asks_barrier || record->is_barrier || record->is_uniform_load;
+                asks_reconverged = asks_reconverged || record->uses_derivatives || record->is_subgroup_operation;
+            }
         if (x.node.is<flat_element>())
-            asks = asks || is_resource(out.at(x.type).kind);
+            asks_reconverged = asks_reconverged || is_resource(out.at(x.type).kind);
     }
-    if (!asks)
+    if (!asks_barrier && !asks_reconverged)
         return;
 
     auto const e = legalize(out, structured);
-    auto pass = uniformity_pass{.m = out,
-                                .e = e,
-                                .prelude_count = prelude_count,
-                                .locals = cc::vector<divergence>::create_defaulted(e.locals.size())};
-
-    // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id
-    for (auto i = isize(0); i < e.locals.size(); ++i)
-        if (e.locals[i].kind == local_kind::parameter)
-            pass.locals[i] = {.is = true, .why = cc::format("comes from the stage's parameter {}", e.locals[i].name)};
-    if (is_valid(e.input))
-        pass.locals[0] = {.is = true, .why = cc::string("comes from the stage's input struct")};
-    for (auto const& input : e.stage_inputs)
-        pass.locals[index_of(input.local)]
-            = input.input == stage_input::workgroup_id
-                ? divergence::none()
-                : divergence{.is = true, .why = cc::format("comes from the stage input {}", e.at(input.local).name)};
-
-    // a local only ever becomes divergent, so the walks settle within one per local
-    for (auto rounds = isize(0); rounds <= e.locals.size(); ++rounds)
+    auto const judged = [&](bool reconverges)
     {
-        pass.is_changed = false;
+        auto pass = uniformity_pass{.m = out,
+                                    .e = e,
+                                    .prelude_count = prelude_count,
+                                    .locals = cc::vector<divergence>::create_defaulted(e.locals.size()),
+                                    .reconverges = reconverges};
+
+        // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id
+        for (auto i = isize(0); i < e.locals.size(); ++i)
+            if (e.locals[i].kind == local_kind::parameter)
+                pass.locals[i] = {.is = true, .why = cc::format("comes from the stage's parameter {}", e.locals[i].name)};
+        if (is_valid(e.input))
+            pass.locals[0] = {.is = true, .why = cc::string("comes from the stage's input struct")};
+        for (auto const& input : e.stage_inputs)
+            pass.locals[index_of(input.local)]
+                = input.input == stage_input::workgroup_id
+                    ? divergence::none()
+                    : divergence{.is = true, .why = cc::format("comes from the stage input {}", e.at(input.local).name)};
+
+        // a local only ever becomes divergent, so the walks settle within one per local
+        for (auto rounds = isize(0); rounds <= e.locals.size(); ++rounds)
+        {
+            pass.is_changed = false;
+            pass.walk();
+            if (!pass.is_changed)
+                break;
+        }
+        pass.is_reporting = true;
         pass.walk();
-        if (!pass.is_changed)
-            break;
-    }
-    pass.is_reporting = true;
-    pass.walk();
+        return pass;
+    };
+    auto pass = judged(asks_reconverged);
+    if (asks_reconverged && asks_barrier)
+        pass.violations.push_back_range(judged(false).violations);
 
     // an index a parameter names several times is one index where it was written
     auto reported_indices = cc::vector<origin>();
@@ -569,7 +599,23 @@ void checker::judge_uniformity(flat_entry_point const& structured)
                              record->name.starts_with("sample") ? ": sample before the branch, or name the level or "
                                                                   "the gradients"
                                                                 : ": take them before the branch"));
+        // a branch of the prelude is no line of the program, so the note names the program's call that reached it
         auto const& from = v.flow.where;
+        auto site = call_site();
+        if (from.file < prelude_count)
+            for (auto const& s : e.at(v.flow.through))
+                if (s.file >= prelude_count)
+                    site = s;
+        if (ast::is_valid(site.call))
+        {
+            d.notes.push_back(
+                {.file = site.file,
+                 .where = span_of(site.file, site.call),
+                 .message = v.flow.tested_why.empty()
+                              ? cc::string("the control flow differs inside this call")
+                              : cc::format("a branch inside this call tests a value that {}", v.flow.tested_why)});
+            continue;
+        }
         auto const span = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt);
         d.notes.push_back({.file = from.file, .where = span, .message = v.flow.why});
     }

@@ -1,7 +1,7 @@
 ---
 name: debugging-ci
 description: Diagnose a red GitHub Actions run for shaped-core — find which job failed and read the real compiler/test errors out of its diagnostics artifact with build_diag / test_diag.
-when_to_use: "CI is red", "the build failed on CI", "MSVC CI fails", "why did the PR check fail", "a GitHub Actions job failed", "investigate the failing run", "download the CI artifact", "ci-diag.zip", "ci-logs.zip"
+when_to_use: "CI is red", "main is red", "fix CI", "the build failed on CI", "MSVC CI fails", "why did the PR check fail", "a GitHub Actions job failed", "investigate the failing run", "download the CI artifact", "ci-diag.zip", "ci-logs.zip"
 allowed-tools: Bash mcp__repo_tools__build_diag mcp__repo_tools__test_diag Read
 ---
 
@@ -12,9 +12,13 @@ The real diagnostics live in the job's uploaded **`<platform>-diagnostics` artif
 So diagnosing CI is: find the failing job, download its artifact, point `build_diag` / `test_diag` at the archive.
 [docs/guides/ci.md](../../../docs/guides/ci.md) is the background — what each workflow runs, and what it uploads.
 
+**Red CI is fixed after the fact, never waited for.**
+Nobody holds a push or a PR on a run; whoever notices a red one on `main` fixes it as its own commit on `main`, opportunistically.
+
 ## 1. Orient — which job, which kind of failure
 
 ```bash
+gh run list --branch main --limit 20 # what is red on main right now
 gh pr checks <pr>                    # pass/fail per workflow on a PR
 gh run list --branch <branch>        # recent runs on a branch
 gh run view <run-id>                 # job/step summary (which step failed)

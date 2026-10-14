@@ -202,7 +202,7 @@ void webgpu_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const&
     CC_ASSERT(buffer != nullptr, "indirect dispatch arguments are not a webgpu buffer");
     CC_ASSERT(!buffer->is_expired(), "indirect dispatch arguments are a transient buffer used past its epoch");
 
-    // WebGPU orders the arguments' reads after earlier passes' writes itself; the list only keeps the buffer alive.
+    // WebGPU orders the arguments' reads after earlier writes, including an earlier dispatch in this pass; the list only keeps the buffer alive.
     touch(args);
     bring_pool_writes_forward();
     open_compute_pass();

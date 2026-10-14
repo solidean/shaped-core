@@ -10,6 +10,7 @@
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-shader-library/compiler/shader_compiler.hh>
+#include <shaped-shader-library/filesystem/filesystem.hh> // slib::file_dependency
 #include <shaped-shader-library/fwd.hh>
 
 /// One shader, compiled on demand and kept current across reloads.
@@ -81,10 +82,11 @@ public:
     [[nodiscard]] sg::shader_stage stage() const { return _stage; }
     [[nodiscard]] cc::string_view entry_point() const { return _entry_point; }
 
-    /// Every virtual path this shader was built from — its source plus the includes that were resolved, across all formats compiled so far.
+    /// Every file this shader was built from — its source, the includes resolved and the modules reached — across all formats compiled so far.
+    /// Each at the revision its compile read, so a path read at two revisions appears twice.
     /// What the reload watcher polls.
     /// Empty before the first acquire, which is why a shader is only watched once someone has asked for it.
-    [[nodiscard]] cc::vector<cc::string> dependencies() const;
+    [[nodiscard]] cc::vector<file_dependency> dependencies() const;
 
     /// Stages a recompile of every format and option set compiled so far.
     /// Called by the reload watcher; the next acquire() picks the results up.
@@ -93,7 +95,7 @@ public:
     /// Clears missed_reload(), since every installed pair is restaged.
     void stage_reload();
 
-    /// Whether a first compile installed a shader read before a reload that skipped it, so the asset still owes that reload.
+    /// Whether a first compile installed a shader built from a file that has moved since it was read, so the asset owes a reload.
     /// The watcher's next scan calls stage_reload() for such an asset, on its own thread.
     [[nodiscard]] bool missed_reload() const;
 
@@ -107,7 +109,7 @@ private:
         cc::vector<shader_option> options;
         sg::async_compiled_shader current;
         sg::async_compiled_shader pending;
-        cc::vector<cc::string> dependencies; ///< source, resolved includes and module files reached, as of the last compile
+        cc::vector<file_dependency> dependencies; ///< source, resolved includes and module files reached, as of the last compile
     };
 
     struct state
@@ -115,9 +117,7 @@ private:
         // Linear scan over a handful of entries — a shader is consumed by one or two backends, under a few option sets.
         cc::small_vector<format_entry, 2> formats;
         u64 generation = 0;
-        /// Bumped by every stage_reload as it picks what to recompile, so a first compile can tell that one passed it by.
-        u64 staged_reloads = 0;
-        /// Set by a first compile that one passed by, cleared by the stage_reload that makes up for it.
+        /// Set by a first compile that read a file since edited, cleared by the stage_reload that makes up for it.
         bool reload_missed = false;
         cc::optional<cc::string> last_error;
     };

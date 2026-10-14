@@ -69,7 +69,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   thread does not go away with that flag — so it may want the same treatment metal's own callback state got.
 
 - **Transfer.** Still open:
-  - **device→device texture copy** — `cmd.copy` does buffer regions only;
+  - **device→device texture copies** — `cmd.copy` does buffer regions and buffer→texture; texture→buffer and texture→texture are open.
   - **fallback staging** when one list's inline transfers exceed the ring capacity.
     On dx12 and vulkan the ring blocks on in-flight epochs first, but with nothing in flight it asserts; webgpu stages the overflow in a one-off buffer and warns.
   - a **parallel host copy** for a large inline upload — take a `cc::pinned_data`, copy it on worker threads, and block at submit rather than inside `bytes_to_buffer`.
@@ -84,16 +84,6 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The reverse edge there — a *stream* ordering behind an in-flight async transfer — was missing until the tier-1
     sweep read zeroes out of a texture an async upload was still filling, and `order_stream_copy` now waits on the
     transfer timeline as well.
-  - **dx12 reads a texture's pending transfers when a list records, not when it submits.**
-    `dx12_command_list::track_texture_access` folds the upload and download waits in at the op, and picks `general`
-    only if a transfer is pending then.
-    A list recorded before an async or streaming upload is enqueued and submitted after it therefore does not wait for
-    the copy, and transitions the texture out of the layout the copy queue is still using — the debug layer reports
-    it, and the list reads the texture before the upload lands.
-    That is the "a check taken during recording" defect [barriers](concepts/barriers.md#what-orders-what-the-calls-on-the-context)
-    names; vulkan gathers the waits at submit and does not have it, and neither backend yet revisits the layout there.
-    `sg stream - a list recorded before a fresh texture's upload and submitted after it` pins the vulkan side and skips
-    dx12 until this is fixed.
   - **a pure layout transition is modelled as touching nothing**, so nothing orders against it.
     `cmd.ensure_layout` — and the async fixup, which is one — declares no stage and no access, since it asks for a layout and nothing else.
     The barrier that produces therefore has an empty scope on both sides, and two things follow from that.
@@ -145,6 +135,7 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
     The copy queue then reports `Barrier layout(D3D12_BARRIER_LAYOUT_SHADER_RESOURCE) ... must be in expected layout (D3D12_BARRIER_LAYOUT_COMMON)`.
     A D3D12 copy queue cannot run a layout barrier at all, so the copy needs COMMON and the list took it away.
     Vulkan survives the same sequence — the semaphore orders it and the layer accepts it — so this is dx12-only today.
+    `sg stream - a list recorded before a fresh texture's upload and submitted after it` pins the vulkan side and skips dx12 until this is fixed.
 
     **`has_pending_transfer` is what should have caught it, and cannot.**
     Both backends' `track_texture_access` force a texture to `general` while any transfer stamp is unreached.
@@ -442,3 +433,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   `arr.transient.release(view)` frees an element its owner is done with; one nobody releases keeps its view, and the resource behind it, until the array fills.
   If owners turn out to forget, the automatic step is freeing by age: once per epoch, free every slot nobody acquired for N epochs.
   It costs a sweep or per-slot bookkeeping each epoch, N is a policy someone has to pick, and an element wanted every N+1 epochs is re-minted each time.
+  The other automatic step is weak-keyed slots: a slot holds its view weakly, and is freed when the resource behind it dies.
+  That needs no policy, but it needs a death notice from the resource to every array holding it, and the descriptor still references the resource until the slot is cleared.
+
+- **Every indirect dispatch re-types the shader's count struct by hand.**
+  A shader writes its group counts as its own `uint3` struct, and each call site spells `reinterpret_as<sg::dispatch_args>()` to hand it to `dispatch_groups_indirect`.
+  A prelude `dispatch_args` type in SGL that generates as `sg::dispatch_args` would make the buffer the right type from the start, and remove every one of those casts.

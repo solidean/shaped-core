@@ -494,6 +494,9 @@ cc::has_single_bit(x);  cc::bit_ceil(x);  cc::bit_floor(x);  cc::bit_width(x);
 cc::bit_rotate_left(x, n);  cc::bit_rotate_right(x, n);  cc::popcount(x);
 cc::count_leading_zeroes(x);  cc::count_trailing_zeroes(x);  // + _ones variants
 
+#include <clean-core/math/float.hh>
+cc::is_finite(x);  cc::is_nan(x);  cc::is_inf(x);   // f32 / f64, constexpr, read from the bits — so no <cmath> and no fast-math surprise
+
 #include <clean-core/common/endian.hh>            // durable formats: the byte order is the FORMAT's, never the host's
 cc::load_bytes_le<u32>(bytes, offset=0);          // -> u32; byte-wise, so buffer alignment never enters into it
 cc::load_bytes_be<f64>(bytes, offset=0);          // floats go through their bit pattern; NaN payloads and -0.0 survive

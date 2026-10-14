@@ -16,6 +16,7 @@
 #include <shaped-graphics/backends/dx12/dx12_raster_pipeline.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture.hh>
 #include <shaped-graphics/backends/dx12/dx12_texture_access.hh> // subresource_extent_of
+#include <shaped-graphics/backends/dx12/dx12_view_desc.hh>      // create_render_target_view / create_depth_stencil_view
 #include <shaped-graphics/barrier/access_inference.hh>          // shader_access_of / shader_layout_of
 #include <shaped-graphics/command_list/raster.hh>
 #include <shaped-graphics/resource/pixel_format.hh>
@@ -88,23 +89,31 @@ void dx12_command_list::raster_begin_rendering(sg::rendering_info const& info)
     }
     flush_barriers();
 
-    // 2) Create the RTV/DSV descriptors and collect the CPU handles the clears / OM bind use.
-    //    The slots outlive recording and are freed against this list's epoch in end_rendering.
+    // 2) Write the RTV/DSV descriptors into this list's own slots and collect the CPU handles the clears / OM bind use.
+    //    Overwriting what the previous scope wrote there is safe, since D3D12 read those when it recorded them.
     cc::fixed_vector<D3D12_CPU_DESCRIPTOR_HANDLE, sg::max_color_targets> rtv_handles;
-    for (auto const& ct : info.color_targets)
+    for (auto i = 0; i < int(info.color_targets.size()); ++i)
     {
-        auto rtv = _ctx.create_dx12_render_target_view(ct.view);
-        CC_ASSERT(rtv.has_value(), "failed to create a render-target view (RTV heap exhausted?)");
-        rtv_handles.push_back(rtv.value().handle);
-        _rendering_rtv_slots.push_back(rtv.value().slot);
+        if (i == int(_rtv_slots.size()))
+        {
+            auto const slot = _ctx._rtv_heap->allocate();
+            CC_ASSERT(slot != cpu_descriptor_slot::invalid, "RTV descriptor heap exhausted");
+            _rtv_slots.push_back(slot);
+        }
+        auto const handle = _ctx._rtv_heap->cpu_at(_rtv_slots[i]);
+        create_render_target_view(_ctx._device.Get(), info.color_targets[i].view, handle);
+        rtv_handles.push_back(handle);
     }
     D3D12_CPU_DESCRIPTOR_HANDLE dsv_handle = {};
     if (info.depth_stencil_target.has_value())
     {
-        auto dsv = _ctx.create_dx12_depth_stencil_view(info.depth_stencil_target.value().view);
-        CC_ASSERT(dsv.has_value(), "failed to create a depth-stencil view (DSV heap exhausted?)");
-        dsv_handle = dsv.value().handle;
-        _rendering_dsv_slot = dsv.value().slot;
+        if (_dsv_slot == cpu_descriptor_slot::invalid)
+        {
+            _dsv_slot = _ctx._dsv_heap->allocate();
+            CC_ASSERT(_dsv_slot != cpu_descriptor_slot::invalid, "DSV descriptor heap exhausted");
+        }
+        dsv_handle = _ctx._dsv_heap->cpu_at(_dsv_slot);
+        create_depth_stencil_view(_ctx._device.Get(), info.depth_stencil_target.value().view, dsv_handle);
     }
 
     // 3) Apply each target's begin-op: clear to a value, discard (contents undefined), or preserve (nothing).
@@ -182,22 +191,6 @@ void dx12_command_list::raster_end_rendering()
     // Unbind the targets from the output-merger: a later copy / dispatch in this list transitions them to another layout, which D3D12 forbids while they are bound as render / depth targets.
     _list->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
 
-    // The RTV/DSV descriptor slots must outlive the list's GPU execution, since the recorded commands read them when they run.
-    // Free them against the recording epoch — this list's submit epoch — so the finalizer runs only once that epoch retires, i.e. after the GPU finishes.
-    // RTV/DSV slots own no ID3D12Resource, so the expiring resource carries only finalizers.
-    if (!_rendering_rtv_slots.empty() || _rendering_dsv_slot != cpu_descriptor_slot::invalid)
-    {
-        dx12_expiring_resource expiring;
-        for (auto const slot : _rendering_rtv_slots)
-            expiring.finalizers.push_back([ctx = &_ctx, slot]() { ctx->free_dx12_render_target_view(slot); });
-        if (_rendering_dsv_slot != cpu_descriptor_slot::invalid)
-            expiring.finalizers.push_back([ctx = &_ctx, slot = _rendering_dsv_slot]()
-                                          { ctx->free_dx12_depth_stencil_view(slot); });
-        _ctx.schedule_deferred_deletion(cc::move(expiring));
-    }
-
-    _rendering_rtv_slots.clear();
-    _rendering_dsv_slot = cpu_descriptor_slot::invalid;
     _in_render_pass = false;
 
     // The graphics bind + IA state is scoped to the pass it was set up in.

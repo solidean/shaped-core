@@ -20,6 +20,9 @@ using namespace cc::primitive_defines;
 class blit_routine; // fullscreen-triangle blit of a source texture across an open raster scope (see blit_routine.hh)
 class box_filter_mipmap_routine;        // fills a texture's mip chain by 2x2 averaging (box_filter_mipmap_routine.hh)
 class bc_compress_routine;              // a texture to BC1/3/4/5/7 on the GPU, a mip level per call
+enum class bc1_alpha : u8;              // what BC1 does with alpha: opaque, or cut out under half
+enum class bc_source_range : u8;        // the range BC4 / BC5 read their source in: 0..1 or -1..1
+struct bc_compress_options;             // bc_compress_routine's knobs
 class raster_box_filter_mipmap_routine; // the same, through the raster pipeline, for formats no typed UAV covers
 enum class mipmap_variant : u8;         // which entry point a texture shape mips through
 struct mipmap_key;                      // a shape and the format it writes: the routine's parameter

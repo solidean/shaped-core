@@ -153,6 +153,9 @@ A native reader was the alternative, and ufbx won on what a reader of untrusted 
 ufbx is two files with no dependencies, which puts it in libspng's tier of the committed-in-source rule ([coding-guidelines.md](coding-guidelines.md)) rather than SQLite's fetched one.
 
 - `[done]` **triangulation**, as a read option: ufbx's ear clip, which a fan gets wrong on a concave polygon.
+- `[done]` **a read spread over a caller's scheduler**, and **a staged one**: `read_options::scheduler` runs ufbx's parse and the per-mesh copy on a `cc::async_scheduler`.
+  `read_structure` skips the geometry, and `read_async` resolves the structure, then the whole scene.
+  Finer stages do not exist to offer: ufbx returns one finished scene per parse, and FBX writes which mesh belongs to which node after every object.
 - `[planned]` **cameras** — a camera's pose is a node like any other; its projection is the missing part.
 - `[planned]` **animation, skinning and blend shapes** — recorded today as `unsupported`, and the static pose is what comes back.
 - `[planned]` **the PBR shader models** ufbx recognizes (3ds Max Physical, Maya StandardSurface, Blender's Principled export), as typed fields beside the raw property bag.
@@ -219,7 +222,7 @@ Arrays, cube maps (partial legacy ones included) and volumes are laid out in fil
 
 - `[done]` **decoding** — any subresource to rgba8 (every format but the float ones), or to rgba32f (every format), through `bcn`.
 - `[planned]` **the remaining DXGI formats** — 10:10:10:2, 11:11:10, 16-bit unorm, and the rest of the uncompressed table, each a mapping plus a texel decoder.
-  Legacy files reach most of them already through the bit-mask path.
+  Legacy files reach 10:10:10:2 and the 16-bit one- and two-channel ones already, through the bit-mask path; 11:11:10 is a float format and RGBA16 is 64 bits, which no 32-bit mask describes.
 
 ### tga [done]
 

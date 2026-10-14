@@ -70,7 +70,7 @@ While staging was strictly submission-ordered the first rule alone covered both 
 Out-of-order selection removed that guarantee, and needed the rule made explicit rather than inherited from the order.
 
 Over-waiting on a higher (monotonic) value is always safe, and neither stamp is ever reset — a stale value only ever yields a cheap already-satisfied wait.
-sg has **no per-resource state / access-tracking layer yet**, so this pair of per-buffer stamps is a deliberately minimal stand-in that the in-progress access-tracking layer should subsume.
+A command list's access tracking reads these stamps at submit, which is how it orders itself against the transfers of the resources it touches — see [barriers](barriers.md).
 
 The **happens-before rule** the caller relies on: an upload is ordered against command lists whose *submit* happens before it (reverse) or after it (forward), on the same thread.
 A buffer concurrently used by a list recording in parallel with the upload is a hazard the caller must avoid — v1 is persistent-buffer, single-writer.

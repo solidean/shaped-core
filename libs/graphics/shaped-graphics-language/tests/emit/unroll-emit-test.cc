@@ -121,3 +121,81 @@ TEST("sgl emit - an unrolled for past 256 copies is a loop, counting a nest's co
         CHECK(occurrences(rows.text, "for (") == 17).dump("text", rows.text);
     }
 }
+
+TEST("sgl emit - an unrolled for whose bound reads the index of an unrolled for written as a loop is a loop too")
+{
+    constexpr cc::string_view source = "binding io:\n"
+                                       "    source: buffer[float]\n"
+                                       "    target: mut buffer[float]\n"
+                                       "\n"
+                                       "@compute(64) fun triangle(@thread_id id: int3){io}:\n"
+                                       "    let mut total = 0.0\n"
+                                       "    @unroll\n"
+                                       "    for row in 0 ..< 300:\n"
+                                       "        @unroll\n"
+                                       "        for column in 0 ..< row + 1:\n"
+                                       "            total += io.source[row * 300 + column]\n"
+                                       "    io.target[id.x] = total\n";
+    // the two warnings, and no error
+    auto const checked = check_sources(read_prelude(), source);
+    CHECK(reports_of(checked)
+          == "unroll-too-long user:[0 ..< 300] an unrolled for writes its body at most 256 times, and this range holds "
+             "300, so it is written as a loop\n"
+             "unroll-too-long user:[0 ..< row + 1] an unrolled for runs over a constant range, and this one is no "
+             "constant inside the unrolled for over `0 ..< 300`, which is written as a loop, so this one is written as "
+             "a loop too\n");
+    for (auto const t : sgl::emit::all_targets())
+    {
+        auto const looped = sgl::emit::emit(checked.module, 0, t);
+        CHECK(sgl::emit::dump_errors(looped) == "");
+        CHECK(occurrences(looped.text, "for (") == 2).dump("text", looped.text);
+    }
+}
+
+TEST("sgl emit - an unrolled for of an inlined function names the call it was reached through")
+{
+    constexpr cc::string_view callee = "fun sum_to(n: int) -> float:\n"
+                                       "    let mut total = 0.0\n"
+                                       "    @unroll\n"
+                                       "    for i in 0 ..< n:\n"
+                                       "        total += i as float\n"
+                                       "    return total\n"
+                                       "\n"
+                                       "binding io:\n"
+                                       "    target: mut buffer[float]\n"
+                                       "\n";
+    // a bound its argument leaves no constant
+    auto const runtime = check_sources(read_prelude(), cc::format("{}@compute(64) fun cs(@thread_id id: int3){{io}}:\n"
+                                                                  "    io.target[id.x] = sum_to(id.x)\n",
+                                                                  callee));
+    CHECK(reports_of(runtime)
+          == "invalid-constant-argument user:[0 ..< n] an unrolled for runs over a constant range: both bounds are int "
+             "constants once the function is inlined, such as `0 ..< taps` with `taps` a const\n"
+             "  note user:[sum_to(id.x)] reached through this call, whose arguments stand in for its parameters\n");
+    // and one its argument makes too long
+    auto const wide = check_sources(read_prelude(), cc::format("{}@compute(64) fun cs(@thread_id id: int3){{io}}:\n"
+                                                               "    io.target[id.x] = sum_to(300)\n",
+                                                               callee));
+    CHECK(reports_of(wide)
+          == "unroll-too-long user:[0 ..< n] an unrolled for writes its body at most 256 times, and this range holds "
+             "300, so it is written as a loop\n"
+             "  note user:[sum_to(300)] reached through this call, whose arguments stand in for its parameters\n");
+}
+
+TEST("sgl emit - an unrolled index's arithmetic shifted in HLSL is written as an int, which DXC otherwise refuses")
+{
+    constexpr cc::string_view source = "binding io:\n"
+                                       "    target: mut buffer[int]\n"
+                                       "\n"
+                                       "@compute(64) fun masks(@thread_id id: int3){io}:\n"
+                                       "    let n = id.x & 7\n"
+                                       "    let mut m = 0\n"
+                                       "    @unroll\n"
+                                       "    for i in 0 ..< 3:\n"
+                                       "        m |= (i + 1) << n\n"
+                                       "    io.target[id.x] = m\n";
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("m = m | (int((0 + 1)) << n);\n")).dump("hlsl", hlsl);
+    CHECK(hlsl.contains("m = m | (int((2 + 1)) << n);\n")).dump("hlsl", hlsl);
+    CHECK(!hlsl.contains("((0 + 1) << n)")).dump("hlsl", hlsl);
+}

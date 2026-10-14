@@ -123,6 +123,24 @@ TEST("sg slot_table - a released key frees its slot now, or in the next epoch if
     CHECK(table.is_pinned(pinned.index));
 }
 
+TEST("sg slot_table - a later epoch's first release frees what an earlier one deferred")
+{
+    auto table = sg::impl::slot_table<u64>(8);
+    auto reclaimed = cc::vector<u32>();
+    auto const record = [&](u32 freed) { reclaimed.push_back(freed); };
+
+    // An owner that only releases, as an unload does, must still get the deferred slot back.
+    auto const first = table.acquire(1, ep(0), record);
+    table.release(1, ep(0), record);
+    CHECK(reclaimed.empty());
+
+    // Key 2 holds no slot, and its release still runs the sweep.
+    table.release(2, ep(1), record);
+    REQUIRE(reclaimed.size() == 1);
+    CHECK(reclaimed[0] == first.index);
+    CHECK(table.occupied_count() == 0);
+}
+
 TEST("sg slot_table - a key acquired again in the epoch it was released is freed with it, and minted afresh")
 {
     auto table = sg::impl::slot_table<u64>(8);

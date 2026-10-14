@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/mutex.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/transfer/stream_source.hh>
@@ -31,15 +32,36 @@ cc::pinned_data<byte const> make_bytes(isize n, auto&& fn)
     return cc::make_pinned_data(cc::move(data));
 }
 
-/// A stream source that holds its one chunk back until release(), so its transfer is in flight for as long as a test needs.
+/// Opened from the test's thread, and outliving the source: once opened, the actor may finish and destroy the source before release() has returned.
+struct gate
+{
+    std::atomic<bool> open = false;
+    cc::mutex<cc::unique_function<void()>> waker; // installed on the actor thread
+
+    void release()
+    {
+        open.store(true, std::memory_order_release);
+        waker.lock(
+            [](cc::unique_function<void()>& w)
+            {
+                if (w)
+                    w();
+            });
+    }
+};
+
+/// A stream source that holds its one chunk back until its gate opens, so its transfer is in flight for as long as a test needs.
 class gated_source final : public sg::stream_source
 {
 public:
-    explicit gated_source(cc::pinned_data<byte const> bytes) : _bytes(cc::move(bytes)) {}
+    gated_source(cc::pinned_data<byte const> bytes, std::shared_ptr<gate> g)
+      : _bytes(cc::move(bytes)), _gate(cc::move(g))
+    {
+    }
 
     [[nodiscard]] sg::stream_poll try_next_chunk() override
     {
-        if (!_open.load(std::memory_order_acquire))
+        if (!_gate->open.load(std::memory_order_acquire))
             return {.status = sg::stream_source_status::not_yet};
         if (_handed_over)
             return {.status = sg::stream_source_status::done};
@@ -47,19 +69,14 @@ public:
         return {.status = sg::stream_source_status::ready, .chunk = {.data = _bytes}};
     }
 
-    void set_waker(cc::unique_function<void()> waker) override { _waker = cc::move(waker); }
-
-    void release()
+    void set_waker(cc::unique_function<void()> waker) override
     {
-        _open.store(true, std::memory_order_release);
-        if (_waker)
-            _waker();
+        _gate->waker.lock([&](cc::unique_function<void()>& w) { w = cc::move(waker); });
     }
 
 private:
     cc::pinned_data<byte const> _bytes;
-    std::atomic<bool> _open = false;
-    cc::unique_function<void()> _waker;
+    std::shared_ptr<gate> _gate;
     bool _handed_over = false;
 };
 } // namespace
@@ -216,9 +233,9 @@ ASYNC_TEST("sg dx12 - a list touching a buffer whose transfer is in flight makes
     auto const n = isize(256);
     auto buf = c.persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
-    auto source = std::make_unique<gated_source>(make_bytes(n, [](isize i) { return i * 3 + 1; }));
-    auto* const gate = source.get();
-    auto stream = c.stream.from_source_to_buffer(buf, cc::move(source));
+    auto const opener = std::make_shared<gate>();
+    auto stream = c.stream.from_source_to_buffer(
+        buf, std::make_unique<gated_source>(make_bytes(n, [](isize i) { return i * 3 + 1; }), opener));
     // The list below waits on purpose, so the stream does not warn about it.
     stream.promote_to_async();
 
@@ -229,7 +246,7 @@ ASYNC_TEST("sg dx12 - a list touching a buffer whose transfer is in flight makes
     CHECK((c.metrics.stats() - before)[sg::stat::queue_waits] == 1);
 
     // The list ran after the stream landed, so it reads the streamed bytes.
-    gate->release();
+    opener->release();
     auto const bytes = co_await readback.bytes();
     REQUIRE(bytes.size() == n);
     CHECK(bytes[0] == byte(1));

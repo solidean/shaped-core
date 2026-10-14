@@ -155,11 +155,15 @@ public:
     cc::vector<dx12_texture_handle> _touched_textures;
 
     // Raster rendering-scope state; at most one scope is open at a time, since begin/end are balanced.
-    // begin_rendering sets _in_render_pass and records the RTV/DSV descriptor slots it created for the pass.
-    // end_rendering schedules their epoch-deferred free — they must outlive the list's GPU execution — and clears these.
     bool _in_render_pass = false;
-    cc::fixed_vector<cpu_descriptor_slot, sg::max_color_targets> _rendering_rtv_slots;
-    cpu_descriptor_slot _rendering_dsv_slot = cpu_descriptor_slot::invalid;
+
+    /// The RTV / DSV slots this list owns, grown to the most targets any of its scopes bound and freed with the list.
+    ///
+    /// **Every scope overwrites them, and nothing waits for the GPU before they are freed.**
+    /// D3D12 reads a CPU descriptor when OMSetRenderTargets or Clear*View records it, so a slot is free for reuse as
+    /// soon as the call that took it returns — tests/backends/dx12-rtv-record-time-test.cc pins that on the device.
+    cc::fixed_vector<cpu_descriptor_slot, sg::max_color_targets> _rtv_slots;
+    cpu_descriptor_slot _dsv_slot = cpu_descriptor_slot::invalid;
 
     // Raster (graphics) bind state, separate from the compute/RT state above: graphics binds through a distinct root-signature bind point.
     // That is SetGraphicsRootSignature / SetGraphicsRootDescriptorTable.
@@ -193,8 +197,9 @@ public:
     // The reverse stamp — defer a later async upload behind this list — is applied to the touched sets at submit.
     cc::vector<dx12_group_value> _required_copy_waits;
 
-    // The async-download completions any resource this list WRITES must observe, same shape and same reason.
-    // Only writes fold in, since two reads never conflict.
+    // The async-download completions this list must observe, same shape and same reason.
+    // A buffer folds in only when this list writes it, since two reads never conflict.
+    // A texture folds in whatever the access, since its entry barrier can change the layout the copy queue is reading.
     cc::vector<dx12_group_value> _required_download_waits;
 
 protected:
@@ -301,6 +306,7 @@ private:
     // Cross-list ordering rides on D3D12's decay of buffers to COMMON at ExecuteCommandLists, so no trailing barrier is needed.
     // An access landing in the write bucket of an array member counts toward _member_writes.
     // `from_array_application` makes the buffer one, and the result says whether the op already held a write of it.
+    // Also files the buffer into the touched set, and into the written one for a write, which fold_transfer_waits reads at submit.
     sg::impl::member_track track_buffer_access(dx12_buffer_handle const& buffer,
                                                sg::pipeline_stage_flags stages,
                                                sg::access_flags access,

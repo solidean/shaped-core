@@ -136,6 +136,7 @@ struct light;
 struct node;
 struct read_options;
 struct data;
+struct loading;
 
 /// The domain every recording site in babel::fbx is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);

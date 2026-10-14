@@ -127,7 +127,7 @@ rules:
 
   - kind: deny-include
     value: <cmath>
-    reason: go through tg — tg::sin / tg::cos take a tg::angle, and tg::sqrt and friends dispatch on scalar_traits, which a std:: call cannot
+    reason: go through tg — tg::sin / tg::cos take a tg::angle, and tg::sqrt and friends dispatch on scalar_traits, which a std:: call cannot. For isnan / isinf / isfinite alone, cc::is_nan / is_inf / is_finite in clean-core/math/float.hh
 
   - kind: deny-include
     value: [<Windows.h>, <windows.h>]

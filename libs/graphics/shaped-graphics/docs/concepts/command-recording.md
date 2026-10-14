@@ -101,9 +101,8 @@ An epoch advance does **not** deliver a download — it drains the GPU, and the 
 
 ## What is implemented today vs deferred
 
-**dx12** records all seven scopes.
-**vulkan** creates devices and resources, but its recording paths are stubs.
-Only `raytracing.is_supported()` and `query.is_supported()` answer honestly, returning false; every other recording call is a `CC_UNREACHABLE` that aborts rather than a no-op.
+**dx12**, **vulkan**, **webgpu** and **metal** all record the seven scopes.
+`raytracing.is_supported()` and `query.is_supported()` answer what the device offers, so a backend or device without ray tracing or timestamps says so there.
 
 One gap is worth knowing before you rely on it:
 `cmd.copy` copies buffer regions, and a buffer into a texture region (`buffer_to_texture`); texture→buffer and texture→texture copies do not exist yet.

@@ -1021,12 +1021,12 @@ TEST("slib sgl compiler - a broken source fails with the place, the kind and the
     }
 }
 
-TEST("slib sgl compiler - a warning is logged under slib each time a compile is handed it, from the cache too",
+TEST("slib sgl compiler - a warning is logged under slib once per library, the cache's answer included",
      exclusive("slib-shader-library"))
 {
-    // the second compile is the in-memory tier's answer, which must not swallow what the first one logged
+    // the second compile is the in-memory tier's answer, which this library has already logged
     nx::expect_warning("SGL warns of 'unrolled.sgl' main: unrolled.sgl:7:14: warning: unroll-too-long: ",
-                       nx::exactly(2, "slib"));
+                       nx::exactly(1, "slib"));
 
     slib::shader_library lib;
     lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler(), {.persistent_cache = nullptr}));

@@ -71,6 +71,8 @@ enum class babel::dds::pixel_format : babel::u8
 
     /// A legacy layout described by the header's bit masks alone, with no DXGI name.
     /// `file_header.pixels` holds the masks and the bit count, and its flags say whether they are RGB, luminance or alpha.
+    /// The masks are read as written: DirectXTex swaps red and blue in a 10:10:10:2 file by default, for an old D3DX
+    /// writer that labeled them the wrong way round, and babel does not.
     masked,
 };
 
@@ -209,7 +211,7 @@ namespace babel::dds
 /// Read a whole DDS file.
 /// This is the zero-copy entry point: every subresource's `bytes` is a view of `bytes` sharing its owner.
 /// Errors on a missing magic, a header that contradicts itself, a format it cannot name, or a file too short for the subresources its header describes.
-/// Every subresource covers at least one input byte, so its records stay within about 48 times the input's size.
+/// Every subresource covers at least one input byte, so its records stay within `sizeof(subresource)` times the input's size.
 /// The worst case is a 65536-layer cube array of 1 x 1 8-bit texels.
 [[nodiscard]] cc::result<data> read(cc::pinned_data<byte const> const& bytes);
 
@@ -252,4 +254,11 @@ namespace babel::dds
 [[nodiscard]] cc::result<cc::vector<float>> decode_rgba32f(data const& tex,
                                                            subresource const& sub,
                                                            decode_options opts = {});
+
+/// decode_rgba32f into memory the caller owns, which must hold four floats per texel of `sub`.
+/// For a caller that keeps the texels in a buffer of its own, so the decode is not copied a second time.
+[[nodiscard]] cc::result<cc::unit> decode_rgba32f_into(data const& tex,
+                                                       subresource const& sub,
+                                                       cc::span<float> out,
+                                                       decode_options opts = {});
 } // namespace babel::dds

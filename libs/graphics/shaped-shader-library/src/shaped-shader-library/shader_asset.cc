@@ -107,13 +107,11 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
         return s.formats.back();
     };
 
-    auto seen_reloads = u64(0);
     auto shader = _state.lock(
         [&](state& s) -> sg::async_compiled_shader
         {
             auto& entry = entry_of(s);
             promote_pending(*library, s, entry);
-            seen_reloads = s.staged_reloads;
             return entry.current;
         });
     if (shader != nullptr)
@@ -124,9 +122,9 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
     auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
 
     // Whoever installs first wins, and a compile that lost the race is dropped.
-    // A reload staged while the winner compiled skipped this entry, which held no shader yet, so the winner flags the asset as having missed it.
-    // The watcher's next scan stages that reload again, compiling on the watcher's thread rather than this consumer's.
-    // A reload staged after the install sees the entry itself, and clears the flag.
+    // A file edited since the compile read it staged either a reload that skipped this entry, which held no shader yet, or none at all, since nothing watched the file.
+    // Either way the winner flags the asset, and the watcher's next scan stages the reload on its own thread rather than this consumer's.
+    // The revisions are read under the lock: a reload staged after it sees the installed entry, so an edit landing after the check is that reload's.
     auto installed = false;
     shader = _state.lock(
         [&](state& s) -> sg::async_compiled_shader
@@ -134,11 +132,12 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
             auto& entry = entry_of(s);
             if (entry.current == nullptr)
             {
+                for (auto const& dependency : outcome.dependencies)
+                    if (library->filesystem().revision(dependency.path) != dependency.revision)
+                        s.reload_missed = true;
                 entry.current = cc::move(outcome.shader);
                 entry.dependencies = cc::move(outcome.dependencies);
                 installed = true;
-                if (s.staged_reloads != seen_reloads)
-                    s.reload_missed = true;
             }
             return entry.current;
         });
@@ -214,19 +213,19 @@ cc::optional<cc::string> slib::shader_asset::last_error() const
     return _state.lock([](state const& s) { return s.last_error; });
 }
 
-cc::vector<cc::string> slib::shader_asset::dependencies() const
+cc::vector<slib::file_dependency> slib::shader_asset::dependencies() const
 {
     return _state.lock(
         [](state const& s)
         {
-            cc::vector<cc::string> all;
+            auto all = cc::vector<file_dependency>();
             for (auto const& entry : s.formats)
                 for (auto const& dependency : entry.dependencies)
                 {
-                    // A file included by several formats' builds only needs watching once.
-                    bool known = false;
+                    // A file included by several formats' builds is listed once, unless they read it at different revisions.
+                    auto known = false;
                     for (auto const& existing : all)
-                        if (existing == dependency)
+                        if (existing.path == dependency.path && existing.revision == dependency.revision)
                             known = true;
                     if (!known)
                         all.push_back(dependency);
@@ -252,8 +251,6 @@ void slib::shader_asset::stage_reload()
     _state.lock(
         [&](state& s)
         {
-            // A first compile in flight is skipped below, and this is how its acquire learns it was.
-            ++s.staged_reloads;
             // Every installed entry is restaged below, so a reload a first compile missed is covered by this one.
             s.reload_missed = false;
             for (auto const& entry : s.formats)

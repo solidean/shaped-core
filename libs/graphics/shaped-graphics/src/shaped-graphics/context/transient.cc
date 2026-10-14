@@ -124,13 +124,12 @@ cc::result<raw_texture_handle> context_transient_scope::try_create_raw_texture(t
     if (auto unsupported = impl::find_unsupported_texture(_ctx.supports(feature::extended_image_formats), desc);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
-    if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
-        return cc::error(cc::move(error));
     if (is_compressed_format(desc.format) && !_ctx.supports(feature::texture_compression_bc))
         return cc::error("a block-compressed texture needs sg::feature::texture_compression_bc, which this device "
                          "lacks");
-    allocation_info alloc;
-    alloc.scope = lifetime_scope::transient;
+    if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
+        return cc::error(cc::move(error));
+    auto const alloc = allocation_info{.scope = lifetime_scope::transient};
     _ctx._stats.add(stat::textures_created);
     auto created = _ctx.try_create_raw_texture(desc, alloc);
     if (created.has_value())

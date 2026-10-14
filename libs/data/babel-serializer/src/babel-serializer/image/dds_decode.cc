@@ -285,27 +285,34 @@ cc::result<cc::vector<byte>> decode_rgba8(data const& tex, subresource const& su
 
 cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const& sub, decode_options opts)
 {
+    CC_RETURN_IF_ERROR(check_subresource(tex, sub, isize(sizeof(float)), opts));
+    auto out = cc::vector<float>::create_uninitialized(isize(sub.width) * sub.height * sub.depth * 4);
+    CC_RETURN_IF_ERROR(decode_rgba32f_into(tex, sub, cc::span<float>(out), opts));
+    return cc::move(out);
+}
+
+cc::result<cc::unit> decode_rgba32f_into(data const& tex, subresource const& sub, cc::span<float> out, decode_options opts)
+{
     CC_RECORD_SCOPE("dds.decode_rgba32f");
     CC_RETURN_IF_ERROR(check_subresource(tex, sub, isize(sizeof(float)), opts));
 
     auto const texel_count = isize(sub.width) * sub.height * sub.depth;
+    CC_ASSERT(out.size() == texel_count * 4, "the output must hold four floats per texel of the subresource");
     auto const fmt = tex.format;
 
     if (is_block_compressed(fmt))
     {
-        auto out = cc::vector<float>::create_uninitialized(texel_count * 4);
         for_each_block(tex, sub,
                        [&](byte const* block, int bx, int by, int z)
                        {
                            auto const texels = decode_block_rgba32f(fmt, block);
                            store_block<float>(cc::span<float const>(texels.rgba), sub, bx, by, z, out.data());
                        });
-        return cc::move(out);
+        return cc::unit{};
     }
 
     if (fmt == pixel_format::masked)
     {
-        auto out = cc::vector<float>::create_uninitialized(texel_count * 4);
         auto const src = sub.bytes.span();
         auto const bytes_per_texel = tex.row_pitch(1);
         auto const row_pitch = tex.row_pitch(sub.width);
@@ -321,13 +328,12 @@ cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const&
                     for (auto c = 0; c < 4; ++c)
                         out[dst + c] = rgba[c];
                 }
-        return cc::move(out);
+        return cc::unit{};
     }
 
     if (is_float(fmt))
     {
         // r16 / rgba16 / r32 / rgba32 floats: a missing channel is 0, and a missing alpha 1.
-        auto out = cc::vector<float>::create_uninitialized(texel_count * 4);
         auto const src = sub.bytes.span();
         auto const channels = fmt == pixel_format::r16_float || fmt == pixel_format::r32_float ? 1 : 4;
         auto const is_half = fmt == pixel_format::r16_float || fmt == pixel_format::rgba16_float;
@@ -344,15 +350,14 @@ cc::result<cc::vector<float>> decode_rgba32f(data const& tex, subresource const&
             for (auto c = 0; c < 4; ++c)
                 out[t * 4 + c] = rgba[c];
         }
-        return cc::move(out);
+        return cc::unit{};
     }
 
     // What is left stores 8-bit channels as they are, so the 8-bit decode is exact and only widens here.
     auto bytes = decode_rgba8(tex, sub, opts);
     CC_RETURN_IF_ERROR(bytes);
-    auto out = cc::vector<float>::create_uninitialized(texel_count * 4);
     for (auto i = isize(0); i < texel_count * 4; ++i)
         out[i] = float(u8(bytes.value()[i])) / 255.0f;
-    return cc::move(out);
+    return cc::unit{};
 }
 } // namespace babel::dds

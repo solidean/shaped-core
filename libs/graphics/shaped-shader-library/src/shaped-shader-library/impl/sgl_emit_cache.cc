@@ -59,7 +59,7 @@ struct reader
 
     [[nodiscard]] bool take(isize count)
     {
-        if (!ok || count < 0 || pos + count > data.size())
+        if (!ok || count < 0 || count > data.size() - pos)
             ok = false;
         return ok;
     }
