@@ -312,7 +312,11 @@ TEST("sg::impl::array_declaration_book - a declaration that saw only arrays of i
     list.op(images);
     CHECK(list.book.withdraw(1));
     CHECK(list.book.withdraw(2));
+#if CC_ASSERT_ENABLED
     CHECK_ASSERTS(list.book.withdraw(3));
+#else
+    CHECK(list.book.withdraw(3));
+#endif
     CHECK(list.book.is_empty());
 }
 
