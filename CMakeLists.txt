@@ -15,6 +15,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # clang jobs. Turn this back on with the first `import`, and make sure the scanner matches the compiler.
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
+# Repo-wide build configuration helpers live in tools/cmake/.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
+
+# Every repo-wide flag below goes through sc_build_options(), which also records it on shaped-core::build-config.
+# clean-core links that target PUBLIC, so a project consuming shaped-core via add_subdirectory gets the same flags — see the module.
+include(BuildConfig)
+
 # Build gating. Both default ON for a top-level build (the normal dev flow) and OFF when
 # shaped-core is consumed via add_subdirectory, where a dependent wants the libraries but not
 # our test and tool binaries. Must precede add_subdirectory(extern): the tools' externals gate
@@ -108,9 +115,9 @@ option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one pe
 option(SC_FRAME_POINTERS "Keep frame pointers, so stacks can be captured by chasing the chain" ON)
 if (SC_FRAME_POINTERS)
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
-        add_compile_options(/Oy-) # clang-cl spells it the MSVC way and rejects -fno-omit-frame-pointer
+        sc_build_options(COMPILE /Oy-) # clang-cl spells it the MSVC way and rejects -fno-omit-frame-pointer
     elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        add_compile_options(-fno-omit-frame-pointer)
+        sc_build_options(COMPILE -fno-omit-frame-pointer)
     endif()
 endif()
 
@@ -143,8 +150,6 @@ set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v3 v4)
 # below it are instantiated in the dispatching target itself. See libs/base/clean-simd/src/clean-simd/dispatch.hh.
 set(SC_SIMD_KERNELS "auto" CACHE STRING "clean-simd kernels above SC_X64_LEVEL compiled for dispatch: auto, a list, or empty")
 
-# Repo-wide build configuration helpers live in tools/cmake/.
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 
 # Apply repo-wide build configuration before add_subdirectory so every target is
 # instrumented. Each is a no-op unless its driving option/preset is active.
@@ -172,7 +177,7 @@ include(RuntimeDlls)
 # short-key hash path was ~5-11x slower under /Ob1). Promote to /Ob2 so RelWithDebInfo matches Release's
 # inlining; /Zi debug info and our CC_ASSERTs are untouched. Applied to every target (C and C++) defined below.
 if (MSVC)
-    add_compile_options($<$<CONFIG:RelWithDebInfo>:/Ob2>)
+    sc_build_options(COMPILE $<$<CONFIG:RelWithDebInfo>:/Ob2>)
 endif()
 
 # Vendored third-party dependencies (mimalloc, xxHash, ...). Defined before the

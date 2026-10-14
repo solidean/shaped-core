@@ -16,8 +16,8 @@ endif()
 
 if(SC_PGO_GENERATE)
     # Instrumented binaries honor LLVM_PROFILE_FILE and drop *.profraw at exit (same env hook coverage uses).
-    add_compile_options(-fprofile-generate)
-    add_link_options(-fprofile-generate)
+    sc_build_options(COMPILE -fprofile-generate)
+    sc_build_options(LINK -fprofile-generate)
 endif()
 
 if(SC_PGO_USE)
@@ -29,6 +29,6 @@ if(SC_PGO_USE)
         message(FATAL_ERROR "SC_PGO_USE: profile not found at ${_prof} — run: uv run dev.py pgo train")
     endif()
     # The two -Wno-profile-instr-* silence benign "stale profile" warnings when sources drift from the profile.
-    add_compile_options(-fprofile-use=${_prof} -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled)
-    add_link_options(-fprofile-use=${_prof})
+    sc_build_options(COMPILE -fprofile-use=${_prof} -Wno-profile-instr-out-of-date -Wno-profile-instr-unprofiled)
+    sc_build_options(LINK -fprofile-use=${_prof})
 endif()
