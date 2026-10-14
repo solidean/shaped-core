@@ -12,14 +12,17 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture.hh>
+#include <shaped-shader-library/raytracing_pipeline.hh>
 
 using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
 
-// Array declarations that outlive one op: tests/shaders/sgl/sticky_arrays.sgl's arrays, met by many dispatches and draws.
+// Array declarations that outlive one op: the arrays of tests/shaders/sgl/sticky_arrays.sgl and sticky_arrays_traced.sgl, met by many dispatches, traces and draws.
 // See libs/graphics/shaped-graphics/docs/concepts/barriers.md, "Array bindings".
 //
 // Most of what these pin is what the list fed the tracker, read off the counts it has recorded so far:
@@ -710,6 +713,67 @@ ASYNC_INVOCABLE_TEST("sg - two raster pipelines touching an array at different s
     CHECK(deltas[2] == 0);
     CHECK(deltas[3] == 0);
     co_await ctx->idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sg - a dispatch and a trace on one bind point each apply an array declaration once, then skip",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    require_arrays(*ctx);
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using traced_t = shaders::sticky_arrays_traced_traced_gather_t;
+    auto const kernel = co_await shaders::sticky_arrays_traced.gather_rack.acquire_pipeline(*ctx);
+    auto const desc = co_await shaders::sticky_arrays_traced.traced_gather.description(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
+    REQUIRE(pipeline != nullptr);
+    auto const table = ctx->uncached.create_raytracing_shader_table(traced_t::table_description(pipeline));
+    REQUIRE(table != nullptr);
+    sg::buffer<i32> const sources[] = {make_source(*ctx, 0), make_source(*ctx, 1), make_source(*ctx, 2)};
+    sg::buffer<i32> const trays[] = {make_tray(*ctx), make_tray(*ctx), make_tray(*ctx), make_tray(*ctx)};
+
+    auto cmd = ctx->create_command_list();
+    auto const rack = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::rack>(),
+        shaders::rack{.sources = {sources[0].as_readonly_buffer(), sources[1].as_readonly_buffer(),
+                                  sources[2].as_readonly_buffer()}});
+    // Made on the compute scope, and in force for the traces too: one bind point.
+    auto const declared = cmd->compute.declare_array_buffer_access("rack.sources", reads_of_three());
+    auto deltas = cc::vector<i64>();
+    for (auto op = 0; op < 4; ++op)
+    {
+        auto const bin
+            = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::bin>(),
+                                                  shaders::bin{.merged = trays[op].as_readwrite_buffer()});
+        auto const tracked = tracks(*cmd);
+        if (op % 2 == 0)
+        {
+            cmd->compute.bind_pipeline(*kernel);
+            cmd->compute.bind_group(0, *rack);
+            cmd->compute.bind_group(1, *bin);
+            cmd->compute.dispatch_threads(k_threads);
+        }
+        else
+        {
+            cmd->raytracing.bind_pipeline(*pipeline);
+            cmd->raytracing.bind_group(0, *rack);
+            cmd->raytracing.bind_group(1, *bin);
+            cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), k_threads);
+        }
+        deltas.push_back(tracks(*cmd) - tracked);
+    }
+    auto const dispatched_back = cmd->download.data_from_buffer(trays[2]);
+    auto const traced_back = cmd->download.data_from_buffer(trays[3]);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // The trace reads at the raytracing stage, outside what the dispatch applied; after that the union covers both.
+    CHECK(deltas[0] == 3);
+    CHECK(deltas[1] == 3);
+    CHECK(deltas[2] == 0);
+    CHECK(deltas[3] == 0);
+    check_gathered(co_await dispatched_back.data(), 0, "the second dispatch");
+    check_gathered(co_await traced_back.data(), 0, "the second trace");
 }
 
 ASYNC_INVOCABLE_TEST("sg - a withdrawn array declaration leaves its array undeclared, covered and logged",

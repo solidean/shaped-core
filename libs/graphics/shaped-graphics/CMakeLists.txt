@@ -435,6 +435,7 @@ if(SC_BUILD_TESTS)
                 sync.sgl:*
                 binding_arrays.sgl:*
                 sticky_arrays.sgl:*
+                sticky_arrays_traced.sgl:*
                 bytes.sgl:*
                 rects.sgl:*
                 draws.sgl:*
