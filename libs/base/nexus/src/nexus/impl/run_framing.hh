@@ -22,7 +22,7 @@ struct run_framing
     bool is_watched = false;
 };
 
-/// Keyed on what `schedule` holds rather than on the bucket `config` swept.
+/// Keyed on what `schedule` holds as well as on the bucket `config` swept.
 /// An example or a benchmark named exactly is reached from the normal sweep, without its bucket flag, and is framed as that bucket's sweep frames it all the same.
 [[nodiscard]] run_framing frame_run(test_schedule_config const& config, test_schedule const& schedule, bool is_entry_run);
 } // namespace nx::impl

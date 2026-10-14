@@ -376,4 +376,11 @@ TEST("test cli - a benchmark named exactly is framed as its sweep frames it")
         CHECK(framing.reports_resources);
         CHECK(framing.is_watched);
     }
+
+    SECTION("and an example scheduled beside it leaves the run unwatched, since neither is a test")
+    {
+        auto const framing = framing_of({"clean-core/vector", "vector - push_back"});
+        CHECK(framing.describes_host);
+        CHECK(!framing.is_watched);
+    }
 }
