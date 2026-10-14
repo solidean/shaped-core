@@ -30,8 +30,8 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
 - **The value and its lifetime**: [`sg::array_access_declaration`](../../src/shaped-graphics/command_list/array_access_declaration.hh#L28), made by the facades.
   The compute and trace facades make it in [compute.hh](../../src/shaped-graphics/command_list/compute.hh#L81-L91) and [raytracing.hh](../../src/shaped-graphics/command_list/raytracing.hh#L77-L85).
   The raster facades make it in [raster.hh](../../src/shaped-graphics/command_list/raster.hh#L159-L168).
-  The core list keeps the links and ends them all when it dies ([command_list.cc:9-40](../../src/shaped-graphics/command_list/command_list.cc#L9-L40)).
-  Every backend's submit ends them too, silently ([command_list.cc:93-97](../../src/shaped-graphics/command_list/command_list.cc#L93-L97)).
+  The core list keeps the links and ends them all when it dies ([command_list.cc:9-39](../../src/shaped-graphics/command_list/command_list.cc#L9-L39)).
+  Every backend's submit ends them too, silently ([command_list.cc:92-96](../../src/shaped-graphics/command_list/command_list.cc#L92-L96)).
   It ends the raster ones at `close_rendering` ([raster.cc:109-110](../../src/shaped-graphics/command_list/raster.cc#L109-L110)).
 - **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one.
   The compute pair and the withdraw are at [command_list.hh:138-148](../../src/shaped-graphics/command_list/command_list.hh#L138-L148).

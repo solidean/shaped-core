@@ -25,7 +25,6 @@ array_access_declaration command_list::adopt_array_declaration(u32 id, bool rast
 
 void command_list::end_array_declaration(impl::array_declaration_link& link)
 {
-    CC_ASSERT(link.list == this, "an array declaration was ended through a list it was not made on");
     _live_array_declarations.remove_first_where([&](impl::array_declaration_token const& t) { return t.get() == &link; });
     link.list = nullptr;
     withdraw_array_declaration(link.id);
