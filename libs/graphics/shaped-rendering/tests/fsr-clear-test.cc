@@ -6,12 +6,14 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/impl/fsr_backend.hh>
 #include <sr_sgl_shaders.hh>
 
 using namespace cc::primitive_defines;
 
 // FSR 3.1's clear job, fsr_clear_float.sgl and fsr_clear_uint.sgl, compiled for each format sr::fsr_upscale_routine
 // clears and run on an image of it.
+// The formats are the routine's own list, so a format added there is tested here, and fails until its bytes are spelled.
 //
 // The upscale tests measure a whole stream, which a clear that wrote the wrong channel or the wrong value would only
 // nudge, so each format's bytes are read back here.
@@ -64,12 +66,20 @@ template <class T>
     return values;
 }
 
-[[nodiscard]] cc::shared_async<cc::vector<byte>> cleared_float(sg::context& ctx, sg::pixel_format format)
+/// The value FSR's unsigned clears are given here: the bits of 1.0f, which the routine hands over as they are.
+constexpr u32 k_bits = 0x3f800000u;
+
+/// An image of `format` cleared the way the routine clears it.
+[[nodiscard]] cc::shared_async<cc::vector<byte>> cleared_as_routine(sg::context& ctx, sr::impl::cleared_format format)
 {
+    if (format.is_uint)
+        co_return co_await cleared<decltype(sr::sgl_shaders::fsr_clear_uint.main_cs), sr::sgl_shaders::fsr_clear_uint_target>(
+            ctx, sr::sgl_shaders::fsr_clear_uint.main_cs, {.target_format = format.format},
+            sr::sgl_shaders::fsr_clear_uint_constants{.value = k_bits}, format.format);
     co_return co_await cleared<decltype(sr::sgl_shaders::fsr_clear_float.main_cs), sr::sgl_shaders::fsr_clear_float_target>(
-        ctx, sr::sgl_shaders::fsr_clear_float.main_cs, {.target_format = format},
+        ctx, sr::sgl_shaders::fsr_clear_float.main_cs, {.target_format = format.format},
         sr::sgl_shaders::fsr_clear_float_constants{.value = tg::vec4f(k_value[0], k_value[1], k_value[2], k_value[3])},
-        format);
+        format.format);
 }
 } // namespace
 
@@ -80,31 +90,46 @@ ASYNC_INVOCABLE_TEST("sr - fsr's clear writes each format's leading channels of 
     auto& ctx = *ctx_h;
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    // a unorm channel stores 1.0 as its largest step
-    for (auto const v : values_of<u8>(co_await cleared_float(ctx, sg::pixel_format::r8_unorm)))
-        CHECK(v == 255);
-
-    // a half stores 1.0 and -1.0 exactly: 0x3c00 and 0xbc00
-    for (auto const v : values_of<u16>(co_await cleared_float(ctx, sg::pixel_format::r16_float)))
-        CHECK(v == 0x3c00);
-    auto const two = values_of<u16>(co_await cleared_float(ctx, sg::pixel_format::rg16_float));
-    REQUIRE(two.size() == 8);
-    for (auto i = isize(0); i < two.size(); i += 2)
+    for (auto const& format : sr::impl::k_cleared_formats)
     {
-        CHECK(two[i] == 0x3c00);
-        CHECK(two[i + 1] == 0xbc00);
+        auto const bytes = co_await cleared_as_routine(ctx, format);
+        switch (format.format)
+        {
+        case sg::pixel_format::r8_unorm:
+            // a unorm channel stores 1.0 as its largest step
+            for (auto const v : values_of<u8>(bytes))
+                CHECK(v == 255);
+            break;
+        case sg::pixel_format::r16_float:
+            // a half stores 1.0 and -1.0 exactly: 0x3c00 and 0xbc00
+            for (auto const v : values_of<u16>(bytes))
+                CHECK(v == 0x3c00);
+            break;
+        case sg::pixel_format::rg16_float:
+        {
+            auto const two = values_of<u16>(bytes);
+            REQUIRE(two.size() == 8);
+            for (auto i = isize(0); i < two.size(); i += 2)
+            {
+                CHECK(two[i] == 0x3c00);
+                CHECK(two[i + 1] == 0xbc00);
+            }
+            break;
+        }
+        case sg::pixel_format::rgba32_float:
+        {
+            auto const four = values_of<f32>(bytes);
+            REQUIRE(four.size() == 16);
+            for (auto i = isize(0); i < four.size(); ++i)
+                CHECK(four[i] == k_value[i % 4]);
+            break;
+        }
+        case sg::pixel_format::r32_uint:
+            for (auto const v : values_of<u32>(bytes))
+                CHECK(v == k_bits);
+            break;
+        default:
+            FAIL(cc::format("the bytes a clear of pixel_format {} writes are not spelled here yet", int(format.format)));
+        }
     }
-
-    auto const four = values_of<f32>(co_await cleared_float(ctx, sg::pixel_format::rgba32_float));
-    REQUIRE(four.size() == 16);
-    for (auto i = isize(0); i < four.size(); ++i)
-        CHECK(four[i] == k_value[i % 4]);
-
-    // an unsigned image holds the float's bits, which the routine hands over as they are
-    auto const bits
-        = co_await cleared<decltype(sr::sgl_shaders::fsr_clear_uint.main_cs), sr::sgl_shaders::fsr_clear_uint_target>(
-            ctx, sr::sgl_shaders::fsr_clear_uint.main_cs, {.target_format = sg::pixel_format::r32_uint},
-            sr::sgl_shaders::fsr_clear_uint_constants{.value = 0x3f800000u}, sg::pixel_format::r32_uint);
-    for (auto const v : values_of<u32>(bits))
-        CHECK(v == 0x3f800000u);
 }
