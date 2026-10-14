@@ -141,6 +141,8 @@ struct sg::backend::dx12::dx12_config
     int sampler_heap_capacity = 512;
 
     /// Descriptors in the non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into.
+    /// An open command list holds as many RTVs as the most color targets one of its scopes bound, and one DSV.
+    /// So these bound how many command lists that render can be open at once — 32 lists of eight targets at the default.
     int rtv_heap_capacity = 256;
     int dsv_heap_capacity = 256;
 };

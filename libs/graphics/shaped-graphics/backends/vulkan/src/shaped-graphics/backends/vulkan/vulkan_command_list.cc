@@ -359,6 +359,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     cmd->_touched_buffers.clear();
     cmd->_touched_textures.clear();
     cmd->_tentative_initial_transitions.clear();
+    retire_attachment_views(*cmd);
 
     // The pool is in flight until this epoch retires, so hand it to the current epoch.
     // Null the list's handles so its destructor cannot destroy the pool just handed off.
@@ -405,6 +406,7 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
         texture->discard_slot(cmd.slot());
     cmd._touched_textures.clear();
     cmd._tentative_initial_transitions.clear();
+    retire_attachment_views(cmd);
 
     // The recorded readbacks never run, so their futures are cancelled rather than left unsettled.
     // A future nobody ever settles parks its dependents for the life of the process.
@@ -418,6 +420,15 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     cmd._pre_buffer = VK_NULL_HANDLE;
     _command_list_slots.release(cmd.slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
+}
+
+void vulkan_context::retire_attachment_views(vulkan_command_list& cmd)
+{
+    if (cmd._created_attachment_views.empty())
+        return;
+    auto expiring = vulkan_expiring_resource();
+    expiring.image_views = cc::move(cmd._created_attachment_views);
+    schedule_deferred_deletion(cc::move(expiring));
 }
 
 void vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,

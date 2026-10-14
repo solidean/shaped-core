@@ -948,6 +948,12 @@ void dx12_context::reclaim_unsubmitted_command_list(dx12_command_list& cmd)
 
 dx12_command_list::~dx12_command_list()
 {
+    // Freed straight away rather than when the epoch retires: the recorded commands read none of these slots.
+    for (auto const slot : _rtv_slots)
+        _ctx.free_dx12_render_target_view(slot);
+    if (_dsv_slot != cpu_descriptor_slot::invalid)
+        _ctx.free_dx12_depth_stencil_view(_dsv_slot);
+
     if (_consumed)
         return; // submitted or dropped explicitly — nothing to reclaim
 

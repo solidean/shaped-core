@@ -140,6 +140,10 @@ public:
     // Set inside a rendering scope; a dispatch inside one is rejected because Vulkan forbids it outright.
     bool _in_render_pass = false;
 
+    // Attachment views this list's scopes created, handed to the epoch's deferred deletion at submit and at drop alike.
+    // A dropped list's views go to the epoch too: a texture caches them, so another list of the epoch may use them.
+    cc::vector<VkImageView> _created_attachment_views;
+
     // The open rendering instance, kept so it can be closed around a barrier and reopened.
     // Vulkan forbids vkCmdPipelineBarrier2 inside a dynamic-rendering instance outright (VUID-...-09553), where
     // D3D12 lets a draw's barriers be flushed in place — so this is what a mid-pass hazard costs here.
