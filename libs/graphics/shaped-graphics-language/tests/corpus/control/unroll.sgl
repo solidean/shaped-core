@@ -254,8 +254,8 @@ fun skipped_mask() -> uint:
 
 test skipped_mask() == 0xffffffffu
 
-// the attribute takes no arguments
-@expect(error = "invalid-attribute-arguments")
+// a count, which would unroll the loop in part, is not supported yet
+@expect(error = "unsupported-yet")
 test:
     let mut total = 0
     @unroll(2)

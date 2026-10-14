@@ -23,6 +23,8 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   It did so before the footprint became a linear pass too.
   The recursive passes each guard their own depth at 200, which a release frame fits and a debug frame does not.
   Either the limit shrinks to what the smallest stack carries, or the deepest walks stop recursing on an operand chain.
+- **Partial unrolling.** `@unroll(n)`, writing a loop's body `n` times per iteration, is `unsupported-yet` (CHK-389).
+  It is the form for a range too long to unroll whole, or one whose bound is no constant.
 - **Array equality and `const` arrays.** `==` of two arrays, and a `const` whose value is an array literal, are both `unsupported-yet`.
 - **Values as type arguments.** `image_2d[.rgba8_unorm]` takes an enum case, and the checker reads exactly that argument today, as a special case of image types.
   The general feature is a type parameterized on an integer or an enum value, which math templated on a dimension wants as well, and it lets code branch on the value.
