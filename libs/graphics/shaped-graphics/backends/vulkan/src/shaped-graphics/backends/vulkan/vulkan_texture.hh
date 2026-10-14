@@ -240,7 +240,7 @@ public:
     /// **An entry is valid only in the epoch it names.**
     /// Its view is destroyed when that epoch retires, so an entry from an earlier epoch holds a handle that may already
     /// be gone, and acquire_attachment_view reuses the entry rather than reading it.
-    /// So the vector holds at most as many entries as one epoch used distinct views.
+    /// So the vector holds as many entries as the busiest epoch used distinct views.
     /// Guarded on its own, apart from `_access`, since concurrent lists rendering to one texture take it per scope.
     mutable cc::mutex<cc::vector<attachment_view>> _attachment_views;
 };
