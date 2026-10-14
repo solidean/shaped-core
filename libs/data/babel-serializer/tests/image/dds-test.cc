@@ -3,7 +3,6 @@
 #include <clean-core/common/endian.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/platform/environment.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
@@ -580,20 +579,6 @@ TEST("dds - the aggregator detects DDS and keeps mip 0 of the first layer")
 
 namespace
 {
-/// Where the Amazon Lumberyard Bistro textures were extracted, when they were.
-/// `SC_BISTRO_TEXTURES` names the directory; otherwise it is `.tmp/` under the checkout this file is in.
-cc::string bistro_texture_dir()
-{
-    if (auto const dir = cc::environment_variable("SC_BISTRO_TEXTURES"); dir.has_value())
-        return dir.value();
-
-    auto const self = cc::string_view(__FILE__);
-    for (auto i = self.size() - 5; i >= 0; --i)
-        if (self.subview_clamped(i, 5) == "libs/" || self.subview_clamped(i, 5) == "libs\\")
-            return cc::format("{}.tmp/bistro-orca/extracted/Bistro_v5_2/Textures", self.subview_clamped(0, i));
-    return {};
-}
-
 cc::optional<cc::vector<byte>> read_file(cc::string_view path)
 {
     auto file = cc::file_read_stream_adapter::open(path);
@@ -609,7 +594,8 @@ cc::optional<cc::vector<byte>> read_file(cc::string_view path)
 
 TEST("dds - real Bistro textures decode, when present")
 {
-    auto const dir = bistro_texture_dir();
+    // Where extern/bistro/fetch-bistro.py installs them, beside the FBX files the fbx tests read.
+    auto const dir = cc::string_view(BABEL_TEST_BISTRO_DIR "/Textures");
 
     // The small files cover every encoding Bistro uses; the 2048 x 2048 ones run under --thorough only.
     struct sample
@@ -665,7 +651,7 @@ TEST("dds - real Bistro textures decode, when present")
     }
 
     if (found == 0)
-        SKIP("the Bistro textures are not extracted; set SC_BISTRO_TEXTURES to their directory");
+        SKIP("Bistro is not fetched; uv run extern/bistro/fetch-bistro.py installs it");
 }
 
 // Budgets and hand-built input
