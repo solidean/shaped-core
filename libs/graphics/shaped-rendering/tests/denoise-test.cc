@@ -341,6 +341,31 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses a named member it cannot run and writ
     CHECK(history.denoiser() == sr::denoise_method::none);
 }
 
+// An output in the format of the upscaler's scratch image is still an output the native members must compile for.
+// A context without FSR is the one that tells: there, nothing else asks for that format.
+ASYNC_INVOCABLE_TEST("sr - prewarming the front alone brings atrous up for an rgba32_float output",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
+
+    // Earlier tests brought both up already, and the front's init is what this pins.
+    sr::reconstruct_routine::evict(ctx, sg::pixel_format::rgba32_float);
+    sr::atrous_denoise_routine::evict(ctx, sg::pixel_format::rgba32_float);
+
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
+    (void)co_await ctx.routines.idle_completion();
+    CHECK(sr::atrous_denoise_routine::try_acquire(ctx, sg::pixel_format::rgba32_float).is_ready())
+        .context(cc::format("fsr supported: {}", sr::query_reconstruct_support(ctx).fsr));
+
+    auto history = sr::reconstruct_history();
+    auto const run = co_await run_once(ctx, noisy_halves(0.1f), {}, atrous_settings, 1, history);
+    CHECK(run.outcome.status == sr::reconstruct_status::denoised);
+}
+
 ASYNC_INVOCABLE_TEST("sr - atrous keeps a flat image flat",
                      (sg::context_handle const& ctx_h),
                      exclusive("sg-reload-generation"))

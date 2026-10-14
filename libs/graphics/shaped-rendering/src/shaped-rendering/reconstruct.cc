@@ -511,20 +511,23 @@ cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scop
     // and one member this device cannot initialize would then hold every other member hostage.
     //
     // The native members compile for the output's format.
-    // They compile for the scratch image the denoiser writes in front of an upscaler as well.
+    // Where an upscaler exists they compile for the scratch image the denoiser writes in front of it as well,
+    // unless that is the output's format already.
     auto& ctx = scope.context();
     auto const support = query_reconstruct_support(ctx);
-    for (auto const format : {params(), k_upscale_source_format})
+    auto const prewarm_native = [&](sg::pixel_format format)
     {
-        if (format == sg::pixel_format::undefined || (format == k_upscale_source_format && !support.fsr))
-            continue;
         if (support.atrous)
             atrous_denoise_routine::prewarm(ctx, format);
         if (support.svgf)
             svgf_denoise_routine::prewarm(ctx, format);
         if (support.oidn)
             oidn_denoise_routine::prewarm(ctx, format);
-    }
+    };
+    if (params() != sg::pixel_format::undefined)
+        prewarm_native(params());
+    if (support.fsr && params() != k_upscale_source_format)
+        prewarm_native(k_upscale_source_format);
     if (support.nrd)
         nrd_denoise_routine::prewarm(ctx);
     if (support.dlss_rr)
