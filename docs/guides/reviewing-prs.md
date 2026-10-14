@@ -620,6 +620,15 @@ sorry i dont understand anything the way this entry is written. please make a sg
 
 The rewrite was seven lines of `sg` — two draws sharing a read-write buffer — the contract sentence, and one bullet per backend; the same shape also made the fix clearer.
 
+**A finding about hostile input is shown the same way: as the input that triggers it.**
+An FBX finding explained in a mechanism and two ratios — babel's copy writes per material what ufbx stores once — got this back:
+
+```raw
+I need more details here. Give me sample code. Where is this happening?
+```
+
+The rewrite was each crafted file as an excerpt, the babel lines that multiply it, the ufbx line that shares it, and what a probe measured; the maintainer could then judge the fix against the file.
+
 ### A review of code nobody here can run says so, and hands verification to the author
 
 Everything such a review finds is read off the source, and the comment must say so rather than wear the register of a verified finding.
