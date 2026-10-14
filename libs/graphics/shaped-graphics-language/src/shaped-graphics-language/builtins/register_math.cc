@@ -336,9 +336,9 @@ void non_finite_each(leaves in, result& out)
     }
 }
 
-/// HLSL's `isnan` and `isinf`, and the same bit test written out in WGSL and MSL.
-/// WGSL may assume no NaN or infinity arises, and Metal compiles fast-math by default, so a test of the VALUE may be
-/// folded to false there; a test of its bits may not.
+/// A test of the float's bits on every target, since none may be handed the value: Vulkan may assume no NaN or infinity
+/// arises unless a module declares otherwise, which DXC's SPIR-V does not; WGSL may assume it outright; and Metal
+/// compiles fast-math by default.
 template <bool IsNan, int Width>
 written write_non_finite(call_context const& c)
 {
@@ -347,7 +347,10 @@ written write_non_finite(call_context const& c)
     switch (c.target)
     {
     case language::hlsl:
-        return {.text = cc::format("{}({})", IsNan ? "isnan" : "isinf", x)};
+    {
+        auto const uints = type_name("uint", Width);
+        return {.text = cc::format("((asuint({1}) & {0}(0x7fffffffu)) {2} {0}(0x7f800000u))", uints, x, op)};
+    }
     case language::wgsl:
     {
         auto const uints = Width == 1 ? cc::string("u32") : cc::format("vec{}<u32>", Width);
@@ -529,8 +532,7 @@ written write_unpack_half(call_context const& c)
 // ---- the names each custom spelling writes, which no name of the program may take in that target ---------------
 
 constexpr cc::string_view k_sign[] = {"sign"};
-constexpr cc::string_view k_is_nan_hlsl[] = {"isnan"};
-constexpr cc::string_view k_is_inf_hlsl[] = {"isinf"};
+constexpr cc::string_view k_non_finite_hlsl[] = {"asuint"};
 constexpr cc::string_view k_non_finite_wgsl[] = {"bitcast"};
 constexpr cc::string_view k_non_finite_msl[] = {"as_type"};
 constexpr cc::string_view k_count_bits_hlsl[] = {"countbits"};
@@ -683,14 +685,14 @@ void sgl::builtins::register_math(registry& r)
         add(r, cc::format("@pure fun is_nan(x: {}) -> {}", f.type, f.bools), non_finite_each<true>,
             {.kind = spelling_kind::custom,
              .custom = f.nan,
-             .hlsl_names = k_is_nan_hlsl,
+             .hlsl_names = k_non_finite_hlsl,
              .wgsl_names = k_non_finite_wgsl,
              .msl_names = k_non_finite_msl},
             nullptr, false, "/// Whether each component is a NaN.");
         add(r, cc::format("@pure fun is_inf(x: {}) -> {}", f.type, f.bools), non_finite_each<false>,
             {.kind = spelling_kind::custom,
              .custom = f.inf,
-             .hlsl_names = k_is_inf_hlsl,
+             .hlsl_names = k_non_finite_hlsl,
              .wgsl_names = k_non_finite_wgsl,
              .msl_names = k_non_finite_msl},
             nullptr, false, "/// Whether each component is an infinity, of either sign.");

@@ -230,7 +230,7 @@ TEST("sgl emit - a bare literal shifted in HLSL is written as the int it is, whi
     CHECK(text_of(source, target::wgsl).contains("int(1)") == false);
 }
 
-TEST("sgl emit - is_nan and is_inf are HLSL's own, and a test of the bits in WGSL and MSL")
+TEST("sgl emit - is_nan and is_inf are a test of the bits on every target")
 {
     constexpr cc::string_view source
         = "struct pixel_input:\n"
@@ -244,9 +244,16 @@ TEST("sgl emit - is_nan and is_inf are HLSL's own, and a test of the bits in WGS
           "    let nan = is_nan(p.position.x)\n"
           "    let inf = any(is_inf(v))\n"
           "    return { color = float4(select(nan, 1.0, 0.0), select(inf, 1.0, 0.0), 0.0, 1.0) }\n";
-    auto const hlsl = text_of(source, target::hlsl_dx12);
-    CHECK(hlsl.contains("isnan(")).dump("hlsl", hlsl);
-    CHECK(hlsl.contains("isinf(")).dump("hlsl", hlsl);
+    // Vulkan may assume no NaN arises unless the module says otherwise, which DXC's SPIR-V does not, so dx12 and vulkan
+    // share one text that never hands `isnan` the value.
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("((asuint(p.position.x) & uint(0x7fffffffu)) > uint(0x7f800000u))")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(v) & uint3(0x7fffffffu)) == uint3(0x7f800000u))")).dump("hlsl", hlsl);
+        CHECK(!hlsl.contains("isnan(")).dump("hlsl", hlsl);
+        CHECK(!hlsl.contains("isinf(")).dump("hlsl", hlsl);
+    }
 
     // Both may assume no NaN arises, so neither is handed the value to test.
     auto const wgsl = text_of(source, target::wgsl);
