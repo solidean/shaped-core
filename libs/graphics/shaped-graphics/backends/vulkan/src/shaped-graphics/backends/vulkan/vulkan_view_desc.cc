@@ -96,18 +96,21 @@ VkImageView acquire_attachment_view(vulkan_context& ctx,
                                     sg::subresource_range const& range,
                                     cc::vector<VkImageView>& created)
 {
-    auto const extent = subresource_extent_of(texture.description());
-    auto const index = isize(range.mip_range.start) * extent.array_count + range.array_range.start;
-
     return texture._attachment_views.lock(
         [&](cc::vector<vulkan_texture::attachment_view>& views) -> VkImageView
         {
-            while (views.size() <= index)
-                views.push_back({});
-
-            auto& slot = views[index];
-            if (slot.epoch == epoch && slot.dimension == dimension && slot.format == format && slot.range == range)
-                return slot.view;
+            vulkan_texture::attachment_view* stale = nullptr;
+            for (auto& entry : views)
+            {
+                if (entry.epoch != epoch)
+                {
+                    if (stale == nullptr)
+                        stale = &entry;
+                    continue;
+                }
+                if (entry.dimension == dimension && entry.format == format && entry.range == range)
+                    return entry.view;
+            }
 
             auto const info = VkImageViewCreateInfo{
                 .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -128,8 +131,16 @@ VkImageView acquire_attachment_view(vulkan_context& ctx,
             [[maybe_unused]] VkResult const r = vkCreateImageView(ctx._device, &info, nullptr, &view);
             CC_ASSERT(r == VK_SUCCESS, "vkCreateImageView failed for a rendering-scope attachment");
 
-            // The view the slot held is not destroyed here: it is in the created list of whichever list made it.
-            slot = {.epoch = epoch, .dimension = dimension, .format = format, .range = range, .view = view};
+            // A stale entry's view is not destroyed here: it is in the created list of whichever list made it.
+            auto const entry = vulkan_texture::attachment_view{.epoch = epoch,
+                                                               .dimension = dimension,
+                                                               .format = format,
+                                                               .range = range,
+                                                               .view = view};
+            if (stale != nullptr)
+                *stale = entry;
+            else
+                views.push_back(entry);
             created.push_back(view);
             return view;
         });

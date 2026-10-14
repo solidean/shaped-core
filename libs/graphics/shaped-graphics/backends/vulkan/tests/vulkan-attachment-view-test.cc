@@ -77,3 +77,36 @@ ASYNC_INVOCABLE_TEST("sg vulkan - an attachment view is shared within its epoch 
     co_await ctx.idle_completion();
     CHECK(!ctx.is_device_lost());
 }
+
+ASYNC_INVOCABLE_TEST("sg vulkan - two attachment views starting at one subresource are each kept for the epoch",
+                     (vulkan::vulkan_context_handle const& handle))
+{
+    auto& ctx = *handle;
+    auto const target = ctx.persistent.create_texture_2d_array({.format = sg::pixel_format::rgba8_unorm,
+                                                                .width = k_extent,
+                                                                .height = k_extent,
+                                                                .array_layers = 2,
+                                                                .usage = sg::texture_usage::render_target});
+
+    // The whole array and its first slice both start at mip 0, layer 0, and differ in dimension and range.
+    // A scope alternating between them reuses both views rather than replacing one with the other.
+    auto const render = [](sg::command_list& cmd, sg::render_target_view const& view)
+    {
+        auto pass = cmd.raster.render_to({.color_targets = {view.cleared(tg::vec4f(1, 0, 0, 1))}});
+        return as_vulkan(cmd)._rendering_color_attachments[0].imageView;
+    };
+
+    auto cmd = ctx.create_command_list();
+    REQUIRE(cmd != nullptr);
+    auto const whole = render(*cmd, target.as_render_target_view());
+    auto const slice = render(*cmd, target.as_render_target_2d_view({.slice = 0}));
+    CHECK(whole != slice);
+    CHECK(render(*cmd, target.as_render_target_view()) == whole);
+    CHECK(render(*cmd, target.as_render_target_2d_view({.slice = 0})) == slice);
+    CHECK(as_vulkan(*cmd)._created_attachment_views.size() == 2);
+    (void)ctx.submit_command_list(cc::move(cmd));
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+    CHECK(!ctx.is_device_lost());
+}

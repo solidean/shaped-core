@@ -95,6 +95,8 @@ namespace sg::backend::vulkan
 /// A view this call creates is appended to `created`, the recording list's own collection, which the list must hand
 /// to its epoch's deferred deletion at submit AND at drop — another list of the epoch may be using it.
 /// So a persistent target pays a create and a destroy per epoch it renders in, which a transient one pays anyway.
+/// A view held for the texture's life would save that, and pin views of subresources rendered once and never again —
+/// the lower mips a mip chain is generated into.
 [[nodiscard]] VkImageView acquire_attachment_view(vulkan_context& ctx,
                                                   vulkan_texture const& texture,
                                                   sg::epoch epoch,

@@ -234,6 +234,9 @@ What a backend makes of them lives for a command list or an epoch, never for the
 dx12 writes them into RTV/DSV slots the recording command list owns, and frees those with the list, since D3D12 reads a CPU descriptor when the call that takes it records.
 Those slots come from a bounded heap, so the command lists open at once are bounded by it too.
 vulkan creates an image view per texture and epoch, shared by every list of that epoch and destroyed when the epoch retires.
+A target that persists across frames therefore recreates its view in every epoch it is rendered in.
+Holding the view for the texture's life would avoid that, and was rejected.
+Many persistent textures are rendered into once at their lower mips, as a mip chain is, and a view kept for each would stay alive for nothing.
 
 Deferred: **aspect (depth/stencil) selection plus format reinterpretation** on texture views.
 Also **texel buffers** — `Buffer<T>` / `samplerBuffer`, a format-decoded linear buffer.

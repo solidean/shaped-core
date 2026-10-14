@@ -235,11 +235,12 @@ public:
         VkImageView view = VK_NULL_HANDLE;
     };
 
-    /// The attachment views rendering scopes used, one slot per first subresource, grown on first use.
+    /// The attachment views rendering scopes used, matched on the whole view description and appended on a miss.
     ///
-    /// **A slot is valid only in the epoch it names.**
-    /// Its view is destroyed when that epoch retires, so a slot from an earlier epoch holds a handle that may already be
-    /// gone, and acquire_attachment_view replaces it rather than reading it.
+    /// **An entry is valid only in the epoch it names.**
+    /// Its view is destroyed when that epoch retires, so an entry from an earlier epoch holds a handle that may already
+    /// be gone, and acquire_attachment_view reuses the entry rather than reading it.
+    /// So the vector holds at most as many entries as one epoch used distinct views.
     /// Guarded on its own, apart from `_access`, since concurrent lists rendering to one texture take it per scope.
     mutable cc::mutex<cc::vector<attachment_view>> _attachment_views;
 };

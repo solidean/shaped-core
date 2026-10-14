@@ -14,9 +14,9 @@
 // - context map: the model acquire_attachment_view replaced.
 //   One map for the whole context, keyed on texture identity plus view fields, under one mutex.
 //   An entry dies with its texture, through a finalizer the texture runs at epoch retire.
-// - texture epoch slot: acquire_attachment_view's model.
-//   Each texture keeps a flat vector of (epoch, view), indexed by subresource, under its own mutex.
-//   A slot stamped with the current epoch is reused; any other slot gets a new view.
+// - texture epoch slot: acquire_attachment_view itself, called as a rendering scope calls it.
+//   Each texture keeps its views stamped with the epoch that created them, under its own mutex.
+//   A view stamped with the current epoch is reused; anything else gets a new view.
 //   The new view is collected per command list and destroyed when its epoch retires.
 // - no cache: a new view on every acquire, destroyed when its epoch retires.
 //
@@ -26,8 +26,9 @@
 // noise to a difference of a few hundred nanoseconds.
 //
 // A transient target is a new texture every frame.
-// It is emulated by minting a fresh identity over the same VkImage, which the driver cannot tell apart from a new
-// image but which keeps vkCreateImage out of a number that is about views.
+// It is emulated over the same VkImage — a fresh identity for the context map, an emptied view list for
+// acquire_attachment_view — which the driver cannot tell apart from a new image but which keeps vkCreateImage out of
+// a number that is about views.
 //
 // One frame acquires `k_targets` attachments `uses` times each; the per-item time is the cost of one acquire.
 
@@ -54,6 +55,8 @@ struct target
     VkFormat format = VK_FORMAT_UNDEFINED;
     VkImageAspectFlags aspect = 0;
     sg::pixel_format sg_format = sg::pixel_format::undefined;
+    vulkan::vulkan_texture const* texture = nullptr;
+    sg::subresource_range range;
 };
 
 [[nodiscard]] VkImageView create_view(VkDevice device, target const& t)
@@ -213,55 +216,43 @@ private:
     cc::mutex<rings> _rings;
 };
 
-/// acquire_attachment_view's model: a flat per-texture vector of (epoch, view) under the texture's own mutex.
+/// acquire_attachment_view itself, collecting what it creates the way a recording command list does.
 class texture_epoch_model : public frame_driver
 {
 public:
-    texture_epoch_model(VkDevice device, cc::span<target const> targets, target_lifetime lifetime)
-      : frame_driver(device, targets, lifetime)
+    texture_epoch_model(vulkan::vulkan_context& ctx, cc::span<target const> targets, target_lifetime lifetime)
+      : frame_driver(ctx._device, targets, lifetime), _ctx(ctx)
     {
-        for (auto& tv : _textures)
-            tv.lock([](cc::vector<epoch_view>& slots) { slots = cc::vector<epoch_view>::create_defaulted(1); });
     }
 
     void begin_frame()
     {
         ++_frame;
         _retired.retire(_device, ring_slot());
-        // A transient target is a new texture, and a new texture starts with no slots stamped.
+        // A transient target is a new texture, and a new texture has no views yet.
         if (_lifetime == target_lifetime::transient)
-            for (auto& tv : _textures)
-                tv.lock([](cc::vector<epoch_view>& slots) { slots = cc::vector<epoch_view>::create_defaulted(1); });
+            for (auto const& t : _targets)
+                t.texture->_attachment_views.lock([](auto& views) { views.clear(); });
     }
 
     [[nodiscard]] VkImageView acquire(int index)
     {
-        auto constexpr subresource = 0; // mip 0, slice 0: the index a real texture derives from the view's range
-        return _textures[index].lock(
-            [&](cc::vector<epoch_view>& slots) -> VkImageView
-            {
-                auto& slot = slots[subresource];
-                if (slot.epoch == _frame)
-                    return slot.view;
-
-                slot = epoch_view{.epoch = _frame, .view = create_view(_device, _targets[index])};
-                _list_views.push_back(slot.view);
-                return slot.view;
-            });
+        auto const& t = _targets[index];
+        return vulkan::acquire_attachment_view(_ctx, *t.texture, sg::epoch(_frame), sg::texture_view_dimension::tex_2d,
+                                               t.sg_format, t.range, _list_views);
     }
 
     void end_frame() { _retired.submit(ring_slot(), _list_views); }
 
-    void drain() { _retired.drain(_device); }
+    void drain()
+    {
+        _retired.drain(_device);
+        for (auto const& t : _targets)
+            t.texture->_attachment_views.lock([](auto& views) { views.clear(); });
+    }
 
 private:
-    struct epoch_view
-    {
-        u64 epoch = 0;
-        VkImageView view = VK_NULL_HANDLE;
-    };
-
-    cc::mutex<cc::vector<epoch_view>> _textures[k_targets];
+    vulkan::vulkan_context& _ctx;
     cc::vector<VkImageView> _list_views; // the recording command list's own collection
     epoch_retire_ring _retired;
 };
@@ -344,11 +335,15 @@ void run_scenario(target_lifetime lifetime, int uses)
                  .width = 256,
                  .height = 256,
                  .usage = is_depth ? sg::texture_usage::depth_stencil : sg::texture_usage::render_target}));
+            auto const& vk_texture = static_cast<vulkan::vulkan_texture const&>(*textures.back().raw());
             targets.push_back(
-                {.image = static_cast<vulkan::vulkan_texture const&>(*textures.back().raw())._image,
+                {.image = vk_texture._image,
                  .format = is_depth ? VK_FORMAT_D32_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM,
                  .aspect = VkImageAspectFlags(is_depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT),
-                 .sg_format = format});
+                 .sg_format = format,
+                 .texture = &vk_texture,
+                 .range = is_depth ? textures.back().as_depth_stencil_view().range()
+                                   : textures.back().as_render_target_view().range()});
         }
 
         auto const device = ctx->_device;
@@ -358,7 +353,7 @@ void run_scenario(target_lifetime lifetime, int uses)
             measure(cc::format("{} - context map", label), model, uses);
         }
         {
-            auto model = texture_epoch_model(device, targets, lifetime);
+            auto model = texture_epoch_model(*ctx, targets, lifetime);
             measure(cc::format("{} - texture epoch slot", label), model, uses);
         }
         {
