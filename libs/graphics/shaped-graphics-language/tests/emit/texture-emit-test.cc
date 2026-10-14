@@ -345,9 +345,9 @@ TEST("sgl emit - a static sampler that compares is a comparison sampler, and its
     CHECK(text_of(shadowed, target::wgsl).contains("var set_shadow: sampler_comparison;\n"));
 }
 
-TEST("sgl emit - WGSL takes an implicit-derivative sample as it stands, since the check pass judged its uniformity")
+TEST("sgl emit - WGSL leaves an implicit-derivative sample's uniformity to the check pass, which judged it already")
 {
-    // CHK-282 refuses what Tint's analysis would, so no directive switches that analysis off
+    // CHK-284 reconverges after a loop where Tint's analysis does not, so Tint's verdict is switched off (EMIT-103)
     constexpr auto sampled = "binding material:\n"
                              "    albedo: texture_2d[float4]\n"
                              "    smp: sampler\n"
@@ -363,7 +363,15 @@ TEST("sgl emit - WGSL takes an implicit-derivative sample as it stands, since th
                              "    let c = material.albedo.sample(p.uv, material.smp)\n"
                              "    if p.uv.x < 0.5 => return {color = c}\n"
                              "    return {color = float4(0.0, 0.0, 0.0, 1.0)}\n";
-    CHECK(!text_of(sampled, target::wgsl).contains("diagnostic"));
+    CHECK(text_of(sampled, target::wgsl).contains("diagnostic(off, derivative_uniformity);\n"));
+    CHECK(!text_of(sampled, target::wgsl).contains("subgroup_uniformity"));
+    // a text that takes no derivative has nothing to switch off
+    constexpr auto loaded = "binding material:\n"
+                            "    albedo: texture_2d[float4]\n"
+                            "\n"
+                            "@compute(1) fun cs(@thread_id id: int3){material}:\n"
+                            "    let c = material.albedo.load(id.xy, 0)\n";
+    CHECK(!text_of(loaded, target::wgsl).contains("diagnostic"));
 }
 
 TEST("sgl emit - a builtin's default fills the level a call leaves out, and a texture stays where it is named")
