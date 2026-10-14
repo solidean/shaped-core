@@ -1,6 +1,7 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/string.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -314,6 +315,24 @@ INVOCABLE_TEST("sg - a BC texture is refused where texture_compression_bc is abs
                         .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst,
                     }),
                     sg::allocation_exception);
+
+    // A size off the block grid is refused too, and still for the missing feature rather than for the alignment.
+    auto message = cc::string();
+    try
+    {
+        (void)ctx->persistent.create_raw_texture({
+            .format = sg::pixel_format::bc1_rgba_unorm,
+            .dimension = sg::texture_dimension::d2,
+            .width = 6,
+            .height = 6,
+            .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst,
+        });
+    }
+    catch (sg::allocation_exception const& e)
+    {
+        message = cc::string(e.message());
+    }
+    CHECK(message.contains("texture_compression_bc"));
 }
 
 // Writing a depth texture from bytes means a different texel layout on each backend, so every entry point refuses it up front.
