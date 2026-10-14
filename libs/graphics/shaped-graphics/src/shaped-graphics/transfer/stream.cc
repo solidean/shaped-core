@@ -99,6 +99,7 @@ stream_upload_handle context_stream_scope::bytes_to_texture(raw_texture_handle t
 {
     CC_ASSERT(texture != nullptr, "stream upload target texture is null");
     impl::assert_async_transfer_target(*texture);
+    impl::assert_writable_from_bytes(texture);
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);
@@ -134,6 +135,7 @@ stream_upload_handle context_stream_scope::from_source_to_texture(raw_texture_ha
     CC_ASSERT(texture != nullptr, "stream upload target texture is null");
     impl::assert_async_transfer_target(*texture);
     CC_ASSERT(source != nullptr, "stream upload source is null");
+    impl::assert_writable_from_bytes(texture);
     impl::assert_valid_subresource(texture, subresource);
     texture_region const box = region.has_value() ? region.value() : impl::full_subresource_region(texture, subresource);
     impl::assert_texture_region_in_bounds(texture, subresource, box);

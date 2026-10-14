@@ -342,11 +342,13 @@ slib::module_library slib::shader_library::read_modules() const
             auto path = impl::join_path(dir, name);
             if (!path.has_value())
                 continue;
+            auto const revision = _mounts.revision(path.value());
             auto text = _mounts.read_text(path.value());
             if (!text.has_value())
                 continue;
             result.paths.push_back(cc::move(path.value()));
             result.texts.push_back(cc::move(text.value()));
+            result.revisions.push_back(revision);
         }
     return result;
 }
@@ -460,8 +462,9 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
                                                                            sg::shader_format format,
                                                                            cc::span<shader_option const> options) const
 {
-    compile_outcome outcome;
-    outcome.dependencies.push_back(cc::string::create_copy_of(virtual_path));
+    auto outcome = compile_outcome();
+    outcome.dependencies.push_back(
+        {.path = cc::string::create_copy_of(virtual_path), .revision = _mounts.revision(virtual_path)});
 
     auto const& package = package_of(virtual_path);
 
@@ -520,11 +523,15 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     // Non-const: cc::function_ref binds a mutable lvalue.
     auto resolve = [&](cc::string_view include_path) -> cc::optional<cc::string>
     {
-        cc::optional<cc::string> resolved;
+        auto resolved = cc::optional<cc::string>();
+        auto revision = file_revision::none;
         for (auto const& root : search_roots)
         {
             auto candidate = impl::join_path(root, include_path);
-            if (candidate.has_value() && _mounts.exists(candidate.value()))
+            if (!candidate.has_value())
+                continue;
+            revision = _mounts.revision(candidate.value());
+            if (revision != file_revision::none)
             {
                 resolved = cc::move(candidate);
                 break;
@@ -540,7 +547,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         if (!seen.insert(resolved.value()))
             return cc::string(); // already included
 
-        outcome.dependencies.push_back(cc::move(resolved.value()));
+        outcome.dependencies.push_back({.path = cc::move(resolved.value()), .revision = revision});
         return text;
     };
 
@@ -559,16 +566,30 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     {
         // Which modules a broken source reaches is unknown, so it depends on all of them: an edit that fixes the
         // module it broke on has to reach it.
-        for (auto const& path : modules.paths)
-            if (seen.insert(path))
-                outcome.dependencies.push_back(path);
+        for (auto i = isize(0); i < modules.paths.size(); ++i)
+            if (seen.insert(modules.paths[i]))
+                outcome.dependencies.push_back({.path = modules.paths[i], .revision = modules.revisions[i]});
         outcome.shader
             = make_failed_shader(cc::format("preprocessing '{}' failed: {}", label, preprocessed.error().to_string()));
         return;
     }
+    // Once per library, a cached result's included: one source's warnings come back for every entry point and format built from it.
+    auto const name = label.empty() ? cc::string_view("<sgl>") : label;
+    for (auto const& w : preprocessed.value().warnings)
+        if (_logged_warnings.lock([&](cc::set<cc::string>& logged)
+                                  { return logged.insert(cc::format("{}\n{}", name, w)); }))
+            CC_LOG_WARNING("SGL warns of '{}' {}: {}", name, entry_point, w);
+
     for (auto& path : preprocessed.value().used_modules)
-        if (seen.insert(path))
-            outcome.dependencies.push_back(cc::move(path));
+    {
+        if (!seen.insert(path))
+            continue;
+        auto revision = file_revision::none;
+        for (auto i = isize(0); i < modules.paths.size(); ++i)
+            if (modules.paths[i] == path)
+                revision = modules.revisions[i];
+        outcome.dependencies.push_back({.path = cc::move(path), .revision = revision});
+    }
 
     desc.source = cc::move(preprocessed.value().source);
     auto pending = cc::optional<sgl_interface>();

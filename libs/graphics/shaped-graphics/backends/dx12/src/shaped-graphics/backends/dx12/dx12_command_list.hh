@@ -125,6 +125,14 @@ public:
     // Buffers this list has touched: their slots are finalized at submit/drop, and each gets the reverse async-upload stamp at submit.
     cc::vector<dx12_buffer_handle> _touched_buffers;
 
+    // The buffers this list writes, a subset of the touched ones, which alone owe a download wait.
+    // Only a write conflicts with a buffer's readback still in flight; a touched texture owes one whatever this list does to it.
+    cc::vector<dx12_buffer_handle> _written_buffers;
+
+    /// Folds every transfer this list must wait for into _required_copy_waits and _required_download_waits.
+    /// Called at submit, before the submission lock: a transfer enqueued after an access was recorded is still waited on.
+    void fold_transfer_waits();
+
     // Compute bind state, both reset on compute_bind_pipeline.
     // The bound pipeline layout supplies each slot's root-parameter indices.
     // One bound group per slot, indexed by `set` and sized to the layout's group count, whose views are declared at dispatch.
@@ -194,12 +202,13 @@ public:
     // A LIST rather than a single value because completion timelines are per resource — collapsing them to one max
     // would be comparing values from unrelated fences, which is exactly the bug out-of-order selection introduced.
     // At submit the direct queue issues one Wait per entry, so the list sees every async write it touches.
-    // Maintained by track_buffer_access / track_texture_access.
+    // Filled by fold_transfer_waits at submit, from the touched set.
     // The reverse stamp — defer a later async upload behind this list — is applied to the touched sets at submit.
     cc::vector<dx12_group_value> _required_copy_waits;
 
-    // The async-download completions any resource this list WRITES must observe, same shape and same reason.
-    // Only writes fold in, since two reads never conflict.
+    // The async-download completions this list must observe, same shape and same reason.
+    // A buffer folds in only when this list writes it, since two reads never conflict.
+    // A texture folds in whatever the access, since its entry barrier can change the layout the copy queue is reading.
     cc::vector<dx12_group_value> _required_download_waits;
 
 protected:
@@ -229,10 +238,18 @@ protected:
                             isize dst_offset_in_bytes,
                             isize size_in_bytes) override;
 
+    void copy_buffer_to_texture(sg::raw_buffer_handle src,
+                                isize src_offset_in_bytes,
+                                isize src_row_pitch_in_bytes,
+                                sg::raw_texture_handle dst,
+                                sg::subresource_index const& subresource,
+                                sg::texture_region const& region) override;
+
     // Compute recording (reached through cmd.compute). Bodies in dx12_command_list.cc.
     void compute_bind_pipeline(sg::compute_pipeline const& pipeline) override;
     void compute_bind_group(int group_index, sg::binding_group const& group) override;
     void compute_dispatch(int x, int y, int z) override;
+    void compute_dispatch_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes) override;
     void compute_declare_array_buffer_access(cc::string_view binding_name,
                                              cc::span<sg::array_buffer_access const> elements) override;
     void compute_declare_array_texture_access(cc::string_view binding_name,
@@ -295,7 +312,7 @@ private:
     // Declare `stages`/`access` on `buffer` for this list's slot, emit the intra-list barrier the tracker asks for, and record the buffer so its slot is finalized at submit/drop.
     // The barrier is precise (COPY_DEST→COPY_SOURCE and the like), with no bounce through COMMON.
     // Cross-list ordering rides on D3D12's decay of buffers to COMMON at ExecuteCommandLists, so no trailing barrier is needed.
-    // Also folds the buffer's pending async-upload value into _required_copy_wait, the forward cross-queue sync for ctx.upload.
+    // Also files the buffer into the touched set, and into the written one for a write, which fold_transfer_waits reads at submit.
     void track_buffer_access(dx12_buffer_handle const& buffer, sg::pipeline_stage_flags stages, sg::access_flags access);
 
     // Shared BLAS build for both geometry families.

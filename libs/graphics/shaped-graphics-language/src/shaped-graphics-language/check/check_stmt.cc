@@ -75,7 +75,12 @@ flow checker::check_stmt(function_scope& scope, ast::stmt_id stmt)
     auto const& ast = ast_of(file);
     auto const& s = ast.at(stmt);
     auto const where = span_of(file, stmt);
-    judge_attributes(file, s.attributes, {}, "a statement");
+    // CHK-389: a `for` may be unrolled, and no other statement takes an attribute
+    cc::string_view const loop_attributes[] = {"unroll"};
+    if (s.node.is<ast::for_stmt>())
+        judge_attributes(file, s.attributes, loop_attributes, "a for");
+    else
+        judge_attributes(file, s.attributes, {}, "a statement");
 
     auto result = flow::falls_through;
     s.node.visit([&](ast::let_stmt const& let) { check_let(scope, stmt, let); }, [&](ast::assign_stmt const& assign)

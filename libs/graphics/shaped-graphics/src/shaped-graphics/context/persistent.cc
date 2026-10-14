@@ -6,6 +6,7 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/persistent.hh>
 #include <shaped-graphics/exceptions.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 
 namespace sg
 {
@@ -61,6 +62,9 @@ cc::result<raw_texture_handle> context_persistent_scope::try_create_raw_texture(
     if (auto unsupported = impl::find_unsupported_texture(_ctx.supports(feature::extended_image_formats), desc);
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
+    if (is_compressed_format(desc.format) && !_ctx.supports(feature::texture_compression_bc))
+        return cc::error("a block-compressed texture needs sg::feature::texture_compression_bc, which this device "
+                         "lacks");
     if (auto error = desc.unaligned_block_error(_ctx.supports(feature::unaligned_block_compression)); !error.empty())
         return cc::error(cc::move(error));
     _ctx._stats.add(stat::textures_created);

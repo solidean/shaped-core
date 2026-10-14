@@ -21,7 +21,10 @@
     X(draws, count, "every draw a submitted list recorded, indexed or not")                                 \
     X(dispatches, count, "every compute dispatch a submitted list recorded")                                \
     X(ray_dispatches, count, "every ray dispatch a submitted list recorded")                                \
+    X(blas_builds, count, "every bottom-level acceleration structure a submitted list built")               \
+    X(tlas_builds, count, "every top-level acceleration structure a submitted list built")                  \
     X(command_lists_submitted, count, "every list submitted, the ones sg submits on its own included")      \
+    X(queue_waits, count, "cross-queue waits a submitted list's queue made on transfers before running it") \
     X(epochs_advanced, count, "every advance_epoch")                                                        \
     X(buffer_barriers, count, "one per buffer barrier record the backend emitted")                          \
     X(texture_barriers, count, "one per texture barrier record the backend emitted, per subresource range") \

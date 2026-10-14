@@ -27,6 +27,14 @@ void assert_valid_subresource(raw_texture_handle const& texture, subresource_ind
     CC_ASSERT(sub.aspect == texture_aspect::color, "only the color aspect is supported for texture copies yet");
 }
 
+void assert_writable_from_bytes(raw_texture_handle const& texture)
+{
+    CC_ASSERT(texture != nullptr, "texture is null");
+    CC_ASSERT(!is_depth_format(texture->description().format), "a depth or depth-stencil texture cannot be written "
+                                                               "from a buffer or from bytes; render or clear it "
+                                                               "instead");
+}
+
 texture_region full_subresource_region(raw_texture_handle const& texture, subresource_index const& sub)
 {
     CC_ASSERT(texture != nullptr, "texture is null");
@@ -53,6 +61,21 @@ void assert_texture_region_in_bounds(raw_texture_handle const& texture,
                "texture copy region offset ({}, {}, {}) + size ({}, {}, {}) exceeds subresource extent ({}, {}, {})",
                region.offset[0], region.offset[1], region.offset[2], region.size[0], region.size[1], region.size[2],
                full.size[0], full.size[1], full.size[2]);
+
+    // A block-compressed copy moves whole blocks, so the box is block-aligned except where it runs to the subresource's
+    // edge, which a mip whose extent is not a multiple of the block may end inside.
+    auto const block = format_block_extent(texture->format());
+    if (block > 1)
+    {
+        CC_ASSERTF(region.offset[0] % block == 0 && region.offset[1] % block == 0,
+                   "a block-compressed texture copy's offset ({}, {}) must be a multiple of the {}-texel block",
+                   region.offset[0], region.offset[1], block);
+        CC_ASSERTF((region.size[0] % block == 0 || region.offset[0] + region.size[0] == full.size[0])
+                       && (region.size[1] % block == 0 || region.offset[1] + region.size[1] == full.size[1]),
+                   "a block-compressed texture copy's size ({}, {}) must be a multiple of the {}-texel block, except "
+                   "where it runs to the subresource's edge",
+                   region.size[0], region.size[1], block);
+    }
 }
 
 isize packed_region_bytes(raw_texture_handle const& texture, texture_region const& region)

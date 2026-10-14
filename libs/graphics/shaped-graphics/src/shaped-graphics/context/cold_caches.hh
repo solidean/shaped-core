@@ -5,8 +5,9 @@
 
 /// Which of the graphics stack's persistent caches a process runs cold, from `SC_SG_COLD`.
 ///
-/// `pipelines` turns off sg::pipeline_cache's persistent tier, `shaders` the compiled-shader tier the shader compilers
-/// keep, and `all` both; they combine as `pipelines,shaders`, and anything else is ignored with a warning.
+/// `pipelines` turns off sg::pipeline_cache's persistent tier, `shaders` the tiers the shader compilers keep, and `all` both.
+/// The shader compilers' tiers are the compiled-shader one and the SGL edge's cache of its front end.
+/// They combine as `pipelines,shaders`, and anything else is ignored with a warning.
 /// A cold tier is neither read nor written, so a run starts from nothing and leaves the store as it found it.
 /// Only the DEFAULT store goes cold: a store passed to `set_blob_cache` is a deliberate choice, and stays in use.
 ///

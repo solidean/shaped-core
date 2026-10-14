@@ -96,3 +96,88 @@ TEST("sg slot_table - a full table of current-epoch slots asserts")
     // Both slots were acquired in this epoch: the working set exceeds the capacity.
     CHECK_ASSERTS(table.acquire(3, ep(0), [](u32) {}));
 }
+
+TEST("sg slot_table - a released key frees its slot now, or in the next epoch if this one used it")
+{
+    auto table = sg::impl::slot_table<u64>(8);
+    auto const old = table.acquire(1, ep(0), no_reclaim);
+    auto const current = table.acquire(2, ep(1), no_reclaim);
+
+    // Key 1 was last acquired in an earlier epoch, so nothing recorded this epoch can name it: freed at once.
+    auto reclaimed = cc::vector<u32>();
+    auto const record = [&](u32 freed) { reclaimed.push_back(freed); };
+    table.release(1, ep(1), record);
+    REQUIRE(reclaimed.size() == 1);
+    CHECK(reclaimed[0] == old.index);
+
+    // Key 2 was acquired this epoch, so its index may be in this epoch's work: it waits for the next epoch.
+    table.release(2, ep(1), record);
+    CHECK(reclaimed.size() == 1);
+    (void)table.acquire(3, ep(2), record);
+    REQUIRE(reclaimed.size() == 2);
+    CHECK(reclaimed[1] == current.index);
+
+    // A pinned key is unpin's to free, not release's.
+    auto const pinned = table.acquire_pinned(4, ep(2), record);
+    table.release(4, ep(3), record);
+    CHECK(table.is_pinned(pinned.index));
+}
+
+TEST("sg slot_table - a later epoch's first release frees what an earlier one deferred")
+{
+    auto table = sg::impl::slot_table<u64>(8);
+    auto reclaimed = cc::vector<u32>();
+    auto const record = [&](u32 freed) { reclaimed.push_back(freed); };
+
+    // An owner that only releases, as an unload does, must still get the deferred slot back.
+    auto const first = table.acquire(1, ep(0), record);
+    table.release(1, ep(0), record);
+    CHECK(reclaimed.empty());
+
+    // Key 2 holds no slot, and its release still runs the sweep.
+    table.release(2, ep(1), record);
+    REQUIRE(reclaimed.size() == 1);
+    CHECK(reclaimed[0] == first.index);
+    CHECK(table.occupied_count() == 0);
+}
+
+TEST("sg slot_table - a key acquired again in the epoch it was released is freed with it, and minted afresh")
+{
+    auto table = sg::impl::slot_table<u64>(8);
+    auto reclaimed = cc::vector<u32>();
+    auto const record = [&](u32 freed) { reclaimed.push_back(freed); };
+
+    auto const first = table.acquire(1, ep(0), record);
+    table.release(1, ep(0), record);
+    // Released, then named again in the same epoch: the same slot, and still deferred.
+    auto const again = table.acquire(1, ep(0), record);
+    CHECK(!again.inserted);
+    CHECK(again.index == first.index);
+    CHECK(reclaimed.empty());
+
+    // The next epoch's first acquire frees the deferred slot before anything else, so key 1 is a new mint.
+    (void)table.acquire(2, ep(1), record);
+    REQUIRE(reclaimed.size() == 1);
+    CHECK(reclaimed[0] == first.index);
+    CHECK(table.acquire(1, ep(1), record).inserted);
+}
+
+TEST("sg slot_table - releasing a key twice frees its slot once")
+{
+    auto table = sg::impl::slot_table<u64>(8);
+    auto reclaimed = cc::vector<u32>();
+    auto const record = [&](u32 freed) { reclaimed.push_back(freed); };
+
+    // Freed at once: a second release finds no slot.
+    (void)table.acquire(1, ep(0), record);
+    table.release(1, ep(1), record);
+    table.release(1, ep(1), record);
+    CHECK(reclaimed.size() == 1);
+
+    // Deferred: the key is listed twice, and its slot is still freed once.
+    (void)table.acquire(2, ep(1), record);
+    table.release(2, ep(1), record);
+    table.release(2, ep(1), record);
+    (void)table.acquire(3, ep(2), record);
+    CHECK(reclaimed.size() == 2);
+}

@@ -20,6 +20,7 @@
 #include <nexus/bench/report.hh>
 #include <nexus/impl/host_loop.hh>
 #include <nexus/impl/rec_session.hh>
+#include <nexus/impl/run_framing.hh>
 #include <nexus/impl/watchdog.hh>
 #include <nexus/tests/alias.hh>
 #include <nexus/tests/entry.hh>
@@ -180,6 +181,7 @@ struct run_reporting
 {
     nx::test_registry const* registry = nullptr;
     bool is_entry_run = false;
+    bool reports_resources = false;
     bool has_benchmarks = false;
     nx::bench::load_sample benchmark_load_before;
     bool benchmark_pinned = false;
@@ -193,6 +195,7 @@ int report_run(nx::test_schedule_config const& config,
 {
     auto const& registry = *reporting.registry;
     auto const is_entry_run = reporting.is_entry_run;
+    auto const reports_resources = reporting.reports_resources;
     auto const has_benchmarks = reporting.has_benchmarks;
     auto const& benchmark_load_before = reporting.benchmark_load_before;
     auto const benchmark_pinned = reporting.benchmark_pinned;
@@ -206,9 +209,6 @@ int report_run(nx::test_schedule_config const& config,
     }
     if (auto const usage = cc::query_process_usage(); usage.has_value())
         resources.peak_resident_bytes = usage.value().peak_resident_bytes;
-
-    // An example is a program someone is watching rather than a suite being measured, so only tests say what they cost.
-    auto const reports_resources = config.selected_bucket != nx::config::test_bucket::example && !is_entry_run;
 
     // A failing test's recording is written beside the run's other artifacts, which is why this follows the JUnit
     // file's directory rather than inventing a location of its own.
@@ -580,11 +580,10 @@ int nx::run(int argc, char** argv)
         return 1;
     }
 
+    auto const framing = impl::frame_run(config, schedule, is_entry_run);
+
     // First, so it is there whatever the run does next, and a failure anywhere below can be reproduced from the log.
-    // Not under the Catch2 XML reporter, whose stdout is the report, and not for an example, which is one program run
-    // whose transcript is its documentation.
-    if (config.shuffle && !config.report_catch2_xml_results && !is_entry_run
-        && config.selected_bucket != nx::config::test_bucket::example)
+    if (framing.prints_seed)
         cc::println("nexus: run seed {} (reproduce with --seed {})", config.seed, config.seed);
 
     if (config.verbose)
@@ -595,17 +594,9 @@ int nx::run(int argc, char** argv)
 
     // A benchmark number is a statement about a machine, so the machine goes first — and it is meant to be copied
     // along with the result rather than read once.
-    // Keyed on what was SCHEDULED rather than on which bucket was swept: naming a benchmark exactly pulls it in
-    // across the bucket rule, and that run wants the machine described just as much as a sweep does.
-    auto has_benchmarks = false;
-    for (auto const& instance : schedule.instances)
-        if (instance.declaration != nullptr
-            && instance.declaration->test_config.bucket == nx::config::test_bucket::benchmark)
-            has_benchmarks = true;
-
     auto benchmark_load_before = nx::bench::load_sample{};
     auto benchmark_pinned = false;
-    if (has_benchmarks)
+    if (framing.describes_host)
     {
         auto const& sys = nx::bench::describe_system();
         cc::println("host  {} {}  |  {}  |  {} logical cores  |  build {}  CC_ASSERT={}{}", sys.os, sys.arch, sys.cpu,
@@ -648,17 +639,14 @@ int nx::run(int argc, char** argv)
     // Its baseline is taken here, so the load it reports afterwards covers the tests and nothing that set them up.
     auto reporting = run_reporting{.registry = &registry,
                                    .is_entry_run = is_entry_run,
-                                   .has_benchmarks = has_benchmarks,
+                                   .reports_resources = framing.reports_resources,
+                                   .has_benchmarks = framing.describes_host,
                                    .benchmark_load_before = benchmark_load_before,
                                    .benchmark_pinned = benchmark_pinned,
                                    .cpu_sampler = cc::make_unique<cc::process_cpu_sampler>()};
 
-    // A test run only: an app, a command or an example is a program that may legitimately sit idle, and a benchmark times itself.
-    // Nor under a debugger, where a test paused at a breakpoint is not a hung one.
-    auto const is_test_run = !is_entry_run
-                          && (config.selected_bucket == nx::config::test_bucket::normal
-                              || config.selected_bucket == nx::config::test_bucket::manual);
-    auto const watchdog_secs = is_test_run && !cc::impl::is_debugger_connected() ? config.watchdog_secs : 0.0;
+    // Not under a debugger either, where a test paused at a breakpoint is not a hung one.
+    auto const watchdog_secs = framing.is_watched && !cc::impl::is_debugger_connected() ? config.watchdog_secs : 0.0;
 
     // A host that owns the thread gets the run in steps, and the report once the last one finishes.
     // Its callbacks — a WebGPU readback, a timer — run only between steps, so a blocking run there would never see them.

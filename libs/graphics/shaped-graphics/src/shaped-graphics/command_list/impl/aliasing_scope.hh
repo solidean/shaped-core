@@ -28,11 +28,15 @@ public:
              cc::span<raw_buffer const* const> vertex_buffers,
              raw_buffer const* index_buffer);
 
+    /// Adds the buffer an indirect dispatch reads its counts from, which WebGPU treats as one more read.
+    void add_indirect_args(raw_buffer const* args);
+
 private:
     struct use
     {
         raw_buffer const* buffer = nullptr;
         bool writes = false;
+        bool indirect_args = false;
         int group = -1;          // the group slot, or -1 for a vertex or index buffer
         cc::string_view binding; // within the group, which the recording keeps alive
         int vertex_slot = -1;    // or -1 for the index buffer

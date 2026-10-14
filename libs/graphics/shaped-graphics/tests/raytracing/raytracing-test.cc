@@ -52,6 +52,7 @@ ASYNC_INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_hand
 
     // Build the BLAS then, in the SAME list, a TLAS referencing it.
     // That exercises the intra-list accel_write -> accel_read ordering between the two builds.
+    auto const before = ctx->metrics.stats();
     auto cmd = ctx->create_command_list();
     auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&tri, 1));
     REQUIRE(blas != nullptr);
@@ -62,6 +63,11 @@ ASYNC_INVOCABLE_TEST("sg - builds a triangle blas and a tlas", (sg::context_hand
     auto const tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&inst, 1));
     REQUIRE(tlas != nullptr);
     ctx->submit_command_list(cc::move(cmd));
+
+    // Each build is counted once, when the list that recorded it submits.
+    auto const built = ctx->metrics.stats() - before;
+    CHECK(built[sg::stat::blas_builds] == 1);
+    CHECK(built[sg::stat::tlas_builds] == 1);
 
     CHECK(blas->size_in_bytes() > 0);
     CHECK(blas->geometry_count() == 1);

@@ -218,6 +218,20 @@ void registry::finalize()
         functions_by_name[f.name].push_back(builtin_id(i));
         functions_by_signature[signature_hash<cc::string>(f.name, f.parameters, f.named_only)].push_back(builtin_id(i));
     }
+
+    language const languages[] = {language::hlsl, language::wgsl, language::msl};
+    for (auto const l : languages)
+    {
+        auto& names = written_names[u8(l)];
+        names.clear();
+        for (auto const& f : functions)
+        {
+            if (f.write.kind == spelling_kind::call)
+                names.insert(f.called_in(l));
+            for (auto const n : f.names_in(l))
+                names.insert(n);
+        }
+    }
 }
 
 builtin_type_id registry::find_type(cc::string_view name) const

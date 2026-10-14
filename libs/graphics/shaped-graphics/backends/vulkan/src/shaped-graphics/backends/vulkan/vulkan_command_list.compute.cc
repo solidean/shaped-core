@@ -279,4 +279,20 @@ void vulkan_command_list::compute_dispatch(int x, int y, int z)
     flush_barriers();
     vkCmdDispatch(_buffer, u32(x), u32(y), u32(z));
 }
+
+void vulkan_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes)
+{
+    CC_ASSERT(!_in_render_pass, "dispatch must not be recorded inside a rendering scope; close the scope first");
+    auto const buffer = std::dynamic_pointer_cast<vulkan_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect dispatch arguments are not a vulkan buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect dispatch arguments are a transient buffer used past its epoch");
+
+    // The arguments are fetched at DRAW_INDIRECT, before the dispatch's shaders run.
+    track_buffer_access(*buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_group_accesses(_bound_groups, _bound_footprint, sg::pipeline_stage_flag::compute);
+    declare_array_accesses(_bound_groups, _bound_footprint, _bound_footprint_owner, sg::pipeline_stage_flag::compute,
+                           _pending_array_buffer_declares, _pending_array_texture_declares);
+    flush_barriers();
+    vkCmdDispatchIndirect(_buffer, buffer->_buffer, VkDeviceSize(offset_in_bytes));
+}
 } // namespace sg::backend::vulkan

@@ -19,13 +19,14 @@ Or the gradient is computed before the branch, where every pixel of the quad sti
 
 **It replaced a stopgap.**
 The WGSL text of an entry point that sampled used to open with `diagnostic(off, derivative_uniformity);`, which kept Tint quiet and left the undefined result in place.
+The directive is back, now because SGL has ruled: the pass refuses what is unsound before any text is written (EMIT-103).
 
 ## What it touched
 
 * Checking: a pass over the core tree of each entry point, and the diagnostic kind `non-uniform-control-flow` for a call in non-uniform control flow.
 * The builtin registry: a record says whether its builtin takes derivatives implicitly or is a barrier, and the pass reads that alone.
 * Texture methods: `sample(…, grad_x = …, grad_y = …)` takes explicit gradients, and `ddx` and `ddy` compute them ([texture-methods.md](texture-methods.md)).
-* Emitting: the WGSL directive is gone.
+* Emitting: the WGSL directive silences Tint where SGL has judged already.
 * Syntax is untouched: an annotation that asserts a branch uniform is still open.
 
 ## Already fixed by the syntax
@@ -41,7 +42,10 @@ It judges an index into a binding array too, which is marked `nonuniform` or pro
 The pass must be sound for every target: whatever it accepts reaches each barrier and each derivative in uniform control flow.
 It need not refuse everything Tint refuses.
 Where Tint's analysis is coarser than ours and refuses a sound program, the WGSL text silences Tint's check for it.
-No such program is known yet, so no mechanism exists for it; one is built when the first one turns up.
+The first such program is a pixel stage that traces a shadow ray and then samples, since Tint holds the trace's loop against the sample.
+SGL reconverges after a loop no invocation leaves by a `return` (CHK-284).
+So WGSL text that takes a derivative, or enables subgroups, switches Tint's verdict on them off (EMIT-103).
+A barrier has no such switch, so a barrier keeps WGSL's rule.
 The pass starts from WGSL's rules, and is coarser than them in one place:
 a local set anywhere in non-uniform control flow is non-uniform everywhere, where WGSL follows each assignment.
 
@@ -51,7 +55,7 @@ That is stricter than HLSL, which defines them over the active lanes, and it rel
 
 ## Open
 
-* Whether a finer analysis proves more programs uniform than WGSL's rules, and what silencing Tint for them then looks like.
+* The questions the rules have left undecided are the `## Open` of [checking](../semantics/checking.md#open): `@subgroup_size`, a load through a `nonuniform` index, and a ray query's committed hit.
 * Where `@uniform` stands: on the branch, on the value it tests, or on a function's parameter.
 * Whether an annotated branch is trusted, or checked at run time in a debug build.
 * Whether a subgroup operation may stand in non-uniform control flow, over the invocations that reach it, and what WGSL's text then silences.

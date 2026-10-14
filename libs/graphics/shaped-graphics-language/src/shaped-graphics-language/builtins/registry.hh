@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
@@ -133,6 +134,17 @@ enum class sgl::builtins::judged_operand : sgl::u8
     divisor,
 };
 
+/// The argument a call writes through, a local of the caller, whose value then differs between invocations as the call
+/// says (CHK-283).
+enum class sgl::builtins::written_argument : sgl::u8
+{
+    none,
+    /// The first, a ray query, which a trace or a step advances: it holds what its arguments and the control flow made.
+    first,
+    /// The one past its signature (`takes_element`), a payload or a callable's parameter: other shaders write it back.
+    element,
+};
+
 /// How every target writes a call of one builtin function.
 struct sgl::builtins::spelling
 {
@@ -245,6 +257,11 @@ struct sgl::builtins::function_record
     bool is_quad_operation = false;
     /// `workgroup_uniform_load`: a barrier whose argument is workgroup memory and whose result is uniform (CHK-374).
     bool is_uniform_load = false;
+    /// Gives what differs between the invocations of a stage whatever its arguments are: a ray-tracing stage's launch
+    /// index, its ray and its hit (CHK-283).
+    /// The size of the launch is the same in all of them, and gives no such thing.
+    bool differs_between_invocations = false;
+    written_argument writes_through = written_argument::none;
     /// The second argument is a lane, a mask or a delta, a constant `int` from 0 to below this (CHK-378); 0 for a call
     /// without one.
     i32 constant_lane_below = 0;
@@ -313,6 +330,9 @@ struct sgl::builtins::registry
     cc::map<cc::string, cc::vector<builtin_id>> functions_by_name;
     /// The overloads whose name, parameters and named-only names hash alike (`signature_hash`); filled by `finalize` too.
     cc::map<u64, cc::vector<builtin_id>> functions_by_signature;
+    /// Per language, every name a function writes there, which `function_record::writes_name` takes one record at a time.
+    /// Filled by `finalize` too.
+    cc::set<cc::string> written_names[u8(language::msl) + 1];
 
     builtin_type_id add(type_record record);
     builtin_id add(function_record record);
@@ -336,6 +356,8 @@ struct sgl::builtins::registry
                                            cc::span<cc::string_view const> parameters,
                                            cc::span<cc::string_view const> named_only) const;
     [[nodiscard]] bool has_function_named(cc::string_view name) const;
+    /// The names some function writes in `l`, which a name of the program written there must not be.
+    [[nodiscard]] cc::set<cc::string> const& names_written_in(language l) const { return written_names[u8(l)]; }
 
     /// The whole of `prelude/builtins.sgl`, byte for byte, in registration order.
     [[nodiscard]] cc::string prelude_text() const;

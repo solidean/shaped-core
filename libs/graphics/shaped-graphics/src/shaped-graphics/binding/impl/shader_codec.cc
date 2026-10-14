@@ -17,6 +17,10 @@ constexpr u32 k_texture_sample_type_count = u32(texture_sample_type::uint) + 1;
 constexpr u32 k_sampler_binding_type_count = u32(sampler_binding_type::comparison) + 1;
 constexpr u32 k_access_mode_count = u32(access_mode::read_write) + 1;
 
+/// A floor on what put_binding writes: its fixed fields plus its two strings' length prefixes.
+/// It only has to stay at or below the real size, since it bounds a count before anything is allocated for it.
+constexpr isize k_min_binding_bytes = 57;
+
 void put_u32(cc::vector<byte>& out, u32 value)
 {
     for (auto i = 0; i < 4; ++i)
@@ -72,6 +76,7 @@ void put_optional_enum(cc::vector<byte>& out, cc::optional<EnumT> const& value)
 void put_binding(cc::vector<byte>& out, binding const& b)
 {
     put_string(out, b.name);
+    put_string(out, b.reflected_name);
     put_optional_u32(out, b.group_index);
     put_optional_u32(out, b.space);
     put_u32(out, b.index);
@@ -102,7 +107,7 @@ struct reader
 
     [[nodiscard]] bool take(isize count)
     {
-        if (!ok || count < 0 || pos + count > data.size())
+        if (!ok || count < 0 || count > data.size() - pos)
         {
             ok = false;
             return false;
@@ -186,6 +191,7 @@ struct reader
     {
         auto b = binding();
         b.name = get_string();
+        b.reflected_name = get_string();
         b.group_index = get_optional_u32();
         b.space = get_optional_u32();
         b.index = get_u32();
@@ -301,7 +307,7 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
     // A binding is at least its fixed fields plus two length prefixes, so a claimed count far past what the
     // remaining bytes could hold is rejected before anything is allocated for it.
     // The number is a floor on the encoded size, so it only has to stay <= what put_binding actually writes.
-    auto const binding_count = r.get_count(49);
+    auto const binding_count = r.get_count(k_min_binding_bytes);
     for (auto i = isize(0); r.ok && i < binding_count; ++i)
         shader.bindings.push_back(r.get_binding());
 
@@ -341,5 +347,31 @@ cc::optional<compiled_shader> decode_compiled_shader(cc::span<byte const> bytes)
         return {};
 
     return shader;
+}
+
+cc::vector<byte> encode_bindings(cc::span<binding const> bindings)
+{
+    auto out = cc::vector<byte>();
+    put_u32(out, k_shader_codec_version);
+    put_u64(out, u64(bindings.size()));
+    for (auto const& b : bindings)
+        put_binding(out, b);
+    return out;
+}
+
+cc::optional<cc::vector<binding>> decode_bindings(cc::span<byte const> bytes)
+{
+    auto r = reader{.data = bytes};
+    if (r.get_u32() != k_shader_codec_version)
+        return {};
+
+    auto bindings = cc::vector<binding>();
+    auto const count = r.get_count(k_min_binding_bytes);
+    for (auto i = isize(0); r.ok && i < count; ++i)
+        bindings.push_back(r.get_binding());
+
+    if (!r.ok || r.pos != bytes.size())
+        return {};
+    return bindings;
 }
 } // namespace sg::impl

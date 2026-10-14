@@ -82,7 +82,7 @@ ASYNC_TEST("slib sgl modules - a shader uses a module of its package's directory
     // the module's file is one the shader was built from, beside its own
     auto has_module = false;
     for (auto const& d : f.main->dependencies())
-        has_module = has_module || d == "mod_pkg/view.sgl";
+        has_module = has_module || d.path == "mod_pkg/view.sgl";
     CHECK(has_module);
 }
 

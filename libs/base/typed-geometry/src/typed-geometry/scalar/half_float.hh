@@ -170,8 +170,12 @@ struct tg::scalar_traits<tg::half_float>
     static constexpr bool has_rounding = true;
     static constexpr bool has_abs = true;
     static constexpr bool has_pow2 = true;
+    static constexpr bool has_non_finite = true;
 
     [[nodiscard]] static constexpr T one() { return T::make_from_bits(0x3c00); }
+    [[nodiscard]] static constexpr bool is_nan(T x) { return x.is_nan(); }
+    [[nodiscard]] static constexpr bool is_inf(T x) { return x.is_inf(); }
+    [[nodiscard]] static constexpr bool is_finite(T x) { return x.is_finite(); }
     [[nodiscard]] static constexpr bool is_zero(T x) { return (x.bits() & 0x7fff) == 0; }
     [[nodiscard]] static constexpr bool is_one(T x) { return x.bits() == 0x3c00; }
     [[nodiscard]] static constexpr T abs(T x) { return T::make_from_bits(u16(x.bits() & 0x7fff)); }

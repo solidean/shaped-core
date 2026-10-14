@@ -59,6 +59,7 @@ public:
 
     /// Streams tightly-packed pinned `data` into one region of `texture`.
     /// Needs texture_usage::copy_dst, plus allow_subresource_stream / allow_region_stream for the narrower scopes.
+    /// A depth or depth-stencil format is refused, here and by `from_source_to_texture`.
     [[nodiscard]] stream_upload_handle bytes_to_texture(raw_texture_handle texture,
                                                         cc::pinned_data<byte const> data,
                                                         subresource_index const& subresource = {},

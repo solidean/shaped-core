@@ -41,6 +41,32 @@ template <class T>
     return scalar_traits<T>::abs(x);
 }
 
+// Classification of the values that are no number; only for scalars with has_non_finite, so an integer refuses rather than answering a constant.
+
+/// Whether x is a NaN.
+template <class T>
+[[nodiscard]] constexpr bool is_nan(T x)
+    requires(tg::traits::has_non_finite<T>)
+{
+    return scalar_traits<T>::is_nan(x);
+}
+
+/// Whether x is an infinity, of either sign.
+template <class T>
+[[nodiscard]] constexpr bool is_inf(T x)
+    requires(tg::traits::has_non_finite<T>)
+{
+    return scalar_traits<T>::is_inf(x);
+}
+
+/// Whether x is neither a NaN nor an infinity.
+template <class T>
+[[nodiscard]] constexpr bool is_finite(T x)
+    requires(tg::traits::has_non_finite<T>)
+{
+    return scalar_traits<T>::is_finite(x);
+}
+
 // Exponentials — base and exponent share one type, so a mixed-type call needs an explicit cast rather than a silent promotion.
 // All require a scalar with has_exponential.
 

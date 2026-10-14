@@ -832,6 +832,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
                      .sampleRateShading = supported.sampleRateShading,
                      .fillModeNonSolid = supported.fillModeNonSolid,
                      .samplerAnisotropy = supported.samplerAnisotropy,
+                     .textureCompressionBC = supported.textureCompressionBC,
                      .fragmentStoresAndAtomics = VK_TRUE,
                      .shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats,
                      .shaderInt16 = shader_features.shader_int16},

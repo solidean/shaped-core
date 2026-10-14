@@ -25,8 +25,37 @@
 
 #endif
 
+namespace
+{
+// True where the platform demangler would hand `symbol` back unchanged, so it need not be entered.
+bool cannot_be_mangled(cc::string_view symbol)
+{
+#ifdef CC_OS_WINDOWS
+    // Every name UnDecorateSymbolName rewrites carries a '?'.
+    return !symbol.contains('?');
+#else
+    // An Itanium mangling, a type encoding included, is [A-Za-z0-9_$.] alone; __cxa_demangle rejects anything else.
+    for (auto const c : symbol)
+    {
+        auto const is_mangling_char = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                                   || c == '_' || c == '$' || c == '.';
+        if (!is_mangling_char)
+        {
+            return true;
+        }
+    }
+    return false;
+#endif
+}
+} // namespace
+
 cc::string cc::demangle_symbol(cc::string_view symbol)
 {
+    if (cannot_be_mangled(symbol))
+    {
+        return cc::string::create_copy_of(symbol);
+    }
+
 #ifdef CC_OS_WINDOWS
     // MSVC symbols are typically well under 4 KB.
     constexpr DWORD buffer_size = 4096;

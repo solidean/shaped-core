@@ -411,6 +411,19 @@ A call is no jump, so a path that discarded would still have had to produce a va
 The portable meaning is that the pixel has no effect after it — no target, no depth, no stencil, no store — which every target keeps.
 Whether the pixel keeps running as a helper for its quad's derivatives is where the targets differ, and the writers demote wherever a target offers the choice.
 
+## CHK-284
+
+WGSL holds a divergent `break` against everything after its loop.
+That refuses a pixel stage that traces a shadow ray and then samples, since the trace is a loop each pixel leaves when its own ray is done.
+Every invocation that enters a loop with no `return` in it reaches the statement after it, and every target's structured control flow reconverges there.
+SPIR-V states it for the core: control flow uniform on entry to a structured loop, which every invocation leaves through its merge block, is uniform again after that block.
+That needs no `SubgroupUniformControlFlowKHR`, which only extends the same promise to flow uniform within a subgroup and not the whole workgroup, and SGL never counts that as uniform (CHK-377).
+DXC emits neither that mode nor maximal reconvergence for vulkan, and nothing here needs it to.
+A `return` is the exit that does not come back, so a loop some invocations leave by one keeps WGSL's rule.
+SGL runs its own analysis, so inheriting Tint's pessimism would buy nothing but refusals, and the WGSL text switches Tint's verdict off (EMIT-103).
+A barrier is where that switch does not exist: WGSL refuses one in what Tint judges non-uniform, whatever the directive.
+So a barrier keeps WGSL's rule on every target, and one shader means the same on all of them.
+
 ## CHK-285
 
 `T[N]` reads the way a C, HLSL or GLSL reader writes an array, and `texture_2d[float4][64]` is a binding array by the same rule, with no second spelling.
@@ -646,3 +659,16 @@ HLSL forms a compute stage's quads from its threads' ids, as it forms the quads 
 DXC writes them for vulkan in the same derivative groups, which is why sg's vulkan grants `subgroups` only with linear compute derivatives.
 WGSL and MSL form quads of four consecutive invocations of a subgroup, which agree with the row and with no square.
 One row whose length is a multiple of 4 is the one shape every target forms alike, and it is the shape a single-pass reduction already takes.
+
+## CHK-389
+
+A loop worth unrolling is one whose index picks an element of a local array, a channel, or a branch, and what pays is the index becoming a constant.
+An array indexed by a constant stays in registers, where one indexed at run time is memory on every GPU.
+The target's own hints cannot promise that the same way everywhere.
+HLSL's `[unroll]` is the one a compiler must obey, MSL has only clang's `#pragma unroll`, which is advisory, and WGSL has none at all.
+So the compiler writes the copies itself, and every target compiles the same straight-line text.
+A hint over the loop would leave WebGPU the slow path on the very shaders that asked.
+Copying is also where the index can be a constant to SGL's own rules, which folds a branch on it as CHK-356 folds any other.
+The limit of 256 copies bounds the text a mistyped bound can write, and nesting is where one multiplies, so a nest's copies count together.
+A loop that long wants a loop, and it means what it meant without the attribute, so it compiles as one and the warning tells its author the copies were not written.
+Unrolling every small constant-range loop without the attribute was not chosen: register pressure and text size would change behind the author's back, with no way to keep a loop a loop.

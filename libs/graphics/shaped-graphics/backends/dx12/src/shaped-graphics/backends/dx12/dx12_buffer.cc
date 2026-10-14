@@ -34,34 +34,29 @@ D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usages 
     return desc;
 }
 
-void dx12_buffer::declare_access(sg::command_list_slot slot, sg::pipeline_stage_flags stages, sg::access_flags access) const
+dx12_track_result dx12_buffer::track_access(sg::command_list_slot slot,
+                                            sg::pipeline_stage_flags stages,
+                                            sg::access_flags access) const
 {
-    _access.lock(
-        [&](access_tracking& t)
+    return _access.lock(
+        [&](access_tracking& t) -> dx12_track_result
         {
             int const i = int(slot);
-            CC_ASSERT(i >= 0, "declare_access with an invalid command_list_slot");
+            CC_ASSERT(i >= 0, "track_access with an invalid command_list_slot");
             while (t.slots.size() <= i)
                 t.slots.push_back(access_slot{});
             auto& e = t.slots[i];
             e.active = true; // a fresh state on first touch (access_slot{} default); no between-lists seed
             e.state.declare(stages, access); // accumulate only — layout defaults to general (buffers never transition)
-        });
-}
 
-bool dx12_buffer::mark_pending_barrier(sg::command_list_slot slot) const
-{
-    return _access.lock(
-        [&](access_tracking& t) -> bool
-        {
-            // Only ever called right after declare_access, so the slot exists and is active.
-            int const i = int(slot);
-            CC_ASSERT(i < t.slots.size() && t.slots[i].active, "mark_pending_barrier before declare_access");
-            auto& e = t.slots[i];
-            if (e.pending_barrier)
-                return false;
+            auto const writes = sg::is_unordered_write(access);
+            auto const result = dx12_track_result{.first_this_op = !e.pending_barrier,
+                                                  .first_this_list = !e.recorded,
+                                                  .first_write_this_list = writes && !e.written};
             e.pending_barrier = true;
-            return true;
+            e.recorded = true;
+            e.written = e.written || writes;
+            return result;
         });
 }
 
@@ -78,34 +73,18 @@ sg::access_barrier dx12_buffer::flush_access(sg::command_list_slot slot) const
         });
 }
 
-bool dx12_buffer::mark_recorded(sg::command_list_slot slot) const
-{
-    return _access.lock(
-        [&](access_tracking& t) -> bool
-        {
-            int const i = int(slot);
-            CC_ASSERT(i >= 0, "mark_recorded with an invalid command_list_slot");
-            while (t.slots.size() <= i)
-                t.slots.push_back(access_slot{});
-            auto& e = t.slots[i];
-            if (e.recorded)
-                return false;
-            e.recorded = true;
-            return true;
-        });
-}
 
 void dx12_buffer::finalize_slot(sg::command_list_slot slot) const
 {
     _access.lock(
         [&](access_tracking& t)
         {
-            // Only ever called for a buffer this list touched, since declare_access set the slot active — see the command list's submit path.
+            // Only ever called for a buffer this list touched, since track_access set the slot active — see the command list's submit path.
             // A buffer has no layout and no between-lists state, so finalize just frees the slot; its state is discarded, not carried.
             int const i = int(slot);
             CC_ASSERT(i < t.slots.size() && t.slots[i].active, "finalize of a buffer this list never touched");
             CC_ASSERT(!t.slots[i].state.has_pending_declares(), "a declared access was never flushed by a GPU op");
-            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + state
+            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + written + state
         });
 }
 
@@ -117,7 +96,7 @@ void dx12_buffer::discard_slot(sg::command_list_slot slot) const
             // Like finalize, only ever called for a buffer this list touched (its slot is active).
             int const i = int(slot);
             CC_ASSERT(i < t.slots.size() && t.slots[i].active, "discard of a buffer this list never touched");
-            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + state
+            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + written + state
         });
 }
 
