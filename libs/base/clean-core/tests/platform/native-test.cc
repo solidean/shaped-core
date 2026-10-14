@@ -1,6 +1,7 @@
 #include <clean-core/common/macros.hh>
 #include <clean-core/platform/native.hh>
 #include <clean-core/platform/source_location.hh>
+#include <clean-core/platform/symbolize.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 
@@ -19,6 +20,16 @@ TEST("cc demangle_symbol - readable names come back unchanged")
     CHECK(cc::demangle_symbol("class cc::string") == "class cc::string");
     CHECK(cc::demangle_symbol("") == "");
 }
+
+#ifdef CC_OS_WINDOWS
+TEST("cc demangle_symbol - a readable name never takes the DbgHelp lock")
+{
+    // The lock is not recursive, so taking it here would deadlock, which the watchdog reports as a hang.
+    auto result = cc::string();
+    cc::impl::with_dbghelp([&] { result = cc::demangle_symbol("int __cdecl foo(int)"); });
+    CHECK(result == "int __cdecl foo(int)");
+}
+#endif
 
 TEST("cc demangle_symbol - a mangled name is still demangled")
 {

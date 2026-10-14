@@ -119,7 +119,9 @@ Fixing CI before a review means fixing code the review may throw away, so the or
 - **wasm is one of those platforms on every box.** The emsdk carries its own node, and `dev.py test --preset emscripten-… --emsdk-path <emsdk>` builds and runs the suite with it.
   "No browser here" is not a reason to review wasm code by reading.
   Once actually built, a wasm threads preset reproduced a per-worker stack limit a review had until then only argued from a standalone probe.
-  **So is webgpu**: `emscripten-threads-webgpu-relwithdebinfo`, CI's preset, runs sg's webgpu backend under the emsdk's node, which is Dawn.
+  **So is webgpu**: `emscripten-threads-webgpu-relwithdebinfo`, CI's preset, runs sg's webgpu backend under the emsdk's node.
+  Node has no WebGPU of its own: Dawn comes from the `webgpu` npm package pinned in [tools/dev/js/package.json](../../tools/dev/js/package.json).
+  dev.py installs it on first use, and without it those runs skip.
   A review once reported its sg runs as covering every backend while the webgpu-only test it had asked for skipped on dx12 and vulkan, and got back "we should be able to run webgpu here too".
   A test that skips on every native backend is a test nobody ran.
 - **Run what the author's machine could not run, not just compile it.**

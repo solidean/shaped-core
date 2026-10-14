@@ -169,6 +169,7 @@ target_sources(clean-core
     src/clean-core/platform/intrinsics.hh
 
     src/clean-core/math/bit.hh
+    src/clean-core/math/float.hh
     src/clean-core/math/random.hh
     src/clean-core/math/wide_arith.hh
 
@@ -539,6 +540,7 @@ if(SC_BUILD_TESTS)
         tests/algorithm/sort-async-test.cc
 
         tests/math/bit-test.cc
+        tests/math/float-test.cc
         tests/math/random-test.cc
         tests/math/wide_arith-test.cc
 
