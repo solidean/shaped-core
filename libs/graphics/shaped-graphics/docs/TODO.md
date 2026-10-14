@@ -433,3 +433,9 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   `arr.transient.release(view)` frees an element its owner is done with; one nobody releases keeps its view, and the resource behind it, until the array fills.
   If owners turn out to forget, the automatic step is freeing by age: once per epoch, free every slot nobody acquired for N epochs.
   It costs a sweep or per-slot bookkeeping each epoch, N is a policy someone has to pick, and an element wanted every N+1 epochs is re-minted each time.
+  The other automatic step is weak-keyed slots: a slot holds its view weakly, and is freed when the resource behind it dies.
+  That needs no policy, but it needs a death notice from the resource to every array holding it, and the descriptor still references the resource until the slot is cleared.
+
+- **Every indirect dispatch re-types the shader's count struct by hand.**
+  A shader writes its group counts as its own `uint3` struct, and each call site spells `reinterpret_as<sg::dispatch_args>()` to hand it to `dispatch_groups_indirect`.
+  A prelude `dispatch_args` type in SGL that generates as `sg::dispatch_args` would make the buffer the right type from the start, and remove every one of those casts.
