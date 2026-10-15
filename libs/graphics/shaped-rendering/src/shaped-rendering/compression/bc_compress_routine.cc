@@ -31,6 +31,22 @@ sg::pixel_format family_of(sg::pixel_format format)
     }
 }
 
+/// `format` with its sRGB encoding taken off, and nothing else: a signed format stays signed.
+sg::pixel_format without_srgb(sg::pixel_format format)
+{
+    switch (format)
+    {
+    case sg::pixel_format::bc1_rgba_unorm_srgb:
+        return sg::pixel_format::bc1_rgba_unorm;
+    case sg::pixel_format::bc3_unorm_srgb:
+        return sg::pixel_format::bc3_unorm;
+    case sg::pixel_format::bc7_rgba_unorm_srgb:
+        return sg::pixel_format::bc7_rgba_unorm;
+    default:
+        return format;
+    }
+}
+
 /// Whether `format` is a signed BC4 or BC5, whose endpoints the encoder writes as signed bytes.
 bool is_snorm_target(sg::pixel_format format)
 {
@@ -63,7 +79,7 @@ sg::pixel_format bc_compress_routine::target_for(sg::pixel_format source, sg::pi
 {
     CC_ASSERT(is_supported_target(family), "not a format bc_compress_routine writes");
     if (!sg::is_srgb_format(source))
-        return family_of(family);
+        return without_srgb(family);
     switch (family_of(family))
     {
     case sg::pixel_format::bc1_rgba_unorm:
@@ -134,6 +150,9 @@ cc::shared_async<cc::unit> bc_compress_routine::init(sg::routine_init_scope scop
                                       : ctx.cached.acquire_binding_group_layout<sgl_shaders::bc_io8>();
     _pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = layout});
     co_await cc::async_settled(_pipeline);
+    auto const* const built = _pipeline->try_value();
+    if (built == nullptr || *built == nullptr)
+        fail_init(); // a failed build would otherwise leave the routine ready, and execute declining forever
     co_return;
 }
 

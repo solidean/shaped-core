@@ -1,5 +1,5 @@
 // The hardware's decode of a texture, texel by texel, into a buffer the test reads back.
-// A BC7 texture and its source go through the same load, so the test compares what a shader would actually see.
+// A compressed texture and its source go through the same load, so the test compares what a shader would actually see.
 
 @inline binding decode_constants:
     width: int
