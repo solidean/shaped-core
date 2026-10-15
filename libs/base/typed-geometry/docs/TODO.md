@@ -39,6 +39,10 @@ Add entries as we discover them, and remove them as they land.
 
 ## transform
 
+- **Camera projections: `perspective`, `orthographic` and `look_at`.**
+  Every graphical consumer writes its own pair today: the sgl-cube example, the cube editor, and the Lumion prototype's camera.
+  Each pins its own handedness and depth range, which is exactly the decision tg has to make once, so the design space is large enough to postpone.
+  It wants at least: left- and right-handed variants or a convention choice, a [0, 1] and a [-1, 1] depth range, reversed and infinite far planes, and the field of view as a `tg::angle`.
 - **Transforms between two different dimensions.**
   `homogeneous_transform` carries a source and a target dimension, and every signature is written in terms of the pair.
   But the type `static_assert`s that they are equal, so lifting and projecting are not implemented.
