@@ -19,7 +19,7 @@
 ///
 /// **This is the seam the hybrid integrator grows from.**
 /// Every target is the layer's slot of the same meaning, in the format the tracer writes its guides in, so a lighting pass after the raster reads either path's alike.
-/// A pixel no surface covers holds the environment in `color`, zero in every G-buffer target, and 1 in `primary_depth`.
+/// A pixel no surface covers holds the environment in `color`, its reprojection in `motion`, 1 in `primary_depth`, and zero in every other target.
 /// Every texture is at one extent and created with `render_target` usage; `module raster`'s `targets` is the same set in SGL.
 struct sv::raster_gbuffer
 {

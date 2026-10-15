@@ -123,7 +123,8 @@ Every frame writes, beside the image, the primary hit's G-buffer into the `tempo
 | `motion` | `motion_guide` | rg32_float | this pixel minus where its surface sat on the previous frame's image, in pixels |
 | `primary_depth` | `primary_depth` | r32_float | clip depth, `1 - near / depth` |
 
-A pixel no surface covers holds zero in every G-buffer target and 1 in `primary_depth`, which is what an escaped primary ray leaves there.
+A pixel no surface covers holds what an escaped primary ray leaves there.
+That is 1 in `primary_depth`, the environment's reprojection in `motion`, and zero in every other G-buffer target.
 
 What follows from putting it there:
 

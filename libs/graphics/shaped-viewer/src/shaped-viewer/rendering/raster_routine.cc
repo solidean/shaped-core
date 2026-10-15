@@ -259,17 +259,17 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     auto const depth = ctx.transient.create_texture_2d(
         {.format = depth_format, .width = extent[0], .height = extent[1], .usage = sg::texture_usage::depth_stencil});
 
-    // Cleared to what a pixel no surface covers holds, so the environment pass need only write the image.
-    auto const zero = tg::vec4f(0, 0, 0, 0);
+    // Every pixel of every target is written, by a surface or by the environment behind them, so nothing is loaded.
+    // The depth alone is cleared, to the far plane the environment tests against.
     auto pass = cmd.raster.render_to(raster::targets{
-        .color = t.color.as_render_target_view().cleared(zero),
-        .normal = t.normal.as_render_target_view().cleared(zero),
-        .depth = t.depth.as_render_target_view().cleared(zero),
-        .albedo = t.albedo.as_render_target_view().cleared(zero),
-        .specular_albedo = t.specular_albedo.as_render_target_view().cleared(zero),
-        .roughness = t.roughness.as_render_target_view().cleared(zero),
-        .motion = t.motion.as_render_target_view().cleared(zero),
-        .primary_depth = primary_depth.as_render_target_view().cleared(tg::vec4f(1, 1, 1, 1)),
+        .color = t.color.as_render_target_view().discarded(),
+        .normal = t.normal.as_render_target_view().discarded(),
+        .depth = t.depth.as_render_target_view().discarded(),
+        .albedo = t.albedo.as_render_target_view().discarded(),
+        .specular_albedo = t.specular_albedo.as_render_target_view().discarded(),
+        .roughness = t.roughness.as_render_target_view().discarded(),
+        .motion = t.motion.as_render_target_view().discarded(),
+        .primary_depth = primary_depth.as_render_target_view().discarded(),
         .depth_stencil = depth.as_depth_stencil_view().cleared(0.0f),
     });
 
