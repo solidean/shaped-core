@@ -326,7 +326,8 @@ Four decisions the mapping needed:
 - **Alpha.** `OPAQUE` binds nothing, leaving the default 1, and `BLEND` binds `opacity`, which the tracer treats as coverage.
   `MASK` binds the **`alpha_cutoff` attribute on the openpbr type**, defaulting to 0 (disabled), which the type declares as its opacity cutoff.
   Baking the step into the imported alpha instead fails as soon as mips filter it, which is exactly when a cutout matters.
-- **Occlusion.** `occlusion` is **declared on the type and imported**, because a raster fallback will want baked AO and an asset that loses its AO map on load cannot get it back.
+- **Occlusion.** `occlusion` is **declared on the type, imported, and named as the type's `occlusion_attribute`**.
+  The raster path darkens its environment light by it, which is the one term there nothing else occludes.
   The path-tracing fragment **ignores it**, with a comment saying why: baked AO in a path tracer is double-counting, since the integrator computes that occlusion correctly and per bounce.
 - **Packed textures.** These are the norm rather than the exception, so `texture_sample_source` grows a **channel swizzle**.
   It is four selectors over `{r, g, b, a, zero, one}`, of which the declaration's `component_count()` decides how many are read.

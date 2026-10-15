@@ -34,7 +34,7 @@ namespace
 // `occlusion` is declared and imported, and deliberately not read here.
 // Baked ambient occlusion in a path tracer is double-counting: the integrator computes that occlusion itself, correctly and
 // per bounce, so applying a baked term on top darkens the surface twice.
-// It is carried anyway because a raster fallback will want it, and an asset that lost its AO map on load cannot get it back.
+// The type declares it as its occlusion attribute instead, which the raster path darkens its environment light by.
 constexpr cc::string_view openpbr_shader = R"sgl(
 surface.base_weight = saturate(base_weight)
 surface.base_color = saturate(base_color)
@@ -183,7 +183,7 @@ surface.emission_color = color
     // 0 disables it, so `OPAQUE` and `BLEND` both bind nothing here and opacity stays continuous.
     signature.push_back(material_signature_entry::of("alpha_cutoff", 0.0f));
 
-    // Baked ambient occlusion, imported but ignored by the path-tracing fragment — see the fragment for why it is carried.
+    // Baked ambient occlusion, which the raster path's environment light reads and the path-tracing fragment ignores — see the fragment.
     signature.push_back(material_signature_entry::of("occlusion", 1.0f));
 
     // Nonzero makes the surface a shell with no interior: it does not refract and encloses no medium.
@@ -204,7 +204,7 @@ surface.emission_color = color
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
 
     return material_type::create(cc::string(builtin_material::openpbr), cc::move(signature), cc::string(openpbr_shader),
-                                 "opacity", "alpha_cutoff");
+                                 "opacity", "alpha_cutoff", "occlusion");
 }
 
 [[nodiscard]] material_type make_pbr()

@@ -586,6 +586,57 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a minified textured cutout cuts again
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a baked occlusion of one half halves the environment's light",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // A white, rough quad filling the view under a uniform environment and no light: all it shows is the ambient term.
+    auto quad = cc::vector<tg::pos3f>();
+    for (auto const& p : {tg::pos3f(-2, -2, 0), tg::pos3f(2, -2, 0), tg::pos3f(2, 2, 0), tg::pos3f(-2, -2, 0),
+                          tg::pos3f(2, 2, 0), tg::pos3f(-2, 2, 0)})
+        quad.push_back(p);
+    using binding = sv::material_attribute_binding;
+    auto& lib = sv_test::shared_material_library();
+    auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto const quad_of = [&](cc::string_view name, f32 occlusion)
+    {
+        auto const material = lib.acquire(
+            sv::material::create(cc::string(name), openpbr,
+                                 {binding::of("base_color", tg::vec3f(1, 1, 1)),
+                                  binding::of("specular_roughness", 1.0f), binding::of("occlusion", occlusion)}));
+        return sv::mesh{.name = cc::string(name),
+                        .geometry = sv::triangle_geometry::create_from_positions(quad),
+                        .material = material};
+    };
+
+    auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto const environment = sv::background::uniform(tg::vec3f(1, 1, 1));
+    constexpr auto size = tg::vec2i(16, 16);
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const unoccluded = resources.acquire_scene_item(quad_of("unoccluded", 1.0f));
+    auto const occluded = resources.acquire_scene_item(quad_of("half occluded", 0.5f));
+    resources.wait_for_pending_uploads();
+    auto const lit = co_await draw_raster(ctx, resources, unoccluded, cam, {}, environment, size);
+    auto const dimmed = co_await draw_raster(ctx, resources, occluded, cam, {}, environment, size);
+    REQUIRE(lit.color.size() == dimmed.color.size());
+
+    auto const center = isize(size[1] / 2) * isize(size[0]) + isize(size[0] / 2);
+    REQUIRE(lit.color[center][1] > 0.1f);
+    for (auto c = 0; c < 3; ++c)
+        CHECK(tg::abs(dimmed.color[center][c] / lit.color[center][c] - 0.5f) < 1e-3f)
+            .context(cc::format("channel {}: {} occluded, {} not", c, dimmed.color[center][c], lit.color[center][c]));
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 ASYNC_INVOCABLE_TEST("sv::raster_routine - a surface one unit in front of another at 2000 wins its depth test",
                      (sg::context_handle const& ctx_h))
 {

@@ -673,6 +673,7 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
 /// The raster path's pixel stage of one triangle permutation: `sv_raster`, over the triangle module `raster`'s vertex stage drew.
 ///
 /// The cutout reads the type's declared opacity through the same attribute function the material does, so a pixel cuts exactly what a hit would.
+/// The type's declared occlusion reaches `raster.shade` the same way, and 1 where it declares none.
 [[nodiscard]] cc::string generate_raster_pixel(resolved_material const& r,
                                                material_parameter_layout const& layout,
                                                material_opacity const& opacity)
@@ -697,7 +698,11 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
                                                                           : cc::string("0.0");
         cc::format_append(src, "    if raster.is_cut({}, {}) => discard\n", lane(r.type->opacity_attribute), cutoff);
     }
-    cc::format_append(src, "    return raster.shade(p, ctx, sv_evaluate_material(ctx), {})\n", supplied_frame);
+    auto const occlusion = r.type->occlusion_attribute.empty()
+                             ? cc::string("1.0")
+                             : cc::format("sv_attribute_{}(ctx)", r.type->occlusion_attribute);
+    cc::format_append(src, "    return raster.shade(p, ctx, sv_evaluate_material(ctx), {}, {})\n", supplied_frame,
+                      occlusion);
     return src;
 }
 } // namespace

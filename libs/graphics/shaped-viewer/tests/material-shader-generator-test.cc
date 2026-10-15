@@ -408,6 +408,22 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     CHECK(quadric.raster_source.empty());
 }
 
+TEST("sv::generate_material_shader - the raster pixel stage hands shade the type's occlusion, or 1")
+{
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(sv::material_signature_entry::of("ao", 1.0f));
+    auto const type
+        = sv::material_type::create("occluded", cc::move(signature), "surface.base_color = base_color\n", {}, {}, "ao");
+    auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
+    CHECK(g.raster_source.contains("    return raster.shade(p, ctx, sv_evaluate_material(ctx), false, "
+                                   "sv_attribute_ao(ctx))\n"));
+
+    auto const plain_type = make_type();
+    auto const plain = sv::generate_material_shader(sv::resolve_material(plain_type, bare_material(), make_mesh()));
+    CHECK(plain.raster_source.contains("    return raster.shade(p, ctx, sv_evaluate_material(ctx), false, 1.0)\n"));
+}
+
 TEST("sv::generate_material_shader - the builtin pbr type generates")
 {
     auto lib = sv::material_library::create();

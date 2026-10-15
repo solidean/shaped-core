@@ -201,10 +201,11 @@ Gotchas:
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
 
 ```cpp
-sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute; hash128 hash; }
-sv::material_type::create(name, signature, shader, opacity_attribute = {}, opacity_cutoff_attribute = {})
-                                 //   -> hashes all five; asserts a name declared twice, a default that is not its format's size,
-                                 //      an opacity attribute that is not a declared float, and a fragment that writes geometry_opacity
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute, occlusion_attribute; hash128 hash; }
+sv::material_type::create(name, signature, shader, opacity_attribute = {}, opacity_cutoff_attribute = {}, occlusion_attribute = {})
+                                 //   -> hashes all six; asserts a name declared twice, a default that is not its format's size,
+                                 //      an opacity, cutoff or occlusion attribute that is not a declared float, and a fragment that writes geometry_opacity
+                                 //   occlusion_attribute: baked AO, which darkens the raster path's environment light alone; the tracer ignores it
                                  //   shader: an SGL FRAGMENT, statements unindented, attributes immutable locals, `surface` the one `let mut`
 t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
 sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
@@ -226,7 +227,7 @@ lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> ma
 sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
-                                 //   openpbr also declares `alpha_cutoff`, its opacity cutoff (0 = off, glTF's MASK), and `occlusion` (imported, ignored here)
+                                 //   openpbr also declares `alpha_cutoff`, its opacity cutoff (0 = off, glTF's MASK), and `occlusion`, its occlusion attribute (raster's ambient reads it, the tracer does not)
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
 sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC

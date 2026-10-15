@@ -159,7 +159,7 @@ fun direct_light(l: scene.light, b: openpbr.bsdf, f: openpbr.frame, wo_local: fl
 /// The environment's light at a surface, unoccluded: the SH's irradiance through the diffuse albedo, and its radiance about the mirror direction through the specular one.
 ///
 /// An approximation where the tracer integrates: the diffuse half is exact for a Lambertian base, and the specular half blurs toward the irradiance as the surface roughens.
-/// Nothing shadows it, so a closed room lit by its environment is lit inside as if open.
+/// Nothing shadows it but the occlusion an asset baked, which `shade` multiplies in.
 fun ambient(surface: openpbr.surface, n: float3, v: float3){drawn} -> float3:
     let sh = background_sh()
     let diffuse = scene.background_irradiance(sh, n) / pt.pi
@@ -171,7 +171,8 @@ fun ambient(surface: openpbr.surface, n: float3, v: float3){drawn} -> float3:
 ///
 /// The surface is described as `tracer.shade_triangle` describes a hit: the flat face normal of the triangle's own corners, turned toward the viewer, and the material's authored frame.
 /// `supplied_tangent_frame` is whether that frame was authored rather than defaulted, which the generated material knows.
-fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> targets:
+/// `occlusion` is the material's baked ambient occlusion, 1 for none: it darkens the environment's light and no analytic light's.
+fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){drawn, tracer.bindless, slug.tables} -> targets:
     let f = drawn.frame[0]
     let cam = scene.camera(..f.camera)
     let inst = scene.instance(..drawn.instances[p.instance as int])
@@ -209,7 +210,7 @@ fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surfac
     if wo_local.z > 0.0:
         for i in 0 ..< (f.light_count as int):
             color += direct_light(scene.light(..drawn.lights[i]), b, shading, wo_local, p.world)
-        color += ambient(surface, shading.n, v)
+        color += ambient(surface, shading.n, v) * occlusion
 
     let prev = scene.camera(..f.previous_camera)
     let motion = float2(p.position.x, p.position.y) - scene.camera_project(prev, p.world - prev.position, f.size)

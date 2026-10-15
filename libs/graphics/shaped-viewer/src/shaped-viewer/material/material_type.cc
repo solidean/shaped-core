@@ -178,13 +178,15 @@ material_type material_type::create(cc::string name,
                                     cc::vector<material_signature_entry> signature,
                                     cc::string shader,
                                     cc::string opacity_attribute,
-                                    cc::string opacity_cutoff_attribute)
+                                    cc::string opacity_cutoff_attribute,
+                                    cc::string occlusion_attribute)
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
     b.add_string(name);
     b.add_string(shader);
     b.add_string(opacity_attribute);
     b.add_string(opacity_cutoff_attribute);
+    b.add_string(occlusion_attribute);
     b.add_pod(i64(signature.size()));
     for (auto const& d : signature)
     {
@@ -200,6 +202,7 @@ material_type material_type::create(cc::string name,
                               .shader = cc::move(shader),
                               .opacity_attribute = cc::move(opacity_attribute),
                               .opacity_cutoff_attribute = cc::move(opacity_cutoff_attribute),
+                              .occlusion_attribute = cc::move(occlusion_attribute),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
 
     for (auto i = 0; i < type.signature.size(); ++i)
@@ -242,6 +245,9 @@ material_type material_type::create(cc::string name,
               "a material type's opacity_cutoff_attribute must name a float attribute its signature declares");
     CC_ASSERT(type.opacity_cutoff_attribute.empty() || !type.opacity_attribute.empty(),
               "a cutoff thresholds the opacity attribute, so a type declaring one declares both");
+    auto const* const occlusion = type.occlusion_attribute.empty() ? nullptr : type.find(type.occlusion_attribute);
+    CC_ASSERT(type.occlusion_attribute.empty() || (occlusion != nullptr && occlusion->format == scalar_float),
+              "a material type's occlusion_attribute must name a float attribute its signature declares");
 
     // Cutout opacity is read from the declared attributes by one generic reader, so a value the fragment computed would
     // shade nothing and cut out nothing — refused rather than silently ignored.

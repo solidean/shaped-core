@@ -26,7 +26,7 @@
 ///                           "surface.base_color = saturate(tint)\n"
 ///                           "surface.specular_roughness = 0.8\n");
 ///
-/// `hash` is the content key over name, signature, fragment and opacity attribute together.
+/// `hash` is the content key over name, signature, fragment and the attributes it names as opacity, cutoff and occlusion together.
 /// Two types built from equal inputs hash equal, so a library registering the same type twice keeps one.
 struct sv::material_type
 {
@@ -51,16 +51,23 @@ struct sv::material_type
     /// It must resolve to a value per instance; one sourced from a texture or a mesh attribute is ignored with a warning.
     cc::string opacity_cutoff_attribute;
 
+    /// Which declared float attribute is baked ambient occlusion, or empty for none.
+    ///
+    /// The raster path multiplies its environment light by it, and nothing else: an analytic light's direct term is not occluded by it.
+    /// The tracer never reads it, since it computes that occlusion itself and a baked term on top would count it twice.
+    cc::string occlusion_attribute;
+
     cc::hash128 hash;
 
-    /// Hashes `name`, `signature`, `shader` and both opacity attributes into the content key.
+    /// Hashes `name`, `signature`, `shader` and the opacity, cutoff and occlusion attributes into the content key.
     /// A signature declaring one name twice asserts: the resolver would have no way to say which declaration a binding meant.
-    /// So does an opacity attribute naming something the signature does not declare as a float.
+    /// So does an opacity, cutoff or occlusion attribute naming something the signature does not declare as a float.
     [[nodiscard]] static material_type create(cc::string name,
                                               cc::vector<material_signature_entry> signature,
                                               cc::string shader,
                                               cc::string opacity_attribute = {},
-                                              cc::string opacity_cutoff_attribute = {});
+                                              cc::string opacity_cutoff_attribute = {},
+                                              cc::string occlusion_attribute = {});
 
     /// The declaration of `name`, or null if this type does not read it.
     [[nodiscard]] material_signature_entry const* find(cc::string_view name) const;

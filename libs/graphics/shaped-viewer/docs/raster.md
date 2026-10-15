@@ -90,7 +90,8 @@ One still compiling is drawn through the fallback permutation's pixel stage.
 - **A sun is its center direction**, carrying the whole solid angle the disc subtends.
 - **The environment is an approximation**: its SH irradiance through the diffuse albedo, and its radiance about the mirror direction through the specular albedo.
   The second blurs toward the irradiance as the surface roughens.
-  Nothing occludes it, so a closed room lit by its environment is lit inside as if open.
+  Nothing occludes it but baked ambient occlusion: where an asset has it, the type's `occlusion_attribute` darkens this term and no other.
+  A closed room without it, lit by its environment, is lit inside as if open.
 - **Emission** is the closure's own.
 
 Nothing bounces, and nothing refracts: a glass sphere shows its reflection and nothing behind it.
@@ -172,6 +173,7 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
   Beside it: cutouts thresholded and as coverage, a capture of a raster layer finishing on its first drawn frame, and vulkan against dx12 to rounding.
   Two planes a unit apart at 2000, which a standard float depth cannot tell apart, hold the reversed depth test.
   A textured cutout minified until its mips fall under the cutoff holds the cut to level 0.
+  A baked occlusion of one half halves what the environment lights.
 - `material-shader-generator-test.cc`: the raster spelling of a cutout material, a textured opacity read at level 0 among them.
 - `render-plan-test.cc`: the slots a raster layer declares.
 - `raster-without-raytracing-test.cc`: a raster layer's capture on a device without ray tracing, and a traced layer there declined with one error; neither builds an acceleration structure.
