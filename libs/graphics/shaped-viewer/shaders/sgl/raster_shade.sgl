@@ -42,14 +42,16 @@ fun mirroring_of(inst: scene.instance) -> float:
 
 /// Where world point `p` lands through `cam`, as the clip position of the pinhole `scene.camera_ray_offset` traces through.
 ///
-/// `w` is the view depth along the camera's forward axis, and `z / w` is `1 - near / w`, the depth `sv::matrices_of` builds and the tracer writes.
+/// `w` is the view depth along the camera's forward axis, and `z / w` is `near / w`: reversed, 1 at the near plane and 0 at infinity.
+/// A float's spacing shrinks toward 0 as fast as `near / w` does, so the depth test resolves a far surface as finely as a near one.
+/// That is the raster pass's own depth alone; `primary_depth` stays `1 - near / w`, the depth `sv::matrices_of` builds and the tracer writes.
 /// Up is up in clip space, which is the tracer's image read top row first.
 fun project(cam: scene.camera, p: float3, near: float) -> hpos4:
     let offset = p - cam.position
     let depth = dot(offset, normalize(cam.forward))
     let x = dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled)
     let y = dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)
-    return hpos4(x, y, depth - near, depth)
+    return hpos4(x, y, near, depth)
 
 /// Corner `vertex % 3` of triangle `vertex / 3` of the draw's instance, pulled out of the bindless tables.
 ///

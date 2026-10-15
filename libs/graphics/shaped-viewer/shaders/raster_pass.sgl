@@ -15,10 +15,11 @@ struct environment_varyings:
     @position position: hpos4
 
 /// Vertices 0, 1 and 2 land at (0,0), (2,0) and (0,2): one triangle covering the target, on the far plane.
+/// The raster depth is reversed, so the far plane is depth 0.
 @vertex fun environment_vs(@vertex_index vertex: int) -> environment_varyings:
     let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
     let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
-    return { position = hpos4(clip.x, clip.y, 1.0, 1.0) }
+    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
 
 /// The environment where no surface was drawn, which the depth test against the far plane decides.
 @pixel fun environment_ps(p: environment_varyings){raster.drawn} -> raster.targets:

@@ -19,7 +19,12 @@ one draw per triangle item ─▶ environment where nothing was drawn
   So one vertex stage serves every mesh, indexed or not, whatever attributes it carries.
 - **The pixel stage is generated per material permutation**, `raster_source` beside the hit group and the wavefront's shade kernel.
   It builds the hit's `material.shading_context` from the triangle and its barycentrics, evaluates the material, and hands the surface to `raster.shade`.
-- **The environment** is a fullscreen pass on the far plane, depth-tested `less_equal`, so it lands only where no surface was drawn.
+- **The depth test is reversed.** A surface tests at `near / depth`, cleared to 0 at infinity and passing `greater`.
+  A float's spacing shrinks toward 0 as fast as that does, so the step it resolves stays about 6e-8 · depth wherever the surface is.
+  The standard `1 - near / depth` would step by about 6e-8 · depth² / near instead: 6 units at 1000 with the default near plane of 0.01.
+  It would also round to exactly 1 past about 3e7 · near, 3e5 units at the default, where the environment would draw over geometry.
+  Only the pass's own depth is reversed: `primary_depth` stays `1 - near / depth`, so nothing that reads it changes.
+- **The environment** is a fullscreen pass on the far plane, at depth 0 and tested `greater_equal`, so it lands only where no surface was drawn.
 - **Every frame is final.**
   The layer's accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `view_ref::is_accumulation_converged` holds at once and a capture finishes on its first drawn frame.
   A frame drawn through a stand-in material is not final: it restarts next frame, as a trace with a stand-in does.
@@ -162,6 +167,7 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
 
 - `raster-test.cc`: the empty Cornell box against the megakernel's direct light, block by block, and its G-buffer at known points.
   Beside it: cutouts thresholded and as coverage, a capture of a raster layer finishing on its first drawn frame, and vulkan against dx12 to rounding.
+  Two planes a unit apart at 2000, which a standard float depth cannot tell apart, hold the reversed depth test.
 - `material-shader-generator-test.cc`: the raster spelling of a textured cutout material.
 - `render-plan-test.cc`: the slots a raster layer declares.
 - `raster-without-raytracing-test.cc`: a raster layer's capture on a device without ray tracing, and a traced layer there declined with one error; neither builds an acceleration structure.

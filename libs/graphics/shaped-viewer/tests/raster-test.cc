@@ -487,6 +487,60 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout material cuts what the trace
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a surface one unit in front of another at 2000 wins its depth test",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // Two planes facing the camera at view depths 2000 and 2001, under the default near plane of 0.01.
+    // A standard float depth, `1 - near / depth`, steps by about 6e-8 * 2000^2 / 0.01 = 24 units there, so both planes land on the same value, 0.999995.
+    // The reversed depth, `near / depth`, puts them about 5500 float steps apart.
+    // The farther plane is drawn first, so where the two tie the nearer one fails a strict test and the farther shows.
+    constexpr auto near_depth = 2000.0f;
+    constexpr auto far_depth = 2001.0f;
+    constexpr auto half = 4000.0f; // well past the frustum's half-height of about 830 at that depth
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const z : {far_depth, near_depth})
+        for (auto const& p : {tg::pos3f(-half, -half, z), tg::pos3f(half, -half, z), tg::pos3f(half, half, z),
+                              tg::pos3f(-half, -half, z), tg::pos3f(half, half, z), tg::pos3f(-half, half, z)})
+            positions.push_back(p);
+
+    // Unlit and colored per triangle: the far plane red, the near one green.
+    auto colors = cc::vector<tg::vec3f>();
+    for (auto const& c : {tg::vec3f(1, 0, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 1, 0), tg::vec3f(0, 1, 0)})
+        colors.push_back(c);
+    auto& lib = sv_test::shared_material_library();
+    auto const unlit = lib.acquire_type(sv::builtin_material::unlit).value();
+    auto mesh = sv::mesh{.name = "two far planes",
+                         .geometry = sv::triangle_geometry::create_from_positions(positions),
+                         .material = lib.acquire(sv::material::create("two far planes", unlit, {}))};
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle, cc::move(colors)));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(mesh);
+    resources.wait_for_pending_uploads();
+
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 0, 0), tg::pos3d(0, 0, 1));
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    CHECK(cam.projection.near_plane == 0.01);
+    constexpr auto size = tg::vec2i(32, 32);
+
+    auto const drawn = co_await draw_raster(ctx, resources, item, cam, {}, sv::background{}, size);
+    auto far_shown = 0;
+    for (auto const& p : drawn.color)
+        if (!(p[1] > 0.5f && p[0] < 0.5f))
+            ++far_shown;
+    CHECK(far_shown == 0).context(cc::format("{} of {} pixels show the farther plane", far_shown, drawn.color.size()));
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 ASYNC_INVOCABLE_TEST("sv - a raster layer's capture finishes on its first drawn frame", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;

@@ -20,6 +20,7 @@ namespace raster = sv::shaders::raster;
 namespace tracer = sv::shaders::tracer;
 
 /// The depth a raster frame tests its surfaces against, which nothing outside the frame reads.
+/// It is reversed — `near / depth`, cleared to 0 at infinity — so a float resolves a far surface as finely as a near one.
 constexpr auto depth_format = sg::pixel_format::depth32_float;
 
 /// `raster.targets` as a pipeline states it: each target in the format its slot is allocated in.
@@ -89,14 +90,14 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     }
     _surface_vs = *compiled_surface_vs;
 
-    // Behind every surface: tested against the far plane the clear left, and writing no depth of its own.
+    // Behind every surface: drawn at depth 0, tested against the far plane the clear left, and writing no depth of its own.
     auto const environment = ctx.cached.acquire_raster_pipeline({
         .layout = shaders::raster_pass.environment_ps.acquire_layout(ctx),
         .vertex_shader = *compiled_environment_vs,
         .fragment_shader = *compiled_environment_ps,
         .topology = sg::primitive_topology::triangle_list, // no vertex input: the vertex index
         .rasterization = {.cull = sg::cull_mode::none},
-        .depth_stencil = {.depth_test = true, .depth_write = false, .depth_compare = sg::compare_op::less_equal},
+        .depth_stencil = {.depth_test = true, .depth_write = false, .depth_compare = sg::compare_op::greater_equal},
         .color_targets = target_states(),
         .depth_stencil_format = depth_format,
     });
@@ -166,7 +167,7 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
             .fragment_shader = *compiled,
             .topology = sg::primitive_topology::triangle_list,
             .rasterization = {.cull = sg::cull_mode::none},
-            .depth_stencil = {.depth_test = true, .depth_write = true, .depth_compare = sg::compare_op::less},
+            .depth_stencil = {.depth_test = true, .depth_write = true, .depth_compare = sg::compare_op::greater},
             .color_targets = target_states(),
             .depth_stencil_format = depth_format,
         });
@@ -269,7 +270,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         .roughness = t.roughness.as_render_target_view().cleared(zero),
         .motion = t.motion.as_render_target_view().cleared(zero),
         .primary_depth = primary_depth.as_render_target_view().cleared(tg::vec4f(1, 1, 1, 1)),
-        .depth_stencil = depth.as_depth_stencil_view().cleared(1.0f),
+        .depth_stencil = depth.as_depth_stencil_view().cleared(0.0f),
     });
 
     // Every table is declared once for the pass, after `pass` so it dies first.
