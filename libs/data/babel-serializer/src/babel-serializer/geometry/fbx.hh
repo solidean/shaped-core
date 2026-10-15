@@ -30,13 +30,14 @@
 // No triangulation by default (`read_options::triangulate` asks for it), no welding, no pixel decoding, no file I/O.
 // A texture is recorded by the file names it carries and by its embedded bytes when it has any; resolving a file name is the caller's business, as babel owns no filesystem policy.
 //
-// What the reader skipped is recorded in `data::issues` rather than dropped silently: cameras, animation, skinning, blend shapes, LOD groups and non-mesh geometry are all `unsupported` today.
+// What the reader skipped is recorded in `data::issues` rather than dropped silently.
+// Cameras, animation, skinning, blend shapes, constraints, markers, LOD groups and non-mesh geometry are all `unsupported` today.
 // ufbx's own warnings about tolerated damage (a clamped index, a duplicated connection) arrive as `malformed`.
 //
 // A READ CAN BE SPREAD OVER A CALLER'S SCHEDULER, AND IT CAN HAND BACK THE SCENE IN TWO STAGES.
-// `read_options::scheduler` runs ufbx's parse and babel's copy of each mesh on a `cc::async_scheduler`; null keeps the whole read on the calling thread.
+// `read_options::scheduler` runs ufbx's parallel decoding and babel's copy of each mesh on a `cc::async_scheduler`; null keeps the whole read on the calling thread.
 // `read_structure` reads everything but the geometry, which is most of a file, so it returns in a fraction of a full read's time.
-// `read_async` runs both side by side and resolves each stage as it finishes, so a caller can fetch textures before the meshes exist.
+// `read_async` runs both side by side and resolves each stage as it finishes, so a caller can usually fetch textures before the meshes exist.
 //
 //   auto const doc = babel::fbx::read(stream, {.triangulate = true}).value();
 //   for (auto const& n : doc.nodes)
@@ -528,16 +529,18 @@ struct babel::fbx::read_options
     /// Bistro's 114 MB exterior builds a 630 MB scene, under its 1.8 GB half.
     /// A plain stream cannot say how long it is, so it gets 1 GiB, which a scene that size exceeds: read a large file through the span overload, or pass a limit.
     /// Exceeding it is a read error, never a truncated scene.
+    /// It bounds ufbx's parse and babel's copy separately; both are alive at once, so the peak can reach one and a half times it.
+    /// `read_async` runs two reads, each under it.
     i64 memory_limit = 0;
 
-    /// Where the read's parallel work runs: ufbx's parse, and babel's copy of each mesh.
+    /// Where the read's parallel work runs: ufbx's parallel decoding, and babel's copy of each mesh.
     /// Null keeps the whole read on the calling thread, one step after another.
     /// The calling thread takes part either way, and the result is the same field for field, issues in the same order.
     /// A pool such as the installed `cc::compute_scheduler()` is what it is for; the scheduler must outlive the read.
     cc::async_scheduler* scheduler = nullptr;
 };
 
-/// The two stages of `read_async`: the scene's structure first, then all of it.
+/// The two stages of `read_async`: the scene's structure, and all of it.
 struct babel::fbx::loading
 {
     /// `read_structure`'s result: every node, material, texture and light, and every mesh named and empty.
@@ -571,7 +574,8 @@ namespace babel::fbx
 
 /// Read an FBX file on a scheduler, handing back each stage as soon as it exists.
 /// Both stages are scheduled before this returns, on `opts.scheduler`, or on `cc::compute_scheduler()` when that is null, and they run side by side.
-/// Each is its own parse of `bytes`: `structure` is `read_structure`'s and resolves first, `complete` is `read`'s.
+/// Each is its own parse of `bytes`: `structure` is `read_structure`'s and usually resolves well before `complete`, which is `read`'s.
+/// Nothing orders the two: on a one-worker or busy pool, a wait inside one stage can run the other nested.
 /// The input is pinned because the read outlives this call, and dropping the stages does not stop it.
 /// A file a stage cannot read fails that stage with the error its synchronous call returns.
 [[nodiscard]] loading read_async(cc::pinned_data<byte const> bytes, read_options opts = {});

@@ -153,13 +153,13 @@ A native reader was the alternative, and ufbx won on what a reader of untrusted 
 ufbx is two files with no dependencies, which puts it in libspng's tier of the committed-in-source rule ([coding-guidelines.md](coding-guidelines.md)) rather than SQLite's fetched one.
 
 - `[done]` **triangulation**, as a read option: ufbx's ear clip, which a fan gets wrong on a concave polygon.
-- `[done]` **a read spread over a caller's scheduler**, and **a staged one**: `read_options::scheduler` runs ufbx's parse and the per-mesh copy on a `cc::async_scheduler`.
-  `read_structure` skips the geometry, and `read_async` resolves the structure, then the whole scene.
+- `[done]` **a read spread over a caller's scheduler**, and **a staged one**: `read_options::scheduler` runs ufbx's parallel decoding and the per-mesh copy on a `cc::async_scheduler`.
+  `read_structure` skips the geometry, and `read_async` runs both, and the structure usually resolves well before the whole scene.
   Finer stages do not exist to offer: ufbx returns one finished scene per parse, and FBX writes which mesh belongs to which node after every object.
 - `[planned]` **cameras** — a camera's pose is a node like any other; its projection is the missing part.
 - `[planned]` **animation, skinning and blend shapes** — recorded today as `unsupported`, and the static pose is what comes back.
 - `[planned]` **the PBR shader models** ufbx recognizes (3ds Max Physical, Maya StandardSurface, Blender's Principled export), as typed fields beside the raw property bag.
-  Every FBX the importer has met so far is Phong or Lambert, whose meaning is the exporting pipeline's.
+  Every FBX this reader has been tried on so far is Phong or Lambert, whose meaning is the exporting pipeline's.
 
 ### Other geometry formats [planned]
 
