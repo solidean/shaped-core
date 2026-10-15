@@ -29,13 +29,17 @@ babel-serializer/src/babel-serializer/
   data/        [in progress]   text / structured data formats needing more than clean-core
     sqlite     [done]          live database engine (read/write, transactions, incremental blob reads; fetch-on-demand backend)
   geometry/    [in progress]   mesh / geometry formats
+    fbx        [done]          FBX reader, both encodings, over the vendored ufbx
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
     obj        [done]          reader
-  image/       [in progress]   image formats (read + write; committed libspng + stb backends, plus two native codecs)
+  image/       [in progress]   image formats (read + write; committed libspng + stb backends, plus native codecs)
     png        [done]          low-level reader + writer (native IHDR fields; ancillary chunks read and written)
     jpg        [done]          low-level reader + writer (native SOF/JFIF fields; rich metadata [todo])
     hdr        [done]          low-level reader + writer, fully native — Radiance RGBE, f32 out
     pfm        [done]          low-level reader + writer, fully native — Portable FloatMap, f32 out
+    dds        [done]          low-level reader, fully native — every subresource as pinned views; decode to rgba8 / rgba32f
+    tga        [done]          low-level reader, fully native — raw / RLE, true-color / gray / color-mapped
+    bcn        [done]          BC1 - BC7 block decoders, BC6H included
     image      [done]          aggregator: pixel buffer + format-dispatching read/encode/write
 ```
 
@@ -129,6 +133,34 @@ Nothing is welded, indexed or derived, because STL is a soup of independent tria
 
 `[planned]` a writer.
 
+### fbx [done]
+
+Reader for both FBX encodings, binary and ASCII, and every version from 6100 on; see [fbx.hh](../src/babel-serializer/geometry/fbx.hh).
+The structure is FBX's own object model: nodes with their composed transforms, and polygon meshes with per-corner attributes.
+Beside them, Phong and Lambert materials as the property bags they are, file textures, and lights.
+Materials connect to the node rather than the mesh, so `node_materials` is where a face's slot is resolved.
+The scene's axes and unit are reported in `settings` and applied to nothing.
+
+**The parse is ufbx's** ([extern/ufbx](../../../../extern/ufbx/dependency.yml), MIT or public domain), committed in-source and confined to `fbx.cc`; babel copies its scene out and frees it.
+A native reader was the alternative, and ufbx won on what a reader of untrusted files most needs:
+
+- it is built for untrusted input — scenes come back sanitized, and an invalid file or an exhausted allocator is a graceful error rather than a crash;
+- its parsers, its Deflate included, are fuzzed both with AFL and semantically, at about 95% branch coverage;
+- it is Godot 4.3's default FBX importer, so real files from every DCC tool have already been through it;
+- it has no known CVEs — FBX's CVEs are all in Autodesk's own SDK;
+- and FBX is a format a native reader would spend months on: two encodings, compressed arrays, a decade of versions, the pivot chain and three scale-inheritance modes.
+
+ufbx is two files with no dependencies, which puts it in libspng's tier of the committed-in-source rule ([coding-guidelines.md](coding-guidelines.md)) rather than SQLite's fetched one.
+
+- `[done]` **triangulation**, as a read option: ufbx's ear clip, which a fan gets wrong on a concave polygon.
+- `[done]` **a read spread over a caller's scheduler**, and **a staged one**: `read_options::scheduler` runs ufbx's parallel decoding and the per-mesh copy on a `cc::async_scheduler`.
+  `read_structure` skips the geometry, and `read_async` runs both, and the structure usually resolves well before the whole scene.
+  Finer stages do not exist to offer: ufbx returns one finished scene per parse, and FBX writes which mesh belongs to which node after every object.
+- `[planned]` **cameras** — a camera's pose is a node like any other; its projection is the missing part.
+- `[planned]` **animation, skinning and blend shapes** — recorded today as `unsupported`, and the static pose is what comes back.
+- `[planned]` **the PBR shader models** ufbx recognizes (3ds Max Physical, Maya StandardSurface, Blender's Principled export), as typed fields beside the raw property bag.
+  Every FBX this reader has been tried on so far is Phong or Lambert, whose meaning is the exporting pipeline's.
+
 ### Other geometry formats [planned]
 
 `[planned]` `.mtl` material libraries (referenced by OBJ), `.ply`.
@@ -181,17 +213,44 @@ Low-level Portable FloatMap reader + writer, also fully native; see [pfm.hh](../
 PFM stores IEEE-754 bits, so the round-trip is **exact** — which is what makes it the format to reach for when values matter more than file size.
 Reading normalizes both of the format's conventions away: rows come back top-first, samples in host byte order, with `byte_order` still reporting what the file used.
 
+### dds [done]
+
+Low-level DirectDraw Surface reader, fully native; see [dds.hh](../src/babel-serializer/image/dds.hh).
+It reads over pinned bytes like `gltf`, because every subresource comes back as a view of the input rather than a copy — the blocks are already what a GPU uploads.
+Legacy FourCC, legacy bit-mask and DX10 headers all resolve to one DXGI-shaped `pixel_format`, with the stored fields kept in `file_header`.
+Arrays, cube maps (partial legacy ones included) and volumes are laid out in file order, and a header that implies more bytes than the file has is an error.
+
+- `[done]` **decoding** — any subresource to rgba8 (every format but the float ones), or to rgba32f (every format), through `bcn`.
+- `[planned]` **the remaining DXGI formats** — 10:10:10:2, 11:11:10, 16-bit unorm, and the rest of the uncompressed table, each a mapping plus a texel decoder.
+  Legacy files reach 10:10:10:2 and the 16-bit one- and two-channel ones already, through the bit-mask path; 11:11:10 is a float format and RGBA16 is 64 bits, which no 32-bit mask describes.
+
+### tga [done]
+
+Low-level Truevision TARGA reader, fully native; see [tga.hh](../src/babel-serializer/image/tga.hh).
+Raw and run-length-encoded, true-color (15/16/24/32-bit), grayscale and color-mapped, with both origin bits normalized to top-left.
+TGA has no magic number, which is why the aggregator tries it last: its 2.0 footer, then a header that parses.
+
+- `[planned]` **the 2.0 extension area** — the alpha-type byte says whether a 32-bit image's fourth channel is alpha at all.
+
+### bcn [done]
+
+BCn block decoding, independent of any container; see [bcn.hh](../src/babel-serializer/image/bcn.hh).
+BC1 - BC5 bit-replicate their endpoints, then interpolate exactly and round to nearest; BC6H and BC7 follow their specifications' integer arithmetic.
+The tests pin hand-computed blocks, plus random BC7 and BC6H blocks checked against Pillow's decoder.
+Pillow skips signed BC6H's sign extension after the inverse transform, and babel follows the specification there instead.
+
 ### image [done]
 
 The aggregator: a plain pixel buffer, `detect_format` from the magic bytes, and format-dispatching `read` / `encode` / `write`.
 See [image.hh](../src/babel-serializer/image/image.hh).
 
 - `[done]` **the f32 sample path** — HDR and PFM decode to `component::f32`, and `encode` rejects an image whose `comp` the target format cannot store.
-- `[done]` **16-bit samples** — a 16-bit PNG decodes to `component::u16` and re-encodes at that width; PNG is the one format spanning two sample types.
+- `[done]` **16-bit samples** — a 16-bit PNG decodes to `component::u16` and re-encodes at that width.
+- `[done]` **DDS and TGA, read-only** — DDS keeps mip 0, as 4 channels of `u8`, or `f32` for a float format; `encode` refuses both.
 
 ### Other image formats [planned]
 
-`[planned]` further stb-supported containers (bmp / tga / gif), and `.exr`.
+`[planned]` further stb-supported containers (bmp / gif), KTX2, and `.exr`.
 
 ## Aggregators
 

@@ -4,8 +4,9 @@
 
 /// Aggregate forward declarations for babel-serializer.
 /// babel-data's fwd.hh declares `namespace babel` itself plus the base64 / JSON / markdown half; this one adds
-/// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::font, babel::png,
-/// babel::jpg, babel::hdr, babel::pfm, the babel::image aggregator over the four codecs, and babel::chrome_trace.
+/// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::fbx, babel::font, babel::png,
+/// babel::jpg, babel::hdr, babel::pfm, babel::dds, babel::tga, the babel::bcn block decoders, the babel::image
+/// aggregator over the image codecs, and babel::chrome_trace.
 /// Each owns its own header; include that header directly when it is all you need.
 
 namespace babel::chrome_trace
@@ -99,6 +100,48 @@ struct data;
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::gltf
 
+namespace babel::fbx
+{
+// The index roles; a forward declaration must repeat the underlying type exactly.
+enum class node_index : int;
+enum class mesh_index : int;
+enum class material_index : int;
+enum class texture_index : int;
+enum class light_index : int;
+
+enum class encoding : u8;
+enum class axis : u8;
+enum class inherit_mode : u8;
+enum class property_type : u8;
+enum class wrap_mode : u8;
+enum class light_type : u8;
+enum class light_decay : u8;
+enum class issue_kind : u8;
+
+struct issue;
+struct file_info;
+struct scene_settings;
+struct transform;
+struct face;
+template <class T>
+struct corner_attribute;
+struct uv_set;
+struct color_set;
+struct mesh;
+struct property;
+struct material_texture;
+struct material;
+struct texture;
+struct light;
+struct node;
+struct read_options;
+struct data;
+struct loading;
+
+/// The domain every recording site in babel::fbx is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::fbx
+
 namespace babel::sqlite
 {
 enum class error_code : u8;
@@ -159,11 +202,43 @@ struct data;
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::pfm
 
+namespace babel::bcn
+{
+struct rgba8_block;
+struct rgba32f_block;
+} // namespace babel::bcn
+
+namespace babel::dds
+{
+enum class pixel_format : u8;
+enum class alpha_mode : u8;
+enum class dimension : u8;
+struct pixel_format_header;
+struct header;
+struct subresource;
+struct data;
+struct decode_options;
+
+/// The domain every recording site in babel::dds is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::dds
+
+namespace babel::tga
+{
+enum class image_type : u8;
+struct data;
+struct read_options;
+
+/// The domain every recording site in babel::tga is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::tga
+
 namespace babel::image
 {
 enum class format : u8;
 enum class component : u8;
 struct image;
+struct read_options;
 
 /// The domain every recording site in babel::image is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);

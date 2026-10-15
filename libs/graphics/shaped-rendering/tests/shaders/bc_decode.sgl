@@ -1,0 +1,14 @@
+// The hardware's decode of a texture, texel by texel, into a buffer the test reads back.
+// A compressed texture and its source go through the same load, so the test compares what a shader would actually see.
+
+@inline binding decode_constants:
+    width: int
+    height: int
+
+binding decode_io:
+    source: texture_2d[float4]
+    texels: mut buffer[float4]
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){decode_io, decode_constants}:
+    if id.x >= decode_constants.width or id.y >= decode_constants.height => return
+    decode_io.texels[id.y * decode_constants.width + id.x] = decode_io.source.load(id.xy)

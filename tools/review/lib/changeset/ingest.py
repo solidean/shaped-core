@@ -48,6 +48,7 @@ class IngestResult:
     repointed: list[Change] = field(default_factory=list)
     candidates: list[Candidate] = field(default_factory=list)
     skipped_covered: int = 0
+    skipped_inside_bulk: int = 0
 
     @property
     def total(self) -> int:
@@ -250,13 +251,33 @@ def interdiffs(change: Change, paths: ReviewPaths) -> list[Interdiff]:
     return out
 
 
+def inside_bulk(ledger: Ledger, candidates: list[Candidate]) -> list[Candidate]:
+    """The candidates a live bulk claim already decides: not yet known, not bulks themselves, and wholly inside one.
+
+    A bulk claim is a decision not to read those hunks.
+    A later sweep — a plain ingest, or the sync after a head move — must not quietly reverse it by handing each an id.
+    """
+    bulked = LineSpace.empty()
+    for change in ledger.live():
+        if change.is_bulk:
+            bulked = bulked.union(change.claim)
+    if bulked.is_empty:
+        return []
+    known = ledger.by_digest()
+    return [c for c in candidates
+            if c.kind != "bulk" and c.digest not in known and c.claim.subtract(bulked).is_empty]
+
+
 def register(
     ledger: Ledger, candidates: list[Candidate], *, round_number: int,
-    write_body, only_uncovered: bool = False,
+    write_body, only_uncovered: bool = False, honor_bulk: bool = True,
 ) -> IngestResult:
     """Turn candidates into ledger rows, reusing the id any already-known digest had.
 
     `write_body` takes (change_id, text) and is what puts a hunk on disk; a bulk or file change has none.
+
+    A new candidate lying wholly inside a live bulk claim is skipped, as `inside_bulk` says why.
+    `honor_bulk=False` is for a caller naming its candidates explicitly, which a bulk claim does not overrule.
 
     A reused change is also RE-POINTED at the candidate's claim when the two differ.
     An id is derived from content and a claim from position, so a head move leaves a hunk the author never touched
@@ -268,6 +289,7 @@ def register(
     result = IngestResult()
     known = ledger.by_digest()
     covered = ledger.covered() if only_uncovered else LineSpace.empty()
+    decided = {c.digest for c in inside_bulk(ledger, candidates)} if honor_bulk else set()
 
     fresh: list[Candidate] = []
     for candidate in candidates:
@@ -286,6 +308,9 @@ def register(
             continue
         if only_uncovered and candidate.claim.subtract(covered).is_empty:
             result.skipped_covered += 1
+            continue
+        if candidate.digest in decided:
+            result.skipped_inside_bulk += 1
             continue
         fresh.append(candidate)
 

@@ -381,6 +381,26 @@ A box filter is the cheap separable default for "we uploaded the base level and 
 It is wrong in places: it ignores gamma, so averaging sRGB content darkens it, and it aliases where a Kaiser or Mitchell filter would not.
 Those belong in routines of their own rather than behind a flag here.
 
+## Block compression
+
+BC1, BC3, BC4, BC5 and BC7 encoded on the GPU, a mip level per call; the target's format picks the encoder.
+
+```cpp
+#include <shaped-rendering/compression/bc_compress_routine.hh>
+sr::bc_compress_routine::execute(cmd, source, target, level);    // encodes `level` of source into the same level of target
+sr::bc_compress_routine::execute(cmd, source, target, level, {.bc1_alpha = sr::bc1_alpha::cut_out}); // BC1 is opaque unless asked
+sr::bc_compress_routine::execute(cmd, normals, bc5, level, {.bc5_range = sr::bc_source_range::minus_one_to_one});
+// a -1..1 source: into bc5_rg_unorm as n * 0.5 + 0.5 (the sampler's caller undoes it), into bc5_rg_snorm as is; bc4_range likewise
+sr::bc_compress_routine::target_for(source_format, family);      // the family (bc1/bc3/bc7) in sRGB where the source is sRGB
+sr::bc_compress_routine::can_compress(ctx, source_format, target); // bool — BC on the device, a supported target, sRGB-ness agreed
+sr::bc_compress_routine::prewarm(ctx, family);                   // keyed by the family's _unorm format: one pipeline each
+// bc1 RGB, opaque by default or 1-bit alpha with cut_out | bc3 RGBA, smooth alpha | bc4 red | bc5 red, green | bc7 RGBA, the best
+// bc4 and bc5 come unsigned or signed (_snorm); no integer or depth source compresses, and can_compress says so
+// measured by the hardware decoder: bc7 ~40 dB, bc1 ~36, bc4 and bc5 ~49 on a smooth gradient
+// a level goes through a TRANSIENT buffer of blocks and cmd.copy.buffer_to_texture: 16 MiB for a 4096^2 BC7 top level
+// an sRGB source is encoded as the bytes it stores; BC4 and BC5 have no sRGB form, so their source must be linear
+```
+
 ## Reconstruction
 
 One front that denoises, then upscales; the design is [docs/reconstruction.md](docs/reconstruction.md).
@@ -406,6 +426,7 @@ auto const out = sr::reconstruct_routine::execute(cmd,     // -> sr::reconstruct
      .guides = {.albedo = a, .normal = n, .depth = d, .motion = m, .jitter = jitter, .view_to_clip = proj},
      .output = image,                                      // OUTPUT extent, image usage, never the same texture as color
      .sample_count = spp * accumulated_frames},            // spatial members back off as it grows; 0 means 1
+                                                            //   .sample_counts = a float texture of the count per pixel, which wins where set
     history, settings);
 out.status                                                 // denoised | pending | unsupported | failed — output untouched unless denoised
 out.denoiser / out.upscaler / out.restarted                // what ran; whether it started from no history

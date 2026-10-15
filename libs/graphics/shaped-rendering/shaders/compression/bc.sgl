@@ -1,0 +1,768 @@
+// Block compression of one texture level into BC1, BC3, BC4, BC5 or BC7, one thread per 4x4 block.
+//
+// Every encoder reads the level through `texel_xy`, which repeats the edge of a partial block.
+// The color encoders go through `stored`, which works on the encoded bytes an sRGB source's format stores, and BC4 and
+// BC5 through `bc4_value_of`, which reads the source in the range the caller named; `bc_compress_routine` dispatches the
+// entry point its target names.
+//
+// BC1, BC3, BC4 and BC5 are built from two blocks.
+// A BC4 block holds one channel: two 8-bit endpoints and a 3-bit index per texel, fitted to the block's range and then
+// refitted by least squares; BC5 is two of them, red and green, and BC3 one for alpha beside a BC1 color block.
+// A signed BC4 or BC5 is the same fit over the channel shifted by 127, its endpoints shifted back into signed bytes.
+// A BC1 block holds two RGB 5:6:5 endpoints on the block's principal axis and a 2-bit index per texel.
+// With `bc1_cut_out`, a BC1 block with a texel under half alpha switches to BC1's three-color mode, whose fourth index is transparent.
+//
+// BC7 uses four of its eight modes; modes 0, 2, 4 and 5 and a wider partition search are where more of its quality is.
+// Every block tries mode 6: one subset, RGBA, 7-bit endpoints with a p-bit each, 4-bit indices.
+// In an opaque block mode 6 is fitted on color alone, with both p-bits 1, so its alpha decodes to 255 rather than 254.
+// An opaque block also tries modes 1 (two subsets, 6-bit endpoints with a shared p-bit, 3-bit indices) and 3 (two
+// subsets, 7-bit endpoints with a p-bit each, 2-bit indices); any other block tries mode 7 (two subsets, RGBA, 5-bit
+// endpoints with a p-bit each, 2-bit indices).
+// The two-subset modes run over the two partitions whose subsets lie closest to a line each.
+// The block keeps whichever has the least squared error.
+// A subset's endpoints come from its principal axis, then one least-squares refit against the indices they chose.
+//
+// The BC7 tables are spelled as local arrays, since an SGL const cannot hold an array yet.
+
+@inline binding bc_constants:
+    // how many blocks the level covers, across and down
+    blocks_wide: int
+    blocks_high: int
+    // the output's rows, in blocks: the buffer's row pitch divided by a block's bytes, 8 or 16
+    row_blocks: int
+    // the level's extent in texels; a block reaching past it repeats the edge texel
+    width: int
+    height: int
+    // 1 when the source is sRGB: it reads back linear, and the format stores the encoded bytes
+    srgb: int
+    // 1 when BC1 cuts out the texels under half alpha; 0 encodes every BC1 block opaque
+    bc1_cut_out: int
+    // the range a BC4 or BC5 source's channels are read in: 0 for 0..1, 1 for -1..1
+    channel_range: int
+    // 1 when the BC4 or BC5 target is the signed form, whose endpoints are signed bytes
+    snorm: int
+
+// The 16-byte formats: BC3, BC5 and BC7.
+binding bc_io16:
+    source: texture_2d[float4]
+    blocks: mut buffer[uint4]
+
+// The 8-byte formats: BC1 and BC4.
+binding bc_io8:
+    source: texture_2d[float4]
+    blocks: mut buffer[uint2]
+
+/// The 64 two-subset partitions, bit i set where texel i (row-major) is in subset 1.
+fun partition_mask(p: int) -> uint:
+    let t = [0xCCCCu, 0x8888u, 0xEEEEu, 0xECC8u, 0xC880u, 0xFEECu, 0xFEC8u, 0xEC80u, 0xC800u, 0xFFECu, 0xFE80u, 0xE800u, 0xFFE8u, 0xFF00u, 0xFFF0u, 0xF000u, 0xF710u, 0x008Eu, 0x7100u, 0x08CEu, 0x008Cu, 0x7310u, 0x3100u, 0x8CCEu, 0x088Cu, 0x3110u, 0x6666u, 0x366Cu, 0x17E8u, 0x0FF0u, 0x718Eu, 0x399Cu, 0xAAAAu, 0xF0F0u, 0x5A5Au, 0x33CCu, 0x3C3Cu, 0x55AAu, 0x9696u, 0xA55Au, 0x73CEu, 0x13C8u, 0x324Cu, 0x3BDCu, 0x6996u, 0xC33Cu, 0x9966u, 0x0660u, 0x0272u, 0x04E4u, 0x4E40u, 0x2720u, 0xC936u, 0x936Cu, 0x39C6u, 0x639Cu, 0x9336u, 0x9CC6u, 0x817Eu, 0xE718u, 0xCCF0u, 0x0FCCu, 0x7744u, 0xEE22u]
+    return t[p]
+
+/// The texel whose index drops its top bit in subset 1 of a two-subset partition; subset 0's is texel 0.
+fun anchor_of_subset_1(p: int) -> int:
+    let t = [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 2, 8, 2, 2, 8, 8, 15, 2, 8, 2, 2, 8, 8, 2, 2, 15, 15, 6, 8, 2, 8, 15, 15, 2, 8, 2, 2, 2, 15, 15, 6, 6, 2, 6, 8, 15, 15, 2, 2, 15, 15, 15, 15, 15, 2, 2, 15]
+    return t[p]
+
+/// The interpolation weight, out of 64, of index `i` among `1 << index_bits`.
+fun weight(index_bits: int, i: int) -> int:
+    if index_bits == 2:
+        let t2 = [0, 21, 43, 64]
+        return t2[i]
+    if index_bits == 3:
+        let t3 = [0, 9, 18, 27, 37, 46, 55, 64]
+        return t3[i]
+    let t4 = [0, 4, 9, 13, 17, 21, 26, 30, 34, 38, 43, 47, 51, 55, 60, 64]
+    return t4[i]
+
+/// BC7's own interpolation, in integers, which is what a decoder computes.
+fun interpolate(a: int4, b: int4, w: int) -> int4:
+    return ((64 - w) * a + w * b + int4(32)) >> int4(6)
+
+/// Channel `c` of `v`, since SGL subscripts no vector yet.
+fun channel(v: int4, c: int) -> int:
+    if c == 0 => return v.x
+    if c == 1 => return v.y
+    if c == 2 => return v.z
+    return v.w
+
+fun to_srgb(c: float) -> float:
+    let l = saturate(c)
+    let e = if l <= 0.0031308 => l * 12.92 else 1.055 * pow(l, 1.0 / 2.4) - 0.055
+    return e
+
+/// Where texel `i` of block (`bx`, `by`) is read, clamped to the level so a partial block repeats its edge.
+fun texel_xy(bx: int, by: int, i: int){bc_constants} -> int2:
+    return int2(min(bx * 4 + (i & 3), bc_constants.width - 1), min(by * 4 + (i >> 2), bc_constants.height - 1))
+
+/// A loaded texel in the units a block stores, 0 to 255: the encoded bytes of an sRGB source.
+fun stored(v: float4){bc_constants} -> float4:
+    let c = if bc_constants.srgb != 0 => float4(to_srgb(v.x), to_srgb(v.y), to_srgb(v.z), v.w) else v
+    return round(saturate(c) * 255.0)
+
+/// An endpoint's stored bits widened back to 8 bits per channel: `q` is `bits` wide, and `p` is its p-bit where it has one.
+fun expand(q: int4, p: int, bits: int, has_p: bool) -> int4:
+    let total = if has_p => bits + 1 else bits
+    let v = if has_p => (q << int4(1)) | int4(p) else q
+    if total >= 8 => return v
+    return (v << int4(8 - total)) | (v >> int4(2 * total - 8))
+
+/// The `bits`-wide value nearest `x` once `p` is appended and the whole widened back to 8 bits.
+fun quantize(x: float4, p: int, bits: int, has_p: bool) -> int4:
+    let top = (1 << bits) - 1
+    if not has_p:
+        return clamp((round(x * (top as float) / 255.0)) as int4, int4(0), int4(top))
+    let total_top = (1 << (bits + 1)) - 1
+    let scaled = x * (total_top as float) / 255.0
+    return clamp((round((scaled - (p as float)) * 0.5)) as int4, int4(0), int4(top))
+
+/// Where a power iteration toward a block's principal axis starts: the covariance column of the channel that varies most.
+/// It is non-zero whenever the block varies, and already the axis when the block holds two colors.
+/// A box diagonal is neither: two colors whose channels move in opposite directions, red against green, cancel against it exactly.
+fun largest_column(c0: float4, c1: float4, c2: float4, c3: float4) -> float4:
+    let mut axis = c0
+    let mut spread = c0.x
+    if c1.y > spread:
+        axis = c1
+        spread = c1.y
+    if c2.z > spread:
+        axis = c2
+        spread = c2.z
+    if c3.w > spread => axis = c3
+    return axis
+
+fun squared(v: float4, alpha: bool) -> float:
+    let d = if alpha => v else float4(v.x, v.y, v.z, 0.0)
+    return dot(d, d)
+
+/// One subset's encoding: endpoints as stored, their p-bits, and its squared error.
+struct subset_fit:
+    q0: int4
+    q1: int4
+    p0: int
+    p1: int
+    error: float
+
+/// Chooses each member's index against the widened endpoints `a` and `b`, writing it into `idx`, and returns the error.
+fun assign_indices(px: float4[16], mask: uint, subset: uint, a: int4, b: int4, index_bits: int, alpha: bool, idx: mut int[16]) -> float:
+    let count = 1 << index_bits
+    let fa = a as float4
+    let d = (b - a) as float4
+    let dd = squared(d, alpha)
+    let mut error = 0.0
+    for i in 0 ..< 16:
+        if ((mask >> (i as uint)) & 1u) != subset => continue
+        let t = if dd > 0.0 => (if alpha => dot(px[i] - fa, d) else dot((px[i] - fa).xyz, d.xyz)) / dd else 0.0
+        let guess = clamp((round(t * ((count - 1) as float))) as int, 0, count - 1)
+        let mut best = guess
+        let mut best_error = squared((interpolate(a, b, weight(index_bits, guess)) as float4) - px[i], alpha)
+        if guess > 0:
+            let e = squared((interpolate(a, b, weight(index_bits, guess - 1)) as float4) - px[i], alpha)
+            if e < best_error:
+                best = guess - 1
+                best_error = e
+        if guess < count - 1:
+            let e = squared((interpolate(a, b, weight(index_bits, guess + 1)) as float4) - px[i], alpha)
+            if e < best_error:
+                best = guess + 1
+                best_error = e
+        idx[i] = best
+        error += best_error
+    return error
+
+/// Endpoints for the floating-point pair `e0`, `e1`, with the p-bits that widen back closest: one per endpoint, or one shared.
+/// `pmode` 3 is one per endpoint held at 1, which is what widens a 7-bit alpha of 127 back to 255 exactly.
+fun quantize_pair(e0: float4, e1: float4, bits: int, pmode: int, alpha: bool) -> subset_fit:
+    if pmode == 3 => return subset_fit(quantize(e0, 1, bits, true), quantize(e1, 1, bits, true), 1, 1, 0.0)
+    let mut fit = subset_fit(quantize(e0, 0, bits, pmode != 0), quantize(e1, 0, bits, pmode != 0), 0, 0, 0.0)
+    if pmode == 0 => return fit
+    let mut best0 = 1.0e30
+    let mut best1 = 1.0e30
+    let mut best_shared = 1.0e30
+    for p in 0 ..< 2:
+        let q0 = quantize(e0, p, bits, true)
+        let q1 = quantize(e1, p, bits, true)
+        let err0 = squared((expand(q0, p, bits, true) as float4) - e0, alpha)
+        let err1 = squared((expand(q1, p, bits, true) as float4) - e1, alpha)
+        if pmode == 2:
+            if err0 < best0:
+                best0 = err0
+                fit.q0 = q0
+                fit.p0 = p
+            if err1 < best1:
+                best1 = err1
+                fit.q1 = q1
+                fit.p1 = p
+        else if err0 + err1 < best_shared:
+            best_shared = err0 + err1
+            fit.q0 = q0
+            fit.q1 = q1
+            fit.p0 = p
+            fit.p1 = p
+    return fit
+
+/// The best endpoints this encoder finds for one subset of `px`, with its indices written into `idx`.
+///
+/// `pmode` is 0 for no p-bit, 1 for one shared by the subset, 2 for one per endpoint, 3 for one per endpoint held at 1.
+/// Without `alpha` the subset is opaque: alpha is neither fitted nor counted, and decodes as 255.
+/// A mode that stores alpha decodes it as 255 only with `pmode` 3, since a free p-bit may give alpha up to save color.
+fun fit_subset(px: float4[16], mask: uint, subset: uint, bits: int, pmode: int, index_bits: int, alpha: bool, idx: mut int[16]) -> subset_fit:
+    // The mean, then the principal axis by power iteration over the covariance.
+    let mut n = 0.0
+    let mut mean = float4(0.0)
+    for i in 0 ..< 16:
+        if ((mask >> (i as uint)) & 1u) != subset => continue
+        n += 1.0
+        mean += px[i]
+    mean = mean / max(n, 1.0)
+
+    let mut c0 = float4(0.0)
+    let mut c1 = float4(0.0)
+    let mut c2 = float4(0.0)
+    let mut c3 = float4(0.0)
+    for i in 0 ..< 16:
+        if ((mask >> (i as uint)) & 1u) != subset => continue
+        let d = if alpha => px[i] - mean else float4(..(px[i] - mean).xyz, 0.0)
+        c0 += d * d.x
+        c1 += d * d.y
+        c2 += d * d.z
+        c3 += d * d.w
+
+    let mut axis = largest_column(c0, c1, c2, c3)
+    for k in 0 ..< 4:
+        let next = c0 * axis.x + c1 * axis.y + c2 * axis.z + c3 * axis.w
+        let len = sqrt(dot(next, next))
+        if len > 1.0e-6 => axis = next / len
+
+    let axis_len = dot(axis, axis)
+    let mut tmin = 0.0
+    let mut tmax = 0.0
+    if axis_len > 1.0e-12:
+        tmin = 1.0e30
+        tmax = -1.0e30
+        for i in 0 ..< 16:
+            if ((mask >> (i as uint)) & 1u) != subset => continue
+            let t = dot(px[i] - mean, axis) / axis_len
+            tmin = min(tmin, t)
+            tmax = max(tmax, t)
+
+    let opaque = float4(0.0, 0.0, 0.0, 255.0)
+    let keep = float4(1.0, 1.0, 1.0, if alpha => 1.0 else 0.0)
+    let e0 = clamp(mean + axis * tmin, float4(0.0), float4(255.0)) * keep + opaque * (float4(1.0) - keep)
+    let e1 = clamp(mean + axis * tmax, float4(0.0), float4(255.0)) * keep + opaque * (float4(1.0) - keep)
+
+    let has_p = pmode != 0
+    let mut fit = quantize_pair(e0, e1, bits, pmode, alpha)
+    fit.error = assign_indices(px, mask, subset, expand(fit.q0, fit.p0, bits, has_p), expand(fit.q1, fit.p1, bits, has_p), index_bits, alpha, mut idx)
+
+    // One least-squares refit: the endpoints that best explain the indices just chosen.
+    let mut aa = 0.0
+    let mut ab = 0.0
+    let mut bb = 0.0
+    let mut ax = float4(0.0)
+    let mut bx = float4(0.0)
+    for i in 0 ..< 16:
+        if ((mask >> (i as uint)) & 1u) != subset => continue
+        let w = (weight(index_bits, idx[i]) as float) / 64.0
+        aa += (1.0 - w) * (1.0 - w)
+        ab += (1.0 - w) * w
+        bb += w * w
+        ax += px[i] * (1.0 - w)
+        bx += px[i] * w
+    let det = aa * bb - ab * ab
+    if abs(det) > 1.0e-6:
+        let r0 = clamp((ax * bb - bx * ab) / det, float4(0.0), float4(255.0)) * keep + opaque * (float4(1.0) - keep)
+        let r1 = clamp((bx * aa - ax * ab) / det, float4(0.0), float4(255.0)) * keep + opaque * (float4(1.0) - keep)
+        let mut refit = quantize_pair(r0, r1, bits, pmode, alpha)
+        let mut refit_idx = idx
+        refit.error = assign_indices(px, mask, subset, expand(refit.q0, refit.p0, bits, has_p), expand(refit.q1, refit.p1, bits, has_p), index_bits, alpha, mut refit_idx)
+        if refit.error < fit.error:
+            fit = refit
+            idx = refit_idx
+    return fit
+
+/// How far the subsets of partition `p` lie from a line each: the variance off each subset's principal axis.
+/// What chooses the partitions worth a full fit, so it only has to rank them.
+/// Without `alpha` the subsets are judged on their color alone, as an opaque block's two-subset modes store them.
+fun partition_spread(px: float4[16], p: int, alpha: bool) -> float:
+    let mask = partition_mask(p)
+    let keep = float4(1.0, 1.0, 1.0, if alpha => 1.0 else 0.0)
+    let mut total = 0.0
+    for s in 0 ..< 2:
+        let mut n = 0.0
+        let mut mean = float4(0.0)
+        for i in 0 ..< 16:
+            if ((mask >> (i as uint)) & 1u) != (s as uint) => continue
+            n += 1.0
+            mean += px[i] * keep
+        mean = mean / max(n, 1.0)
+        let mut c0 = float4(0.0)
+        let mut c1 = float4(0.0)
+        let mut c2 = float4(0.0)
+        let mut c3 = float4(0.0)
+        for i in 0 ..< 16:
+            if ((mask >> (i as uint)) & 1u) != (s as uint) => continue
+            let d = px[i] * keep - mean
+            c0 += d * d.x
+            c1 += d * d.y
+            c2 += d * d.z
+            c3 += d * d.w
+        let mut axis = largest_column(c0, c1, c2, c3)
+        for k in 0 ..< 4:
+            let next = c0 * axis.x + c1 * axis.y + c2 * axis.z + c3 * axis.w
+            let len = sqrt(dot(next, next))
+            if len > 1.0e-6 => axis = next / len
+        let along = dot(c0 * axis.x + c1 * axis.y + c2 * axis.z + c3 * axis.w, axis)
+        total += (c0.x + c1.y + c2.z + c3.w) - along
+    return total
+
+// ---- packing ---------------------------------------------------------------------------------------------------------
+
+/// ORs `value`, `count` bits wide, into the block at bit `pos`, and moves `pos` past it.
+fun put(block: mut uint4, pos: mut int, value: uint, count: int):
+    let word = pos >> 5
+    let shift = (pos & 31) as uint
+    let low = value << shift
+    let high = if shift == 0u => 0u else value >> (32u - shift)
+    let spills = (pos & 31) + count > 32
+    if word == 0:
+        block.x = block.x | low
+        if spills => block.y = block.y | high
+    else if word == 1:
+        block.y = block.y | low
+        if spills => block.z = block.z | high
+    else if word == 2:
+        block.z = block.z | low
+        if spills => block.w = block.w | high
+    else:
+        block.w = block.w | low
+    pos += count
+
+/// Mode 6 over the whole block; an `opaque` block is fitted on color alone, its p-bits held at 1 so alpha is exactly 255.
+fun encode_mode6(px: float4[16], opaque: bool, error: mut float) -> uint4:
+    let mut idx = int[16].filled(0)
+    let mut fit = fit_subset(px, 0u, 0u, 7, if opaque => 3 else 2, 4, not opaque, mut idx)
+    error = fit.error
+
+    // Texel 0 drops its top index bit, so it must be in the lower half: otherwise the endpoints swap.
+    if idx[0] >= 8:
+        let q = fit.q0
+        fit.q0 = fit.q1
+        fit.q1 = q
+        let p = fit.p0
+        fit.p0 = fit.p1
+        fit.p1 = p
+        for i in 0 ..< 16:
+            idx[i] = 15 - idx[i]
+
+    let mut block = uint4(0u)
+    let mut pos = 0
+    put(mut block, mut pos, 64u, 7)
+    for c in 0 ..< 4:
+        put(mut block, mut pos, channel(fit.q0, c) as uint, 7)
+        put(mut block, mut pos, channel(fit.q1, c) as uint, 7)
+    put(mut block, mut pos, fit.p0 as uint, 1)
+    put(mut block, mut pos, fit.p1 as uint, 1)
+    for i in 0 ..< 16:
+        put(mut block, mut pos, idx[i] as uint, if i == 0 => 3 else 4)
+    return block
+
+/// Mode 1, 3 or 7, as `mode` says, over partition `p`; only mode 7 stores alpha.
+fun encode_two_subsets(px: float4[16], mode: int, p: int, error: mut float) -> uint4:
+    let bits = if mode == 1 => 6 else (if mode == 3 => 7 else 5)
+    let pmode = if mode == 1 => 1 else 2
+    let index_bits = if mode == 1 => 3 else 2
+    let alpha = mode == 7
+    let channels = if alpha => 4 else 3
+    let top = (1 << index_bits) - 1
+    let mask = partition_mask(p)
+    let anchor = anchor_of_subset_1(p)
+
+    let mut idx = int[16].filled(0)
+    let mut fit0 = fit_subset(px, mask, 0u, bits, pmode, index_bits, alpha, mut idx)
+    let mut fit1 = fit_subset(px, mask, 1u, bits, pmode, index_bits, alpha, mut idx)
+    error = fit0.error + fit1.error
+
+    // Each subset's anchor texel drops its top index bit; a subset whose anchor is in the upper half swaps its endpoints.
+    let half_range = (top + 1) / 2
+    if idx[0] >= half_range:
+        let q = fit0.q0
+        fit0.q0 = fit0.q1
+        fit0.q1 = q
+        let pb = fit0.p0
+        fit0.p0 = fit0.p1
+        fit0.p1 = pb
+        for i in 0 ..< 16:
+            if ((mask >> (i as uint)) & 1u) == 0u => idx[i] = top - idx[i]
+    if idx[anchor] >= half_range:
+        let q = fit1.q0
+        fit1.q0 = fit1.q1
+        fit1.q1 = q
+        let pb = fit1.p0
+        fit1.p0 = fit1.p1
+        fit1.p1 = pb
+        for i in 0 ..< 16:
+            if ((mask >> (i as uint)) & 1u) == 1u => idx[i] = top - idx[i]
+
+    let mut block = uint4(0u)
+    let mut pos = 0
+    put(mut block, mut pos, 1u << (mode as uint), mode + 1)
+    put(mut block, mut pos, p as uint, 6)
+    for c in 0 ..< channels:
+        put(mut block, mut pos, channel(fit0.q0, c) as uint, bits)
+        put(mut block, mut pos, channel(fit0.q1, c) as uint, bits)
+        put(mut block, mut pos, channel(fit1.q0, c) as uint, bits)
+        put(mut block, mut pos, channel(fit1.q1, c) as uint, bits)
+    if mode == 1:
+        put(mut block, mut pos, fit0.p0 as uint, 1)
+        put(mut block, mut pos, fit1.p0 as uint, 1)
+    else:
+        put(mut block, mut pos, fit0.p0 as uint, 1)
+        put(mut block, mut pos, fit0.p1 as uint, 1)
+        put(mut block, mut pos, fit1.p0 as uint, 1)
+        put(mut block, mut pos, fit1.p1 as uint, 1)
+    for i in 0 ..< 16:
+        let anchored = i == 0 or i == anchor
+        put(mut block, mut pos, idx[i] as uint, if anchored => index_bits - 1 else index_bits)
+    return block
+
+@compute(8, 8) fun bc7_cs(@thread_id id: int3){bc_io16, bc_constants}:
+    let bx = id.x
+    let by = id.y
+    if bx >= bc_constants.blocks_wide or by >= bc_constants.blocks_high => return
+
+    let mut px = float4[16].filled(float4(0.0))
+    let mut opaque = true
+    for i in 0 ..< 16:
+        px[i] = stored(bc_io16.source.load(texel_xy(bx, by, i)))
+        if px[i].w < 255.0 => opaque = false
+
+    let mut best_error = 0.0
+    let mut best = encode_mode6(px, opaque, mut best_error)
+
+    // Modes 1 and 3 store no alpha, so they are for an opaque block; mode 7 is the two-subset mode that does.
+    if best_error > 0.0:
+        let mut first = 0
+        let mut second = 1
+        let mut first_spread = 1.0e30
+        let mut second_spread = 1.0e30
+        for p in 0 ..< 64:
+            let spread = partition_spread(px, p, not opaque)
+            if spread < first_spread:
+                second = first
+                second_spread = first_spread
+                first = p
+                first_spread = spread
+            else if spread < second_spread:
+                second = p
+                second_spread = spread
+        for k in 0 ..< 2:
+            let p = if k == 0 => first else second
+            for m in 0 ..< 2:
+                if m == 1 and not opaque => continue
+                let mode = if not opaque => 7 else (if m == 0 => 1 else 3)
+                let mut error = 0.0
+                let block = encode_two_subsets(px, mode, p, mut error)
+                if error < best_error:
+                    best_error = error
+                    best = block
+
+    bc_io16.blocks[by * bc_constants.row_blocks + bx] = best
+
+// ---- BC4: one channel ------------------------------------------------------------------------------------------------
+
+/// The value BC4's index `i` decodes to between endpoints `r0` and `r1`, in its eight-value mode (`r0` > `r1`).
+fun bc4_value(r0: float, r1: float, i: int) -> float:
+    if i == 0 => return r0
+    if i == 1 => return r1
+    let k = (i - 1) as float
+    return floor(((7.0 - k) * r0 + k * r1) / 7.0)
+
+/// The interpolation weight toward `r1` of BC4's index `i`.
+fun bc4_weight(i: int) -> float:
+    if i == 0 => return 0.0
+    if i == 1 => return 1.0
+    return ((i - 1) as float) / 7.0
+
+/// Each value's nearest index between `r0` and `r1`, written into `idx`; returns the squared error.
+fun bc4_assign(v: float[16], r0: float, r1: float, idx: mut int[16]) -> float:
+    let mut error = 0.0
+    for i in 0 ..< 16:
+        let mut best = 0
+        let mut best_error = 1.0e30
+        for k in 0 ..< 8:
+            let d = bc4_value(r0, r1, k) - v[i]
+            if d * d < best_error:
+                best_error = d * d
+                best = k
+        idx[i] = best
+        error += best_error
+    return error
+
+/// One channel of a loaded texel as the integer a BC4 block fits: 0 to 255 for an unsigned target.
+/// A signed target stores -127 to 127, fitted shifted by 127, so 0 to 254; `bc4_signed` shifts the endpoints back.
+/// A -1..1 source into an unsigned target is stored as n * 0.5 + 0.5, the unsigned normal-map convention.
+fun bc4_value_of(c: float){bc_constants} -> float:
+    if bc_constants.snorm != 0:
+        let lo = if bc_constants.channel_range != 0 => -1.0 else 0.0
+        return round(clamp(c, lo, 1.0) * 127.0) + 127.0
+    let n = if bc_constants.channel_range != 0 => c * 0.5 + 0.5 else c
+    return round(saturate(n) * 255.0)
+
+/// A block fitted over `bc4_value_of`'s shifted values, with its two endpoint bytes made the signed values they stand for.
+/// The fit never leaves 0..254 for a signed target, so no endpoint becomes -128.
+fun bc4_signed(block: uint2) -> uint2:
+    let r0 = ((block.x & 0xFFu) - 127u) & 0xFFu
+    let r1 = (((block.x >> 8u) & 0xFFu) - 127u) & 0xFFu
+    return uint2((block.x & 0xFFFF0000u) | r0 | (r1 << 8u), block.y)
+
+/// One BC4 block over `v`, 0 to `top` each: 64 bits, endpoints first and then sixteen 3-bit indices.
+/// `top` is 255 for an unsigned target and 254 for a signed one, shifted.
+fun bc4_block(v: float[16], top: float) -> uint2:
+    let mut lo = 255.0
+    let mut hi = 0.0
+    for i in 0 ..< 16:
+        lo = min(lo, v[i])
+        hi = max(hi, v[i])
+
+    let mut r0 = hi
+    let mut r1 = lo
+    let mut idx = int[16].filled(0)
+    let mut error = 0.0
+    if hi > lo:
+        error = bc4_assign(v, r0, r1, mut idx)
+
+        // One least-squares refit of the endpoints against the indices the range chose.
+        let mut aa = 0.0
+        let mut ab = 0.0
+        let mut bb = 0.0
+        let mut ax = 0.0
+        let mut bx = 0.0
+        for i in 0 ..< 16:
+            let w = bc4_weight(idx[i])
+            aa += (1.0 - w) * (1.0 - w)
+            ab += (1.0 - w) * w
+            bb += w * w
+            ax += v[i] * (1.0 - w)
+            bx += v[i] * w
+        let det = aa * bb - ab * ab
+        if abs(det) > 1.0e-6:
+            let f0 = clamp(round((ax * bb - bx * ab) / det), 0.0, top)
+            let f1 = clamp(round((bx * aa - ax * ab) / det), 0.0, top)
+            if f0 > f1:
+                let mut refit_idx = idx
+                let refit_error = bc4_assign(v, f0, f1, mut refit_idx)
+                if refit_error < error:
+                    r0 = f0
+                    r1 = f1
+                    idx = refit_idx
+
+    // Three index bits per texel from bit 16 on: the first sixteen bits share a word with the endpoints.
+    let mut bits_lo = 0u
+    let mut bits_hi = 0u
+    for i in 0 ..< 16:
+        let at = 16 + i * 3
+        let value = idx[i] as uint
+        if at + 3 <= 32:
+            bits_lo = bits_lo | (value << (at as uint))
+        else if at >= 32:
+            bits_hi = bits_hi | (value << ((at - 32) as uint))
+        else:
+            bits_lo = bits_lo | (value << (at as uint))
+            bits_hi = bits_hi | (value >> ((32 - at) as uint))
+    return uint2((r0 as uint) | ((r1 as uint) << 8u) | bits_lo, bits_hi)
+
+// ---- BC1: color ------------------------------------------------------------------------------------------------------
+
+fun to_565(c: float3) -> uint:
+    let r = clamp(round(c.x * 31.0 / 255.0), 0.0, 31.0) as uint
+    let g = clamp(round(c.y * 63.0 / 255.0), 0.0, 63.0) as uint
+    let b = clamp(round(c.z * 31.0 / 255.0), 0.0, 31.0) as uint
+    return (r << 11u) | (g << 5u) | b
+
+fun from_565(v: uint) -> float3:
+    let r = (v >> 11u) & 31u
+    let g = (v >> 5u) & 63u
+    let b = v & 31u
+    return float3(((r << 3u) | (r >> 2u)) as float, ((g << 2u) | (g >> 4u)) as float, ((b << 3u) | (b >> 2u)) as float)
+
+/// The color BC1's index `i` decodes to; `four` is the four-color mode, otherwise index 3 is transparent black.
+fun bc1_color(c0: float3, c1: float3, i: int, four: bool) -> float3:
+    if i == 0 => return c0
+    if i == 1 => return c1
+    if four:
+        let third = if i == 2 => (2.0 * c0 + c1) / 3.0 else (c0 + 2.0 * c1) / 3.0
+        return third
+    if i == 2 => return (c0 + c1) * 0.5
+    return float3(0.0)
+
+/// The interpolation weight toward `c1` of index `i`.
+fun bc1_weight(i: int, four: bool) -> float:
+    if i == 0 => return 0.0
+    if i == 1 => return 1.0
+    if not four => return 0.5
+    let w = if i == 2 => 1.0 / 3.0 else 2.0 / 3.0
+    return w
+
+/// Each texel's nearest index, written into `idx`; a texel `transparent` marks takes index 3 of the three-color mode.
+fun bc1_assign(px: float4[16], transparent: uint, c0: float3, c1: float3, four: bool, idx: mut int[16]) -> float:
+    let mut error = 0.0
+    let count = if four => 4 else 3
+    for i in 0 ..< 16:
+        if ((transparent >> (i as uint)) & 1u) != 0u:
+            idx[i] = 3
+            continue
+        let mut best = 0
+        let mut best_error = 1.0e30
+        for k in 0 ..< count:
+            let d = bc1_color(c0, c1, k, four) - px[i].xyz
+            let e = dot(d, d)
+            if e < best_error:
+                best_error = e
+                best = k
+        idx[i] = best
+        error += best_error
+    return error
+
+/// One BC1 block over `px`, 0 to 255 per channel: two 5:6:5 endpoints, then sixteen 2-bit indices.
+///
+/// With `allow_transparent`, a texel under half alpha decodes as transparent black through the three-color mode.
+/// Without it the block is always four-color, which is what BC3's color half requires.
+fun bc1_block(px: float4[16], allow_transparent: bool) -> uint2:
+    let mut transparent = 0u
+    if allow_transparent:
+        for i in 0 ..< 16:
+            if px[i].w < 128.0 => transparent = transparent | (1u << (i as uint))
+    let four = transparent == 0u
+
+    // The principal axis of the opaque texels, by power iteration over their covariance.
+    let mut n = 0.0
+    let mut mean = float3(0.0)
+    for i in 0 ..< 16:
+        if ((transparent >> (i as uint)) & 1u) != 0u => continue
+        n += 1.0
+        mean += px[i].xyz
+    mean = mean / max(n, 1.0)
+    let mut c0v = float3(0.0)
+    let mut c1v = float3(0.0)
+    let mut c2v = float3(0.0)
+    for i in 0 ..< 16:
+        if ((transparent >> (i as uint)) & 1u) != 0u => continue
+        let d = px[i].xyz - mean
+        c0v += d * d.x
+        c1v += d * d.y
+        c2v += d * d.z
+    let mut axis = largest_column(float4(..c0v, 0.0), float4(..c1v, 0.0), float4(..c2v, 0.0), float4(0.0)).xyz
+    for k in 0 ..< 4:
+        let next = c0v * axis.x + c1v * axis.y + c2v * axis.z
+        let len = sqrt(dot(next, next))
+        if len > 1.0e-6 => axis = next / len
+    let axis_len = dot(axis, axis)
+    let mut tmin = 0.0
+    let mut tmax = 0.0
+    if axis_len > 1.0e-12:
+        tmin = 1.0e30
+        tmax = -1.0e30
+        for i in 0 ..< 16:
+            if ((transparent >> (i as uint)) & 1u) != 0u => continue
+            let t = dot(px[i].xyz - mean, axis) / axis_len
+            tmin = min(tmin, t)
+            tmax = max(tmax, t)
+
+    let mut q0 = to_565(clamp(mean + axis * tmax, float3(0.0), float3(255.0)))
+    let mut q1 = to_565(clamp(mean + axis * tmin, float3(0.0), float3(255.0)))
+    let mut idx = int[16].filled(0)
+    let error = bc1_assign(px, transparent, from_565(q0), from_565(q1), four, mut idx)
+
+    // One least-squares refit against the indices the axis chose.
+    let mut aa = 0.0
+    let mut ab = 0.0
+    let mut bb = 0.0
+    let mut ax = float3(0.0)
+    let mut bx = float3(0.0)
+    for i in 0 ..< 16:
+        if ((transparent >> (i as uint)) & 1u) != 0u => continue
+        let w = bc1_weight(idx[i], four)
+        aa += (1.0 - w) * (1.0 - w)
+        ab += (1.0 - w) * w
+        bb += w * w
+        ax += px[i].xyz * (1.0 - w)
+        bx += px[i].xyz * w
+    let det = aa * bb - ab * ab
+    if abs(det) > 1.0e-6:
+        let r0 = to_565(clamp((ax * bb - bx * ab) / det, float3(0.0), float3(255.0)))
+        let r1 = to_565(clamp((bx * aa - ax * ab) / det, float3(0.0), float3(255.0)))
+        let mut refit_idx = idx
+        let refit_error = bc1_assign(px, transparent, from_565(r0), from_565(r1), four, mut refit_idx)
+        if refit_error < error:
+            q0 = r0
+            q1 = r1
+            idx = refit_idx
+
+    // The order of the endpoints is what picks the mode: c0 > c1 is four colors, c0 <= c1 three and transparent.
+    // Swapping them exchanges indices 0 and 1, and in the four-color mode 2 and 3 as well.
+    let swap = if four => q0 < q1 else q0 > q1
+    if swap:
+        let q = q0
+        q0 = q1
+        q1 = q
+        for i in 0 ..< 16:
+            let k = idx[i]
+            if k == 0 => idx[i] = 1
+            if k == 1 => idx[i] = 0
+            if four and k == 2 => idx[i] = 3
+            if four and k == 3 => idx[i] = 2
+    // Equal endpoints read as the three-color mode, whose index 3 is transparent, so every texel takes index 0.
+    if four and q0 == q1:
+        for i in 0 ..< 16:
+            idx[i] = 0
+
+    let mut bits = 0u
+    for i in 0 ..< 16:
+        bits = bits | ((idx[i] as uint) << ((2 * i) as uint))
+    return uint2(q0 | (q1 << 16u), bits)
+
+// ---- entry points ----------------------------------------------------------------------------------------------------
+
+/// Whether block (`bx`, `by`) is in the level; the dispatch covers whole groups of 8x8 blocks.
+fun in_level(bx: int, by: int){bc_constants} -> bool:
+    return bx < bc_constants.blocks_wide and by < bc_constants.blocks_high
+
+@compute(8, 8) fun bc1_cs(@thread_id id: int3){bc_io8, bc_constants}:
+    if not in_level(id.x, id.y) => return
+    let mut px = float4[16].filled(float4(0.0))
+    for i in 0 ..< 16:
+        px[i] = stored(bc_io8.source.load(texel_xy(id.x, id.y, i)))
+    bc_io8.blocks[id.y * bc_constants.row_blocks + id.x] = bc1_block(px, bc_constants.bc1_cut_out != 0)
+
+@compute(8, 8) fun bc4_cs(@thread_id id: int3){bc_io8, bc_constants}:
+    if not in_level(id.x, id.y) => return
+    let mut v = float[16].filled(0.0)
+    for i in 0 ..< 16:
+        v[i] = bc4_value_of(bc_io8.source.load(texel_xy(id.x, id.y, i)).x)
+    let signed = bc_constants.snorm != 0
+    let block = bc4_block(v, if signed => 254.0 else 255.0)
+    bc_io8.blocks[id.y * bc_constants.row_blocks + id.x] = if signed => bc4_signed(block) else block
+
+@compute(8, 8) fun bc3_cs(@thread_id id: int3){bc_io16, bc_constants}:
+    if not in_level(id.x, id.y) => return
+    let mut px = float4[16].filled(float4(0.0))
+    let mut alpha = float[16].filled(0.0)
+    for i in 0 ..< 16:
+        px[i] = stored(bc_io16.source.load(texel_xy(id.x, id.y, i)))
+        alpha[i] = px[i].w
+    let a = bc4_block(alpha, 255.0)
+    let c = bc1_block(px, false)
+    bc_io16.blocks[id.y * bc_constants.row_blocks + id.x] = uint4(a.x, a.y, c.x, c.y)
+
+@compute(8, 8) fun bc5_cs(@thread_id id: int3){bc_io16, bc_constants}:
+    if not in_level(id.x, id.y) => return
+    let mut red = float[16].filled(0.0)
+    let mut green = float[16].filled(0.0)
+    for i in 0 ..< 16:
+        let t = bc_io16.source.load(texel_xy(id.x, id.y, i))
+        red[i] = bc4_value_of(t.x)
+        green[i] = bc4_value_of(t.y)
+    let signed = bc_constants.snorm != 0
+    let top = if signed => 254.0 else 255.0
+    let r = if signed => bc4_signed(bc4_block(red, top)) else bc4_block(red, top)
+    let g = if signed => bc4_signed(bc4_block(green, top)) else bc4_block(green, top)
+    bc_io16.blocks[id.y * bc_constants.row_blocks + id.x] = uint4(r.x, r.y, g.x, g.y)

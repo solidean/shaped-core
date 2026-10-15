@@ -3,17 +3,17 @@
 Serialization / deserialization of various formats.
 Namespace `babel`; headers included by full path from `src/`.
 > Each format parses into an unopinionated, read-once structure, and reading takes a `cc::read_stream`.
-> The deviation: `gltf` takes a `cc::pinned_data<byte const>` so its buffers are zero-copy subviews of the input.
+> The deviation: `gltf` and `dds` take a `cc::pinned_data<byte const>` so their payloads are zero-copy subviews of the input.
 > [docs/coding-guidelines.md](docs/coding-guidelines.md) owns both rules.
 
 ```cpp
-#include <babel-serializer/all.hh>   // umbrella (sqlite + obj + stl + gltf + png + jpg + hdr + pfm + image + chrome_trace, plus all of babel-data)
+#include <babel-serializer/all.hh>   // umbrella (sqlite + obj + stl + gltf + fbx + png + jpg + hdr + pfm + dds + tga + bcn + image + chrome_trace, plus all of babel-data)
 ```
 
 ---
 
 **Recording domain:** `babel`, declared one library down in babel-data.
-Each format here shadows it: `babel.obj`, `babel.stl`, `babel.gltf`, `babel.png`, `babel.jpg`, `babel.hdr`, `babel.pfm`, `babel.image`, `babel.sqlite`.
+Each format here shadows it: `babel.obj`, `babel.stl`, `babel.gltf`, `babel.fbx`, `babel.png`, `babel.jpg`, `babel.hdr`, `babel.pfm`, `babel.dds`, `babel.tga`, `babel.image`, `babel.sqlite`.
 Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
 
 ## OBJ (`babel::obj`)
@@ -182,6 +182,68 @@ node const& n = doc.nodes[0];
 n.has_matrix ? use(n.matrix) : use(n.translation, n.rotation, n.scale); // tg::mat4f / vec3f + quat_f + vec3f
 ```
 
+## FBX (`babel::fbx`)
+
+Both encodings, every version from 6100 on; the parse is the vendored ufbx's, copied out into FBX's own object model.
+
+```cpp
+#include <babel-serializer/geometry/fbx.hh>
+
+cc::result<babel::fbx::data> read(cc::read_stream& in, read_options = {});   // + span / string_view overloads
+struct read_options { bool triangulate = false; i64 memory_limit = 0; cc::async_scheduler* scheduler = nullptr; };
+// triangulate: ear clip | memory_limit: 0 = 32x input + 64 MiB, at most 4 GiB | scheduler: ufbx's parallel decoding + the per-mesh copy spread over it
+cc::result<babel::fbx::data> read_structure(cc::read_stream& in, read_options = {});   // + span; no geometry: every mesh named and empty
+babel::fbx::loading read_async(cc::pinned_data<byte const> bytes, read_options = {});   // { structure, complete }: cc::shared_async<data> each, both scheduled at once
+
+auto const loading = babel::fbx::read_async(cc::make_pinned_data(cc::move(file_bytes)), {.scheduler = &cc::compute_scheduler()});
+fetch_textures((co_await loading.structure).textures);   // milliseconds in: nodes, materials, textures, lights
+draw(co_await loading.complete);                          // then everything, the same indices
+
+auto const doc = babel::fbx::read(stream, {.triangulate = true}).value();
+doc.info;       // file_info { version (7500 = FBX 2016), encoding (binary | ascii), creator, application, application_version }
+doc.settings;   // scene_settings { right, up, front (axis::positive_x ..), unit_meters (0.01 = cm), original_unit_meters, frames_per_second }
+doc.settings.is_left_handed();  // REPORTED, applied to nothing — the caller converts
+doc.issues;  doc.has_issues();  doc.has_issue_of(kind);  doc.issue_report();   // as gltf's
+
+doc.nodes;      // PARENTS FIRST; nodes[0] is the nameless root
+n.parent;  doc.children_of(n);
+n.local;  n.geometry;                         // transform { translation, rotation, scale } — the pivot chain composed
+n.node_to_world;  n.geometry_to_world;        // tg::affine_transform3f, honoring n.inherit (FBX's scale inheritance)
+n.mesh;  n.light;                             // mesh_index / light_index; several nodes naming one mesh is instancing
+doc.materials_of(n);                          // span<material_index> — the node's material SLOTS, possibly empty
+doc.material_of(n, m, f);                     // material_index face f draws with on node n; invalid where n has no such slot
+
+doc.meshes;     // mesh { name, faces, face_holes, positions, normals, tangents, bitangents, uv_sets, color_sets, face_materials }
+m.faces[f];                    // face { first_corner, corner_count } — polygons unless read with triangulate
+m.positions.at(corner);        // corner_attribute<T> { values, indices }: one index per face corner, every mapping mode unified
+m.normals.exists();            // false: both arrays empty
+m.uv_sets[0].uvs.at(corner);   // V points UP the image, as FBX writes it
+m.material_slot_of(f);         // index into materials_of(node), NOT into doc.materials — material_of does the lookup
+m.is_hole(f);                  // a face FBX marks hidden; triangulation drops these
+
+doc.materials;  // material { name, shading_model ("phong"), properties (own), defaults (template, SHARED pin), textures }
+mat.find_property("DiffuseColor");   // property const* { name, type, value (vec4f), value_int, text }; own, then template default
+mat.find_texture("NormalMap");       // texture_index — FBX connects a texture to a PROPERTY by name
+doc.textures;   // texture { name, relative_filename, absolute_filename (as written, backslashes too), content (embedded, SHARED pin), wrap_u/v, uv_set }
+doc.lights;     // light { type, decay, color, intensity (FBX Intensity / 100, no unit), local_direction (-Y), inner/outer_angle_degrees (FULL cone) }
+```
+
+Gotchas:
+
+- **Materials belong to the node, not the mesh.** Two instances of one mesh may draw with different materials, so a face's slot means nothing without the node placing it.
+  The slots follow the FIRST instance's count, and an instance listing more is an `unsupported` issue.
+- **Nothing is converted.** Positions are in the file's axes and unit; `settings` says which, and a Z-up centimeter scene stays one.
+  Axes that are not a permutation of X, Y and Z, or a unit outside 1e-9 to 1e9 meters, fall back to FBX's default with a `malformed` issue.
+- **A read spread over a scheduler is the same read**, field for field and issue for issue: only where the work runs changes.
+  Bistro's 114 MB exterior reads about five times faster over a 15-worker pool, and its structure alone in a few tens of milliseconds.
+- **A memory ceiling bounds every read** (`memory_limit`): an array's stated count is allocated before its bytes are, so a crafted file is an error rather than gigabytes.
+  A plain stream cannot say how long it is and gets 1 GiB; the span overloads scale it to the input, at most 4 GiB, split evenly between ufbx's working memory and the scene.
+  The copy of the meshes is budgeted against the whole limit before it starts, since it writes per corner what ufbx shares.
+- **A mesh past `i32` counts is an error**, since every index here is an `i32`.
+- **No file is opened.** A texture is its file names and its embedded bytes; resolving a name is the caller's policy, which babel owns none of.
+  Both names are untrusted: absolute, drive-lettered, UNC or climbing out with `..`, `relative_filename` included.
+- **Cameras, animation, skinning, blend shapes, constraints, markers, LOD groups and curves are not read**, and each is an `unsupported` issue rather than silence.
+
 ## SQLite (`babel::sqlite`)
 
 A live database engine, not a stream parser — a thin RAII wrapper over an open connection.
@@ -269,28 +331,30 @@ h.reopen(other_rowid);                     // same handle, next row — cheaper 
 // read-only for now; the row's table must be a rowid table (a WITHOUT ROWID one cannot be reached this way)
 ```
 
-## Images (`babel::image` + `babel::png` / `babel::jpg` / `babel::hdr` / `babel::pfm`)
+## Images (`babel::image` + `babel::png` / `babel::jpg` / `babel::hdr` / `babel::pfm` / `babel::dds` / `babel::tga`)
 
 Two layers: low-level per-format codecs that expose the format's own metadata, and an aggregator for "just the pixels".
 `png` decodes through the vendored **libspng** and `jpg` through the vendored **stb** — always linked, never visible from a babel header, and never reached by the aggregator.
-`hdr` / `pfm` are fully native and reach no backend at all.
+`hdr` / `pfm` / `dds` / `tga` are fully native and reach no backend at all, and `bcn` is the native BCn block decoder under `dds`.
 
 ```cpp
 #include <babel-serializer/image/image.hh>  // aggregator — the "I just want pixels" layer
 
-cc::result<babel::image::image> read(cc::span<cc::byte const> bytes); // auto-detects PNG / JPG / HDR / PFM
+cc::result<babel::image::image> read(cc::span<cc::byte const> bytes, {.max_decoded_bytes = 1 << 28}); // auto-detects PNG / JPG / HDR / PFM / DDS / TGA; the budget binds DDS / TGA
+cc::result<babel::image::image> read(cc::span<cc::byte const> bytes, babel::image::format fmt); // no detection
 cc::result<babel::image::image> read(cc::read_stream& in);            // slurps, then decodes
-cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); // png / jpg / hdr / pfm from magic bytes
+cc::result<babel::image::format> detect_format(cc::span<cc::byte const> bytes); // magic bytes; TGA (no magic) last
 
 struct image {                        // row-major, top-left origin, tightly packed
-    int width; int height; int channels;      // 1 grey / 2 GA / 3 rgb / 4 rgba
-    babel::image::component comp;             // u8 (png/jpg) | u16 (16-bit png, host-endian) | f32 (hdr/pfm)
+    int width; int height; int channels;      // 1 gray / 2 gray+alpha / 3 rgb / 4 rgba
+    babel::image::component comp;             // u8 (png/jpg/tga/dds) | u16 (16-bit png, host-endian) | f32 (hdr/pfm/float dds)
     cc::vector<cc::byte> pixels;
     bool is_empty(); int bytes_per_component(); isize row_stride();
     cc::span<float const> samples_f32();      // the pixels as floats; empty unless comp == f32
 };
 
 // writing — babel's first writer. encode -> bytes, or write to a stream. jpg_quality ignored by every other format.
+// dds and tga are read-only: encode errors.
 cc::result<cc::vector<cc::byte>> encode(image const&, babel::image::format fmt, {.jpg_quality = 90});
 cc::result<cc::unit> write(cc::write_stream& out, image const&, babel::image::format fmt, {...});
 ```
@@ -300,7 +364,7 @@ cc::result<cc::unit> write(cc::write_stream& out, image const&, babel::image::fo
 #include <babel-serializer/image/jpg.hh>   // low-level JPG: pixels + native metadata
 
 babel::png::data p = babel::png::read(bytes).value();
-p.width; p.height; p.channels; p.pixels;       // channels follow the file: 1 grey / 2 GA / 3 rgb / 4 rgba, +1 for a tRNS chunk
+p.width; p.height; p.channels; p.pixels;       // channels follow the file: 1 gray / 2 gray+alpha / 3 rgb / 4 rgba, +1 for a tRNS chunk
 p.decoded;                                     // u8, or u16 for a 16-bit PNG — HOST-endian, unlike the file
 p.bit_depth; p.color; p.interlace;             // native IHDR fields; 1/2/4-bit unpacks to u8, so bit_depth is where it survives
 p.gamma; p.srgb_intent; p.icc_profile; p.texts; p.physical;  // gAMA / sRGB / iCCP / tEXt+zTXt+iTXt / pHYs, read AND written
@@ -332,6 +396,35 @@ f.scale;                                       // the header's factor — metada
 f.byte_order;                                  // what the file used; `pixels` are always host order
 
 babel::pfm::encode(f, {.byte_order = babel::pfm::endianness::little});  // + write(stream, ...)
+```
+
+```cpp
+#include <babel-serializer/image/dds.hh>   // low-level DDS: the header, the format, every subresource as stored
+#include <babel-serializer/image/tga.hh>   // low-level TGA: u8 pixels + the header's origin, depth and alpha bits
+#include <babel-serializer/image/bcn.hh>   // one BCn block -> 16 texels; no container
+
+babel::dds::data t = babel::dds::read(cc::make_pinned_data(cc::move(bytes))).value(); // zero-copy; span overload copies
+t.format;                                      // pixel_format: bc1..bc7 (+ _srgb / _snorm), rgba8 / bgra8 / ..., or masked
+t.alpha;                                       // alpha_mode; DXT2 / DXT4 resolve to bc2 / bc3 + premultiplied
+t.width; t.height; t.depth; t.mip_count; t.array_size; t.is_cube; t.cube_faces;
+t.file_header;                                 // the stored legacy + DX10 fields: FourCC, masks, DXGI number, ...
+t.subresources;                                // file order: layer, then face, then mip — each a pinned view of the input
+t.find(layer, face, mip);                      // -> subresource const*, nullptr where absent
+babel::dds::decode_rgba8(t, sub, {.max_decoded_bytes = 1 << 28}); // -> result<vector<byte>> rgba8; errors for a float format or past the budget
+babel::dds::decode_rgba32f(t, sub);            // -> result<vector<float>>; every format, signed ones in -1..1, BC1-BC5 unrounded
+babel::dds::decode_rgba32f_into(t, sub, out);  // the same into caller memory, four floats per texel
+babel::dds::is_block_compressed(fmt); is_float(fmt); is_srgb(fmt); mip_extent(base, level);
+
+babel::tga::data g = babel::tga::read(bytes, {.max_decoded_bytes = 1 << 28}).value();  // the budget is checked before allocating
+g.channels;                                    // 1 gray / 2 gray+alpha / 3 rgb / 4 rgba, from depth, palette and alpha bits
+g.type; g.run_length_encoded; g.pixel_depth; g.alpha_bits; g.stored_bottom_up; g.stored_right_to_left;
+
+babel::bcn::small_block(ptr); babel::bcn::large_block(ptr);   // fixed_span<byte const, 8 / 16>; the length is the constructor's precondition, unchecked
+babel::bcn::decode_bc1(block) / decode_bc2 / decode_bc3 / decode_bc7 -> rgba8_block;   // .rgba[texel * 4 + c]
+babel::bcn::decode_bc4(block, is_signed) / decode_bc5(block, is_signed) -> rgba8_block; // (r,0,0,1) / (r,g,0,1); signed: 128 for 0
+babel::bcn::decode_bc6h(block, is_signed) -> rgba32f_block;  // Khronos's half-float results widened, alpha 1
+babel::bcn::decode_bc1_f32(block) ... decode_bc5_f32(block, is_signed);  // exact interpolants, before rounding
+babel::bcn::decode_bc4_channel(block, is_signed);            // the channel as integers: 0..255 or -127..127
 ```
 
 ## Chrome Trace (`trace/chrome_trace.hh`)
@@ -402,10 +495,21 @@ Only what the signatures above cannot tell you.
 - **JPG is lossy, PNG lossless.** Round-trip PNG for exact pixels, and expect small per-channel deltas through JPG.
 - **`channels` is the *decoded* count**, since palette PNGs are de-palettized and Adam7 is de-interlaced.
   The native `color` / `interlace` fields still report the original encoding.
-- **The sample type follows the format.** JPEG decodes to `u8` and HDR / PFM to `f32`; PNG is the one that spans two, `u16` for a 16-bit file and `u8` for every other depth.
+- **The sample type follows the format.** JPEG and TGA decode to `u8` and HDR / PFM to `f32`.
+  PNG spans two, `u16` for a 16-bit file and `u8` for every other depth; DDS spans two as well, `f32` for BC6H and the float formats.
   `encode` errors on a mismatch rather than reinterpreting the buffer, so check `comp` after a `read` that picked its own format.
 - **HDR is lossy and PFM is not.** RGBE quantizes a pixel's three mantissas against one shared exponent (~0.2% of the pixel's largest channel); PFM stores the bits, so its round-trip is exact.
 - **HDR and PFM both store rows the other way up**, and both are flipped to a top-left origin on read — `stored_bottom_up` reports what the HDR file did.
+- **The aggregator keeps one image of a DDS texture**: mip 0 of the first layer and face, the first slice of a volume, always 4 channels.
+  Use `babel::dds` for the rest, or for the blocks themselves.
+- **BC5 decodes to (x, y, 0, 1)**, and a normal's z is the consumer's to reconstruct; BC4 is (r, 0, 0, 1).
+  The first BC5 block is red, ATI2 included.
+- **Signed BC4 / BC5 land biased in 8 bits** (-1 -> 0, 0 -> 128, 1 -> 255), the unused channels as 128; `decode_rgba32f` has the signed values.
+- **The decode budget defaults to 256 MiB**: 8192 x 8192 in rgba8, but only 4096 x 4096 in rgba32f; the largest `isize` disables it.
+- **A DDS's stored pitch is ignored**: rows are read tightly packed, so a DWORD-padded legacy file reads skewed.
+- **A TGA has alpha only where its descriptor declares attribute bits**, at 16 and 32 bits alike; otherwise the image is rgb.
+  An alpha that is zero at every pixel reads as opaque, as DirectXTex reads it, and `alpha_was_all_zero` says so.
+- **TGA has no magic.** `detect_format` takes a TGA 2.0 footer or, failing that, a header that parses — a guess, so pass the format to `read` when you know it.
 - **Image rows carry no padding**: `row_stride() == width * channels * bytes_per_component()`.
 - **`babel::png::encode` wants the buffer size exactly.** `width * height * channels * (decoded == u16 ? 2 : 1)`, so a buffer that merely fits is `decoded` disagreeing with it and is an error.
 - **A PNG decode caps dimensions and ancillary-chunk memory**, because the input is untrusted and libspng's own defaults are effectively unbounded.
@@ -417,10 +521,14 @@ Only what the signatures above cannot tell you.
 #include <babel-serializer/data/sqlite.hh>   // just SQLite
 #include <babel-serializer/geometry/obj.hh>  // just OBJ
 #include <babel-serializer/geometry/gltf.hh> // just glTF / GLB
+#include <babel-serializer/geometry/fbx.hh>  // just FBX
 #include <babel-serializer/image/png.hh>     // just PNG (low-level)
 #include <babel-serializer/image/jpg.hh>     // just JPG (low-level)
 #include <babel-serializer/image/hdr.hh>     // just Radiance HDR (low-level)
 #include <babel-serializer/image/pfm.hh>     // just PFM (low-level)
+#include <babel-serializer/image/dds.hh>     // just DDS (low-level)
+#include <babel-serializer/image/tga.hh>     // just TGA (low-level)
+#include <babel-serializer/image/bcn.hh>     // just the BCn block decoders
 #include <babel-serializer/image/image.hh>   // the image aggregator
 #include <babel-serializer/all.hh>           // everything
 ```

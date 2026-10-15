@@ -1,7 +1,7 @@
 # Render routines (in shaped-rendering)
 
 shaped-rendering (`sr`) is the home for **concrete render routines** — the actual GPU algorithms, each built on the render-routine framework.
-`sr::blit_routine` is the one that exists today; mipmap generation, tonemapping and texture compression are the intended set.
+Blit, mipmap generation, block compression, denoising and upscaling exist today; tonemapping is the one still intended.
 
 The **framework itself lives in shaped-graphics** — `sg::render_routine`, the per-context `ctx.routines` registry, and the `sg::reload_generation` hot-reload counter.
 Read its front-door doc first:
