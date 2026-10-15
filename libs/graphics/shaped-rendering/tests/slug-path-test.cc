@@ -79,18 +79,33 @@ namespace
     return out;
 }
 
-/// The distance from `p` to the nearest point of `path`'s curves: the region a round join and round cap stroke covers.
-[[nodiscard]] f32 distance_to_path(tg::pos2f p, sr::slug_path const& path)
+/// The distance to the nearest point of a path's curves: the region a round join and round cap stroke covers.
+/// Sampled once, since a coverage check asks it for tens of thousands of points.
+struct path_distance
 {
-    auto best = 3.0e38f;
-    for (auto const& c : path.curves())
+    cc::vector<cc::vector<tg::pos2f>> polylines;
+
+    /// Each curve as a polyline whose chords stray from it by under `tolerance`.
+    /// A quadratic's chord over a parameter step h strays by at most |p1 - 2 p2 + p3| h^2 / 4.
+    explicit path_distance(sr::slug_path const& path, f32 tolerance = 1.0e-3f)
     {
-        auto const points = sampled(c);
-        for (auto i = isize(1); i < points.size(); ++i)
-            best = cc::min(best, distance_to_segment(p, points[i - 1], points[i]));
+        for (auto const& c : path.curves())
+        {
+            auto const bend = (c.p1 - c.p2) - (c.p2 - c.p3);
+            auto const n = tg::sqrt(bend.length() / (4.0f * tolerance));
+            polylines.push_back(sampled(c, cc::clamp(int(tg::ceil(n)), 1, 2048)));
+        }
     }
-    return best;
-}
+
+    [[nodiscard]] f32 to(tg::pos2f p) const
+    {
+        auto best = 3.0e38f;
+        for (auto const& points : polylines)
+            for (auto i = isize(1); i < points.size(); ++i)
+                best = cc::min(best, distance_to_segment(p, points[i - 1], points[i]));
+        return best;
+    }
+};
 
 /// Every point of a grid over `box` is covered exactly when `inside` says so, but within `margin` of the boundary.
 /// The winding is never negative either way: the stroker's pieces add.
@@ -199,7 +214,7 @@ TEST("sr::stroke_outline - a round-joined, round-capped polyline covers what lie
     REQUIRE(!outline.is_empty());
     CHECK(outline.is_closed());
     check_region(outline, tg::aabb2f(tg::pos2f(-5, -5), tg::pos2f(105, 105)), 0.7f, 0.05f,
-                 [&](tg::pos2f p) { return distance_to_path(p, path) - 6.0f; });
+                 [near = path_distance(path)](tg::pos2f p) { return near.to(p) - 6.0f; });
 }
 
 TEST("sr::stroke_outline - a curve bending tighter than the half-width still covers exactly its reach")
@@ -216,7 +231,7 @@ TEST("sr::stroke_outline - a curve bending tighter than the half-width still cov
         auto const outline = sr::stroke_outline(*p, style, 0.01f);
         REQUIRE(!outline.is_empty());
         check_region(outline, tg::aabb2f(tg::pos2f(-15, -15), tg::pos2f(115, 115)), 0.9f, 0.1f,
-                     [&](tg::pos2f q) { return distance_to_path(q, *p) - 8.0f; });
+                     [near = path_distance(*p)](tg::pos2f q) { return near.to(q) - 8.0f; });
     }
 }
 

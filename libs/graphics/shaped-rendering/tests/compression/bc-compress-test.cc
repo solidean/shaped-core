@@ -147,6 +147,21 @@ image gradient(int size)
     return out;
 }
 
+/// `source` grown to `size` x `size` by repeating its last row and column: what an encoder's edge clamp reads.
+image edge_clamped(image const& source, int size)
+{
+    auto out = blank(size, size);
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const from = (isize(cc::min(y, source.height - 1)) * source.width + cc::min(x, source.width - 1)) * 4;
+            auto const to = (isize(y) * size + x) * 4;
+            for (auto c = 0; c < 4; ++c)
+                out.rgba8[to + c] = source.rgba8[from + c];
+        }
+    return out;
+}
+
 /// A color ramp under an alpha ramp that crosses it, so no block is opaque.
 image alpha_ramp(int size)
 {
@@ -407,13 +422,19 @@ ASYNC_INVOCABLE_TEST("sr - BC1 and BC7 compress any mip level, a partial block a
         for (auto const level : {1, 4, 6})
         {
             auto const extent = size >> level;
+
+            // A device without unaligned BC (metal) refuses a texture smaller than a block, though it has the mip.
+            // There the reference is the level edge-clamped to whole blocks, which the encoder must read alike.
+            auto const alone_extent
+                = ctx.supports(sg::feature::unaligned_block_compression) ? extent : (extent + 3) / 4 * 4;
             auto const alone_source = ctx.persistent.create_texture_2d(
-                {.format = source_format, .width = extent, .height = extent, .usage = source_usage});
+                {.format = source_format, .width = alone_extent, .height = alone_extent, .usage = source_usage});
             auto const alone = ctx.persistent.create_texture_2d(
-                {.format = t.format, .width = extent, .height = extent, .usage = target_usage});
+                {.format = t.format, .width = alone_extent, .height = alone_extent, .usage = target_usage});
 
             auto encode = ctx.create_command_list();
-            encode->upload.bytes_to_texture(alone_source.raw(), cc::span<byte const>(gradient(extent).rgba8));
+            encode->upload.bytes_to_texture(alone_source.raw(),
+                                            cc::span<byte const>(edge_clamped(gradient(extent), alone_extent).rgba8));
             auto const outcome = sr::bc_compress_routine::execute(*encode, original, compressed, level);
             auto const alone_outcome = sr::bc_compress_routine::execute(*encode, alone_source, alone, 0);
             ctx.submit_command_list(cc::move(encode));
@@ -424,11 +445,12 @@ ASYNC_INVOCABLE_TEST("sr - BC1 and BC7 compress any mip level, a partial block a
             auto const got = co_await decode(ctx, compressed, level);
             auto const reference = co_await decode(ctx, alone);
             REQUIRE(want.size() == got.size());
-            REQUIRE(reference.size() == got.size());
+            REQUIRE(reference.size() == isize(alone_extent) * alone_extent);
 
             auto differing = 0;
-            for (auto i = isize(0); i < got.size(); ++i)
-                differing += got[i] == reference[i] ? 0 : 1;
+            for (auto y = 0; y < extent; ++y)
+                for (auto x = 0; x < extent; ++x)
+                    differing += got[isize(y) * extent + x] == reference[isize(y) * alone_extent + x] ? 0 : 1;
             CHECK(differing == 0).dump("level", level).dump("differing texels", differing).dump("channels", t.channels);
 
             auto const psnr = psnr_of(want, got, t.channels);
