@@ -310,13 +310,19 @@ cc::shared_async<cc::vector<tg::vec4f>> trace_direct(sg::context& ctx,
     return sum / f64(count);
 }
 
-/// Whether the device can run what these tests drive: the raster path itself, and the tracer it is compared against.
+/// Whether the raster path's shaders build here, which needs an SGL compiler and no ray tracing.
+[[nodiscard]] bool can_raster()
+{
+    return sv_test::shared_env().has_compiler;
+}
+
+/// Whether the device also runs the tracer a raster image is compared against.
 [[nodiscard]] bool can_run(sg::context& ctx)
 {
     auto probe = ctx.create_command_list();
     auto const supported = probe->raytracing.is_supported();
     ctx.drop_command_list(cc::move(probe));
-    return supported && sv_test::shared_env().has_compiler;
+    return supported && can_raster();
 }
 
 /// The Cornell box's enclosure alone, without its two blocks or its lamp: no wall then shadows another, so the tracer's
@@ -419,8 +425,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout material cuts what the trace
          "libs/graphics/shaped-viewer/docs/TODO.md");
 #endif
     auto& ctx = *ctx_h;
-    if (!can_run(ctx))
-        SKIP("no ray tracing or no SGL compiler, so the shaders do not build");
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
 
     // A black, unlit quad filling the view in front of a white environment: a kept pixel is 0, and a cut one is 1.
     auto quad = cc::vector<tg::pos3f>();
@@ -484,8 +490,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout material cuts what the trace
 ASYNC_INVOCABLE_TEST("sv - a raster layer's capture finishes on its first drawn frame", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
-    if (!can_run(ctx))
-        SKIP("no ray tracing or no SGL compiler, so the viewer's shaders do not build");
+    if (!can_raster())
+        SKIP("no SGL compiler, so the viewer's shaders do not build");
 
     constexpr auto size = tg::vec2i(96, 64);
     auto const path = cc::format("{}/sv-raster-capture.png", cc::temp_directory_path());
@@ -546,14 +552,14 @@ ASYNC_TEST("sv vulkan - the raster path draws what it draws on dx12, to rounding
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
     if (ctx.has_error())
         SKIP("no vulkan device");
-    if (!can_run(*ctx.value()))
-        SKIP("no ray tracing or no SGL compiler on the vulkan device");
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
 
     // The debug layer has to be active before the process's first dx12 device, and this test may race dx12-entry.cc's
     // drivers to it, so the reference asks for the layer exactly as they do.
     auto reference = sg::create_dx12_context(
         {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
-    if (reference.has_error() || !can_run(*reference.value()))
+    if (reference.has_error())
         SKIP("no dx12 hardware device to hold the vulkan image to");
 
     // A draw's bindings and bindless elements fresh from this list's uploads need a barrier the first draw finds, inside
