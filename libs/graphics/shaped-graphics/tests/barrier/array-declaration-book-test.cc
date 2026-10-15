@@ -237,6 +237,29 @@ TEST("sg::impl::array_declaration_book - each group the declarations meet is che
     CHECK(list.tracked == 1);
 }
 
+TEST("sg::impl::array_declaration_book - many groups at one name each apply once, then each is current")
+{
+    // One group per draw under one declaration, as a caller binding a group of its own per draw does.
+    auto list = fake_list();
+    auto groups = cc::vector<fake_array>();
+    for (auto i = 0; i < 200; ++i)
+        groups.push_back(buffers("tables.buffers", 3));
+    list.book.declare_buffers(1, "tables.buffers", reads(2));
+
+    for (auto const& group : groups)
+        list.op(group);
+    CHECK(list.tracked == 400);
+    for (auto const& group : groups)
+        list.op(group);
+    CHECK(list.tracked == 400);
+
+    // Every group is checked on its own: one more, with a vacant element, asserts at its first meeting.
+    auto vacant = buffers("tables.buffers", 3);
+    vacant.elements[1].resource = -1;
+    CHECK_ASSERTS(list.op(vacant));
+    CHECK(list.tracked == 400);
+}
+
 TEST("sg::impl::array_declaration_book - a vacant element asserts at the first meeting with its group")
 {
     auto list = fake_list();

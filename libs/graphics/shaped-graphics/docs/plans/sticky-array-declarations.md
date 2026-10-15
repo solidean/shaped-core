@@ -36,7 +36,7 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
 - **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one.
   The compute pair and the withdraw are at [command_list.hh:138-148](../../src/shaped-graphics/command_list/command_list.hh#L138-L148).
   The raster pair is at [command_list.hh:191-196](../../src/shaped-graphics/command_list/command_list.hh#L191-L196).
-- **What every backend shares**: [`sg::impl::array_declaration_book`](../../src/shaped-graphics/barrier/array_declarations.hh#L40).
+- **What every backend shares**: [`sg::impl::array_declaration_book`](../../src/shaped-graphics/barrier/array_declarations.hh#L42).
   It holds one bind point's declarations, their per-name generations and the application records.
   Its `apply` is the per-op procedure under [what an op does](#what-an-op-does).
   Its `withdraw` and `end_all` are where a declaration ends, and where the never-met check runs ([array_declarations.cc:44-93](../../src/shaped-graphics/barrier/array_declarations.cc#L44-L93)).
@@ -325,7 +325,7 @@ At each dispatch, trace or draw, every array binding of every bound group meets 
    The first time a group's array meets a set of declarations, every element they list is checked for range and vacancy against *that* group's array.
    The check is per declaration, not per name: a declaration made after its name already met a group bumps the name's generation, so that group checks the set again at its next op there.
    Checking per group is what fixes the existing first-group-only bug, and a different group at the same name checks again.
-   Every array is met and checked before any is tracked ([array_declarations.hh:181-196](../../src/shaped-graphics/barrier/array_declarations.hh#L181-L196)).
+   Every array is met and checked before any is tracked ([array_declarations.hh:206-230](../../src/shaped-graphics/barrier/array_declarations.hh#L206-L230)).
    So a declaration that asserts leaves the op untouched.
 2. **Plan.** Summarize the live declarations naming the array — named, any element, access union — and call `plan_array_declarations` exactly as today.
    The summary is kept per name and family, recounted at every declare and end, so reading it here costs O(1).
@@ -333,11 +333,11 @@ At each dispatch, trace or draw, every array binding of every bound group meets 
 3. **Apply, or skip.** An `as_declared` read-only array is skipped iff it is [current](#a-write-between-two-reads) and its key is covered.
    Otherwise every element is tracked — and always for a declaration that writes, declared or widened by `widen_by`, as today.
    An application keeps no resolved resource.
-   It indexes the group's array afresh for every element it tracks ([array_declarations.hh:243-260](../../src/shaped-graphics/barrier/array_declarations.hh#L243-L260)).
+   It indexes the group's array afresh for every element it tracks ([array_declarations.hh:275-295](../../src/shaped-graphics/barrier/array_declarations.hh#L275-L295)).
    No caller holds a writable table across ops, so stickiness never needs to cover that case.
 
 **The key.**
-An array's [application record](../../src/shaped-graphics/barrier/array_declarations.hh#L105-L124) is found by the group's identity and the array's binding.
+An array's [application record](../../src/shaped-graphics/barrier/array_declarations.hh#L112-L139) is found by the group's identity and the array's binding.
 It holds the generation of the name and family it was applied at, and the stages and access applied since its last invalidation, as a union.
 The generation is per name and family: declaring or withdrawing a declaration of `tables.textures_2d` bumps that array's alone, so a one-op declaration of another name leaves this one current.
 The key is **covered** when the generation matches and the op's stages and access are within the recorded union.
@@ -435,7 +435,8 @@ Its withdraw keeps nothing, so the never-met check never runs there; no op there
 ### What it costs
 
 Per op, for an array whose declaration is current: one summary read, one `plan_array_declarations` call, one key compare.
-The book finds the name and the record by linear search, so that is O(bound arrays × (names + records)) — sv binds eight tables — and no element is touched.
+The book finds the name by linear search and the record by one hash lookup on (group, binding), so that is O(bound arrays × names) — sv binds eight tables — and no element is touched.
+Records are never dropped within a list, so a caller binding a new group per draw grows the map by one per draw and pays a constant lookup, not a scan over every earlier group.
 The O(elements) work happens once per array per list, again after any member write, and again when a key is not covered.
 
 Back of the envelope for a moving Sponza frame:

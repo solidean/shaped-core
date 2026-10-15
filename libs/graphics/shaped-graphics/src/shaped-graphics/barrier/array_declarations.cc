@@ -137,18 +137,7 @@ isize sg::impl::array_declaration_book::find_or_add(cc::string_view name, bool i
 sg::impl::array_declaration_book::application& sg::impl::array_declaration_book::application_for(void const* group,
                                                                                                  isize binding)
 {
-    for (auto& app : _applications)
-        if (app.group == group && app.binding == binding)
-            return app;
-    _applications.push_back({.group = group,
-                             .binding = binding,
-                             .checked_generation = {},
-                             .applied_generation = 0,
-                             .stages = {},
-                             .access = {},
-                             .snapshot = 0,
-                             .current = false});
-    return _applications.back();
+    return _applications[application_key{.group = group, .binding = binding}];
 }
 
 void sg::impl::array_declaration_book::recount(isize name_index)

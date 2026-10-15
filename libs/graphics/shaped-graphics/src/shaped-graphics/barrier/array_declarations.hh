@@ -1,5 +1,7 @@
 #pragma once
 
+#include <clean-core/common/hash.hh>
+#include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
@@ -107,12 +109,20 @@ private:
         int exceptions_in_flight = 0;
     };
 
-    /// How one array binding of one group was last checked and applied.
-    struct application
+    /// One array binding of one bound group, which its application is found by.
+    struct application_key
     {
         void const* group = nullptr;
         isize binding = -1;
 
+        [[nodiscard]] bool operator==(application_key const&) const = default;
+
+        [[nodiscard]] friend u64 hash(application_key const& k) { return cc::make_hash(k.group, k.binding); }
+    };
+
+    /// How one array binding of one group was last checked and applied.
+    struct application
+    {
         /// The generation its elements were checked against, or none yet.
         cc::optional<u32> checked_generation;
 
@@ -151,7 +161,9 @@ private:
 
     cc::vector<name_state> _names;
     cc::vector<declaration> _declarations;
-    cc::vector<application> _applications;
+
+    /// A record's address is stable across later inserts.
+    cc::map<application_key, application> _applications;
 
     /// Live declarations of each family that have not seen an op bind an array of it, so an op skips the walk once all have.
     int _buffers_unseen = 0;
