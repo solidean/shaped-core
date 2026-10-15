@@ -601,21 +601,6 @@ constexpr i32 max_budgeted_rounds = 64;
     return false;
 }
 
-/// The G-buffer slots a raster layer writes beside its image, and their formats — what `temporal_inputs_of` declares for one.
-struct raster_slot
-{
-    u64 (*id)(u8 layer) = nullptr;
-    sg::pixel_format format = sg::pixel_format::undefined;
-};
-constexpr raster_slot raster_slots[] = {
-    {.id = temporal_id::normal_guide, .format = sg::pixel_format::rgba16_float},
-    {.id = temporal_id::depth_guide, .format = sg::pixel_format::r32_float},
-    {.id = temporal_id::albedo_guide, .format = sg::pixel_format::rgba16_float},
-    {.id = temporal_id::specular_albedo_guide, .format = sg::pixel_format::rgba16_float},
-    {.id = temporal_id::roughness_guide, .format = sg::pixel_format::r16_float},
-    {.id = temporal_id::motion_guide, .format = sg::pixel_format::rg32_float},
-};
-
 /// Everything a raster layer's frame is drawn from that a trace of it would upload too.
 struct raster_scene
 {
@@ -1483,7 +1468,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     if (!is_traced)
     {
         // No plan sized the G-buffer either, so this path ensures it beside the image.
-        for (auto const& s : raster_slots)
+        for (auto const& s : impl::raster_slots)
             (void)ensure_temporal(ctx, store, v.id, s.id(layer), v.resolution, s.format);
         (void)raster_layer(cmd, v, *scene, layer, v.resolution,
                            {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash},

@@ -10,6 +10,7 @@
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/resources/material_shader_cache.hh>
 #include <shaped-viewer/shader_library.hh>
+#include <shaped-viewer/view/view_data.hh>
 #include <sv_shaders.hh>
 
 namespace sv
@@ -49,6 +50,35 @@ constexpr auto depth_format = sg::pixel_format::depth32_float;
 cc::shared_async<cc::unit> raster_routine::init_once(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
+
+    // `view_renderer` binds the slots of `impl::raster_slots` as these targets, so each must be allocated in the format its target is drawn in.
+    struct bound_target
+    {
+        u64 (*id)(u8 layer) = nullptr;
+        sg::pixel_format format = sg::pixel_format::undefined;
+    };
+    auto const states = target_states();
+    bound_target const bound[] = {
+        {.id = temporal_id::normal_guide, .format = states.normal.format},
+        {.id = temporal_id::depth_guide, .format = states.depth.format},
+        {.id = temporal_id::albedo_guide, .format = states.albedo.format},
+        {.id = temporal_id::specular_albedo_guide, .format = states.specular_albedo.format},
+        {.id = temporal_id::roughness_guide, .format = states.roughness.format},
+        {.id = temporal_id::motion_guide, .format = states.motion.format},
+    };
+    CC_ASSERT(cc::span<bound_target const>(bound).size() == cc::span<impl::raster_slot const>(impl::raster_slots).size(),
+              "every raster slot is one target of the frame");
+    for (auto const& t : bound)
+    {
+        auto found = false;
+        for (auto const& s : impl::raster_slots)
+            if (s.id == t.id)
+            {
+                CC_ASSERT(s.format == t.format, "a raster slot is allocated in the format its target is drawn in");
+                found = true;
+            }
+        CC_ASSERT(found, "every G-buffer target of a raster frame is one of impl::raster_slots");
+    }
     auto const table = [&](sg::pixel_format format)
     {
         return ctx.persistent.create_texture_2d(

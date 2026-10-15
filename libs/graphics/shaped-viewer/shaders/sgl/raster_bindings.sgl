@@ -143,7 +143,7 @@ struct varyings:
 
 /// What a raster frame writes per pixel: the lit image and the primary hit's G-buffer.
 ///
-/// Each target is the layer's slot of the same meaning (view/view_data.cc), in the format the tracer writes it in.
+/// Each target is the layer's slot of the same meaning (`sv::impl::raster_slots`, view/view_data.hh), in the format the tracer writes it in.
 /// A pixel no surface covers holds the environment in `color`, its reprojection in `motion`, 1 in `primary_depth`, and zero in every other target.
 @pixel struct targets:
     /// radiance, alpha 1

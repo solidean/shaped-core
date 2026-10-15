@@ -148,6 +148,27 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
 }
 } // namespace sv::temporal_id
 
+namespace sv::impl
+{
+/// One G-buffer slot a raster layer writes beside its image: the id it is minted under, and the format it is allocated in.
+struct raster_slot
+{
+    u64 (*id)(u8 layer) = nullptr;
+    sg::pixel_format format = sg::pixel_format::undefined;
+};
+
+/// Every G-buffer slot a raster layer writes beside its image, each in the format `module raster`'s `targets` draws it in.
+/// `temporal_inputs_of` declares these, and `raster_routine` holds the formats to its pipelines' when it initializes.
+inline constexpr raster_slot raster_slots[] = {
+    {.id = temporal_id::normal_guide, .format = sg::pixel_format::rgba16_float},
+    {.id = temporal_id::depth_guide, .format = sg::pixel_format::r32_float},
+    {.id = temporal_id::albedo_guide, .format = sg::pixel_format::rgba16_float},
+    {.id = temporal_id::specular_albedo_guide, .format = sg::pixel_format::rgba16_float},
+    {.id = temporal_id::roughness_guide, .format = sg::pixel_format::r16_float},
+    {.id = temporal_id::motion_guide, .format = sg::pixel_format::rg32_float},
+};
+} // namespace sv::impl
+
 /// How often a view re-renders, as a fraction of the frame loop's rate.
 ///
 /// 1 is every frame, 0.5 every second frame, 0 only when something invalidates it.

@@ -58,12 +58,8 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         // It never denoises, since every frame it draws is final.
         if (v.layers[i].settings.mode == render_mode::raster)
         {
-            out.push_back({.id = temporal_id::normal_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
-            out.push_back({.id = temporal_id::depth_guide(u8(i)), .format = sg::pixel_format::r32_float});
-            out.push_back({.id = temporal_id::albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
-            out.push_back({.id = temporal_id::specular_albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
-            out.push_back({.id = temporal_id::roughness_guide(u8(i)), .format = sg::pixel_format::r16_float});
-            out.push_back({.id = temporal_id::motion_guide(u8(i)), .format = sg::pixel_format::rg32_float});
+            for (auto const& s : impl::raster_slots)
+                out.push_back({.id = s.id(u8(i)), .format = s.format});
             continue;
         }
 
