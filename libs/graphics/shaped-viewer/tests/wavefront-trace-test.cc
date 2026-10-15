@@ -26,6 +26,8 @@ using namespace cc::primitive_defines;
 
 constexpr auto k_size = tg::vec2i(32, 32);
 constexpr int k_block = 4;
+/// The Cornell box's path length, for both tracers.
+constexpr int k_max_bounces = 5;
 
 /// The scene both tracers render: the Cornell box through the managers, its instances and its light table.
 struct cornell_scene
@@ -63,7 +65,7 @@ struct cornell_scene
     fc.previous_camera = fc.camera;
     s.lights.describe_in(fc);
     fc.samples_per_pixel = spp;
-    fc.max_bounces = 5;
+    fc.max_bounces = k_max_bounces;
     fc.rng_seed = seed;
     fc.accum_frame = accum_frame;
     return fc;
@@ -323,7 +325,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - traces the megakernel's image of t
 
 // The pool's two invariants, read off the per-round live-path counts.
 // A carrying frame refills every slot whose path finished, so every round sees every slot; that is what makes a frame's cost its rounds.
-// A draining frame starts nothing, so its count never rises, and a scene with no medium empties well inside `max_bounces` rounds.
+// A draining frame starts nothing, so its count never rises, and a scene with no medium empties within `max_bounces` rounds.
+// A path takes one round per surface bounce, so whatever bounce it carried in at, none enters the drain's round at index `max_bounces` or later.
 ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot busy and a drain empties them",
                      (sg::context_handle const& ctx_h))
 {
@@ -392,7 +395,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
     CHECK(drain.value()[0] == slots);
     for (auto r = 1; r < drain_rounds; ++r)
         CHECK(drain.value()[r] <= drain.value()[r - 1]).context(cc::format("draining round {}", r));
-    CHECK(drain.value()[drain_rounds - 1] == 0u);
+    for (auto r = k_max_bounces; r < drain_rounds; ++r)
+        CHECK(drain.value()[r] == 0u).context(cc::format("draining round {}, past every bounce", r));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
