@@ -686,17 +686,11 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
            "    let ctx = raster.pixel_context(p)\n";
     if (opacity.can_cut_out())
     {
-        // A vector opacity is read through its first lane, as the tracer's channel selector reads a texel.
-        auto const lane = [&](cc::string_view name) -> cc::string
-        {
-            for (auto const& a : r.attributes)
-                if (a.name == name && a.format.component_count() > 1)
-                    return cc::format("sv_attribute_{}(ctx).x", name);
-            return cc::format("sv_attribute_{}(ctx)", name);
-        };
-        auto const cutoff = opacity.cutoff != material_opacity::no_offset ? lane(r.type->opacity_cutoff_attribute)
-                                                                          : cc::string("0.0");
-        cc::format_append(src, "    if raster.is_cut({}, {}) => discard\n", lane(r.type->opacity_attribute), cutoff);
+        auto const cutoff = opacity.cutoff != material_opacity::no_offset
+                              ? cc::format("sv_attribute_{}(ctx)", r.type->opacity_cutoff_attribute)
+                              : cc::string("0.0");
+        cc::format_append(src, "    if raster.is_cut(sv_attribute_{}(ctx), {}) => discard\n", r.type->opacity_attribute,
+                          cutoff);
     }
     auto const occlusion = r.type->occlusion_attribute.empty()
                              ? cc::string("1.0")
