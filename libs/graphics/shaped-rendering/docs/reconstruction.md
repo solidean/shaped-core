@@ -326,6 +326,13 @@ SVGF carries a per-pixel variance in alpha between its own passes and swaps it f
 An upscaled output is the written exception: its alpha is the upscaler's, since `color`'s is at the other extent.
 Whether a vendor member can honour the rule is open — it may write its own alpha and leave us no say — and that is the point at which the rule is either kept by a copy pass or relaxed in writing.
 
+**A native member compiles its last pass once per output format.**
+An SGL image names its format, so the à-trous, SVGF and OIDN members are routines parametrized on the format of the caller's output, and `reconstruct_routine` prewarms them for it.
+The alternative was one compile per member and no format parameter: always write an `rgba32_float` scratch image, then copy it into the caller's format.
+That costs a full-screen pass and a full-resolution image every frame to save one compile per format, so per-format compiles won.
+A format-less storage image, `image_2d[.host]`, planned in [SGL's TODO](../../shaped-graphics-language/docs/TODO.md), would allow one compile on dx12, vulkan and metal.
+webgpu keeps compiling per format, since WGSL has no such image.
+
 ## Selection and refusal
 
 **Explicit means explicit.**
