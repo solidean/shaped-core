@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/macros.hh>
-#include <clean-core/common/utility.hh>    // cc::max
+#include <clean-core/common/utility.hh> // cc::max
+#include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_node.hh> // cc::impl::async_bind_main_thread_home
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/thread.hh>
@@ -62,7 +63,40 @@ cc::atomic<cc::u64> g_next_thread_id = {cc::u64(cc::thread_id::main) + 1};
 thread_local cc::thread_id tl_thread_id = cc::thread_id::invalid;
 
 cc::atomic<bool> g_main_claimed = {false};
+
+struct thread_exit_entry
+{
+    void (*fn)(void*);
+    void* userdata;
+};
+
+thread_local bool tl_thread_exit_done = false;
+
+// The one thread_local here with a destructor, reached only by register_at_thread_exit.
+struct thread_exit_list
+{
+    cc::vector<thread_exit_entry> entries;
+
+    ~thread_exit_list()
+    {
+        // Popped one at a time, because a callback may register another.
+        while (!entries.empty())
+        {
+            auto const e = entries.pop_back();
+            e.fn(e.userdata);
+        }
+        tl_thread_exit_done = true;
+    }
+};
+thread_local thread_exit_list tl_thread_exit_list;
 } // namespace
+
+void cc::register_at_thread_exit(void (*fn)(void*), void* userdata)
+{
+    CC_ASSERT(fn != nullptr, "a thread exit callback must not be null");
+    CC_ASSERT(!tl_thread_exit_done, "this thread's exit callbacks have already run");
+    tl_thread_exit_list.entries.push_back({.fn = fn, .userdata = userdata});
+}
 
 double cc::scheduler_tick_secs()
 {

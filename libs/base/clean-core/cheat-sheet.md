@@ -809,6 +809,8 @@ i32 p = cc::recommended_worker_count();   // >= 1 always; machine, affinity mask
 auto id = cc::current_thread_id();        // cc::thread_id (enum class : u64); equality only — NOT the OS id a debugger shows
 cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for this thread AND binds cc::main_thread_scheduler(); nothing does it implicitly
                                           //   cc::thread_id::invalid (0) is the "no thread" sentinel
+cc::register_at_thread_exit(fn, userdata); // void(*)(void*), run at thread exit, last registered first; register from a COLD path
+                                          //   the way a hot thread_local stays trivially destructible (MSVC/clang-cl guard every access to one that is not)
 
 #include <clean-core/thread/spin.hh>
 cc::spin_pause();                         // CPU spin-wait hint, for a SHORT bounded spin; never a substitute for blocking
