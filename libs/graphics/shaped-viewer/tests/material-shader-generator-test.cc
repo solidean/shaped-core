@@ -376,7 +376,7 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     CHECK(g.raster_source.contains("    surface.base_color = base_color\n"));
     CHECK(g.raster_source.contains("fun sv_attribute_base_color(ctx: material.shading_context){raster.drawn, "
                                    "tracer.bindless} -> float3:"));
-    // A pixel has derivatives, so it samples at the level they pick rather than at level 0.
+    // A pixel has derivatives, so it samples at the level they pick rather than at level 0; the opacity here is a mesh attribute.
     CHECK(g.raster_source.contains(".sample(uv, raster.drawn.palette_linear_repeat_repeat)\n"));
     CHECK(!g.raster_source.contains("tracer.traced"));
     CHECK(!g.raster_source.contains("level = 0.0"));
@@ -391,6 +391,16 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
 
     // The hit group keeps its own spelling.
     CHECK(g.source.contains("tracer.traced.palette_linear_repeat_repeat, level = 0.0"));
+
+    // A textured opacity is read at level 0 by the pixel too, as a hit reads it, while the base color's level is still the derivatives'.
+    auto textured = make_mesh();
+    textured.attributes.push_back(make_uvs());
+    textured.textures.push_back({.name = "base_color", .source = {.texture = sv::texture_id(3), .uv_attribute = "uv"}});
+    textured.textures.push_back({.name = "opacity", .source = {.texture = sv::texture_id(4), .uv_attribute = "uv"}});
+    auto const t = sv::generate_material_shader(sv::resolve_material(type, material, textured));
+    REQUIRE(t.opacity.can_cut_out());
+    CHECK(t.raster_source.contains(".sample(uv, raster.drawn.palette_linear_repeat_repeat)\n"));
+    CHECK(t.raster_source.contains(".sample(uv, raster.drawn.palette_linear_repeat_repeat, level = 0.0)\n"));
 
     // A quadric batch has no raster stage yet.
     auto const quadric = sv::generate_material_shader(sv::resolve_material(type, material, make_mesh()),

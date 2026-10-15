@@ -68,6 +68,7 @@ That is byte for byte the text the hit group holds, with two exceptions:
 
 - **The sampler palette lives in `raster.drawn`**, a copy of `tracer.traced`'s, since a generated load names the group that holds its sampler and a raster pipeline binds no acceleration structure.
 - **A texture samples at the level the pixel's derivatives pick**, where a hit names level 0.
+  The cutout's opacity and cutoff are the exception, read at level 0 as a hit reads them: a box-filtered mip averages opacity, so a minified cutout would thin and vanish.
 
 Everything after the material is shared code too:
 
@@ -155,6 +156,8 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
 - **Quadric batches**, above.
 - **Antialiasing.** Every pixel is shaded at its center, so edges alias where the tracer's jitter antialiases them.
 - **Blended transparency**: coverage is cut at one half, and transmission shows no refraction.
+- **Coverage-preserving mips.** A cutout reads level 0, so a minified one keeps its coverage but aliases.
+  The quality fix is mips generated to keep the fraction above the cutoff, with the cutout then sampled through them.
 - **Lights seen by the camera**: a rect light marked visible to the camera is not drawn.
 - **Overdraw**: there is no depth prepass, so an occluded surface is shaded before the one in front of it lands.
 - **Vertex reuse**: the vertex stage runs three times per triangle, since no index buffer is bound.
@@ -168,7 +171,8 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
 - `raster-test.cc`: the empty Cornell box against the megakernel's direct light, block by block, and its G-buffer at known points.
   Beside it: cutouts thresholded and as coverage, a capture of a raster layer finishing on its first drawn frame, and vulkan against dx12 to rounding.
   Two planes a unit apart at 2000, which a standard float depth cannot tell apart, hold the reversed depth test.
-- `material-shader-generator-test.cc`: the raster spelling of a textured cutout material.
+  A textured cutout minified until its mips fall under the cutoff holds the cut to level 0.
+- `material-shader-generator-test.cc`: the raster spelling of a cutout material, a textured opacity read at level 0 among them.
 - `render-plan-test.cc`: the slots a raster layer declares.
 - `raster-without-raytracing-test.cc`: a raster layer's capture on a device without ray tracing, and a traced layer there declined with one error; neither builds an acceleration structure.
 - The `shaped-viewer/raster` example draws one scene traced and rasterized side by side.

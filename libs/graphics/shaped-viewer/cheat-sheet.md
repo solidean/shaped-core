@@ -360,6 +360,7 @@ Gotchas:
 - **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
 - **A sample names its level, 0** — a ray tracing hit shader has no derivatives to pick a mip from.
   The raster pixel stage is the one spelling that does not: it has derivatives, and samples through `raster.drawn`'s copy of the palette.
+  Its cutout opacity and cutoff still read level 0, since a box-filtered mip averages a cutout away.
 - **Every bindless index is `nonuniform`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
 - **Each load is a function of its own**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.

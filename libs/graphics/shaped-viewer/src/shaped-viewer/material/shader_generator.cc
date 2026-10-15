@@ -277,7 +277,8 @@ struct body_spelling
     /// The binding holding the palette `sgl_palette_sampler` names: `tracer.traced` at a hit, `raster.drawn` at a pixel.
     cc::string_view palette_group = "tracer.traced";
 
-    /// Whether a sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
+    /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
+    /// The cutout's opacity and cutoff name level 0 either way; `samples_level_zero` says why.
     bool explicit_level = true;
 };
 
@@ -286,6 +287,15 @@ constexpr auto traced_spelling = body_spelling{};
 
 /// The spelling a raster pixel stage reads its attributes in.
 constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", .explicit_level = false};
+
+/// Whether attribute `name` of `r` samples level 0 in `spelling`.
+///
+/// The cutout's opacity and cutoff always do: a box-filtered mip averages opacity, so a minified cutout would read a coverage below its cutoff and vanish.
+/// Level 0 is what a hit reads, so a pixel then cuts what the tracer would at any distance.
+[[nodiscard]] bool samples_level_zero(resolved_material const& r, cc::string_view name, body_spelling const& spelling)
+{
+    return spelling.explicit_level || name == r.type->opacity_attribute || name == r.type->opacity_cutoff_attribute;
+}
 
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
@@ -356,10 +366,11 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
         cc::format_append(
             out, "    let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + {}u) as int\n",
             tex.offset);
-        // An explicit level where there are no derivatives, at a hit; the texel is named because a constant selector reads it twice.
+        // An explicit level where there are no derivatives, at a hit, and for a cutout everywhere.
+        // The texel is named because a constant selector reads it twice.
         cc::format_append(out, "    let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, {}.{}{})\n",
                           spelling.palette_group, sgl_palette_sampler(a.sample->sampler),
-                          spelling.explicit_level ? ", level = 0.0" : "");
+                          samples_level_zero(r, a.name, spelling) ? ", level = 0.0" : "");
 
         auto value = texel_expression(a.sample->swizzle, a.format);
 

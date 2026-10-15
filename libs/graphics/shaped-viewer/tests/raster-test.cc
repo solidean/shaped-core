@@ -14,6 +14,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/rendering/raster_routine.hh>
+#include <shaped-viewer/resources/impl/mip_layout.hh> // sv::impl::mip_count_of
 #include <typed-geometry/scalar/half_float.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
@@ -484,6 +485,104 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout material cuts what the trace
         }
         CHECK(wrong == 0).context(cc::format("{}: {} pixels not {}", c.name, wrong, c.cut ? "cut" : "kept"));
     }
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a minified textured cutout cuts against level 0, as the tracer does",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // A 256 x 256 opacity whose every 2 x 2 block holds exactly two opaque texels, placed by a hash so nothing aliases.
+    // Every mip below it is then exactly the box average, alpha 128, which is under the cutoff of 0.6.
+    // The quad spans about 45 pixels of a 32-pixel view, so about 6 texels a pixel: a derivative-picked level is 2 or 3, and cuts everything.
+    constexpr i32 extent = 256;
+    auto const levels = sv::impl::mip_count_of(extent, extent);
+    auto pixels = cc::vector<byte>();
+    for (auto y = 0; y < extent; ++y)
+        for (auto x = 0; x < extent; ++x)
+        {
+            auto h = u32(x / 2) * 73856093u ^ u32(y / 2) * 19349663u;
+            h ^= h >> 13;
+            h *= 0x5bd1e995u;
+            h ^= h >> 15;
+            // The six ways two of four corners can be opaque, as bit masks over (x % 2, y % 2).
+            constexpr u32 arrangements[] = {0b0011, 0b0101, 0b0110, 0b1001, 0b1010, 0b1100};
+            auto const mask = arrangements[h % 6];
+            auto const opaque = (mask >> u32((y % 2) * 2 + (x % 2))) & 1u;
+            for (auto const c : {byte(0), byte(0), byte(0), byte(opaque != 0 ? 255 : 0)})
+                pixels.push_back(c);
+        }
+    for (auto level = 1; level < levels; ++level)
+    {
+        auto const side = cc::max(extent >> level, 1);
+        for (auto i = 0; i < side * side; ++i)
+            for (auto const c : {byte(0), byte(0), byte(0), byte(128)})
+                pixels.push_back(c);
+    }
+
+    auto uvs = cc::vector<tg::vec2f>();
+    auto quad = cc::vector<tg::pos3f>();
+    for (auto const& p : {tg::pos3f(-2, -2, 0), tg::pos3f(2, -2, 0), tg::pos3f(2, 2, 0), tg::pos3f(-2, -2, 0),
+                          tg::pos3f(2, 2, 0), tg::pos3f(-2, 2, 0)})
+    {
+        quad.push_back(p);
+        uvs.push_back(tg::vec2f((p[0] + 2.0f) / 4.0f, (p[1] + 2.0f) / 4.0f));
+    }
+
+    // Black and reflecting nothing, in front of a white environment: a kept pixel is 0, and a cut one is 1.
+    using binding = sv::material_attribute_binding;
+    auto& lib = sv_test::shared_material_library();
+    auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto const material
+        = lib.acquire(sv::material::create("minified cutout", openpbr,
+                                           {binding::of("base_color", tg::vec3f(0, 0, 0)),
+                                            binding::of("specular_weight", 0.0f), binding::of("alpha_cutoff", 0.6f)}));
+    auto mesh = sv::mesh{.name = "minified cutout",
+                         .geometry = sv::triangle_geometry::create_from_positions(quad),
+                         .material = material};
+    mesh.attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+    mesh.textures.push_back({.name = "opacity",
+                             .source = {.texture = sv::texture_data::create(
+                                            cc::move(pixels), sg::pixel_format::rgba8_unorm, extent, extent, levels),
+                                        .uv_attribute = "uv",
+                                        .sampler = {.mag_filter = sg::sampler_filter::nearest,
+                                                    .address_u = sg::sampler_address_mode::clamp_edge,
+                                                    .address_v = sg::sampler_address_mode::clamp_edge},
+                                        .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::a)}});
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(mesh);
+    resources.wait_for_pending_uploads();
+    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(permutation != nullptr);
+    REQUIRE(permutation->opacity.can_cut_out());
+
+    auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto const drawn = co_await draw_raster(ctx, resources, item, cam, {}, sv::background::uniform(tg::vec3f(1, 1, 1)),
+                                            tg::vec2i(32, 32));
+
+    // Level 0 is half opaque, so about half the view is kept, where the mips would have cut all of it.
+    auto kept = 0;
+    auto other = 0;
+    for (auto const& p : drawn.color)
+    {
+        if (tg::abs(p[0]) < 1e-3f)
+            ++kept;
+        else if (tg::abs(p[0] - 1.0f) > 1e-3f)
+            ++other;
+    }
+    auto const total = isize(drawn.color.size());
+    CHECK(other == 0).context(cc::format("{} pixels neither kept nor cut", other));
+    CHECK(kept > total * 35 / 100).context(cc::format("{} of {} kept", kept, total));
+    CHECK(kept < total * 65 / 100).context(cc::format("{} of {} kept", kept, total));
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
