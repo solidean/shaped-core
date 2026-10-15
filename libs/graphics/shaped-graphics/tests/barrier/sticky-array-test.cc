@@ -480,6 +480,53 @@ ASYNC_INVOCABLE_TEST("sg - two declarations holding one texture at different lay
         CHECK(got[i] == (i % 2 == 0 ? 0.25f : 0.75f)).context(cc::format("thread {}", i));
 }
 
+ASYNC_INVOCABLE_TEST("sg - a current array declaration applies after all when a later array of its op moves a member",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    require_arrays(*ctx);
+
+    auto const look_gallery = co_await shaders::sticky_arrays.look.acquire_pipeline(*ctx);
+    auto const look_both = co_await shaders::sticky_arrays.look_beside_annex.acquire_pipeline(*ctx);
+    auto const first = make_image(*ctx, 0.25f);
+    auto const second = make_image(*ctx, 0.75f);
+    sg::buffer<float> const easels[] = {make_easel(*ctx), make_easel(*ctx)};
+
+    auto cmd = ctx->create_command_list();
+    auto const gallery = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::gallery>(),
+        shaders::gallery{.images = {first.as_texture_view(), second.as_texture_view()}});
+    auto const annex = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::annex>(),
+        shaders::annex{.images = {first.as_texture_view(), second.as_texture_view()}});
+    auto const easel_group
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::easel>(),
+                                              shaders::easel{.reds = easels[1].as_readwrite_buffer()});
+    auto const a = cmd->compute.declare_array_texture_access(
+        "gallery.images", images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
+    auto const b = cmd->compute.declare_array_texture_access(
+        "annex.images", images_at(sg::texture_layout::general, sg::texture_layout::general));
+
+    look(*cmd, *look_gallery, *gallery, easels[0]); // a applies, and is current
+    auto const tracked = tracks(*cmd);
+    cmd->compute.bind_pipeline(*look_both);
+    cmd->compute.bind_group(0, *gallery);
+    cmd->compute.bind_group(1, *annex);
+    cmd->compute.bind_group(2, *easel_group);
+    cmd->compute.dispatch_threads(k_threads);
+    auto const delta = tracks(*cmd) - tracked;
+    auto const back = cmd->download.data_from_buffer(easels[1]);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // a is skipped as current, then b moves both textures to general.
+    // Where that is a layout change, a applies after all, so the op's barrier serves both arrays.
+    CHECK(delta == 2 + reapplied(*ctx));
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == isize(k_threads));
+    for (auto i = 0; i < k_threads; ++i)
+        CHECK(got[i] == (i % 2 == 0 ? 0.25f : 0.75f)).context(cc::format("thread {}", i));
+}
+
 ASYNC_INVOCABLE_TEST("sg - groups alternating A, B, A at one array name re-apply where the other moved a layout",
                      (sg::context_handle const& ctx))
 {

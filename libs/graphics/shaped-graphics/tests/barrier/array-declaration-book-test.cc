@@ -4,6 +4,7 @@
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/barrier/array_declarations.hh>
+#include <shaped-graphics/barrier/resource_access.hh> // sg::is_unordered_write
 #include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/resource/views.hh>
 
@@ -64,26 +65,42 @@ struct fake_list
     i64 tracked = 0;
     i64 covered = 0;
 
-    /// One op over `arrays`, each the array of a group of its own at index `i`, whose identity is its address.
-    void op(cc::span<fake_array const> arrays, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
+    /// One op over `groups`, each the array of a group at index `i`, whose identity is its address.
+    /// Every tracked element is a member, so a tracked write counts toward `member_writes` as a list's tracker does.
+    void op(cc::span<fake_array const* const> groups, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
     {
         auto sites = cc::vector<sg::impl::array_site<fake_array>>();
-        for (auto i = 0; i < int(arrays.size()); ++i)
-            sites.push_back({.group = &arrays[i], .group_index = i, .array = &arrays[i]});
-        auto const track = [&](fake_element const&, sg::pipeline_stage_flags, sg::access_flags)
+        for (auto i = 0; i < int(groups.size()); ++i)
+            sites.push_back({.group = groups[i], .group_index = i, .array = groups[i]});
+        auto const track = [&](fake_element const&, sg::pipeline_stage_flags, sg::access_flags access)
         {
             ++tracked;
-            return sg::impl::member_track{.member_write = false, .held_write = held_write};
+            auto const writes = sg::is_unordered_write(access);
+            if (writes)
+                ++member_writes;
+            return sg::impl::member_track{.member_write = writes, .held_write = held_write};
         };
         auto const track_texture
-            = [&](fake_element const&, sg::pipeline_stage_flags, sg::access_flags, sg::texture_layout)
+            = [&](fake_element const&, sg::pipeline_stage_flags, sg::access_flags access, sg::texture_layout)
         {
             ++tracked;
-            return sg::impl::member_track{.member_write = false, .held_write = held_write};
+            auto const writes = sg::is_unordered_write(access);
+            if (writes)
+                ++member_writes;
+            return sg::impl::member_track{.member_write = writes, .held_write = held_write};
         };
         auto const cover = [&](fake_array const&, fake_element const&, sg::impl::array_plan const&) { ++covered; };
         book.apply(cc::span<sg::impl::array_site<fake_array> const>(sites), nullptr, this, stages, member_writes, stats,
                    track, track_texture, cover);
+    }
+
+    /// One op over `arrays`, each the array of a group of its own.
+    void op(cc::span<fake_array const> arrays, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
+    {
+        auto groups = cc::vector<fake_array const*>();
+        for (auto const& array : arrays)
+            groups.push_back(&array);
+        op(cc::span<fake_array const* const>(groups), stages);
     }
 
     void op(fake_array const& array, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
@@ -159,6 +176,38 @@ TEST("sg::impl::array_declaration_book - a write is applied at every op")
     list.op(table);
     list.op(table);
     CHECK(list.tracked == 2);
+}
+
+TEST("sg::impl::array_declaration_book - a skipped read applies after all when a later array of its op writes a member")
+{
+    // One texture in two arrays of one op, read through the gallery and written through the annex.
+    // Declaring the gallery again would combine both uses into one layout, so its skip must not stand.
+    auto list = fake_list();
+    auto const gallery = textures("gallery.images", 1);
+    auto const annex = textures("annex.images", 1);
+    sg::array_texture_access const read[]
+        = {{.index = 0, .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture}};
+    sg::array_texture_access const write[]
+        = {{.index = 0, .access = sg::access_flag::shader_write, .layout = sg::texture_layout::shader_image}};
+    list.book.declare_textures(1, "gallery.images", read);
+    list.book.declare_textures(2, "annex.images", write);
+
+    list.op(gallery);
+    CHECK(list.tracked == 1);
+    fake_array const* const read_then_write[] = {&gallery, &annex};
+    list.op(read_then_write);
+    CHECK(list.tracked == 3); // the annex's write, then the gallery's read after all
+
+    // Written first, the gallery is not current when its turn comes, and applies once.
+    fake_array const* const write_then_read[] = {&annex, &gallery};
+    list.op(write_then_read);
+    CHECK(list.tracked == 5);
+
+    // Nothing written in its op, the skip stands.
+    list.op(gallery);
+    list.op(gallery);
+    CHECK(list.tracked == 5);
+    CHECK(list.stats.values[int(sg::stat::array_element_tracks)] == 5);
 }
 
 TEST("sg::impl::array_declaration_book - a key covered by what was applied skips, and one outside it applies once")

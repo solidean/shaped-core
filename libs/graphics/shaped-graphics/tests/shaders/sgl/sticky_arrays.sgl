@@ -42,6 +42,11 @@ binding easel:
 @compute(64) fun look_annex(@thread_id id: int3){annex, easel}:
     easel.reds[id.x] = annex.images[nonuniform (id.x % 2)].load(int2(0, 0)).x
 
+// The look with the annex bound beside the gallery, both indexed: the annex adds each image's green, which is 0.
+@compute(64) fun look_beside_annex(@thread_id id: int3){gallery, annex, easel}:
+    let red = gallery.images[nonuniform (id.x % 2)].load(int2(0, 0)).x
+    easel.reds[id.x] = red + annex.images[nonuniform (id.x % 2)].load(int2(0, 0)).y
+
 // A full-screen triangle whose pixel stage reads the shelf, and a twin whose vertex stage reads it too.
 struct shelf_varyings:
     @position position: hpos4

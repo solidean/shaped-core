@@ -27,6 +27,8 @@
 /// The list counts `member_writes`: every tracked access landing in the write bucket on a resource some application tracked.
 /// An application snapshots that count right after its own tracking, and stays current while the count is unchanged.
 /// One where an element's state already held a write or a layout change earlier in its op is never current.
+/// A skip is decided before the op's later arrays track, so one whose op moves the count afterwards applies after all.
+/// The skipped array may hold the member written, and declaring it again would have combined both uses in one barrier.
 
 /// One array binding of one bound group, as an op meets it.
 /// `ArrayBinding` is the backend's: it has `name`, `is_texture`, `binding`, `bound_as` and `elements`, each element `is_vacant()`.
@@ -136,11 +138,36 @@ private:
         /// The list's `member_writes` right after its tracking.
         u64 snapshot = 0;
         bool current = false;
+
+        /// The op that last skipped it, as the book counts ops.
+        u64 skipped_op = 0;
     };
 
     [[nodiscard]] isize find(cc::string_view name, bool is_texture) const;
     [[nodiscard]] isize find_or_add(cc::string_view name, bool is_texture);
     [[nodiscard]] application& application_for(void const* group, isize binding);
+
+    /// How the op meets the array of `site`, under the live declarations of `name_index`, or none for a negative one.
+    template <class ArrayBinding>
+    [[nodiscard]] array_plan plan_of(array_site<ArrayBinding> const& site,
+                                     isize name_index,
+                                     pipeline_footprint const* footprint,
+                                     void const* pipeline,
+                                     pipeline_stage_flags op_stages) const;
+
+    /// Tracks every element the live declarations of `name_index` list in `array`, as `plan` widens them, and records it in `app`.
+    /// An application that was not `still_current` starts its union afresh.
+    template <class ArrayBinding, class TrackBuffer, class TrackTexture>
+    void track_declared(application& app,
+                        isize name_index,
+                        ArrayBinding const& array,
+                        array_plan const& plan,
+                        bool still_current,
+                        u64 const& member_writes,
+                        stat_counts& stats,
+                        TrackBuffer& track_buffer,
+                        TrackTexture& track_texture);
+
     void add(declaration d, cc::string_view name, bool is_texture);
     void recount(isize name_index);
     void meet(isize name_index);
@@ -168,6 +195,9 @@ private:
     /// Live declarations of each family that have not seen an op bind an array of it, so an op skips the walk once all have.
     int _buffers_unseen = 0;
     int _textures_unseen = 0;
+
+    /// Ops `apply` has met, which tells a skip of this op from an earlier one's.
+    u64 _ops = 0;
 };
 
 template <class Elements>
@@ -229,16 +259,14 @@ void sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> c
     if (saw_textures)
         see_family(true);
 
+    ++_ops;
+    auto const writes_before = member_writes;
+    auto skipped = false;
     for (auto const& site : sites)
     {
         auto const& array = *site.array;
         auto const name_index = find(array.name, array.is_texture);
-        auto const declared = name_index >= 0 ? _names[name_index].declared : array_declarations();
-
-        auto use = cc::optional<slot_use>();
-        if (footprint != nullptr && footprint->is_known())
-            use = footprint->use_of(site.group_index, array.binding);
-        auto const plan = plan_array_declarations(pipeline, array.name, use, array.bound_as, op_stages, declared);
+        auto const plan = plan_of(site, name_index, footprint, pipeline, op_stages);
 
         if (plan.how == array_plan::mode::cover_all)
         {
@@ -258,46 +286,96 @@ void sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> c
         auto const& name = _names[name_index];
         auto& app = application_for(site.group, array.binding);
         auto const applied_access = name.declared.access | plan.widen_by;
-        auto const read_only = !is_unordered_write(applied_access);
         auto const still_current
             = app.current && app.applied_generation == name.generation && app.snapshot == member_writes;
 
         // Covered rather than equal: a read at stages already synced since the last write needs no barrier.
         // A write is never skipped.
-        if (read_only && still_current && app.stages.has_all(plan.stages) && app.access.has_all(applied_access))
+        if (!is_unordered_write(applied_access) && still_current && app.stages.has_all(plan.stages)
+            && app.access.has_all(applied_access))
+        {
+            app.skipped_op = _ops;
+            skipped = true;
             continue;
-        if (!still_current)
-        {
-            app.stages = {};
-            app.access = {};
         }
-
-        auto held_write = false;
-        auto tracked = i64(0);
-        for (auto const& d : _declarations)
-        {
-            if (d.name_index != name_index)
-                continue;
-            for (auto const& e : d.buffers)
-            {
-                held_write = track_buffer(array.elements[e.index], plan.stages, e.access | plan.widen_by).held_write
-                          || held_write;
-                ++tracked;
-            }
-            for (auto const& e : d.textures)
-            {
-                held_write
-                    = track_texture(array.elements[e.index], plan.stages, e.access | plan.widen_by, e.layout).held_write
-                   || held_write;
-                ++tracked;
-            }
-        }
-        stats.add(stat::array_element_tracks, tracked);
-
-        app.applied_generation = name.generation;
-        app.stages |= plan.stages;
-        app.access |= applied_access;
-        app.snapshot = member_writes;
-        app.current = read_only && !held_write;
+        track_declared(app, name_index, array, plan, still_current, member_writes, stats, track_buffer, track_texture);
     }
+    if (!skipped || member_writes == writes_before)
+        return;
+
+    // A member written after a skip was decided may be one the skipped array holds too, in another layout or at another access.
+    // Declaring that array again would have combined both uses, so every skip of this op is applied after all.
+    for (auto const& site : sites)
+    {
+        auto const& array = *site.array;
+        auto* const app = _applications.get_ptr(application_key{.group = site.group, .binding = array.binding});
+        if (app == nullptr || app->skipped_op != _ops)
+            continue;
+        app->skipped_op = 0;
+        auto const name_index = find(array.name, array.is_texture);
+        auto const plan = plan_of(site, name_index, footprint, pipeline, op_stages);
+        track_declared(*app, name_index, array, plan, false, member_writes, stats, track_buffer, track_texture);
+    }
+}
+
+template <class ArrayBinding>
+sg::impl::array_plan sg::impl::array_declaration_book::plan_of(array_site<ArrayBinding> const& site,
+                                                               isize name_index,
+                                                               pipeline_footprint const* footprint,
+                                                               void const* pipeline,
+                                                               pipeline_stage_flags op_stages) const
+{
+    auto const& array = *site.array;
+    auto const declared = name_index >= 0 ? _names[name_index].declared : array_declarations();
+    auto use = cc::optional<slot_use>();
+    if (footprint != nullptr && footprint->is_known())
+        use = footprint->use_of(site.group_index, array.binding);
+    return plan_array_declarations(pipeline, array.name, use, array.bound_as, op_stages, declared);
+}
+
+template <class ArrayBinding, class TrackBuffer, class TrackTexture>
+void sg::impl::array_declaration_book::track_declared(application& app,
+                                                      isize name_index,
+                                                      ArrayBinding const& array,
+                                                      array_plan const& plan,
+                                                      bool still_current,
+                                                      u64 const& member_writes,
+                                                      stat_counts& stats,
+                                                      TrackBuffer& track_buffer,
+                                                      TrackTexture& track_texture)
+{
+    if (!still_current)
+    {
+        app.stages = {};
+        app.access = {};
+    }
+
+    auto held_write = false;
+    auto tracked = i64(0);
+    for (auto const& d : _declarations)
+    {
+        if (d.name_index != name_index)
+            continue;
+        for (auto const& e : d.buffers)
+        {
+            held_write
+                = track_buffer(array.elements[e.index], plan.stages, e.access | plan.widen_by).held_write || held_write;
+            ++tracked;
+        }
+        for (auto const& e : d.textures)
+        {
+            held_write = track_texture(array.elements[e.index], plan.stages, e.access | plan.widen_by, e.layout).held_write
+                      || held_write;
+            ++tracked;
+        }
+    }
+    stats.add(stat::array_element_tracks, tracked);
+
+    auto const& name = _names[name_index];
+    auto const applied_access = name.declared.access | plan.widen_by;
+    app.applied_generation = name.generation;
+    app.stages |= plan.stages;
+    app.access |= applied_access;
+    app.snapshot = member_writes;
+    app.current = !is_unordered_write(applied_access) && !held_write;
 }
