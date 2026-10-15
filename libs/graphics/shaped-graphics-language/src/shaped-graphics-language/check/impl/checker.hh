@@ -676,6 +676,8 @@ struct checker
     [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
     /// A checked index's value when it is an int literal or names a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
+    /// The same of a `uint` index: a literal with its `u` suffix, or a `const` of `uint`.
+    [[nodiscard]] cc::optional<i64> constant_unsigned_index(i32 file, ast::expr_id expr) const;
     /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
     [[nodiscard]] type_id resource_type(type_info info);
     /// `acceleration_structure[.geometry]` (CHK-320).

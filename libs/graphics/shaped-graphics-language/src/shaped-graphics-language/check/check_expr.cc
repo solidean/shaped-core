@@ -217,6 +217,7 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     }
 
     auto const int_type = type_of_builtin(builtins::k_int, file, where);
+    auto const uint_type = type_of_builtin(builtins::k_uint, file, where);
     auto result = object;
     for (auto const& a : arguments)
     {
@@ -226,14 +227,20 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
                           : ast::expr_id::none;
         auto const index = check_expr(scope, a.value);
         binding_index = outer_index;
-        if (index != error_type && index != int_type)
+        // CHK-287: an `int` or a `uint`, which every target indexes by alike
+        if (index != error_type && index != int_type && index != uint_type)
             report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
-                   cc::format("{} is indexed by an int, and this is a {}",
+                   cc::format("{} is indexed by an int or a uint, and this is a {}",
                               kind == type_kind::buffer ? "a buffer" : "an array", out.name_of(index)));
         // CHK-309: a constant index names one element, and one past the end is refused by every target
         auto const count = out.at(result).count;
-        if (auto const at = index == int_type ? constant_index(file, a.value) : cc::optional<i32>();
-            kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
+        auto at = cc::optional<i64>();
+        if (index == int_type)
+            if (auto const signed_at = constant_index(file, a.value); signed_at.has_value())
+                at = signed_at.value();
+        if (index == uint_type)
+            at = constant_unsigned_index(file, a.value);
+        if (kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
             report(diagnostic_kind::invalid_constant_argument, file, span_of(file, a.value),
                    cc::format("{} is no index into {}, whose elements are 0 ..< {}", at.value(), out.name_of(result),
                               count));

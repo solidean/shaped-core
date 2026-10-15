@@ -839,8 +839,9 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   Every length is an `int` literal or an `int` `const`, at least 1, or `invalid-constant-argument`.
   An array of arrays is one group, outermost first, `float[3, 5]` for three arrays of five; two groups in a row are `wrong-kind-of-name` ([why](why/checking.md#chk-285)).
 * **CHK-286** `T[]`, a group with no length, is an array whose length the host binds, which only a binding member may be; anywhere else it is `wrong-kind-of-name`.
-* **CHK-287** `xs[i]` is an element of an array, and `xs[i, j]` is `xs[i][j]`: one `int` index per dimension, at most as many as the array has.
-* **CHK-309** An index that is an `int` literal or names an `int` `const` lies in `0 ..< N` for its dimension's length `N`, or it is `invalid-constant-argument`.
+* **CHK-287** `xs[i]` is an element of an array, and `xs[i, j]` is `xs[i][j]`: one index per dimension, at most as many as the array has.
+  An index is an `int` or a `uint`, into an array, a binding array and a buffer alike, since every target indexes by either; any other type is `type-mismatch`.
+* **CHK-309** An index that is an `int` or `uint` literal, or names an `int` or `uint` `const`, lies in `0 ..< N` for its dimension's length `N`, or it is `invalid-constant-argument`.
   An index computed at run time is not judged here.
 * **CHK-288** `xs.length` is an array's length, an `int` constant, and the one member an array has; it is never assigned.
 * **CHK-289** `T[N].filled(v)` is an array of `T[N]` whose every element is `v`, which converts to `T` as an argument does.
@@ -1380,7 +1381,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `opaque-struct-needs-builtin` | CHK-34 |
 | `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
-| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-329, CHK-344, CHK-362, CHK-375 |
+| `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162 |
