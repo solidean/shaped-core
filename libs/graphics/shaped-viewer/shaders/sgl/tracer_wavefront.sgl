@@ -176,6 +176,9 @@ fun start_sample(slot: uint, rng_in: uint){traced, wavefront_step}:
 
 /// Clears what this frame tallies, kills every path on a restart, and starts a sample in every slot without one.
 /// Every live slot is queued for the first round, whose input is `queue_a`.
+///
+/// The primary depth and the hit distances are cleared by a restart alone, as the estimate's sums are.
+/// A still frame of few rounds starts no sample in most pixels, so a guide cleared every frame would read as escaped there.
 fun wavefront_begin(slot: uint){traced, wavefront_step}:
     if slot >= wavefront_step.width * wavefront_step.height => return
     let f = traced.frame[0]
@@ -188,10 +191,6 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
     tally.frame_sum_specular = float3(0.0)
     tally.frame_primary_count = 0.0
     tally.frame_motion = float2(0.0)
-    tally.primary_depth = -1.0
-    tally.hit_diffuse = float2(0.0)
-    tally.hit_specular = float2(0.0)
-    tally.escaped = float2(0.0)
     traced.tallies[s] = tally
 
     let st = traced.path_states[s]
@@ -263,7 +262,7 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
         if hit_t < 0.0:
             tally.guide_count += 1.0
             st.flags = st.flags & ~path_flag_primary
-            // The depth raster sees where the frame's first primary ray landed; one that escaped is the far plane.
+            // The depth raster sees where the estimate's first primary ray landed; one that escaped is the far plane.
             if tally.primary_depth < 0.0 => tally.primary_depth = 1.0
         traced.tallies[s] = tally
     else if b == 1u:
@@ -515,7 +514,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         tally.roughness_sum += p.roughness
         tally.guide_count += 1.0
 
-        // The depth raster sees at the pixel CENTER: the center ray met with the plane the frame's first primary hit lies on.
+        // The depth raster sees at the pixel CENTER: the center ray met with the plane the estimate's first primary hit lies on.
         // The projection sv::matrices_of builds has w as the view depth, so z / w is 1 - near / depth.
         if tally.primary_depth < 0.0:
             let px = slot_pixel(slot)

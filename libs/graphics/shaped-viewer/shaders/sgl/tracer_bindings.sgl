@@ -220,13 +220,13 @@ struct pixel_tally:
     albedo_sum: float3
     roughness_sum: float
     specular_albedo_sum: float3
-    /// the clip depth of this frame's first primary ray, 1 where it escaped, and below 0 until one has
+    /// the clip depth of the estimate's first primary ray, 1 where it escaped, and below 0 until one has
     primary_depth: float
     frame_motion: float2
-    /// this frame's first secondary hits, per lobe of the path: the distances summed and how many hit
+    /// the estimate's first secondary hits, per lobe of the path: the distances summed and how many hit
     hit_diffuse: float2
     hit_specular: float2
-    /// this frame's first secondary rays that escaped, per lobe
+    /// the estimate's first secondary rays that escaped, per lobe
     escaped: float2
 
 /// The workgroup counts an indirect dispatch reads, `sg::dispatch_args`.

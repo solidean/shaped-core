@@ -397,6 +397,99 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// A still frame of one round starts a new sample in only the slots whose path finished last round, which is few of them.
+// The primary depth is what drawings are depth-tested against, so it holds the estimate's, not the frame's: every covered pixel keeps its depth.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a still frame of one round keeps the primary depth its estimate found",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+    auto const background = sv::background_gpu::from(sv::background{});
+    auto const target = make_target(ctx);
+    auto const depth = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::r32_float,
+         .width = k_size[0],
+         .height = k_size[1],
+         .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
+    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+
+    // A restart that keeps every slot busy, then a still frame of a single round.
+    auto restarted_depth = sg::data_future<f32>();
+    auto still_depth = sg::data_future<f32>();
+    (void)co_await trace_frames(
+        ctx, target, 2,
+        [&](sg::command_list& cmd, int f)
+        {
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
+            records.push_back(resources.describe_instance(cmd, scene.item.mesh, scene.item.instance));
+            sv::place_instance_record(records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+            auto const bindless = resources.freeze();
+            auto const trace = sv::pt_trace_desc{
+                .background = ctx.transient.create_buffer_from_pod(cmd, background, sg::buffer_usage::readonly_buffer),
+                .instances = scene.instances,
+                .output = target,
+                .primary_depth = depth,
+                .instance_table = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer),
+                .lights = sv_test::upload_lights(cmd, scene.lights),
+                .hit_groups = scene.hit_groups,
+                .bindless = &bindless};
+            auto fc = frame_of(scene, 9u, 0u, 1);
+            fc.write_primary_depth = 1;
+            fc.near_plane = f32(scene.camera.projection.near_plane);
+            auto const outcome = sv::wavefront_routine::execute(cmd, {.trace = trace,
+                                                                      .frame = fc,
+                                                                      .state = &state,
+                                                                      .rounds = f == 0 ? 6 : 1,
+                                                                      .restart = f == 0,
+                                                                      .regenerate = true,
+                                                                      .generation = 1});
+            if (outcome == sg::routine_outcome::executed)
+                (f == 0 ? restarted_depth : still_depth)
+                    = sg::data_future<f32>(cmd.download.bytes_from_texture(depth.raw()));
+            return outcome;
+        });
+
+    auto const restarted = restarted_depth.try_get_data();
+    auto const still = still_depth.try_get_data();
+    REQUIRE(restarted.has_value());
+    REQUIRE(still.has_value());
+    REQUIRE(restarted.value().size() == still.value().size());
+
+    auto covered = isize(0);
+    auto lost = isize(0);
+    auto moved = isize(0);
+    for (auto i = isize(0); i < still.value().size(); ++i)
+    {
+        if (restarted.value()[i] >= 1.0f)
+            continue;
+        ++covered;
+        if (still.value()[i] >= 1.0f)
+            ++lost;
+        else if (still.value()[i] != restarted.value()[i])
+            ++moved;
+    }
+    CHECK(covered > still.value().size() / 2).context(cc::format("{} of {} pixels covered", covered, still.value().size()));
+    CHECK(lost == 0).context(cc::format("{} of {} covered pixels read the far plane", lost, covered));
+    CHECK(moved == 0).context(cc::format("{} of {} covered pixels changed their depth", moved, covered));
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // The furnace through the wavefront: a lossless object under a uniform environment returns the environment, which is what
 // segment's medium walk and shade's refraction have to get right between them — see volumetric-furnace-test.cc for the megakernel's.
 ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible under a uniform environment",
