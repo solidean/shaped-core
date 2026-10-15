@@ -102,7 +102,19 @@ When a slot's path ends, it adds its radiance to the slot's own float sum and co
 The state is structure-of-arrays, one buffer per field group, so a stage reads only what it uses.
 **It is stored unpacked, behind accessors**, until per-stage timings show the bandwidth worth packing; ray origins stay 32-bit float whatever is packed.
 
-At 1920×1080 with `k = 1`, unpacked, a frame holds roughly 250 MB of path state, 50 MB of hit records, 200 MB of shadow rays and a few index buffers of 8 MB each.
+Unpacked, a slot holds 460 bytes, which is close to 1 GB at 1920×1080 and 3.8 GB at 3840×2160, per traced layer:
+
+| per slot | bytes | 1920×1080 | 3840×2160 |
+|---|---|---|---|
+| path state: `path_ray`, `path_state`, `path_medium`, `path_light` | 24 + 48 + 32 + 24 = 128 | 265 MB | 1062 MB |
+| `hit_record` | 36 | 75 MB | 299 MB |
+| two `shadow_ray`s | 2 × 64 = 128 | 265 MB | 1062 MB |
+| `pixel_tally` | 144 | 299 MB | 1194 MB |
+| six queues of `u32` | 24 | 50 MB | 199 MB |
+| **total** | **460** | **954 MB** | **3815 MB** |
+
+A layer that upscales keeps a second state for its scaled frames, at the upscaler's input extent.
+**If memory matters, the tallies and the shadow rays are the lever**: packed, or one shadow ray per slot, they hold more than half of it.
 
 ### The image is a per-pixel sum and count
 
