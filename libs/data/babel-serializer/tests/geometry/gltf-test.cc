@@ -878,7 +878,12 @@ TEST("gltf - a vendor extension reads through json_of, on the element that carri
         "materials": [{"name": "plain"},
                       {"name": "tinted", "extensions": {"VENDOR_tint": {"strength": 0.25}}, "extras": {"note": "x"}}],
         "meshes": [{"primitives": [{"attributes": {}, "extensions": {"VENDOR_tint": {"strength": 0.5}}}]}]})");
-    auto const doc = REQUIRED_VALUE(babel::gltf::read(json));
+    // without the option the document is not kept, and no element reaches its JSON
+    auto const lean = REQUIRED_VALUE(babel::gltf::read(json));
+    CHECK(!lean.json_of(lean.materials[1]).is_valid());
+    CHECK(!lean.json_root().is_valid());
+
+    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.keep_json_document = true}));
     REQUIRE(doc.materials.size() == 2);
 
     CHECK(!doc.json_of(doc.materials[0])["extensions"].is_valid());

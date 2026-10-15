@@ -666,17 +666,21 @@ struct babel::gltf::data
     cc::vector<cc::string> extensions_required;
 
     /// The parsed JSON itself, for what this reader does not model: a vendor extension, `extras`, anything unknown.
-    /// Each element's `json_node` names its object here, and json_of hands back the ref.
+    /// Empty unless read_options::keep_json_document was set; each element's `json_node` names its object here either way.
     babel::json::document json;
 
-    /// The element's own JSON object, `extensions` and `extras` included; an invalid ref for one built by hand.
+    /// The element's own JSON object, `extensions` and `extras` included.
+    /// An invalid ref for an element built by hand, and for every element when the read did not keep the document.
     /// The ref points into this data, so it is good for as long as the data is neither moved nor destroyed.
     template <class Element>
     [[nodiscard]] babel::json::ref json_of(Element const& e) const
     {
-        return babel::json::ref(&json, e.json_node);
+        return json.node_count() > 0 ? babel::json::ref(&json, e.json_node) : babel::json::ref();
     }
-    [[nodiscard]] babel::json::ref json_root() const { return json.root(); }
+    [[nodiscard]] babel::json::ref json_root() const
+    {
+        return json.node_count() > 0 ? json.root() : babel::json::ref();
+    }
 
     cc::vector<buffer> buffers;
     cc::vector<buffer_view> buffer_views;
@@ -816,6 +820,10 @@ struct babel::gltf::read_options
     /// A file may require one and still read, and using one is not recorded as an issue.
     /// The names must outlive the read.
     cc::span<cc::string_view const> caller_extensions;
+
+    /// Keep the parsed JSON in data::json, for json_of to reach what this reader does not model.
+    /// Off by default: the document costs about as much memory again as the parsed structure, for a reader that never asks.
+    bool keep_json_document = false;
 };
 
 namespace babel::gltf

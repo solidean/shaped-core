@@ -547,7 +547,8 @@ public:
         CC_RETURN_IF_ERROR(resolve_images());
 
         // Handed over last: every ref above points into `document`, and none is used after this.
-        result.json = cc::move(document);
+        if (opts.keep_json_document)
+            result.json = cc::move(document);
         return cc::unit{};
     }
 

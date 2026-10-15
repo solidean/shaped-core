@@ -105,6 +105,7 @@ babel::gltf::container detect_container(cc::span<cc::byte const> bytes); // gltf
 struct read_options {   // by value; the default touches nothing outside the input
     cc::function_ref<cc::result<cc::pinned_data<cc::byte const>>(cc::string_view uri)> resolve_uri;
     cc::span<cc::string_view const> caller_extensions; // extensions YOU interpret (via json_of): a file may require them
+    bool keep_json_document = false;                   // keep data::json, which json_of reads; off, every ref is invalid
 };
 
 cc::result<babel::gltf::data> read(cc::pinned_data<cc::byte const> bytes, read_options = {}); // ZERO-COPY
@@ -130,7 +131,7 @@ doc.issue_report();         // cc::string, one "kind: message" line per issue; "
 
 doc.extensions_used;   // cc::vector<cc::string>; a required extension other than KHR_lights_punctual,
                        // EXT_meshopt_compression or one of caller_extensions fails the read
-doc.json_of(doc.materials[i])["extensions"]["VENDOR_x"]; // json::ref to ANY element's own JSON object: vendor extensions, extras
+doc.json_of(doc.materials[i])["extensions"]["VENDOR_x"]; // json::ref to ANY element's own JSON object, with keep_json_document
 doc.json_root();       // the document root; both refs point into doc, so they die with it
 doc.buffer_views[i].meshopt;  // optional<meshopt_compression>: EXT_meshopt_compression as written (mode, filter, count, stride)
 doc.buffer_views[i].decoded;  // its bytes, decoded during read; view_of reads these, so accessors need nothing special
