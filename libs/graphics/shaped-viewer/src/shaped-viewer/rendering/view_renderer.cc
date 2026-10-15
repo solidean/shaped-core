@@ -887,7 +887,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (res.traces[trace_index].raw() == nullptr)
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to trace
 
-    // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
+    // Held for the whole trace because the reload generation is read under it.
     auto self = try_acquire_exclusive(cmd);
     if (!self.is_ready())
         return sg::routine_outcome::declined;
@@ -1439,7 +1439,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const* const scene = primary_scene_3d(v);
     CC_ASSERT(scene != nullptr, "a traced view needs a scene_3d layer");
 
-    // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
+    // Held for the whole trace because the reload generation is read under it.
     auto self = try_acquire_exclusive(cmd);
 
     // The slot is resolved either way, so a view whose renderer is not up yet still has a texture to re-present
