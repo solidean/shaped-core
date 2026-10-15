@@ -423,6 +423,58 @@ ASYNC_INVOCABLE_TEST("sr - atrous leaves a deep mean almost alone",
     CHECK(moved < 0.2f * rmse_against_clean(noisy));
 }
 
+ASYNC_INVOCABLE_TEST("sr - atrous reads a per-pixel sample count where one is given",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    // One image whose top half claims one sample a pixel and whose bottom half claims 4096, as a mean whose pixels
+    // finished different numbers of paths would: the top must be filtered as a one-sample frame, the bottom left alone.
+    // A scalar count of 4096 beside it must be ignored, or the top would be left alone too.
+    auto const noisy = noisy_halves(0.1f);
+    auto counts = cc::vector<tg::vec4f>();
+    for (auto y = 0; y < k_size; ++y)
+        for (auto x = 0; x < k_size; ++x)
+            counts.push_back(tg::vec4f(y < k_size / 2 ? 1.0f : 4096.0f, 0, 0, 0));
+
+    auto const color_tex = make_image(ctx);
+    auto const counts_tex = make_image(ctx);
+    auto const output_tex = make_image(ctx);
+    auto cmd = ctx.create_command_list();
+    upload(*cmd, color_tex, noisy);
+    upload(*cmd, counts_tex, counts);
+    auto history = sr::reconstruct_history();
+    auto const outcome = sr::reconstruct_routine::execute(
+        *cmd, {.color = color_tex, .output = output_tex, .sample_count = 4096, .sample_counts = counts_tex}, history,
+        atrous_settings);
+    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output_tex.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+    REQUIRE(outcome.status == sr::reconstruct_status::denoised);
+    auto const pixels = co_await readback.data();
+
+    // The RMS movement of each half, against the input's own deviation from the clean image.
+    auto const moved_in = [&](int y0, int y1)
+    {
+        auto sum = 0.0f;
+        for (auto y = y0; y < y1; ++y)
+            for (auto x = 0; x < k_size; ++x)
+            {
+                auto const d = pixels[y * k_size + x][0] - noisy[y * k_size + x][0];
+                sum += d * d;
+            }
+        return tg::sqrt(sum / f32((y1 - y0) * k_size));
+    };
+    auto const deviation = rmse_against_clean(noisy);
+    CHECK(moved_in(0, k_size / 2) > 0.5f * deviation);
+    CHECK(moved_in(k_size / 2, k_size) < 0.2f * deviation);
+}
+
 namespace
 {
 /// A checker of 4-pixel cells, dark and light, as a reflectance.

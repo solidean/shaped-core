@@ -70,7 +70,7 @@ Still open beyond those: `ImDrawCmd::UserCallback` dispatch and an Alpha8 atlas 
 ```text
 sr::blit_routine          [done]     fullscreen-triangle blit of a texture across an open raster scope
 mipmap generation         [done]     sr::box_filter_mipmap_routine (compute) and sr::raster_box_filter_mipmap_routine
-texture compression       [planned]
+texture compression       [done]     sr::bc_compress_routine: BC1, BC3, BC4, BC5 and BC7 on the GPU (BC6H not yet)
 tonemapping               [planned]
 render passes / helpers   [planned]
 common shader utilities   [planned]

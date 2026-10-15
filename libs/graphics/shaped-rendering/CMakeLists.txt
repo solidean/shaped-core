@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(shaped-rendering LANGUAGES CXX)
 
-# shaped-rendering (sr::) builds concrete render routines and helpers on top of shaped-graphics (mipmap generation, tonemapping, texture compression, ...).
+# shaped-rendering (sr::) builds concrete render routines and helpers on top of shaped-graphics (mipmap generation, texture compression, denoising, ...).
 # The render-routine *framework* (the routine base and the per-context ctx.routines registry) lives in shaped-graphics;
 # sr hosts the concrete routines, which land in their own .cc files as they are implemented.
 # It is also home to the window abstraction.
@@ -21,6 +21,7 @@ add_library(shaped-rendering
     src/shaped-rendering/fsr_upscale_routine.cc
     src/shaped-rendering/impl/tza.cc
     src/shaped-rendering/impl/oidn_network.cc
+    src/shaped-rendering/compression/bc_compress_routine.cc
     src/shaped-rendering/raster_box_filter_mipmap_routine.cc
     src/shaped-rendering/imgui_context.cc
     src/shaped-rendering/imgui_routine.cc
@@ -60,6 +61,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/fsr_upscale_routine.hh
     src/shaped-rendering/impl/fsr_backend.hh
     src/shaped-rendering/impl/denoise_images.hh
+    src/shaped-rendering/compression/bc_compress_routine.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
     src/shaped-rendering/window.hh
     src/shaped-rendering/imgui_context.hh
@@ -257,6 +259,7 @@ sc_add_shader_package(
         module:slug
         blit.sgl:*
         imgui.sgl:*
+        compression/bc.sgl:*
         raster_box_filter_mipmap.sgl:*
         nn_pool.sgl:*
         nn_upsample.sgl:*
@@ -399,6 +402,7 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE
             tests/backends/backends.cc
             tests/shader_fixtures.cc
+            tests/compression/bc-compress-test.cc
             tests/blit-routine-test.cc
             tests/imgui-routine-test.cc
             tests/raster-box-filter-mipmap-test.cc
@@ -417,6 +421,7 @@ if(SC_BUILD_TESTS)
             LANGUAGE   sgl
             MODULE_DIRS ${SR_SGL_MODULE_DIR}
             SHADERS
+                bc_decode.sgl:*
                 slug_traced.sgl:*
                 slug_traced_pipeline.sgl:*
         )

@@ -8,6 +8,7 @@
 // The luminance edge-stop is relative to the noise the input is expected to carry.
 // `luminance_scale` is the caller's sigma times 1/sqrt(sample count), so a one-sample frame is smoothed hard and a
 // deep mean is averaged only across differences a few of its own, much smaller, noise widths wide.
+// With `k_has_sample_counts` the count is per pixel instead, and the 1/sqrt is taken here at the center pixel.
 //
 // Guides are optional.
 // A missing one is bound to the colour texture as a stand-in with its flag clear, so every slot of the group is filled
@@ -21,6 +22,7 @@ static const uint k_has_depth = 1u << 2;
 static const uint k_demodulate_in = 1u << 3; // this pass reads raw colour and divides the albedo out
 static const uint k_remodulate_out = 1u << 4; // this pass multiplies the albedo back in before writing
 static const uint k_has_specular_albedo = 1u << 5;
+static const uint k_has_sample_counts = 1u << 6; // gSampleCounts holds each pixel's sample count in red
 
 // A zero albedo would make demodulation divide by zero, and clamping both directions by the same floor keeps the
 // round trip exact.
@@ -47,6 +49,7 @@ namespace atrous_bindings
     Texture2D<float4> gSpecularAlbedo;
     Texture2D<float4> gNormal;
     Texture2D<float4> gDepth;
+    Texture2D<float4> gSampleCounts;
     RWTexture2D<float4> gTarget;
 }
 
@@ -104,7 +107,10 @@ float4 source_at(int2 p)
 
     // Relative, so the edge-stop means the same thing for a dim corner and a bright highlight.
     // The additive floor keeps a black pixel from refusing every neighbour.
-    float lum_width = gConstants.luminance_scale * (abs(centre_lum) + 1e-2) + 1e-6;
+    float luminance_scale = gConstants.luminance_scale;
+    if ((flags & k_has_sample_counts) != 0)
+        luminance_scale /= sqrt(max(gSampleCounts.Load(int3(p, 0)).r, 1.0));
+    float lum_width = luminance_scale * (abs(centre_lum) + 1e-2) + 1e-6;
 
     static const float kernel[5] = {1.0 / 16.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0};
 

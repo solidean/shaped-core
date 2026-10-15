@@ -111,8 +111,9 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 - **Bulking a merge claims what it brought in, never what its author resolved.**
   Every file the merge changed beyond git's own merge of its parents — per `git show --remerge-diff` — stays out of the bulk, and the command lists them.
   That is what makes "bulk the merge of `main`" safe on a follow-up review, where the resolutions are the only part of the merge that is the branch's work.
-- **A plain `ingest` never re-creates what a bulk claim covers.**
-  It skips a new hunk lying wholly inside one, so re-running it after a head move keeps the decision the bulk recorded.
+- **No sweep re-creates what a bulk claim covers — `ingest` and `sync` alike.**
+  Each skips a new hunk lying wholly inside one, so a head move keeps the decision the bulk recorded.
+  Only `ingest --commits` overrides it, since it names its changes explicitly.
 - **`sync` supersedes a hunk edited in place, and its replacement says so.**
   The replacement records the superseded id, its card folds the interdiff above its diff, and `changes --interdiff` prints it.
   A bulk claim is superseded only once nothing it claims is left in the range.

@@ -78,14 +78,15 @@ See `tests/data/sqlite-test.cc`.
 
 Some backends are **committed in-source** rather than fetched.
 The stb image libraries (`extern/stb`, two small public-domain headers) were the first, and libspng (`extern/libspng`, one `.c` and one `.h`) followed, both on the xxhash / imgui model.
-Because the source is always on disk, the `stb` and `spng` targets always exist and babel **always** links them.
+ufbx (`extern/ufbx`, one `.c` and one `.h`) is the third, behind `babel::fbx`.
+Because the source is always on disk, the `stb`, `spng` and `ufbx` targets always exist and babel **always** links them.
 
 That drops the entire availability machinery the sqlite rule above carries.
 **No `is_available()`, no `BABEL_HAS_*` compile switch, no stub path, no runtime "backend missing" error, no `if(TARGET stb)`.**
-The link in `CMakeLists.txt` is unconditional (`target_link_libraries(babel-serializer PRIVATE spng stb)`).
+The links in `CMakeLists.txt` are unconditional (`target_link_libraries(babel-serializer PRIVATE spng stb)`, and `ufbx` beside them).
 
 **The header non-leak still binds**, with no availability gate carrying it.
-Each third-party header appears in exactly one TU — `spng.h` in `image/impl/spng_backend.cc`, stb's in `image/impl/stb_backend.cc` — and both links are `PRIVATE`.
+Each third-party header appears in exactly one TU — `spng.h` in `image/impl/spng_backend.cc`, stb's in `image/impl/stb_backend.cc`, `ufbx.h` in `geometry/fbx.cc` — and every link is `PRIVATE`.
 Here the reason is layering hygiene and a swappable backend rather than a conditionally-present engine.
 
 Pick the fetched-and-gated shape (the section above) only when the backend is genuinely heavy enough to keep out of the tree.
@@ -116,6 +117,7 @@ Reach for a low-level codec when you need a format's metadata; reach for the agg
 **A format small enough to own outright skips the seam entirely and is written natively.**
 `babel::hdr` and `babel::pfm` are the first: Radiance RGBE is a text header plus two scanline encodings, and PFM is five ASCII tokens plus raw floats.
 Neither is worth a backend, and writing them natively is what lets them be complete rather than metadata-`[todo]` the way the stb-backed pair still is.
+`babel::dds` and `babel::tga` followed on the same grounds, DDS's block decoding included, since BCn is a specification of a few hundred lines rather than an entropy coder.
 The test is the format's own size, not whether stb happens to support it — stb reads `.hdr` too.
 A format whose decoder is a real piece of engineering (PNG's inflate, JPEG's entropy coding) goes behind the seam and grows a native path later.
 
@@ -127,6 +129,7 @@ This is the deviation the stream rule at the top of this file points at.
 **Take a `cc::pinned_data<byte const>` instead when the parsed structure has to hand back zero-copy views of the input bytes.**
 `gltf` is the first such format, and the test is narrow: a `.glb` carries its vertex / index / texture payload inline.
 So each `buffers` entry is a `subdata` of the input that shares its owner: nothing bulk is copied, and the views stay valid after the caller drops its own handle.
+`dds` is the second: a texture's subresources are already what a GPU uploads, so each one is a view of the input too.
 A stream cannot promise that — its window is a recycled buffer, so anything kept has to be copied out.
 
 **Why this is not a defeat for the stream rule** (not obvious): parsing the *text* still goes through a stream.

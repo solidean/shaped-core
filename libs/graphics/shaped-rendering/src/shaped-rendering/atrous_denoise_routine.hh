@@ -38,6 +38,7 @@ struct sr::atrous_options
 /// The model is one noise width per sample equal to the pixel's own luminance, which is crude and deliberately
 /// conservative: a real integrator's per-sample noise is usually larger, so real detail survives with margin.
 /// That is what lets it sit on an accumulating mean without blurring the converged result.
+/// Given `reconstruct_inputs::sample_counts`, it takes the count per pixel instead, for a mean whose pixels differ in depth.
 ///
 /// Holds its two ping-pong images in the caller's `reconstruct_history`, so a steady stream allocates nothing.
 /// It keeps no history in the temporal sense, so a `restarted` call looks exactly like any other.

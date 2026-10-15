@@ -22,6 +22,11 @@ rules:
     files: src/babel-serializer/image/impl/stb_backend.cc
 
   - kind: allow-include
+    value: <ufbx.h>
+    reason: the FBX parser behind babel::fbx, confined to the reader TU
+    files: src/babel-serializer/geometry/fbx.cc
+
+  - kind: allow-include
     value: <charconv>
     reason: "TODO: from_chars is what a number is parsed with, and being fast is the point of these readers — migrate once a cc:: from-string lands"
     files:

@@ -386,6 +386,7 @@ The denoiser attaches to it in two halves, and both are built:
 - **Still camera: a spatial member on the mean.**
   The caller passes the mean's total sample count, and the member backs off as it grows.
   à-trous scales its luminance edge-stop by `1 / sqrt(sample_count)`, which is how a Monte Carlo mean's noise shrinks.
+  A mean whose pixels hold different counts passes them per pixel, as `sample_counts`, and the scale is taken at each pixel.
   The mean itself is never touched, so the image still converges to the unbiased answer, and turning the denoiser off costs nothing.
 - **Moving camera: a temporal member on fresh samples.**
   While the mean is young, the tracer also writes the frame's own samples and motion vectors, and a temporal member denoises those with its history.
