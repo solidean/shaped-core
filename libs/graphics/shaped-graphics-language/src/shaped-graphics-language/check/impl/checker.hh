@@ -1020,6 +1020,14 @@ struct checker
                           ast::expr_id call,
                           cc::span<symbol_id const> candidates,
                           call_arguments const& arguments);
+    /// What a call that matched none of `candidates` was one step from, as a clause its detail ends in; empty for none.
+    /// A candidate that a `mut` mark alone keeps from matching names the mark (CHK-316).
+    /// One whose first parameter is a condition, and that the arguments would match with the last one moved to the
+    /// front, says that the condition comes first, as WGSL's `select` does not have it (CHK-365).
+    [[nodiscard]] cc::string miss_hint(i32 file,
+                                       cc::span<symbol_id const> candidates,
+                                       call_arguments const& arguments,
+                                       cc::string_view spelling);
     /// Remembers how call `id` fills the parameters of `callee`, which is what the flat tree is written from.
     void record_call(i32 file,
                      ast::expr_id id,

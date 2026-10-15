@@ -1494,7 +1494,9 @@ type_id checker::resolve_overload(function_scope& scope,
                               signature_text(spelling, expected)));
         }
         else
-            report(diagnostic_kind::no_matching_overload, file, where, call_text(file, spelling, arguments));
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("{}{}", call_text(file, spelling, arguments),
+                              miss_hint(file, candidates, arguments, spelling)));
         return error_type;
     }
     auto const best = best_of(cc::move(matches));
@@ -1765,6 +1767,80 @@ void checker::note_near_misses(i32 file,
         }
         out.near_misses.push_back(miss);
     }
+}
+
+cc::string checker::miss_hint(i32 file,
+                              cc::span<symbol_id const> candidates,
+                              call_arguments const& arguments,
+                              cc::string_view spelling)
+{
+    auto const is_condition = [&](type_id type)
+    {
+        auto const* const record = out.builtin_type_of(type);
+        return record != nullptr && record->leaf_kind == value_kind::boolean;
+    };
+    for (auto const candidate : candidates)
+    {
+        if (out.at(candidate).state != symbol_state::checked)
+            continue;
+        auto const parameters
+            = cc::vector<parameter>::create_copy_of(out.at(out.functions[out.at(candidate).info].parameters));
+        auto is_generic = false;
+        for (auto const& p : parameters)
+            is_generic = is_generic || is_open(p.type);
+        if (is_generic)
+            continue;
+
+        // CHK-316: the marks alone are off, and each place is of its parameter's type exactly
+        auto const bound = bind_arguments(parameters, arguments);
+        if (bound.failure == miss_reason::none)
+        {
+            auto flipped = isize(-1);
+            auto is_one_mark_away = true;
+            for (auto p = isize(0); is_one_mark_away && p < parameters.size(); ++p)
+            {
+                auto const i = bound.slots[p];
+                if (i < 0)
+                    continue;
+                if (parameters[p].is_mut != arguments.written[i].is_mut)
+                {
+                    is_one_mark_away = arguments.types[i] == parameters[p].type;
+                    flipped = flipped < 0 ? p : flipped;
+                }
+                else
+                    is_one_mark_away = chain_of(file, parameters[p], arguments, i).has_value();
+            }
+            if (is_one_mark_away && flipped >= 0)
+            {
+                auto const& p = parameters[flipped];
+                auto const argument = text_of(file, span_of(file, arguments.written[bound.slots[flipped]].expr));
+                if (p.is_mut)
+                    return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, as in `mut "
+                                      "{}`",
+                                      p.name, argument);
+                return cc::format(": {} is no mut parameter, so its argument takes no `mut`", p.name);
+            }
+        }
+
+        // CHK-365: `select(a, b, cond)` is WGSL's order, and SGL's condition stands first
+        auto const n = arguments.written.size();
+        if (n >= 2 && isize(parameters.size()) == n && is_condition(parameters[0].type) && arguments.names.size() == n
+            && arguments.types[n - 1] == parameters[0].type)
+        {
+            auto is_rotated = true;
+            for (auto i = isize(0); is_rotated && i < n; ++i)
+                is_rotated = arguments.names[i].empty() && !arguments.written[i].is_mut && !parameters[i].is_mut
+                          && chain_of(file, parameters[i], arguments, i == 0 ? n - 1 : i - 1).has_value();
+            if (is_rotated)
+            {
+                auto types = cc::vector<type_id>();
+                for (auto const& p : parameters)
+                    types.push_back(p.type);
+                return cc::format(": its condition comes first, as in {}", signature_text(spelling, types));
+            }
+        }
+    }
+    return {};
 }
 
 cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call_arguments const& arguments)

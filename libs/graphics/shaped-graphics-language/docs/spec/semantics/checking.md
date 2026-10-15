@@ -582,6 +582,8 @@ fun shade(k: float) -> float:
   So a default on a mut parameter is `default-not-allowed-here`, at the declaration.
   The argument is a place by the rules of an assignment's left side, or `not-assignable`, and its type is the parameter's exactly, so its chain has length 0.
   Its indices are evaluated once, where the call binds it, and the body reads and writes that one place wherever it names the parameter.
+  A call that a candidate would match but for one mark is `no-matching-overload`, and its detail names the parameter and says whether it takes the mark.
+  That is a mark missing on an argument of a mut parameter's type exactly, or one written on an argument of another parameter.
 * **CHK-70** A candidate **matches** when it binds, and each argument converts to its parameter's type by a **conversion chain**.
   An argument of the parameter's type does so by a chain of length 0, and so does one a pattern parameter takes (CHK-194, CHK-207); a literal converts by CHK-81 or CHK-253.
 * **CHK-253** A number literal converts to a numeric type that holds it: by a chain of length 0 to its default type, and of length 1 to any other ([why](why/checking.md#chk-253)).
@@ -664,6 +666,8 @@ The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2
 * **CHK-365** `select(cond, if_true, if_false)` evaluates all three in that order, and gives `if_true` where `cond` holds and `if_false` where it does not ([why](why/checking.md#chk-365)).
   With a `bool` condition both values are of one scalar or vector type; with a `bool` vector both are plain vectors of its width, and it picks per component.
   It is a function like any other, so `cond.select(a, b)` is the same call (CHK-247).
+  The condition stands first, where WGSL writes it last.
+  A call whose arguments would match with the last one moved to the front is `no-matching-overload`, and its detail says the condition comes first.
 
 ```sgl sketch
 fun shade(uv: float2, id: int3, a: float3, b: float3) -> float3:
@@ -1405,7 +1409,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-366, CHK-367, CHK-390 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-390 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |

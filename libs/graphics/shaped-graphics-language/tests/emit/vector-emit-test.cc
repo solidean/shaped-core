@@ -65,6 +65,23 @@ TEST("sgl emit - select takes its condition first in HLSL, and last in WGSL and 
     CHECK(msl.contains("const float2 mixed = select(w, v, v > w);\n"));
 }
 
+TEST("sgl emit - select of scalars takes a bool condition on every target, as MSL's own does")
+{
+    constexpr auto scalars = "binding work:\n"
+                             "    counts: mut buffer[uint]\n"
+                             "\n"
+                             "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                             "    let k = work.counts[id.x]\n"
+                             "    let c = k > 3u\n"
+                             "    let f = select(c, 1.0, 2.0)\n"
+                             "    work.counts[id.x] = select(c, k, 7u) + (f as uint)\n";
+    CHECK(text_of(scalars, target::hlsl_dx12).contains("work_counts[id.x] = select(c, k, 7u) + uint(f);\n"));
+    CHECK(text_of(scalars, target::hlsl_vulkan).contains("const float f = select(c, 1.0, 2.0);\n"));
+    CHECK(text_of(scalars, target::wgsl).contains("work_counts[id.x] = select(7u, k, c) + u32(f);\n"));
+    CHECK(text_of(scalars, target::msl).contains("work_counts[id.x] = select(7u, k, c) + uint(f);\n"));
+    CHECK(text_of(scalars, target::msl).contains("const float f = select(2.0, 1.0, c);\n"));
+}
+
 TEST("sgl emit - a one-value constructor and a scalar beside a vector are each target's own")
 {
     auto const hlsl = text_of(k_vectors, target::hlsl_dx12);

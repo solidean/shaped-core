@@ -342,6 +342,31 @@ TEST("sgl check - a numeric type's name converts as `as` does, and converts noth
     CHECK(body_reports("let t = int2(c)\nreturn k\n").contains("no-matching-overload user:[int2(c)] int2(float3)"));
 }
 
+TEST("sgl check - a call one `mut` mark away from a candidate says which parameter wants it")
+{
+    constexpr auto twice = "fun twice(x: mut float):\n    x = x * 2.0\n\n";
+    // CHK-316: the parameter is mut, and the argument is unmarked
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    twice(v)\n    return v\n", twice))
+          == "no-matching-overload user:[twice(v)] twice(float): x is a mut parameter, so its argument is a place "
+             "marked `mut`, as in `mut v`\n");
+    CHECK(reports_for("fun f() -> float:\n    let mut v = 1.0\n    return sqrt(mut v)\n")
+              .contains("sqrt(float): x is no mut parameter, so its argument takes no `mut`"));
+    // a mark that would not make the call match is not the reason, and is not named
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut n = 1\n    twice(n)\n    return 1.0\n", twice))
+          == "no-matching-overload user:[twice(n)] twice(int)\n");
+}
+
+TEST("sgl check - a select written with its condition last says the condition comes first")
+{
+    // CHK-365: WGSL's `select(f, t, cond)` is a habit a port brings along
+    CHECK(body_reports("let b = k > 0.0\nreturn select(1.0, 2.0, b)\n")
+          == "no-matching-overload user:[select(1.0, 2.0, b)] select(1.0, 2.0, bool): its condition comes first, as "
+             "in select(bool, float, float)\n");
+    CHECK(body_reports("let b = c > c\nreturn select(c, c, b).x\n")
+              .contains("its condition comes first, as in select(bool3, float3, float3)"));
+    CHECK(body_reports("let b = k > 0.0\nreturn select(b, 1.0, 2.0)\n") == "");
+}
+
 TEST("sgl check - the side tables name what an editor asks for")
 {
     auto const checked = check_sources(read_prelude(), cc::string(pixel_edges)
