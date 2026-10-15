@@ -69,8 +69,7 @@ What one declaration meeting many ops changes is the element work, and only that
 - **A member write ends every current application.** A resource an application tracked is an array member of the list.
   Any tracked access landing in a member's write bucket — an unordered write or a layout change — counts.
   That covers every path: a scalar binding, a copy, an upload, a native scope, and an application's own layout transitions.
-  A render target counts through its layout change on dx12 and vulkan.
-  On metal a render-target write is no unordered write and a texture has no layout, so it never counts; the render encoder's boundary orders it instead.
+  A render-target write to a member counts on every backend: through its layout change on dx12 and vulkan, and as a write on metal, where a texture has no layout.
   An application whose op already wrote one of its elements, before it applied, is not current either.
 - **A declaration that never met its array asserts when it ends, if some op of its bind point bound an array of its family**, which is where a misspelled name is caught.
   A bind point that ran no op, or bound only arrays of the other family, proves nothing about the name, so a frame with nothing to draw ends its declarations silently.
@@ -120,6 +119,7 @@ A texture uses `shader_texture` / `shader_image` / `render_target` / `depth_read
 None of it is any one backend's spelling, and each value documents its D3D12 and Vulkan mapping.
 `is_unordered_write` marks the writes that need a hazard barrier — shader, copy and accel writes.
 Color and depth *targets* are ROP-ordered freebies.
+`has_write_access` is every write, those two included.
 
 ## Draws inside one render pass on webgpu
 
