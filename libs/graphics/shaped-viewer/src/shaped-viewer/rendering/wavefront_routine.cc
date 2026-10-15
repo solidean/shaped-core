@@ -45,19 +45,18 @@ cc::shared_async<cc::unit> wavefront_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
     auto const& w = sv::shaders::wavefront;
-    _kernels = kernels{
-        .begin = co_await w.begin.acquire_pipeline(ctx),
-        .extend = co_await w.extend.acquire_pipeline(ctx),
-        .segment = co_await w.segment.acquire_pipeline(ctx),
-        .sort = co_await w.sort.acquire_pipeline(ctx),
-        .connect = co_await w.connect.acquire_pipeline(ctx),
-        .finalize = co_await w.finalize.acquire_pipeline(ctx),
-        .resolve = co_await w.resolve.acquire_pipeline(ctx),
-        .reset = co_await w.reset.acquire_pipeline(ctx),
-        .args_round = co_await w.args_round.acquire_pipeline(ctx),
-        .args_shade = co_await w.args_shade.acquire_pipeline(ctx),
-        .args_connect = co_await w.args_connect.acquire_pipeline(ctx),
-    };
+    // One statement per co_await: inside a designated initializer they crash MSVC's backend (C1001, 14.44 and 14.51).
+    _kernels.begin = co_await w.begin.acquire_pipeline(ctx);
+    _kernels.extend = co_await w.extend.acquire_pipeline(ctx);
+    _kernels.segment = co_await w.segment.acquire_pipeline(ctx);
+    _kernels.sort = co_await w.sort.acquire_pipeline(ctx);
+    _kernels.connect = co_await w.connect.acquire_pipeline(ctx);
+    _kernels.finalize = co_await w.finalize.acquire_pipeline(ctx);
+    _kernels.resolve = co_await w.resolve.acquire_pipeline(ctx);
+    _kernels.reset = co_await w.reset.acquire_pipeline(ctx);
+    _kernels.args_round = co_await w.args_round.acquire_pipeline(ctx);
+    _kernels.args_shade = co_await w.args_shade.acquire_pipeline(ctx);
+    _kernels.args_connect = co_await w.args_connect.acquire_pipeline(ctx);
     // A reload re-generates every shade kernel against modules that may have moved.
     _shade_kernels.clear();
 }
