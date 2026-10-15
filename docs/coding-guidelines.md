@@ -604,6 +604,10 @@ Guarded data lives in a `cc::mutex<T>`, never next to a bare mutex — the value
 - **`lock_scoped()` is the exception**, for the critical section that cannot be one call: it spans the caller's own statements, or the lock is handed back to a caller.
   It returns a move-only `cc::mutex_guard<T>` that releases when it dies, and the escaping reference lives exactly as long as the guard.
 
+**A `thread_local` on a hot path is trivially destructible and constant-initialized.**
+Under MSVC and clang-cl, one with a destructor checks an initialization guard on every access, and on a path that runs per element that guard is a measurable share of the cost.
+Hang its cleanup off `cc::register_at_thread_exit`, called once from the cold path that first fills it.
+
 ---
 
 ## Operators & Overloading
