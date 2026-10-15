@@ -151,6 +151,19 @@ fun instance_normal_to_world(inst: scene.instance, n: float3) -> float3:
     if det < 0.0 => return -m
     return m
 
+// ---- Cutouts -------------------------------------------------------------------------------------------------------
+
+/// What tells the cutout coins of one segment's traces apart: extend's, then connect's per shadow ray.
+const cutout_salt_extend = 0x9e3779b9u
+const cutout_salt_shadow = 0x85ebca6bu
+
+/// The cutout seed of a trace inline in a path's segment, from the path's own random state.
+///
+/// The state advances every segment and every sample, so each draws its own coins, which the megakernel's frame seed cannot.
+/// Hashed rather than drawn, so the path's own sequence is left as it was; the salt keeps the seed off the stream's next draw.
+fun path_cutout_seed(rng: uint, salt: uint) -> uint:
+    return pt.hash(rng + salt)
+
 // ---- Starting a sample ----------------------------------------------------------------------------------------------
 
 /// Starts a new sample in `slot`: a jittered camera ray, and a path that has gathered nothing yet.
@@ -211,10 +224,9 @@ fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
     let slot = round_slot(index)
     let s = slot as int
     let r = traced.path_rays[s]
-    let px = slot_pixel(slot)
-    let launch = int3(px.x as int, px.y as int, 0)
+    let seed = path_cutout_seed(traced.path_states[s].rng, cutout_salt_extend)
     let pr = ray(origin = pos3(r.origin.x, r.origin.y, r.origin.z), direction = vec3(r.direction.x, r.direction.y, r.direction.z), t_min = 1e-3, t_max = 1e4)
-    let h = traced.world.trace(pr, any_hit = c => cutout(c, launch, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
+    let h = traced.world.trace(pr, any_hit = c => cutout_with_seed(c, candidate_opacity(c), seed), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
 
     if h.kind == hit_kind.triangle:
         traced.hits[s] = hit_record(h.instance_id as uint, h.primitive_index as uint, hit_triangle, h.t, float2(h.barycentrics.y, h.barycentrics.z), float3(0.0))
@@ -578,14 +590,14 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
     if index >= traced.counters[counter_shadow].load() => return
     let slot = traced.queue_shadow[index as int]
-    let px = slot_pixel(slot)
-    let launch = int3(px.x as int, px.y as int, 0)
+    let rng = traced.path_states[slot as int].rng
     let mut light = traced.path_lights[slot as int]
     for j in 0 ..< 2:
         let sr = traced.shadow_rays[((2u * slot) as int) + j]
         if sr.tested == 0u => continue
+        let seed = path_cutout_seed(rng, cutout_salt_shadow + (j as uint))
         let r = ray(origin = pos3(sr.origin.x, sr.origin.y, sr.origin.z), direction = vec3(sr.direction.x, sr.direction.y, sr.direction.z), t_min = 1e-3, t_max = sr.distance)
-        let h = traced.world.trace(r, any_hit = c => cutout(c, launch, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
+        let h = traced.world.trace(r, any_hit = c => cutout_with_seed(c, candidate_opacity(c), seed), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
         if h.kind == hit_kind.none:
             light.radiance += sr.radiance
             light.specular += sr.specular

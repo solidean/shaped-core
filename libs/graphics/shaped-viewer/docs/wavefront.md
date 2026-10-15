@@ -60,6 +60,8 @@ The opacity is a constant, a mesh attribute, or a texture channel read through a
 One fixed function, `tracer.instance_opacity`, reads it inside traversal, so extend and connect never recompile for a material, and every cutout candidate runs the same code.
 
 - A cutoff of 0 is stochastic coverage, as before; above 0 it is glTF's alpha cutoff.
+- The wavefront's coverage coin is hashed from the path's own random state, so every segment and every sample tosses its own.
+  The megakernel's any-hit cannot advance its payload, so its coin comes from the pixel and the frame's seed, shared by the samples of one frame.
 - A type declares `opacity_attribute` and `opacity_cutoff_attribute`; a fragment that writes `geometry_opacity` asserts.
 - Both built-in types fit unchanged; a type with a procedural mask can no longer cut out.
 - Quadrics cannot cut out today, so cutout stays triangle-only.

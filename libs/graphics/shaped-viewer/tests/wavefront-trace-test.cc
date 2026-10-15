@@ -642,6 +642,69 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a cutout cuts where its opacity sa
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// A coverage cutout through the wavefront: each sample tosses its own coin, even the samples one pixel finishes within one frame.
+// A black unlit quad at half coverage in front of a white environment, one round per sample and every sample of the carrying frame
+// drawn in that frame, so a coin shared by a pixel's samples would leave each pixel black or white rather than gray.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a coverage cutout tosses a coin per sample",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const p : {tg::pos3f(-2, -2, 0), tg::pos3f(2, -2, 0), tg::pos3f(2, 2, 0), tg::pos3f(-2, -2, 0),
+                         tg::pos3f(2, 2, 0), tg::pos3f(-2, 2, 0)})
+        positions.push_back(p);
+    auto& lib = sv_test::shared_material_library();
+    auto const type = lib.acquire_type(sv::builtin_material::unlit).value();
+    auto bindings = cc::vector<sv::material_attribute_binding>();
+    bindings.push_back(sv::material_attribute_binding::of("color", tg::vec3f(0, 0, 0)));
+    bindings.push_back(sv::material_attribute_binding::of("opacity", 0.5f));
+    auto const mesh = sv::mesh{.name = "wavefront coverage",
+                               .geometry = sv::triangle_geometry::create_from_positions(positions),
+                               .material = lib.acquire(sv::material::create("wavefront coverage", type, bindings))};
+
+    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    constexpr int samples = 32;
+    auto const pixels = co_await trace_wavefront(ctx, resources, mesh,
+                                                 {.camera = camera,
+                                                  .environment = sv::background::uniform(tg::vec3f(1, 1, 1)),
+                                                  .max_bounces = 1,
+                                                  .frames = 2,
+                                                  .rounds = samples});
+
+    // At 33 samples a pixel's mean has a deviation near 0.09 about 0.5, so a pixel outside 0.1 to 0.9 is all but impossible.
+    auto mixed = isize(0);
+    auto mean = 0.0f;
+    for (auto const& p : pixels)
+    {
+        auto const l = luminance_of(p);
+        mean += l;
+        if (l > 0.1f && l < 0.9f)
+            ++mixed;
+    }
+    auto const total = isize(pixels.size());
+    mean /= f32(total);
+    CHECK(mixed > total * 95 / 100).context(cc::format("{} of {} pixels mix kept and cut samples", mixed, total));
+    CHECK(tg::abs(mean - 0.5f) < 0.05f).dump("mean luminance", mean);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 #if SV_TEST_HAS_VULKAN
 // The wavefront under vulkan's synchronization validation, which reports a hazard between two dispatches by the accesses it names.
 // sg infers every barrier the round's stages need from their footprints, and this is the oracle that sees one missing:

@@ -488,19 +488,24 @@ fun candidate_opacity(c: triangle_candidate){traced, bindless} -> float:
 /// The cutout test, run at every intersection a non-opaque instance reports, for a surface whose material evaluated to `opacity`.
 ///
 /// STOCHASTIC rather than a fixed threshold: `geometry_opacity` is a coverage fraction, so accepting the hit that fraction of the time converges to a partly covered surface.
-/// The draw comes from the pixel, the frame's seed, the primitive and the instance rather than from the payload, which an any hit may not advance.
-/// The instance is in the hash so two instances sharing one geometry cut out independently.
-fun cutout(c: triangle_candidate, launch: int3, opacity: float){traced} -> hit_decision:
+/// The coin is `seed` hashed with the primitive and the instance, so two instances sharing one geometry cut out independently.
+/// `seed` must differ wherever two decisions should be independent: `cutout` and the wavefront's `path_cutout_seed` are what supply it.
+fun cutout_with_seed(c: triangle_candidate, opacity: float, seed: uint) -> hit_decision:
     // fully covered: the common case, and it accepts without drawing anything
     if opacity >= 1.0 => return hit_decision.accept
-    let x = launch.x as uint
-    let y = launch.y as uint
     let primitive = c.primitive_index as uint
     let instance = c.instance_id as uint
-    let h = pt.hash(x + y * 65536u + traced.frame[0].rng_seed * 9781u + primitive * 2654435761u + instance * 2246822519u)
+    let h = pt.hash(seed + primitive * 2654435761u + instance * 2246822519u)
     let u = (h as float) * (1.0 / 4294967296.0)
     if opacity < u => return hit_decision.ignore
     return hit_decision.accept
+
+/// The megakernel's cutout test, seeded by the pixel and the frame rather than by the payload, which an any hit may not advance.
+/// So every sample a pixel traces within one frame meets the same coin at a given primitive.
+fun cutout(c: triangle_candidate, launch: int3, opacity: float){traced} -> hit_decision:
+    let x = launch.x as uint
+    let y = launch.y as uint
+    return cutout_with_seed(c, opacity, x + y * 65536u + traced.frame[0].rng_seed * 9781u)
 
 // ---- Quadrics -------------------------------------------------------------------------------------------------------
 
