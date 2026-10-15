@@ -182,11 +182,12 @@ public:
             auto type = b.element_form.has_value()
                           ? cc::format("{}device {}*", b.is_mut ? "" : "const ", b.element_form.value().name)
                           : resource_text(p, b.type);
-            // EMIT-150: a buffer's coherence qualifies the memory it points at, and a texture's the texture
+            // EMIT-150: a buffer's coherence qualifies the memory it points at, and a texture's is its last template
+            // argument, since an argument buffer's field takes no qualifier
             if (b.is_coherent && type.starts_with("device "))
                 type = cc::format("device coherent(device) {}", type.subview({.start = 7, .end = type.size()}));
-            else if (b.is_coherent)
-                type = cc::format("coherent(device) {}", type);
+            else if (b.is_coherent && type.ends_with(">"))
+                type = cc::format("{}, memory_coherence_device>", type.subview({.start = 0, .end = type.size() - 1}));
             out.appendf("{}{} {} [[id({})]]", k_indent, type, b.name, b.slot);
             if (b.count > 1)
                 out.appendf("[{}]", b.count);
@@ -255,10 +256,27 @@ public:
         return text.contains('.') || text.contains('e') ? text : text + ".0";
     }
 
+    /// Whether the entry point names `metal::raytracing`: a ray-tracing stage, or any stage that binds an acceleration
+    /// structure or traces one inline.
+    [[nodiscard]] static bool uses_ray_tracing(plan const& p)
+    {
+        if (p.e.entry_stage >= stage::raygen)
+            return true;
+        for (auto const& r : p.resources)
+            if (p.m.at(r.type).kind == type_kind::acceleration_structure)
+                return true;
+        for (auto const& x : p.e.exprs)
+            if (auto const* const call = x.node.try_as<flat_call>())
+                if (auto const* const record = p.m.builtin_function(call->intrinsic);
+                    record != nullptr && record->takes_acceleration_index)
+                    return true;
+        return false;
+    }
+
     void write_declarations(cc::string& out, plan const& p) const override
     {
         out += "#include <metal_stdlib>\nusing namespace metal;\n\n";
-        if (p.e.entry_stage >= stage::raygen)
+        if (uses_ray_tracing(p))
             out += "#include <metal_raytracing>\nusing namespace raytracing;\n\n";
         write_enum_constants(out, p, *this);
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.

@@ -14,7 +14,7 @@ For *how* to build and test, see
 |------------|--------------------|---------------------------------------------------------------------|
 | **CMake**  | 3.28               | See below. The floor lives in the top-level [CMakeLists.txt](../CMakeLists.txt). |
 | **Ninja**  | any recent         | The only generator configured by every preset.                      |
-| **Python** | 3.10+              | [dev.py](../dev.py) and helper scripts (PEP 723 inline deps).        |
+| **Python** | 3.10+              | [dev.py](../dev.py) and helper scripts (PEP 723 inline deps). The `extern/*/vendor-*.py` scripts and `fetch-zydis.py` need 3.12, which uv fetches from their header; the other fetch scripts stay at 3.10. |
 | **uv**     | any recent         | How every Python entry point is run (`uv run dev.py ...`).           |
 | C++ compiler | C++23           | See [Compilers](#compilers). All targets are 64-bit.                |
 

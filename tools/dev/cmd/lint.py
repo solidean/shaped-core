@@ -132,8 +132,8 @@ def run_shaped_linter(
         print(dev.console.red("shaped-linter: could not resolve the built executable"), file=sys.stderr)
         return False
 
-    # A wider scope than clang-format's, prose included, so .md and .py are in — tools/dev/lib/quality/format.py owns it.
-    files = dev.discover_lint_files(ctx.root, scope=scope)
+    # A wider scope than clang-format's, prose included, so .md and .py are in — the project's Layout names it.
+    files = dev.discover_lint_files(ctx.root, scope=scope, layout=ctx.policy.layout)
     if not files:
         print(dev.console.green("shaped-linter: nothing to lint (no sources in scope)"), file=sys.stderr)
         return True
@@ -297,7 +297,7 @@ def run_bless_includes(
         print(dev.console.red("shaped-linter: could not resolve the built executable"), file=sys.stderr)
         return False
 
-    files = dev.discover_lint_files(ctx.root, scope=None)
+    files = dev.discover_lint_files(ctx.root, scope=None, layout=ctx.policy.layout)
 
     # One invocation, unlike `lint shaped`: a config's block is written from everything below it at once,
     # and a batched run would rewrite each block from one batch's share of the files.

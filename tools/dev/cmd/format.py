@@ -1,4 +1,4 @@
-"""`format` — run clang-format over our C++ source roots (see format.source_roots)."""
+"""`format` — run clang-format over the project's C++ source roots (its Layout's `source_roots`)."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             check=args.check_only,
             scope=a.scope_from_args(args),
             allow_different_version=args.allow_different_version,
+            layout=ctx.policy.layout,
             mirror=args.mirror_output,
             verbose=args.verbose,
         )

@@ -312,6 +312,8 @@ struct fbx_converter
         skip(scene.nurbs_curves.count + scene.nurbs_surfaces.count + scene.line_curves.count, "curves or surfaces are",
              "");
         skip(scene.procedural_geometries.count, "procedural geometry element(s) are", "");
+        skip(scene.constraints.count, "constraint(s) are", ", so a constrained node stands at its own transform");
+        skip(scene.markers.count, "marker(s) are", "");
 
         auto animated = size_t(0);
         for (auto i = size_t(0); i < scene.anim_layers.count; ++i)
@@ -933,9 +935,10 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
     // The allocation count is bounded alongside, since ufbx counts both.
     // One budget, split evenly between ufbx's working memory and the scene it builds, so the two together never pass it.
     // Both at least 1, since ufbx reads 0 as "unlimited" — a tiny budget must refuse rather than lift the ceiling.
+    // Clamped in u64, so a limit past a 32-bit size_t saturates rather than wrapping to 0.
     auto const limit = babel::impl::memory_limit_of(opts.memory_limit, input_size);
     auto const halved = limit / 2;
-    auto const half = size_t(halved > 0 ? halved : 1);
+    auto const half = size_t(cc::min(u64(cc::max(halved, i64(1))), u64(SIZE_MAX)));
     auto const allocations = half / 64 > 0 ? half / 64 : size_t(1);
     load.temp_allocator.memory_limit = half;
     load.result_allocator.memory_limit = half;
@@ -953,6 +956,10 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
         ufbx_format_error(message, sizeof(message), &error);
         return cc::error(cc::format("fbx: {}", cc::string_view(message)));
     }
+    CC_DEFER
+    {
+        ufbx_free_scene(scene);
+    };
 
     auto converter = babel::impl::fbx_converter{.scene = *scene, .opts = opts, .copy_limit = limit};
     converter.convert_info();
@@ -962,7 +969,6 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
     converter.convert_meshes();
     converter.convert_lights();
     converter.convert_nodes();
-    ufbx_free_scene(scene);
 
     if (!converter.error.empty())
         return cc::error(cc::move(converter.error));

@@ -19,21 +19,21 @@ if(EMSCRIPTEN)
     # A tree walk here bounds its depth rather than its frames, and a native thread's megabyte is what that bound was
     # sized against: sgl's interpreter overflows 64 KiB at the nesting it accepts.
     # The pthread default is the same 64 KiB, so a worker gets the megabyte too.
-    add_link_options("SHELL:-s STACK_SIZE=1MB")
+    sc_build_options(LINK "SHELL:-s STACK_SIZE=1MB")
 
     # Threads are the repo-wide SC_THREADS knob (root CMakeLists), not a wasm-local one.
     # -pthread is what predefines __EMSCRIPTEN_PTHREADS__, which is what clean-core's CC_HAS_THREADS reads --
     # so passing it here is the whole of the C++-side wiring (see common/macros.hh).
     if(SC_THREADS)
-        add_compile_options(-pthread)
-        add_link_options(-pthread)
+        sc_build_options(COMPILE -pthread)
+        sc_build_options(LINK -pthread)
 
         # The pool must be warm before main() runs.
         # A test that spawns a thread and joins it blocks the thread that spawned, and a worker created on demand
         # is serviced by that same event loop -- which the join has stopped. That is a deadlock, not a slowdown.
         # _STRICT=0 keeps exhausting the pool a warning plus an on-demand spawn rather than a hard error.
-        add_link_options("SHELL:-s PTHREAD_POOL_SIZE=8" "SHELL:-s PTHREAD_POOL_SIZE_STRICT=0")
-        add_link_options("SHELL:-s DEFAULT_PTHREAD_STACK_SIZE=1MB")
+        sc_build_options(LINK "SHELL:-s PTHREAD_POOL_SIZE=8" "SHELL:-s PTHREAD_POOL_SIZE_STRICT=0")
+        sc_build_options(LINK "SHELL:-s DEFAULT_PTHREAD_STACK_SIZE=1MB")
     endif()
 
     # WebAssembly's 128-bit SIMD, which clean-simd's simd128 kernel is built on.
@@ -41,15 +41,15 @@ if(EMSCRIPTEN)
     # OFF builds the scalar kernel instead, for an engine that predates it.
     option(SC_WASM_SIMD "Build with WebAssembly SIMD128 (-msimd128)" ON)
     if(SC_WASM_SIMD)
-        add_compile_options(-msimd128)
+        sc_build_options(COMPILE -msimd128)
     endif()
 
     # emdawnwebgpu ships inside the emsdk, so WebGPU costs no vendored dependency -- which is the reason this
     # tier is cheaper to reach than a native Dawn backend would be.
     # Needed on compile and link both: the port supplies webgpu.h to one and its JS bindings to the other.
     if(SC_WASM_WEBGPU)
-        add_compile_options("SHELL:--use-port=emdawnwebgpu")
-        add_link_options("SHELL:--use-port=emdawnwebgpu")
+        sc_build_options(COMPILE "SHELL:--use-port=emdawnwebgpu")
+        sc_build_options(LINK "SHELL:--use-port=emdawnwebgpu")
     endif()
 
     # Keep the wasm name section, so a captured stack reads as function names rather than as bare indices.
@@ -65,11 +65,11 @@ if(EMSCRIPTEN)
     # pinned down here, so this says only what is measured.
     # Nothing but a test should care: a walk reports the frames that exist, and these are the frames that exist.
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Release")
-        add_compile_options(--profiling-funcs)
-        add_link_options(--profiling-funcs)
-        add_compile_definitions(CC_WASM_KEEPS_FRAME_STRUCTURE=1)
+        sc_build_options(COMPILE --profiling-funcs)
+        sc_build_options(LINK --profiling-funcs)
+        sc_build_options(DEFINITIONS CC_WASM_KEEPS_FRAME_STRUCTURE=1)
     else()
-        add_compile_definitions(CC_WASM_KEEPS_FRAME_STRUCTURE=0)
+        sc_build_options(DEFINITIONS CC_WASM_KEEPS_FRAME_STRUCTURE=0)
     endif()
 
     # Debug info BESIDE the artifact, for resolving a captured stack after the fact.
@@ -102,20 +102,20 @@ if(EMSCRIPTEN)
     endif()
 
     if(sc_wasm_sidecars STREQUAL "source-map" OR sc_wasm_sidecars STREQUAL "both")
-        add_compile_options(-gsource-map)
-        add_link_options(-gsource-map)
+        sc_build_options(COMPILE -gsource-map)
+        sc_build_options(LINK -gsource-map)
     endif()
     if(sc_wasm_sidecars STREQUAL "dwarf" OR sc_wasm_sidecars STREQUAL "both")
-        add_compile_options(-gseparate-dwarf)
-        add_link_options(-gseparate-dwarf)
+        sc_build_options(COMPILE -gseparate-dwarf)
+        sc_build_options(LINK -gseparate-dwarf)
     endif()
 
     # nexus drives its control flow (REQUIRE / SKIP / CHECK_ASSERTS, fuzzing) through C++ exceptions, so they
     # must be enabled. Emscripten disables them by default; -fexceptions is the broadly-compatible JS-based
     # mode. -fwasm-exceptions (native wasm EH, faster, needs a newer runtime) is reserved for later.
     if(SC_WASM_EXCEPTIONS STREQUAL "fexceptions")
-        add_compile_options(-fexceptions)
-        add_link_options(-fexceptions)
+        sc_build_options(COMPILE -fexceptions)
+        sc_build_options(LINK -fexceptions)
     elseif(SC_WASM_EXCEPTIONS STREQUAL "wasm-exceptions")
         message(FATAL_ERROR "SC_WASM_EXCEPTIONS=wasm-exceptions is planned (Tier 3) but not yet supported")
     else()
@@ -126,7 +126,7 @@ if(EMSCRIPTEN)
     # access (so nexus' --junit-xml file write and cwd-relative paths work), EXIT_RUNTIME propagates the
     # process exit code (pass/fail), and memory growth avoids a fixed heap cap. These are link-time settings;
     # they no-op on the static libraries and apply to the linked test binaries.
-    add_link_options("SHELL:-s NODERAWFS=1" "SHELL:-s EXIT_RUNTIME=1" "SHELL:-s ALLOW_MEMORY_GROWTH=1")
+    sc_build_options(LINK "SHELL:-s NODERAWFS=1" "SHELL:-s EXIT_RUNTIME=1" "SHELL:-s ALLOW_MEMORY_GROWTH=1")
 
     # A link runs wasm-opt, which takes about 2 GB per process, so a full test build links more binaries at once
     # than a developer machine has memory for; compiles stay at full parallelism.

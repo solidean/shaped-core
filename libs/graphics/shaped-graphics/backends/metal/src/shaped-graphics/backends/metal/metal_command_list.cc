@@ -98,6 +98,14 @@ MTL4::ComputeCommandEncoder* metal_command_list::compute_encoder()
     // actually rests on, and tests/barrier/cross-list-ordering-test.cc, which fails without it.
     // The pair stays for the visibility half, so a write published by one encoder is readable by the next.
     _encoder->barrierAfterQueueStages(k_compute_encoder_stages, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
+
+    // An encoder starts with no state, while sg's bound pipeline outlives it: a timestamp, a copy or a pass closes
+    // the encoder between two dispatches that never rebind.
+    if (_bound_compute != nullptr)
+    {
+        _encoder->setComputePipelineState(_bound_compute->state());
+        _encoder->setArgumentTable(argument_table());
+    }
     return _encoder;
 }
 

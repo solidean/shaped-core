@@ -2,6 +2,7 @@
 
 #include <clean-core/container/array.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/log.hh> // CC_LOG_ERROR
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>

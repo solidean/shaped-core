@@ -1,7 +1,7 @@
 ---
 name: postmortem
 description: Produce a short, high-signal session friction review near the end of a coding session — where momentum was lost (retries, late-discovered invariants, weak docs, forced code archaeology), not a bug report. Sparse, selective output is the point.
-when_to_use: "postmortem", "session friction review", "session retrospective", "what slowed us down", "friction review"
+when_to_use: '"postmortem", "session friction review", "session retrospective", "what slowed us down", "friction review"'
 argument-hint: "[optional focus area]"
 allowed-tools: Read Grep Glob
 ---

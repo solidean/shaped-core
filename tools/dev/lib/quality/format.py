@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core import console, ui
+from ..core.layout import DRIVER_ROOT, Layout
 from ..core.models import StepResult
 from ..core.process import response_file, run_step
 from .changes import ChangeScope, changed_files
@@ -63,15 +64,18 @@ _FALLBACK_PATHS = (
 _VIOLATION_RE = re.compile(r"^(?P<file>.+?):\d+:\d+:\s+(?:error|warning):", re.MULTILINE)
 
 
-def repo_clang_format(root: Path) -> Path:
-    """Where tools/bin/fetch-clang-format.py installs the pinned clang-format, whether or not it is there yet."""
-    return root / "tools" / "bin" / ("clang-format.exe" if os.name == "nt" else "clang-format")
+def repo_clang_format() -> Path:
+    """Where tools/bin/fetch-clang-format.py installs the pinned clang-format, whether or not it is there yet.
+
+    The driver's tools/bin, not the project's: a project consuming shaped-core shares its pinned clang-format (see core/layout.py).
+    """
+    return DRIVER_ROOT / "tools" / "bin" / ("clang-format.exe" if os.name == "nt" else "clang-format")
 
 
-def find_clang_format(explicit: str | None = None, root: Path | None = None) -> str | None:
-    """Locate the clang-format executable: an explicit path or name, then the repo-local pinned one, then PATH, then the common LLVM install locations.
+def find_clang_format(explicit: str | None = None) -> str | None:
+    """Locate the clang-format executable: an explicit path or name, then the pinned one, then PATH, then the common LLVM install locations.
 
-    The repo-local copy outranks PATH because it is the only one whose version we chose — see ensure_pinned_clang_format.
+    The pinned copy outranks PATH because it is the only one whose version we chose — see ensure_pinned_clang_format.
     It exists only once something fetched it, so a machine whose PATH clang-format is already the right major never grows one.
     None when nothing usable is found.
     """
@@ -79,10 +83,9 @@ def find_clang_format(explicit: str | None = None, root: Path | None = None) -> 
         if Path(explicit).is_file():
             return explicit
         return shutil.which(explicit)
-    if root is not None:
-        pinned = repo_clang_format(root)
-        if pinned.is_file():
-            return str(pinned)
+    pinned = repo_clang_format()
+    if pinned.is_file():
+        return str(pinned)
     found = shutil.which("clang-format")
     if found:
         return found
@@ -92,7 +95,7 @@ def find_clang_format(explicit: str | None = None, root: Path | None = None) -> 
     return None
 
 
-def ensure_pinned_clang_format(root: Path) -> str | None:
+def ensure_pinned_clang_format() -> str | None:
     """Fetch the pinned clang-format into tools/bin and return its path, or None if that could not be done.
 
     Called only once the resolved clang-format is missing or the wrong major, so the common case never runs it.
@@ -100,12 +103,12 @@ def ensure_pinned_clang_format(root: Path) -> str | None:
     """
     if os.environ.get("SC_SKIP_CLANG_FORMAT_FETCH"):
         return None
-    script = root / "tools" / "bin" / "fetch-clang-format.py"
+    script = DRIVER_ROOT / "tools" / "bin" / "fetch-clang-format.py"
     if not script.is_file():
         return None
     try:
         completed = subprocess.run(
-            [sys.executable, str(script)], cwd=str(root), capture_output=True, text=True, timeout=300
+            [sys.executable, str(script)], cwd=str(DRIVER_ROOT), capture_output=True, text=True, timeout=300
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -115,7 +118,7 @@ def ensure_pinned_clang_format(root: Path) -> str | None:
         ui.write_line(completed.stderr.strip())
     if completed.returncode != 0:
         return None
-    pinned = repo_clang_format(root)
+    pinned = repo_clang_format()
     return str(pinned) if pinned.is_file() else None
 
 
@@ -145,25 +148,17 @@ def required_major(root: Path) -> int:
     return int(m.group(1)) if m else _DEFAULT_MAJOR
 
 
-def source_roots(root: Path) -> list[Path]:
-    """The directories whose `.cc`/`.hh` files clang-format owns.
-
-    A whitelist rather than a repo-wide sweep: extern/ is vendored third-party code we must not reformat, and a stray source elsewhere should not silently become our problem.
-    Add a root here when the repo grows first-party C++ outside libs/.
-    """
-    return [
-        root / "libs",
-        root / "tools" / "instruction-tracer",
-        root / "tools" / "shaped-linter",
-    ]
+def source_roots(root: Path, *, layout: Layout) -> list[Path]:
+    """The directories whose `.cc`/`.hh` files clang-format owns: the layout's `source_roots`, as absolute paths."""
+    return [root / r for r in layout.source_roots]
 
 
-def discover_files(root: Path, *, scope: ChangeScope | None) -> list[Path]:
+def discover_files(root: Path, *, scope: ChangeScope | None, layout: Layout) -> list[Path]:
     """Return the sorted list of `.cc`/`.hh` files under the source roots to format.
 
     A `scope` restricts the set to what that change set touched (see quality/changes.py); None means the whole tree.
     """
-    roots = [r for r in source_roots(root) if r.is_dir()]
+    roots = [r for r in source_roots(root, layout=layout) if r.is_dir()]
 
     if scope is not None:
         selected = [
@@ -188,43 +183,40 @@ def discover_files(root: Path, *, scope: ChangeScope | None) -> list[Path]:
 # it: clang-format must never be pointed at a .md, and the two are answering different questions.
 _LINT_SUFFIXES = (".cc", ".hh", ".md", ".py")
 
-_LINT_ROOTS = ("libs", "tools", "docs", ".claude/skills")
-
-# First-party files at the repo root, which is not a directory we can walk wholesale.
-_LINT_ROOT_FILES = ("CLAUDE.md", "README.md", "dev.py")
-
 # Never ours to lint: vendored code, build output, and caches.
 # `archive` holds text kept verbatim on purpose — an original draft beside the document that replaced it.
 # Linting it would mean editing it, which is the one thing an archive must not have happen to it.
 _LINT_EXCLUDED_DIRS = frozenset({"extern", "build", ".venv", "__pycache__", "node_modules", ".git", "archive"})
 
 
-def lint_roots(root: Path) -> list[Path]:
+def lint_roots(root: Path, *, layout: Layout) -> list[Path]:
     """The directories shaped-linter owns, as absolute paths."""
-    return [root / r for r in _LINT_ROOTS]
+    return [root / r for r in layout.lint_roots]
 
 
-def _is_lintable(path: Path, roots: list[Path], root: Path) -> bool:
+def _is_lintable(path: Path, roots: list[Path], root: Path, layout: Layout) -> bool:
     if path.suffix not in _LINT_SUFFIXES:
         return False
-    if any(part in _LINT_EXCLUDED_DIRS for part in path.parts):
+    # Only the part below the root counts: a checkout that itself sits under a directory named `extern` or `build` —
+    # shaped-core as another project's submodule — is still entirely ours.
+    if any(part in _LINT_EXCLUDED_DIRS for part in path.relative_to(root).parts):
         return False
     if any(r in path.parents for r in roots):
         return True
-    return path.parent == root and path.name in _LINT_ROOT_FILES
+    return path.parent == root and path.name in layout.lint_root_files
 
 
-def discover_lint_files(root: Path, *, scope: ChangeScope | None) -> list[Path]:
+def discover_lint_files(root: Path, *, scope: ChangeScope | None, layout: Layout) -> list[Path]:
     """Return the sorted list of files shaped-linter should lint.
 
     Wider than `discover_files`: it covers `.md` and `.py` too, and reaches docs/ and .claude/skills/,
     because the linter's prose rules bind every file a human writes sentences in.
     A `scope` restricts the set to what that change set touched (see quality/changes.py); None means the whole tree.
     """
-    roots = [r for r in lint_roots(root) if r.is_dir()]
+    roots = [r for r in lint_roots(root, layout=layout) if r.is_dir()]
 
     if scope is not None:
-        return sorted({p for p in changed_files(root, scope) if _is_lintable(p, roots, root)})
+        return sorted({p for p in changed_files(root, scope) if _is_lintable(p, roots, root, layout)})
 
     found: list[Path] = []
     for lint_root in roots:
@@ -233,7 +225,7 @@ def discover_lint_files(root: Path, *, scope: ChangeScope | None) -> list[Path]:
             for f in filenames:
                 if f.endswith(_LINT_SUFFIXES):
                     found.append(Path(dirpath) / f)
-    found += [root / f for f in _LINT_ROOT_FILES if (root / f).is_file()]
+    found += [root / f for f in layout.lint_root_files if (root / f).is_file()]
     return sorted(found)
 
 
@@ -299,6 +291,7 @@ def run_format(
     check: bool,
     scope: ChangeScope | None,
     allow_different_version: bool,
+    layout: Layout,
     mirror: bool = False,
     verbose: bool = False,
 ) -> FormatResult:
@@ -309,14 +302,14 @@ def run_format(
     Returns a FormatResult describing what happened, including the "no files in scope" success; the caller prints the summary (see report.summarize_format).
     """
     need = required_major(root)
-    clang_format = find_clang_format(root=root)
+    clang_format = find_clang_format()
     have = clang_format_version(clang_format) if clang_format is not None else None
 
     # clang-format output is not stable across major versions, so enforce the major declared by .clang-format.
     # Nothing usable means fetch the pinned build rather than send the caller off to install LLVM by hand — that is
     # what tools/bin/fetch-clang-format.py is for, and it is a ~1.5 MB download that happens once per machine.
     if clang_format is None or have is None or have[0] != need:
-        fetched = ensure_pinned_clang_format(root)
+        fetched = ensure_pinned_clang_format()
         if fetched is not None:
             clang_format = fetched
             have = clang_format_version(clang_format)
@@ -342,7 +335,7 @@ def run_format(
                 "or pass --allow-different-version to proceed anyway."
             )
 
-    files = discover_files(root, scope=scope)
+    files = discover_files(root, scope=scope, layout=layout)
     if not files:
         return FormatResult(ok=True, check=check, scope=scope, files=0, nothing=True)
 

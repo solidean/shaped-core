@@ -191,7 +191,7 @@ Both encodings, every version from 6100 on; the parse is the vendored ufbx's, co
 
 cc::result<babel::fbx::data> read(cc::read_stream& in, read_options = {});   // + span / string_view overloads
 struct read_options { bool triangulate = false; i64 memory_limit = 0; cc::async_scheduler* scheduler = nullptr; };
-// triangulate: ear clip | memory_limit: 0 = 32x input + 64 MiB, at most 4 GiB | scheduler: ufbx's parse + the per-mesh copy spread over it
+// triangulate: ear clip | memory_limit: 0 = 32x input + 64 MiB, at most 4 GiB | scheduler: ufbx's parallel decoding + the per-mesh copy spread over it
 cc::result<babel::fbx::data> read_structure(cc::read_stream& in, read_options = {});   // + span; no geometry: every mesh named and empty
 babel::fbx::loading read_async(cc::pinned_data<byte const> bytes, read_options = {});   // { structure, complete }: cc::shared_async<data> each, both scheduled at once
 
@@ -242,7 +242,7 @@ Gotchas:
 - **A mesh past `i32` counts is an error**, since every index here is an `i32`.
 - **No file is opened.** A texture is its file names and its embedded bytes; resolving a name is the caller's policy, which babel owns none of.
   Both names are untrusted: absolute, drive-lettered, UNC or climbing out with `..`, `relative_filename` included.
-- **Cameras, animation, skinning, blend shapes, LOD groups and curves are not read**, and each is an `unsupported` issue rather than silence.
+- **Cameras, animation, skinning, blend shapes, constraints, markers, LOD groups and curves are not read**, and each is an `unsupported` issue rather than silence.
 
 ## SQLite (`babel::sqlite`)
 

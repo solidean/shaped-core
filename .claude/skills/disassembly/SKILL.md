@@ -1,7 +1,7 @@
 ---
 name: disassembly
 description: Inspect the optimizer's actual codegen with `dev.py assembly` — search built symbols, disassemble a function (a local godbolt over the object files), and trace what a function really executed at run time. Works on shaped-core's presets and, via --build-dir/--objects/--exe, on any other project's build. Use when you need to confirm what machine code a function compiled to, or which path it actually took.
-when_to_use: "disassemble", "assembly", "what does this compile to", "did the atomic fold", "did this inline", "is it vectorized", "look at the codegen", "dev.py assembly", "godbolt", "why is X slower/faster", "attribute a perf delta to a cause", "is this microbenchmark representative", "does the real code match the benchmark mock", "which branch was taken", "where did that indirect call go", "what did it actually execute", "trace instructions", "how many instructions"
+when_to_use: '"disassemble", "assembly", "what does this compile to", "did the atomic fold", "did this inline", "is it vectorized", "look at the codegen", "dev.py assembly", "godbolt", "why is X slower/faster", "attribute a perf delta to a cause", "is this microbenchmark representative", "does the real code match the benchmark mock", "which branch was taken", "where did that indirect call go", "what did it actually execute", "trace instructions", "how many instructions"'
 allowed-tools: Bash mcp__repo_tools__repo_search Read
 ---
 

@@ -333,6 +333,13 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(clean-core PUBLIC Threads::Threads)
 
+# The repo-wide build configuration — x86-64 level, floating-point contraction, sanitizers, coverage, PGO, wasm threads.
+# PUBLIC because some of it is ABI: CC_X64_LEVEL is read by our headers, so everything including them must agree on it.
+# tools/cmake/BuildConfig.cmake says why it is a target. The root CMakeLists defines it; a consumer adding clean-core alone gets none.
+if(TARGET shaped-core::build-config)
+    target_link_libraries(clean-core PUBLIC shaped-core::build-config)
+endif()
+
 # timeBeginPeriod / timeEndPeriod (cc::scoped_scheduler_tick) live in winmm, which is not part of the default
 # Windows link set. Private: nothing in our headers names it.
 if(WIN32)

@@ -44,7 +44,7 @@ COPY_MAP = {
 }
 
 # Everything we own under DEST that a re-vendor must wipe first.
-# The script, CMakeLists.txt, dependency.yml and .gitignore stay.
+# The script, CMakeLists.txt and dependency.yml stay.
 WIPE = ["include", "src", "LICENSE"]
 
 

@@ -42,21 +42,22 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def _branch_base(ctx: Context) -> str | None:
-    """The merge base with the default branch, or None when there is none.
+    """The merge base with the integration branch (`Policy.default_branch`), or None when there is none.
 
-    On local `main` only `origin/main` is a base: the unpushed commits plus the working tree, what a push to `main` sends.
-    Comparing local `main` with itself would inspect nothing, so it is never a candidate there.
+    On the local integration branch only its `origin/` counterpart is a base: the unpushed commits plus the working tree, what a push sends.
+    Comparing the local branch with itself would inspect nothing, so it is never a candidate there.
     """
     import subprocess
 
+    branch = ctx.policy.default_branch
     try:
         head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ctx.root),
                               capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
-    on_main = head.returncode == 0 and head.stdout.strip() == "main"
+    on_branch = head.returncode == 0 and head.stdout.strip() == branch
 
-    for base in ("origin/main",) if on_main else ("origin/main", "main"):
+    for base in (f"origin/{branch}",) if on_branch else (f"origin/{branch}", branch):
         try:
             out = subprocess.run(["git", "merge-base", base, "HEAD"], cwd=str(ctx.root),
                                  capture_output=True, text=True, timeout=30)
@@ -78,6 +79,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                 check=not fix,
                 scope=scope,
                 allow_different_version=False,
+                layout=ctx.policy.layout,
                 mirror=mirror,
                 verbose=verbose,
             )
@@ -99,7 +101,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
 
     def check_crossrefs(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # A moved file breaks links in other, untouched files, so this is always repo-wide: fix and scope are both ignored.
-        return dev.report.summarize_crossrefs(dev.check_crossrefs(ctx.root), ctx.root)
+        return dev.report.summarize_crossrefs(dev.check_crossrefs(ctx.root, layout=ctx.policy.layout), ctx.root)
 
     def check_deps_licenses(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # A dependency's license is a property of the manifest set, not of the next commit's files, so this is repo-wide too.
@@ -322,7 +324,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         def run(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
             from tools.dev.lib.quality.format import find_clang_format
 
-            clang_format = find_clang_format(root=ctx.root)
+            clang_format = find_clang_format()
             if clang_format is None:
                 dev.ui.write_line(f"{name}: skipped -- clang-format not found")
                 return True
@@ -445,7 +447,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     explicit = args.since is not None or args.commit is not None or args.all or args.dirty_only
     base = None if explicit else _branch_base(ctx)
     if not explicit and base is None:
-        ctx.die("check found no merge base with origin/main (or main, off main) to scope its gates to; "
+        ctx.die(f"check found no merge base with origin/{ctx.policy.default_branch} (or {ctx.policy.default_branch}, "
+                "off it) to scope its gates to; "
                 "fetch origin, or pass --since <rev>, --commit <rev>, --dirty-only or --all")
     scope = a.scope_from_args(args, default_since=base)
     if scope is not None and scope.revision is not None:

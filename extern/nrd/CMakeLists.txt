@@ -25,7 +25,9 @@ endif()
 # extern/dxc already pins one, and pointing ShaderMake at it is the whole reason that pin now takes dxc.exe: left to
 # itself ShaderMake DOWNLOADS a DXC at configure time, which would put a second, unpinned compiler in a build whose
 # point is that every dependency is pinned — and would make configure need the network.
-set(_nrd_dxc "${CMAKE_SOURCE_DIR}/extern/dxc/.install/bin/dxc.exe")
+# Paths into shaped-core are relative to this file, not CMAKE_SOURCE_DIR: that is the consumer's root when shaped-core is a subdirectory.
+set(_sc_root "${CMAKE_CURRENT_LIST_DIR}/../..")
+set(_nrd_dxc "${_sc_root}/extern/dxc/.install/bin/dxc.exe")
 if(NOT WIN32 OR NOT EXISTS "${_nrd_dxc}")
     message(STATUS "nrd: no pinned dxc.exe to compile its shaders with — skipping, so sr::nrd_denoise_routine reports unsupported.")
     return()
@@ -78,7 +80,7 @@ add_subdirectory("${NRD_INSTALL}/NRD" "${CMAKE_CURRENT_BINARY_DIR}/nrd" EXCLUDE_
 # are embedded like the package's own — and what it would take to close it.
 # The copy is gitignored, and configure refreshes it, so the header can never be staler than the library it describes.
 file(COPY "${NRD_INSTALL}/NRD/Shaders/NRD.hlsli" "${NRD_INSTALL}/NRD/Shaders/NRDConfig.hlsli"
-     DESTINATION "${CMAKE_SOURCE_DIR}/libs/graphics/shaped-rendering/shaders/nrd")
+     DESTINATION "${_sc_root}/libs/graphics/shaped-rendering/shaders/nrd")
 
 # NRD's warnings are NRD's business, and it builds with -Werror of its own.
 # A consumer's stricter settings must not turn an upstream's clean build into a broken one.

@@ -1,7 +1,7 @@
 ---
 name: modernizing-old-code
 description: Playbook for porting a working-but-old implementation (from the previous clean-core or another codebase) into current shaped-core — finding its home, swapping dead APIs for current ones, and matching today's C++23 style. Includes a living list of old→new gotchas. Use whenever you're handed a legacy snippet/file to "bring up to speed", "modernize", "port into clean-core", or "make it fit our style".
-when_to_use: "modernize this", "bring this up to speed", "port this into clean-core", "our old impl was", "make this fit our new style", "update this old code", "this is from the old clean-core"
+when_to_use: '"modernize this", "bring this up to speed", "port this into clean-core", "our old impl was", "make this fit our new style", "update this old code", "this is from the old clean-core"'
 allowed-tools: Read Edit Write Bash Glob Grep mcp__repo_tools__repo_search mcp__repo_tools__repo_structure mcp__repo_tools__file_structure mcp__repo_tools__build_diag mcp__repo_tools__test_diag
 ---
 

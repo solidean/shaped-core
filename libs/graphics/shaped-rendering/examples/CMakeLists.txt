@@ -9,7 +9,8 @@ if(NOT SC_HAS_DXC_COMPILER)
     return()
 endif()
 
-# The per-example settings below name the example's target, which does not exist when examples are off.
+# sc_add_example is a no-op without SC_BUILD_EXAMPLES, but the target_* calls and the shader package below are not.
+# Off is the default when shaped-core is another project's subdirectory, so this must return rather than configure a target that does not exist.
 if(NOT SC_BUILD_EXAMPLES)
     return()
 endif()

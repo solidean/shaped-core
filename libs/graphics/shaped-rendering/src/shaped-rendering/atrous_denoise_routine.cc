@@ -110,6 +110,8 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     CC_ASSERT(extent_of(in.output) == extent_of(in.color), "à-trous does not upscale: output and input extents differ");
     CC_ASSERT(!is_set(in.sample_counts) || extent_of(in.sample_counts) == extent_of(in.color),
               "per-pixel sample counts must cover the input extent");
+    CC_ASSERT(!is_set(in.sample_counts) || !sg::is_integer_format(in.sample_counts.format()),
+              "per-pixel sample counts must be a float or normalized format, which the shader reads as float4");
     CC_ASSERT(options.iterations >= 1, "à-trous needs at least one pass");
 
     // Read-only: execute touches nothing init did not publish, and the ping-pong images are the caller's.

@@ -186,6 +186,7 @@ struct babel::dds::data
 namespace babel::dds
 {
 /// The extent of mip `level` along an axis whose base is `base`, never below 1.
+/// `level` must be in 0..31, since it is a shift of an `int`.
 [[nodiscard]] constexpr int mip_extent(int base, int level)
 {
     auto const e = base >> level;

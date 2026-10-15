@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import console, profile, ui
+from .layout import DRIVER_ROOT
 from .logs import capture_line, step_log_paths
 from .models import Preset, StepResult
 
@@ -137,9 +138,12 @@ def default_emsdk_root() -> Path:
     return Path.home() / "tools" / "emsdk"
 
 
-def pinned_emsdk_version(repo_root: Path) -> str:
-    """The Emscripten version this repo builds with: `tools/emsdk.version`, which CI reads too."""
-    return (repo_root / "tools" / "emsdk.version").read_text(encoding="utf-8").strip()
+def pinned_emsdk_version() -> str:
+    """The Emscripten version the driver builds with: shaped-core's `tools/emsdk.version`, which CI reads too.
+
+    The driver's pin rather than the project's, since a wasm build of a consuming project compiles shaped-core with it.
+    """
+    return (DRIVER_ROOT / "tools" / "emsdk.version").read_text(encoding="utf-8").strip()
 
 
 def installed_emsdk_version(root: Path) -> str | None:

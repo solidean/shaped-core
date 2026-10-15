@@ -5,6 +5,7 @@
 #include <clean-core/math/bit.hh> // cc::bit_cast
 #include <clean-core/record/log.hh>
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/async_coroutine.hh>
@@ -307,6 +308,18 @@ TEST("fbx - a light reads its type, decay, color and intensity over 100")
     REQUIRE(lamp != nullptr);
     CHECK(lamp->light == bf::light_index(0));
     CHECK(near(lamp->node_to_world.transform(tg::pos3f::zero), tg::pos3f(0, 0, 3)));
+}
+
+TEST("fbx - a stream reads as the span does, the header's own example")
+{
+    auto const text = babel::test::fbx_scene();
+    auto adapter = cc::span_read_stream_adapter(cc::string_view(text).as_bytes());
+    cc::read_stream stream = adapter;
+    auto const doc = REQUIRED_VALUE(babel::fbx::read(stream, {.triangulate = true}));
+    auto const from_span = REQUIRED_VALUE(babel::fbx::read(cc::string_view(text), {.triangulate = true}));
+    CHECK(first_difference(doc, from_span).empty());
+    REQUIRE(doc.meshes.size() == 1);
+    CHECK(doc.meshes[0].faces.size() == 3);
 }
 
 TEST("fbx - a clean file yields no issues")

@@ -51,6 +51,7 @@ struct sr::bc_compress_options
 ///
 /// BC4 and BC5 come in an unsigned and a signed form, and `bc_compress_options` says what range their source is in.
 /// Block compression stores normalized or float data only, so an integer or a depth source has no target here.
+/// A float source is CLAMPED to 0..1, or to -1..1 for a BC4 or BC5 read as `minus_one_to_one`: HDR values do not survive.
 ///
 /// The encoders are `shaders/compression/bc.sgl`.
 ///

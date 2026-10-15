@@ -44,8 +44,9 @@ struct babel::tga::data
     int height = 0;
 
     /// 1 gray, 2 gray + alpha, 3 rgb or 4 rgba — what the stored pixels hold, a palette's entries for a color-mapped image.
-    /// A 16- or 32-bit pixel has an alpha channel only when the descriptor declares attribute bits; otherwise its alpha
-    /// bit or byte is padding, and the image is rgb.
+    /// In a true-color or color-mapped image, a 16- or 32-bit pixel has an alpha channel only when the descriptor declares
+    /// attribute bits; otherwise its alpha bit or byte is padding, and the image is rgb.
+    /// A 16-bit grayscale image is always gray + alpha.
     int channels = 0;
 
     /// True when the alpha channel was zero at every pixel and was read as opaque instead, as DirectXTex reads such a

@@ -1,7 +1,7 @@
 ---
 name: debugging-ci
 description: Diagnose a red GitHub Actions run for shaped-core — find which job failed and read the real compiler/test errors out of its diagnostics artifact with build_diag / test_diag.
-when_to_use: "CI is red", "main is red", "fix CI", "the build failed on CI", "MSVC CI fails", "why did the PR check fail", "a GitHub Actions job failed", "investigate the failing run", "download the CI artifact", "ci-diag.zip", "ci-logs.zip"
+when_to_use: '"CI is red", "main is red", "fix CI", "the build failed on CI", "MSVC CI fails", "why did the PR check fail", "a GitHub Actions job failed", "investigate the failing run", "download the CI artifact", "ci-diag.zip", "ci-logs.zip"'
 allowed-tools: Bash mcp__repo_tools__build_diag mcp__repo_tools__test_diag Read
 ---
 

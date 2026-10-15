@@ -274,6 +274,10 @@ namespace
 /// It must equal `sg::backend::metal::k_inline_constants_buffer_index`, which ssc::msl cannot include.
 constexpr auto k_inline_constants_buffer_index = isize(sg::reserved_binding_group + 1);
 
+/// The buffer index `dispatch_rays` binds a TLAS's hit-group offsets at, which a raygen kernel declares.
+/// It must equal `sg::backend::metal::k_hit_group_offsets_buffer_index`, which ssc::msl cannot include.
+constexpr auto k_hit_group_offsets_buffer_index = isize(5);
+
 /// The texture kind a `texture*` or `depth*` type names, with `tex_2d` standing for the plain one.
 [[nodiscard]] cc::optional<sg::texture_view_dimension> texture_dimension_of(cc::string_view type)
 {
@@ -452,12 +456,14 @@ cc::result<cc::string_view> ssc::msl::impl::entry_qualifier_for(sg::shader_stage
     case sg::shader_stage::fragment:
         return cc::string_view("fragment");
     case sg::shader_stage::closest_hit:
-    case sg::shader_stage::any_hit:
     case sg::shader_stage::miss:
     case sg::shader_stage::callable:
-    case sg::shader_stage::intersection:
-        // A shader table links these by name, and a visible function is what it can link.
+        // The kernel calls these through a visible function table.
         return cc::string_view("visible");
+    case sg::shader_stage::any_hit:
+    case sg::shader_stage::intersection:
+        // These run during traversal, from an intersection function table: `[[intersection(...)]]`.
+        return cc::string_view("intersection");
     case sg::shader_stage::tessellation_control:
     case sg::shader_stage::tessellation_evaluation:
         return cc::error("metal has no tessellation control or evaluation stage; it tessellates from a compute kernel "
@@ -546,6 +552,13 @@ cc::result<ssc::msl::impl::reflection> ssc::msl::impl::reflect(cc::string_view s
         // Everything else a parameter can carry — [[stage_in]], [[thread_position_in_grid]] and its neighbours —
         // is a value the hardware supplies rather than something a group binds.
         if (buffer_index < 0 && texture_index < 0 && sampler_index < 0)
+            continue;
+
+        // sg's own addresses, which the backend binds and no layout declares: the reserved group (a raygen's function
+        // tables, shader diagnostics) and a raygen's hit-group offsets.
+        if (buffer_index == sg::reserved_binding_group)
+            continue;
+        if (buffer_index == k_hit_group_offsets_buffer_index && stage == sg::shader_stage::raygen)
             continue;
 
         if (buffer_index >= 0)

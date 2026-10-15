@@ -215,9 +215,11 @@ TEST("dds - a non-power-of-two mip chain halves down to 1x1, flooring")
     CHECK(t.subresources[0].bytes.size() == 16);
     CHECK(u8(t.subresources[2].bytes[0]) == 24); // the fourth block of the payload
 
-    // A fourth level does not exist for 5x3.
-    auto const too_many = dds::read(cc::span<byte const>(make_dds({.width = 5, .height = 3, .mips = 4}, payload)));
-    CHECK(too_many.has_error());
+    // A fourth level does not exist for 5x3; the payload carries its 8 bytes too, so only the mip count can refuse it.
+    auto const padded = counting_payload(16 + 8 + 8 + 8);
+    auto const too_many = dds::read(cc::span<byte const>(make_dds({.width = 5, .height = 3, .mips = 4}, padded)));
+    REQUIRE(too_many.has_error());
+    CHECK(cc::format("{}", too_many.error()).contains("mip levels"));
 
     // Uncompressed: 7x5 rgba8 through DX10, 7x5 -> 3x2 -> 1x1, rows tightly packed.
     auto const rgba = counting_payload((7 * 5 + 3 * 2 + 1) * 4);

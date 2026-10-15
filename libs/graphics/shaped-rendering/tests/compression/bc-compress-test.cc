@@ -147,6 +147,21 @@ image gradient(int size)
     return out;
 }
 
+/// `source` grown to `size` x `size` by repeating its last row and column: what an encoder's edge clamp reads.
+image edge_clamped(image const& source, int size)
+{
+    auto out = blank(size, size);
+    for (auto y = 0; y < size; ++y)
+        for (auto x = 0; x < size; ++x)
+        {
+            auto const from = (isize(cc::min(y, source.height - 1)) * source.width + cc::min(x, source.width - 1)) * 4;
+            auto const to = (isize(y) * size + x) * 4;
+            for (auto c = 0; c < 4; ++c)
+                out.rgba8[to + c] = source.rgba8[from + c];
+        }
+    return out;
+}
+
 /// A color ramp under an alpha ramp that crosses it, so no block is opaque.
 image alpha_ramp(int size)
 {
@@ -195,9 +210,11 @@ image cutout(int size)
     return out;
 }
 
-/// What a shader loads from `texture`, as floats, texel by texel.
-cc::shared_async<cc::vector<tg::vec4f>> decode(sg::context& ctx, sg::texture_2d const& texture)
+/// What a shader loads from mip `level` of `texture`, as floats, texel by texel.
+cc::shared_async<cc::vector<tg::vec4f>> decode(sg::context& ctx, sg::texture_2d const& texture, int level = 0)
 {
+    auto const width = cc::max(1, texture.width() >> level);
+    auto const height = cc::max(1, texture.height() >> level);
     auto const& entry = sr_test::sgl_shaders::bc_decode.main_cs;
     auto const shader = entry->acquire(ctx);
     co_await cc::async_settled(shader);
@@ -208,18 +225,18 @@ cc::shared_async<cc::vector<tg::vec4f>> decode(sg::context& ctx, sg::texture_2d 
     REQUIRE(built != nullptr);
     auto const layout = ctx.cached.acquire_binding_group_layout<sr_test::sgl_shaders::decode_io>();
 
-    auto const count = isize(texture.width()) * texture.height();
+    auto const count = isize(width) * height;
     auto cmd = ctx.create_command_list();
     auto const texels
         = ctx.transient.create_buffer<tg::vec4f>(count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     auto const group = ctx.transient.create_binding_group(
         *cmd, layout,
-        sr_test::sgl_shaders::decode_io{.source = texture.as_texture_view(), .texels = texels.as_readwrite_buffer()});
+        sr_test::sgl_shaders::decode_io{.source = texture.as_texture_view({.mips = {.start = level, .count = 1}}),
+                                        .texels = texels.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*built);
     cmd->compute.bind_group(0, *group);
-    cmd->compute.set_inline_constants(
-        sr_test::sgl_shaders::decode_constants{.width = texture.width(), .height = texture.height()}.to_block());
-    cmd->compute.dispatch_threads(texture.width(), texture.height());
+    cmd->compute.set_inline_constants(sr_test::sgl_shaders::decode_constants{.width = width, .height = height}.to_block());
+    cmd->compute.dispatch_threads(width, height);
     auto readback = cmd->download.data_from_buffer(texels);
     ctx.submit_command_list(cc::move(cmd));
 
@@ -228,6 +245,22 @@ cc::shared_async<cc::vector<tg::vec4f>> decode(sg::context& ctx, sg::texture_2d 
     for (auto const& t : data)
         out.push_back(t);
     co_return out;
+}
+
+/// PSNR over the first `channels` of two decodes, in dB.
+float psnr_of(cc::vector<tg::vec4f> const& want, cc::vector<tg::vec4f> const& got, int channels)
+{
+    auto sum = 0.0;
+    auto count = isize(0);
+    for (auto i = isize(0); i < want.size(); ++i)
+        for (auto c = 0; c < channels; ++c)
+        {
+            auto const d = double((got[i][c] - want[i][c]) * 255.0f);
+            sum += d * d;
+            ++count;
+        }
+    auto const mse = sum / double(cc::max(count, isize(1)));
+    return mse <= 0.0 ? 99.0f : float(10.0 * tg::log(255.0 * 255.0 / mse) / tg::log(10.0));
 }
 
 struct comparison
@@ -336,6 +369,99 @@ cc::shared_async<cc::unit> prewarm(sg::context& ctx, std::initializer_list<sg::p
 }
 } // namespace
 
+TEST("sr - target_for keeps a signed target signed, and takes an sRGB source's encoding")
+{
+    // A linear source keeps the target as asked: only an sRGB encoding is ever taken off, never the sign.
+    CHECK(sr::bc_compress_routine::target_for(sg::pixel_format::rgba32_float, sg::pixel_format::bc5_rg_snorm)
+          == sg::pixel_format::bc5_rg_snorm);
+    CHECK(sr::bc_compress_routine::target_for(sg::pixel_format::rgba32_float, sg::pixel_format::bc4_r_snorm)
+          == sg::pixel_format::bc4_r_snorm);
+    CHECK(sr::bc_compress_routine::target_for(sg::pixel_format::rgba8_unorm, sg::pixel_format::bc7_rgba_unorm_srgb)
+          == sg::pixel_format::bc7_rgba_unorm);
+    CHECK(sr::bc_compress_routine::target_for(sg::pixel_format::rgba8_unorm_srgb, sg::pixel_format::bc7_rgba_unorm)
+          == sg::pixel_format::bc7_rgba_unorm_srgb);
+}
+
+ASYNC_INVOCABLE_TEST("sr - BC1 and BC7 compress any mip level, a partial block and a single texel included",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    auto constexpr source_format = sg::pixel_format::rgba8_unorm;
+    if (!sr::bc_compress_routine::can_compress(ctx, source_format, sg::pixel_format::bc7_rgba_unorm))
+        SKIP("this device has no BC textures");
+    co_await prewarm(ctx, {sg::pixel_format::bc1_rgba_unorm, sg::pixel_format::bc7_rgba_unorm});
+
+    // 64 x 64 with every mip, each its own gradient, so a level read from the wrong place shows as a wrong image.
+    constexpr int size = 64;
+    constexpr int mips = 7;
+    auto const original = ctx.persistent.create_texture_2d(
+        {.format = source_format, .width = size, .height = size, .mip_levels = mips, .usage = source_usage});
+    auto cmd = ctx.create_command_list();
+    for (auto l = 0; l < mips; ++l)
+        cmd->upload.bytes_to_texture(original.raw(), cc::span<byte const>(gradient(size >> l).rgba8), {.mip_level = l});
+    ctx.submit_command_list(cc::move(cmd));
+
+    struct target_case
+    {
+        sg::pixel_format format = sg::pixel_format::bc1_rgba_unorm;
+        int channels = 3;
+        float min_psnr = 32.0f;
+    };
+    // Levels 1, 4 and 6: 32 x 32, one 4 x 4 block, and a single texel, which is a block the edge clamp fills.
+    // Each must decode exactly as the same image does compressed as level 0 of a texture of its own, which pins the
+    // level's extent, its view and the edge clamp.
+    // Only the 32 x 32 level is also held to a quality floor: at 4 x 4, `gradient` puts its whole ramp and its noise in
+    // one block, which no BC1 or BC7 block holds well whatever the level.
+    for (auto const t : {target_case{.format = sg::pixel_format::bc1_rgba_unorm, .channels = 3, .min_psnr = 32.0f},
+                         target_case{.format = sg::pixel_format::bc7_rgba_unorm, .channels = 4, .min_psnr = 38.0f}})
+    {
+        auto const compressed = ctx.persistent.create_texture_2d(
+            {.format = t.format, .width = size, .height = size, .mip_levels = mips, .usage = target_usage});
+        for (auto const level : {1, 4, 6})
+        {
+            auto const extent = size >> level;
+
+            // A device without unaligned BC (metal) refuses a texture smaller than a block, though it has the mip.
+            // There the reference is the level edge-clamped to whole blocks, which the encoder must read alike.
+            auto const alone_extent
+                = ctx.supports(sg::feature::unaligned_block_compression) ? extent : (extent + 3) / 4 * 4;
+            auto const alone_source = ctx.persistent.create_texture_2d(
+                {.format = source_format, .width = alone_extent, .height = alone_extent, .usage = source_usage});
+            auto const alone = ctx.persistent.create_texture_2d(
+                {.format = t.format, .width = alone_extent, .height = alone_extent, .usage = target_usage});
+
+            auto encode = ctx.create_command_list();
+            encode->upload.bytes_to_texture(alone_source.raw(),
+                                            cc::span<byte const>(edge_clamped(gradient(extent), alone_extent).rgba8));
+            auto const outcome = sr::bc_compress_routine::execute(*encode, original, compressed, level);
+            auto const alone_outcome = sr::bc_compress_routine::execute(*encode, alone_source, alone, 0);
+            ctx.submit_command_list(cc::move(encode));
+            REQUIRE(outcome == sg::routine_outcome::executed);
+            REQUIRE(alone_outcome == sg::routine_outcome::executed);
+
+            auto const want = co_await decode(ctx, original, level);
+            auto const got = co_await decode(ctx, compressed, level);
+            auto const reference = co_await decode(ctx, alone);
+            REQUIRE(want.size() == got.size());
+            REQUIRE(reference.size() == isize(alone_extent) * alone_extent);
+
+            auto differing = 0;
+            for (auto y = 0; y < extent; ++y)
+                for (auto x = 0; x < extent; ++x)
+                    differing += got[isize(y) * extent + x] == reference[isize(y) * alone_extent + x] ? 0 : 1;
+            CHECK(differing == 0).dump("level", level).dump("differing texels", differing).dump("channels", t.channels);
+
+            auto const psnr = psnr_of(want, got, t.channels);
+            if (level == 1)
+                CHECK(psnr >= t.min_psnr).dump("level", level).dump("psnr", psnr).dump("channels", t.channels);
+            CC_LOG_INFO("mip {} of {} channels: {} dB, {} texels differing from level 0", level, t.channels, psnr,
+                        differing);
+        }
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sr - BC7 compression reproduces every two-subset partition and holds a gradient",
                      (sg::context_handle const& ctx_h),
                      exclusive("sg-reload-generation"))
@@ -365,7 +491,7 @@ ASYNC_INVOCABLE_TEST("sr - BC7 compression reproduces every two-subset partition
     auto const dot = co_await compress_and_compare(ctx, one_red_dot(16), sg::pixel_format::rgba8_unorm, bc7, 4);
     CHECK(dot.max_error <= 2.0f).dump("max error", dot.max_error);
 
-    // Color and alpha each ramp along their own axis, so every block is a plane no one subset fits: mode 7's two do.
+    // Color and alpha each ramp along their own axis, so no single line fits a block; mode 7's two subsets fit it closely.
     auto const alpha = co_await compress_and_compare(ctx, alpha_ramp(32), sg::pixel_format::rgba8_unorm, bc7, 4);
     CHECK(alpha.psnr >= 38.0f).dump("psnr", alpha.psnr).dump("max error", alpha.max_error);
 
