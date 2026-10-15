@@ -1548,6 +1548,14 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
          .traced_with_stand_ins = &stand_ins},
         fc, slot, false);
 
+    // The store's budget counts the path state beside the texture, and the trace may just have created or grown it.
+    auto bytes = texture_bytes(v.resolution, sg::pixel_format::rgba32_float);
+    if (slot.paths.has_value())
+        bytes += slot.paths.value().size_in_bytes();
+    if (slot.scaled_paths.has_value())
+        bytes += slot.scaled_paths.value().size_in_bytes();
+    store.set_payload_bytes(v.id, bytes);
+
     // As above: a declined trace recorded nothing, so it must not count as a sample, and a frame shaded by a stand-in
     // must not be averaged with the next.
     if (traced == sg::routine_outcome::executed && stand_ins)
