@@ -560,15 +560,20 @@ constexpr i32 max_budgeted_rounds = 64;
         slot.pacing.in_flight.push_back({.rounds = rounds});
         timing = &slot.pacing.in_flight.back().timing;
     }
-    return wavefront_routine::execute(cmd, {.trace = d,
-                                            .frame = fc,
-                                            .state = &paths,
-                                            .rounds = rounds,
-                                            .restart = restart,
-                                            .regenerate = !restart,
-                                            .generation = paths.generation,
-                                            .roulette_after = wavefront_roulette_after,
-                                            .timing = timing});
+    auto const outcome = wavefront_routine::execute(cmd, {.trace = d,
+                                                          .frame = fc,
+                                                          .state = &paths,
+                                                          .rounds = rounds,
+                                                          .restart = restart,
+                                                          .regenerate = !restart,
+                                                          .generation = paths.generation,
+                                                          .roulette_after = wavefront_roulette_after,
+                                                          .timing = timing});
+
+    // A declined frame records no timestamps, so its entry would never land and would hold back every later one.
+    if (timing != nullptr && outcome != sg::routine_outcome::executed)
+        (void)slot.pacing.in_flight.pop_back();
+    return outcome;
 }
 
 /// Whether a layer traced in `mode` may be traced on `ctx`, saying so once per `slot` when it may not.
