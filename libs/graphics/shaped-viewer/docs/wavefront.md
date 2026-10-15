@@ -138,8 +138,12 @@ Connect adds into a radiance field of its own per slot, which resolve sums with 
 
 ### Settings
 
-`render_settings::samples_per_pixel` is replaced by a round budget per frame, and `k` stays internal.
-`max_bounces` keeps its name and becomes the cap.
+`render_settings::rounds_per_frame` is what a still frame runs; `samples_per_pixel` is the megakernel's, which the wavefront does not read.
+`render_settings::frame_budget_ms`, 16 by default, turns the rounds into a target: a still frame runs as many as fit, from the smoothed GPU timestamps of the frames before it, between 1 and 64.
+`rounds_per_frame` is then only where that starts, and stays the count where the device times nothing or the budget is 0.
+A headless viewer, which is what a capture runs in, sets every budget to 0, so a capture's sample count depends on no machine's speed or load.
+A frame that restarts is held to neither, since it drains.
+`max_bounces` keeps its name and is the cap.
 
 ### Where the generic kernels live
 
@@ -247,7 +251,8 @@ It stays because neither tracer wins everywhere: the megakernel is about twice a
 
 Every step has landed: the wavefront traces a layer unless `render_settings::mode` asks for the megakernel.
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
-A frame whose image changed restarts and drains, a still one carries for `rounds_per_frame` rounds, and a layer that denoises hands the spatial member the tallies' per-pixel counts.
+A frame whose image changed restarts and drains, and a still one carries for as many rounds as fit `frame_budget_ms`, or for `rounds_per_frame` where that is 0.
+A layer that denoises hands the spatial member the tallies' per-pixel counts.
 Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the Cornell box, media, glass and cutouts,
 and `wavefront-view-test.cc` through the viewer on quadrics and decals.
 

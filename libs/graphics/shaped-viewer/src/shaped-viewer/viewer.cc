@@ -882,6 +882,13 @@ void viewer::finish_frame(frame& f)
             p.at = p.at + down;
     }
 
+    // A headless run is a capture or a test, whose image must not depend on how fast this machine is or what else its GPU runs.
+    // So a still wavefront frame runs its `rounds_per_frame` rather than as many rounds as its budget measured to fit.
+    if (im.config.headless)
+        for (auto& v : def.views)
+            for (auto& l : v.layers)
+                l.settings.frame_budget_ms = 0.0f;
+
     // What the store already holds for each view, so the plan can decide what refreshes.
     // Read off the composite texture rather than a field stamped beside it, so "the plan believes this can be
     // re-presented" and "there is something to re-present" cannot drift apart.

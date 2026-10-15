@@ -104,7 +104,7 @@
         "mechanism": "sv",
         "size": "1440x600",
         "format": "jpg",
-        "accumulate": 64,
+        "accumulate": 256,
         "timeout": 600,
         "captures": [
             {}

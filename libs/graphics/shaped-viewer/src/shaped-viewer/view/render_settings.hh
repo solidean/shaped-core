@@ -78,6 +78,7 @@ struct sv::render_settings
     /// The rounds a still frame runs follow from what the last ones measured, so the image converges as fast per second
     /// as the GPU allows while the viewer stays responsive; a frame that sees the image change is not held to it.
     /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
+    /// A headless viewer, which is what a capture runs in, treats it as 0, so its image depends on no machine's speed.
     f32 frame_budget_ms = 16.0f;
 
     /// How this layer's image is denoised before its parent composites it; off unless asked for.
