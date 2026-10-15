@@ -1,7 +1,9 @@
 # The wavefront path tracer
 
-**Built, and the default.**
+**Built, and the default for now.**
 The megakernel in [tracer_pipeline.sgl](../shaders/tracer_pipeline.sgl), one ray-tracing pipeline whose raygen walks every path to its end in registers, stays as `render_mode::megakernel`.
+The intended direction is a hybrid default — rasterized primaries, lit by the megakernel — with the wavefront as the best-quality mode.
+[Which tracer is the default](#which-tracer-is-the-default) says why.
 This document is the wavefront's shape, the decisions behind it, the alternatives that were weighed and rejected, and what it measured.
 
 ## Why
@@ -26,20 +28,23 @@ Inline ray queries would reach it, but it has no bindless binding arrays, and sv
 ## The shape
 
 ```
-generate ─▶ extend ─▶ sort by permutation ─▶ shade (one dispatch per permutation) ─▶ connect ─▶ resolve
-   ▲                                              │
-   └──────── a slot whose path ended ◀────────────┘
+begin ─▶ extend ─▶ segment ─▶ sort by permutation ─▶ shade (one dispatch per permutation) ─▶ connect ─▶ finalize ─▶ resolve
+           ▲                                                                                               │
+           └─────────── the next round: the paths that go on, and the samples finalize started ◀───────────┘
 ```
 
-- **generate** writes a pixel's next camera ray into a path slot.
+- **begin** clears what the frame tallies, kills every path on a restart, and starts a camera ray in every slot without a live path.
 - **extend** traces each live path's next segment inline and records the nearest hit.
+- **segment** settles what the hit's material does not decide — a medium walked or crossed, the analytic lights passed, an escape — and routes the path to the next round, to finalize, or to shade.
 - **sort** counts hits per material permutation, turns the counts into offsets and indirect-dispatch arguments, and scatters each slot into its permutation's range.
 - **shade** evaluates the material, samples the BSDF for the next direction, and writes the next-event estimation shadow rays with their unoccluded contribution.
 - **connect** traces the shadow rays, any-hit only, and adds the contribution of the ones nothing blocks.
-- **resolve** folds each pixel's finished paths into the image.
+- **finalize** folds each path that ended into its pixel's tally, and starts the pixel's next sample in the slot where the frame still takes samples.
+- **resolve** writes each pixel's mean and its guides out of its tally, once, after the last round.
 
-A **round** is one pass of extend, sort, shade and connect: one segment of every live path.
-A frame runs a fixed budget of rounds.
+Small single-thread kernels between the stages turn each queue's count into the next dispatch's arguments.
+A **round** is one pass of extend, segment, sort, shade, connect and finalize: one segment of every live path.
+A frame runs a set number of rounds, and [Settings](#settings) says where that number comes from.
 
 ## Decisions
 
@@ -92,8 +97,8 @@ The barrier backends already translate `access_flag::indirect_read`; what is new
 
 ### A path slot belongs to one pixel, and is refilled in place
 
-Slot `(pixel, j)` for `j < k`, with `k` from a memory budget and 1 by default.
-When a slot's path ends, it adds its radiance to the slot's own float sum and count, and generate writes that same pixel's next sample into it in the next round.
+One slot per pixel.
+When a slot's path ends, finalize adds its radiance to the pixel's float sum and count, and starts that pixel's next sample in the same slot, which the next round extends.
 
 - Every accumulation has one writer, so nothing needs float atomics, which SGL does not have.
 - Queues stay full for the whole frame, with no sample-pass boundary to wait at.
@@ -121,10 +126,10 @@ A layer that upscales keeps a second state for its scaled frames, at the upscale
 The accumulated target holds a float radiance sum and a count of finished paths per pixel, and the displayed image is their quotient.
 
 **That mean is consistent, not exact.**
-The paths still in flight are disproportionately the long ones, so the finished set leans toward short paths by roughly `k / count`: visible in the first frames, gone after a few hundred.
+The paths still in flight are disproportionately the long ones, so the finished set leans toward short paths by roughly `1 / count`: visible in the first frames, gone after a few hundred.
 
 **A drain gives the exact mean**: rounds run without new samples until every queue is empty.
-Tests and captures drain before they read.
+The routine-level tests drain before they read; a capture does not, which [Where it stands](#where-it-stands) lists as open.
 **A frame that sees the camera or the scene change drains too**, so a moving image is always exact; carrying resumes once it is still.
 Every path carries the generation of the camera it started under, and an older one never reaches the image.
 
@@ -133,8 +138,9 @@ The denoiser learns how converged each pixel is from a per-pixel count texture, 
 
 ### Surface paths end by Russian roulette under a cap
 
-From bounce 3 on, a path survives with its throughput's largest channel as probability, floored at 0.05, and is divided by it — the rule the medium walk already uses.
-`max_bounces` becomes a safety cap, defaulting to 32, which is what bounds a draining frame; the last bounce keeps its rule that next-event estimation takes a light's full weight.
+Once a path has taken more than three bounces, so from its fourth on, it survives with its throughput's largest channel as probability, floored at 0.05.
+A survivor is divided by that probability, the rule the medium walk already uses.
+`max_bounces` is the cap, 5 by default as for the megakernel, and it is what bounds a draining frame; the last bounce keeps its rule that next-event estimation takes a light's full weight.
 Surface bounces and medium scatters keep separate counters and separate roulettes, so a fog bank cannot exhaust the surface budget.
 
 ### A medium's scatter is a segment like any other
@@ -146,7 +152,7 @@ A walk that outlasts the frame's rounds continues next frame, so no dispatch is 
 
 Shade computes everything about a light sample but its visibility, and connect traces the batch.
 The per-material shade kernels then contain no traversal at all.
-Connect adds into a radiance field of its own per slot, which resolve sums with shade's, so the two never write one value in the same round.
+Connect adds what arrives into the slot's `path_light`, the one shade wrote, in a dispatch of its own and one thread per slot, so the entry has one writer at a time.
 
 ### Settings
 
@@ -174,13 +180,12 @@ They start in sv and move to shaped-rendering once a second caller exists.
 - **Discarding in-flight paths on a camera move.** Bounded moving frames, but only paths short enough to finish in one frame would count, so a moving image is biased dark.
   It stays the fallback if a draining frame's cost ever matters more than that bias.
 - **An inline walk kernel for media.** It confines the deep-path cost to media rather than removing it, and once paths carry across frames a scatter as a segment costs nothing new.
-- **Keeping the megakernel beside the wavefront.** Every estimator change would land twice and drift; the GPU tests' physical expectations are the reference that lasts.
 
 ## Measuring
 
 - GPU timestamps per stage, recorded into `cc::rec`.
-- Per-round live-path counts, a diagnostic readback behind a setting.
-- One benchmark, megakernel against wavefront, on `openpbr-spheres`, `lights`, `quadric-gallery`, `mesh-structure-dense` and the furnace test's dense interior.
+- Per-round live-path counts, a diagnostic readback a caller asks for through `wavefront_trace_desc::live_paths`.
+- One benchmark, megakernel against wavefront, on a shallow scene and a deep one: the Cornell box and a dense scattering cube.
 
 A wavefront is not faster on every scene: on a shallow, single-material one, the stored state's memory traffic usually loses to the megakernel's registers.
 
@@ -256,8 +261,16 @@ On the Radeon 780M, where pixel order always worked, the wavefront measures:
 7. Measurement, the benchmark and a one-off image comparison against the megakernel.
 8. The wavefront becomes the default, and the megakernel stays as a choice — `render_settings::mode`.
 
-The plan ended with deleting the megakernel.
+The plan ended with deleting the megakernel, since every estimator change would land twice and could drift.
 It stays because neither tracer wins everywhere: the megakernel is about twice as fast on a shallow scene, and the wavefront far ahead on a deep one.
+The GPU tests' physical expectations, and `wavefront-trace-test.cc`'s comparison of the two, are what keep them from drifting apart.
+
+### Which tracer is the default
+
+The wavefront is the default today, and very likely not for good.
+The intended default is the hybrid: rasterized primaries, lit by the megakernel, the cheaper tracer on the shallow paths that lighting needs.
+The wavefront is meant to become the best-quality mode, the one an image converges in where quality matters more than the frame rate.
+Neither change has landed; [the roadmap](plans/rendering-roadmap.md) orders the work toward them.
 
 ### Where it stands
 
@@ -265,8 +278,8 @@ Every step has landed: the wavefront traces a layer unless `render_settings::mod
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
 A frame whose image changed restarts and drains, and a still one carries for as many rounds as fit `frame_budget_ms`, or for `rounds_per_frame` where that is 0.
 A layer that denoises hands the spatial member the tallies' per-pixel counts.
-Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the Cornell box, media, glass and cutouts,
-and `wavefront-view-test.cc` through the viewer on quadrics and decals.
+Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the Cornell box, and `wavefront-view-test.cc` through the viewer on quadrics and decals.
+`wavefront-trace-test.cc` holds media and glass to the furnace's analytic expectation instead, and cutouts to the fraction they keep.
 
 What is still open:
 

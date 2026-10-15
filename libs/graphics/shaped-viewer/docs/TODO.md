@@ -31,6 +31,10 @@ Bigger design intent lives in [structure.md](structure.md).
   - **Only dx12 can pretend a device has no ray tracing** (`dx12_config::withhold_raytracing`), so the no-ray-tracing test runs there alone.
     Vulkan's arm is untested on such a device; the same knob on `vulkan_config` would reach it.
 
+- **The raster mode should look good, not merely stand in.**
+  Today it is unshadowed, and its only reflection is the SH environment's, so a scene reads flat and a closed room is lit as if open.
+  Good-looking raster images are a goal of their own, for a device without ray tracing and for the hybrid's base, rather than a fallback to tolerate.
+
 - **A radiance cache, for the interactive hybrid mode.**
   The hybrid rasterizes primary visibility and lights it by tracing; a cache of incoming radiance is what makes that lighting cheap enough per frame.
   It is for the interactive mode alone: a final render converges with the wavefront tracer and no cache, so nothing it caches biases a finished image.
@@ -116,9 +120,9 @@ What is left is the interaction on top of it, in dependency order:
 - **One traced layer per view is still assumed** in `view_renderer::execute`, the single-view convenience the GPU tests
   drive.
   The plan and `trace` are already per `(view, layer)`.
-- **A path runs to completion inside one dispatch**, which is what makes a frame cost the DEEPEST path in it rather than
-  the average one, and what lets a heavy dispatch trip a driver watchdog.
-  The wavefront tracer that replaces it is designed in [wavefront.md](wavefront.md), with its landing order.
+- **A megakernel frame costs its deepest path**, since a path runs to completion inside one dispatch, which is also what lets a heavy dispatch trip a driver watchdog.
+  The wavefront tracer answers it and is the default today; the megakernel stays as `render_mode::megakernel`, because it is faster on shallow paths.
+  What is open is the default itself: very likely the hybrid, lit by the megakernel, with the wavefront as the best-quality mode — [wavefront.md](wavefront.md#which-tracer-is-the-default).
 
 ## What the bindless lock does not cover
 
