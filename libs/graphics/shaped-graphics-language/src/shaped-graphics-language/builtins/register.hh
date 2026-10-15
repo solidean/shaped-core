@@ -19,7 +19,7 @@ void register_scalar_math(registry& r);
 void register_vector_math(registry& r);
 /// `mat4` times a matrix, a position, a direction and a plain four-vector.
 void register_transforms(registry& r);
-/// `x as T` between `float`, `int` and `uint` of one width, as operator functions of `as`.
+/// `x as T` between `float`, `int` and `uint` of one width, as operator functions of `as`, and `T(x)` beside it.
 void register_conversions(registry& r);
 /// The texture and image methods, for every shape.
 void register_textures(registry& r);

@@ -620,6 +620,11 @@ fun shade(k: float) -> float:
   A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
   Between `int` and `uint` the bits stay.
   The interpreter's choice of the unspecified value is saturation at the integer's bounds, and 0 for a NaN.
+* **CHK-390** `T(x)`, where `T` is a numeric scalar or a plain vector, is `x as T` wherever `as` converts the type of `x` to `T`, and `x` where it is a `T` already ([why](why/checking.md#chk-390)).
+  So `float(k)` of an `int` is `k as float`, and `float3(n)` of an `int3` converts each component, by CHK-197 and with its unspecified values.
+  Each is a function of `T`'s name beside its constructors (CHK-240), so a literal meets the overload of its own type.
+  `float(1)` converts the `int` 1, and `uint(-1)` is `constant-not-representable` as `(-1) as uint` is.
+  A type `as` does not convert takes no such call: `float(true)` and `int2(v)` of a `float3` are `no-matching-overload`, and a `bool` or a `bool32` converts by `as` alone.
 
 ```sgl
 let n = normalize p.normal
@@ -1389,7 +1394,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-366, CHK-367 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-366, CHK-367, CHK-390 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
@@ -1414,7 +1419,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `literal-needs-type` | CHK-257, CHK-313 |
 | `shift-out-of-range` | CHK-270 |
 | `constant-without-value` | CHK-311 |
-| `constant-not-representable` | CHK-312 |
+| `constant-not-representable` | CHK-312, CHK-390 |
 | `missing-sampler` | CHK-279 |
 | `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389 |
 | `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |

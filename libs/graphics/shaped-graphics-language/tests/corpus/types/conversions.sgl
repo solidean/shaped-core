@@ -1,0 +1,50 @@
+// `T(x)` converts as `x as T` does, between the numeric families and their widths, and nowhere else (CHK-390)
+
+test:
+    let k = 3
+    float(k) == 3.0
+    float(k) == k as float
+    uint(k) == 3u
+    int(2.75) == 2
+    int(-2.75) == -2
+    float(k) / 2.0 == 1.5
+
+// a vector converts component for component
+test:
+    let w = int3(1, -2, 3)
+    float3(w) == float3(1.0, -2.0, 3.0)
+    int2(float2(1.5, -1.5)) == int2(1, -1)
+    uint4(int4(0, 1, 2, 3)) == uint4(0u, 1u, 2u, 3u)
+
+// a literal meets the overload of its own type, so `float(1)` converts the int 1
+test float(1) == 1.0 and int(7.5) == 7
+
+// of its own type it is the value, as `x as T` is
+test:
+    let x = 0.25
+    float(x) == x
+    float2(float2(x)) == float2(x)
+
+// between int and uint the bits stay, and a negative constant is refused as `as` refuses it
+test:
+    let n = -1
+    uint(n) == 0xffff'ffff
+    int(uint(n)) == -1
+
+@expect(error = "constant-not-representable")
+test uint(-1) == 0u
+
+// what `as` does not convert, the name does not either
+@expect(error = "no-matching-overload")
+test float(true) == 1.0
+
+@expect(error = "no-matching-overload")
+test int2(float3(1.0)) == int2(1)
+
+binding counts:
+    totals: mut buffer[uint]
+    weights: buffer[float]
+
+@compute(64) fun tally(@thread_id id: int3){counts}:
+    let i = uint(id.x)
+    counts.totals[i] = uint(counts.weights[i] * 4.0) + uint(float3(id).y)

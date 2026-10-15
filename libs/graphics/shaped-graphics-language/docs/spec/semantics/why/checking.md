@@ -314,6 +314,13 @@ Defining saturation and a NaN of 0 would mean a clamp and a compare around every
 A program that needs a defined result clamps before it converts, and pays for it only where it asks.
 The interpreter still has to give some value, and saturation is the choice that is right on the most hardware.
 
+## CHK-390
+
+A shader ported from HLSL, GLSL or MSL writes `float(i)`, and every one of those languages reads it as a conversion.
+Refusing it would only send the author to `as`, and a second meaning would be worse than none.
+So the call is exactly the conversion `as` is, with the same overloads and the same unspecified values, and never a reinterpretation of bits, which `from_bits` is.
+A type `as` does not reach stays unreachable this way too, so `bool` keeps its one explicit spelling.
+
 ## CHK-225
 
 A `bool` line is a check rather than a line under a `check` keyword, because the keyword would sit on every line of every test.
