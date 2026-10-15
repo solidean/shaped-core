@@ -86,7 +86,7 @@ One still compiling is drawn through the fallback permutation's pixel stage.
 
 - **A point light, a spot and a parallel light are exact.**
 - **A rect is integrated over a fixed 4×4 grid** of points on it, which is exact in the limit and close for a light not much nearer than its own size.
-  The Cornell box test holds it to the tracer's direct light to within 4% per block.
+  The Cornell box test holds each block and channel to the tracer's direct light within 10% of the traced value plus 0.05, so a dark block is held to about 0.005.
 - **A sun is its center direction**, carrying the whole solid angle the disc subtends.
 - **The environment is an approximation**: its SH irradiance through the diffuse albedo, and its radiance about the mirror direction through the specular albedo.
   The second blurs toward the irradiance as the surface roughens.
