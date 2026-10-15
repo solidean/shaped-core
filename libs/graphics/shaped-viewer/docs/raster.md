@@ -58,8 +58,6 @@ A traced layer on such a device is declined, with one logged error naming the mi
 A second setting would need a precedence rule — what does raster plus wavefront mean — and every reader of either would have to know it.
 The hybrid joins as a fourth value of the same switch: rasterized primaries, traced lighting.
 
-The enum was `path_integrator` while it held the two tracers alone, and is named for what it chooses now that it holds more than paths.
-
 ## Materials are the tracer's
 
 **There is no second BSDF.**
