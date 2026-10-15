@@ -487,3 +487,74 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
                                               granted));
     CHECK(whole.contains("b.t is a binding array, read by element: `b.t[i]`"));
 }
+
+TEST("sgl check - a mat3 is a value of function bodies, and no binding or stage edge holds one yet")
+{
+    // CHK-391: its layout in memory is not decided, so every place that would need one refuses it at its line
+    constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
+    constexpr auto nested = "struct holder:\n    m: mat3\nstruct outer:\n    h: holder\n\n";
+    auto const with_nested = [&](cc::string_view members) { return reports_for(cc::string(nested) + listing(members)); };
+
+    // a plain member of a group's constant block, directly, in an array, and nested in structs
+    CHECK(reports_for(listing("    basis: mat3\n"))
+              .contains(cc::format("unsupported-yet user:[mat3] a mat3 in a constant block, {}", why)));
+    CHECK(reports_for(listing("    bases: mat3[2]\n")).contains(cc::format("a mat3 in a constant block, {}", why)));
+    CHECK(with_nested("    o: outer\n").contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
+    CHECK(with_nested("    os: outer[2]\n").contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
+
+    // an @inline block is a constant block too
+    CHECK(reports_for(cc::format("{}@inline binding pushed:\n    o: outer\n", nested))
+              .contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
+
+    // a buffer's element, directly, as an array, nested, and in a binding array of buffers
+    CHECK(
+        reports_for(listing("    raw: mut buffer[mat3]\n")).contains(cc::format("a mat3 in a buffer's element, {}", why)));
+    CHECK(
+        reports_for(listing("    rows: buffer[mat3[2]]\n")).contains(cc::format("a mat3 in a buffer's element, {}", why)));
+    CHECK(with_nested("    items: buffer[outer]\n")
+              .contains(cc::format("a mat3 in a buffer's element, outer.h.m: mat3, {}", why)));
+    CHECK(reports_for(cc::format("require binding_arrays\n{}{}", nested, listing("    sets: buffer[outer][2]\n")))
+              .contains(cc::format("a mat3 in a buffer's element, outer.h.m: mat3, {}", why)));
+
+    // workgroup memory, which has no host side, is GPU memory all the same
+    CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n")
+              .contains(cc::format("a mat3 in workgroup memory, {}", why)));
+    CHECK(reports_for(cc::format("{}@workgroup binding tile:\n    o: outer\n", nested))
+              .contains(cc::format("a mat3 in workgroup memory, outer.h.m: mat3, {}", why)));
+
+    // a vertex input, a stage link in both directions, and a pixel output
+    constexpr auto edges
+        = "@vertex struct vin:\n"
+          "    p: float3\n"
+          "    m: mat3\n"
+          "struct varyings:\n"
+          "    @position position: hpos4\n"
+          "    o: outer\n"
+          "struct plain:\n"
+          "    @position position: hpos4\n"
+          "@pixel struct target:\n"
+          "    color: float4\n"
+          "    h: holder\n"
+          "\n"
+          "@vertex fun vs(v: vin) -> varyings:\n"
+          "    return {position = hpos4(0.0, 0.0, 0.0, 1.0), o = outer(holder(mat3(v.p, v.p, v.p)))}\n"
+          "@pixel fun ps(p: varyings) -> plain:\n"
+          "    return {position = p.position}\n"
+          "@pixel fun shade(p: plain) -> target:\n"
+          "    return {color = float4(1.0), h = holder(mat3(float3(1.0), float3(1.0), float3(1.0)))}\n";
+    auto const crossing = reports_for(cc::string(nested) + edges);
+    CHECK(crossing.contains(cc::format("user:[vs] a mat3 crossing a stage edge, in vin.m: mat3, {}", why)));
+    CHECK(crossing.contains(cc::format("user:[vs] a mat3 crossing a stage edge, in varyings.o.h.m: mat3, {}", why)));
+    CHECK(crossing.contains(cc::format("user:[ps] a mat3 crossing a stage edge, in varyings.o.h.m: mat3, {}", why)));
+    CHECK(crossing.contains(cc::format("user:[shade] a mat3 crossing a stage edge, in target.h.m: mat3, {}", why)));
+
+    // a local, a parameter, a result and a struct a body holds are all fine
+    CHECK(reports_for(cc::string(nested)
+                      + "fun turned(o: outer, v: float3) -> float3 => o.h.m * v\n"
+                        "fun square(m: mat3) -> mat3 => m * m\n"
+                        "fun made(c: float3) -> outer:\n"
+                        "    let mut o = outer(holder(mat3(c, c, c)))\n"
+                        "    o.h.m = square(o.h.m)\n"
+                        "    return o\n")
+          == "");
+}

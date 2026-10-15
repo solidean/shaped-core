@@ -121,6 +121,17 @@ use view
 * **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
+* **CHK-391** `mat3` is the prelude's 3x3 matrix of floats, column-major like `mat4`, and a value of function bodies alone ([why](why/checking.md#chk-391)).
+  `mat3(c0, c1, c2)` makes one of three `float3` columns, `c0` first.
+  `m * v` of a `float3` or a `vec3` gives the same type, and `m * n` of two is their product, which applies `n` first.
+  It has no other function yet, as `mat4` has none: no transpose, no subscript and no `==`.
+  A local, a parameter, a result and a field of a struct a body holds may be one.
+  Wherever a layout would place one it is `unsupported-yet`, at any depth of the structs and arrays holding it.
+  That is a constant block, an `@inline` one among them, a buffer's element, a binding array's buffer and workgroup memory.
+  It is also every struct that crosses a stage edge: a vertex input, a stage link, a control point, a factors struct, a stream's vertex and a pixel output.
+  So are the ray data of CHK-326: a ray set's payload, a stage's payload, the attributes a hit carries or an intersection reports, and a callable's parameter.
+  It is judged before an array holding it is (CHK-291), so the detail names the `mat3`.
+  The detail names the path down to it and says that its layout in GPU memory is not decided.
 
 ## Members and constructors
 
@@ -1371,7 +1382,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-391 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |

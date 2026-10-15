@@ -77,7 +77,9 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   Go-to-definition into a module's file waits for the position lookup [lsp.md](lsp.md) lists.
 - **A generic struct's type parameter is not in scope in its methods.** `mixed_hit.procedural()` returns through the helper `procedural_of_mixed[A]`, since the method cannot name `A`.
 - **An enum does not convert to `int`.** `h.kind as int` is refused (CHK-150), so storing a `hit_kind` in a buffer takes a `case`; [enum-futures.md](spec/incubator/enum-futures.md) holds the cast.
-- **The matrix zoo, and `tg` types such as `quat`.** A hit's transforms are rows of `float4` because SGL has `mat4` alone; `mat3x4`, `mat3` and a quaternion would let a hit hand them over typed.
+- **The matrix zoo, and `tg` types such as `quat`.** A hit's transforms are rows of `float4` because SGL has `mat4`, and a `mat3` of function bodies alone.
+  `mat3x4` and a quaternion would let a hit hand them over typed.
+- **What a matrix can do beyond a product.** Neither `mat4` nor `mat3` has a transpose, a subscript of a column, `==`, or a `mat3` of a `mat4`'s upper left, which a normal matrix wants (CHK-391).
 - **A `misplaced-not` inside a `test` body was seen to pass silently**, while writing the ray-tracing tests.
   It does not reproduce in a plain test body: `test:` ending in `not a and b` reports it, as a function body does.
   The likelier case is a test with an `error` or `warning` expectation, which takes every diagnostic inside it as its own (CHK-232); pin whichever it was with a corpus test.
@@ -90,7 +92,7 @@ What the compiler carries today is the [spec](spec/_index.md); a construct it do
   A compute shader or a stage acquired on its own has no frozen part: its reload compiles, and its pipeline is then refused by the feature's name.
 - **Arrays and `mat3` in GPU memory, and matrices and arrays across a stage edge.** An array is a value everywhere else (CHK-285).
   It is `unsupported-yet` wherever GPU memory or a stage edge holds one (CHK-291).
-  `mat3` does not exist yet.
+  `mat3` is a value of function bodies alone, refused wherever memory or a stage edge would hold one (CHK-391).
   Their layout is decided (the spec's emitting file, "Open"), and they land together, after the tier-1 work.
   In a constant block an array element starts a row: `slib::row<T>` pads a shorter one to 16 bytes on the host, and WGSL reads it through `array<vec4f, N>`.
   The mechanism that is missing is a memory form holding an array, which a runtime index walks into.

@@ -92,6 +92,7 @@ struct target_ {
 | `float3`, `vec3`, `pos3` | `float3` | `vec3f` | `float3` |
 | `float4`, `hpos4` | `float4` | `vec4f` | `float4` |
 | `mat4` | `float4x4` | `mat4x4f` | `float4x4` |
+| `mat3` | `float3x3` | `mat3x3f` | `float3x3` |
 | `int` | `int` | `i32` | `int` |
 | `bool` | `bool` | `bool` | `bool` |
 | `half`, `half3` | `float16_t`, `float16_t3` | `f16`, `vec3h` | `half`, `half3` |
@@ -266,6 +267,8 @@ binding affine:
 * **EMIT-43** HLSL declares every matrix member `column_major` and writes a product `mul(a, b)`; WGSL writes `a * b`, for a matrix times a vector and for a matrix times a matrix.
 * **EMIT-44** `transform_position(m, p)` is the product of `m` and the four-vector `(p, 1.0)`.
 * **EMIT-45** `transform_direction(m, v)` is the `xyz` of the product of `m` and `(v, 0.0)`.
+* **EMIT-156** `mat3(c0, c1, c2)` is `transpose(float3x3(c0, c1, c2))` in HLSL, whose constructor takes rows, and the target's own constructor of three columns in WGSL and MSL.
+  A product of a `mat3` is written as EMIT-43 writes a `mat4`'s, and no memory holds one, so no declaration of a block or a buffer names it (CHK-391).
 
 ## The text
 
@@ -535,7 +538,8 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
 * Whether `@layout` also promises a buffer element's layout, which EMIT-111 places today without a promise.
 * A struct member of a `@layout(.cpp)` block, which HLSL would read back by building the struct in a local field by field.
-* `mat3`, which SGL has no type for yet: its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
+* `mat3` in GPU memory, which the checker refuses today (CHK-391).
+  Its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
   The host holds a block's as `slib::gpu_mat3` and a buffer's as `tg::mat3f`, which is those 36 bytes.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.

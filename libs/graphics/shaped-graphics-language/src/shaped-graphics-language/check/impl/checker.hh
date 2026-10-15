@@ -745,6 +745,19 @@ struct checker
     [[nodiscard]] cc::string sixteen_bit_path(type_id type) const;
     /// CHK-383: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
     void judge_edge_16_bit(i32 file, source_span where, type_id type);
+    /// The first value of function bodies alone that `type` holds, such as a `mat3`, through struct members, arrays and
+    /// a buffer's element; `path` is empty when it holds none (CHK-391).
+    struct local_only_found
+    {
+        /// `: mat3` for `type` itself, `.inner.basis: mat3` for a member.
+        cc::string path;
+        /// Why no memory holds it yet, from its record.
+        cc::string_view reason;
+        type_id type = type_id::none;
+    };
+    [[nodiscard]] local_only_found local_only_path(type_id type) const;
+    /// CHK-391: refuses each value of function bodies alone a struct crossing a stage edge holds.
+    void judge_edge_local_only(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).

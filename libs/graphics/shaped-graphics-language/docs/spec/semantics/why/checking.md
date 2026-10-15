@@ -679,3 +679,11 @@ Copying is also where the index can be a constant to SGL's own rules, which fold
 The limit of 256 copies bounds the text a mistyped bound can write, and nesting is where one multiplies, so a nest's copies count together.
 A loop that long wants a loop, and it means what it meant without the attribute, so it compiles as one and the warning tells its author the copies were not written.
 Unrolling every small constant-range loop without the attribute was not chosen: register pressure and text size would change behind the author's back, with no way to keep a loop a loop.
+
+## CHK-391
+
+A rotation or a normal matrix is a `mat3`, and building one from three columns is the common case in a body.
+Its layout in GPU memory is a decision of its own: a constant block starts each column on a row of 16 bytes, a buffer's element may pack it into 36, and each target's memory form differs.
+Taking that decision with the first local `mat3` would fix it before any shader needed one in memory, so a `mat3` stays in function bodies until it is taken.
+Everywhere memory or a stage edge would hold one is refused at its line, the way an array is (CHK-291), rather than by the emitter with no line at all.
+A shader that wants one from memory reads its columns, which are `float3`s, and builds it in the body.

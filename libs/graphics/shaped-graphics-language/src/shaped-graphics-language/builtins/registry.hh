@@ -207,6 +207,10 @@ struct sgl::builtins::type_record
     /// What a device needs for a value of it, which an entry point holding one needs too (CHK-382).
     check::feature_set features;
 
+    /// A value of function bodies alone, which no GPU memory and no stage edge holds yet (CHK-391).
+    /// The detail of what refuses one says why: `mat3`'s layout in memory is not decided.
+    cc::string_view local_only_reason;
+
     /// Read back from the declaration by `finalize`.
     cc::string name;
 

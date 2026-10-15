@@ -63,6 +63,11 @@
 @shadowable(false)
 @builtin struct mat4
 
+/// Column-major, and a vector stands to its right.
+/// A value of function bodies alone, which no GPU memory holds yet.
+@shadowable(false)
+@builtin struct mat3
+
 /// A bool as GPU memory holds one: four bytes, 0 for false and anything else for true.
 /// `x as bool32` and `x as bool` convert; a bool itself has no layout.
 @shadowable(false)
@@ -1036,6 +1041,13 @@
 @builtin @pure @operator("*") fun transform_direction(m: mat4, v: vec3) -> vec3
 @builtin @pure @operator("*") fun transform_float4(m: mat4, v: float4) -> float4
 @builtin @pure @operator("*") fun multiply_mat4(m: mat4, b: mat4) -> mat4
+
+// a mat3 is a value of function bodies alone (CHK-391): made of its columns, times a three-vector
+/// The matrix of three columns, `c0` first.
+@builtin @pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3
+@builtin @pure @operator("*") fun transform_float3(m: mat3, v: float3) -> float3
+@builtin @pure @operator("*") fun transform_direction3(m: mat3, v: vec3) -> vec3
+@builtin @pure @operator("*") fun multiply_mat3(m: mat3, b: mat3) -> mat3
 
 // `x as T` between the numeric families of one width, and between the widths of one family,
 // component for component; each target writes a conversion to `T`
