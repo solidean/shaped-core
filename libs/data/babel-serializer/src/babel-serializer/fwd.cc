@@ -65,6 +65,11 @@ namespace babel::dds
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.dds");
 } // namespace babel::dds
 
+namespace babel::ktx2
+{
+CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.ktx2");
+} // namespace babel::ktx2
+
 namespace babel::tga
 {
 CC_REC_DEFINE_DOMAIN(g_rec_domain, "babel.tga");

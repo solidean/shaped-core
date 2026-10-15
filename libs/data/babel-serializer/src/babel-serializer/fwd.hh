@@ -5,7 +5,7 @@
 /// Aggregate forward declarations for babel-serializer.
 /// babel-data's fwd.hh declares `namespace babel` itself plus the base64 / JSON / markdown half; this one adds
 /// every format layered on top — babel::sqlite, babel::obj, babel::stl, babel::gltf, babel::fbx, babel::font, babel::png,
-/// babel::jpg, babel::hdr, babel::pfm, babel::dds, babel::tga, the babel::bcn block decoders, the babel::image
+/// babel::jpg, babel::hdr, babel::pfm, babel::dds, babel::ktx2, babel::tga, the babel::bcn block decoders, the babel::image
 /// aggregator over the image codecs, and babel::chrome_trace.
 /// Each owns its own header; include that header directly when it is all you need.
 
@@ -75,10 +75,13 @@ enum class alpha_mode : u8;
 enum class filter : u16;
 enum class wrap_mode : u16;
 enum class light_type : u8;
+enum class meshopt_mode : u8;
+enum class meshopt_filter : u8;
 
 struct issue;
 struct asset_info;
 struct buffer;
+struct meshopt_compression;
 struct buffer_view;
 struct accessor;
 struct attribute;
@@ -222,6 +225,21 @@ struct decode_options;
 /// The domain every recording site in babel::dds is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);
 } // namespace babel::dds
+
+namespace babel::ktx2
+{
+enum class format : u32;
+enum class supercompression : u32;
+struct level_index;
+struct header;
+struct key_value;
+struct subresource;
+struct data;
+struct read_options;
+
+/// The domain every recording site in babel::ktx2 is attributed to.
+CC_REC_DECLARE_DOMAIN(g_rec_domain);
+} // namespace babel::ktx2
 
 namespace babel::tga
 {

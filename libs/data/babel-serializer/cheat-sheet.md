@@ -104,6 +104,7 @@ babel::gltf::container detect_container(cc::span<cc::byte const> bytes); // gltf
 
 struct read_options {   // by value; the default touches nothing outside the input
     cc::function_ref<cc::result<cc::pinned_data<cc::byte const>>(cc::string_view uri)> resolve_uri;
+    cc::span<cc::string_view const> caller_extensions; // extensions YOU interpret (via json_of): a file may require them
 };
 
 cc::result<babel::gltf::data> read(cc::pinned_data<cc::byte const> bytes, read_options = {}); // ZERO-COPY
@@ -127,7 +128,13 @@ doc.has_issues();           // bool
 doc.has_issue_of(babel::gltf::issue_kind::unsupported); // unsupported | unresolved | malformed
 doc.issue_report();         // cc::string, one "kind: message" line per issue; "" when clean
 
-doc.extensions_used;   // cc::vector<cc::string>; a required extension other than KHR_lights_punctual fails the read
+doc.extensions_used;   // cc::vector<cc::string>; a required extension other than KHR_lights_punctual,
+                       // EXT_meshopt_compression or one of caller_extensions fails the read
+doc.json_of(doc.materials[i])["extensions"]["VENDOR_x"]; // json::ref to ANY element's own JSON object: vendor extensions, extras
+doc.json_root();       // the document root; both refs point into doc, so they die with it
+doc.buffer_views[i].meshopt;  // optional<meshopt_compression>: EXT_meshopt_compression as written (mode, filter, count, stride)
+doc.buffer_views[i].decoded;  // its bytes, decoded during read; view_of reads these, so accessors need nothing special
+doc.buffers[i].is_fallback;   // the extension's placeholder buffer: never resolved, never fetched
 
 doc.buffers;      // cc::vector<buffer>      — { uri, byte_length, pinned_data<byte const> data, resolved }
 doc.buffer_views; // cc::vector<buffer_view> — { buffer, byte_offset, byte_length, byte_stride (0 = packed), target }
@@ -331,7 +338,7 @@ h.reopen(other_rowid);                     // same handle, next row — cheaper 
 // read-only for now; the row's table must be a rowid table (a WITHOUT ROWID one cannot be reached this way)
 ```
 
-## Images (`babel::image` + `babel::png` / `babel::jpg` / `babel::hdr` / `babel::pfm` / `babel::dds` / `babel::tga`)
+## Images (`babel::image` + `babel::png` / `babel::jpg` / `babel::hdr` / `babel::pfm` / `babel::dds` / `babel::ktx2` / `babel::tga`)
 
 Two layers: low-level per-format codecs that expose the format's own metadata, and an aggregator for "just the pixels".
 `png` decodes through the vendored **libspng** and `jpg` through the vendored **stb** — always linked, never visible from a babel header, and never reached by the aggregator.
@@ -414,6 +421,16 @@ babel::dds::decode_rgba8(t, sub, {.max_decoded_bytes = 1 << 28}); // -> result<v
 babel::dds::decode_rgba32f(t, sub);            // -> result<vector<float>>; every format, signed ones in -1..1, BC1-BC5 unrounded
 babel::dds::decode_rgba32f_into(t, sub, out);  // the same into caller memory, four floats per texel
 babel::dds::is_block_compressed(fmt); is_float(fmt); is_srgb(fmt); mip_extent(base, level);
+
+#include <babel-serializer/image/ktx2.hh>  // low-level KTX 2.0: header, levels, every subresource; Basis Universal refused
+babel::ktx2::data k = babel::ktx2::read(pinned, {.scheduler = &cc::compute_scheduler()}).value(); // levels decode as tasks
+auto task = babel::ktx2::read_async(pinned, {});  // -> shared_async<data> on the compute pool; many textures share it
+k.pixel_format;                                // format, whose values ARE vkFormat numbers: bc1..bc7, rgba8, rgba16f, ...
+k.width; k.height; k.depth; k.mip_count; k.layer_count; k.face_count; k.is_cube(); k.is_array();
+k.is_srgb_transfer; k.is_premultiplied_alpha;  // from the data format descriptor
+k.find(layer, face, mip);                      // -> subresource const*; .bytes: a view of the input (plain) or of its decoded level (zstd / zlib)
+k.find_key("KTXorientation");                  // key/value data; a text value keeps its NUL
+babel::ktx2::image_byte_size(fmt, w, h, d); block_byte_size(fmt); is_block_compressed(fmt); is_float(fmt); is_srgb(fmt);
 
 babel::tga::data g = babel::tga::read(bytes, {.max_decoded_bytes = 1 << 28}).value();  // the budget is checked before allocating
 g.channels;                                    // 1 gray / 2 gray+alpha / 3 rgb / 4 rgba, from depth, palette and alpha bits

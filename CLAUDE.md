@@ -70,12 +70,14 @@ One-liner per library:
 * **`libs/data/babel-serializer`** — the rest of babel: everything that needs more than clean-core.
   Each format parses into an **unopinionated native structure** (read-once, query-friendly, not for insertion), with **opinionated aggregators** ("load an image", "load a mesh") on top.
   Readers take a `cc::read_stream` and parse against its buffered window.
-  The exception is one that must hand back zero-copy views of its input: `gltf` and `dds` take a `cc::pinned_data<byte const>`.
+  The exception is one that must hand back zero-copy views of its input: `gltf`, `dds` and `ktx2` take a `cc::pinned_data<byte const>`.
   So far: a SQLite engine wrapper (`data/`), Wavefront OBJ, STL (both containers), glTF 2.0/GLB and FBX readers (`geometry/`), and an OpenType reader (`font/`, TrueType outlines as stored).
   FBX parses through the vendored ufbx and comes back as FBX's own object model, its axes and unit reported rather than applied.
   Also a PNG codec in `babel::png` over the vendored libspng and a JPEG one in `babel::jpg` over the vendored stb, plus fully native Radiance HDR and PFM in `babel::hdr` / `babel::pfm`,
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
   Native read-only DDS and TGA too: `babel::dds` hands back every mip, layer and cube face as views of the input, and `babel::bcn` decodes BC1 - BC7.
+  `babel::ktx2` reads KTX 2.0 the same way, undoing zstd or zlib supercompression level by level, on a scheduler when given one.
+  glTF decodes EXT_meshopt_compression over the vendored meshoptimizer decoders, and `json_of` hands back any element's own JSON, for vendor extensions.
   The aggregator keeps mip 0 of a DDS, as `u8`, or `f32` for BC6H and the float formats.
   Namespace `babel`. Depends on babel-data + typed-geometry.
   **One namespace, two libraries**, split by dependency rather than by topic — which is why `data/` spans both, `sqlite` living up here because of what it *needs*.
