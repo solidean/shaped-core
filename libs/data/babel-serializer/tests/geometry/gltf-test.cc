@@ -899,13 +899,14 @@ TEST("gltf - a vendor extension reads through json_of, on the element that carri
     CHECK(!doc.json_of(babel::gltf::material()).is_valid());
 }
 
-TEST("gltf - a required extension the caller interprets itself reads, and its use is no issue")
+TEST("gltf - a registered extension may be required, and its use is no issue")
 {
     auto const json = cc::string_view(R"({"asset": {"version": "2.0"},
         "extensionsUsed": ["VENDOR_tint"], "extensionsRequired": ["VENDOR_tint"]})");
     CHECK(babel::gltf::read(json).has_error());
 
-    cc::string_view const mine[] = {"VENDOR_tint"};
-    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.caller_extensions = mine}));
+    // no hook: an extension that only adds information, which the caller reads through json_of
+    babel::gltf::extension const mine[] = {{.name = "VENDOR_tint"}};
+    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.extensions = mine}));
     CHECK(!doc.has_issues()).dump("issues", doc.issue_report());
 }

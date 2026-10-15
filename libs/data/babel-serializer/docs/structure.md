@@ -121,11 +121,11 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
 - `[done]` **`EXT_meshopt_compression`**: a compressed bufferView is decoded during read, over the vendored meshoptimizer decoders, and `view_of` reads it like any other.
 - `[done]` **extensions / extras raw access**: `read_options::keep_json_document` keeps `data::json`, every element records its `json_node`, and `data::json_of(element)` is the ref.
   Opt-in, since the document costs about as much memory again as the parsed structure.
-  `read_options::caller_extensions` lets a file require extensions the caller interprets itself.
   A stored `json::ref` dangles across a `cc::move(data)`; `json_of` called afresh does not.
-- `[planned]` **decode hooks for a caller's extensions** — so a vendor extension can change how bytes decode, not only add information.
-  Today `view_of` fails on an accessor with no bufferView, which a vendor constant (Lumion's `LUMION_constant`) is, and the caller expands it itself.
-  Planned for when a second extension needs it: a hook per accessor or bufferView, consulted before the reader's own decoding.
+- `[done]` **registered extensions**: `read_options::extensions` names the extensions a caller implements, so a file may require them.
+  One that changes bytes registers a hook for bufferViews, accessors or both, and `view_of` reads what it decoded.
+  EXT_meshopt_compression runs through the same hooks, as the reader's own registration.
+  Images, textures and materials have no hooks: an extension on them adds information, which the caller reads through `json_of`.
 - `[planned]` **a node's composed local transform** — blocked on typed-geometry, which has no TRS composition yet.
   The reader stores `matrix` or TRS in whichever form the file used and composes nothing; [lower-library-gaps.md](lower-library-gaps.md) has that gap and the rest.
 - `[planned]` **writer**.

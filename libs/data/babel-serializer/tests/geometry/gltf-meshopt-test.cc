@@ -320,8 +320,8 @@ TEST("gltf meshopt - a view whose packed buffer was never resolved is an issue, 
             "accessors": [{"bufferView": 0, "componentType": 5126, "count": 4, "type": "VEC3"}]})");
     auto const doc = REQUIRED_VALUE(gltf::read(cc::string_view(json)));
     CHECK(doc.has_issue_of(gltf::issue_kind::unresolved));
-    CHECK(doc.buffer_views[0].decoded.empty());
+    CHECK(!doc.buffer_views[0].decoded.has_value());
     auto const view = doc.view_of(gltf::accessor_index(0));
     REQUIRE(view.has_error());
-    CHECK(view.error().to_string().contains("never decoded"));
+    CHECK(view.error().to_string().contains("left it undecoded"));
 }

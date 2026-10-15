@@ -285,10 +285,11 @@ struct babel::gltf::buffer_view
     /// The view's EXT_meshopt_compression; absent for a plain view.
     /// `buffer`, `byte_offset` and `byte_length` above are then the fallback's, and name no bytes worth reading.
     cc::optional<meshopt_compression> meshopt;
-    /// A meshopt view's bytes, decoded during read: `byte_length` bytes, the whole view.
-    /// Empty when the packed bytes sit in a buffer that was never resolved, which `data::issues` records.
-    /// view_of reads these in place of the buffer.
-    cc::pinned_data<byte const> decoded;
+    /// The extension that decodes this view, EXT_meshopt_compression or one the caller registered; empty for a plain view.
+    cc::string decoded_by;
+    /// What that extension decoded: `byte_length` bytes, the whole view, which view_of reads in place of the buffer.
+    /// Absent when it could not decode it, which `data::issues` records; view_of then refuses the view.
+    cc::optional<cc::pinned_data<byte const>> decoded;
 };
 
 /// One `accessors` entry: typed elements inside a bufferView.
@@ -309,6 +310,12 @@ struct babel::gltf::accessor
     i32 bound_count = 0;
 
     cc::string name;
+
+    /// The registered extension that decodes this accessor; empty for one read through its bufferView.
+    cc::string decoded_by;
+    /// What it decoded: `count` elements, `element_size()` apart, which view_of reads in place of a bufferView.
+    /// Absent when it could not decode them, which `data::issues` records; view_of then refuses the accessor.
+    cc::optional<cc::pinned_data<byte const>> decoded;
 
     /// Components per element: 1 / 2 / 3 / 4 / 4 / 9 / 16 by `type`.
     [[nodiscard]] int component_count() const
@@ -805,6 +812,48 @@ namespace babel::gltf
 
 } // namespace babel::gltf
 
+/// What a buffer-view hook decodes: the view and its extension's JSON object, in the document as read so far.
+/// Every buffer is resolved, and every bufferView and accessor parsed, when a hook runs.
+struct babel::gltf::buffer_view_decode
+{
+    data const& doc;
+    buffer_view_index view = buffer_view_index::invalid;
+    babel::json::ref extension;
+};
+
+/// What an accessor hook decodes: the accessor and its extension's JSON object.
+/// Every bufferView is decoded by then, so a hook may read through view_of.
+struct babel::gltf::accessor_decode
+{
+    data const& doc;
+    accessor_index accessor = accessor_index::invalid;
+    babel::json::ref extension;
+};
+
+/// A hook's answer: the decoded bytes, nullopt to leave the element undecoded (recorded as an issue), or an error failing the read.
+namespace babel::gltf
+{
+using decoded_bytes = cc::result<cc::optional<cc::pinned_data<byte const>>>;
+}
+
+/// A glTF extension the caller implements, registered through read_options::extensions.
+///
+/// Registering one is what lets a file require it, and what keeps its use off the issue list.
+/// An extension that only adds information needs no hook: the caller reads it afterwards, through data::json_of.
+/// One that changes how bytes decode states it here, and view_of then reads what its hook returned.
+/// At most one extension may decode any one element; a second is an error, the reader's own included.
+struct babel::gltf::extension
+{
+    cc::string_view name;
+
+    /// Decodes a bufferView carrying the extension into exactly its `byteLength` bytes.
+    cc::function_ref<decoded_bytes(buffer_view_decode const&)> decode_buffer_view;
+
+    /// Decodes an accessor carrying the extension into its `count` elements, tightly packed.
+    /// Runs after every bufferView is decoded; an accessor may carry the extension in place of a bufferView.
+    cc::function_ref<decoded_bytes(accessor_decode const&)> decode_accessor;
+};
+
 /// Reader knobs.
 /// Every default means "touch nothing outside the input bytes".
 struct babel::gltf::read_options
@@ -816,10 +865,11 @@ struct babel::gltf::read_options
     /// resolver's job, because babel owns no filesystem policy.
     cc::function_ref<cc::result<cc::pinned_data<byte const>>(cc::string_view uri)> resolve_uri;
 
-    /// Extensions the caller interprets itself, through data::json_of, beside the ones this reader does.
+    /// Extensions the caller implements, beside the ones this reader does: see gltf::extension.
     /// A file may require one and still read, and using one is not recorded as an issue.
-    /// The names must outlive the read.
-    cc::span<cc::string_view const> caller_extensions;
+    /// A name must be unique among them and must not be one this reader implements itself.
+    /// The extensions, their names and their hooks must outlive the read.
+    cc::span<extension const> extensions;
 
     /// Keep the parsed JSON in data::json, for json_of to reach what this reader does not model.
     /// Off by default: the document costs about as much memory again as the parsed structure, for a reader that never asks.

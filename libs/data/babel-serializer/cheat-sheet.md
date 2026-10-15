@@ -104,7 +104,7 @@ babel::gltf::container detect_container(cc::span<cc::byte const> bytes); // gltf
 
 struct read_options {   // by value; the default touches nothing outside the input
     cc::function_ref<cc::result<cc::pinned_data<cc::byte const>>(cc::string_view uri)> resolve_uri;
-    cc::span<cc::string_view const> caller_extensions; // extensions YOU interpret (via json_of): a file may require them
+    cc::span<gltf::extension const> extensions;        // extensions YOU implement: a file may require them (below)
     bool keep_json_document = false;                   // keep data::json, which json_of reads; off, every ref is invalid
 };
 
@@ -130,7 +130,12 @@ doc.has_issue_of(babel::gltf::issue_kind::unsupported); // unsupported | unresol
 doc.issue_report();         // cc::string, one "kind: message" line per issue; "" when clean
 
 doc.extensions_used;   // cc::vector<cc::string>; a required extension other than KHR_lights_punctual,
-                       // EXT_meshopt_compression or one of caller_extensions fails the read
+                       // EXT_meshopt_compression or a registered extension fails the read
+// a registered extension: hookless when it only adds information (read it via json_of), hooks when it changes bytes
+gltf::extension{.name = "VENDOR_x", .decode_buffer_view = f, .decode_accessor = g}; // f, g: function_refs, outlive the read
+//   f(buffer_view_decode{doc, view, extension}) / g(accessor_decode{doc, accessor, extension}) -> decoded_bytes:
+//   bytes (view_of then reads them), nullopt (left undecoded, an issue; view_of refuses), or an error (the read fails)
+doc.accessors[i].decoded_by / .decoded;   // which extension decoded it, and its tightly packed elements
 doc.json_of(doc.materials[i])["extensions"]["VENDOR_x"]; // json::ref to ANY element's own JSON object, with keep_json_document
 doc.json_root();       // the document root; both refs point into doc, so they die with it
 doc.buffer_views[i].meshopt;  // optional<meshopt_compression>: EXT_meshopt_compression as written (mode, filter, count, stride)

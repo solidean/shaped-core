@@ -77,7 +77,8 @@ One-liner per library:
   with the `babel::image` aggregator on top (`image/`) — `u8` samples for JPEG, `u8` or `u16` for PNG, `f32` for the last two.
   Native read-only DDS and TGA too: `babel::dds` hands back every mip, layer and cube face as views of the input, and `babel::bcn` decodes BC1 - BC7.
   `babel::ktx2` reads KTX 2.0 the same way, undoing zstd or zlib supercompression level by level, on a scheduler when given one.
-  glTF decodes EXT_meshopt_compression over the vendored meshoptimizer decoders, and `json_of` hands back any element's own JSON, for vendor extensions.
+  glTF decodes EXT_meshopt_compression over the vendored meshoptimizer decoders, and a caller registers its own extensions with hooks that decode bufferViews and accessors.
+  `json_of` hands back any element's own JSON, for what an extension adds.
   The aggregator keeps mip 0 of a DDS, as `u8`, or `f32` for BC6H and the float formats.
   Namespace `babel`. Depends on babel-data + typed-geometry.
   **One namespace, two libraries**, split by dependency rather than by topic — which is why `data/` spans both, `sqlite` living up here because of what it *needs*.

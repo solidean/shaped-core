@@ -128,6 +128,7 @@ if(SC_BUILD_TESTS)
         tests/geometry/fbx-test.cc
         tests/geometry/gltf-test.cc
         tests/geometry/gltf-meshopt-test.cc
+        tests/geometry/gltf-extension-test.cc
         tests/geometry/obj-test.cc
         tests/geometry/stl-test.cc
 
