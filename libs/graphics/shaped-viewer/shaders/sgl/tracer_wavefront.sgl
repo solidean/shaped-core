@@ -238,9 +238,8 @@ fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
 // ---- segment: what the hit's material does not decide ---------------------------------------------------------------
 
 /// Settles the round's path at `index` up to its hit's material: the medium it crossed, the analytic lights it passed, and an escape.
-/// A path that scattered goes on to the next round, one that ended to finalize, and one that reached a surface to shade.
-/// Settles the round's path at `index` up to its hit's material: the medium it crossed, the analytic lights it passed, and an escape.
 /// Returns the slot, its route and, for a hit, the permutation that shades it.
+/// The route is the next round for a path that scattered, finalize for one that ended, and shade for one that reached a surface.
 fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
     if index >= round_count() => return uint3(0u, route_none, 0u)
     let slot = round_slot(index)
@@ -691,8 +690,7 @@ fun wavefront_reset(){traced}:
 /// The round's arguments from its input queue's count, and every queue it fills emptied.
 fun wavefront_args_round(){traced, dispatch, wavefront_step}:
     dispatch.args[dispatch_round] = groups_for(round_count())
-    let next = if wavefront_step.parity == 0u => counter_queue_b else counter_queue_a
-    traced.counters[next].store(0u)
+    traced.counters[output_counter()].store(0u)
     traced.counters[counter_hits].store(0u)
     traced.counters[counter_shadow].store(0u)
     traced.counters[counter_finished].store(0u)
