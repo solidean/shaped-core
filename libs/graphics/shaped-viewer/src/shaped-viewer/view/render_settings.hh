@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shaped-graphics/fwd.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
 
@@ -19,6 +20,9 @@ namespace sv
 /// Per view rather than per process is the intended shape — see libs/graphics/shaped-viewer/docs/TODO.md, where this becomes
 /// `render_settings::max_accumulated_frames`, excluded from the trace hash.
 inline constexpr u32 accumulation_frame_cap = 4096;
+
+/// The mode a layer asking for `mode` is drawn in on `ctx`: `mode` itself, unless it is `automatic`.
+[[nodiscard]] render_mode resolve_render_mode(sg::context const& ctx, render_mode mode);
 } // namespace sv
 
 /// How a layer's image is produced from its scene: traced by one of two path tracers, or rasterized.
@@ -28,6 +32,13 @@ inline constexpr u32 accumulation_frame_cap = 4096;
 /// libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
 enum class sv::render_mode : sv::u8
 {
+    /// The wavefront where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, and `raster` where it has not, which the viewer warns of once.
+    ///
+    /// Resolved where the viewer builds the frame's plan, so the plan declares what the mode it resolved to writes.
+    /// A plan built by hand from a layer still `automatic` traces it with the wavefront.
+    /// It is also where the default can move, to the hybrid once there is one, without a caller changing anything.
+    automatic,
+
     /// One ray-tracing dispatch per frame, every path traced to its end inside it.
     /// A frame costs `render_settings::samples_per_pixel` samples per pixel.
     megakernel,
@@ -64,7 +75,7 @@ struct sv::render_settings
     i32 max_bounces = 5;
 
     /// Which path tracer traces this layer, or `raster` to draw it instead; switching restarts its image.
-    render_mode mode = render_mode::wavefront;
+    render_mode mode = render_mode::automatic;
 
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///

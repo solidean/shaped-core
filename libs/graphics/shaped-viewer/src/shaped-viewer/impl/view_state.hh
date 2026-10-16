@@ -59,6 +59,10 @@ struct temporal_slot
 
     u32 accum_frame = 0;
 
+    /// What the last frame of this accumulation slot's layer bound in place of permutations not compiled, as `stand_in_report::hash`.
+    /// The next frame's image hash folds it in, which is what restarts the image when the set changes, and only then.
+    u64 stand_in_hash = 0;
+
     /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
     ///
     /// Here rather than on a routine because a routine cannot know which layer a call belongs to, and here rather than

@@ -72,7 +72,7 @@ struct background;
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
-enum class render_mode : u8; // how a layer is drawn: one of two path tracers, or raster (render_settings.hh)
+enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;
@@ -255,6 +255,7 @@ struct material_permutation; // one permutation generated + compiled (resources/
 class material_shader_cache;
 struct pt_light_table; // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
+struct stand_in_report; // what a frame bound in place of permutations not compiled (rendering/stand_in_report.hh)
 class pathtrace_routine;
 struct wavefront_state;          // the wavefront tracer's path state for one view (rendering/traced_group.hh)
 struct wavefront_trace_desc;     // one wavefront frame (rendering/wavefront_routine.hh)

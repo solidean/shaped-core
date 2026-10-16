@@ -1,5 +1,6 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -314,6 +315,104 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
     auto const* const slot = rec->temporal.get_ptr(sv::temporal_id::accumulation(0));
     REQUIRE(slot != nullptr);
     CHECK(slot->texture.raw() != nullptr);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A material whose fragment does not compile is drawn through the stand-in for good, which is an image like any other.
+// It used to restart its view on every frame: the frame reported a substitution and the next one took that for a changed image.
+// So the view never accumulated, and a capture waiting on it timed out.
+ASYNC_INVOCABLE_TEST("sv - a material that does not compile still accumulates down the plan path",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+
+    auto& lib = *sv::acquire_material_library().value();
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
+    auto const type = lib.register_type(sv::material_type::create("sv_test_broken_planned", cc::move(signature),
+                                                                  "surface.x = not_a_function(roughness)\n"));
+
+    auto const cloud = sv_test::make_triangle_cloud(32);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto mesh = sv_test::as_mesh("broken cloud", cloud.positions, cloud.materials);
+    mesh.material = lib.acquire(sv::material::create("sv_test_broken_planned", type, {}));
+    auto const item = resources.acquire_scene_item(mesh);
+    resources.wait_for_pending_uploads();
+
+    // Each tracer says once why the cloud shades as the stand-in, however many frames trace it.
+    nx::expect_error("the hit group of <material 'sv_test_broken_planned'> did not compile*", nx::exactly(1));
+    if (ctx.supports(sg::feature::ray_query))
+        nx::expect_error("the shade kernel of <material 'sv_test_broken_planned'> did not compile*", nx::exactly(1));
+
+    auto const output_size = tg::vec2i(64, 64);
+    for (auto const mode : {sv::render_mode::megakernel, sv::render_mode::wavefront})
+    {
+        if (mode == sv::render_mode::wavefront && !ctx.supports(sg::feature::ray_query))
+            continue;
+
+        auto const traced_id
+            = sv::view_id::from_string(mode == sv::render_mode::wavefront ? "broken wavefront" : "broken megakernel");
+        auto def = sv::viewer_definition{};
+        {
+            auto v = sv::view_data{};
+            v.id = traced_id;
+            v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)};
+            auto& scene = sv::ensure_scene_3d(v);
+            scene.items.push_back(item);
+            scene.settings.mode = mode;
+            def.views.push_back(cc::move(v));
+
+            auto const root_node = def.nodes.add_container(sv::invalid_node);
+            auto leaf = sv::layout_leaf{};
+            leaf.views.push_back(sv::view_index(0));
+            def.nodes.add_leaf(root_node, cc::move(leaf));
+
+            auto root = sv::view_data{};
+            root.id = sv::view_id::from_string("root");
+            root.layers.push_back(
+                {.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+            def.root_view = sv::view_index(def.views.size());
+            def.views.push_back(cc::move(root));
+        }
+
+        auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                              .width = output_size[0],
+                                                              .height = output_size[1],
+                                                              .usage = sg::texture_usage::render_target});
+        auto store = sv::view_store{};
+
+        // Frames until the mean holds two, which a view restarting on every frame never reaches.
+        auto index = u64(0);
+        auto const accumulated = sv_test::frames_until_executed(
+            ctx,
+            [&](sg::command_list& cmd)
+            {
+                resources.advance_to(ctx.current_epoch());
+                store.begin_frame(u64(ctx.current_epoch()));
+                auto const plan = sv::build_render_plan(def, output_size, index++, {});
+                (void)sv::viewer_renderer::execute(cmd, def, plan, resources, store,
+                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+                return store.accumulated_frames(traced_id) >= 2 ? sg::routine_outcome::executed
+                                                                : sg::routine_outcome::declined;
+            });
+        CHECK(accumulated)
+            .context(cc::format("{}: {} frames accumulated",
+                                mode == sv::render_mode::wavefront ? "wavefront" : "megakernel",
+                                store.accumulated_frames(traced_id)));
+    }
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

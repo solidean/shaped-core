@@ -52,7 +52,10 @@ sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f6
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
 sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 frame_budget_ms; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   frame_budget_ms (16): a still wavefront frame runs as many rounds as fit, measured; 0 runs rounds_per_frame (8); a headless viewer forces 0
-sv::render_mode              // wavefront (default) | megakernel | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+sv::render_mode              // automatic (default) | megakernel | wavefront | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+                                 //   automatic: the wavefront where the device has raytracing_pipeline and ray_query, raster with one warning where not;
+                                 //   the viewer resolves it before planning, and a plan built by hand traces it with the wavefront
+sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
@@ -299,6 +302,9 @@ auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::
   `material_shader_cache::acquire_fallback()` is a neutral hit group over an EMPTY signature, so it reads no per-instance block and can stand in for any material whatever that material's layout was.
   `pathtrace_routine` keys its pipeline on the SUBSTITUTED set, so the frame the real permutation lands the key changes and a new variant is built.
   A `pt_trace_desc` with no `fallback` keeps the old all-or-nothing behavior: one material still compiling makes the whole trace a no-op.
+  Every routine reports what it bound through `stand_ins`, a `sv::stand_in_report`: a hash over the bound set, 0 for none, and whether a stood-in compile is still pending.
+  The view folds the hash into its image's, so a material that failed for good converges over the stand-in, and one that lands restarts the image once.
+  One still pending restarts the image every frame, so a mean of it never reads as converged.
 - **A cutout is DATA, not code.** `material_type::opacity_attribute` names the attribute that is the opacity, and `opacity_cutoff_attribute` the optional threshold.
   One generic reader, `tracer.instance_opacity`, takes it straight out of the parameter block through the instance record's opacity fields, whatever the material.
   So a kernel that traces never recompiles for a material, and a fragment cannot compute opacity: writing `geometry_opacity` asserts.
@@ -860,7 +866,8 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 
 **Raster layers** (`render_settings::mode = render_mode::raster`, [docs/raster.md](docs/raster.md)) go through the same plan trace, and draw instead.
 - **Every frame is final**: the accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `is_accumulation_converged` and a capture finish at once.
-  A frame drawn through a stand-in material is not final, and restarts next frame.
+  A frame drawn through a stand-in for a material still compiling is not final, and restarts next frame.
+  One for a material that failed for good is final: the routine reports what it bound as a `stand_in_report`, whose hash the image's folds in.
 - **The G-buffer is written every frame, denoised or not**, into the guide slots of the same meaning.
   Those are `normal_guide`, `depth_guide`, `albedo_guide`, `specular_albedo_guide`, `roughness_guide` and `motion_guide`.
   `reconstruct` is ignored, and nothing denoises.

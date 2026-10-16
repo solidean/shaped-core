@@ -26,6 +26,7 @@
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/shader_library.hh>
+#include <shaped-viewer/view/render_settings.hh>
 #include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
@@ -200,6 +201,9 @@ struct viewer::impl
     // Last frame's leaves, in window space and with the links that order them.
     // Routing runs before the next frame is authored, so last frame's answer is the only one there is.
     cc::vector<hit_region> last_hit_regions;
+
+    /// Whether a layer left `render_mode::automatic` has been said to fall back to raster, which is said once per viewer.
+    bool raster_fallback_reported = false;
 
     /// The views the previous frame authored, so a per-frame controller update can reach each of them exactly once.
     /// `last_hit_regions` cannot serve: one view may own several regions, and a fly controller integrated twice over the
@@ -888,6 +892,22 @@ void viewer::finish_frame(frame& f)
         for (auto& v : def.views)
             for (auto& l : v.layers)
                 l.settings.frame_budget_ms = 0.0f;
+
+    // `automatic` is resolved here, where the plan is built, so the plan declares what the resolved mode writes.
+    for (auto& v : def.views)
+        for (auto& l : v.layers)
+        {
+            if (l.kind != layer_kind::scene_3d || l.settings.mode != render_mode::automatic)
+                continue;
+            l.settings.mode = resolve_render_mode(*im.ctx, l.settings.mode);
+            if (l.settings.mode == render_mode::raster && !im.raster_fallback_reported)
+            {
+                CC_LOG_WARNING("the device has no ray tracing, so every layer left render_mode::automatic is "
+                               "rasterized: "
+                               "lit directly, unshadowed and without bounces");
+                im.raster_fallback_reported = true;
+            }
+        }
 
     // What the store already holds for each view, so the plan can decide what refreshes.
     // Read off the composite texture rather than a field stamped beside it, so "the plan believes this can be

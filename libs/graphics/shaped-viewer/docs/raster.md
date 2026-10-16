@@ -27,7 +27,8 @@ one draw per triangle item ─▶ environment where nothing was drawn
 - **The environment** is a fullscreen pass on the far plane, at depth 0 and tested `greater_equal`, so it lands only where no surface was drawn.
 - **Every frame is final.**
   The layer's accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `view_ref::is_accumulation_converged` holds at once and a capture finishes on its first drawn frame.
-  A frame drawn through a stand-in material is not final: it restarts next frame, as a trace with a stand-in does.
+  A frame drawn through a stand-in for a material still compiling is not final: it restarts next frame, as a trace with such a stand-in does.
+  A stand-in for a material that failed for good is final, since it is the image the layer will keep drawing.
 - **Nothing denoises.** `render_settings::reconstruct` is ignored, and neither the denoised slot nor the frame-samples slots are declared.
 
 `sv::raster_routine` (rendering/raster_routine.hh) is the routine; `view_renderer` drives it from the same plan trace a traced layer goes through, before any accumulation or denoising.

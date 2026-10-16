@@ -13,6 +13,7 @@
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/rendering/stand_in_report.hh>
 #include <shaped-viewer/scene/background.hh>
 
 /// What a raster frame writes: the lit image, and the primary hit's G-buffer beside it.
@@ -96,8 +97,8 @@ struct sv::raster_frame_desc
     /// Where the frame is written, every target at one extent.
     raster_gbuffer targets;
 
-    /// Where set, receives whether a frame that executed drew any permutation through `fallback`.
-    bool* drawn_with_stand_ins = nullptr;
+    /// Where set, receives what a frame that executed drew through `fallback` in place of `permutations`.
+    stand_in_report* stand_ins = nullptr;
 };
 
 /// The raster path: one draw per scene item, through each material permutation's generated pixel stage, into a G-buffer.

@@ -71,12 +71,12 @@ struct cornell_scene
     return fc;
 }
 
-[[nodiscard]] sg::texture_2d make_target(sg::context& ctx)
+[[nodiscard]] sg::texture_2d make_target(sg::context& ctx, tg::vec2i size = k_size)
 {
     return ctx.persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba32_float,
-         .width = k_size[0],
-         .height = k_size[1],
+         .width = size[0],
+         .height = size[1],
          .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 }
 
@@ -132,6 +132,7 @@ struct wavefront_run
     int frames = 24;
     int rounds = 12;
     int drain_rounds = 48;
+    tg::vec2i size = k_size;
 };
 
 /// Traces `mesh` through the wavefront, every frame but the last regenerating, and reads the drained image back.
@@ -156,8 +157,8 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_wavefront(sg::context& ctx,
     hit_groups.push_back(permutation);
     auto const background = sv::background_gpu::from(run.environment);
 
-    auto const target = make_target(ctx);
-    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+    auto const target = make_target(ctx, run.size);
+    auto state = sv::wavefront_state::create(ctx, run.size, 4);
     co_return co_await trace_frames(
         ctx, target, run.frames,
         [&](sg::command_list& cmd, int f)
@@ -705,6 +706,75 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a coverage cutout tosses a coin pe
     mean /= f32(total);
     CHECK(mixed > total * 95 / 100).context(cc::format("{} of {} pixels mix kept and cut samples", mixed, total));
     CHECK(tg::abs(mean - 0.5f) < 0.05f).dump("mean luminance", mean);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// An image past 65535 groups of 64 threads, which no backend dispatches on one axis: 4096 x 1040 is 4.26 Mpx.
+// An unlit quad fills the view, so every stage but connect runs over more slots than one row of groups holds.
+// A slot past the first row that no stage reached reads as a pixel that is not the quad's color.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - an image past one row of groups is traced to its last pixel",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    constexpr auto size = tg::vec2i(4096, 1040);
+    static_assert(isize(size[0]) * isize(size[1]) > isize(65535) * 64, "the image needs a second row of groups");
+
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const p : {tg::pos3f(-40, -40, 0), tg::pos3f(40, -40, 0), tg::pos3f(40, 40, 0), tg::pos3f(-40, -40, 0),
+                         tg::pos3f(40, 40, 0), tg::pos3f(-40, 40, 0)})
+        positions.push_back(p);
+    auto& lib = sv_test::shared_material_library();
+    auto const type = lib.acquire_type(sv::builtin_material::unlit).value();
+    auto bindings = cc::vector<sv::material_attribute_binding>();
+    bindings.push_back(sv::material_attribute_binding::of("color", tg::vec3f(0.25f, 0.5f, 0.75f)));
+    auto const mesh = sv::mesh{.name = "wavefront wide quad",
+                               .geometry = sv::triangle_geometry::create_from_positions(positions),
+                               .material = lib.acquire(sv::material::create("wavefront wide quad", type, bindings))};
+
+    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    camera.projection.aspect_ratio = f64(size[0]) / f64(size[1]);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const pixels = co_await trace_wavefront(ctx, resources, mesh,
+                                                 {.camera = camera,
+                                                  .environment = sv::background::uniform(tg::vec3f(0, 0, 0)),
+                                                  .max_bounces = 1,
+                                                  .frames = 2,
+                                                  .rounds = 2,
+                                                  .drain_rounds = 4,
+                                                  .size = size});
+    REQUIRE(pixels.size() == isize(size[0]) * isize(size[1]));
+
+    // The quad's color is whatever the first pixel holds; every other one, the last row's included, must hold it too.
+    auto const expected = pixels[0];
+    auto wrong = isize(0);
+    auto first_wrong = isize(-1);
+    for (auto i = isize(0); i < pixels.size(); ++i)
+    {
+        auto const d = pixels[i] - expected;
+        if (tg::abs(d[0]) + tg::abs(d[1]) + tg::abs(d[2]) <= 1e-3f)
+            continue;
+        if (first_wrong < 0)
+            first_wrong = i;
+        ++wrong;
+    }
+    CHECK(luminance_of(expected) > 0.1f).dump("first pixel's luminance", luminance_of(expected));
+    CHECK(wrong == 0).context(cc::format("{} pixels differ from the first, the first at slot {}", wrong, first_wrong));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

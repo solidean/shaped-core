@@ -57,6 +57,28 @@ It needs no shader table and no pipeline per set of permutations, and every stag
 **The escape, if it is ever needed, is a ray-tracing pipeline per stage**, with SGL allowing atomics in a raygen behind `raytracing_pipeline`.
 The trigger is a cutout-heavy scene where extend measures slower than the pipeline on dx12.
 
+### It requires the ray-tracing pipeline, though it traces inline
+
+Every wavefront kernel needs `raytracing_pipeline` beside `ray_query`, the counting kernels included, and `render_mode::automatic` asks for both.
+**The cause is the group, not the trace.**
+Every kernel lists `tracer.traced`, the group the megakernel binds too.
+Its `world` takes its feature from the file that declares it ([raytracing.md](../../shaped-graphics-language/docs/spec/raytracing.md)).
+That file is module `tracer`'s bindings, which `require raytracing_pipeline` for the megakernel's sake, so the member costs it to every entry point that lists the group.
+Without the `require` in `wavefront.sgl`, `sgl emit` refuses every kernel with `feature-not-declared`.
+
+**Splitting the require was weighed and not taken.**
+It means declaring the member for `ray_query` instead, which the megakernel then needs too, or a second group the wavefront binds alone, which forks `traced_group_of` and its stand-ins.
+What it would buy is a device with ray queries and no pipeline.
+webgpu is one, and is out of scope, since it lacks binding arrays as well.
+The others are mobile Vulkan drivers, where nothing in sv runs today.
+The split is worth taking with the first such device sv targets, and testing on it.
+
+### A dispatch over the slots is laid out in rows
+
+Every backend dispatches at most 65535 groups on one axis, which at 64 threads a group is 4.19 Mpx; a 3840×2160 image needs 129,600 groups.
+So begin and resolve, and every indirect round through `groups_for`, lay their groups out in rows of 65535, and each kernel reads its index through `tracer.thread_index`.
+A row past the count holds threads past it too, so every kernel still returns past the count it reads.
+
 ### Cutout is data, not code
 
 **Landed, in the megakernel too.**

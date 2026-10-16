@@ -190,7 +190,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
 
     // Records one trace into `cmd` and reports what it decided; the caller owns the frame around it, so the same body
     // serves a one-shot check and a driven one.
-    auto stand_ins = false;
+    auto stand_ins = sv::stand_in_report{};
     auto const trace = [&](sg::command_list& cmd, sv::material_permutation const* fallback)
     {
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
@@ -221,7 +221,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
                                                     .hit_groups = hit_groups,
                                                     .fallback = fallback,
                                                     .bindless = &bindless,
-                                                    .traced_with_stand_ins = &stand_ins});
+                                                    .stand_ins = &stand_ins});
     };
 
     // The permutation genuinely does not build, so it cannot be traced with.
@@ -248,8 +248,10 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     CHECK(sv_test::frames_until_executed(
         ctx, [&](sg::command_list& cmd) { return trace(cmd, &resources.shaders.acquire_fallback()); }));
 
-    // And it says so: a frame shaded by the stand-in is an image of other materials, which a mean must not average in.
-    CHECK(stand_ins);
+    // And it says so: a frame shaded by the stand-in is an image of other materials, which a mean must tell apart.
+    // The compile failed for good, so the substitution is settled and a mean of it may converge.
+    CHECK(stand_ins.hash != 0);
+    CHECK(!stand_ins.pending);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

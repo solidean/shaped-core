@@ -125,6 +125,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/resources/gpu_resource_manager.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
+    src/shaped-viewer/rendering/stand_in_report.hh
     src/shaped-viewer/rendering/raster_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh

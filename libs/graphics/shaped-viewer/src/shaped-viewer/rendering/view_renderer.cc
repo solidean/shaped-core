@@ -576,6 +576,12 @@ constexpr i32 max_budgeted_rounds = 64;
     return outcome;
 }
 
+/// The mode a plan's layer is recorded in: `automatic` is the viewer's to resolve, and one that reaches a plan built by hand is the wavefront.
+[[nodiscard]] render_mode planned_mode(render_mode mode)
+{
+    return mode == render_mode::automatic ? render_mode::wavefront : mode;
+}
+
 /// Whether a layer traced in `mode` may be traced on `ctx`, saying so once per `slot` when it may not.
 ///
 /// Both tracers need the ray-tracing pipeline: the megakernel is one, and the structure the wavefront's group binds is declared for it.
@@ -609,14 +615,14 @@ struct raster_scene
     traced_decals const* decals = nullptr;
     background_gpu const* background = nullptr;
 
-    /// The trace hash of what is drawn, which a frame drawn through a stand-in must not leave behind as the slot's.
+    /// The trace hash of what is drawn, which a frame drawn through a stand-in still compiling must not leave behind as the slot's.
     u64 hash = 0;
 };
 
 /// Draws one frame of raster layer `l` of `v`, layer index `layer`, into `slot` and the G-buffer slots `rec` keeps beside it.
 ///
 /// The slots must exist at `resolution`: the plan's resolve allocates them, and the single-view path ensures them itself.
-/// A frame that draws is final, so `slot` is left converged; one drawn through a stand-in restarts next frame instead.
+/// A frame that draws is final, so `slot` is left converged; one drawn through a stand-in still compiling restarts next frame instead.
 [[nodiscard]] sg::routine_outcome raster_layer(sg::command_list& cmd,
                                                view_data const& v,
                                                layer const& l,
@@ -698,7 +704,7 @@ struct raster_scene
     auto* const primary_depth
         = l.needs_primary_depth() ? rec.temporal.get_ptr(temporal_id::primary_depth(layer)) : nullptr;
 
-    auto stand_ins = false;
+    auto stand_ins = stand_in_report{};
     auto const outcome = raster_routine::execute(
         cmd, {.frame = frame,
               .background = background,
@@ -719,7 +725,7 @@ struct raster_scene
                           .roughness = slot_of(temporal_id::roughness_guide(layer))->texture,
                           .motion = motion->texture,
                           .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d()},
-              .drawn_with_stand_ins = &stand_ins});
+              .stand_ins = &stand_ins});
     if (outcome == sg::routine_outcome::declined)
         return outcome;
 
@@ -727,12 +733,22 @@ struct raster_scene
     motion->has_last_camera = true;
 
     // Every frame drawn is the image itself, so the layer is converged the moment one lands.
-    // One drawn through a stand-in is an image of other materials, which must not read as finished.
-    slot.reset_hash = stand_ins ? cc::combine_hash(scene.hash, u64(1)) : scene.hash;
-    slot.accum_frame = stand_ins ? 1 : accumulation_frame_cap;
+    // One drawn through a stand-in still compiling is an image of other materials, which must not read as finished.
+    // A stand-in for a material that failed for good is the image this layer will keep drawing, so it is final.
+    slot.stand_in_hash = stand_ins.hash;
+    slot.reset_hash = stand_ins.pending ? cc::combine_hash(scene.hash, u64(1)) : scene.hash;
+    slot.accum_frame = stand_ins.pending ? 1 : accumulation_frame_cap;
     return outcome;
 }
 } // namespace
+
+render_mode resolve_render_mode(sg::context const& ctx, render_mode mode)
+{
+    if (mode != render_mode::automatic)
+        return mode;
+    auto const traces = ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query);
+    return traces ? render_mode::wavefront : render_mode::raster;
+}
 
 cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
 {
@@ -882,8 +898,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (slot == nullptr)
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate
 
-    auto const is_traced = l.settings.mode != render_mode::raster;
-    if (is_traced && !can_trace(ctx, l.settings.mode, rec, *slot))
+    auto const mode = planned_mode(l.settings.mode);
+    auto const is_traced = mode != render_mode::raster;
+    if (is_traced && !can_trace(ctx, mode, rec, *slot))
         return sg::routine_outcome::declined;
 
     auto const resolved = resolve_scene(cmd, l, resources, is_traced);
@@ -896,9 +913,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     fc.decal_count = u32(decals.decals.size());
     auto const bg = background_gpu::from(l.background);
     // The integrator is folded in too: both converge to the same image, but a mean must not hold samples of both.
+    // So is what the last frame stood in for a permutation not compiled, which only the routine decides.
     auto const hash
         = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation),
-                           cc::make_hash(u32(l.settings.mode)));
+                           cc::make_hash(u32(mode), slot->stand_in_hash));
 
     // The same, with the camera left out: what a temporal denoiser's history restarts on.
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
@@ -1105,7 +1123,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // finish different numbers of paths, so one count for the image would misjudge every one of them.
     // Transient, since the tallies hold the counts and the resolve rewrites every pixel each frame.
     auto const sample_counts
-        = has_guides && l.settings.mode == render_mode::wavefront
+        = has_guides && mode == render_mode::wavefront
             ? ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
                                                .width = input_extent[0],
                                                .height = input_extent[1],
@@ -1137,7 +1155,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const frame_specular = image_of(ds.frame_specular, has_split, sg::pixel_format::rgba16_float);
     auto const guide_hit_distance = image_of(ds.hit_distance, has_split, sg::pixel_format::rg32_float);
 
-    auto stand_ins = false;
+    auto stand_ins = stand_in_report{};
     auto const traced = trace_layer(
         cmd, l.settings,
         {.frame = frame,
@@ -1171,7 +1189,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
          .decals = decal_buffers.decals,
          .decal_shapes = decal_buffers.shapes,
          .decal_atlas = decal_buffers.atlas,
-         .traced_with_stand_ins = &stand_ins},
+         .stand_ins = &stand_ins},
         fc, *slot, scaled);
 
     // Only a frame that actually dispatched advances the accumulation: counting a declined one would make the blend
@@ -1179,9 +1197,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (traced == sg::routine_outcome::declined)
         return sg::routine_outcome::declined;
 
-    // A frame shaded by a stand-in material is an image of a different scene, so the next frame restarts rather than
-    // averaging into it — the trace hash cannot see the substitution, which the routine alone decides.
-    if (stand_ins)
+    // The next frame's hash carries what this one stood in, so a substitution that changes restarts the image once.
+    // One still compiling restarts it every frame instead, since it ends by itself and a mean of it must not read as converged.
+    slot->stand_in_hash = stand_ins.hash;
+    if (stand_ins.pending)
         slot->reset_hash = cc::combine_hash(hash, u64(1));
 
     // A scaled frame is no sample of the mean, which the next still frame restarts at full size.
@@ -1443,8 +1462,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     // nobody remembers.
     store.get_or_create(v.id).camera_cut_pending = false;
 
-    auto const is_traced = scene->settings.mode != render_mode::raster;
-    if (is_traced && !can_trace(ctx, scene->settings.mode, store.get_or_create(v.id), slot))
+    // Resolved against the device here, since this path ensures a raster layer's slots itself.
+    auto const mode = resolve_render_mode(ctx, scene->settings.mode);
+    auto const is_traced = mode != render_mode::raster;
+    if (is_traced && !can_trace(ctx, mode, store.get_or_create(v.id), slot))
         return slot.texture;
 
     // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
@@ -1457,7 +1478,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     fc.decal_count = u32(decals.decals.size());
     auto const bg = background_gpu::from(scene->background);
     auto const hash = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
-                                       cc::make_hash(u32(scene->settings.mode)));
+                                       cc::make_hash(u32(mode), slot.stand_in_hash));
 
     if (!self.is_ready())
         return slot.texture; // nothing traced this frame; the caller re-presents what the slot already holds
@@ -1508,7 +1529,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const* const quadric_fallback = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 
     // Called under our own guard; the leaf takes its own, which is a different routine and so nests no lock.
-    auto stand_ins = false;
+    auto stand_ins = stand_in_report{};
     auto const traced = trace_layer(
         cmd, scene->settings,
         {.frame = frame,
@@ -1530,7 +1551,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
          .decals = decal_buffers.decals,
          .decal_shapes = decal_buffers.shapes,
          .decal_atlas = decal_buffers.atlas,
-         .traced_with_stand_ins = &stand_ins},
+         .stand_ins = &stand_ins},
         fc, slot, false);
 
     // The store's budget counts the path state beside the texture, and the trace may just have created or grown it.
@@ -1542,8 +1563,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     store.set_payload_bytes(v.id, bytes);
 
     // As above: a declined trace recorded nothing, so it must not count as a sample, and a frame shaded by a stand-in
-    // must not be averaged with the next.
-    if (traced == sg::routine_outcome::executed && stand_ins)
+    // still compiling must not be averaged with the next.
+    if (traced == sg::routine_outcome::executed)
+        slot.stand_in_hash = stand_ins.hash;
+    if (traced == sg::routine_outcome::executed && stand_ins.pending)
         slot.reset_hash = cc::combine_hash(hash, u64(1));
     if (traced == sg::routine_outcome::executed && slot.accum_frame < accumulation_frame_cap)
         ++slot.accum_frame;

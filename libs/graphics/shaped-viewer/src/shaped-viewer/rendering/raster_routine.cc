@@ -241,7 +241,10 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
 
     auto pipelines = cc::vector<sg::raster_pipeline_handle>();
     pipelines.reserve(d.permutations.size());
+    auto bound = cc::vector<material_permutation const*>();
+    bound.reserve(d.permutations.size());
     auto substituted = false;
+    auto pending = false;
     for (auto const* p : d.permutations)
     {
         CC_ASSERT(p != nullptr, "a raster frame names a permutation the shader cache does not hold");
@@ -249,12 +252,16 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         auto pipeline = self->_surface_pipeline_of(ctx, p, *d.bindless);
         if (pipeline == nullptr)
         {
+            // _surface_pipeline_of made the entry, so it is there to ask whether the compile settled.
+            pending = pending || !self->_surfaces.get_ptr(p->key)->failed;
             pipeline = fallback;
+            p = d.fallback;
             substituted = true;
         }
         if (pipeline == nullptr)
             return sg::routine_outcome::declined;
         pipelines.push_back(cc::move(pipeline));
+        bound.push_back(p);
     }
 
     auto const frame = ctx.transient.create_buffer_from_pod(cmd, d.frame, sg::buffer_usage::readonly_buffer);
@@ -325,8 +332,8 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     pass.bind_group(0, *drawn);
     pass.draw({.vertex_range = {.offset = 0, .size = 3}});
 
-    if (d.drawn_with_stand_ins != nullptr)
-        *d.drawn_with_stand_ins = substituted;
+    if (d.stand_ins != nullptr)
+        *d.stand_ins = stand_in_report::of(bound, substituted, pending);
     return sg::routine_outcome::executed;
 }
 } // namespace sv

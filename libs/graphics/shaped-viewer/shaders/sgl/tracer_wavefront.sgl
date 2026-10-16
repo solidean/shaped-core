@@ -57,6 +57,10 @@ const route_hit = 3u
 /// The workgroup size of every wavefront kernel over a queue.
 const wavefront_group_size = 64u
 
+/// The most workgroups a dispatch holds on one axis, on every backend.
+/// A dispatch of more is laid out in rows of this many: `groups_for` sizes it, and `thread_index` reads it back.
+const max_groups_per_axis = 65535u
+
 /// What a shade dispatch's thread reads where its permutation's range has no path for it.
 const no_slot = 0xffffffffu
 
@@ -109,9 +113,16 @@ fun push_hit(slot: uint, permutation: uint){traced}:
     traced.counters[counter_permutations + (permutation as int)].add(1u)
 
 /// The workgroups that cover `count` threads, but never more than cover every slot: a corrupt count stays a valid dispatch.
+/// In rows of `max_groups_per_axis`, so an image past 4.19 Mpx stays within every backend's limit; the last row is the only short one.
 fun groups_for(count: uint){wavefront_step} -> dispatch_args:
     let threads = min(count, wavefront_step.width * wavefront_step.height)
-    return dispatch_args((threads + wavefront_group_size - 1u) / wavefront_group_size, 1u, 1u)
+    let groups = (threads + wavefront_group_size - 1u) / wavefront_group_size
+    return dispatch_args(min(groups, max_groups_per_axis), (groups + max_groups_per_axis - 1u) / max_groups_per_axis, 1u)
+
+/// The index thread `id` of a wavefront dispatch covers, in the rows `groups_for` lays its groups out in.
+/// A full row past the count holds threads past it too, so every kernel still returns past the count it reads.
+fun thread_index(id: int3) -> uint:
+    return (id.x as uint) + (id.y as uint) * max_groups_per_axis * wavefront_group_size
 
 // ---- Pixels ---------------------------------------------------------------------------------------------------------
 

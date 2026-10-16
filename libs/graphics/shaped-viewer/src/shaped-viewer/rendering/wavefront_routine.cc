@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/utility.hh> // cc::min
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <sgl_modules/slug.hh>
@@ -24,6 +25,18 @@ constexpr isize dispatch_hits = 1;
 constexpr isize dispatch_shadow = 2;
 constexpr isize dispatch_finished = 3;
 constexpr isize dispatch_shade = 4;
+
+/// `tracer.wavefront_group_size` and `tracer.max_groups_per_axis`, which lay a dispatch over the slots out in rows.
+constexpr u32 group_size = 64;
+constexpr u32 max_groups_per_axis = 65535;
+
+/// Dispatches the bound per-slot kernel over `slots` threads, in the rows `tracer.thread_index` reads its index from.
+void dispatch_slots(sg::command_list& cmd, u32 slots)
+{
+    auto const groups = (slots + group_size - 1) / group_size;
+    cmd.compute.dispatch_groups(int(cc::min(groups, max_groups_per_axis)),
+                                int((groups + max_groups_per_axis - 1) / max_groups_per_axis));
+}
 
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
 [[nodiscard]] cc::optional<sg::shader_format> sgl_format_for(sg::context const& ctx, slib::shader_library const& lib)
@@ -201,19 +214,27 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
 
     auto shade = cc::vector<sg::compute_pipeline_handle>();
     shade.reserve(t.hit_groups.size());
+    auto bound = cc::vector<material_permutation const*>();
+    bound.reserve(t.hit_groups.size());
     auto substituted = false;
+    auto pending = false;
     for (auto const* p : t.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a wavefront trace names a permutation the shader cache does not hold");
         auto kernel = self->_shade_kernel_of(ctx, p, *t.bindless);
         if (kernel == nullptr)
         {
-            kernel = p->kind == geometry_kind::quadrics ? quadric_fallback : fallback;
+            // _shade_kernel_of made the entry, so it is there to ask whether the compile settled.
+            pending = pending || !self->_shade_kernels.get_ptr(p->key)->failed;
+            auto const quadric = p->kind == geometry_kind::quadrics;
+            kernel = quadric ? quadric_fallback : fallback;
+            p = quadric ? t.quadric_fallback : t.fallback;
             substituted = true;
         }
         if (kernel == nullptr)
             return sg::routine_outcome::declined;
         shade.push_back(cc::move(kernel));
+        bound.push_back(p);
     }
 
     auto const tlas = cmd.raytracing.build_tlas(t.instances);
@@ -297,7 +318,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     use(*self->_kernels.reset, second_group::none);
     cmd.compute.dispatch_groups(1);
     use(*self->_kernels.begin, second_group::none);
-    cmd.compute.dispatch_threads(int(width * height));
+    dispatch_slots(cmd, width * height);
 
     for (auto round = 0; round < d.rounds; ++round)
     {
@@ -351,7 +372,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
 
     mark(wavefront_stage::resolve);
     use(*self->_kernels.resolve, second_group::none);
-    cmd.compute.dispatch_threads(int(width * height));
+    dispatch_slots(cmd, width * height);
 
     if (timed)
     {
@@ -362,8 +383,8 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     }
     if (live.raw() != nullptr)
         *d.live_paths = cmd.download.data_from_buffer(live);
-    if (t.traced_with_stand_ins != nullptr)
-        *t.traced_with_stand_ins = substituted;
+    if (t.stand_ins != nullptr)
+        *t.stand_ins = stand_in_report::of(bound, substituted, pending);
     return sg::routine_outcome::executed;
 }
 } // namespace sv

@@ -16,6 +16,7 @@
 #include <shaped-shader-library/raytracing_pipeline.hh> // slib::raytracing_host_parts
 #include <shaped-viewer/drawing/decal.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/rendering/stand_in_report.hh>
 #include <shaped-viewer/rendering/traced_group.hh>
 #include <shaped-viewer/resources/instance_data.hh>
 #include <shaped-viewer/scene/background.hh>
@@ -177,10 +178,9 @@ struct sv::pt_trace_desc
     /// Null means no decals, and the routine binds empty stand-ins.
     sr::slug_atlas const* decal_atlas = nullptr;
 
-    /// Where set, receives whether a frame that executed traced any permutation with its stand-in.
-    /// Such a frame is an image of different materials than the one the scene converges to, so a caller accumulating a
-    /// mean must not average it with any other frame.
-    bool* traced_with_stand_ins = nullptr;
+    /// Where set, receives what a frame that executed traced in place of the permutations of `hit_groups`.
+    /// A caller accumulating a mean folds its hash into the one its image restarts on, since a different set of shaders is a different image.
+    stand_in_report* stand_ins = nullptr;
 };
 
 /// The global-illumination path-tracing pass: shaders/tracer_pipeline.sgl, over module `tracer` (shaders/sgl).
@@ -258,8 +258,10 @@ private:
     };
 
     /// The variant for `d`'s hit groups, or null while it is building and after it failed; never waits.
-    /// `substituted` is set to whether it stands any permutation in with a fallback.
-    [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx, pt_trace_desc const& d, bool& substituted);
+    /// `stand_ins` receives what it stands in with a fallback.
+    [[nodiscard]] pipeline_variant const* _variant_for(sg::context& ctx,
+                                                       pt_trace_desc const& d,
+                                                       stand_in_report& stand_ins);
 
     /// Keyed on the substituted hit groups in order; dropped by every reload.
     /// A map rather than a vector for the references: a variant is held across the dispatch that follows its build.

@@ -655,7 +655,7 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
 
     src += "@compute(64) fun sv_shade(@thread_id id: int3){tracer.traced, tracer.bindless, slug.tables, "
            "tracer.wavefront_step}:\n"
-           "    let slot = tracer.shade_slot(id.x as uint)\n"
+           "    let slot = tracer.shade_slot(tracer.thread_index(id))\n"
            "    if slot == tracer.no_slot => return\n";
     if (kind == geometry_kind::quadrics)
         cc::format_append(src,
