@@ -19,12 +19,13 @@ metal_context::metal_context(MTL::Device* device,
                              MTL4::CommandQueue* queue,
                              MTL4::Compiler* compiler,
                              MTL::SharedEvent* epoch_event,
-                             MTL::SharedEvent* submission_event)
+                             MTL::SharedEvent* submission_event,
+                             MTL::Event* submission_wait_event)
   : sg::context(sg::backend_kind::metal, sg::thread_model::multi_threaded, k_accepted_shader_formats),
     _device(device),
     _queue(queue),
     _compiler(compiler),
-    _epochs(device, queue, epoch_event, submission_event)
+    _epochs(device, queue, epoch_event, submission_event, submission_wait_event)
 {
     CC_ASSERT(_device != nullptr && _queue != nullptr, "a metal context needs a device and a queue");
     CC_ASSERT(_compiler != nullptr, "a metal context needs a compiler");
@@ -277,7 +278,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             // Per-resource rather than a blanket serialization: two lists touching nothing in common still run
             // concurrently, and the stamp is read here, before `stamp_touched_resources` raises it to this submission.
             if (auto const wait = highest_prior_submission(list); wait > 0)
-                _queue->wait(_epochs.submission_timeline(), wait);
+                _queue->wait(_epochs.submission_wait_timeline(), wait);
 
             // Order this list after every off-frame transfer of a resource it touches.
             //

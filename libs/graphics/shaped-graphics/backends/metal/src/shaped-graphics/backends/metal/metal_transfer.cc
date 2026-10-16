@@ -100,8 +100,8 @@ cc::result<cc::unit> metal_transfer_system::create(metal_context& ctx)
     if (_stream_queue == nullptr)
         return metal_error(error, "the metal device refused a streaming queue");
 
-    _upload_timeline = ctx.device()->newSharedEvent();
-    _download_timeline = ctx.device()->newSharedEvent();
+    _upload_timeline = ctx.device()->newEvent();
+    _download_timeline = ctx.device()->newEvent();
     if (_upload_timeline == nullptr || _download_timeline == nullptr)
         return cc::error("the metal device refused a transfer timeline");
 
@@ -163,7 +163,7 @@ void metal_transfer_system::wait_for_queues(MTL4::CommandQueue* queue,
     // their own — so the copy defers behind the last command list that named this resource.
     // Zero means no list ever did, and the submission event would never reach it.
     if (auto const wait = stamp.get(); wait > 0)
-        queue->wait(_ctx->epochs().submission_timeline(), wait);
+        queue->wait(_ctx->epochs().submission_wait_timeline(), wait);
 
     // And behind this resource's own previous transfer.
     // Two commits on one queue are ordered, but the copies inside them are not — an upload and the download that reads

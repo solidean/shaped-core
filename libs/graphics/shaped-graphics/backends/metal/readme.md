@@ -249,7 +249,14 @@ Each of these is a fact about Metal rather than a gap in the backend.
   Splitting them took that to zero in sixty-five runs.
   It is the shape vulkan already has, and dx12 needs neither split — a D3D12 copy queue runs its command lists serially where an MTL4 queue is concurrent by default.
   **Each queue needs a timeline of its own.**
-  One shared event cannot take signals from two queues: they complete independently, so a later value can land first, drive the event backwards and release a waiter early.
+  One event cannot take signals from two queues: they complete independently, so a later value can land first, drive the event backwards and release a waiter early.
+- **A queue never waits on an `MTLSharedEvent` another queue signals.**
+  On an M4 under macOS 27 such a wait sometimes stalls for four seconds and then lets the work run before the value is reached.
+  The tier-1 transfer fuzz read stale and zeroed bytes from it within a few hundred runs.
+  GPU timestamps showed the reader running before the writer it waited on.
+  A raw Metal probe with no sg in it reproduced it within a few dozen runs, and the same probe on `MTLEvent` stayed clean over sixty.
+  So the transfer timelines are device-local `MTLEvent`s, and the submission timeline, which the host reads too, has a device-local twin that queues wait on.
+  The streaming timelines stay shared, because the host signals them.
 - **A streaming transfer needs a timeline per resource, which the async tier does not.**
   A list touching a streamed resource waits for the *whole* transfer, including chunks the actor has not staged yet — so the value is reserved when the transfer is admitted and signalled when it ends.
   On one shared timeline that is unsound: transfers finish out of order, and a later one signalling its value would report an earlier one complete.

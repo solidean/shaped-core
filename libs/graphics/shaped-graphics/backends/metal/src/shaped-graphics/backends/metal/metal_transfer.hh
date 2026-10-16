@@ -20,11 +20,14 @@
 /// Metal makes the queue itself cheap — `newMTL4CommandQueue` again — so what costs something is the ordering, not the
 /// queue.
 ///
-/// **Ordering runs on one shared event, in both directions.**
-/// A transfer signals `_timeline` when it completes, and a command list that touches the resource waits on the value
-/// its last transfer claimed.
+/// **Ordering runs on events, in both directions.**
+/// A transfer signals its queue's timeline when it completes, and a command list that touches the resource waits on
+/// the value its last transfer claimed.
 /// The reverse — a transfer waiting for the frame's writes — rides the submission timeline the epoch system already
-/// keeps, which is why there is only one new event here rather than two.
+/// keeps.
+/// A timeline one queue signals and another waits on is a device-local `MTLEvent`, never an `MTLSharedEvent`; see
+/// `metal_epoch_system::submission_wait_timeline` for why.
+/// The streaming timelines are the exception, because the host signals them, and only a shared event takes that.
 ///
 /// A resource's storage is held for the duration by the handle the completion handler keeps, and released explicitly
 /// inside it: a caller is free to drop its last handle the moment an async transfer is issued, and the copy is still
@@ -199,10 +202,13 @@ private:
     /// A third queue costs one object and removes the cycle entirely.
     MTL4::CommandQueue* _stream_queue = nullptr;
 
-    /// One per transfer queue, because a shared event cannot take signals from two: they complete independently, so a
+    /// One per transfer queue, because one event cannot take signals from two: they complete independently, so a
     /// later value can land first and drive the event backwards.
-    MTL::SharedEvent* _upload_timeline = nullptr;
-    MTL::SharedEvent* _download_timeline = nullptr;
+    ///
+    /// Device-local rather than shared, because only queues wait on them and the host never reads them.
+    /// A queue waiting on a shared event can run ahead of the value; see `submission_wait_timeline`.
+    MTL::Event* _upload_timeline = nullptr;
+    MTL::Event* _download_timeline = nullptr;
 
     // A callback mutex, because `forget_value` runs inside a commit handler — see metal_common.hh.
     mutable cc::mutex<state> _state;

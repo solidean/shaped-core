@@ -38,12 +38,18 @@ void wait_for_value(MTL::SharedEvent* event, u64 value, cc::atomic<bool> const& 
 metal_epoch_system::metal_epoch_system(MTL::Device* device,
                                        MTL4::CommandQueue* queue,
                                        MTL::SharedEvent* epoch_event,
-                                       MTL::SharedEvent* submission_event)
-  : _device(device), _queue(queue), _epoch_event(epoch_event), _submission_event(submission_event)
+                                       MTL::SharedEvent* submission_event,
+                                       MTL::Event* submission_wait_event)
+  : _device(device),
+    _queue(queue),
+    _epoch_event(epoch_event),
+    _submission_event(submission_event),
+    _submission_wait_event(submission_wait_event)
 {
     CC_ASSERT(_device != nullptr, "epoch system needs a device");
     CC_ASSERT(_queue != nullptr, "epoch system needs a queue");
-    CC_ASSERT(_epoch_event != nullptr && _submission_event != nullptr, "epoch system needs both timelines");
+    CC_ASSERT(_epoch_event != nullptr && _submission_event != nullptr && _submission_wait_event != nullptr,
+              "epoch system needs all three timelines");
 
     _open.epoch_value = _current.load(cc::memory_order_relaxed);
 }
@@ -170,6 +176,8 @@ sg::submission_token metal_epoch_system::claim_submission_token()
 
 void metal_epoch_system::signal_submission(sg::submission_token token)
 {
+    // The twin first, though either order is sound: both signals run once everything committed before them is done.
+    _queue->signalEvent(_submission_wait_event, u64(token));
     _queue->signalEvent(_submission_event, u64(token));
 }
 
@@ -306,7 +314,9 @@ void metal_epoch_system::shutdown()
 
     _epoch_event->release();
     _submission_event->release();
+    _submission_wait_event->release();
     _epoch_event = nullptr;
     _submission_event = nullptr;
+    _submission_wait_event = nullptr;
 }
 } // namespace sg::backend::metal

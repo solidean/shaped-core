@@ -104,12 +104,15 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
 
     auto* const epoch_event = device->newSharedEvent();
     auto* const submission_event = device->newSharedEvent();
-    if (epoch_event == nullptr || submission_event == nullptr)
+    auto* const submission_wait_event = device->newEvent();
+    if (epoch_event == nullptr || submission_event == nullptr || submission_wait_event == nullptr)
     {
         if (epoch_event != nullptr)
             epoch_event->release();
         if (submission_event != nullptr)
             submission_event->release();
+        if (submission_wait_event != nullptr)
+            submission_wait_event->release();
         compiler->release();
         queue->release();
         device->release();
@@ -119,7 +122,8 @@ cc::result<sg::context_handle> sg::create_metal_context(backend::metal::metal_co
     // From here on the context owns every handle above, so nothing below may release one — the destructor would free it
     // a second time.
     // That is why the guard-style unwinds stop here rather than continuing past construction.
-    auto ctx = std::make_shared<metal_context>(device, queue, compiler, epoch_event, submission_event);
+    auto ctx
+        = std::make_shared<metal_context>(device, queue, compiler, epoch_event, submission_event, submission_wait_event);
     ctx->set_adapter_info(describe(device));
     // An MTL4 barrier names stages, never a resource, so there is no per-resource barrier to count.
     // Its transfer waits are events this backend does not count yet.

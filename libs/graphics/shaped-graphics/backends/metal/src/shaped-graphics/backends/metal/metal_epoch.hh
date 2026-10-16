@@ -47,11 +47,12 @@ struct sg::backend::metal::metal_epoch_payload
 class sg::backend::metal::metal_epoch_system
 {
 public:
-    /// Takes ownership of `epoch_event` and `submission_event`; `device` and `queue` are the context's and outlive this.
+    /// Takes ownership of the three events; `device` and `queue` are the context's and outlive this.
     metal_epoch_system(MTL::Device* device,
                        MTL4::CommandQueue* queue,
                        MTL::SharedEvent* epoch_event,
-                       MTL::SharedEvent* submission_event);
+                       MTL::SharedEvent* submission_event,
+                       MTL::Event* submission_wait_event);
     ~metal_epoch_system();
 
     metal_epoch_system(metal_epoch_system const&) = delete;
@@ -98,9 +99,20 @@ public:
     /// The epoch timeline, for a waiter that parks on it directly.
     [[nodiscard]] MTL::SharedEvent* epoch_timeline() const { return _epoch_event; }
 
-    /// The submission timeline itself, for a second queue that has to order itself behind the direct one.
-    /// `metal_transfer_system` is the only caller; every other question about it is `is_submission_complete`.
+    /// The submission timeline as the host sees it, for a listener or a host-side compare.
     [[nodiscard]] MTL::SharedEvent* submission_timeline() const { return _submission_event; }
+
+    /// The submission timeline as a queue waits on it: a device-local twin signalled with the same values.
+    ///
+    /// **A queue never waits on the shared event.**
+    /// On an M4 under macOS 27, an MTL4 queue waiting on an `MTLSharedEvent` that another queue signals sometimes
+    /// stalls for four seconds and then runs work before the value is reached.
+    /// A raw Metal probe with no sg in it reproduces that within a few dozen runs, and the same probe on `MTLEvent`
+    /// stayed clean over sixty.
+    /// So a timeline one queue signals and another waits on is device-local, and this one, which the host reads too,
+    /// carries a twin signalled right beside the shared event.
+    /// The host keeps reading the shared event, which a plain `MTLEvent` cannot be read from.
+    [[nodiscard]] MTL::Event* submission_wait_timeline() const { return _submission_wait_event; }
 
     /// An allocator to record into, recycled from the pool or newly created.
     /// Null when the device refused a fresh one, which every caller reports rather than asserts on.
@@ -153,6 +165,7 @@ private:
     MTL4::CommandQueue* _queue = nullptr;
     MTL::SharedEvent* _epoch_event = nullptr;
     MTL::SharedEvent* _submission_event = nullptr;
+    MTL::Event* _submission_wait_event = nullptr;
 
     /// The epoch new work records into, and the value the next commit signals.
     cc::atomic<u64> _current = {u64(sg::epoch::first)};

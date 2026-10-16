@@ -74,7 +74,8 @@ public:
                   MTL4::CommandQueue* queue,
                   MTL4::Compiler* compiler,
                   MTL::SharedEvent* epoch_event,
-                  MTL::SharedEvent* submission_event);
+                  MTL::SharedEvent* submission_event,
+                  MTL::Event* submission_wait_event);
     ~metal_context() override;
 
     // create_metal_context fills this in once it has picked a device.

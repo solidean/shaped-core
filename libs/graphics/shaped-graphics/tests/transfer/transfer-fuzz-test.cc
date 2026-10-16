@@ -253,10 +253,62 @@ ASYNC_INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const
                  })
         ->execute_at_least(10);
 
-    if (!nx::is_thorough())
-        test->cap_seed_count(24);
+    SECTION("fuzz")
+    {
+        if (!nx::is_thorough())
+            test->cap_seed_count(24);
 
-    CHECK(co_await test->execute_fuzz_test_async());
+        CHECK(co_await test->execute_fuzz_test_async());
+    }
+
+    // The sections below are fuzz findings on metal, where one queue waited on an MTLSharedEvent another queue signals.
+    // Such a wait sometimes stalls for four seconds and then lets the work run before the value is reached.
+    // See metal_epoch_system::submission_wait_timeline.
+
+    // An async download of bytes a list had just written handed back zeroes.
+    SECTION("regression - async download after an inline upload")
+    {
+        auto n0 = test->eval_op("mk_trace");
+        (void)test->eval_op("advance epoch", n0);
+        co_await test->eval_op_async("async download + check", cc::random::from_state(9050458225619920008ull), n0);
+    }
+
+    // A list read the buffer as it was before an async upload it waited on.
+    SECTION("regression - a list reads after an async upload")
+    {
+        auto n0 = test->eval_op("mk_trace");
+        (void)test->eval_op("copy region", cc::random::from_state(15407372961399553199ull), n0);
+        (void)test->eval_op("async upload", cc::random::from_state(3286546624697886487ull), n0);
+        (void)test->eval_op("advance epoch", n0);
+        co_await test->eval_op_async("download + check", cc::random::from_state(8633375846102810339ull), n0);
+    }
+
+    // A list missed the middle one of three async uploads.
+    SECTION("regression - a list reads after three async uploads")
+    {
+        auto n0 = test->eval_op("mk_trace");
+        (void)test->eval_op("async upload", cc::random::from_state(5122889261944415232ull), n0);
+        (void)test->eval_op("async upload", cc::random::from_state(15008876143257452787ull), n0);
+        (void)test->eval_op("async upload", cc::random::from_state(10398724905230871989ull), n0);
+        (void)test->eval_op("advance epoch", n0);
+        co_await test->eval_op_async("download + check", cc::random::from_state(16467782329776526886ull), n0);
+    }
+
+    // The finding that started the hunt: an inline upload, an async upload, a second inline upload, an async download.
+    SECTION("regression - inline upload, async upload, inline upload, async download")
+    {
+        auto n0 = test->eval_op("mk_trace");
+        (void)test->eval_op("submit cmd", n0);
+        (void)test->eval_op("advance epoch", n0);
+        (void)test->eval_op("advance epoch", n0);
+        (void)test->eval_op("copy region", cc::random::from_state(3699031922499913056ull), n0);
+        (void)test->eval_op("advance epoch", n0);
+        (void)test->eval_op("upload", cc::random::from_state(1724587761744200817ull), n0);
+        (void)test->eval_op("open cmd", n0);
+        (void)test->eval_op("async upload", cc::random::from_state(12318124846294869785ull), n0);
+        (void)test->eval_op("upload", cc::random::from_state(13562018016512298076ull), n0);
+        co_await test->eval_op_async("async download + check", cc::random::from_state(1247115699077984541ull), n0);
+    }
 
     // The ops start async transfers they do not all await, and a test settles what it started: the context's detached work, then the GPU.
     co_await cc::async_settled(ctx->backlog.settled());
