@@ -166,6 +166,9 @@ That is what every target does with a four-wide store into a narrower format, an
 The conversion is written where it happens, so a store that drops a channel always says so.
 
 ```sgl
+// .r16_float and .rg16_float are outside the portable image formats, which every target writes without asking
+require extended_image_formats
+
 @option const target_format: pixel_format = .rgba16_float
 
 binding mip:
