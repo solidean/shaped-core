@@ -361,3 +361,43 @@ ASYNC_TEST("sg metal - concurrent submits on one buffer see each other's writes"
             ++wrong;
     CHECK(wrong == 0).context(cc::format("{} of {} slots did not carry their thread's write", wrong, k_threads));
 }
+
+// Off-frame uploads back to back, so the feedback handlers of the first run while later ones commit.
+// Each handler takes its staging buffer out of the residency set and releases it, on a queue Apple owns.
+// Metal's GPU validation layer reads that set inside every commit, which is where a staging buffer released mid-read
+// crashed it; see readme.md's "Running under Metal's GPU validation".
+// One buffer per upload, since uploads to one resource queue behind each other and would leave little to overlap.
+ASYNC_TEST("sg metal - async uploads commit while earlier ones settle")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    constexpr int k_uploads = 256;
+    auto buffers = cc::vector<sg::raw_buffer_handle>();
+    for (auto i = 0; i < k_uploads; ++i)
+    {
+        buffers.push_back(ctx->persistent.create_raw_buffer(isize(sizeof(u32)), k_copy_both));
+        auto value = cc::vector<u32>();
+        value.push_back(u32(i));
+        ctx->upload.data_to_buffer(buffers.back(), cc::pinned_data<u32 const>(cc::make_pinned_data(cc::move(value))));
+    }
+    co_await ctx->idle_completion();
+
+    auto down = ctx->create_command_list();
+    auto futures = cc::vector<sg::bytes_future>();
+    for (auto const& b : buffers)
+        futures.push_back(down->download.bytes_from_buffer(b, 0, isize(sizeof(u32))));
+    ctx->submit_command_list(cc::move(down));
+    co_await ctx->idle_completion();
+
+    auto mismatches = 0;
+    for (auto i = 0; i < k_uploads; ++i)
+    {
+        auto const bytes = futures[i].try_get_bytes();
+        REQUIRE(bytes.has_value());
+        if (*reinterpret_cast<u32 const*>(bytes.value().data()) != u32(i))
+            ++mismatches;
+    }
+    CHECK(mismatches == 0).context(cc::format("{} of {} uploads landed wrong", mismatches, k_uploads));
+}

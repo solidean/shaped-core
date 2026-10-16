@@ -232,8 +232,7 @@ void metal_transfer_system::commit(MTL4::CommandQueue* queue,
           sink->notify_drained();
     });
 
-    MTL4::CommandBuffer const* const buffers[] = {command_buffer};
-    queue->commit(buffers, 1, options);
+    _ctx->residency().commit(queue, command_buffer, options);
     options->release();
 
     queue->signalEvent(claim.is_download ? _download_timeline : _upload_timeline, claim.value);
@@ -514,8 +513,7 @@ void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buf
           sink->notify_drained();
     });
 
-    MTL4::CommandBuffer const* const buffers[] = {command_buffer};
-    _stream_queue->commit(buffers, 1, options);
+    _ctx->residency().commit(_stream_queue, command_buffer, options);
     options->release();
 
     // No value signalled here: a streaming batch is one slice of a transfer, and what a waiter waits for is the

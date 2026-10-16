@@ -331,8 +331,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
                   sink->notify_drained();
             });
 
-            MTL4::CommandBuffer const* const buffers[] = {buffer};
-            _queue->commit(buffers, 1, options);
+            _residency.commit(_queue, buffer, options);
             options->release();
 
             _epochs.signal_submission(claimed);
