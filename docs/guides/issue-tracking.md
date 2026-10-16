@@ -136,6 +136,10 @@ An agent claims on someone's behalf: `--as "Claude (for <name>)"`.
 `issues release <id>` removes a claim the same way, and `--force` takes over or releases someone else's.
 `issues list --stale <days>` finds claims nobody touched for a while.
 
+**A leftover claim whose work has landed may be cleared by anyone, without asking.**
+Nothing clears a claim automatically in every case, so a claim outlives its work: a closed issue still carrying `claimed-by`, or an open one whose resolving commit is already in the history.
+When the commit history shows that closing, remove the claim: `issues release <id> --force` on an open issue, the two lines by hand on a closed one.
+
 By hand: edit the two lines, commit only that file, push.
 
 ### Closed
