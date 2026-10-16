@@ -720,7 +720,14 @@ struct raster_scene
     auto const decal_buffers = upload_decals(cmd, *scene.decals, resources.drawings.decal_atlas());
 
     // Held across the draws: the tables are what a pixel reaches every mesh and texture through.
-    auto const bindless = resources.freeze();
+    // A snapshot that does not fit the descriptor heap declines the layer, as it declines a trace.
+    auto frozen = resources.try_freeze();
+    if (frozen.has_error())
+    {
+        CC_LOG_ERROR("the bindless tables could not be snapshot for a raster layer: {}", frozen.error().to_string());
+        return sg::routine_outcome::declined;
+    }
+    auto const& bindless = frozen.value();
 
     // Every layer keeps one, since a double-click picks off it whether or not anything draws over the frame.
     auto* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
@@ -906,8 +913,10 @@ void view_renderer::acquire_trace(sg::command_list& cmd,
     if (res.traces[trace_index].raw() == nullptr)
         return; // trace() will not run it either
     // The same walk trace() takes, for its acquires alone: residency only moves at the frame's settle pass, so both
-    // resolve the same items to the same indices.
-    (void)resolve_scene(cmd, v.layers[tr.layer], resources);
+    // resolve the same items to the same indices — under the same mode, which decides what a walk acquires.
+    auto const& l = v.layers[tr.layer];
+    auto const is_traced = planned_mode(l.settings.mode) != render_mode::raster;
+    (void)resolve_scene(cmd, l, resources, is_traced);
 }
 
 sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
