@@ -4,6 +4,7 @@
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/impl/bounds_of.hh>
+#include <typed-geometry/geometry/impl/hexahedron.hh>
 #include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/primitives/plane.hh>
@@ -108,6 +109,20 @@ public:
             r[c] = pos<D, T>() + (bc * a.dist + ca * b.dist + ab * f.dist) / tg::dot(a.normal, bc);
         }
         return r;
+    }
+    /// every pair of corners that share two of their three planes; needs a far plane, as vertices() does.
+    [[nodiscard]] constexpr cc::fixed_array<segment<D, T>, 12> edges() const
+    {
+        return tg::impl::corner_edges<3, D, T>(this->vertices());
+    }
+    /// the six faces, wound counterclockwise seen from outside; face i lies on planes[i].
+    /// Needs a far plane, as vertices() does.
+    [[nodiscard]] constexpr cc::fixed_array<quad<D, T>, 6> faces() const
+    {
+        // The corner bits run right, top, far, which is right-handed or not depending on the planes, so the right face asks its own normal.
+        auto const f = tg::impl::corner_faces(this->vertices(), false);
+        auto const n = tg::dual(tg::cross(f[1].pos10 - f[1].pos00, f[1].pos01 - f[1].pos00));
+        return tg::dot(n, planes[1].normal) < T(0) ? tg::impl::corner_faces(this->vertices(), true) : f;
     }
 
     // transformation
