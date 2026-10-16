@@ -67,5 +67,6 @@ struct div_mod_result;
 /// floor and ceil of one quotient (see scalar/fixed_int/fixed_arith.hh).
 template <class T>
 struct floor_ceil_result;
+struct ratio_significand;
 
 } // namespace tg

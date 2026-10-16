@@ -472,6 +472,7 @@ tg::div_trunc / mod_trunc / div_floor / mod_floor / div_ceil(a, b);  // same wid
 tg::div_mod_trunc(a, b); tg::div_mod_floor(a, b);          // -> {quotient, remainder} from one division
 tg::div_floor<fi32>(x, w); tg::div_ceil<fi32>(x, w);       // quotient known to fit fi32: udiv128 estimate + exact fix
 tg::div_floor_ceil<fi32>(x, w);                            // -> {floor, ceil}
+tg::ratio_to_f64(x, w); tg::ratio_to_f32(x, w);           // x / w correctly rounded (to nearest, ties to even); any widths
 x.to_f64(); x.to_f32(); fi128(2.5);                        // correctly rounded out; truncating in
 x.sign(); x.is_negative();                                 // int -1/0/+1 without a branch; bool
 u.count_leading_zeroes(); u.popcount(); u.bit_width();     // fixed_uint only; s.magnitude_bit_width() for signed
