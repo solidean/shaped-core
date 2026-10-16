@@ -230,7 +230,7 @@ def test_known_matches_refs_and_markers(base: Path):
 
     assert "bug-crash" in hits("src/lib.cc:3") and "bug-crash" not in hits("src/lib.cc:1")
     assert "bug-flaky" in hits("src/lib.cc:1"), "a directory ref covers its files"
-    assert "feat-shiny" in hits("src/more.cc:2") and "feat-shiny" not in hits("src/more.cc:1")
+    assert "feat-shiny" in hits("src/more.cc:1") and "marked at src/more.cc:2" in hits("src/more.cc:1"), "a marker counts for its file"
     assert "bug-flaky" in hits("kernels-test/segment-triangle")
     assert "bug-flaky" in hits("intersect") and "bug-flaky" in hits("h256::intersect")
     assert cli(a, "known", "nothing-like-this")[0] == 1

@@ -104,6 +104,7 @@ Code points back at an issue with a **marker**:
 
 `issues known <query>` answers "is this known?" for a path, a `path:line`, a test name, a symbol or plain text.
 It searches refs, markers and the text, closed issues included and marked, since a fixed issue is what a regression looks for.
+A marker counts for its whole file, since it sits above the code it marks rather than on the line a query names.
 
 ## Lifecycle
 

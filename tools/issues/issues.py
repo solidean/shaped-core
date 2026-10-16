@@ -582,8 +582,9 @@ def cmd_known(ws: Workspace, args: argparse.Namespace) -> int:
                 if first is not None and ref_first is not None and (ref_last < first or last < ref_first):
                     continue
                 hits.append((issue, f"refs file: {value}"))
+        # A marker counts for its whole file: it sits above the code it marks, rarely on the queried line.
         for marker_rel, line, qualifier, issue_id in _markers(repo):
-            if marker_rel == rel and (first is None or first <= line <= last):
+            if marker_rel == rel:
                 issue = ws.lookup(f"{qualifier}:{issue_id}" if qualifier else issue_id, repo)
                 if issue is not None:
                     hits.append((issue, f"marked at {marker_rel}:{line}"))
