@@ -93,6 +93,7 @@ CONSTANTS_STAGE = "constants"
 # Splitting on byte offsets rather than lines is safe, and deliberately so.
 # `)slibsrc"` may not appear in the source at all, so no boundary can grow one.
 # Nothing requires a chunk to be a whole line either -- concatenation restores the exact byte sequence.
+# A chunk must hold whole characters, though: the generated file is written as UTF-8, and half a character is not one.
 EMBED_CHUNK_BYTES = 8000
 
 
@@ -495,8 +496,16 @@ def embed_literal(text: str) -> str:
         # An empty shader file still has to yield a literal rather than nothing.
         return ' R"slibsrc()slibsrc"'
 
-    chunks = [raw[i:i + EMBED_CHUNK_BYTES] for i in range(0, len(raw), EMBED_CHUNK_BYTES)]
-    return "".join(f'\n    R"slibsrc({chunk.decode("utf-8", "surrogateescape")})slibsrc"' for chunk in chunks)
+    chunks = []
+    start = 0
+    while start < len(raw):
+        end = min(start + EMBED_CHUNK_BYTES, len(raw))
+        # Back to the start of the character the cut lands in: a continuation byte is 0b10xxxxxx.
+        while end < len(raw) and (raw[end] & 0xC0) == 0x80:
+            end -= 1
+        chunks.append(raw[start:end])
+        start = end
+    return "".join(f'\n    R"slibsrc({chunk.decode("utf-8")})slibsrc"' for chunk in chunks)
 
 
 def storage_of(member: StructMember) -> str:
