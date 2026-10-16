@@ -193,9 +193,12 @@ cc::shared_async<temporal_result> run_temporal(sg::context& ctx, svgf_inputs con
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));
 
-    co_return temporal_result{.history = co_await read_back(ctx, out_history),
-                              .moments = co_await read_back(ctx, out_moments),
-                              .normal_depth = co_await read_back(ctx, out_normal_depth)};
+    // One statement per co_await: inside a designated initializer they crash MSVC's backend (C1001).
+    auto result = temporal_result{};
+    result.history = co_await read_back(ctx, out_history);
+    result.moments = co_await read_back(ctx, out_moments);
+    result.normal_depth = co_await read_back(ctx, out_normal_depth);
+    co_return result;
 }
 
 // ---- filter ---------------------------------------------------------------------------------------------------------
