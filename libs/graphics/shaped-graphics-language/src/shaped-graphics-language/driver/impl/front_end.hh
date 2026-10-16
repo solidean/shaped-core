@@ -32,10 +32,42 @@ struct front_end
     /// Parallel to the files between the prelude and the program: the name of each reached library file.
     cc::vector<cc::string_view> library_names;
     /// Every error of every phase, one formatted diagnostic per line and its notes under it; empty when there is none.
-    /// A diagnostic a test's `@expect` names is in neither this nor `warnings`.
+    /// A diagnostic a test's `@expect` names is in neither this nor `warnings`, and neither is one of `entry_diagnostics`.
     cc::string errors;
     /// The warnings, one entry each, formatted the same way but without the line end after its last line.
     cc::vector<cc::string> warnings;
+
+    /// A diagnostic judged of the inlined bodies of some entry points alone, which a compile of another one leaves out
+    /// (CHK-396).
+    struct entry_diagnostic
+    {
+        /// Their functions.
+        cc::vector<check::symbol_id> entry_points;
+        bool is_warning = false;
+        /// Formatted as an entry of `warnings` is, or as a line of `errors`.
+        cc::string text;
+    };
+    cc::vector<entry_diagnostic> entry_diagnostics;
+
+    /// `errors`, and the errors of the entry point of function `function`; of every entry point where it is `none`.
+    [[nodiscard]] cc::string errors_of(check::symbol_id function) const
+    {
+        auto result = errors;
+        for (auto const& d : entry_diagnostics)
+            if (!d.is_warning && (function == check::symbol_id::none || check::holds(d.entry_points, function)))
+                result += d.text;
+        return result;
+    }
+
+    /// `warnings`, and the warnings of the entry point of function `function`; of every entry point where it is `none`.
+    [[nodiscard]] cc::vector<cc::string> warnings_of(check::symbol_id function) const
+    {
+        auto result = warnings;
+        for (auto const& d : entry_diagnostics)
+            if (d.is_warning && (function == check::symbol_id::none || check::holds(d.entry_points, function)))
+                result.push_back(d.text);
+        return result;
+    }
 
     /// The source's file; behind the prelude it is the last one, and a file of the prelude stands in its own place.
     [[nodiscard]] i32 program_file() const { return program; }

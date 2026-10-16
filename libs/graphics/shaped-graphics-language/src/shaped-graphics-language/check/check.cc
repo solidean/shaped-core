@@ -546,6 +546,9 @@ void checker::run(resume_point from)
     judge_footprint_pins();
     judge_trace_graphs();
     judge_callables();
+    judge_indices();
+    merge_entry_diagnostics();
+    drop_expecting_entry_points();
 }
 
 void checker::declare_file(i32 file)

@@ -130,6 +130,7 @@ namespace sgl::test
 /// reports each such expectation that none of them met as `unmet-expectation` (CHK-232).
 /// Inside is from the test's keyword to the end of its body, so a diagnostic outside is never taken.
 /// A test that expects diagnostics is judged by them alone, and `run_tests` leaves it out.
+/// An entry point that expects them takes those judged of its inlined body the same way, wherever they stand (CHK-397).
 void contain_expected(check::checked_module const& m, cc::vector<check::located_diagnostic>& diagnostics);
 
 /// A result that is no pass as the diagnostic `test-failed` at its test, with one related note per narrowed part.

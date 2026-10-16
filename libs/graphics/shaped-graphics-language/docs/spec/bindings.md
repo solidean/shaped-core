@@ -359,18 +359,24 @@ binding materials:
 
 let base = materials.albedo[nonuniform p.material].sample(p.uv)
 let fixed = materials.albedo[materials.slot].sample(p.uv)
+let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
 ```
 
 * It is read by element, and an element is the resource itself, handed to a builtin as the member would be.
 * It takes `N` slots from its first, so the resources after it start `N` later, as sg's bindings concept requires of every array.
 * `N` is at least 2: sg and the generated host code bind a count of 1 as a plain member, which is what one resource is written as (CHK-299).
-* An index the uniformity pass cannot prove the same in every invocation is marked `nonuniform i`, or refused (CHK-300).
-  Forgetting the mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
-  A mark on an index the pass proves uniform is a warning, since it pays for nothing.
-  The mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
+* An index the uniformity pass proves the same in every invocation needs no mark, and any other is marked, or refused (CHK-300).
+  `nonuniform i` says it may differ, which every varying index says, however plainly the pass sees it vary.
+  Forgetting that mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
+  `uniform i` is the author's word where the pass proves neither, such as a count read from a buffer the shader writes, and is refused on an index the pass proves varying (CHK-394).
+  A `nonuniform` mark on an index the pass proves uniform is a warning, since it pays for nothing.
+  A mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
+* A function's index is judged by what each call reaching it passes, in each entry point alone (CHK-395, CHK-396).
+  A helper that one call reaches with a uniform index and another with a varying one is split in two, or marked `nonuniform` and pays on both.
 * `T[]`, whose length the host binds, is the spelling an unbounded array has, and `unsupported-yet` until sg binds one.
   An array of samplers, and one of more than one dimension, are `unsupported-yet` too.
-* HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a marked index; WebGPU has no binding arrays, so WGSL refuses by the feature.
+* HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a `nonuniform` index, and a `uniform` one plain, as MSL writes both.
+  WebGPU has no binding arrays, so WGSL refuses by the feature.
 
 ## Workgroup memory
 
@@ -547,7 +553,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
   The builtins that take one are the texture methods of [Sampling](#sampling), called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
-* Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform`.
+* Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform` and `uniform`.
 * `@workgroup` bindings, which take no group.
 * `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
 * `@atomic` images of `.r32_uint` and `.r32_sint`, with the same updates, and `@coherent` buffers and images.

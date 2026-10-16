@@ -11,7 +11,7 @@
 // The corpus is how SGL's semantics are tested: one `.sgl` file per topic under tests/corpus/, each a program whose
 // `test`s state what the language does.
 // A file passes when it checks with no diagnostic at all, every test in it passes, and every entry point it declares is
-// written for every target.
+// written for every target that has what it requires.
 // The files of tests/corpus/modules/ are the library every file may `use`; each is also a program of its own module,
 // so a module's tests run as any file's do.
 
@@ -77,6 +77,27 @@ corpus_library const& library()
 }
 } // namespace
 
+namespace
+{
+/// Whether every line of `error` says the target lacks a feature the entry point requires.
+bool is_lacking_feature(cc::string_view error)
+{
+    auto is_any = false;
+    while (!error.empty())
+    {
+        auto const end = error.find('\n');
+        auto const line = end < 0 ? error : error.subview({.offset = 0, .size = end});
+        error = end < 0 ? cc::string_view() : error.subview(end + 1);
+        if (line.empty())
+            continue;
+        if (!line.contains(": error: target-lacks-feature: "))
+            return false;
+        is_any = true;
+    }
+    return is_any;
+}
+} // namespace
+
 INVOCABLE_TEST("sgl corpus - a file checks clean, passes its tests, and writes every entry point",
                (sgl_corpus_file const& f))
 {
@@ -98,6 +119,9 @@ INVOCABLE_TEST("sgl corpus - a file checks clean, passes its tests, and writes e
     CHECK(texts.value().size() == tested.entry_points.size() * isize(sgl::emit::all_targets().size()));
     for (auto const& e : texts.value())
     {
+        // EMIT-109: WebGPU has some features on no device, and an entry point that requires one is refused there alone
+        if (e.target == sgl::emit::target::wgsl && e.text.has_error() && is_lacking_feature(e.text.error()))
+            continue;
         CHECK(e.text.has_value()).dump("entry point", e.entry_point).dump("target", sgl::emit::to_string(e.target));
         if (e.text.has_error())
             CHECK(e.text.error() == "");

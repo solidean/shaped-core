@@ -768,6 +768,10 @@ fun f() -> float:
 * **CHK-267** `@expect(footprint = "slot: access, ...")` on an entry point pins its [footprint](../bindings.md#footprint): each touched slot once, as `read`, `write` or `read write`, in any order.
   A footprint that differs is `unmet-expectation`, whose detail spells the one the code has.
   On a function that is no entry point, or with any other argument, it is `invalid-attribute-arguments`.
+* **CHK-397** `@expect(error = "kind")` or `@expect(warning = "kind")` on an entry point, of any stage, takes the diagnostics judged of its inlined body (CHK-396), wherever in the program they stand.
+  It takes them as a test's expectation takes those inside the test (CHK-232), and one none of them meets is `unmet-expectation`.
+  Such an entry point is judged by them alone and never built, as such a test is never run.
+  On a function that is no entry point it is `invalid-attribute-arguments`.
 
 ## Features
 
@@ -879,9 +883,32 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   `T[]`, an array of samplers and one of more than one dimension are `unsupported-yet`.
   An array whose innermost element is a value is no binding array, whatever its dimensions: CHK-291 is what judges it.
   An access word stands before it and qualifies its element: `out image_2d[.rgba8_unorm][4]`.
-* **CHK-300** An index into a binding array that the uniformity pass cannot prove the same in every invocation is `non-uniform-index` unless it is `nonuniform i` ([why](why/checking.md#chk-300)).
-  `nonuniform i` is its argument unchanged, and on an index the pass proves uniform it is the warning `needless-nonuniform`.
-  It stands only as the whole index into a binding array, `textures[nonuniform i]`; anywhere else, a `let` or an index into a value array included, it is `wrong-kind-of-name`.
+* **CHK-300** An index into a binding array that the uniformity pass proves the same in every invocation needs no mark ([why](why/checking.md#chk-300)).
+  Any other is marked `uniform i` or `nonuniform i`.
+  Unmarked, an index the pass proves varying (CHK-393) is `non-uniform-index`, and one it proves neither way is `unproven-index`, whose detail offers both marks.
+  A varying index is marked `nonuniform` even where the pass proves it varying, since the mark is what keeps its cost in the source.
+  Either mark is its argument unchanged.
+  A `nonuniform` mark on an index the pass proves uniform wherever the program reaches it is the warning `needless-nonuniform` (CHK-395).
+  A mark stands only as the whole index into a binding array, `textures[nonuniform i]`; anywhere else, a `let` or an index into a value array included, it is `wrong-kind-of-name`.
+  Neither is a keyword: each is a function of the prelude, written as a call without parentheses, which a program's own name of that spelling shadows.
+* **CHK-393** An index the pass does not prove uniform is **proven varying** where it comes from what the stage is handed (CHK-283), or from what a trace or a callable writes back.
+  It may come so through values, or through control flow that tests such a value.
+  Every other value CHK-283 counts non-uniform is **unproven**: a read of a `mut` buffer, a `mut` image or workgroup memory, and the result of an atomic or a subgroup operation.
+* **CHK-394** `uniform i` is the author's word that `i` is the same in every invocation where the pass cannot prove it, and every target writes it as the plain index (EMIT-121).
+  On an index the pass proves varying it is `uniform-index-varies`.
+  On one the pass proves uniform it costs nothing, and is no warning.
+* **CHK-395** An access in a function is judged over the copies of it each entry point inlined, one per call that reaches it, and each copy by what its call passes ([why](why/checking.md#chk-395)).
+  So an index a function derives from its parameter needs no mark where every call reaching it passes a value the pass proves uniform.
+  An unmarked access that some copies reach uniform and others not is `mixed-index`, at the index.
+  Its notes name one call of each kind, where the paths of the two copies part, and what made the other value differ.
+  Its detail offers two fixes: split the function in two, one of which marks the index `nonuniform`, or mark it `nonuniform` and pay for the mark on the uniform calls too.
+  A `nonuniform` mark settles it, and is needless only where every copy in every entry point of the program is uniform.
+  A `uniform` mark there is `uniform-index-varies` where a copy is proven varying.
+  The index of an element a resource parameter stands for is the one its caller wrote, and is judged there.
+* **CHK-396** A diagnostic of the uniformity pass belongs to the entry points whose inlined bodies it was judged of ([why](why/checking.md#chk-396)).
+  A compile of one entry point reports the program's diagnostics and its own, and never another entry point's: a vertex stage never answers for a helper only a pixel stage calls.
+  A check of the whole file, `sgl test` and the language server among them, reports every entry point's, each once.
+  A function no entry point of the program reaches is not judged, since an index it derives from a parameter is its callers' to prove.
 
 ## Workgroup memory
 
@@ -1401,7 +1428,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-397, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
@@ -1428,7 +1455,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
-| `unmet-expectation` | CHK-232, CHK-267 |
+| `unmet-expectation` | CHK-232, CHK-267, CHK-397 |
 | `member-name-clash` | CHK-238, CHK-386 |
 | `literal-not-representable` | CHK-60, CHK-61, CHK-253, CHK-357 |
 | `call-spelling` | CHK-256 |
@@ -1440,8 +1467,11 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `missing-sampler` | CHK-279 |
 | `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389 |
 | `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
-| `non-uniform-index` | CHK-300 |
-| `needless-nonuniform` | CHK-300 |
+| `non-uniform-index` | CHK-300, CHK-395 |
+| `needless-nonuniform` | CHK-300, CHK-395 |
+| `unproven-index` | CHK-300 |
+| `mixed-index` | CHK-395 |
+| `uniform-index-varies` | CHK-394, CHK-395 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
 
@@ -1459,4 +1489,5 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 * Whether `workgroup_uniform_load` takes an element of a workgroup array at a uniform index.
 * Whether `@subgroup_size` is uniform.
 * Whether a value loaded through an element a `nonuniform` index picked is non-uniform — it counts as uniform today, which is a soundness hole of the same kind.
+* Whether a function no entry point reaches is judged on its own, its parameters unproven, once a module has an interface its callers are checked against (CHK-396).
 * Whether a ray query's committed hit may assume that traversal finds one ray's hits the same way in every lane.

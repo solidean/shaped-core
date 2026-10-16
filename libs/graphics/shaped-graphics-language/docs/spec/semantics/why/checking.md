@@ -447,6 +447,31 @@ On hardware that needs the mark, a marked access becomes a loop over the distinc
 A refactor that makes an index non-uniform then fails loudly, where an inserted mark would slow it silently.
 The strict rule is also additively relaxable: making the mark optional later breaks no program, while hiding the cost now and asking for it back later would.
 
+What the pass proves uniform needs no word, since the plain index is what every target writes for it anyway.
+Not everything uniform is provable: a count one thread wrote to a buffer, or a value a subgroup broadcast, may be the same in every invocation by the author's design.
+For those the author says which it is, and `uniform i` is the word that asserts it.
+It is checked against what the pass does prove, so it can never contradict a proven difference, and it costs nothing where it is right.
+`uniform` and `nonuniform` are functions of the prelude rather than keywords, so they are spelled and placed alike, and no program loses the name.
+
+## CHK-395
+
+A helper is inlined once per call, so its index has as many values as it has calls.
+Judging the access once, by the first copy the pass met, made a helper called with a uniform index and a varying one impossible to write.
+Unmarked, the varying call was refused; marked, the uniform call called the mark needless, and nothing satisfied both.
+Judging each copy by its own call lets the helper stay unmarked wherever every call proves its index uniform, which is the common case.
+Where calls disagree, the compiler cannot pick for the author: writing the mark pays on every call, and leaving it out is wrong on some.
+So it names both calls and asks, and the explicit `nonuniform` is an answer, not a mistake to warn about.
+A needless mark is judged over every entry point of the program, since one shared helper must not warn in the compile of a shader whose sibling needs the mark.
+
+## CHK-396
+
+Each entry point is a separate shader, compiled on its own by a host that may never build its siblings.
+A diagnostic judged of one entry point's inlined body says nothing of another's, so failing the other's compile for it would refuse a correct shader.
+A whole-file check still shows every one, since an editor and a test run speak for the file.
+A function no entry point reaches is left alone, though a check could judge it with its parameters unproven.
+That would demand a mark on every library helper that derives an index from a parameter, which is exactly the index CHK-395 lets the callers prove.
+A module's function is judged where it is used, in the program whose entry points inline it.
+
 ## CHK-320
 
 The geometry is part of the type because it decides what a trace against the structure is written as and what it gives back.

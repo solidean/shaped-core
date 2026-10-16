@@ -319,6 +319,99 @@ TEST("sgl check - mut bytes differ between threads, named alone or in a binding 
     CHECK(words("work.many[1].load(0u)").contains("is loaded from work.many, which the shader also stores to"));
 }
 
+TEST("sgl check - an index the pass proves neither the same nor different is marked `uniform` or `nonuniform`")
+{
+    auto const counted = [](cc::string_view index)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding mats:\n"
+                                      "    texs: texture_2d[float4][8]\n"
+                                      "\n"
+                                      "binding work:\n"
+                                      "    counts: mut buffer[int]\n"
+                                      "    values: mut buffer[float4]\n"
+                                      "\n"
+                                      "@compute(64) fun cs(@thread_id id: int3){{mats, work}}:\n"
+                                      "    let k = work.counts[0] % 8\n"
+                                      "    work.values[id.x] = mats.texs[{}].load(int2(0, 0))\n",
+                                      index));
+    };
+    // CHK-394: the author's word, either way, where the pass has none
+    CHECK(counted("uniform k") == "");
+    CHECK(counted("nonuniform k") == "");
+    CHECK(counted("k")
+          == "unproven-index user:[k] an index into a binding array that the compiler cannot prove the same in every "
+             "invocation: mark it `uniform k` where it is, or `nonuniform k` where it may differ\n"
+             "  note user:[work.counts[0]] this value is read from work.counts, which the shader also writes\n");
+}
+
+TEST("sgl check - a `uniform` mark on an index the pass proves varying is refused")
+{
+    auto const picked = [](cc::string_view index)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding mats:\n"
+                                      "    @sampler(smp) texs: texture_2d[float4][8]\n"
+                                      "    smp: sampler\n"
+                                      "    slot: int\n"
+                                      "\n"
+                                      "struct pixel_input:\n"
+                                      "    @position position: hpos4\n"
+                                      "    uv: float2\n"
+                                      "    @interpolate(.flat) material: int\n"
+                                      "\n"
+                                      "@pixel struct target:\n"
+                                      "    color: float4\n"
+                                      "\n"
+                                      "@pixel fun ps(p: pixel_input){{mats}} -> target:\n"
+                                      "    return {{color = mats.texs[{}].sample(p.uv)}}\n",
+                                      index));
+    };
+    // a mark that costs nothing is no needless one
+    CHECK(picked("uniform mats.slot") == "");
+    CHECK(picked("uniform p.material")
+          == "uniform-index-varies user:[uniform p.material] this index is marked `uniform`, and it differs between "
+             "invocations: mark it `nonuniform p.material` instead\n"
+             "  note user:[p] this value comes from the stage's input struct\n");
+}
+
+TEST("sgl check - a helper reached with a uniform index and a varying one is split, or marked `nonuniform`")
+{
+    auto const helped = [](cc::string_view index)
+    {
+        return reports_for(
+            cc::format("require binding_arrays\n\n"
+                       "binding mats:\n"
+                       "    @sampler(smp) texs: texture_2d[float4][8]\n"
+                       "    smp: sampler\n"
+                       "    slot: int\n"
+                       "\n"
+                       "struct pixel_input:\n"
+                       "    @position position: hpos4\n"
+                       "    uv: float2\n"
+                       "    @interpolate(.flat) material: int\n"
+                       "\n"
+                       "@pixel struct target:\n"
+                       "    color: float4\n"
+                       "\n"
+                       "fun sample_map(map: int, uv: float2){{mats}} -> float4 => mats.texs[{}].sample(uv)\n"
+                       "\n"
+                       "@pixel fun ps(p: pixel_input){{mats}} -> target:\n"
+                       "    return {{color = sample_map(mats.slot, p.uv) + sample_map(p.material, p.uv)}}\n",
+                       index));
+    };
+    // CHK-395: the explicit mark is the author's choice to pay on the uniform call too
+    CHECK(helped("nonuniform (map % 8)") == "");
+    CHECK(helped("map % 8")
+          == "mixed-index user:[map % 8] some calls give this index into a binding array a value the same in every "
+             "invocation, and others one that may differ: split sample_map in two, one of which marks it `nonuniform "
+             "(map % 8)`, or mark it `nonuniform (map % 8)` here and pay for the mark on the uniform calls too\n"
+             "  note user:[sample_map(mats.slot, p.uv)] this call gives it a value the same in every invocation\n"
+             "  note user:[sample_map(p.material, p.uv)] and this one a value that may differ between them\n"
+             "  note user:[p] this value comes from the stage's input struct\n");
+    CHECK(helped("uniform (map % 8)").contains("uniform-index-varies"));
+}
+
 TEST("sgl check - `nonuniform i` stands only as the index into a binding array")
 {
     auto const marked = [](cc::string_view body)
@@ -348,6 +441,9 @@ TEST("sgl check - `nonuniform i` stands only as the index into a binding array")
     CHECK(marked("    results.values[nonuniform id.x] = float4(0.0, 0.0, 0.0, 0.0)\n").contains(misplaced));
     CHECK(marked("    results.values[id.x] = materials.texs[nonuniform (nonuniform id.x)].load(int2(0, 0))\n")
               .contains(misplaced));
+    CHECK(marked("    let j = uniform id.x\n"
+                 "    results.values[id.x] = materials.texs[nonuniform j].load(int2(0, 0))\n")
+              .contains("`uniform i` marks an index into a binding array, and stands only as one: `t[uniform i]`"));
 }
 
 TEST("sgl check - a marked index stays marked when an argument after it moves it into a local")

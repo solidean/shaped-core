@@ -85,6 +85,7 @@ struct target_ {
   `texture_barrier` is `DeviceMemoryBarrierWithGroupSync`, `textureBarrier` and `mem_texture`.
 * **EMIT-121** A binding array is its element's declaration with the length after the name, at its first slot, and the resources after it start `count` slots later.
   HLSL wraps an index marked `nonuniform` in `NonUniformResourceIndex`, which DXC carries into SPIR-V as `NonUniform`.
+  MSL needs no mark, and every target writes an index marked `uniform` as the plain index (CHK-394).
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|

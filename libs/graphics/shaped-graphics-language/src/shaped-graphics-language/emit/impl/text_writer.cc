@@ -194,12 +194,12 @@ struct writer
         return x.node.is<flat_construct>() && !is_builtin_type(p.m, x.type) && !d.has_struct_constructor();
     }
 
-    /// `nonuniform i`, whose own text is `i`.
+    /// `nonuniform i`, whose own text is `i`; `uniform i` is no such mark, since it is written as the plain index.
     [[nodiscard]] bool is_nonuniform_mark(flat_expr_id id) const
     {
         auto const* const c = p.e.at(id).node.try_as<flat_call>();
         auto const* const record = c != nullptr ? p.m.builtin_function(c->intrinsic) : nullptr;
-        return record != nullptr && record->is_nonuniform_mark;
+        return record != nullptr && record->mark == builtins::index_mark::nonuniform;
     }
 
     [[nodiscard]] bool is_array(check::type_id type) const

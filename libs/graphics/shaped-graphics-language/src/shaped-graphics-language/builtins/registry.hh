@@ -145,6 +145,16 @@ enum class sgl::builtins::written_argument : sgl::u8
     element,
 };
 
+/// What a mark on an index into a binding array says of it (CHK-300).
+enum class sgl::builtins::index_mark : sgl::u8
+{
+    none,
+    /// `uniform i`: the author says the index is the same in every invocation, where the compiler cannot prove it.
+    uniform,
+    /// `nonuniform i`: the index may differ between invocations, which the hardware is told and pays for.
+    nonuniform,
+};
+
 /// How every target writes a call of one builtin function.
 struct sgl::builtins::spelling
 {
@@ -269,8 +279,8 @@ struct sgl::builtins::function_record
     /// The second argument is a lane, a mask or a delta, a constant `int` from 0 to below this (CHK-378); 0 for a call
     /// without one.
     i32 constant_lane_below = 0;
-    /// `nonuniform i`: its argument, marked as an index into a binding array that differs between invocations (CHK-300).
-    bool is_nonuniform_mark = false;
+    /// `uniform i` and `nonuniform i`: its argument, marked as an index into a binding array (CHK-300).
+    index_mark mark = index_mark::none;
     /// Takes one argument more than its signature names, of a struct of the program: a stream's `emit` its vertex, of
     /// the type the stream holds (CHK-303), and a trace its payload, which the call writes through (CHK-329).
     bool takes_element = false;

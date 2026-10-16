@@ -1575,10 +1575,11 @@ type_id checker::resolve_overload(function_scope& scope,
     {
         // CHK-300: the mark is what an index into a binding array is written with, and on anything else it means nothing
         auto const* const record = out.builtin_function(out.at(chosen).intrinsic);
-        if (record != nullptr && record->is_nonuniform_mark && id != binding_index)
+        if (record != nullptr && record->mark != builtins::index_mark::none && id != binding_index)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, where,
-                   "`nonuniform i` marks an index into a binding array, and stands only as one: `t[nonuniform i]`");
+                   cc::format("`{0} i` marks an index into a binding array, and stands only as one: `t[{0} i]`",
+                              record->name));
             return error_type;
         }
         return result;

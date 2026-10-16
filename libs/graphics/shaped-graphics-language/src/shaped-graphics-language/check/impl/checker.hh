@@ -297,6 +297,26 @@ struct footprint_pin
     source_span where;
 };
 
+/// One access of a binding array by index in one entry point's inlined body, which `judge_indices` judges with every
+/// other access the same index text makes (CHK-300, CHK-395).
+struct index_use
+{
+    /// The entry point's function.
+    symbol_id entry = symbol_id::none;
+    /// The index as written, its mark included: what every inlined copy of one access shares.
+    origin index;
+    /// The marked argument where there is a mark, and the index itself where there is none.
+    origin written;
+    builtins::index_mark mark = {};
+    /// Proven the same in every invocation; proven to vary, by what each invocation is handed (CHK-393); or neither.
+    bool is_uniform = false;
+    bool varies = false;
+    /// What made it not uniform, for a note.
+    related_note why;
+    /// The calls this copy was inlined through, outermost first.
+    cc::vector<call_site> through;
+};
+
 /// One `use` line of a file: the name it binds, and the module that name stands for.
 struct module_use
 {
@@ -406,6 +426,8 @@ struct checker
     cc::vector<require_line> require_lines;
     /// Every entry point's footprint pin, judged once the entry points are flattened (CHK-267).
     cc::vector<footprint_pin> footprint_pins;
+    /// Every access of a binding array by index, in each entry point that reaches it.
+    cc::vector<index_use> index_uses;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -718,6 +740,12 @@ struct checker
     void index_builtin_symbols();
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
     void judge_uniformity(flat_entry_point const& structured);
+    /// CHK-300, CHK-395: every index into a binding array, judged over the copies the entry points inlined of it.
+    void judge_indices();
+    /// CHK-396: one diagnostic for each that several entry points were judged to have alike, which names them all.
+    void merge_entry_diagnostics();
+    /// CHK-397: an entry point that expects a diagnostic is judged by it alone, and is never built.
+    void drop_expecting_entry_points();
     /// CHK-270, CHK-311 and CHK-312: every constant of the tree folded, and what WGSL would refuse of it reported.
     void judge_constants(flat_entry_point const& structured);
     /// The prelude symbol that declares `id`; `none` for a record no declaration names.
@@ -765,8 +793,8 @@ struct checker
 
     // ---- footprint pins (check_footprint.cc) ------------------------------------------------------------------------
 
-    /// Records the `@expect(footprint = "...")` among the attributes of function `id`; any other `@expect` there is
-    /// reported, since a function's only expectation is its footprint.
+    /// Records the `@expect(footprint = "...")` among the attributes of function `id`, and an entry point's expected
+    /// diagnostics (CHK-397); any other `@expect` there is reported.
     void read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_entry_point);
     /// `unmet-expectation` for every pin whose entry point's footprint says otherwise (CHK-267).
     void judge_footprint_pins();
