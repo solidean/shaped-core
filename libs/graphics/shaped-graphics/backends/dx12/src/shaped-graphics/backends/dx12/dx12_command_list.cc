@@ -327,6 +327,10 @@ void dx12_command_list::compute_set_inline_constants(cc::span<byte const> data, 
 void dx12_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
+    CC_ASSERTF(x <= sg::max_dispatch_groups_per_dimension && y <= sg::max_dispatch_groups_per_dimension
+                   && z <= sg::max_dispatch_groups_per_dimension,
+               "dispatch of ({}, {}, {}) groups exceeds the {} per dimension every backend allows", x, y, z,
+               sg::max_dispatch_groups_per_dimension);
     CC_ASSERT(_bound_pipeline_layout != nullptr, "bind a compute pipeline before dispatch");
 
     // dx12 binds targets with OMSetRenderTargets rather than a real render pass, so this would likely work here —

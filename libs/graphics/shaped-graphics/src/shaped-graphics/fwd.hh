@@ -402,6 +402,11 @@ inline constexpr int max_color_targets = 8;
 /// 8 is WebGPU's `maxVertexBuffers`; DX12 allows 32 (`D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`) and Vulkan at least 16.
 inline constexpr int max_vertex_buffers = 8;
 
+/// Hard cap on the workgroups one dispatch runs along each axis, direct or indirect.
+/// 65535 is DX12's `D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION`, Vulkan's guaranteed `maxComputeWorkGroupCount` and WebGPU's default `maxComputeWorkgroupsPerDimension`.
+/// A one-dimensional dispatch of more groups is two-dimensional instead.
+inline constexpr int max_dispatch_groups_per_dimension = 65535;
+
 } // namespace sg
 
 /// A binding's identity inside a staging_binding_group, resolved once from its name.

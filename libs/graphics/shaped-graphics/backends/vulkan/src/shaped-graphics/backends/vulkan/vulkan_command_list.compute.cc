@@ -192,6 +192,10 @@ void vulkan_command_list::declare_array_accesses(cc::span<vulkan_binding_group c
 void vulkan_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
+    CC_ASSERTF(x <= sg::max_dispatch_groups_per_dimension && y <= sg::max_dispatch_groups_per_dimension
+                   && z <= sg::max_dispatch_groups_per_dimension,
+               "dispatch of ({}, {}, {}) groups exceeds the {} per dimension every backend allows", x, y, z,
+               sg::max_dispatch_groups_per_dimension);
     CC_ASSERT(!_in_render_pass, "dispatch must not be recorded inside a rendering scope; close the scope first");
 
     // Declare each bound group's shader accesses before the dispatch: the tracker emits any hazard barrier (a prior

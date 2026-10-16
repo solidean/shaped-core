@@ -62,10 +62,13 @@ public:
     }
 
     /// Dispatches `x`*`y`*`z` **workgroups** of the active pipeline.
+    /// Each count must be at most `sg::max_dispatch_groups_per_dimension` (65535) on every backend.
     void dispatch_groups(int x, int y = 1, int z = 1);
 
     /// Dispatches enough workgroups to cover `x`*`y`*`z` **threads**, rounding up per axis by the bound pipeline's workgroup size (`ceil(threads / workgroup_size)`).
     /// A pipeline must be bound first.
+    /// Each resulting group count must be at most `sg::max_dispatch_groups_per_dimension` (65535): nothing splits a larger one.
+    /// So 64-thread groups cover at most 4,194,240 threads along one axis, and a larger 1D range dispatches in two dimensions.
     void dispatch_threads(int x, int y = 1, int z = 1);
 
     /// Dispatches the workgroup counts element `index` of `args` holds, read by the GPU when the dispatch runs.
@@ -73,7 +76,7 @@ public:
     /// `args` needs `buffer_usage::indirect_command_buffer`, and a shader writing it needs `readwrite_buffer` too.
     /// It must not be bound to the same dispatch as a writable binding, which WebGPU refuses.
     /// A count of 0 on any axis dispatches nothing.
-    /// Each count must be at most 65535; larger is undefined, and WebGPU skips the dispatch.
+    /// Each count must be at most `sg::max_dispatch_groups_per_dimension` (65535); larger is undefined, and WebGPU skips the dispatch.
     void dispatch_groups_indirect(buffer<dispatch_args> const& args, isize index = 0);
 
     /// The byte-addressed form: three `u32` counts at `offset_in_bytes`, which must be a multiple of 4.

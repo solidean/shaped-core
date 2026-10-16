@@ -771,12 +771,12 @@ arr.slot() / capacity() / occupied_count() / pinned_count()  // -> binding_slot 
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size + bound pipeline layout)
 cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)
-cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
-cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
+cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups; each count ASSERTS <= sg::max_dispatch_groups_per_dimension (65535)
+cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis, under the same 65535 cap: nothing splits a larger 1D range
 cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group counts buffer<sg::dispatch_args> element `index` holds, read by the GPU at the dispatch
                                          //   sg::dispatch_args { u32 x = 0, y = 1, z = 1 } — a shader's own uint3 struct re-types with reinterpret_as<sg::dispatch_args>()
                                          //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)
-                                         //   each count must be at most 65535; larger is undefined, and webgpu skips the dispatch
+                                         //   each count must be at most 65535 too; larger is undefined, and webgpu skips the dispatch
                                          //   the args must not be bound writable to the same dispatch (webgpu refuses it); bytes: dispatch_groups_indirect_bytes(raw_buffer_handle, offset_in_bytes % 4 == 0)
 //   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
 auto d = cmd.compute.declare_array_buffer_access(name, elements)  // [[nodiscard]] -> sg::array_access_declaration — in force for EVERY dispatch/trace while `d` lives

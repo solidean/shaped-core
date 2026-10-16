@@ -786,6 +786,10 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(_bound_compute != nullptr, "a dispatch needs a bound compute pipeline");
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch dimensions must be non-negative");
+    CC_ASSERTF(x <= sg::max_dispatch_groups_per_dimension && y <= sg::max_dispatch_groups_per_dimension
+                   && z <= sg::max_dispatch_groups_per_dimension,
+               "dispatch of ({}, {}, {}) groups exceeds the {} per dimension every backend allows", x, y, z,
+               sg::max_dispatch_groups_per_dimension);
 
     if (x == 0 || y == 0 || z == 0)
         return;
