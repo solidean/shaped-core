@@ -16,6 +16,18 @@ namespace
 namespace dx12 = sg::backend::dx12;
 } // namespace
 
+// The pristine values are the context's own subject, so this one takes a context of its own rather than the shared one.
+TEST("sg dx12 - a new context opens epoch::first, with nothing completed")
+{
+    auto handle = dx12::make_fresh_context();
+    if (handle == nullptr)
+        SKIP("no dx12 adapter on this machine");
+
+    CHECK(handle->current_epoch() == sg::epoch::first);
+    // Nothing has finished yet, so the completed epoch is first - 1, which is what lets a plain `<=` work from the first frame.
+    CHECK(u64(handle->completed_epoch()) == u64(sg::epoch::first) - 1);
+}
+
 ASYNC_INVOCABLE_TEST("sg dx12 - epoch advance and retire", (dx12::dx12_context_handle const& handle))
 {
     REQUIRE(handle != nullptr);

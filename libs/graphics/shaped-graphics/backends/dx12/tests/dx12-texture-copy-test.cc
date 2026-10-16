@@ -305,6 +305,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - inline texture upload splits across the ring sea
     co_await ctx->idle_completion(); // drain, then park the ring cursor just before the seam
     c._upload_inline.debug_set_cursor(u64(park));
     auto const before = c._upload_inline.debug_cursor();
+    REQUIRE(before.capacity == ring_bytes); // the guard's size applied, so the ring is small enough to wrap
     REQUIRE(ring_bytes - isize(before.next_pos % u64(ring_bytes)) < 768); // setup forces a seam wrap
 
     // The staged region straddles the seam; a byte-exact round-trip below proves the split copy is correct.
@@ -351,6 +352,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - inline texture download splits across the ring s
     co_await ctx->idle_completion(); // drain, then park the readback ring cursor just before the seam
     c._download_inline.debug_set_cursor(u64(park));
     auto const before = c._download_inline.debug_cursor();
+    REQUIRE(before.capacity == ring_bytes); // the guard's size applied, so the ring is small enough to wrap
     REQUIRE(ring_bytes - isize(before.next_pos % u64(ring_bytes)) < 768); // setup forces a seam wrap
 
     auto down = ctx->create_command_list();

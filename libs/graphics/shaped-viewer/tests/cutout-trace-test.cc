@@ -222,13 +222,21 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a cutout cuts where its opacity sa
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
-    // A default run traces a thresholded attribute and a texture channel; --thorough traces every source.
+    // A default run traces a thresholded attribute both ways and a texture channel; --thorough traces every source.
+    // A half cut counts pixels, not which half, so only the case cutting nothing tells a reversed cutoff apart.
     {
         auto attributes = cc::vector<sv::mesh_attribute>();
         attributes.push_back(per_triangle("opacity", 0.3f, 0.7f));
         auto const c = co_await trace_cut(
             ctx, resources, quad_of("cutout threshold", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
         check_counts(c, expect_cut::half, "a cutoff of 0.5 over opacities of 0.3 and 0.7");
+    }
+    {
+        auto attributes = cc::vector<sv::mesh_attribute>();
+        attributes.push_back(per_triangle("opacity", 0.6f, 0.9f));
+        auto const c = co_await trace_cut(
+            ctx, resources, quad_of("cutout threshold kept", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
+        check_counts(c, expect_cut::none, "a cutoff of 0.5 over opacities of 0.6 and 0.9");
     }
     if (nx::is_thorough())
     {
@@ -243,13 +251,6 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a cutout cuts where its opacity sa
             auto const c = co_await trace_cut(
                 ctx, resources, quad_of("cutout attribute", unlit, cc::vector<binding>{black}, cc::move(attributes)));
             check_counts(c, expect_cut::half, "a per-triangle opacity of 0 and 1");
-        }
-        {
-            auto attributes = cc::vector<sv::mesh_attribute>();
-            attributes.push_back(per_triangle("opacity", 0.6f, 0.9f));
-            auto const c = co_await trace_cut(
-                ctx, resources, quad_of("cutout threshold kept", openpbr, dark_openpbr(0.5f), cc::move(attributes)));
-            check_counts(c, expect_cut::none, "a cutoff of 0.5 over opacities of 0.6 and 0.9");
         }
     }
     {

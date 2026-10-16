@@ -133,7 +133,7 @@ INVOCABLE_TEST("sgl checked prelude - a program behind it checks as it does with
 }
 
 // Three drivers rather than one, so the larger sets check in parallel.
-TEST("sgl checked prelude - every corpus file")
+TEST("sgl checked prelude - the corpus files, every fourth by default")
 {
     auto files = cc::vector<program>();
     add_files_under(files, "corpus", SGL_CORPUS_DIR);
@@ -144,7 +144,7 @@ TEST("sgl checked prelude - every corpus file")
         nx::invoke_tests(files[i].name, files[i]);
 }
 
-TEST("sgl checked prelude - every sample and sg shader")
+TEST("sgl checked prelude - the samples and sg shaders, every third by default")
 {
     auto files = cc::vector<program>();
     add_files_under(files, "samples", SGL_SAMPLES_DIR);
