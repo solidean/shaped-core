@@ -20,7 +20,7 @@ What it is for, in order:
 - **A frame paced by its live paths**, with no dispatch bounded by the worst path in it.
 - **Material coherence**: each material's shading runs over only the paths that hit it.
 - **Paths that outlive a frame**, so a still view converges on a fixed per-frame budget.
-- **dx12, vulkan and metal.** Metal has never run the current tracer, and running there is part of done.
+- **dx12, vulkan and metal.** It runs on dx12 and vulkan; metal is open, below.
 
 **webgpu is out of scope.**
 Inline ray queries would reach it, but it has no bindless binding arrays, and sv's material model is built on them.
@@ -212,7 +212,8 @@ They start in sv and move to shaped-rendering once a second caller exists.
 - Per-round live-path counts, a diagnostic readback a caller asks for through `wavefront_trace_desc::live_paths`.
 - One benchmark, megakernel against wavefront, on a shallow scene and a deep one: the Cornell box and a dense scattering cube.
 
-A wavefront is not faster on every scene: on a shallow, single-material one, the stored state's memory traffic usually loses to the megakernel's registers.
+A wavefront is not faster on every scene: on a shallow, single-material one, the stored state's memory traffic can lose to the megakernel's registers.
+It did on an RTX laptop GPU and did not on a Radeon 780M, whose tables are below.
 
 ### What it measured
 
@@ -287,7 +288,8 @@ On the Radeon 780M, where pixel order always worked, the wavefront measures:
 8. The wavefront becomes the default, and the megakernel stays as a choice — `render_settings::mode`.
 
 The plan ended with deleting the megakernel, since every estimator change would land twice and could drift.
-It stays because neither tracer wins everywhere: the megakernel is about twice as fast on a shallow scene, and the wavefront far ahead on a deep one.
+It stays because neither tracer wins everywhere: on the RTX laptop GPU the megakernel is about twice as fast on a shallow scene, and the wavefront far ahead on a deep one.
+The Radeon 780M has the wavefront ahead on both, so which one a shallow scene favors is the GPU's to say.
 The GPU tests' physical expectations, and `wavefront-trace-test.cc`'s comparison of the two, are what keep them from drifting apart.
 
 ### Which tracer is the default
@@ -299,8 +301,9 @@ Neither change has landed; [the roadmap](plans/rendering-roadmap.md) orders the 
 
 ### Where it stands
 
-Every step has landed: the wavefront traces a layer unless `render_settings::mode` asks for the megakernel.
+Every step of the landing order has landed: `render_mode::automatic` traces a layer with the wavefront unless the device cannot trace, or `render_settings::mode` asks for another.
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
+A layer that stops tracing with the wavefront releases it, and one that can never scale releases its scaled state.
 A frame whose image changed restarts and drains, and a still one carries for as many rounds as fit its share of `frame_budget_ms`, or for `rounds_per_frame` where that is 0.
 A mean at `accumulation_frame_cap` starts no more samples, so its tallies stop growing with it.
 A layer that denoises hands the spatial member the tallies' per-pixel counts.
@@ -308,6 +311,8 @@ Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the 
 `wavefront-trace-test.cc` holds media and glass to the furnace's analytic expectation instead, and cutouts to the fraction they keep.
 
 What is still open:
+
+- **metal.** The tracer has never run there, and running there is part of done.
 
 - **A draining frame is bounded rather than empty.**
   It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 17` rounds, enough for every surface bounce and for a medium walk up to where its roulette starts.

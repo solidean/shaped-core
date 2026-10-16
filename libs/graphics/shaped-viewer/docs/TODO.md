@@ -121,7 +121,7 @@ What is left is the interaction on top of it, in dependency order:
   drive.
   The plan and `trace` are already per `(view, layer)`.
 - **A megakernel frame costs its deepest path**, since a path runs to completion inside one dispatch, which is also what lets a heavy dispatch trip a driver watchdog.
-  The wavefront tracer answers it and is the default today; the megakernel stays as `render_mode::megakernel`, because it is faster on shallow paths.
+  The wavefront tracer answers it and is the default today; the megakernel stays as `render_mode::megakernel`, because on NVIDIA it is faster on shallow paths.
   What is open is the default itself: very likely the hybrid, lit by the megakernel, with the wavefront as the best-quality mode — [wavefront.md](wavefront.md#which-tracer-is-the-default).
 
 ## What the bindless lock does not cover
@@ -142,7 +142,8 @@ What keeps a live index from being reassigned is sg's reclaim rule — a full ar
 ## What the path tracer still needs
 
 `sv::wavefront_routine`, the default, and `sv::pathtrace_routine`, the megakernel in `shaders/tracer_pipeline.sgl`, both trace over module `tracer` (shaders/sgl).
-Each material permutation gets one generated hit group.
+Each material permutation gets one generated hit group, which the megakernel binds, and one generated shade kernel, which the wavefront dispatches.
+The two bullets below are the megakernel's hit groups; a shade kernel is one compute entry point, compiled again on every reload of the wavefront.
 
 - **A permutation's hit group does not reload with a module it uses.**
   It is compiled once per permutation key, which hashes the resolution and the geometry kind, so an edit to module `tracer` reaches the raygen and not the hit groups.

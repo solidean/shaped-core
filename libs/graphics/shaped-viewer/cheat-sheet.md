@@ -9,7 +9,8 @@ The authoring surface sits at the root; everything else is one folder down — `
 > **Scope note:** early stage, in three layers.
 > A frame is authored through the fluent handles (`sv::interactive` → `frame` → `window_ref` → `view_ref` → `scene_ref`), flattened into a `render_plan`, and replayed by `viewer_renderer`.
 > A **view is the definition of one texture**, and a view's layer may itself be a whole layout tree — so views nest, at any depth.
-> Rendering needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracer runs on dx12 and vulkan.
+> Tracing needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracers run on dx12 and vulkan.
+> A raster layer needs none, and `render_mode::automatic`, the default, rasterizes where the device cannot trace.
 > The default context and the examples are dx12's.
 > The API is present everywhere; without a backend a routine just draws nothing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
@@ -857,10 +858,10 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
   Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them, and only on the frames it runs.
 - **`sv::matrices_of(camera_record, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
-  A traced layer rasterizes nothing, so these exist for a denoiser that reprojects in world space.
+  They exist for a denoiser or an upscaler that reprojects in world space, whether the layer was traced or rasterized.
   `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
-  `reconstruct_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
-  The per-frame offset a temporal upscaler reconstructs from is the other kind, and sv has none.
+  `reconstruct_guides::jitter` stays zero at full size: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  The per-frame offset a temporal upscaler reconstructs from is the other kind: a frame traced at the upscaler's extent takes one, and passes it as `.jitter` beside `.previous_jitter`.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.

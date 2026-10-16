@@ -28,8 +28,8 @@ inline constexpr u32 accumulation_frame_cap = 4096;
 /// How a layer's image is produced from its scene: traced by one of two path tracers, or rasterized.
 ///
 /// The two tracers converge to the same image; they differ in what a frame costs and how a moving image looks.
-/// Neither wins everywhere: the megakernel is about twice as fast on a shallow scene, the wavefront far ahead wherever paths run deep, as in a scattering medium.
-/// libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
+/// Neither wins everywhere: on an RTX laptop GPU the megakernel is about twice as fast on a shallow scene, and the wavefront far ahead wherever paths run deep, as in a scattering medium.
+/// On a Radeon 780M the wavefront wins the shallow scene too; libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
 enum class sv::render_mode : sv::u8
 {
     /// The wavefront where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, and `raster` where it has not, which the viewer warns of once.
@@ -60,7 +60,7 @@ enum class sv::render_mode : sv::u8
 
 /// View-wide render settings — everything that applies to a whole view rather than a single scene item.
 ///
-/// Just the path-tracer integration controls for now.
+/// How the layer is drawn, traced or rasterized, and the controls of each; a field says which mode reads it.
 /// Lighting and the environment live elsewhere on the layer (its lights and its background).
 /// This is the home for the post-process sequence, exposure, ... as they land.
 struct sv::render_settings

@@ -1387,7 +1387,7 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
         // The raygen offsets every primary ray by a fresh random amount within its pixel, so the samples are spread
         // over the pixel and their mean is its centre — which is exactly what a zero here says.
         // What `jitter` is for is the per-frame offset shared by every pixel that a temporal upscaler reconstructs
-        // sub-pixel detail from, and sv has none; see the viewer TODO.
+        // sub-pixel detail from, which only a frame traced at the upscaler's extent has, and `trace` passes there.
         .view_to_clip = cameras.current.view_to_clip,
         .previous_view_to_clip = cameras.previous.view_to_clip,
         .world_to_view = cameras.current.world_to_view,

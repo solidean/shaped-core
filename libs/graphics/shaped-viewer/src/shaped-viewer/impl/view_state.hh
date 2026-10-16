@@ -16,11 +16,6 @@
 
 namespace sv::impl
 {
-/// One temporal resource a view keeps across frames, and how far whatever writes it has run.
-///
-/// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
-/// now asking for it means the history describes something else, and `accum_frame` restarts at 0.
-/// A resize does the same, since a fresh texture holds nothing to blend into.
 /// How a still wavefront frame fits its time budget: a smoothed estimate of one round's GPU time, and the frames whose
 /// timestamps have not landed yet.
 struct wavefront_pacing
@@ -37,6 +32,11 @@ struct wavefront_pacing
     cc::vector<pending> in_flight;
 };
 
+/// One temporal resource a view keeps across frames, and how far whatever writes it has run.
+///
+/// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
+/// now asking for it means the history describes something else, and `accum_frame` restarts at 0.
+/// A resize does the same, since a fresh texture holds nothing to blend into.
 struct temporal_slot
 {
     /// What the frame writes, and what everything downstream samples.
