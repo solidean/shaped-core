@@ -180,6 +180,7 @@ That is what makes it worth writing down: a checkout missing all of it configure
 | **X11 / XCB / wayland development headers** (Linux) | a *windowed* swapchain, and SDL3 configuring at all | `sr::window_system::try_create` fails and a swapchain reports the platform unsupported; headless present and `--capture` are unaffected |
 | **DXC** (`uv run extern/dxc/download-dxc.py`, run by dev.py) | `ssc::dxc`, so a shader package's HLSL becomes DXIL or SPIR-V | every `slib` `acquire` fails, and the examples that draw are gated out of the build |
 | **Windows SDK** (`d3d12shader.h`) | DXIL *reflection*, and the dx12 backend | SPIR-V reflection still works, through the vendored SPIRV-Reflect |
+| **A dx12 driver reporting shader model 6.8** | running any shader sg compiles, every one being SM 6.8 DXIL | `create_dx12_context` refuses the device, naming the adapter, its driver and the model it reaches |
 
 The Linux windowing entry is headers-only on purpose: SDL loads `libX11` and `libwayland-client` themselves at run time.
 So a machine with the runtime and no headers builds a shaped-rendering with `SR_HAS_WINDOW=0`, and never says why at run time.
