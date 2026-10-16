@@ -101,12 +101,13 @@ ASYNC_INVOCABLE_TEST("sr - fsr's clear writes each format's leading channels of 
                 CHECK(v == 255);
             break;
         case sg::pixel_format::r16_float:
-            // a half stores 1.0 and -1.0 exactly: 0x3c00 and 0xbc00
+            // a half stores 1.0 exactly, as 0x3c00
             for (auto const v : values_of<u16>(bytes))
                 CHECK(v == 0x3c00);
             break;
         case sg::pixel_format::rg16_float:
         {
+            // and -1.0 as 0xbc00, in the second channel
             auto const two = values_of<u16>(bytes);
             REQUIRE(two.size() == 8);
             for (auto i = isize(0); i < two.size(); i += 2)

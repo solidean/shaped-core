@@ -114,7 +114,7 @@ constexpr resample_step k_upsamples[] = {
 constexpr int k_upsample_count = int(sizeof(k_upsamples) / sizeof(k_upsamples[0]));
 
 /// How many texels along x one convolution thread produces.
-/// Must match `conv_texels` in nn_conv.sgl; the oracle test is what notices if it does not.
+/// Must match `conv_texels` in nn_conv.sgl; only the OIDN oracle test notices if it does not, and it skips without OIDN.
 constexpr int k_conv_texels = 8;
 
 /// `v` rounded up to a multiple of sixteen, and at least sixteen.
@@ -507,7 +507,7 @@ bool oidn_programs::build(sg::context& ctx)
     auto const& pool_cs = sgl_shaders::nn_pool.main_cs;
     auto const& upsample_cs = sgl_shaders::nn_upsample.main_cs;
     one(conv_cs->acquire(ctx), conv_cs.acquire_layout(ctx), conv);
-    one(input_cs.acquire(ctx, output_values), input_cs.acquire_layout(ctx, output_values), input);
+    one(input_cs.acquire(ctx), input_cs.acquire_layout(ctx), input);
     one(output_cs.acquire(ctx, output_values), output_cs.acquire_layout(ctx, output_values), output);
     one(pool_cs->acquire(ctx), pool_cs.acquire_layout(ctx), pool);
     one(upsample_cs->acquire(ctx), upsample_cs.acquire_layout(ctx), upsample);
@@ -528,7 +528,7 @@ cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx, sg::pixel_format
     // The shaders first, because a pipeline cannot be built before its shader exists.
     auto const output_values = sgl_shaders::nn_io_options{.target_format = output_format};
     for (auto const& shader :
-         {sgl_shaders::nn_conv.main_cs->acquire(ctx), sgl_shaders::nn_io.input_cs.acquire(ctx, output_values),
+         {sgl_shaders::nn_conv.main_cs->acquire(ctx), sgl_shaders::nn_io.input_cs.acquire(ctx),
           sgl_shaders::nn_io.output_cs.acquire(ctx, output_values), sgl_shaders::nn_pool.main_cs->acquire(ctx),
           sgl_shaders::nn_upsample.main_cs->acquire(ctx)})
     {

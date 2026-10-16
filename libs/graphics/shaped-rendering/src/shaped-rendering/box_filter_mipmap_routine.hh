@@ -63,8 +63,7 @@ struct sr::mipmap_program
 /// between faces.
 /// A 3D texture is the one shape that halves in z too, which is why it averages 8 taps rather than 4.
 ///
-/// One dispatch per generated level, source bound as a single-mip view of level N and target as the UAV of
-/// N+1, so no level is read and written by the same dispatch.
+/// One dispatch per generated level, source bound as a single-mip view of level N and target as the image of N+1, so no level is read and written by the same dispatch.
 /// The texture must carry `texture | image` usage and have the levels allocated already —
 /// this fills a chain, it never reshapes one.
 class sr::box_filter_mipmap_routine : public sg::render_routine<box_filter_mipmap_routine, sr::mipmap_key>
@@ -126,8 +125,8 @@ private:
 
     /// The single-mip source view of `level`, in the dimension the matching entry point expects.
     ///
-    /// A cube's natural SRV is a `TextureCube`, which is sampled by direction rather than indexed by texel — so
-    /// a cube reads through its faces as a 2D array instead, matching the shape its UAV already has.
+    /// A cube's natural texture view is sampled by direction rather than indexed by texel.
+    /// So a cube reads through its faces as a 2D array instead, matching the shape its image already has.
     template <class Traits>
     [[nodiscard]] static sg::raw_view _source_of(sg::texture<Traits> const& texture, int level)
     {
@@ -137,7 +136,7 @@ private:
             return texture.as_texture_view({.mips = {.start = level, .count = 1}});
     }
 
-    /// The target (UAV) view of `level`.
+    /// The target image view of `level`.
     ///
     /// A 3D texture has to name its depth range explicitly: the default "all slices" is resolved against the
     /// texture's base depth, not the level's, so mip 1 of an 8-deep texture would ask for 8 slices of a 4-deep
@@ -169,7 +168,7 @@ private:
     };
 
     /// How many slices the shape's array view carries, a cube's six faces per layer included.
-    /// The same rule `texture::_whole_slice_count()` applies, so the dispatch covers exactly what the UAV does.
+    /// The same rule `texture::_whole_slice_count()` applies, so the dispatch covers exactly what the image view does.
     template <class Traits>
     [[nodiscard]] static int _slice_count(sg::texture<Traits> const& texture)
     {
