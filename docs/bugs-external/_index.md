@@ -44,6 +44,7 @@ So each entry carries the answer as something runnable.
 | [vulkan-syncval-wait-before-signal-false-race](vulkan-syncval-wait-before-signal-false-race/readme.md) | Khronos validation layer, SDK 1.4.304–1.4.341 | fixed upstream in 1.4.350, flagged by `dev.py doctor` |
 | [webgpu-timestamp-write-index-sentinel](webgpu-timestamp-write-index-sentinel/readme.md) | emdawnwebgpu + Dawn, against wgpu | not yet filed, worked around in shaped-graphics |
 | [deno-code-cache-stale-same-length-source](deno-code-cache-stale-same-length-source/readme.md) | Deno 2.9.6 | not yet filed, worked around in dev.py |
+| [libcxx-float-h-guard-vs-macos27-math-h](libcxx-float-h-guard-vs-macos27-math-h/readme.md) | Homebrew LLVM 22 libc++, macOS 27 SDK | fixed upstream in LLVM 23, worked around in the build |
 
 ## Retiring one
 
