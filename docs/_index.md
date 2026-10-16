@@ -44,6 +44,7 @@ Findings we want to keep, but that are not a guide to anything.
 - [guides/dependencies.md](guides/dependencies.md) — the `extern/` manifests, `dev.py deps`, and how to bump a pin.
 - [guides/cheat-sheets.md](guides/cheat-sheets.md) — the per-library cheat-sheet format, and where the sheets live.
 - [guides/postmortem.md](guides/postmortem.md) — the session friction review behind `/postmortem`.
+- [guides/issue-tracking.md](guides/issue-tracking.md) — issues as markdown files in any `docs/issues/` folder: the format, claiming, closing, and `dev.py issues`.
 
 ## Pending work
 
@@ -102,6 +103,7 @@ Findings we want to keep, but that are not a guide to anything.
 - [instruction-tracer](../tools/instruction-tracer/readme.md) — what optimized code actually executed, driven by `dev.py assembly trace`.
 - [review](../tools/review/readme.md) — the review tool: a commit range as a folder of files, answered in a local page, iterated in rounds.
   Start at its [docs hub](../tools/review/docs/_index.md), which covers the coverage model, the entry grammar and the folder format.
+- [issues](../tools/issues/readme.md) — the in-repo issue tracker behind `dev.py issues`; [guides/issue-tracking.md](guides/issue-tracking.md) is the system.
 
 ## Third-party licenses
 
