@@ -222,9 +222,11 @@ struct sr::text_event
 struct sr::mouse_move_event
 {
     /// Cursor position in pixels, relative to the window's client area.
+    /// The pixels of window::width()/height(), so on a Retina display it is twice the logical position — divide by window::pixel_density for that.
     tg::pos2f cursor_pos;
 
     /// Motion since the previous event, in pixels.
+    /// Scaled by pixel_density like cursor_pos, so the same hand motion reports twice the delta on a Retina display.
     /// This is the value to drive a camera with: it stays correct when the cursor is captured or hits the screen edge.
     tg::vec2f delta;
 };

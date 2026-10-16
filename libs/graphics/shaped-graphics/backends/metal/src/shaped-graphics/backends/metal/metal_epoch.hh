@@ -124,6 +124,19 @@ public:
     /// Runs `finalizer` once the open epoch's GPU work has finished.
     void defer(cc::unique_function<void()> finalizer);
 
+    /// Gives up on the queue, because the device is gone and will signal nothing more.
+    ///
+    /// **A lost device's timelines stop where they are.**
+    /// Once the system refuses the process the GPU, no queued `signalEvent` ever runs.
+    /// Every wait on a value past the last one reached would then park forever: the frame loop's throttle, the
+    /// completion waiter and shutdown's drain alike.
+    /// So both timelines are signalled to their maximum from the host, which is what dx12 does to its fences on removal.
+    /// Every wait returns and every listener fires.
+    /// The portable layer checks the loss first, so it fails each pending completion rather than settling it.
+    /// The flag keeps that answer even if a queue the system did not stop signals a lower value afterwards.
+    /// Safe from any thread; the context calls it from a commit's feedback handler.
+    void abandon_timelines();
+
     /// Drains the GPU, runs every outstanding finalizer, and releases the events and the allocator pool.
     /// Idempotent; the context calls it before it releases the device.
     void shutdown();
@@ -157,4 +170,7 @@ private:
     cc::mutex<cc::vector<MTL4::CommandAllocator*>> _callback_free_allocators;
 
     bool _is_shut_down = false;
+
+    /// Set by `abandon_timelines`: every value counts as reached.
+    cc::atomic<bool> _is_abandoned = false;
 };

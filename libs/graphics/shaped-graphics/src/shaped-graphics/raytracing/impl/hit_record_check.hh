@@ -14,10 +14,10 @@ namespace sg::impl
 ///
 /// **The check assumes every trace's geometry multiplier is the table's ray count**, which a generated table's traces are.
 /// Hand-written shaders need not agree: `TraceRay(…, ray_type, 0, …)` shares one record across geometries, legal on dx12
-/// and vulkan, and the check would report records that shader never reaches — so such a table keeps the checks off.
+/// and vulkan, and the check would report records that shader never reaches — so such a table turns `context::hit_record_checks` off.
 ///
 /// An instance whose mask is 0 is never hit and is skipped.
-/// What sg never recorded is not checked: a tlas built while `context::portability_checks` was off has no instances to look at,
+/// What sg never recorded is not checked: a tlas built while `context::hit_record_checks` was off has no instances to look at,
 /// and a pipeline a backend built outside the context does not say which of its groups are procedural.
 /// Stops after `max_messages`, since one wrong offset usually breaks every record after it.
 [[nodiscard]] cc::vector<cc::string> find_hit_record_mismatches(raytracing_shader_table const& table,

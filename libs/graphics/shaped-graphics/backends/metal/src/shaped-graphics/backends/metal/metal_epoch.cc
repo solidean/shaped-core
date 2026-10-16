@@ -16,9 +16,13 @@ namespace
 /// soon as the value lands.
 constexpr u64 k_wait_slice_ms = 1000;
 
-void wait_for_value(MTL::SharedEvent* event, u64 value)
+/// What an abandoned timeline reads as: past every value anything will ever wait for, as a removed dx12 fence does.
+constexpr u64 k_abandoned_value = ~u64(0);
+
+void wait_for_value(MTL::SharedEvent* event, u64 value, cc::atomic<bool> const& is_abandoned)
 {
-    while (event->signaledValue() < value)
+    // The flag as well as the value, since a queue may still lower an abandoned timeline; see abandon_timelines.
+    while (event->signaledValue() < value && !is_abandoned.load(cc::memory_order_acquire))
     {
         // **A GPU fence here is not necessarily outside the pump registry**, which is the assumption a bare wait would
         // make — see clean-core/thread/thread_pump.hh.
@@ -55,6 +59,9 @@ sg::epoch metal_epoch_system::completed() const
     // predecessor is the true answer and reading a freed event is not.
     if (_is_shut_down)
         return sg::epoch(_current.load(cc::memory_order_acquire) - 1);
+
+    if (_is_abandoned.load(cc::memory_order_acquire))
+        return sg::epoch(k_abandoned_value);
 
     auto const value = _epoch_event->signaledValue();
     auto const first_minus_one = u64(sg::epoch::first) - 1;
@@ -95,7 +102,8 @@ void metal_epoch_system::retire_completed()
     _mutex.lock(
         [&](int&)
         {
-            auto const reached = _epoch_event->signaledValue();
+            auto const reached
+                = _is_abandoned.load(cc::memory_order_acquire) ? k_abandoned_value : _epoch_event->signaledValue();
             while (!_in_flight.empty() && _in_flight.front().epoch_value <= reached)
             {
                 auto payload = _in_flight.pop_front();
@@ -122,9 +130,9 @@ int metal_epoch_system::in_flight_count()
 void metal_epoch_system::wait_counted(MTL::SharedEvent* event, u64 value)
 {
     if (_totals == nullptr)
-        return wait_for_value(event, value);
+        return wait_for_value(event, value, _is_abandoned);
     auto const waited = sg::impl::gpu_wait_scope(*_totals);
-    wait_for_value(event, value);
+    wait_for_value(event, value, _is_abandoned);
 }
 
 void metal_epoch_system::wait_for(sg::epoch e)
@@ -179,7 +187,7 @@ bool metal_epoch_system::is_submission_complete(sg::submission_token token) cons
     if (token == sg::submission_token::not_submitted)
         return false;
     // Shutdown drained the queue before releasing the timeline, so every token issued before it is complete.
-    if (_is_shut_down)
+    if (_is_shut_down || _is_abandoned.load(cc::memory_order_acquire))
         return true;
     return _submission_event->signaledValue() >= u64(token);
 }
@@ -237,6 +245,17 @@ void metal_epoch_system::retire_allocator_with_epoch(MTL4::CommandAllocator* all
 void metal_epoch_system::defer(cc::unique_function<void()> finalizer)
 {
     _mutex.lock([&](int&) { _open.finalizers.push_back(cc::move(finalizer)); });
+}
+
+void metal_epoch_system::abandon_timelines()
+{
+    // Flag first, so a waiter the signal below wakes already reads the answer the flag gives.
+    if (_is_abandoned.exchange(true, cc::memory_order_acq_rel))
+        return;
+
+    // The events live until shutdown, and the feedback sink is detached before it, so no handler reaches here after.
+    _epoch_event->setSignaledValue(k_abandoned_value);
+    _submission_event->setSignaledValue(k_abandoned_value);
 }
 
 void metal_epoch_system::shutdown()

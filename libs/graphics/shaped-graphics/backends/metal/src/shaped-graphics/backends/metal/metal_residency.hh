@@ -37,6 +37,16 @@ public:
     /// Null is ignored.
     void remove(MTL::Allocation const* allocation);
 
+    /// Commits `buffer` to `queue` while no other thread can change the set.
+    ///
+    /// **Every commit in this backend goes through here, because Metal's GPU validation reads the set during the commit.**
+    /// With `MTL_SHADER_VALIDATION=1` the commit walks the allocations of every set attached to the queue, without the
+    /// lock the writers here take.
+    /// A transfer's feedback handler meanwhile removes its staging buffer from the set and releases it, on Apple's queue.
+    /// The walk then reaches a freed object and traps in `-[MTL4GPUDebugCommandBuffer applyResidencySets:]`.
+    /// So a commit and a change to the set are made exclusive, which costs an uncontended lock per commit.
+    void commit(MTL4::CommandQueue* queue, MTL4::CommandBuffer const* buffer, MTL4::CommitOptions const* options);
+
     /// Releases the set; it is unusable afterwards.
     void shutdown();
 

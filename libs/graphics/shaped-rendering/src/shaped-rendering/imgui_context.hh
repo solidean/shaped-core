@@ -96,15 +96,15 @@ public:
 public:
     struct frame_info
     {
-        /// Display extent in imgui's own units (logical pixels).
+        /// Display extent in imgui's own units — logical units, not pixels, whenever framebuffer_scale is not 1.
         tg::vec2i display_size;
 
         /// Seconds since the previous frame.
         /// Must be > 0 — imgui divides by it.
         float delta_time = 1.0f / 60.0f;
 
-        /// Framebuffer pixels per display unit.
-        /// 1 unless the caller is doing DPI scaling itself.
+        /// Framebuffer pixels per display unit — 2 on a Retina display.
+        /// imgui rasterizes its fonts at this density, so leaving it 1 there draws blurry text.
         tg::vec2f framebuffer_scale = tg::vec2f(1.0f, 1.0f);
     };
 
@@ -112,6 +112,7 @@ public:
     void begin_frame(frame_info const& info);
 
     /// Starts a frame sized from `win`, and hands the window imgui's text-input intent so an on-screen keyboard and IME engage around a focused text field.
+    /// imgui then works in the window's logical units, at its pixel_density as the framebuffer scale.
     ///
     /// Skips the frame's text-input handover while the window is minimized (it has no drawable area then);
     /// the caller should skip rendering too — see window::is_minimized.

@@ -8,6 +8,7 @@
 #include <shaped-rendering/impl/input_translation.hh>
 #include <shaped-rendering/impl/window_internals.hh>
 #include <shaped-rendering/window.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::round
 
 // The SDL-backed implementation of sr::window and sr::window_system.
 // The pure SDL-to-sr mapping lives in impl/input_translation.hh so a test can reach it; everything that needs a live window or the event queue is here.
@@ -91,6 +92,12 @@ constexpr int cursor_shape_count = int(cursor_shape::resize_nwse) + 1;
 /// and because at most one system is alive at a time (s_live_system_count) — the same reasoning that lets that counter be a global.
 /// Creating each shape once matters: a UI library sets the cursor every frame from its hover state.
 SDL_Cursor* s_cursors[cursor_shape_count] = {};
+
+/// The pixel density an event for `w` converts at — 1 for an event naming no live window, which has nothing to scale against.
+float density_of(window const* w)
+{
+    return w != nullptr ? w->pixel_density() : 1.0f;
+}
 
 void destroy_cursors()
 {
@@ -226,8 +233,9 @@ void window::set_size(tg::vec2i size)
     _system->assert_owning_thread();
     CC_ASSERT(size[0] > 0 && size[1] > 0, "window size must be positive");
 
-    _width = size[0];
-    _height = size[1];
+    _logical_size = size;
+    _width = int(tg::round(float(size[0]) * _pixel_density));
+    _height = int(tg::round(float(size[1]) * _pixel_density));
     auto const ok = SDL_SetWindowSize(as_sdl(_native_window), size[0], size[1]);
     CC_ASSERT(ok, "SDL_SetWindowSize failed");
 }
@@ -266,6 +274,21 @@ void window::stop_text_input()
     auto const ok = SDL_StopTextInput(as_sdl(_native_window));
     CC_ASSERT(ok, "SDL_StopTextInput failed");
     _is_text_input_active = false;
+}
+
+void window::refresh_scale()
+{
+    auto* const sdl_window = as_sdl(_native_window);
+
+    // On failure the previous values stand — every caller returns void, and the next size or scale event corrects them.
+    auto logical_width = 0;
+    auto logical_height = 0;
+    if (SDL_GetWindowSize(sdl_window, &logical_width, &logical_height))
+        _logical_size = tg::vec2i(logical_width, logical_height);
+
+    _pixel_density = impl::pixel_density_from_sdl(SDL_GetWindowPixelDensity(sdl_window));
+    auto const display_scale = SDL_GetWindowDisplayScale(sdl_window);
+    _display_scale = display_scale > 0.0f ? display_scale : _pixel_density;
 }
 
 window_system& window::system() const
@@ -357,11 +380,13 @@ cc::vector<display_info> window_system::displays() const
                 usable = bounds;
 
             auto const scale = SDL_GetDisplayContentScale(ids[i]);
+            auto const* const mode = SDL_GetCurrentDisplayMode(ids[i]);
 
             result.push_back({.position = tg::pos2i(bounds.x, bounds.y),
                               .size = tg::vec2i(bounds.w, bounds.h),
                               .work_position = tg::pos2i(usable.x, usable.y),
                               .work_size = tg::vec2i(usable.w, usable.h),
+                              .pixel_density = impl::pixel_density_from_sdl(mode != nullptr ? mode->pixel_density : 0.0f),
                               .content_scale = scale > 0.0f ? scale : 1.0f});
         }
         SDL_free(ids);
@@ -475,6 +500,10 @@ cc::result<cc::unique_ptr<window>> window_system::try_create_window(window_descr
     if (!desc.is_focusable)
         flags |= SDL_WINDOW_NOT_FOCUSABLE;
 
+    // Without it macOS backs the window at one pixel per point, and a Retina display upscales a half-resolution image.
+    // With it, desc's size is in points and the back buffer comes out pixel_density times that.
+    flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+
     // Cocoa's only presentation surface is a CAMetalLayer, and SDL_Metal_CreateView refuses a window that was not asked
     // for one at creation.
     // Every window gets it rather than only the ones a swapchain will use, because sr learns that after the fact.
@@ -510,6 +539,7 @@ cc::result<cc::unique_ptr<window>> window_system::try_create_window(window_descr
     // Queried now so the getters are meaningful before the first poll_events.
     if (!SDL_GetWindowSizeInPixels(sdl_window, &win->_width, &win->_height))
         return cc::error(last_sdl_error());
+    win->refresh_scale();
 
     auto position_x = 0;
     auto position_y = 0;
@@ -615,29 +645,44 @@ void window_system::poll_events()
                                    .payload = text_event{.text = cc::string(event.text.text)}});
             break;
 
+        // SDL reports mouse coordinates in logical units and sr in pixels.
+        // The density is the window's as of this point in the stream, so motion queued before a move to another display converts at the old one.
         case SDL_EVENT_MOUSE_MOTION:
-            _events.push_back({.window = window_from_id(event.motion.windowID),
-                               .payload = mouse_move_event{.cursor_pos = tg::pos2f(event.motion.x, event.motion.y),
-                                                           .delta = tg::vec2f(event.motion.xrel, event.motion.yrel)}});
+        {
+            auto* const w = window_from_id(event.motion.windowID);
+            auto const density = density_of(w);
+            _events.push_back(
+                {.window = w,
+                 .payload = mouse_move_event{
+                     .cursor_pos = impl::pixels_from_logical(event.motion.x, event.motion.y, density),
+                     .delta = impl::pixels_from_logical_delta(event.motion.xrel, event.motion.yrel, density)}});
             break;
+        }
 
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP:
-            _events.push_back({.window = window_from_id(event.button.windowID),
+        {
+            auto* const w = window_from_id(event.button.windowID);
+            _events.push_back({.window = w,
                                .payload = mouse_button_event{.button = impl::mouse_button_from_sdl(event.button.button),
                                                              .modifiers = _modifiers,
                                                              .is_down = event.button.down,
                                                              .clicks = int(event.button.clicks),
-                                                             .cursor_pos = tg::pos2f(event.button.x, event.button.y)}});
+                                                             .cursor_pos = impl::pixels_from_logical(
+                                                                 event.button.x, event.button.y, density_of(w))}});
             break;
+        }
 
         case SDL_EVENT_MOUSE_WHEEL:
         {
-            _events.push_back({.window = window_from_id(event.wheel.windowID),
-                               .payload = mouse_wheel_event{
-                                   .delta = tg::vec2f(impl::wheel_amount(event.wheel.x, event.wheel.direction),
-                                                      impl::wheel_amount(event.wheel.y, event.wheel.direction)),
-                                   .cursor_pos = tg::pos2f(event.wheel.mouse_x, event.wheel.mouse_y)}});
+            // The scroll amount is in ticks, not a distance, so only the position converts.
+            auto* const w = window_from_id(event.wheel.windowID);
+            _events.push_back(
+                {.window = w,
+                 .payload = mouse_wheel_event{
+                     .delta = tg::vec2f(impl::wheel_amount(event.wheel.x, event.wheel.direction),
+                                        impl::wheel_amount(event.wheel.y, event.wheel.direction)),
+                     .cursor_pos = impl::pixels_from_logical(event.wheel.mouse_x, event.wheel.mouse_y, density_of(w))}});
             break;
         }
 
@@ -656,12 +701,25 @@ void window_system::poll_events()
 
         // The pixel size, not SDL_EVENT_WINDOW_RESIZED's logical size — the back buffer is sized in pixels.
         // The two diverge as soon as a window sits on a high-density display.
+        // A move to a display of another density changes the pixel size alone, so the density is re-read here too.
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             if (auto* const w = window_from_id(event.window.windowID))
             {
                 w->_width = event.window.data1;
                 w->_height = event.window.data2;
+                w->refresh_scale();
             }
+            break;
+
+        case SDL_EVENT_WINDOW_RESIZED:
+            if (auto* const w = window_from_id(event.window.windowID))
+                w->_logical_size = tg::vec2i(event.window.data1, event.window.data2);
+            break;
+
+        // A content-scale change with no density change — the user changed Windows' scaling — moves no pixel size.
+        case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+            if (auto* const w = window_from_id(event.window.windowID))
+                w->refresh_scale();
             break;
 
         case SDL_EVENT_WINDOW_MOVED:
@@ -677,6 +735,7 @@ void window_system::poll_events()
                 // So state it here rather than leaving a stale size behind.
                 w->_width = 0;
                 w->_height = 0;
+                w->_logical_size = tg::vec2i(0, 0);
             }
             break;
 
@@ -688,6 +747,7 @@ void window_system::poll_events()
                 // On failure the previous size stands, which is the best available answer here — poll_events returns void, and the next size event will correct it.
                 auto const ok = SDL_GetWindowSizeInPixels(as_sdl(w->_native_window), &w->_width, &w->_height);
                 CC_ASSERT(ok, "SDL_GetWindowSizeInPixels failed");
+                w->refresh_scale();
             }
             break;
 
