@@ -65,7 +65,7 @@ enum class sv::render_mode : sv::u8
 /// This is the home for the post-process sequence, exposure, ... as they land.
 struct sv::render_settings
 {
-    /// Primary rays integrated per pixel, all in the one path-trace dispatch.
+    /// Primary rays integrated per pixel, all in the one path-trace dispatch: the megakernel's alone, which no other mode reads or restarts on.
     ///
     /// This is what one frame costs, not what the image converges to — a view left alone accumulates without limit,
     /// so this trades how fast a moving camera settles against how smooth it stays while it moves.

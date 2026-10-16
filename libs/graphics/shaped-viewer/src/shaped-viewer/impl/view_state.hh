@@ -97,6 +97,9 @@ struct temporal_slot
     /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
     u32 scaled_frame = 0;
 
+    /// How many full-size frames of this accumulation slot's layer restarted its mean, which keeps each restart's random sequence apart.
+    u32 restarts = 0;
+
     /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's.
     tg::vec2f last_jitter = tg::vec2f(0, 0);
 

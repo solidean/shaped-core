@@ -415,6 +415,17 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     return h;
 }
 
+/// The random seed of the frame `slot` traces next, once `restarts` counts a frame that restarts the mean.
+///
+/// Each restart draws a sequence of its own, so moving frames, every one a restart, do not all draw one.
+/// A still frame's seed rides one above its count within its restart's run, and the runs never overlap, since the count stops at the cap.
+/// Never 0, which the tracer reads as no seed.
+[[nodiscard]] u32 seed_of(impl::temporal_slot const& slot)
+{
+    auto const seed = slot.restarts * (accumulation_frame_cap + 1) + slot.accum_frame + 1;
+    return seed != 0 ? seed : 1;
+}
+
 /// Bytes a texture of `size` in `format` costs, for the cache's budget.
 [[nodiscard]] isize texture_bytes(tg::vec2i size, sg::pixel_format format)
 {
@@ -911,6 +922,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const decals = decals_of(l, resources.drawings.decal_atlas());
     auto fc = make_frame_constants(v, l, lights, tr.resolution);
     fc.decal_count = u32(decals.decals.size());
+    // Only the megakernel reads it, so no other mode restarts on it.
+    if (mode != render_mode::megakernel)
+        fc.samples_per_pixel = 0;
     auto const bg = background_gpu::from(l.background);
     // The integrator is folded in too: both converge to the same image, but a mean must not hold samples of both.
     // So is what the last frame stood in for a permutation not compiled, which only the routine decides.
@@ -939,6 +953,13 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         rec.camera_cut_pending = false;
     }
 
+    // The path state is the wavefront's alone, and the store's budget counts it for as long as the slot holds it.
+    if (mode != render_mode::wavefront)
+    {
+        slot->paths = {};
+        slot->scaled_paths = {};
+    }
+
     // A rasterized layer draws its final image and its G-buffer in one frame, so nothing below — accumulation,
     // denoising, upscaling — has anything to do with it.
     if (!is_traced)
@@ -958,9 +979,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     slot->reset_hash = hash;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
-    // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot->accum_frame;
-    fc.rng_seed = slot->accum_frame + 1;
+    if (slot->accum_frame == 0)
+        ++slot->restarts;
+    fc.rng_seed = seed_of(*slot);
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
     // temporal ones only when the layer may denoise temporally.
@@ -1070,6 +1092,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // test reads the primary depth at the view's own size.
     auto upscale_settings = schedule.temporal_settings;
     upscale_settings.upscaler = l.settings.reconstruct.upscaler;
+    // A layer that can never trace at the upscaler's extent holds no paths for it.
+    if (!has_temporal || depth_slot != nullptr || upscale_settings.upscaler == sr::upscale_method::none)
+        slot->scaled_paths = {};
     auto const may_scale = image_changed && writes_temporal && depth_slot == nullptr;
     auto const input_extent = may_scale
                                 ? sr::reconstruct_input_extent(ctx, upscale_settings, tr.resolution, traceable_guides())
@@ -1476,6 +1501,8 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const decals = decals_of(*scene, resources.drawings.decal_atlas());
     auto fc = make_frame_constants(v, *scene, lights, v.resolution);
     fc.decal_count = u32(decals.decals.size());
+    if (mode != render_mode::megakernel)
+        fc.samples_per_pixel = 0;
     auto const bg = background_gpu::from(scene->background);
     auto const hash = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
                                        cc::make_hash(u32(mode), slot.stand_in_hash));
@@ -1485,6 +1512,11 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     if (acc.resized)
         store.set_payload_bytes(v.id, texture_bytes(v.resolution, sg::pixel_format::rgba32_float));
+
+    // As on the plan path, and this path never scales.
+    if (mode != render_mode::wavefront)
+        slot.paths = {};
+    slot.scaled_paths = {};
 
     if (!is_traced)
     {
@@ -1503,9 +1535,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     slot.reset_hash = hash;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
-    // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot.accum_frame;
-    fc.rng_seed = slot.accum_frame + 1;
+    if (slot.accum_frame == 0)
+        ++slot.restarts;
+    fc.rng_seed = seed_of(slot);
 
     auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
         1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
