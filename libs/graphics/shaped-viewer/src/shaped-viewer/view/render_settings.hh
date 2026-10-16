@@ -80,17 +80,10 @@ struct sv::render_settings
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///
     /// The wavefront's counterpart to `samples_per_pixel`, which it does not read: this is what a still frame costs, and a path still alive after it carries on next frame.
-    /// A frame that sees the image change ignores it, and runs until every sample it started has finished.
-    /// With a `frame_budget_ms`, it is only where the rounds start, until the frame's own timestamps say what one costs.
+    /// A frame that sees the image change ignores it, and drains: it runs `wavefront_routine::drain_rounds(max_bounces)` rounds.
+    /// Those finish every sample it started but a medium walk deeper than that, which a still frame after it finishes.
+    /// Under the viewer's `viewer_config::frame_budget_ms`, it is only where the rounds start, until the frame's own timestamps say what one costs.
     i32 rounds_per_frame = 8;
-
-    /// How much GPU time a still frame of the wavefront tracer may take, in milliseconds; 0 runs `rounds_per_frame` always.
-    ///
-    /// The rounds a still frame runs follow from what the last ones measured, so the image converges as fast per second
-    /// as the GPU allows while the viewer stays responsive; a frame that sees the image change is not held to it.
-    /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
-    /// A headless viewer, which is what a capture runs in, treats it as 0, so its image depends on no machine's speed.
-    f32 frame_budget_ms = 16.0f;
 
     /// How this layer's image is denoised before its parent composites it; off unless asked for.
     ///

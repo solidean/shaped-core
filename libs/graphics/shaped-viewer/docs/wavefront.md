@@ -179,9 +179,12 @@ Connect adds what arrives into the slot's `path_light`, the one shade wrote, in 
 ### Settings
 
 `render_settings::rounds_per_frame` is what a still frame runs; `samples_per_pixel` is the megakernel's, which the wavefront does not read.
-`render_settings::frame_budget_ms`, 16 by default, turns the rounds into a target: a still frame runs as many as fit, from the smoothed GPU timestamps of the frames before it, between 1 and 64.
+`viewer_config::frame_budget_ms`, 16 by default, turns the rounds into a target: a still frame runs as many as fit, from the smoothed GPU timestamps of the frames before it, between 1 and 64.
+The budget is the frame's, split evenly among its still wavefront layers, so four still views take the frame's 16 ms rather than 64.
+A layer counts as still when its mean held the frame before; one whose image changes this frame drains and leaves its share unspent.
 `rounds_per_frame` is then only where that starts, and stays the count where the device times nothing or the budget is 0.
-A headless viewer, which is what a capture runs in, sets every budget to 0, so a capture's sample count depends on no machine's speed or load.
+A headless viewer, which is what a capture runs in, sets the budget to 0, so a capture's sample count depends on no machine's speed or load.
+So does a plan built by hand, whose `viewer_definition::wavefront_budget_ms` is 0 unless its caller sets it.
 A frame that restarts is held to neither, since it drains.
 `max_bounces` keeps its name and is the cap.
 
@@ -298,7 +301,8 @@ Neither change has landed; [the roadmap](plans/rendering-roadmap.md) orders the 
 
 Every step has landed: the wavefront traces a layer unless `render_settings::mode` asks for the megakernel.
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
-A frame whose image changed restarts and drains, and a still one carries for as many rounds as fit `frame_budget_ms`, or for `rounds_per_frame` where that is 0.
+A frame whose image changed restarts and drains, and a still one carries for as many rounds as fit its share of `frame_budget_ms`, or for `rounds_per_frame` where that is 0.
+A mean at `accumulation_frame_cap` starts no more samples, so its tallies stop growing with it.
 A layer that denoises hands the spatial member the tallies' per-pixel counts.
 Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the Cornell box, and `wavefront-view-test.cc` through the viewer on quadrics and decals.
 `wavefront-trace-test.cc` holds media and glass to the furnace's analytic expectation instead, and cutouts to the fraction they keep.
@@ -306,7 +310,7 @@ Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the 
 What is still open:
 
 - **A draining frame is bounded rather than empty.**
-  It runs `max_bounces + 17` rounds, enough for every surface bounce and for a medium walk up to where its roulette starts.
+  It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 17` rounds, enough for every surface bounce and for a medium walk up to where its roulette starts.
   A deeper walk finishes on the next still frame, or is dropped by the next restart.
 - **A moving frame is one sample per pixel**, where the megakernel's is `samples_per_pixel`; starting several per pixel on a draining frame is the fix, if a moving image turns out too noisy.
 - **A capture does not drain before it reads.** Its mean is consistent but holds the paths that finished, which favors short ones until the carry catches up.

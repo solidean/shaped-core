@@ -157,16 +157,17 @@ cc::optional<cc::fixed_array<f64, wavefront_timing::stage_count>> wavefront_timi
     return seconds;
 }
 
-void wavefront_routine::_record_landed_timings()
+void wavefront_routine::_record_landed_timings(u64 now)
 {
-    // A frame whose list was dropped never lands; a handful in flight is the most a healthy queue holds.
-    constexpr isize max_in_flight = 8;
-    while (_timed.size() > max_in_flight)
+    // A frame whose list was dropped never lands, and one a handful of epochs old was.
+    // Aged by epoch rather than counted, since every traced layer of the frame adds one.
+    constexpr u64 max_epochs_in_flight = 16;
+    while (!_timed.empty() && _timed.front().epoch + max_epochs_in_flight < now)
         _timed.remove_at(0);
 
     while (!_timed.empty())
     {
-        auto const landed = _timed.front().try_seconds();
+        auto const landed = _timed.front().timing.try_seconds();
         if (!landed.has_value())
             return;
         auto const& seconds = landed.value();
@@ -206,6 +207,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
               "wavefront_routine: the trace names more permutations than its state has room for");
     CC_ASSERT(t.bindless != nullptr, "wavefront_routine: a trace binds the manager's bindless tables");
     CC_ASSERT(d.rounds > 0, "wavefront_routine: a frame takes at least one round");
+    CC_ASSERT(d.restart || d.state->generation != 0, "wavefront_routine: the first frame through a state must restart");
 
     // Started whether or not a substitution ends up needing them.
     auto const fallback = t.fallback != nullptr ? self->_shade_kernel_of(ctx, t.fallback, *t.bindless) : nullptr;
@@ -248,8 +250,12 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         cmd.upload.pod_to_buffer(lights, tracer::light_record{});
     }
 
+    // Past every decline, so a generation is spent only on a frame that runs; 0 stays the fresh state's.
+    if (d.restart && ++d.state->generation == 0)
+        d.state->generation = 1;
+
     auto fc = d.frame;
-    fc.generation = d.generation;
+    fc.generation = d.state->generation;
     fc.wavefront_flags = d.restart ? 1u : 0u;
     fc.permutation_count = u32(t.hit_groups.size());
     fc.roulette_after = d.roulette_after;
@@ -298,7 +304,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         cmd.compute.set_inline_constants(step);
     };
 
-    self->_record_landed_timings();
+    self->_record_landed_timings(u64(ctx.current_epoch()));
     auto timing = wavefront_timing{};
     auto const timed = cmd.query.is_supported();
     auto const mark = [&](wavefront_stage s)
@@ -379,7 +385,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         timing.end = cmd.query.record_gpu_timestamp();
         if (d.timing != nullptr)
             *d.timing = timing;
-        self->_timed.push_back(cc::move(timing));
+        self->_timed.push_back({.timing = cc::move(timing), .epoch = u64(ctx.current_epoch())});
     }
     if (live.raw() != nullptr)
         *d.live_paths = cmd.download.data_from_buffer(live);

@@ -163,10 +163,8 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
         // sampled directly, so from above the box is lit through its lamp mesh alone and comes out nearly black.
         // Moderate, because nothing tone-maps and a bright box clips to flat white; either way the noise would hide.
         scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
-        // No frame budget: it sizes a still frame by the GPU's own timing, so a capture at `accumulate` frames would hold
-        // however many samples this machine reached, and two captures would compare different estimates.
-        scene.settings(
-            {.samples_per_pixel = 1, .mode = mode, .frame_budget_ms = 0.0f, .reconstruct = {.denoiser = method}});
+        // A capture runs headless, so no frame budget sizes a still frame by this machine's speed.
+        scene.settings({.samples_per_pixel = 1, .mode = mode, .reconstruct = {.denoiser = method}});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
         // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.

@@ -185,8 +185,7 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_wavefront(sg::context& ctx,
                                                         .state = &state,
                                                         .rounds = last ? run.drain_rounds : run.rounds,
                                                         .restart = f == 0,
-                                                        .regenerate = !last,
-                                                        .generation = 1});
+                                                        .regenerate = !last});
         });
 }
 
@@ -286,8 +285,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - traces the megakernel's image of t
                                                         .state = &state,
                                                         .rounds = last ? 8 : 6,
                                                         .restart = f == 0,
-                                                        .regenerate = !last,
-                                                        .generation = 1});
+                                                        .regenerate = !last});
         });
 
     REQUIRE(reference.size() == traced.size());
@@ -379,7 +377,6 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
                                                         .rounds = carrying ? carry_rounds : drain_rounds,
                                                         .restart = carrying,
                                                         .regenerate = carrying,
-                                                        .generation = 1,
                                                         .live_paths = carrying ? &carried : &drained});
         });
 
@@ -461,8 +458,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a still frame of one round keeps t
                                                                       .state = &state,
                                                                       .rounds = f == 0 ? 6 : 1,
                                                                       .restart = f == 0,
-                                                                      .regenerate = true,
-                                                                      .generation = 1});
+                                                                      .regenerate = true});
             if (outcome == sg::routine_outcome::executed)
                 (f == 0 ? restarted_depth : still_depth)
                     = sg::data_future<f32>(cmd.download.bytes_from_texture(depth.raw()));

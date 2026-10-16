@@ -22,6 +22,10 @@ struct sv::viewer_definition
     /// 1 for a headless frame, which has no window to ask.
     f32 content_scale = 1.0f;
 
+    /// The GPU milliseconds this frame's still wavefront layers share, which the viewer sets from `viewer_config::frame_budget_ms`.
+    /// 0, the default for a definition built by hand, runs each layer's `render_settings::rounds_per_frame`.
+    f32 wavefront_budget_ms = 0.0f;
+
     [[nodiscard]] view_data& operator[](view_index i) { return views[u32(i)]; }
     [[nodiscard]] view_data const& operator[](view_index i) const { return views[u32(i)]; }
 };

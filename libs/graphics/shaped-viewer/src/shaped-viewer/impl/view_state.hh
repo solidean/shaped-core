@@ -216,6 +216,22 @@ struct view_state
 // was not layer 0 reported zero forever and nothing waiting on it ever finished.
 // Every caller asking "how far has this view got" goes through these two.
 
+// -- Pacing a still wavefront frame.
+
+/// The GPU milliseconds the still wavefront layers of a frame under `config` share: none in a headless viewer.
+/// A headless run is a capture or a test, whose image must not depend on how fast the machine is.
+[[nodiscard]] f32 wavefront_budget_of(viewer_config const& config);
+
+/// One still wavefront layer's share of `budget_ms`, split evenly among `still_layers` of them; 0 for no budget.
+[[nodiscard]] f32 wavefront_budget_share(f32 budget_ms, isize still_layers);
+
+/// The most rounds a budget gives a still frame, however cheap a round measured.
+inline constexpr i32 max_budgeted_rounds = 64;
+
+/// How many rounds a still frame runs: `rounds_per_frame`, or as many as fit `budget_ms` at `seconds_per_round`, between 1 and `max_budgeted_rounds`.
+/// `rounds_per_frame` stands until a round is measured, and always where the budget is 0.
+[[nodiscard]] i32 still_rounds_for(i32 rounds_per_frame, f32 budget_ms, f64 seconds_per_round);
+
 /// The lowest accumulated-frame count across every traced layer of `state`, and 0 when it has none.
 ///
 /// The lowest rather than the first: a view converges when its slowest layer does.

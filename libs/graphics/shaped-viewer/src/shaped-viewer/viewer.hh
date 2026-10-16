@@ -34,6 +34,14 @@ struct sv::viewer_config
     /// A headless loop is ended by `request_close` alone, since there is no window to close.
     bool headless = false;
 
+    /// How much GPU time a frame's still wavefront layers may take together, in milliseconds, split evenly among them; 0 runs each layer's `rounds_per_frame`.
+    ///
+    /// A still layer's rounds follow from what its last frames measured, so the image converges as fast per second as the GPU allows while the viewer stays responsive.
+    /// A frame whose image changed is not held to it, since it drains.
+    /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
+    /// A headless viewer, which is what a capture runs in, treats it as 0, so its image depends on no machine's speed.
+    f32 frame_budget_ms = 16.0f;
+
     /// Swapchain back buffers, and also the pipelining depth passed to advance_epoch.
     /// Must be >= 2.
     int buffer_count = 3;

@@ -37,7 +37,8 @@ struct sv::wavefront_state
     sg::buffer<u32> shade_offsets;
     sg::buffer<shaders::tracer::dispatch_args> args;
 
-    /// The camera generation the last restart started its paths under, kept by whoever restarts: the next restart takes the one after.
+    /// The camera generation the last restart started its paths under, which `wavefront_routine::execute` advances on every restart.
+    /// 0 until the first, which is how a fresh state is told from one that has run.
     u32 generation = 0;
 
     /// A state for `extent`, every path dead and every tally empty: the first trace through it has to restart.

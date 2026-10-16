@@ -480,23 +480,25 @@ struct ensured_slot
     return {.slot = &slot, .resized = resized};
 }
 
+/// The mode a plan's layer is recorded in: `automatic` is the viewer's to resolve, and one that reaches a plan built by hand is the wavefront.
+[[nodiscard]] render_mode planned_mode(render_mode mode)
+{
+    return mode == render_mode::automatic ? render_mode::wavefront : mode;
+}
+
 /// The bounce after which the wavefront's Russian roulette may end a path, which leaves `max_bounces` a cap.
 constexpr u32 wavefront_roulette_after = 3;
 
-/// The most rounds a budget gives a still frame, however cheap a round measured.
-constexpr i32 max_budgeted_rounds = 64;
-
-/// How many rounds a still frame runs: `rounds_per_frame`, or as many as fit `frame_budget_ms` once a round is measured.
+/// How many rounds a still frame runs under `budget_ms`, its layer's share of the frame's: `impl::still_rounds_for` over the measured cost of a round.
 ///
 /// Folds in every frame whose timestamps have landed first, so the estimate is as fresh as the GPU allows.
 /// The estimate is smoothed rather than replaced, since one frame's time moves with what else the GPU is doing.
-[[nodiscard]] i32 still_rounds(render_settings const& settings, impl::wavefront_pacing& pacing)
+[[nodiscard]] i32 still_rounds(render_settings const& settings, f32 budget_ms, impl::wavefront_pacing& pacing)
 {
-    auto const fixed = cc::max(1, settings.rounds_per_frame);
-    if (settings.frame_budget_ms <= 0.0f)
+    if (budget_ms <= 0.0f)
     {
         pacing.in_flight.clear();
-        return fixed;
+        return impl::still_rounds_for(settings.rounds_per_frame, budget_ms, 0.0);
     }
 
     while (!pacing.in_flight.empty())
@@ -518,13 +520,27 @@ constexpr i32 max_budgeted_rounds = 64;
     while (pacing.in_flight.size() > max_in_flight)
         pacing.in_flight.remove_at(0);
 
-    if (pacing.seconds_per_round <= 0.0)
-        return fixed;
-    auto const fit = i32(f64(settings.frame_budget_ms) * 1e-3 / pacing.seconds_per_round);
-    return cc::clamp(fit, 1, max_budgeted_rounds);
+    return impl::still_rounds_for(settings.rounds_per_frame, budget_ms, pacing.seconds_per_round);
 }
 
-/// Traces one frame of a layer into `slot` with the layer's integrator, `d.frame` holding `fc`.
+/// How many of `plan`'s traces run a still wavefront frame this frame, as far as is known before any of them traces.
+/// That is every refreshing wavefront layer whose mean has not restarted; one whose image changes this frame still counts, and leaves its share unspent.
+[[nodiscard]] isize still_wavefront_traces(viewer_definition const& def, render_plan const& plan, view_store const& store)
+{
+    auto count = isize(0);
+    for (auto const& tr : plan.traces)
+    {
+        if (!tr.refresh || planned_mode(def[tr.view].layers[tr.layer].settings.mode) != render_mode::wavefront)
+            continue;
+        auto const* const rec = store.peek_ptr(tr.id);
+        auto const* const slot = rec != nullptr ? rec->temporal.get_ptr(temporal_id::accumulation(tr.layer)) : nullptr;
+        if (slot != nullptr && slot->accum_frame > 0)
+            ++count;
+    }
+    return count;
+}
+
+/// Traces one frame of a layer into `slot` with the layer's integrator, `d.frame` holding `fc`, a still wavefront frame under `budget_ms`.
 ///
 /// The wavefront's path state lives on `slot`, so this is where it is sized and where a frame decides between restarting and carrying.
 /// A frame whose mean restarts (`accum_frame == 0`) restarts every path and drains: it starts one sample per pixel and runs them to their end,
@@ -536,7 +552,8 @@ constexpr i32 max_budgeted_rounds = 64;
                                               pt_trace_desc const& d,
                                               shaders::tracer::frame_constants const& fc,
                                               impl::temporal_slot& slot,
-                                              bool scaled)
+                                              bool scaled,
+                                              f32 budget_ms)
 {
     if (settings.mode == render_mode::megakernel)
         return pathtrace_routine::execute(cmd, d);
@@ -554,43 +571,34 @@ constexpr i32 max_budgeted_rounds = 64;
 
     auto& paths = held.value();
     auto const restart = scaled || slot.accum_frame == 0;
-    if (restart)
-        ++paths.generation;
 
-    // A path takes one round per surface bounce, capped by `max_bounces`, and one per medium scatter, which only a roulette ends.
-    // Room for every bounce and for a walk up to where that roulette starts (`pt.roulette_after`, 16).
-    // A walk deeper than that is still alive at the frame's end: a still next frame finishes it, and a restart drops it,
+    // A walk deeper than a drain is still alive at the frame's end: a still next frame finishes it, and a restart drops it,
     // which biases a moving image only where a medium scatters that often.
-    auto const drain_rounds = cc::max(0, fc.max_bounces) + 1 + 16;
-    auto const rounds = restart ? drain_rounds : still_rounds(settings, slot.pacing);
+    auto const rounds
+        = restart ? wavefront_routine::drain_rounds(fc.max_bounces) : still_rounds(settings, budget_ms, slot.pacing);
 
     // Only a still frame's rounds are full of paths, so only its timestamps say what a round costs.
     auto* timing = static_cast<wavefront_timing*>(nullptr);
-    if (!restart && settings.frame_budget_ms > 0.0f)
+    if (!restart && budget_ms > 0.0f)
     {
         slot.pacing.in_flight.push_back({.rounds = rounds});
         timing = &slot.pacing.in_flight.back().timing;
     }
-    auto const outcome = wavefront_routine::execute(cmd, {.trace = d,
-                                                          .frame = fc,
-                                                          .state = &paths,
-                                                          .rounds = rounds,
-                                                          .restart = restart,
-                                                          .regenerate = !restart,
-                                                          .generation = paths.generation,
-                                                          .roulette_after = wavefront_roulette_after,
-                                                          .timing = timing});
+    auto const outcome = wavefront_routine::execute(
+        cmd, {.trace = d,
+              .frame = fc,
+              .state = &paths,
+              .rounds = rounds,
+              .restart = restart,
+              // At the cap the mean stops counting frames, so its tallies stop taking samples too.
+              .regenerate = !restart && slot.accum_frame < accumulation_frame_cap,
+              .roulette_after = wavefront_roulette_after,
+              .timing = timing});
 
     // A declined frame records no timestamps, so its entry would never land and would hold back every later one.
     if (timing != nullptr && outcome != sg::routine_outcome::executed)
         (void)slot.pacing.in_flight.pop_back();
     return outcome;
-}
-
-/// The mode a plan's layer is recorded in: `automatic` is the viewer's to resolve, and one that reaches a plan built by hand is the wavefront.
-[[nodiscard]] render_mode planned_mode(render_mode mode)
-{
-    return mode == render_mode::automatic ? render_mode::wavefront : mode;
 }
 
 /// Whether a layer traced in `mode` may be traced on `ctx`, saying so once per `slot` when it may not.
@@ -770,6 +778,8 @@ cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
     // A traced layer finds the tracer still initializing on its first frame at most, and declines that frame as it would anyway.
     if (ctx.supports(sg::feature::raytracing_pipeline))
         pathtrace_routine::prewarm(ctx);
+    if (ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query))
+        wavefront_routine::prewarm(ctx);
 
     // Warmed rather than declared: a layer that never crossfades must not wait on it, and one that does reaches the
     // fade a good many frames after the first trace — so the compile has long since finished by then.
@@ -1215,7 +1225,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
          .decal_shapes = decal_buffers.shapes,
          .decal_atlas = decal_buffers.atlas,
          .stand_ins = &stand_ins},
-        fc, *slot, scaled);
+        fc, *slot, scaled,
+        impl::wavefront_budget_share(def.wavefront_budget_ms, still_wavefront_traces(def, plan, store)));
 
     // Only a frame that actually dispatched advances the accumulation: counting a declined one would make the blend
     // weight say more samples had landed than did, and the estimate would stop moving toward the answer.
@@ -1585,7 +1596,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
          .decal_shapes = decal_buffers.shapes,
          .decal_atlas = decal_buffers.atlas,
          .stand_ins = &stand_ins},
-        fc, slot, false);
+        fc, slot, false, 0.0f);
 
     // The store's budget counts the path state beside the texture, and the trace may just have created or grown it.
     auto bytes = texture_bytes(v.resolution, sg::pixel_format::rgba32_float);

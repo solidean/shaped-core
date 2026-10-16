@@ -62,15 +62,12 @@ struct sv::wavefront_trace_desc
     i32 rounds = 1;
 
     /// Whether every path and every tally starts over, since the image describes something else now.
-    /// The first frame through a state must restart.
+    /// The first frame through a state must restart, and a restart advances `state->generation`.
     bool restart = false;
 
     /// Whether a slot whose path finished starts its next sample within this frame.
     /// A frame that drains takes none, so every sample it started finishes inside it.
     bool regenerate = true;
-
-    /// Which camera generation this frame's paths start under; one of an older generation never reaches the image.
-    u32 generation = 1;
 
     /// The bounce Russian roulette starts after, or 0 for a hard `max_bounces` alone.
     u32 roulette_after = 0;
@@ -102,6 +99,16 @@ public:
     ///
     /// A permutation whose shade kernel has not compiled is shaded by the stand-in of its kind, as the megakernel's hit groups are.
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, wavefront_trace_desc const& d);
+
+    /// How many medium scatters a walk takes before its Russian roulette may end it: `pt.roulette_after` in shaders/sgl/pt_sampling.sgl.
+    static constexpr i32 medium_roulette_after = 16;
+
+    /// The rounds a draining frame runs under `max_bounces`: the primary segment and one per surface bounce, then a medium walk up to where its roulette starts.
+    /// A walk deeper than that is still alive when the frame ends.
+    [[nodiscard]] static constexpr i32 drain_rounds(i32 max_bounces)
+    {
+        return (max_bounces > 0 ? max_bounces : 0) + 1 + medium_roulette_after;
+    }
 
 protected:
     cc::shared_async<cc::unit> init_once(sg::routine_init_scope scope) override;
@@ -144,9 +151,16 @@ private:
     /// Keyed on the permutation's key; dropped by every reload.
     cc::map<cc::hash128, shade_kernel> _shade_kernels;
 
-    /// Frames whose timestamps have not landed yet, oldest first.
-    cc::vector<wavefront_timing> _timed;
+    /// A frame whose timestamps have not landed yet, and the context epoch it was recorded in.
+    struct timed_frame
+    {
+        wavefront_timing timing;
+        u64 epoch = 0;
+    };
 
-    /// Records every frame of `_timed` whose timestamps have all landed, and drops the oldest past a few that never do.
-    void _record_landed_timings();
+    /// Every traced layer's frames whose timestamps have not landed yet, oldest first.
+    cc::vector<timed_frame> _timed;
+
+    /// Records every frame of `_timed` whose timestamps have all landed by epoch `now`, and drops one too old to land ever.
+    void _record_landed_timings(u64 now);
 };
