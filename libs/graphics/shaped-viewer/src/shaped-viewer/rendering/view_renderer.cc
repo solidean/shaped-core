@@ -422,10 +422,12 @@ struct ensured_slot
     if (resized)
     {
         // UAV-written by whatever fills it, sampled by whatever reads it back — every temporal resource needs both.
-        auto const desc = sg::texture_2d_description{.format = format,
-                                                     .width = resolution[0],
-                                                     .height = resolution[1],
-                                                     .usage = sg::texture_usage::texture | sg::texture_usage::image};
+        // Copyable too, so the host can read one back: a double-click reads a texel of the primary depth.
+        auto const desc = sg::texture_2d_description{
+            .format = format,
+            .width = resolution[0],
+            .height = resolution[1],
+            .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src};
 
         if (slot.texture.raw() != nullptr)
             slot.texture.raw()->expire();
@@ -708,11 +710,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_split = has_split ? 1 : 0;
     }
 
-    // The depth a layer's 3D drawings are occluded by, on every frame that traces it — after the hash, so a drawing
-    // coming or going never restarts the image.
-    // Keyed on the same condition `temporal_inputs_of` declares it on, so the slot was sized by this frame's resolve.
-    auto* const depth_slot
-        = l.needs_primary_depth() ? rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer)) : nullptr;
+    // The depth a layer's 3D drawings are occluded by and a pick reads, on every frame that traces it — after the hash,
+    // so a drawing coming or going never restarts the image.
+    auto* const depth_slot = rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer));
     if (depth_slot != nullptr)
     {
         fc.write_primary_depth = 1;

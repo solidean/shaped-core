@@ -174,7 +174,8 @@ Supporting directories:
 * **`tools/`** — `dev/` (Python build/test machinery behind [dev.py](dev.py);
   see [docs/dev-py-driver.md](docs/dev-py-driver.md)), `bin/` (checked-in binaries, e.g. `diag-launcher.exe`), `cmake/` (repo-wide build config modules), `lint/` (the clang-tidy gate whitelist),
   `shaped-linter/` (our own C++ linter — own lexer + parser, no LLVM; see [its readme](tools/shaped-linter/readme.md) — run via `dev.py lint shaped`),
-  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)), and `instruction-tracer/` (a C++ tool —
+  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)),
+  `issues/` (the in-repo issue tracker behind `dev.py issues` — see [docs/guides/issue-tracking.md](docs/guides/issue-tracking.md)), and `instruction-tracer/` (a C++ tool —
   see [its readme](tools/instruction-tracer/readme.md) — that records what optimized code actually executed; drive it via `dev.py assembly trace`).
 * **`docs/`** — repo-wide docs; start at [docs/_index.md](docs/_index.md).
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry points.
@@ -406,6 +407,8 @@ Invokable session tooling lives in [.claude/skills/](.claude/skills/). Worth cal
 
 * **`/building-and-testing`** — drive `dev.py` and the `repo_tools` `build_diag` / `test_diag` diagnostics.
   See [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md).
+* **`/issue-tracking`** — file, find, claim and close issues: markdown files in any `docs/issues/` folder, driven by `dev.py issues`.
+  See [docs/guides/issue-tracking.md](docs/guides/issue-tracking.md).
 * **`/reworking-prose`** — rework the comments and docs around a topic wholesale, landing every rewrite in one `dev.py lint prose-apply` pass.
   Use it whenever prose findings pile up, a guideline changes, or a surface needs more documentation than it has.
 
@@ -510,8 +513,10 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | See external dependency pins     | `uv run dev.py deps list` (`--offline` for no network; [dependencies](docs/guides/dependencies.md)) |
 | Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
+| File, find or claim an issue     | `uv run dev.py issues new/list/known/claim` ([issue-tracking](docs/guides/issue-tracking.md); the `issue-tracking` skill) |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
+| Update a consumer's submodules   | `uv run dev.py submodules sync [--bump]` — fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
 | Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |

@@ -300,6 +300,7 @@ A binary with several is exactly right when related examples want to share setup
 Such a binary may also carry ordinary `TEST`s, for the machinery it grew along the way.
 `dev.py test` runs them: an example binary joins the sweep exactly when it reports tests of its own, and is skipped when it has none.
 Its `EXAMPLE`s are in another bucket and never run there.
+An example binary that is not built, such as one a consumer excludes from `all`, is skipped too; a test binary that is not built fails its run, and the rest still run.
 
 ## What binds an example, and what does not
 

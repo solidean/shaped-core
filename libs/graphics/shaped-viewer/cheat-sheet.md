@@ -486,6 +486,25 @@ s.add_arrow(tg::segment3f(a, b), steel);            //   sized to its own length
 s.add_arrow(tg::segment3f(a, b), 0.01f, steel);     //   ...or to a fixed shaft, so only LENGTH varies across arrows
 ```
 
+### tg objects by their parts (`scene/tg_objects.hh`)
+
+Any tg object takes part by what it has — `vertices()`, `edges()`, `faces()`; a triangle or quad is its own face; any scalar, `aabb3i` included.
+
+```cpp
+sv::vertex_style                 // { float radius = 0.02f; }
+sv::edge_style                   // { radius = 0.01f; optional vertex_radius (unset = radius: exactly round joints); bool vertices = true; line_ends ends = flat; }
+                                 //   vertices: a sphere on each of the OBJECT's vertices, once each, and open tubes; without: `ends` closes each tube
+
+set.add_edges(box, style);       // -> isize primitives appended (aabb: 12 tubes + 8 joints), so a per-primitive attribute can follow in step
+set.add_vertices(tet, style);    // -> isize; also add_edges(span<segment3f>, span<pos3f> joints, style) / add_vertices(span<pos3f>, style)
+sv::triangle_geometry::create_from_faces(obj_or_range)  // the faces as a raw triangle list, wound as tg winds them
+
+s.add_faces(box, surface);                              // -> faces_ref; one mesh per (view, layer, material) when the frame ends
+s.add_edges(box, {.radius = 0.02f}, ink);               // -> edges_ref
+s.add_vertices(box, {.radius = 0.05f}, accent);         // -> vertices_ref
+s.add_edges(frustum).radius(0.04f).material(accent);    // drawn at the flush, so the ref still restyles it this frame
+```
+
 **`add` is the only mutator** — the named factories all funnel through it, and `add(quadric_primitive)` takes a record the factories do not cover.
 That is what makes "equal contents give equal hashes" a property of the type rather than of the caller.
 The hash is one pass over the primitive span, taken on the first `hash()` after a mutation and cached, so a set filled once and placed every frame hashes once.
@@ -637,12 +656,19 @@ sv::orbit_state                  // { pos3d target; f64 distance; angle_d azimut
 o.to_camera()                    // -> camera (camera::orbiting plus the fov); orbit_state::from_camera(cam, distance) is the lossy inverse
 sv::orbit_camera_controller      // { orbit_state orbit; camera_controller_config config; }
 c.handle(sr::input_event) -> bool  // apply one event ALREADY routed to this view; true if the camera actually moved
+c.focus_on(pos3d) -> bool        // start a glide to orbit this point at config.focus_approach (0.7) of its depth, view direction kept; false behind the eye
+c.update(dt) -> bool             // advance that glide (config.focus_seconds, ease-out); true while moving. A pan cancels it; cancel_focus() too
+c.is_focusing()                  // whether update would still move the camera
 c.camera() / c.is_dragging()     // the resulting camera / whether a drag is in progress
+sv::primary_hit_position(record, pixel, resolution, depth, near) // -> optional<pos3d>: a texel of the trace's primary depth back to world; none = escaped
 sv::camera_controller_config     // { f64 orbit_degrees_per_pixel, pan_units_per_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
 ```
 
 Left drag orbits, middle drag pans the target (scaled by distance, so one drag covers the same screen fraction at every zoom), the wheel scales the distance geometrically.
-It is **event-driven and time-free** — every input carries the motion it caused, so there is no `update(dt)` to schedule and a view that gets no input produces none.
+**A double-click orbits the surface under the cursor**: `sv::viewer` reads one texel of the trace's primary depth back and calls `focus_on`.
+The glide starts a frame or two after the click, and a click on the background moves nothing.
+It is **event-driven** — every input carries the motion it caused, and a view that gets no input produces none.
+The glide is its one motion over time, so a caller running its own pump calls `update(dt)` every frame; `sv::viewer` does that for you.
 `sv::viewer` drives one per view for you; a caller running its own event pump (see `viewer-window-manual-test.cc`) just feeds it `wsys->events()`.
 
 ```cpp
