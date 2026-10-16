@@ -115,7 +115,10 @@ def _sync(repo: Path, sub: Submodule, *, dry_run: bool, fetch: bool) -> Outcome:
     behind = _count(repo, f"HEAD..{target}")
     if on and not behind:
         return Outcome(sub.path, "up-to-date", f"{branch} at {head[:10]}", head, head)
-    detail = f"{branch}: {head[:10]}..{target[:10]}, {behind} commit(s)" + ("" if on else ", leaving the detached HEAD")
+    if on:
+        detail = f"{branch}: {head[:10]}..{target[:10]}, {behind} commit(s)"
+    else:
+        detail = f"checks {branch} out at the detached {head[:10]}" + (f", then {behind} commit(s) to {target[:10]}" if behind else "")
     if dry_run:
         return Outcome(sub.path, "would update", detail, head, target)
 

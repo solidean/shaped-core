@@ -122,7 +122,11 @@ def test_detached_within_the_branch_moves_onto_it(base: Path):
     w = World(base)
     git(w.lib, "checkout", "-q", "--detach", w.c1)
     o = w.sync()
-    assert o.status == "updated" and w.head() == w.c3, o
+    assert o.status == "updated" and w.head() == w.c3 and "then 2 commit(s)" in o.detail, o
+    assert git(w.lib, "symbolic-ref", "--short", "HEAD") == "main"
+    git(w.lib, "checkout", "-q", "--detach")
+    o = w.sync()
+    assert o.status == "updated" and "then" not in o.detail, "detached at the tip: only the checkout"
     assert git(w.lib, "symbolic-ref", "--short", "HEAD") == "main"
 
 
