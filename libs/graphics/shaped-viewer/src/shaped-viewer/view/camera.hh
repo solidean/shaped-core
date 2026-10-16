@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <sgl_modules/tracer.hh> // sv::shaders::tracer::camera_record
 #include <shaped-viewer/fwd.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -33,6 +34,16 @@ namespace sv
 /// diagonal, and `forward` is its third view axis.
 /// A camera whose basis is degenerate — a zero `right_scaled` or `forward` — yields identities rather than NaNs.
 [[nodiscard]] camera_matrices matrices_of(shaders::tracer::camera_record const& cam, f32 near_plane);
+
+/// The world point a traced pixel's primary-hit depth names, or none where the primary ray escaped.
+///
+/// The inverse of the tracer's `primary_depth`, which is `1 - near_plane / view_depth` along the ray through the center of `pixel` in a `resolution`-sized image.
+/// Good enough for a pick, not for geometry: a single-precision depth keeps fewer bits of `1 - depth` the further the hit lies from the near plane.
+[[nodiscard]] cc::optional<tg::pos3d> primary_hit_position(shaders::tracer::camera_record const& cam,
+                                                           tg::vec2i pixel,
+                                                           tg::vec2i resolution,
+                                                           f32 depth,
+                                                           f32 near_plane);
 } // namespace sv
 
 /// A perspective projection: vertical field of view, aspect ratio (width / height), and near plane.

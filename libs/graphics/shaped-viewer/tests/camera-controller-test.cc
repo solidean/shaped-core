@@ -2,6 +2,7 @@
 #include <shaped-rendering/input.hh>
 #include <shaped-viewer/view/camera_controller.hh>
 #include <typed-geometry/geometry/query/distance.hh>
+#include <typed-geometry/linalg/vec_ops.hh> // tg::dot
 
 using namespace cc::primitive_defines;
 
@@ -128,6 +129,103 @@ TEST("sv - orbit controller ignores keys and unrelated events")
     CHECK(!c.handle({.payload = sr::key_event{.scancode = sr::scancode::w, .is_down = true}}));
     CHECK(!c.handle({.payload = sr::text_event{.text = "w"}}));
     CHECK(!c.is_dragging());
+}
+
+TEST("sv - orbit controller focuses on a point by gliding in, never turning")
+{
+    auto c = sv::orbit_camera_controller{};
+    c.orbit = {.target = tg::pos3d(0, 0, 0),
+               .distance = 5.0,
+               .azimuth = tg::angle_d::make_from_degree(30),
+               .elevation = tg::angle_d::make_from_degree(20)};
+    auto const before = c.camera();
+    auto const b = before.basis();
+
+    // Off-axis, 3 units deep: it becomes the target, and the distance becomes the approached share of its depth.
+    auto const point = before.position + b.forward * 3.0 + b.right * 1.0 - b.up * 0.5;
+    CHECK(c.focus_on(point));
+    CHECK(c.is_focusing());
+
+    // A glide rather than a jump: nothing moves until time passes, and halfway it is between the two.
+    CHECK(c.camera().position.distance_to(before.position) < eps);
+    CHECK(c.update(c.config.focus_seconds * 0.5));
+    auto const halfway = c.orbit.target.distance_to(point);
+    CHECK(halfway > eps);
+    CHECK(halfway < tg::pos3d(0, 0, 0).distance_to(point));
+
+    // It lands exactly, and then stops asking for frames.
+    CHECK(c.update(c.config.focus_seconds));
+    CHECK(!c.is_focusing());
+    CHECK(!c.update(1.0));
+    CHECK(c.orbit.target.distance_to(point) < eps);
+    auto const approach = c.config.focus_approach;
+    CHECK(approach < 1.0); // the default moves in, which is the point of approaching
+    CHECK(abs_of(c.orbit.distance - 3.0 * approach) < eps);
+
+    // The view direction is kept, and the eye moved in along it by exactly what it gave up of the depth.
+    auto const after = c.camera();
+    CHECK((after.basis().forward - b.forward).length() < eps);
+    CHECK(abs_of(tg::dot(after.position - before.position, b.forward) - 3.0 * (1.0 - approach)) < eps);
+
+    // Nothing behind the eye can be orbited, so it is refused rather than flipping the view.
+    auto const kept = c.orbit.target;
+    CHECK(!c.focus_on(after.position - after.basis().forward));
+    CHECK(!c.is_focusing());
+    CHECK(c.orbit.target.distance_to(kept) < eps);
+}
+
+TEST("sv - orbit controller's focus yields to a pan and scales with a zoom")
+{
+    auto c = sv::orbit_camera_controller{};
+    c.orbit.distance = 4.0;
+    auto const cam = c.camera();
+    auto const b = cam.basis();
+
+    // A zoom mid-glide scales where it lands, so the wheel is never undone by the glide finishing.
+    CHECK(c.focus_on(cam.position + b.forward * 2.0 + b.right));
+    (void)c.update(c.config.focus_seconds * 0.25);
+    CHECK(c.handle(wheel(-1)));
+    (void)c.update(c.config.focus_seconds);
+    CHECK(abs_of(c.orbit.distance - 2.0 * c.config.focus_approach * c.config.zoom_per_wheel_tick) < 1e-9);
+
+    // A pan takes the target by hand, and the glide gives it up rather than dragging it back.
+    CHECK(c.focus_on(c.camera().position + c.camera().basis().forward * 3.0 - c.camera().basis().up));
+    (void)c.handle(button(sr::mouse_button::middle, true));
+    CHECK(c.handle(motion(10, 0)));
+    CHECK(!c.is_focusing());
+    CHECK(!c.update(1.0));
+}
+
+TEST("sv - primary_hit_position inverts the tracer's primary depth")
+{
+    auto cam = sv::camera::looking_at(tg::pos3d(1, 2, -5), tg::pos3d(0, 0, 0));
+    auto const resolution = tg::vec2i(200, 100);
+    cam.projection.aspect_ratio = 2.0;
+    auto const record = sv::camera_record_of(cam);
+    auto const near_plane = 0.01f;
+
+    // Encoded the way tracer_pipeline.sgl writes it: 1 - near / view_depth, along the ray through the pixel center.
+    auto const pixel = tg::vec2i(137, 22);
+    auto const view_depth = 4.2;
+    auto const depth = f32(1.0 - f64(near_plane) / view_depth);
+
+    auto const hit = sv::primary_hit_position(record, pixel, resolution, depth, near_plane);
+    REQUIRE(hit.has_value());
+
+    // The depth is a float, so the hit is good to its precision rather than to a double's.
+    auto const b = cam.basis();
+    auto const to_hit = hit.value() - cam.position;
+    CHECK(abs_of(tg::dot(to_hit, b.forward) - view_depth) < 1e-3);
+
+    // And on the pixel's center ray: the same ray `camera_ray_offset` forms.
+    auto const t = (cam.projection.vertical_fov * 0.5).tan();
+    auto const ndc_x = (f64(pixel[0]) + 0.5) / f64(resolution[0]) * 2.0 - 1.0;
+    auto const ndc_y = (f64(pixel[1]) + 0.5) / f64(resolution[1]) * 2.0 - 1.0;
+    auto const ray = (b.forward + b.right * (2.0 * t * ndc_x) - b.up * (t * ndc_y)).normalized();
+    CHECK((to_hit - ray * tg::dot(to_hit, ray)).length() < 1e-5);
+
+    // An escaped primary ray stays at the far plane, which names no surface.
+    CHECK(!sv::primary_hit_position(record, pixel, resolution, 1.0f, near_plane).has_value());
 }
 
 TEST("sv - orbit_state and camera::orbiting agree")

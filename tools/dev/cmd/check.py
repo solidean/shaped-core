@@ -15,6 +15,7 @@ from tools import dev
 from tools.dev import console
 
 from . import args as a
+from . import issues
 from .context import Context
 
 NAME = "check"
@@ -122,6 +123,19 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         )
         return result.ok
 
+    def check_issues(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # Not fixable and not scopable: a file deleted anywhere can break a ref in an untouched issue.
+        return issues.gate(ctx, mirror=mirror, verbose=verbose)
+
+    def check_issues_selftest(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The tracker's own suite: claims against a real bare remote, check, known and close, in throwaway repositories.
+        result = dev.run_step(
+            ["uv", "run", str(ctx.root / "tools" / "issues" / "issues-self-test.py")],
+            step_type="issues", name="issues-self-test",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        return result.ok
+
     def check_dev_selftest(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # dev.py's own machinery, which nothing else exercises: the job profile's layout, the change-scope resolver, and
         # the live progress region.
@@ -138,6 +152,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             (Path("tools") / "dev" / "changes-self-test.py", []),
             (Path("tools") / "dev" / "ui-self-test.py", []),
             (Path("tools") / "dev" / "symbolize-self-test.py", []),
+            (Path("tools") / "dev" / "submodules-self-test.py", []),
             (Path("extern") / "manifest-self-test.py", []),
             (Path("libs") / "base" / "clean-simd" / "tools" / "check-link-map.py", ["--self-test"]),
         )
@@ -405,6 +420,10 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("dev-selftest", "dev.py's own self-tests (job profile, change scope, progress region, dependency manifests, "
                                   "clean-simd's link-map check)",
                   False, check_dev_selftest),
+        dev.Check("issues", "every issue file and every issue marker in the code is valid (docs/guides/issue-tracking.md)",
+                  False, check_issues),
+        dev.Check("issues-selftest", "run the issue tracker's own suite (claims against a real remote, check, known, close)",
+                  False, check_issues_selftest),
         dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
                   False, check_review),
         dev.Check("shader-grammar",

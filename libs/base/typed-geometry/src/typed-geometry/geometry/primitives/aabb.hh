@@ -4,6 +4,7 @@
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
 #include <typed-geometry/geometry/impl/bounds_of.hh>
+#include <typed-geometry/geometry/impl/hexahedron.hh>
 #include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/primitives/box.hh>
 #include <typed-geometry/geometry/primitives/segment.hh>
@@ -127,14 +128,13 @@ public:
     /// every pair of corners that differ on exactly one axis.
     [[nodiscard]] constexpr cc::fixed_array<segment<D, T>, D * (1 << (D - 1))> edges() const
     {
-        auto const v = this->vertices();
-        cc::fixed_array<segment<D, T>, D * (1 << (D - 1))> r = {};
-        auto n = 0;
-        for (int c = 0; c < (1 << D); ++c)
-            for (int i = 0; i < D; ++i)
-                if (!((c >> i) & 1))
-                    r[n++] = segment<D, T>(v[c], v[c | (1 << i)]);
-        return r;
+        return tg::impl::corner_edges<D, D, T>(this->vertices());
+    }
+    /// the six faces, wound counterclockwise seen from outside; face 2a + s lies at max on axis a if s is 1, at min if 0.
+    [[nodiscard]] constexpr cc::fixed_array<quad<3, T>, 6> faces() const
+        requires(D == 3)
+    {
+        return tg::impl::corner_faces(this->vertices(), false);
     }
 
     // parameters

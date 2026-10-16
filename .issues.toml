@@ -1,0 +1,5 @@
+# The issue tracker: docs/guides/issue-tracking.md.
+name = "shaped-core"
+branch = "main"
+# Its self-test writes markers into throwaway repositories, so its source names issues that exist only there.
+exclude = ["tools/issues/issues-self-test.py"]

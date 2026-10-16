@@ -29,7 +29,7 @@ They differ in where they are added and in what depth means.
   A logical pixel is the window's content scale in texture pixels, so text keeps its physical size on a high-DPI display.
 - **3D instances go on a scene**, `scene_ref::add_drawing`, in world units, seen through the view's camera.
   They are drawn after the trace, so traced geometry in front of them hides them, and they hide nothing traced: no shadow, not in a reflection.
-  The trace writes its primary-hit depth for a layer that holds drawings, a fill pass turns it into a depth target, and the layer's drawings draw tested against it in a pass of their own.
+  The trace writes its primary-hit depth for every layer, a fill pass turns it into a depth target, and the layer's drawings draw tested against it in a pass of their own.
   That depth is the first sample's, reprojected to the pixel center on the plane it hit, so a drawing lying on a face tests equal to the face rather than flickering with the jitter.
   A drawing that has to belong to the surface it lies on — lit, shadowed, curved with it — is a decal, which is traced.
 

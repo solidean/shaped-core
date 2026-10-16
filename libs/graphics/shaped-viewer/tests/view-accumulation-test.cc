@@ -303,13 +303,14 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
         CHECK(store.accumulated_frames(traced_id) == u32(i));
     }
 
-    // The accumulator is the view's only temporal resource, and the one texture the estimate lives in.
+    // The accumulator is the one texture the estimate lives in, and the primary depth the only resource beside it.
     //
-    // A second slot beside it used to exist for the reprojection's G-buffer, together with a history half each; the
-    // blend is in place now, so a resolve that hands back anything but a single allocated target is a regression.
+    // A second accumulation slot used to exist for the reprojection's G-buffer, together with a history half each; the
+    // blend is in place now, so a resolve that hands back any more than these two is a regression.
     auto const* const rec = store.peek_ptr(traced_id);
     REQUIRE(rec != nullptr);
-    CHECK(rec->temporal.size() == 1);
+    CHECK(rec->temporal.size() == 2);
+    CHECK(rec->temporal.get_ptr(sv::temporal_id::primary_depth(0)) != nullptr);
 
     auto const* const slot = rec->temporal.get_ptr(sv::temporal_id::accumulation(0));
     REQUIRE(slot != nullptr);

@@ -206,6 +206,8 @@ def drop_testless_examples(
 
     Test binaries are never dropped: an empty one IS a failure, and this must not quietly turn that into a pass.
     A binary that cannot answer the query is kept, so a probe that fails never silently removes coverage.
+    An example binary that is not on disk is dropped: it was never built, so it has no coverage to lose.
+    That is the normal case for an example the build excludes from `all`, which the build before a test run never makes.
     """
     by_name = {t.name: t for t in targets}
     out: list[str] = []
@@ -213,6 +215,8 @@ def drop_testless_examples(
         target = by_name.get(name)
         if target is None or not is_example(target):
             out.append(name)
+            continue
+        if target.artifact is None or not target.artifact.is_file():
             continue
         listing = query_listing(
             preset, target, test_name=test_name, extra_args=list(extra_args or []), root=root, launcher=launcher
