@@ -47,7 +47,7 @@ fun visible(s: light_sample, seed: uint){traced} -> bool:
 
 /// Direct light from one of the trace's lights, with the BSDF folded in and weighted against the BSDF sampler.
 ///
-/// One light is picked, in proportion to its power or uniformly where the table carries no probabilities, and its choice is part of the density.
+/// One light is picked by the probabilities the table carries, or uniformly where it carries none, and its choice is part of the density.
 /// That keeps one shadow ray per hit an unbiased estimate of every light at once.
 /// A point or a parallel light is a delta no sampled ray can reach, so it takes no weighting and is divided by the probability of picking it alone.
 /// A rect, a disc and an emissive instance are reachable by the raygen's continuation ray too, and weight against it.

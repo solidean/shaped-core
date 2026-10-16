@@ -572,7 +572,7 @@ TEST("sv - an instance qualifies as a light unless its emission is dark wherever
     }
 }
 
-TEST("sv - emissive instances' records follow every analytic light, and are picked by power")
+TEST("sv - emissive instances' records follow every analytic light, and are picked half by power")
 {
     auto const rect = sv::shaders::tracer::light_record{.path = u32(sv::light_path::area),
                                                         .area = 1.0f,
@@ -606,11 +606,12 @@ TEST("sv - emissive instances' records follow every analytic light, and are pick
     CHECK(fc.light_count == 4);
     CHECK(fc.emitter_offset == 2);
 
-    // Local lights share half the choice with the sun; within it a two-sided mesh record weighs twice a one-sided rect.
-    CHECK(tg::abs(table.records[0].select_pdf - 0.1f) < 1e-6f);
-    CHECK(tg::abs(table.records[2].select_pdf - 0.2f) < 1e-6f);
-    CHECK(tg::abs(table.records[3].select_pdf - 0.2f) < 1e-6f);
-    CHECK(tg::abs(table.records[1].select_pdf - 0.5f) < 1e-6f);
+    // In the power half local lights share with the sun, and a two-sided mesh record weighs twice a one-sided rect:
+    // 0.1, 0.2, 0.2 and 0.5 by power, each half of that plus an eighth from the uniform half.
+    CHECK(tg::abs(table.records[0].select_pdf - 0.175f) < 1e-6f);
+    CHECK(tg::abs(table.records[2].select_pdf - 0.225f) < 1e-6f);
+    CHECK(tg::abs(table.records[3].select_pdf - 0.225f) < 1e-6f);
+    CHECK(tg::abs(table.records[1].select_pdf - 0.375f) < 1e-6f);
     CHECK(table.records.back().select_cdf == 1.0f);
 
     SECTION("an emitter whose scan saw only black is picked rarely, at the floor of its kind, yet never not at all")
@@ -630,9 +631,10 @@ TEST("sv - emissive instances' records follow every analytic light, and are pick
         dim.flags |= sv::light_flag_unseen_emission;
         auto const with_lamp = sv::pt_light_table::grouped(cc::vector<sv::shaders::tracer::light_record>{dim, mesh(1)});
         REQUIRE(with_lamp.records.size() == 2);
-        // The floor is a thousandth of the kind's mean weight, here half the lamp's.
+        // The floor is a thousandth of the kind's mean weight, here half the lamp's, and only in the power half:
+        // a stand-in takes none of the uniform one.
         CHECK(with_lamp.records[0].select_pdf > 0.0f);
-        CHECK(tg::abs(with_lamp.records[0].select_pdf - 5e-4f) < 1e-5f);
+        CHECK(tg::abs(with_lamp.records[0].select_pdf - 2.5e-4f) < 1e-5f);
 
         // Beside a sun, local lights made only of stand-ins take a sliver of the choice rather than half of it.
         auto const with_sun = sv::pt_light_table::grouped(cc::vector<sv::shaders::tracer::light_record>{dim, sun});

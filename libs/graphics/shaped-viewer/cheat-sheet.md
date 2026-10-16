@@ -832,7 +832,7 @@ sv::raster_gbuffer                                   // { color rgba32f; normal,
 sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block
 sv::pt_light_table::grouped(span<light_record>, sel) // -> { records grouped by path, path_offset[5], path_count[5] } — a counting sort; each run keeps the given order
                                                    //   path sv::light_path_mesh (4) is an emissive instance's record, last; describe_in writes its offset as emitter_offset
-                                                   //   sel = light_selection::power (default) writes each record's select_pdf/select_cdf; ::uniform writes 0s
+                                                   //   sel = light_selection::power (default): half by power, half uniform over lit lights, into select_pdf/select_cdf; ::uniform writes 0s
 table.describe_in(fc)                                // writes light_count, the per-path table and emitter_offset into the frame block, so they cannot disagree
 table.key(emitters, instances) -> u64                // what each index names and where each emitter's instance record places it: ReSTIR DI's history key
                                                      //   not selection, a mesh record's area/emission or a cdf index, nor a non-emitter's placement
@@ -841,13 +841,14 @@ table.key(emitters, instances) -> u64                // what each index names an
 sv::shader_package()                                 // the one SGL package: tracer + module tracer, layout and depth fill; sv's default library adds it
 ```
 
-[`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward one light, picked in proportion to its power, and the SH environment.
+[`pathtrace_routine.hh`](src/shaped-viewer/rendering/pathtrace_routine.hh) describes the integrator: next-event estimation toward one light, and the SH environment.
+The light is picked half by power and half uniformly.
 Each is balance-heuristic weighted against the BSDF-sampled bounce ray, so a near-smooth surface under a small light converges instead of sparkling.
 That is why it converges at far fewer `samples_per_pixel` than a naive path tracer.
 What a caller supplies is a view.
 The `view_renderer` groups the layer's lights into a `pt_light_table`, uploads it as `traced.lights`, and writes its table into the frame constants.
 Every path is traced; a point or a parallel light is a delta and has next-event estimation alone (docs/lights.md).
-The pick probability, by power (`light_record::select_pdf`), is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced however the lights are picked.
+The pick probability (`light_record::select_pdf`) is inside the light's density, so the next-event sample and the bounce ray reaching a light stay balanced however the lights are picked.
 A layer with no lights falls back to `layer::fallback_light` — `sv::default_fallback_light()`, a sun — which `scene.fallback_light(cc::nullopt)` turns off.
 
 **Denoising.** A layer with `render_settings::reconstruct` on is denoised right after its trace, and its parent samples the result.

@@ -67,7 +67,9 @@ inline constexpr u32 no_emitter = 0xffffffffu;
 /// How next-event estimation picks among a table's lights.
 enum class sv::light_selection : sv::u8
 {
-    /// In proportion to each light's power; the distant lights, which have none, share half the choice where both kinds have light.
+    /// Half in proportion to each light's power, and half uniformly over the lights with light to offer.
+    /// Within the power half the distant lights, which have no power, share it half and half with the local ones where both have light.
+    /// The uniform half is what keeps a dim light near a shading point from being starved, since power knows nothing of distance.
     power,
     /// Every light alike, which the records say by leaving their selection probabilities 0.
     uniform,
@@ -248,7 +250,7 @@ struct sv::pt_trace_desc
 /// A permutation whose hit group has not compiled is substituted by `fallback` or `quadric_fallback`, by its kind.
 ///
 /// The raygen bounces each ray and estimates direct light at every hit by next-event estimation toward two sources:
-/// one light, picked in proportion to its power (`pt_light_table`), and the SH environment.
+/// one light, picked half by power and half uniformly (`pt_light_table`), and the SH environment.
 /// **Both are gathered by balance-heuristic multiple importance sampling** against the BSDF-sampled bounce ray.
 /// The environment pairs with that ray escaping, a light with it crossing that light, which is analytic and so is intersected
 /// rather than traced.

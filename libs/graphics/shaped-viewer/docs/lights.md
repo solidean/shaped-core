@@ -248,10 +248,12 @@ The key ignores selection and an emitter record's area and emission, which say h
    `visible_to_camera`, off by default and only for a light with an extent, and `casts_shadows`, on by default.
    A light that casts no shadow is ignored by geometry on both sides of the weighting, or the two would disagree about what they integrate.
    A light-linking mask is reserved in both GPU records, light and instance, all ones and read by nothing.
-7. **Power-weighted selection.** Landed, in both tracers.
+7. **Power-weighted selection, mixed with uniform.** Landed, in both tracers.
    `pt_light_table::grouped` writes each record's `select_pdf` and the running `select_cdf`, and next-event estimation picks by a binary search over them.
-   Local lights are weighed by power and distant ones by irradiance, which do not compare, so the two kinds share the choice half and half where both have light.
-   An emissive instance whose emission no read saw above zero is no light for that rule, and only keeps its kind a thousandth of the choice.
+   Half of the choice is by power: local lights are weighed by power and distant ones by irradiance, which do not compare, so the two kinds share that half and half where both have light.
+   The other half is uniform over the lights with light to offer, since power knows nothing of distance: alone it starved a dim light that is the near one somewhere.
+   light-stage's bulb by its stairs was twice as noisy by power alone as by uniform selection; the mixture's cost and gain are pinned by a wavefront test with a dim corner light.
+   An emissive instance whose emission no read saw above zero is no light for that rule: it takes none of the uniform half, and only keeps its kind a thousandth of the power half.
    Every weight is floored at a thousandth of its kind's mean, so no light the multiple-importance weights count on is impossible to pick.
    A table of `light_selection::uniform` writes both 0, which the tracer reads as every light alike.
    A record no table wrote says the same.

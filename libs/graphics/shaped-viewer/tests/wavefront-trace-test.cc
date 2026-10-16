@@ -1388,6 +1388,113 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// Power knows nothing of distance: a light dim overall can be the one that lights the place a pixel sees.
+// The box keeps its lamp and gains a point light in a floor corner, a tenth of the lamp's power.
+// Picked by power alone it is drawn one time in 11 and weighted up when it is, so the corner is noise.
+// The table mixes half uniform in, which brings that within reach of uniform selection and keeps the mean.
+// Pure power is written into the same records by hand, as the table used to.
+// Measured where the corner light carries most of the image, which a lamp-only run marks: over the whole frame pure power
+// is a little better, since the lamp lights nearly all of it, and that is the trade the mixture makes.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a dim light near what it lights keeps a fair share of the choice",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const base = make_scene(resources);
+
+    auto const& lamp = base.box.light;
+    auto const lamp_power = luminance_of(lamp.emission) * 4.0f * lamp.half_x * lamp.half_z * tg::pi<f32>;
+    auto records = cc::vector<sv::shaders::tracer::light_record>();
+    records.push_back(base.lights.records[0]);
+    records.push_back(sv::light_record_of(
+        sv::light::point(tg::pos3f(-0.8f, -0.8f, 0.8f)).candela(lamp_power / 10.0f / (4.0f * tg::pi<f32>))));
+
+    auto mixed = base;
+    mixed.lights = sv::pt_light_table::grouped(records, sv::light_selection::power);
+    auto uniform = base;
+    uniform.lights = sv::pt_light_table::grouped(records, sv::light_selection::uniform);
+    auto pure = mixed;
+    {
+        // Points stand before areas in the table; by power the corner light is one part in 11.
+        REQUIRE(pure.lights.records.size() == 2);
+        REQUIRE(pure.lights.records[0].path == u32(sv::light_path::point));
+        pure.lights.records[0].select_pdf = 1.0f / 11.0f;
+        pure.lights.records[0].select_cdf = 1.0f / 11.0f;
+        pure.lights.records[1].select_pdf = 10.0f / 11.0f;
+        pure.lights.records[1].select_cdf = 1.0f;
+    }
+    REQUIRE(mixed.lights.records[0].select_pdf > 0.25f);
+
+    constexpr int frames = 48;
+    auto const by_mixed = co_await run_restir(ctx, resources, mixed, frames, {.history = false});
+    auto const by_uniform = co_await run_restir(ctx, resources, uniform, frames, {.history = false});
+    auto const by_pure = co_await run_restir(ctx, resources, pure, frames, {.history = false});
+    auto const by_lamp = co_await run_restir(ctx, resources, base, frames, {.history = false});
+
+    auto const uniform_mean = mean_luminance_of(by_uniform.mean);
+    auto const mixed_mean = mean_luminance_of(by_mixed.mean);
+    CHECK(tg::abs(mixed_mean - uniform_mean) < 0.03f * uniform_mean)
+        .context(cc::format("mixed: {} against {} uniform", mixed_mean, uniform_mean));
+
+    // Against the three runs' mean, whose seeds they share, as the power test measures.
+    auto reference = cc::vector<tg::vec3f>();
+    for (auto i = isize(0); i < by_uniform.mean.size(); ++i)
+        reference.push_back((by_uniform.mean[i] + by_mixed.mean[i] + by_pure.mean[i]) / 3.0f);
+    // The corner: pixels where the corner light carries more than half of the reference, skipped everywhere else.
+    auto outside_corner = cc::vector<i32>();
+    auto corner_pixels = 0;
+    for (auto i = isize(0); i < reference.size(); ++i)
+    {
+        auto const total = luminance_of(reference[i]);
+        auto const from_lamp = luminance_of(by_lamp.mean[i]);
+        auto const corner = total > 0.0f && total - from_lamp > 0.5f * total;
+        outside_corner.push_back(corner ? 0 : 1);
+        corner_pixels += corner ? 1 : 0;
+    }
+    REQUIRE(corner_pixels >= 8);
+
+    auto uniform_error = 0.0f;
+    auto mixed_error = 0.0f;
+    auto pure_error = 0.0f;
+    auto mixed_whole = 0.0f;
+    auto pure_whole = 0.0f;
+    for (auto f = 0; f < frames; ++f)
+    {
+        uniform_error += rms_error(by_uniform.frames[f], reference, outside_corner) / f32(frames);
+        mixed_error += rms_error(by_mixed.frames[f], reference, outside_corner) / f32(frames);
+        pure_error += rms_error(by_pure.frames[f], reference, outside_corner) / f32(frames);
+        mixed_whole += rms_error(by_mixed.frames[f], reference) / f32(frames);
+        pure_whole += rms_error(by_pure.frames[f], reference) / f32(frames);
+    }
+    // A pixel the corner light carries has an error that goes with one over the root of that light's pick probability:
+    // 1/11 by power alone, 0.5 uniform, and about 0.295 mixed.
+    // So the mixture sits near 0.55 of power alone and 1.3 of uniform, each bound with some room over it.
+    CHECK(mixed_error < 0.7f * pure_error)
+        .context(cc::format("corner per-frame error: {} mixed, {} by power alone", mixed_error, pure_error));
+    CHECK(mixed_error < 1.5f * uniform_error)
+        .context(cc::format("corner per-frame error: {} mixed, {} uniform", mixed_error, uniform_error));
+    CC_LOG_INFO(
+        "a dim corner light over {} pixels: per-frame error {} mixed, {} uniform, {} by power alone; whole image {} "
+        "mixed, {} by power alone; means {} mixed, {} uniform",
+        corner_pixels, mixed_error, uniform_error, pure_error, mixed_whole, pure_whole, mixed_mean, uniform_mean);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // ReSTIR's DI track, phase D1: the visible point's light from the trace's lights, resampled and reused, on 22 small lights.
 // With one next-event sample a frame a pixel sees one lamp of 22.
 // Resampling eight candidates, and the neighbors' and the last frame's choices, makes the one that matters to it close to certain.

@@ -740,6 +740,8 @@ A fixed 16 pixels would reach across half of the test's 32x32 image and keep one
 - **Unbiased and better**, measured on the Cornell box with a second light eight times dimmer: by power, the mean within 1% of uniform selection's, in both tracers.
   Per-frame error against a long uniform reference on other seeds falls from 0.437 to 0.352, 1.24x.
 - The `lights` scene's comparison is owed.
+- **Since mixed half uniform**: by power alone, a dim light near the point it lights was starved, light-stage's bulb twice as noisy as uniform selection there.
+  On the Cornell box with a corner light a tenth of the lamp's power, the corner's per-frame error is 1.20 by power alone, 0.67 mixed and 0.50 uniform.
 
 **Phase D1: ReSTIR DI at the visible point**, beside GI phase G1, on the foundation — built.
 

@@ -314,9 +314,14 @@ namespace
 /// Above zero, since such a record may emit; small, since nothing says it does.
 constexpr auto unseen_kind_share = 1e-3;
 
+/// The share of the choice picked by power; the rest is uniform over the lights with light to offer.
+constexpr auto power_selection_share = 0.5;
+
 /// Writes each record's selection probability and the running sum of them, the last of which is 1.
-/// Local and distant lights are normalized apart and share the choice half and half where both have light, since their weights do not compare.
-/// A record whose emission no read saw above zero is no evidence of light: a kind made only of those takes `unseen_kind_share` beside one that has light.
+/// Half of it is by power: local and distant lights are normalized apart and share that half and half where both have light, since their weights do not compare.
+/// The other half is uniform over every light with light to offer, which bounds what a dim light near a shading point costs.
+/// A record whose emission no read saw above zero is no evidence of light, and it takes none of the uniform half.
+/// A kind made only of those takes `unseen_kind_share` of the power half beside one that has light.
 /// Every weight is floored at a thousandth of its kind's mean, so no light is impossible to pick while its record says it may be.
 void weigh_by_power(cc::span<shaders::tracer::light_record> records)
 {
@@ -370,14 +375,35 @@ void weigh_by_power(cc::span<shaders::tracer::light_record> records)
     }();
     auto const share = cc::fixed_array<f64, 2>{local_share, 1.0 - local_share};
 
+    // Half of the choice is uniform over the lights with light to offer, so a dim light that is the near one somewhere keeps a
+    // fair share: power knows nothing of distance, and alone it starved such a light into noise.
+    // A dark light and a stand-in for an emission no read saw take none of that half, or a scene of them would spend it on nothing.
+    auto const offers_light
+        = [&](shaders::tracer::light_record const& l) { return !is_unseen(l) && selection_weight_of(l) > 0.0f; };
+    auto const lit_count = [&]
+    {
+        auto n = 0;
+        for (auto const& l : records)
+            n += offers_light(l) ? 1 : 0;
+        return n;
+    }();
+    auto const probability = [&](shaders::tracer::light_record const& l)
+    {
+        auto const kind = is_distant(l) ? 1 : 0;
+        auto const by_power = share[kind] * weight(l) / total[kind];
+        if (lit_count == 0)
+            return by_power;
+        auto const uniform = offers_light(l) ? 1.0 / f64(lit_count) : 0.0;
+        return power_selection_share * by_power + (1.0 - power_selection_share) * uniform;
+    };
+
     // The search picks a light with the width of its interval between two f32 cdfs, so that width is the pdf it is given.
     // Every interval is kept open by at least one float step, and the last cdf is exactly 1, among any number of lights.
     auto running = 0.0;
     auto previous = 0.0f;
     for (auto& l : records)
     {
-        auto const kind = is_distant(l) ? 1 : 0;
-        running += share[kind] * weight(l) / total[kind];
+        running += probability(l);
         auto const cdf = cc::min(f32(running), 1.0f);
         l.select_cdf = cdf > previous ? cdf : next_float_up(previous);
         previous = l.select_cdf;

@@ -777,9 +777,11 @@ TEST("sv - the light table groups by path and keeps each run in the order it was
     }
 }
 
-// Next-event estimation picks a light in proportion to its power, which the table writes into each record.
-// Local lights are weighed by power and distant ones by irradiance, so the two kinds share the choice half and half.
-TEST("sv - the light table weighs next-event estimation by power, distant lights sharing half")
+// Next-event estimation picks a light half by power and half uniformly, which the table writes into each record.
+// Within the power half, local lights are weighed by power and distant ones by irradiance, so the two kinds share it half and half.
+// The uniform half is over every light with light to offer.
+TEST("sv - the light table weighs next-event estimation half by power, distant lights sharing that half, and half "
+     "uniformly")
 {
     auto const rect = [](f32 radiance)
     {
@@ -790,13 +792,14 @@ TEST("sv - the light table weighs next-event estimation by power, distant lights
     auto const sun
         = sv::shaders::tracer::light_record{.path = u32(sv::light_path::distant_point), .emission = tg::vec3f(2, 2, 2)};
 
-    SECTION("local lights alone are picked by power")
+    SECTION("local lights alone are picked half by power and half uniformly")
     {
         auto const given = cc::vector<sv::shaders::tracer::light_record>{rect(1), rect(3)};
         auto const table = sv::pt_light_table::grouped(given);
-        CHECK(tg::abs(table.records[0].select_pdf - 0.25f) < 1e-6f);
-        CHECK(tg::abs(table.records[1].select_pdf - 0.75f) < 1e-6f);
-        CHECK(tg::abs(table.records[0].select_cdf - 0.25f) < 1e-6f);
+        // 0.5 * 1/4 + 0.5 * 1/2, and 0.5 * 3/4 + 0.5 * 1/2.
+        CHECK(tg::abs(table.records[0].select_pdf - 0.375f) < 1e-6f);
+        CHECK(tg::abs(table.records[1].select_pdf - 0.625f) < 1e-6f);
+        CHECK(tg::abs(table.records[0].select_cdf - 0.375f) < 1e-6f);
         CHECK(table.records[1].select_cdf == 1.0f);
     }
 
@@ -804,10 +807,10 @@ TEST("sv - the light table weighs next-event estimation by power, distant lights
     {
         auto const given = cc::vector<sv::shaders::tracer::light_record>{sun, rect(1), rect(3)};
         auto const table = sv::pt_light_table::grouped(given);
-        // The table orders area before distant.
-        CHECK(tg::abs(table.records[0].select_pdf - 0.125f) < 1e-6f);
-        CHECK(tg::abs(table.records[1].select_pdf - 0.375f) < 1e-6f);
-        CHECK(tg::abs(table.records[2].select_pdf - 0.5f) < 1e-6f);
+        // The table orders area before distant; by power 1/8, 3/8 and 1/2, each half of that plus a sixth.
+        CHECK(tg::abs(table.records[0].select_pdf - (0.0625f + 1.0f / 6.0f)) < 1e-6f);
+        CHECK(tg::abs(table.records[1].select_pdf - (0.1875f + 1.0f / 6.0f)) < 1e-6f);
+        CHECK(tg::abs(table.records[2].select_pdf - (0.25f + 1.0f / 6.0f)) < 1e-6f);
         CHECK(table.records[2].select_cdf == 1.0f);
     }
 
