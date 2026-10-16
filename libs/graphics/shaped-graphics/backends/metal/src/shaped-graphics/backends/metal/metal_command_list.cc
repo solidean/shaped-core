@@ -319,6 +319,8 @@ void metal_command_list::declare_accel(std::shared_ptr<void const> owner,
 
 void metal_command_list::flush_barriers()
 {
+    _skip_guard.check(_member_writes);
+
     if (_pending_buffers.empty() && _pending_textures.empty() && _pending_accels.empty())
         return;
 
@@ -950,7 +952,7 @@ void metal_command_list::declare_array_accesses(sg::impl::pipeline_footprint con
     // An MTL4 barrier names stages and never a resource, so covering every element still costs one barrier.
     using array_binding = metal_binding_group::array_binding;
     using array_element = metal_binding_group::array_element;
-    book.apply(
+    auto const skipped = book.apply(
         cc::span<sg::impl::array_site<array_binding> const>(_array_sites), footprint, pipeline, op_stages, _member_writes,
         _stats, [&](array_element const& element, sg::pipeline_stage_flags stages, sg::access_flags access)
         { return declare_buffer(element.buffer, stages, access, true); },
@@ -963,6 +965,7 @@ void metal_command_list::declare_array_accesses(sg::impl::pipeline_footprint con
             else
                 declare_texture(element.texture, plan.stages, plan.cover_access);
         });
+    _skip_guard.arm(skipped, _member_writes);
 }
 
 void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views)

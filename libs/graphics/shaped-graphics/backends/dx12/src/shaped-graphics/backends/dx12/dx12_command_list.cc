@@ -188,6 +188,8 @@ void dx12_command_list::forget_bind_state()
 
 void dx12_command_list::flush_barriers()
 {
+    _skip_guard.check(_member_writes);
+
     // Flush every resource whose access was declared since the last flush.
     // Flushing here rather than per declare merges the several declares of a resource bound more than once to this op into one barrier carrying the union of stages/access.
     // Each resource appears at most once here (track_* enqueues it only on the first binding this op), so each is flushed exactly once.
@@ -516,7 +518,7 @@ void dx12_command_list::declare_array_accesses(cc::span<dx12_binding_group const
     if (_array_sites.empty())
         return;
 
-    book.apply(
+    auto const skipped = book.apply(
         cc::span<sg::impl::array_site<dx12_array_binding> const>(_array_sites), footprint, pipeline, op_stages,
         _member_writes, _stats,
         [&](dx12_array_element const& element, sg::pipeline_stage_flags stages, sg::access_flags access)
@@ -539,6 +541,7 @@ void dx12_command_list::declare_array_accesses(cc::span<dx12_binding_group const
                                      sg::shader_layout_of(ab.bound_as));
             }
         });
+    _skip_guard.arm(skipped, _member_writes);
 }
 
 void dx12_command_list::upload_bytes_to_buffer(sg::raw_buffer_handle buffer,

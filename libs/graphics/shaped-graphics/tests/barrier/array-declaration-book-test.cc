@@ -67,7 +67,8 @@ struct fake_list
 
     /// One op over `groups`, each the array of a group at index `i`, whose identity is its address.
     /// Every tracked element is a member, so a tracked write counts toward `member_writes` as a list's tracker does.
-    void op(cc::span<fake_array const* const> groups, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
+    /// Returns what `apply` does: whether some array of the op was skipped.
+    bool op(cc::span<fake_array const* const> groups, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
     {
         auto sites = cc::vector<sg::impl::array_site<fake_array>>();
         for (auto i = 0; i < int(groups.size()); ++i)
@@ -90,22 +91,22 @@ struct fake_list
             return sg::impl::member_track{.member_write = writes, .held_write = held_write};
         };
         auto const cover = [&](fake_array const&, fake_element const&, sg::impl::array_plan const&) { ++covered; };
-        book.apply(cc::span<sg::impl::array_site<fake_array> const>(sites), nullptr, this, stages, member_writes, stats,
-                   track, track_texture, cover);
+        return book.apply(cc::span<sg::impl::array_site<fake_array> const>(sites), nullptr, this, stages, member_writes,
+                          stats, track, track_texture, cover);
     }
 
     /// One op over `arrays`, each the array of a group of its own.
-    void op(cc::span<fake_array const> arrays, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
+    bool op(cc::span<fake_array const> arrays, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
     {
         auto groups = cc::vector<fake_array const*>();
         for (auto const& array : arrays)
             groups.push_back(&array);
-        op(cc::span<fake_array const* const>(groups), stages);
+        return op(cc::span<fake_array const* const>(groups), stages);
     }
 
-    void op(fake_array const& array, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
+    bool op(fake_array const& array, sg::pipeline_stage_flags stages = sg::pipeline_stage_flag::compute)
     {
-        op(cc::span<fake_array const>(&array, 1), stages);
+        return op(cc::span<fake_array const>(&array, 1), stages);
     }
 };
 
@@ -129,10 +130,10 @@ TEST("sg::impl::array_declaration_book - a current read-only application is skip
     auto const table = buffers("tables.buffers", 4);
     list.book.declare_buffers(1, "tables.buffers", reads(3));
 
-    list.op(table);
+    CHECK(!list.op(table));
     CHECK(list.tracked == 3);
-    list.op(table);
-    list.op(table);
+    CHECK(list.op(table));
+    CHECK(list.op(table));
     CHECK(list.tracked == 3);
     CHECK(list.stats.values[int(sg::stat::array_element_tracks)] == 3);
 }
@@ -195,8 +196,8 @@ TEST("sg::impl::array_declaration_book - a skipped read applies after all when a
     list.op(gallery);
     CHECK(list.tracked == 1);
     fake_array const* const read_then_write[] = {&gallery, &annex};
-    list.op(read_then_write);
-    CHECK(list.tracked == 3); // the annex's write, then the gallery's read after all
+    CHECK(!list.op(read_then_write)); // applied after all, so nothing is left for the flush to check
+    CHECK(list.tracked == 3);         // the annex's write, then the gallery's read after all
 
     // Written first, the gallery is not current when its turn comes, and applies once.
     fake_array const* const write_then_read[] = {&annex, &gallery};
@@ -205,7 +206,7 @@ TEST("sg::impl::array_declaration_book - a skipped read applies after all when a
 
     // Nothing written in its op, the skip stands.
     list.op(gallery);
-    list.op(gallery);
+    CHECK(list.op(gallery));
     CHECK(list.tracked == 5);
     CHECK(list.stats.values[int(sg::stat::array_element_tracks)] == 5);
 }
@@ -460,4 +461,21 @@ TEST("sg::impl::array_declaration_book - an end while an exception unwinds past 
     CHECK_THROWS_AS(end_all_while_unwinding(), unwound);
     CHECK(list.book.is_empty());
     CHECK(!list.book.withdraw(3));
+}
+
+TEST("sg::impl::array_skip_guard - a member written between a skip and its flush asserts at the flush")
+{
+    auto guard = sg::impl::array_skip_guard();
+
+    // A read tracked between the two leaves the count alone.
+    guard.arm(true, 7);
+    guard.check(7);
+
+    // Disarmed by the flush, and by an op that skipped nothing, so a later write is not this guard's.
+    guard.check(8);
+    guard.arm(false, 8);
+    guard.check(9);
+
+    guard.arm(true, 9);
+    CHECK_ASSERTS(guard.check(10));
 }

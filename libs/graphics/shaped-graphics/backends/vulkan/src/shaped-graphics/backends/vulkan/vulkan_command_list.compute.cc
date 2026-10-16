@@ -164,7 +164,7 @@ void vulkan_command_list::declare_array_accesses(cc::span<vulkan_binding_group c
     if (_array_sites.empty())
         return;
 
-    book.apply(
+    auto const skipped = book.apply(
         cc::span<sg::impl::array_site<vulkan_array_binding> const>(_array_sites), footprint, pipeline, op_stages,
         _member_writes, _stats,
         [&](vulkan_array_element const& element, sg::pipeline_stage_flags stages, sg::access_flags access)
@@ -187,6 +187,7 @@ void vulkan_command_list::declare_array_accesses(cc::span<vulkan_binding_group c
                                            sg::shader_layout_of(ab.bound_as));
             }
         });
+    _skip_guard.arm(skipped, _member_writes);
 }
 
 void vulkan_command_list::compute_dispatch(int x, int y, int z)

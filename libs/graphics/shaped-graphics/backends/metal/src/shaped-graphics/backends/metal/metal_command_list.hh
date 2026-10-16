@@ -480,6 +480,9 @@ private:
     /// How many accesses this list declared into the write bucket of an array member, which ends every current application.
     u64 _member_writes = 0;
 
+    /// Armed by an op whose arrays were skipped, and checked by the next flush_barriers.
+    sg::impl::array_skip_guard _skip_guard;
+
     /// The bound arrays of the op being recorded, kept to reuse their storage.
     cc::vector<sg::impl::array_site<metal_binding_group::array_binding>> _array_sites;
 

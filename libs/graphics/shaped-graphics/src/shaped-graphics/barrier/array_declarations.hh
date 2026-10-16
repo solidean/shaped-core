@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/hash.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
@@ -29,6 +30,10 @@
 /// One where an element's state already held a write or a layout change earlier in its op is never current.
 /// A skip is decided before the op's later arrays track, so one whose op moves the count afterwards applies after all.
 /// The skipped array may hold the member written, and declaring it again would have combined both uses in one barrier.
+///
+/// **Every write of an op is tracked before `declare_array_accesses`**, which is what the re-check above relies on.
+/// A write tracked after `apply` returns but before the op's barrier flush would leave a skipped element in the wrong state.
+/// Whatever a backend tracks between the two must be a read; `array_skip_guard` asserts it at the flush.
 
 /// One array binding of one bound group, as an op meets it.
 /// `ArrayBinding` is the backend's: it has `name`, `is_texture`, `binding`, `bound_as` and `elements`, each element `is_vacant()`.
@@ -68,8 +73,9 @@ public:
     /// marking its resource an array member and returning its `member_track`.
     /// `cover(array, element, plan)` tracks one element of an array covered whole, which is not an application.
     /// `member_writes` is the list's count, read after each application's tracking.
+    /// Returns whether some array of the op was skipped, which the backend arms its `array_skip_guard` with.
     template <class ArrayBinding, class TrackBuffer, class TrackTexture, class Cover>
-    void apply(cc::span<array_site<ArrayBinding> const> sites,
+    [[nodiscard]] bool apply(cc::span<array_site<ArrayBinding> const> sites,
                pipeline_footprint const* footprint,
                void const* pipeline,
                pipeline_stage_flags op_stages,
@@ -200,6 +206,32 @@ private:
     u64 _ops = 0;
 };
 
+/// What an op that skipped an array leaves its barrier flush to check: that no member was written since `apply`.
+/// A backend arms it with what `apply` returned, and checks it at the start of every barrier flush.
+class sg::impl::array_skip_guard
+{
+public:
+    /// Records `member_writes` if the op skipped an array, and disarms otherwise.
+    void arm(bool skipped, u64 member_writes)
+    {
+        _armed = skipped;
+        _member_writes = member_writes;
+    }
+
+    /// Asserts that a skip armed since the last flush saw no member written afterwards, and disarms.
+    void check(u64 member_writes)
+    {
+        CC_ASSERT(!_armed || member_writes == _member_writes,
+                  "a member of an array was written after declare_array_accesses skipped an array in the same op; "
+                  "every write of an op must be tracked before its arrays are declared");
+        _armed = false;
+    }
+
+private:
+    bool _armed = false;
+    u64 _member_writes = 0;
+};
+
 template <class Elements>
 void sg::impl::array_declaration_book::check(isize name_index, Elements const& elements) const
 {
@@ -223,7 +255,7 @@ void sg::impl::array_declaration_book::check(isize name_index, Elements const& e
 }
 
 template <class ArrayBinding, class TrackBuffer, class TrackTexture, class Cover>
-void sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> const> sites,
+bool sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> const> sites,
                                              pipeline_footprint const* footprint,
                                              void const* pipeline,
                                              pipeline_stage_flags op_stages,
@@ -301,7 +333,7 @@ void sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> c
         track_declared(app, name_index, array, plan, still_current, member_writes, stats, track_buffer, track_texture);
     }
     if (!skipped || member_writes == writes_before)
-        return;
+        return skipped;
 
     // A member written after a skip was decided may be one the skipped array holds too, in another layout or at another access.
     // Declaring that array again would have combined both uses, so every skip of this op is applied after all.
@@ -316,6 +348,7 @@ void sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> c
         auto const plan = plan_of(site, name_index, footprint, pipeline, op_stages);
         track_declared(*app, name_index, array, plan, false, member_writes, stats, track_buffer, track_texture);
     }
+    return false;
 }
 
 template <class ArrayBinding>

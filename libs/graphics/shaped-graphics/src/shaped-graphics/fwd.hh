@@ -293,6 +293,7 @@ struct array_plan;                              // how a dispatch tracks one bou
 struct array_declaration_link; // what a live array declaration and its list share (command_list/array_access_declaration.hh)
 using array_declaration_token = std::shared_ptr<array_declaration_link>;
 class array_declaration_book; // one bind point's live array declarations (barrier/array_declarations.hh)
+class array_skip_guard;       // what an op's skipped arrays leave its barrier flush to check (barrier/array_declarations.hh)
 struct member_track;          // what tracking one declared array element found
 template <class ArrayBinding>
 struct array_site; // one array binding of one bound group, as an op meets it

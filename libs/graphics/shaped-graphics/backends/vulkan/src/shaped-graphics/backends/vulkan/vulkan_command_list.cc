@@ -519,6 +519,8 @@ void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle textu
 
 void vulkan_command_list::flush_barriers()
 {
+    _skip_guard.check(_member_writes);
+
     auto global = make_empty_memory_barrier();
     auto has_global = false;
     for (auto const* buffer : _pending_barrier_buffers)
