@@ -23,11 +23,12 @@
 // So those reads are strided where the input reads are a broadcast, and there is no reuse of them across texels otherwise.
 //
 // 8 was swept rather than picked, over a whole 256x256 tile: 4 is 5.8 ms, 8 is 5.3, 12 is 6.3, 16 is 7.2 and 24 is 9.1.
-// Those times are the HLSL kernel's before the SGL port, which writes the same bits, and have not been re-taken.
+// Those times are the HLSL kernel's before the SGL port, which computes the same arithmetic, and have not been re-taken.
 // Re-sweep it whenever the reads change width, since the window a thread holds in registers grows with them.
 // Blocking the output channels as well does not pay; reconstruction.md has the measurement.
 //
-// `sr::impl::oidn_network` dispatches against this, and the two must agree; a mismatch is a wrong image, which the oracle test against OIDN's own filter catches immediately.
+// `sr::impl::oidn_network` dispatches against this, and the two must agree; a mismatch is a wrong image.
+// nn-conv-test.cc dispatches with its own copy, so moving this one fails it on every run; the network's copy is checked only by the OIDN oracle test, which skips where OIDN was not fetched.
 const conv_texels = 8
 
 // The columns of the input window one thread reads: its texels and one more on either side.
