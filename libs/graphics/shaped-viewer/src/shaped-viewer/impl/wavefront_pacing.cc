@@ -1,3 +1,4 @@
+#include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <shaped-viewer/impl/wavefront_pacing.hh>
 
@@ -13,6 +14,13 @@ wavefront_timing& wavefront_pacing::queue(wavefront_plan plan)
     in_flight.push_back({.rounds = plan.rounds, .fill = plan.fill, .warming = still_frames < warmup_frames});
     ++still_frames;
     return in_flight.back().timing;
+}
+
+void wavefront_pacing::withdraw()
+{
+    CC_ASSERT(!in_flight.empty(), "only a queued frame can be withdrawn");
+    in_flight.pop_back();
+    --still_frames;
 }
 
 void wavefront_pacing::land(pending const& p, f64 seconds, f64 budget_seconds)
@@ -38,8 +46,9 @@ wavefront_plan wavefront_pacing::next(f64 budget_seconds, i32 fallback_rounds) c
         return {.rounds = 1, .fill = fill};
     if (seconds_per_full_round <= 0.0)
         return {.rounds = cc::max(1, fallback_rounds), .fill = 1.0f};
-    auto const fit = i32(budget_seconds / seconds_per_full_round);
-    return {.rounds = cc::clamp(fit, 1, max_rounds), .fill = 1.0f};
+    // Clamped before the conversion, since a budget meant as "no limit" fits more rounds than an i32 holds.
+    auto const fit = cc::clamp(budget_seconds / seconds_per_full_round, 1.0, f64(max_rounds));
+    return {.rounds = i32(fit), .fill = 1.0f};
 }
 
 void wavefront_pacing::reset()

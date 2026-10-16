@@ -775,6 +775,8 @@ void mark_unwritten(impl::temporal_slot* slot)
                                                           .sample_floor = scaled ? nullptr : &floor});
     if (floor.is_valid())
         slot.sample_floors.push_back(cc::move(floor));
+    if (timing != nullptr && outcome == sg::routine_outcome::declined)
+        slot.pacing.withdraw();
     return outcome;
 }
 

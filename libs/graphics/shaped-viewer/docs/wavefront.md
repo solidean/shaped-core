@@ -152,7 +152,8 @@ There the frame runs one round, and a free slot starts a new sample only with pr
 - Each pixel still averages whole samples, and which slots start is independent of what any sample returns, so the mean is unchanged.
 - A round's cost grows slower than `fill`, since the paths a round carries stay, so each correction is partial and the fill settles over a few frames.
 - A restart's first one-round still frames steer nothing, since the drain left their slots empty and they cost less than they will.
-- Nor does a still frame whose pixels all held their sample target when it started: it starts nothing, and its near-empty rounds would plan too many after the next move.
+- A still frame whose pixels all hold their sample target is not traced, but the CPU learns that a frame or more late.
+  The frames between still dispatch and are timed like any other, so their near-empty rounds can plan a frame or two over budget after the next move.
 - A fill moving toward a target within 5% of 1 snaps to 1 once it is that close itself, so a view turned toward something cheap regains whole rounds.
 - Below a full fill a round's queue is never full, so it loses the pixel-order fast path of `round_slot`, and a segment costs more than at full occupancy.
 

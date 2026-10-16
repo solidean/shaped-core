@@ -42,7 +42,7 @@ inline constexpr cc::string_view capture_size_env_var = "SC_CAPTURE_SIZE";
 
 /// How much the program should accumulate before it captures, in the program's own unit.
 ///
-/// What the unit is belongs to the program: shaped-viewer counts samples per pixel in every traced view, a raster app counts frames drawn.
+/// What the unit is belongs to the program: a path tracer may count samples per pixel, a raster app frames drawn.
 /// Either way it is the knob a scene needing longer reaches for.
 inline constexpr cc::string_view capture_accumulate_env_var = "SC_CAPTURE_ACCUMULATE";
 

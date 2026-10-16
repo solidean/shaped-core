@@ -139,3 +139,28 @@ TEST("sv::impl::wavefront_pacing - a frame with nothing measured runs the fallba
     CHECK(plan.rounds == 6);
     CHECK(plan.fill == 1.0f);
 }
+
+// A frame that declines never records timestamps, and the queue lands in order, so one left queued would hold every later frame back.
+TEST("sv::impl::wavefront_pacing - a withdrawn frame leaves the queue and the warm-up as they were")
+{
+    auto pacing = sv::impl::wavefront_pacing();
+    (void)pacing.queue({.rounds = 1, .fill = 1.0f});
+    auto const queued = pacing.in_flight.size();
+    auto const still = pacing.still_frames;
+
+    (void)pacing.queue({.rounds = 2, .fill = 1.0f});
+    pacing.withdraw();
+    CHECK(pacing.in_flight.size() == queued);
+    CHECK(pacing.still_frames == still);
+    CHECK(pacing.in_flight.back().rounds == 1);
+}
+
+// A budget meant as "no limit" fits more rounds than an i32 holds, so the plan is clamped before it is counted.
+TEST("sv::impl::wavefront_pacing - a budget far past any round runs the most rounds")
+{
+    auto pacing = sv::impl::wavefront_pacing();
+    pacing.seconds_per_full_round = 1e-9;
+    auto const plan = pacing.next(1e6, 8);
+    CHECK(plan.rounds == sv::impl::wavefront_pacing::max_rounds);
+    CHECK(plan.fill == 1.0f);
+}

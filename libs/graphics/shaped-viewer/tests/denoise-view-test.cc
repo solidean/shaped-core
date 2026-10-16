@@ -118,7 +118,7 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
             if (phase == phase_methods.size())
                 viewer.request_close();
         }
-        REQUIRE(cc::current_time_steady_secs() - loop_start < 25.0)
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0)
             .context(cc::format("phase {}, accumulated {}, streaming {}, pending {}; frames (phase:count):{}", phase,
                                 accumulated, f.streaming_resources(), f.pending_resource_work(), history));
     }
@@ -517,7 +517,9 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, "96x64");
     auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "4");
-    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "20");
+    // A wavefront capture that runs first in its process compiles every kernel cold, which an unoptimized build's SGL
+    // compiler takes about a minute for, before the first of its frames.
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto const box = sv_test::make_cornell_box();
     // Lit by its own lamp, an emissive mesh, which is the box's only light.
@@ -539,7 +541,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
                         .temporal_denoise_fade_frames = fade});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
-        REQUIRE(cc::current_time_steady_secs() - loop_start < 25.0);
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
     }
 
     co_await cc::async_settled(sv::background_work(ctx));

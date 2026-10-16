@@ -3,7 +3,7 @@
 #include <shaped-rendering/capture.hh>
 
 // What a capture run reads from the environment.
-// `accumulate` carries no unit of its own: shaped-viewer reads it as samples per pixel, a raster app as frames drawn.
+// `accumulate` carries no unit of its own: a path tracer may read it as samples per pixel, a raster app as frames drawn.
 
 TEST("sr - a capture request reads the accumulate target as given", nx::config::exclusive("env"))
 {

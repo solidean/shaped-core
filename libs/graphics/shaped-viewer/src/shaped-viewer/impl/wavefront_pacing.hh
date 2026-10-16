@@ -59,6 +59,10 @@ struct wavefront_pacing
     /// Queues the still frame about to run `plan`, and returns where its timestamps go.
     [[nodiscard]] wavefront_timing& queue(wavefront_plan plan);
 
+    /// Takes back the frame `queue` queued last, which declined and so will never land.
+    /// Left queued, it would hold every later frame's measurement behind it.
+    void withdraw();
+
     /// Folds in the landed frame `p`, which took `seconds` of GPU time against `budget_seconds`.
     void land(pending const& p, f64 seconds, f64 budget_seconds);
 

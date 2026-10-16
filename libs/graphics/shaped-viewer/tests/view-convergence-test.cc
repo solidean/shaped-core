@@ -111,6 +111,8 @@ TEST("sv - a mean that restarted holds no samples, whatever was counted before")
 
     slot.accum_frame = 3;
     slot.pixels_short = 12;
+    // A floor still in flight: the old image's, which must not land on the restarted one.
+    slot.sample_floors.push_back(sg::data_future<u32>());
     sv::impl::restart_accumulation(slot);
     CHECK(slot.accum_frame == 0);
     CHECK(slot.samples == 0);

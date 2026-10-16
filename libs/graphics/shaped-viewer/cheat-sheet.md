@@ -24,7 +24,7 @@ Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see
 ## Per-frame description — what to render
 
 ```cpp
-sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 content_scale; def[i] -> view_data& } — a whole frame, as two flat pools
+sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 content_scale; u32 sample_target; def[i] -> view_data& } — a whole frame, as two flat pools
 sv::view_data                    // { view_id id; vec2i resolution; bool resolution_follows_layout; camera; vector<layer> layers; refresh_policy refresh; vector<temporal_input>; }
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
@@ -50,7 +50,7 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 frame_budget_ms; bool restir; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 frame_budget_ms; bool restir; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
 sv::render_mode              // wavefront (default) | megakernel | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
@@ -913,6 +913,8 @@ store.set_payload_bytes(id, n)                // what the byte budget counts; vi
 store.accumulated_frames(id) -> u32           // one named slot's frame counter, defaulting to accumulation(0) — the layer, not the view
 store.min_accumulated_samples(id) -> u32      // the fewest samples per pixel across every traced layer; sv::impl::min_accumulated_samples is the rule
 store.is_accumulation_converged(id, samples = {}) -> bool  // every traced layer holds `samples`, or stopped at sv::accumulation_sample_cap
+store.pixels_short_of_target(id) -> u32       // pixels of the traced layers still below their trace's target, as last read back
+store.restart_accumulation(id)               // every traced layer starts over — for a change the trace hash cannot see
 sv::impl::view_state                 // the record: display_name, controller, camera, placement, zoom, composite, temporal, last_refresh_frame
 sv::impl::temporal_slot              // { texture_2d texture; u64 reset_hash; u32 accum_frame; u32 samples; ... }
 sv::impl::restart_accumulation(slot) // frames, samples and the sample floors still in flight, all back to nothing

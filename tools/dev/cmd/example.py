@@ -58,7 +58,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--capture-size", metavar="WxH",
                    help="Override the resolution the sidecar declares")
     p.add_argument("--capture-accumulate", metavar="N", type=int,
-                   help="Override the accumulated-frame target the sidecar declares")
+                   help="Override the accumulation target the sidecar declares, in the example's own unit (samples per pixel for sv)")
     p.add_argument("--capture-timeout", metavar="SECS", type=float,
                    help="Override the timeout the sidecar declares")
     p.add_argument("--update-captures", nargs="?", const="", metavar="MATCH",
