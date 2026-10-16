@@ -1,5 +1,6 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/common/time.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -293,6 +294,22 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
                                                    cmd, def, plan, resources, store,
                                                    output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
                                            }));
+
+    // Whichever tracer the default mode resolves to may still compile its own kernel for the item, standing in meanwhile.
+    // A pending stand-in restarts the image every frame, so the counted frames start only once a frame binds none.
+    auto const stand_in_hash = [&]
+    {
+        auto const* const rec = store.peek_ptr(traced_id);
+        auto const* const slot = rec != nullptr ? rec->temporal.get_ptr(sv::temporal_id::accumulation(0)) : nullptr;
+        return slot != nullptr ? slot->stand_in_hash : u64(1);
+    };
+    auto const warm_start = cc::current_time_steady_secs();
+    while (stand_in_hash() != 0)
+    {
+        REQUIRE(cc::current_time_steady_secs() - warm_start < 60.0);
+        sv_test::drive_ambient_work();
+        co_await frame(0);
+    }
     store = sv::view_store{}; // the warm-up's own counts are not what this test is about
 
     // The regression this exists for: `resolve` stamped the *declaration's* reset rule onto the slot, `trace` then
