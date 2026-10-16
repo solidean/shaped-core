@@ -774,6 +774,9 @@ m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for t
                                             //   a pin needs no unlock, and is recorded for the access declaration like an acquire
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
+m.try_freeze() -> result<bound_resources>   // the same, failing unlocked where freeze throws (a heap that cannot hold the snapshot); a trace declines on it
+                                            //   a DIRTY snapshot is a whole-table copy in the persistent heap: acquire for every recording first, then freeze
+                                            //   — viewer_renderer runs view_renderer::acquire_trace for each trace before the first, so a frame mints one
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
 bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
 auto const d = bound.declare_raytracing_access(cmd)  // -> sv::declared_tables — EVERY table, empty ones included, for every trace while `d` lives

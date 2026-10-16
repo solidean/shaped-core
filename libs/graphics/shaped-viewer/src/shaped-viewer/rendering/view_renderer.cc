@@ -892,6 +892,24 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
     return out;
 }
 
+void view_renderer::acquire_trace(sg::command_list& cmd,
+                                  viewer_definition const& def,
+                                  render_plan const& plan,
+                                  u32 trace_index,
+                                  plan_resources const& res,
+                                  gpu_resource_manager& resources)
+{
+    auto const& tr = plan.traces[trace_index];
+    CC_ASSERT(isize(u32(tr.view)) < def.views.size(), "a plan trace names a view the definition does not hold");
+    auto const& v = def[tr.view];
+    CC_ASSERT(isize(tr.layer) < v.layers.size(), "a plan trace names a layer the view does not hold");
+    if (res.traces[trace_index].raw() == nullptr)
+        return; // trace() will not run it either
+    // The same walk trace() takes, for its acquires alone: residency only moves at the frame's settle pass, so both
+    // resolve the same items to the same indices.
+    (void)resolve_scene(cmd, v.layers[tr.layer], resources);
+}
+
 sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                                          viewer_definition const& def,
                                          render_plan const& plan,
@@ -1150,7 +1168,14 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
     // Held across the dispatch: the tables are what the closest-hit reaches every mesh and texture through, and
     // nothing may mint a descriptor the bound snapshot would not contain while it is being recorded against.
-    auto const bindless = resources.freeze();
+    // A snapshot the descriptor heap cannot hold declines this trace and leaves the frame standing.
+    auto frozen = resources.try_freeze();
+    if (frozen.has_error())
+    {
+        CC_LOG_ERROR("the bindless tables could not be snapshot for a trace: {}", frozen.error().to_string());
+        return sg::routine_outcome::declined;
+    }
+    auto const& bindless = frozen.value();
 
     // Acquired as soon as the view holds a quadric batch, rather than when one is caught uncompiled: the trace
     // declines entirely while a quadric permutation is unready and this is not, so a late acquire blanks the view for

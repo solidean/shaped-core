@@ -1137,6 +1137,16 @@ bound_resources gpu_resource_manager::freeze()
     return bound_resources(*this, _group->snapshot());
 }
 
+cc::result<bound_resources> gpu_resource_manager::try_freeze()
+{
+    lock();
+    auto group = _group->try_snapshot();
+    if (group.has_error())
+        unlock();
+    CC_RETURN_IF_ERROR(group);
+    return bound_resources(*this, cc::move(group.value()));
+}
+
 sg::binding_group_layout_handle const& gpu_resource_manager::bindless_layout() const
 {
     return _group->layout();
