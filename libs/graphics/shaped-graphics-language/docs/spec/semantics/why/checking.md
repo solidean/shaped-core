@@ -712,3 +712,13 @@ Its layout in GPU memory is a decision of its own: a constant block starts each 
 Taking that decision with the first local `mat3` would fix it before any shader needed one in memory, so a `mat3` stays in function bodies until it is taken.
 Everywhere memory or a stage edge would hold one is refused at its line, the way an array is (CHK-291), rather than by the emitter with no line at all.
 A shader that wants one from memory reads its columns, which are `float3`s, and builds it in the body.
+
+## CHK-398
+
+An atomic counts the invocations that reach it, so it means something only where the program can say how many there are.
+A raygen runs once per launch index, a miss once per ray that leaves the scene, a closest hit once per trace that hit, and a callable once per call.
+An any hit runs for each candidate the traversal asks about, including candidates a nearer hit later replaces, in an order the device picks.
+DXR and Vulkan may run it more than once for one candidate, unless the geometry sets `NO_DUPLICATE_ANYHIT_INVOCATION`, and Metal has no such flag.
+An intersection runs as often as the traversal reaches its box, which the acceleration structure's build decides.
+So a counter in either holds a number no spec defines, and one that differs between devices and between builds of one structure.
+Every target compiles the atomic itself in all six stages, so the refusal is SGL's, and its detail says why rather than only that the stage is left out.

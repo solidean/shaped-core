@@ -424,6 +424,8 @@ Its operations are builtins that take it first, called as methods: `add`, `subtr
 `load()` reads it, and `store(v)` writes it.
 `and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
 Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
+A pixel and a compute stage take them, and so do the ray-tracing stages that run once per launch, ray or call: a raygen, a miss, a closest hit and a callable.
+An any hit and an intersection run as often as the traversal decides, so an atomic there counts something no spec defines, and is `stage-not-allowed` (CHK-398).
 The host holds a buffer of atomics as the plain integers it is.
 Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
 
@@ -482,7 +484,8 @@ Its caveats are the other atomics' and a few of its own:
   It fails a weak compare-exchange spuriously the first time each call meets `expected`.
   So a weak one without its retry loop fails its test, as it may on a GPU.
 * A spin lock built from either, where one invocation waits for another to release it, may hang a GPU whose SIMD group cannot run both sides; SGL does not detect one.
-* Like every atomic, both are `@stages(.pixel, .compute)`.
+* Like every atomic, both stand in a pixel, a compute, a raygen, a miss, a closest-hit and a callable stage.
+  A ray-tracing stage has no helper invocations, so the strong form's loop needs no test for one there.
 
 **An image's texels are atomics where its member says so.**
 `@atomic` on a `mut` image of the format `r32_uint` or `r32_sint` makes each texel an atomic, which a subscript reaches and the methods above update ([CHK-372](semantics/checking.md#atomics)):

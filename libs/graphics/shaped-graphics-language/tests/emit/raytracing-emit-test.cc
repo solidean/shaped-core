@@ -117,3 +117,72 @@ TEST("sgl emit - a comparison under another comparison is parenthesized")
         CHECK(text.contains("== 1) != (")).dump("target", sgl::emit::to_string(t));
     }
 }
+
+TEST("sgl emit - an atomic in a raygen, a closest hit, a miss and a callable is each target's own device atomic")
+{
+    // CHK-398: each of these runs once per launch, hit, miss or call, so an atomic in it counts something defined
+    auto const source = cc::string_view(R"(require raytracing_pipeline
+
+struct radiance:
+    hit: int
+
+struct operand:
+    x: int
+
+rays rs:
+    primary: radiance
+
+binding counted:
+    world: acceleration_structure[.triangles]
+    counts: mut buffer[atomic[uint]]
+
+@callable fun bump(v: mut operand){counted}:
+    counted.counts[3].add(1u)
+    v.x = v.x + 1
+
+callables ops = (bump)
+
+@raygen fun start(@launch_id id: int3){counted}:
+    counted.counts[0].add(1u)
+    let mut p = radiance(0)
+    trace(counted.world, ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), rs.primary, mut p)
+    let mut v = operand(0)
+    ops[0](mut v)
+    let first = counted.counts[4].compare_exchange_strong(0u, 1u)
+
+@miss fun sky(p: mut radiance){counted}:
+    counted.counts[2].add(1u)
+
+@closest_hit fun shade(h: triangle_hit, p: mut radiance){counted}:
+    p.hit = 1
+    counted.counts[1].add(1u)
+
+hit_group lit for rs:
+    primary = (closest_hit = shade)
+
+@raytracing pipeline path:
+    rays = rs
+    raygen = start
+    miss.primary = sky
+    hit_groups = (lit)
+)");
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        CHECK(text_of_entry(source, "start", t).contains("    InterlockedAdd(counted_counts[0], 1u, atomic_before);\n"));
+        CHECK(text_of_entry(source, "shade", t).contains("    InterlockedAdd(counted_counts[1], 1u, atomic_before);\n"));
+        CHECK(text_of_entry(source, "sky", t).contains("    InterlockedAdd(counted_counts[2], 1u, atomic_before);\n"));
+        CHECK(text_of_entry(source, "bump", t).contains("    InterlockedAdd(counted_counts[3], 1u, atomic_before);\n"));
+    }
+    // a ray-tracing stage has no helpers, so the strong loop needs no test for one (EMIT-158)
+    auto const start = text_of_entry(source, "start", target::msl);
+    CHECK(start.contains("    (void)(atomic_fetch_add_explicit(&counted_counts[0], 1u, memory_order_relaxed));\n"));
+    CHECK(start.contains("    while (!atomic_compare_exchange_weak_explicit(exchange_place, "));
+    CHECK(!start.contains("simd_is_helper_thread"));
+    cc::string_view const names[] = {"shade", "sky", "bump"};
+    for (auto i = 0; i < 3; ++i)
+        CHECK(text_of_entry(source, names[i], target::msl)
+                  .contains(cc::format("    (void)(atomic_fetch_add_explicit(&counted_counts[{}], 1u, "
+                                       "memory_order_relaxed));\n",
+                                       i + 1)))
+            .context(names[i]);
+}

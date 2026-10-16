@@ -89,6 +89,7 @@ struct target_ {
 * **EMIT-158** In a pixel stage, the strong form's loop keeps a helper invocation from spinning on what its atomics read, which is undefined ([why](why/emitting.md#emit-158)).
   MSL's loop tests `simd_is_helper_thread()` first, so a helper never enters it.
   HLSL's has no loop, and WGSL refuses the pixel stage (EMIT-159).
+  A compute and a ray-tracing stage have no helpers, so their loop has no such test.
 * **EMIT-159** `wgsl` refuses a pixel stage that calls `compare_exchange_strong` as `target-lacks-feature`, whose detail says why and what to write instead.
   WGSL has no test for a helper invocation, so no loop it holds could keep one out ([why](why/emitting.md#emit-159)).
   A weak compare-exchange is one call, which a helper leaves at once, and a compute stage has no helpers, so WGSL writes both.

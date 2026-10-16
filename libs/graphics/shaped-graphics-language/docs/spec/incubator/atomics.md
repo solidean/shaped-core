@@ -4,7 +4,8 @@
 
 ## The idea
 
-**SGL's atomics are the ones every target has**: 32-bit `uint` and `int`, in a `mut buffer` or in workgroup memory, relaxed, in a pixel or a compute stage ([bindings.md](../bindings.md#atomics)).
+**SGL's atomics are the ones every target has**: 32-bit `uint` and `int`, in a `mut buffer` or in workgroup memory, relaxed.
+They stand in a pixel, a compute or a ray-tracing stage that runs once per ray or call ([bindings.md](../bindings.md#atomics)).
 Image atomics have come back already: an `@atomic` image's texels are atomics under `image_atomics`, with the buffer atomics' methods ([CHK-372](../semantics/checking.md#atomics)).
 Each thing below is what one target or another lacks, so each comes back behind an sg feature when a shader wants it, and never as a target's own dialect.
 
@@ -21,5 +22,4 @@ The compare-exchange has left the incubator, as a strong and a weak form ([bindi
 
 ## Open
 
-* Whether a ray-tracing stage takes atomics, which every target would allow, beside the pixel and compute stages.
 * Whether HLSL's `Interlocked*` without an out value, for an update whose result is dropped, is worth a writer of its own.

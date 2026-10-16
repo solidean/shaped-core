@@ -180,6 +180,10 @@ constexpr cc::string_view k_atomics_msl[] = {
     "simd_is_helper_thread",
 };
 
+/// CHK-296: every stage that writes memory once per invocation the program can count.
+/// A vertex stage has no writable storage in WebGPU, and any-hit and intersection stages run as often as traversal decides.
+constexpr cc::string_view k_atomic_stages = "@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)";
+
 /// A compare-exchange writes statements in every target (EMIT-157).
 bool every_language(language)
 {
@@ -625,8 +629,8 @@ void sgl::builtins::register_sync(registry& r)
                       "    exchanged: bool");
 
     r.add_comment("// Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.\n"
-                  "// Each is relaxed, and each but a store gives the value before; a vertex stage has none "
-                  "(CHK-296).");
+                  "// Each is relaxed, and each but a store gives the value before; a vertex, an any-hit and an "
+                  "intersection stage have none (CHK-296).");
     for (auto const is_signed : {false, true})
     {
         auto const t = is_signed ? "int" : "uint";
@@ -642,7 +646,7 @@ void sgl::builtins::register_sync(registry& r)
                                  info.name)
                     : cc::format("fun {1}(a: mut atomic[{0}], v: {0}) -> {0}", t, info.name);
             r.add(function_record{
-                .signature = cc::format("@stages(.pixel, .compute) {}", signature),
+                .signature = cc::format("{} {}", k_atomic_stages, signature),
                 .doc = info.doc,
                 .evaluate = is_signed ? evaluator_of<true>(info.op) : evaluator_of<false>(info.op),
                 .write = {.kind = spelling_kind::custom,
@@ -687,7 +691,7 @@ void sgl::builtins::register_sync(registry& r)
                                      info.name, texel, t)
                         : cc::format("fun texel_{}({}, v: {}) -> {}", info.name, texel, t, t);
                 r.add(function_record{
-                    .signature = cc::format("@internal @stages(.pixel, .compute) {}", signature),
+                    .signature = cc::format("@internal {} {}", k_atomic_stages, signature),
                     .doc = info.doc,
                     .evaluate = info.op == atomic_op::store                 ? nothing
                               : info.op == atomic_op::compare_exchange_weak ? texel_exchanged_weak

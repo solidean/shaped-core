@@ -3336,9 +3336,28 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     for (auto const& v : f.stage_violations)
-        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-               cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
-                          check::stage_name(info.entry_stage), out.at(v.callee).name));
+    {
+        // CHK-398: an atomic counts its stage's invocations, which traversal decides for these two
+        auto const* const record = out.builtin_function(out.at(v.callee).intrinsic);
+        auto const is_atomic = record != nullptr && record->is_atomic;
+        if (is_atomic && info.entry_stage == stage::any_hit)
+            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+                   cc::format("{} is an any_hit entry point, which runs an implementation-defined number of times: for "
+                              "candidates the traversal later rejects, and more than once per candidate unless the "
+                              "geometry sets NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of; so the "
+                              "atomic {} would count something no spec defines",
+                              s.name, out.at(v.callee).name));
+        else if (is_atomic && info.entry_stage == stage::intersection)
+            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+                   cc::format("{} is an intersection entry point, which runs as often as the traversal reaches its "
+                              "box, an implementation-defined number of times; so the atomic {} would count something "
+                              "no spec defines",
+                              s.name, out.at(v.callee).name));
+        else
+            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+                   cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
+                              check::stage_name(info.entry_stage), out.at(v.callee).name));
+    }
     // CHK-380: HLSL forms a compute stage's quads from its threads' ids, which only one axis keeps consecutive
     auto const is_linear = info.workgroup[0] % 4 == 0 && info.workgroup[1] == 1 && info.workgroup[2] == 1;
     for (auto const& q : is_linear ? cc::span<stage_violation const>() : cc::span<stage_violation const>(f.quad_calls))

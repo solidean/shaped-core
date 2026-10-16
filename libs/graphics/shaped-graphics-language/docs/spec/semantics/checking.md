@@ -923,14 +923,16 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 
 * **CHK-296** `atomic[T]` is an atomic of `uint` or `int`, and of any other `T` `wrong-kind-of-name`.
   It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
-  Its builtins are `@stages(.pixel, .compute)`.
+  Its builtins are `@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)`.
+* **CHK-398** An atomic's builtin reached from an `@any_hit` or an `@intersection` entry point is `stage-not-allowed`, whose detail says how often that stage runs ([why](why/checking.md#chk-398)).
+  The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
 * **CHK-297** An expression of an atomic's type stands only as a builtin's argument; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
   A local, a parameter or a field of an atomic's type is `wrong-kind-of-name` as well.
 * **CHK-372** `@atomic` on a `mut` image member of the format `.r32_uint` or `.r32_sint` makes each of its texels an atomic of `uint` or `int` ([why](why/checking.md#chk-372)).
   On any other member it is `wrong-kind-of-name`, and it needs `image_atomics`, a form CHK-201 judges.
   It is part of the member's type, which a resource parameter never names, so no function of the program takes such an image.
 * **CHK-373** `img[xy]` of an `@atomic` member is its texel's atomic, which stands only as a builtin's argument by CHK-297: `img[xy].max(v)`.
-  The buffer atomics' methods are its methods, `load()` and `store(v)` among them, and they are `@stages(.pixel, .compute)` as CHK-296 has every atomic's.
+  The buffer atomics' methods are its methods, `load()` and `store(v)` among them, and they take the stages CHK-296 gives every atomic's.
   The image's own `load` and `store` are `wrong-kind-of-name` on it, and `size` and the image's other methods take it as they take any image.
 
 ```sgl sketch

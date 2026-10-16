@@ -201,17 +201,18 @@ Reordering a set changes every table built from it, which is why it is one decla
 Its payload is a `mut` parameter of a struct, the caller's place, which the stage reads and writes (CHK-328).
 What the GPU hands it besides is a parameter of a prelude type, read from the target where the entry point starts.
 
-| stage | takes | returns | may trace a ray type | may call a callable |
-|---|---|---|---|---|
-| `@raygen` | stage inputs alone | nothing | yes | yes |
-| `@miss` | `p: mut T`, and `r: ray` if it reads the ray | nothing | yes | yes |
-| `@closest_hit` | `h: triangle_hit` or `h: procedural_hit[A]`, `p: mut T` | nothing | yes | yes |
-| `@any_hit` | `c: triangle_candidate` or `c: procedural_candidate[A]`, `p: mut T` | `hit_decision` | no | no |
-| `@intersection` | `b: procedural_box` alone: no payload reaches it | `report[A]`, `A` a struct of the program | no | no |
-| `@callable` | `p: mut T`, the caller's parameter | nothing | no | yes |
+| stage | takes | returns | may trace a ray type | may call a callable | may update an atomic |
+|---|---|---|---|---|---|
+| `@raygen` | stage inputs alone | nothing | yes | yes | yes |
+| `@miss` | `p: mut T`, and `r: ray` if it reads the ray | nothing | yes | yes | yes |
+| `@closest_hit` | `h: triangle_hit` or `h: procedural_hit[A]`, `p: mut T` | nothing | yes | yes | yes |
+| `@any_hit` | `c: triangle_candidate` or `c: procedural_candidate[A]`, `p: mut T` | `hit_decision` | no | no | no |
+| `@intersection` | `b: procedural_box` alone: no payload reaches it | `report[A]`, `A` a struct of the program | no | no | no |
+| `@callable` | `p: mut T`, the caller's parameter | nothing | no | yes | yes |
 
 * **Every stage may take `@launch_id` and `@launch_size`**, both `int3`: which ray of the launch it runs for, and the launch's size (CHK-327).
 * **A trace or a callable called from a stage whose row says no is `stage-not-allowed`**, since the prelude's builtins carry `@stages` (CHK-193).
+* **An atomic in an any hit or an intersection is `stage-not-allowed` too**, and its detail says why: traversal decides how often those run (CHK-398).
 * An entry point is no generic function, so a stage names its `A`: `h: procedural_hit[sphere_attributes]`.
 
 ```sgl
