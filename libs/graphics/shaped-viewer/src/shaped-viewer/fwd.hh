@@ -134,6 +134,7 @@ enum class attribute_interpolation : u8; // how a mesh-sourced attribute is blen
 struct material_signature_entry;         // one attribute a material type requires
 struct material_attribute_binding;       // one attribute a material overrides
 struct material_type;                    // a family of materials: signature + shader fragment
+struct material_type_description;        // what material_type::create builds one from, field by field
 struct material;                         // one instance of a type, with some attributes bound
 struct resolved_attribute;
 struct resolved_material;           // a type + material + mesh resolved down the frequency chain

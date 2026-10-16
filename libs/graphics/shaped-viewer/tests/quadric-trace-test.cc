@@ -268,8 +268,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute 
 
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("color", tg::vec3f(0.5f, 0.5f, 0.5f)));
-    auto const type
-        = sv::material_type::create("sv_test_per_primitive", cc::move(signature), "surface.base_color = color\n");
+    auto const type = sv::material_type::create(
+        {.name = "sv_test_per_primitive", .signature = cc::move(signature), .shader = "surface.base_color = color\n"});
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
     // One value per primitive, which is the finest a quadric batch can serve.
@@ -734,9 +734,10 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
     // comment is "still compiling, or a material that does not build".
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("tint", tg::vec3f(0.9f, 0.2f, 0.1f)));
-    auto const type = sv::material_type::create("sv_test_uncompilable", cc::move(signature),
-                                                "surface.base_color = tint\n"
-                                                "this_function_does_not_exist(surface)\n");
+    auto const type = sv::material_type::create({.name = "sv_test_uncompilable",
+                                                 .signature = cc::move(signature),
+                                                 .shader = "surface.base_color = tint\n"
+                                                           "this_function_does_not_exist(surface)\n"});
     auto const material = sv::material::create("m", sv::material_type_id::invalid, {});
 
     auto resident = sv::resident_quadric_set{.name = "one sphere", .geometry = batch, .primitive_count = 1};

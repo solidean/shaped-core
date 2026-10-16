@@ -7,6 +7,19 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/material_attribute.hh>
 
+/// What `material_type::create` builds a type from, each field meaning what `material_type`'s field of the same name does.
+/// Named field by field, so two attributes of one type cannot trade places unseen: an opacity cutoff and an emission scale are both floats.
+struct sv::material_type_description
+{
+    cc::string name = {};
+    cc::vector<material_signature_entry> signature = {};
+    cc::string shader = {};
+    cc::string opacity_attribute = {};
+    cc::string opacity_cutoff_attribute = {};
+    cc::string emission_color_attribute = {};
+    cc::string emission_scale_attribute = {};
+};
+
 /// A family of materials: what a shader needs per pixel, and the code that turns it into a shaded surface.
 ///
 /// PBR is a material type; gold is a `sv::material` instantiating it.
@@ -22,9 +35,10 @@
 ///
 /// A minimal type, which reads one color and is lit like plaster:
 ///
-///     material_type::create("plaster", {material_signature_entry::of("tint", tg::vec3f(0.9f, 0.9f, 0.85f))},
-///                           "surface.base_color = saturate(tint)\n"
-///                           "surface.specular_roughness = 0.8\n");
+///     material_type::create({.name = "plaster",
+///                            .signature = {material_signature_entry::of("tint", tg::vec3f(0.9f, 0.9f, 0.85f))},
+///                            .shader = "surface.base_color = saturate(tint)\n"
+///                                      "surface.specular_roughness = 0.8\n"});
 ///
 /// `hash` is the content key over name, signature, fragment, opacity and emission attributes together.
 /// Two types built from equal inputs hash equal, so a library registering the same type twice keeps one.
@@ -68,13 +82,7 @@ struct sv::material_type
     /// A signature declaring one name twice asserts: the resolver would have no way to say which declaration a binding meant.
     /// So does an opacity attribute naming something the signature does not declare as a float.
     /// So do an emission color that is not a declared float3, and a fragment of an emitting type that writes `surface.emission_*`.
-    [[nodiscard]] static material_type create(cc::string name,
-                                              cc::vector<material_signature_entry> signature,
-                                              cc::string shader,
-                                              cc::string opacity_attribute = {},
-                                              cc::string opacity_cutoff_attribute = {},
-                                              cc::string emission_color_attribute = {},
-                                              cc::string emission_scale_attribute = {});
+    [[nodiscard]] static material_type create(material_type_description description);
 
     /// Whether this type declares where its emission comes from, which is what lets an instance of it light the scene.
     [[nodiscard]] bool declares_emission() const { return !emission_color_attribute.empty(); }

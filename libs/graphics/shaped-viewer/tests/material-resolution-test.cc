@@ -46,7 +46,8 @@ constexpr auto uv_format = sv::attribute_format::of_vector(sv::scalar_type::f32,
 {
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f, final_default));
-    return sv::material_type::create("test", cc::move(signature), "surface.specular_roughness = roughness\n");
+    return sv::material_type::create(
+        {.name = "test", .signature = cc::move(signature), .shader = "surface.specular_roughness = roughness\n"});
 }
 
 [[nodiscard]] sv::texture_sample_source make_sample(sv::texture_id id, cc::string uv = "uv")
@@ -70,7 +71,7 @@ TEST("sv::material_type - a name the generator cannot emit is rejected")
     {
         auto signature = cc::vector<sv::material_signature_entry>();
         signature.push_back(sv::material_signature_entry::of(cc::move(name), 0.5f));
-        return sv::material_type::create("test", cc::move(signature), "");
+        return sv::material_type::create({.name = "test", .signature = cc::move(signature)});
     };
 
     // The name is pasted into the generated SGL as a local, and the type's own fragment is written against it — so a name that

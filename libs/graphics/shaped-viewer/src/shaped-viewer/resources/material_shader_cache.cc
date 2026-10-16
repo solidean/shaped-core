@@ -31,9 +31,9 @@ namespace
 /// what the content hash is over, so nothing else can collide with them.
 resolved_material fallback_resolution(geometry_kind kind)
 {
-    static auto const type = material_type::create("sv_fallback", {},
-                                                   "surface.base_color = float3(0.5, 0.5, 0.5)\n"
-                                                   "surface.specular_roughness = 1.0\n");
+    static auto const type = material_type::create({.name = "sv_fallback",
+                                                    .shader = "surface.base_color = float3(0.5, 0.5, 0.5)\n"
+                                                              "surface.specular_roughness = 1.0\n"});
     static auto const material = sv::material::create("sv_fallback", material_type_id::invalid, {});
 
     // Resolved against the kind it will be generated for, even though an empty signature asks the geometry for nothing:

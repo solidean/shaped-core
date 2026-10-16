@@ -162,8 +162,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     auto& lib = *sv::acquire_material_library().value();
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
-    auto const type = lib.register_type(
-        sv::material_type::create("sv_test_broken", cc::move(signature), "surface.x = not_a_function(roughness)\n"));
+    auto const type = lib.register_type(sv::material_type::create(
+        {.name = "sv_test_broken", .signature = cc::move(signature), .shader = "surface.x = not_a_function(roughness)\n"}));
 
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::gpu_resource_manager::create(ctx);

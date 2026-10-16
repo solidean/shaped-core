@@ -203,8 +203,8 @@ Gotchas:
 ```cpp
 sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute;
                                  //   string emission_color_attribute, emission_scale_attribute; hash128 hash; }
-sv::material_type::create(name, signature, shader, opacity_attribute = {}, opacity_cutoff_attribute = {},
-                          emission_color_attribute = {}, emission_scale_attribute = {})
+sv::material_type_description    // { name, signature, shader, opacity_attribute, opacity_cutoff_attribute, emission_color_attribute, emission_scale_attribute; }
+sv::material_type::create({.name = ..., .signature = ..., .shader = ..., ...})
                                  //   -> hashes all seven; asserts a name declared twice, a default that is not its format's size,
                                  //      an opacity attribute that is not a declared float, and a fragment that writes geometry_opacity
                                  //   an emission color must be a declared float3 and a scale a float; a declaring type's fragment may not write surface.emission_*
@@ -277,10 +277,12 @@ Gotchas:
 auto signature = cc::vector<sv::material_signature_entry>();
 signature.push_back(sv::material_signature_entry::of("tint", tg::vec3f(0.9f, 0.9f, 0.85f)));
 signature.push_back(sv::material_signature_entry::of("opacity", 1.0f));
-auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::move(signature),
-                                                                 "surface.base_color = saturate(tint)\n"
-                                                                 "surface.specular_roughness = 0.8\n",
-                                                                 "opacity")); // the fragment never reads it: the tracer does
+auto const plaster = lib.register_type(sv::material_type::create({.name = "plaster",
+                                                                  .signature = cc::move(signature),
+                                                                  .shader = "surface.base_color = saturate(tint)\n"
+                                                                            "surface.specular_roughness = 0.8\n",
+                                                                  // the fragment never reads it: the tracer does
+                                                                  .opacity_attribute = "opacity"}));
 ```
 - **An acquire creates the buffer and hands the payload to `ctx.stream`; it does not upload.**
   `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.

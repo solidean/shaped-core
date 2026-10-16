@@ -174,23 +174,17 @@ namespace
 }
 } // namespace
 
-material_type material_type::create(cc::string name,
-                                    cc::vector<material_signature_entry> signature,
-                                    cc::string shader,
-                                    cc::string opacity_attribute,
-                                    cc::string opacity_cutoff_attribute,
-                                    cc::string emission_color_attribute,
-                                    cc::string emission_scale_attribute)
+material_type material_type::create(material_type_description description)
 {
     auto& b = cc::byte_stream_builder::thread_local_scratch();
-    b.add_string(name);
-    b.add_string(shader);
-    b.add_string(opacity_attribute);
-    b.add_string(opacity_cutoff_attribute);
-    b.add_string(emission_color_attribute);
-    b.add_string(emission_scale_attribute);
-    b.add_pod(i64(signature.size()));
-    for (auto const& d : signature)
+    b.add_string(description.name);
+    b.add_string(description.shader);
+    b.add_string(description.opacity_attribute);
+    b.add_string(description.opacity_cutoff_attribute);
+    b.add_string(description.emission_color_attribute);
+    b.add_string(description.emission_scale_attribute);
+    b.add_pod(i64(description.signature.size()));
+    for (auto const& d : description.signature)
     {
         b.add_string(d.name);
         b.add_pod(d.format);
@@ -199,13 +193,13 @@ material_type material_type::create(cc::string name,
         b.add_pod_span_sized(cc::span<byte const>(d.default_value));
     }
 
-    auto type = material_type{.name = cc::move(name),
-                              .signature = cc::move(signature),
-                              .shader = cc::move(shader),
-                              .opacity_attribute = cc::move(opacity_attribute),
-                              .opacity_cutoff_attribute = cc::move(opacity_cutoff_attribute),
-                              .emission_color_attribute = cc::move(emission_color_attribute),
-                              .emission_scale_attribute = cc::move(emission_scale_attribute),
+    auto type = material_type{.name = cc::move(description.name),
+                              .signature = cc::move(description.signature),
+                              .shader = cc::move(description.shader),
+                              .opacity_attribute = cc::move(description.opacity_attribute),
+                              .opacity_cutoff_attribute = cc::move(description.opacity_cutoff_attribute),
+                              .emission_color_attribute = cc::move(description.emission_color_attribute),
+                              .emission_scale_attribute = cc::move(description.emission_scale_attribute),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
 
     for (auto i = 0; i < type.signature.size(); ++i)
