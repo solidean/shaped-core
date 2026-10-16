@@ -54,8 +54,8 @@ jobs:
           $cdb = Get-ChildItem -Recurse 'C:\Program Files (x86)\Windows Kits\10\Debuggers\arm64' -Filter cdb.exe -ErrorAction SilentlyContinue | Select-Object -First 1
           Write-Host "cdb: $($cdb.FullName)"
           $script = @(
-            'sxe -c ".echo ===FAULT===; .lastevent; .ecxr; kn 80; .echo ===ALL===; ~*kn 50; .dump /ma C:\dumps\fastfail.dmp; q" c0000409',
-            'sxe -c ".echo ===AV===; .lastevent; .ecxr; kn 80; .echo ===ALL===; ~*kn 50; .dump /ma C:\dumps\av.dmp; q" av',
+            'sxe -c ".echo ===FAULT===; .lastevent; .ecxr; kn 80; .echo ===ALL===; ~*kn 50; .dump /ma C:/dumps/fastfail.dmp; q" c0000409',
+            'sxe -c ".echo ===AV1===; .lastevent; kn 8; gn" -c2 ".echo ===AV2===; .lastevent; .ecxr; kn 80; .echo ===ALL===; ~*kn 50; .dump /ma C:/dumps/av.dmp; q" av',
             'g'
           )
           Set-Content -Path C:\dumps\probe.cdb -Value $script -Encoding ascii
