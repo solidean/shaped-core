@@ -13,21 +13,28 @@ constexpr cc::string_view table_names[] = {"textures_1d",   "textures_1d_array",
 
 static_assert(sizeof(table_names) / sizeof(table_names[0]) == u32(sv::bindless_table::count_), "one name per table");
 
-/// The module's bindings, checked once against the enum: a table added to one and not the other asserts here.
+/// The module's tables, checked once against the enum: a table added to one and not the other asserts here.
+/// The material sampler palette follows them in the binding, and is all that may.
 [[nodiscard]] cc::span<sg::binding const> checked_bindings()
 {
     auto const bindings = sv::shaders::tracer::bindless::declared_bindings();
-    CC_ASSERT(bindings.size() == isize(sv::bindless_table::count_), "module tracer's `binding bindless` declares one "
-                                                                    "binding per sv::bindless_table");
+    auto const tables = isize(sv::bindless_table::count_);
+    CC_ASSERT(bindings.size() >= tables, "`binding bindless` declares a binding per sv::bindless_table");
     for (auto i = isize(0); i < bindings.size(); ++i)
     {
         auto const name = cc::string_view(bindings[i].name);
+        if (i >= tables)
+        {
+            auto const is_sampler = bindings[i].type == sg::binding_type::sampler;
+            CC_ASSERT(is_sampler, "`binding bindless` declares samplers alone after its tables");
+            continue;
+        }
         CC_ASSERT(name.starts_with("bindless.") && name.subview(9) == table_names[i],
                   "module tracer's `binding bindless` declares its tables in sv::bindless_table order");
         CC_ASSERT(bindings[i].count >= 2, "a bindless table needs at least 2 elements — sg reads a count of 1 as a "
                                           "scalar binding");
     }
-    return bindings;
+    return bindings.subspan(cc::offset_size{.offset = 0, .size = tables});
 }
 } // namespace
 

@@ -92,13 +92,14 @@ fun pixel_context(p: varyings){drawn, tracer.bindless} -> material.shading_conte
     let indices = inst.indices as int
     return material.make_context(inst, tracer.bindless.buffers[nonuniform indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
 
-/// Whether a cutout material removes this pixel: below `cutoff` where it is above 0, glTF's MASK.
+/// Whether a cutout material removes this pixel, read through `tracer.instance_opacity` as the tracer's any-hit reads it.
 ///
+/// Where the type's cutoff is above 0 that is glTF's MASK, and the pixel is cut exactly where a hit is.
 /// A cutoff of 0 is coverage, which a tracer draws stochastically and converges to a partial surface.
 /// One raster frame cannot, so coverage below one half is cut and the rest kept.
-fun is_cut(opacity: float, cutoff: float) -> bool:
-    let threshold = if cutoff > 0.0 => cutoff else 0.5
-    return opacity < threshold
+fun is_cut(p: varyings, ctx: material.shading_context){drawn, tracer.bindless} -> bool:
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+    return tracer.instance_opacity(inst, ctx) < 0.5
 
 /// Paints every decal reaching `p` into `surface`'s base, as `tracer.apply_decals` paints a hit.
 fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){drawn, slug.tables}:

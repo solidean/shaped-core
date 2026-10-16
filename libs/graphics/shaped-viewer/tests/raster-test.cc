@@ -418,7 +418,7 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - the Cornell box's raster image is the
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
-ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout material cuts what the tracer's would",
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout thresholds at its cutoff, and cuts coverage below one half",
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
@@ -488,7 +488,7 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout material cuts what the trace
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
-ASYNC_INVOCABLE_TEST("sv::raster_routine - a minified textured cutout cuts against level 0, as the tracer does",
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a minified textured cutout cuts against level 0",
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)

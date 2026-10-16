@@ -154,7 +154,7 @@ namespace sv
 /// A procedural group is `tracer.intersect_quadric`'s intersection, shared by both records, and `tracer.shade_quadric`'s closest hit.
 /// A texture is sampled through the palette sampler `sgl_palette_sampler` names for its state, at level 0.
 ///
-/// The raster pixel stage is the same body over module `raster`'s copy of the palette, sampling at the level the pixel's derivatives pick.
+/// The raster pixel stage is the same body over the same palette, sampling at the level the pixel's derivatives pick.
 ///
 /// The generated text depends on `r.permutation_key` AND on `opts`, so `key` covers both — two calls agreeing on the pair
 /// generate the same source, byte for byte, and nothing else may share their cache entry.
@@ -164,7 +164,7 @@ namespace sv
 [[nodiscard]] generated_material_shader generate_material_shader(resolved_material const& r,
                                                                  material_shader_options const& opts = {});
 
-/// The sampler of module `tracer`'s palette (shaders/sgl/tracer_bindings.sgl) that the tracer samples `s`'s texture through.
+/// The sampler of the palette in module `tracer`'s `binding bindless` (shaders/sgl/tracer_bindings.sgl) that `s`'s texture is sampled through.
 ///
 /// The palette has one sampler per magnification filter and address mode of `u` and of `v`, which is everything a hit's sample can tell apart.
 /// A hit samples level 0 explicitly, and at level 0 only the magnification filter applies, so `min_filter` and `mip_filter` are dropped.

@@ -77,14 +77,6 @@ enum class load_shape
     }
 }
 
-[[nodiscard]] bool samples_texture(resolved_material const& r)
-{
-    for (auto const& a : r.attributes)
-        if (a.sample != nullptr)
-            return true;
-    return false;
-}
-
 /// The parameter block: one slot per thing the shader has to be told at run time, in signature order.
 [[nodiscard]] material_parameter_layout build_layout(resolved_material const& r)
 {
@@ -269,16 +261,13 @@ enum class load_shape
                       element_expression(binding.frequency));
 }
 
-/// What differs between the stages a material's body is spelled for: where the sampler palette lives, and how a texture picks its level.
+/// What differs between the stages a material's body is spelled for: how a texture picks its level.
 ///
-/// Everything else — the loads, the fragment, the bindless tables — is the same text for a traced hit and a rasterized pixel.
+/// Everything else — the loads, the fragment, the bindless tables and the sampler palette among them — is the same text for a traced hit and a rasterized pixel.
 struct body_spelling
 {
-    /// The binding holding the palette `sgl_palette_sampler` names: `tracer.traced` at a hit, `raster.drawn` at a pixel.
-    cc::string_view palette_group = "tracer.traced";
-
     /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
-    /// The cutout's opacity and cutoff name level 0 either way; `samples_level_zero` says why.
+    /// A pixel's cutout does not read through these loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0 as a hit does.
     bool explicit_level = true;
 };
 
@@ -286,16 +275,7 @@ struct body_spelling
 constexpr auto traced_spelling = body_spelling{};
 
 /// The spelling a raster pixel stage reads its attributes in.
-constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", .explicit_level = false};
-
-/// Whether attribute `name` of `r` samples level 0 in `spelling`.
-///
-/// The cutout's opacity and cutoff always do: a box-filtered mip averages opacity, so a minified cutout would read a coverage below its cutoff and vanish.
-/// Level 0 is what a hit reads, so a pixel then cuts what the tracer would at any distance.
-[[nodiscard]] bool samples_level_zero(resolved_material const& r, cc::string_view name, body_spelling const& spelling)
-{
-    return spelling.explicit_level || name == r.type->opacity_attribute || name == r.type->opacity_cutoff_attribute;
-}
+constexpr auto raster_spelling = body_spelling{.explicit_level = false};
 
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
@@ -305,16 +285,10 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
 {
     auto const& a = r.attributes[index];
     auto const components = a.format.component_count();
-    auto const samples = a.frequency == material_frequency::material_texture
-                      || a.frequency == material_frequency::mesh_texture_binding;
 
     auto out = cc::string();
-    if (samples)
-        cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{{}, tracer.bindless}} -> {}:\n",
-                          a.name, spelling.palette_group, sgl_type_of(a.format));
-    else
-        cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{tracer.bindless}} -> {}:\n", a.name,
-                          sgl_type_of(a.format));
+    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{tracer.bindless}} -> {}:\n", a.name,
+                      sgl_type_of(a.format));
     out += "    let block = ctx.param_buffer as int\n";
 
     switch (a.frequency)
@@ -366,11 +340,11 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
         cc::format_append(
             out, "    let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + {}u) as int\n",
             tex.offset);
-        // An explicit level where there are no derivatives, at a hit, and for a cutout everywhere.
+        // An explicit level where there are no derivatives, at a hit.
         // The texel is named because a constant selector reads it twice.
-        cc::format_append(out, "    let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, {}.{}{})\n",
-                          spelling.palette_group, sgl_palette_sampler(a.sample->sampler),
-                          samples_level_zero(r, a.name, spelling) ? ", level = 0.0" : "");
+        cc::format_append(
+            out, "    let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, tracer.bindless.{}{})\n",
+            sgl_palette_sampler(a.sample->sampler), spelling.explicit_level ? ", level = 0.0" : "");
 
         auto value = texel_expression(a.sample->swizzle, a.format);
 
@@ -544,13 +518,7 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
         src += "\n";
     }
 
-    if (samples_texture(r))
-        cc::format_append(src,
-                          "fun sv_evaluate_material(ctx: material.shading_context){{{}, tracer.bindless}} -> "
-                          "openpbr.surface:\n",
-                          spelling.palette_group);
-    else
-        src += "fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:\n";
+    src += "fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:\n";
     for (auto const& a : r.attributes)
         cc::format_append(src, "    let {} = sv_attribute_{}(ctx)\n", a.name, a.name);
     src += "    let mut surface = openpbr.default_surface()\n";
@@ -672,7 +640,8 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
 
 /// The raster path's pixel stage of one triangle permutation: `sv_raster`, over the triangle module `raster`'s vertex stage drew.
 ///
-/// The cutout reads the type's declared opacity through the same attribute function the material does, so a pixel cuts exactly what a hit would.
+/// The cutout reads the instance's opacity record through `tracer.instance_opacity`, the reader a hit's any-hit cuts through.
+/// So a pixel cuts what a hit does wherever the type's cutoff is above 0; coverage, a cutoff of 0, is cut below one half (`raster.is_cut`).
 /// The type's declared occlusion reaches `raster.shade` the same way, and 1 where it declares none.
 [[nodiscard]] cc::string generate_raster_pixel(resolved_material const& r,
                                                material_parameter_layout const& layout,
@@ -685,13 +654,7 @@ constexpr auto raster_spelling = body_spelling{.palette_group = "raster.drawn", 
     src += "@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, slug.tables} -> raster.targets:\n"
            "    let ctx = raster.pixel_context(p)\n";
     if (opacity.can_cut_out())
-    {
-        auto const cutoff = opacity.cutoff != material_opacity::no_offset
-                              ? cc::format("sv_attribute_{}(ctx)", r.type->opacity_cutoff_attribute)
-                              : cc::string("0.0");
-        cc::format_append(src, "    if raster.is_cut(sv_attribute_{}(ctx), {}) => discard\n", r.type->opacity_attribute,
-                          cutoff);
-    }
+        src += "    if raster.is_cut(p, ctx) => discard\n";
     auto const occlusion = r.type->occlusion_attribute.empty()
                              ? cc::string("1.0")
                              : cc::format("sv_attribute_{}(ctx)", r.type->occlusion_attribute);

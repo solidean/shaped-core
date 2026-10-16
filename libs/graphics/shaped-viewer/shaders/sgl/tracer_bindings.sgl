@@ -312,11 +312,31 @@ binding traced:
     /// Where each permutation's range of `queue_sorted` starts.
     shade_offsets: mut buffer[uint]
 
+/// The manager's bindless tables — group 1, which the host binds as the manager's own group.
+///
+/// This is THE declaration of them: `sv::gpu_resource_manager` lays its staging group out from this binding's reflection (resources/bindless_tables.hh).
+/// So a table's size is changed here, and the order must stay `sv::bindless_table`'s, which the host asserts.
+/// The material sampler palette sits here too, static samplers the host binds nothing for, because every pipeline that samples a material lists this group.
+binding bindless:
+    require binding_arrays
+
+    textures_1d: texture_1d[float4][64]
+    textures_1d_array: texture_1d_array[float4][32]
+    textures_2d: texture_2d[float4][4096]
+    textures_2d_array: texture_2d_array[float4][256]
+    textures_cube: texture_cube[float4][64]
+    textures_cube_array: texture_cube_array[float4][16]
+    textures_3d: texture_3d[float4][128]
+
+    /// Raw buffers: vertices, indices, attributes and parameter blocks, which a hit reads through `scene.instance`.
+    buffers: bytes[4096]
+
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //
     // Every texture a material samples goes through one of these, picked per texture by `sv::sgl_palette_sampler` (material/shader_generator.hh).
     // One per magnification filter and address mode of each axis: a hit samples level 0 explicitly, where only the magnification filter decides.
     // So the minification and mip filters, the third axis and the level clamps of an `sg::sampler` do not reach the palette; the generator's header says so at length.
+    // A raster pixel has derivatives, so there an entry's minification and mip filters, the same as its magnification filter, do apply.
 
     sampler palette_nearest_repeat_repeat:
         filter = .nearest
@@ -390,24 +410,6 @@ binding traced:
         filter = .linear
         address_u = .clamp_edge
         address_v = .clamp_edge
-
-/// The manager's bindless tables — group 1, which the host binds as the manager's own group.
-///
-/// This is THE declaration of them: `sv::gpu_resource_manager` lays its staging group out from this binding's reflection (resources/bindless_tables.hh).
-/// So a table's size is changed here, and the order must stay `sv::bindless_table`'s, which the host asserts.
-binding bindless:
-    require binding_arrays
-
-    textures_1d: texture_1d[float4][64]
-    textures_1d_array: texture_1d_array[float4][32]
-    textures_2d: texture_2d[float4][4096]
-    textures_2d_array: texture_2d_array[float4][256]
-    textures_cube: texture_cube[float4][64]
-    textures_cube_array: texture_cube_array[float4][16]
-    textures_3d: texture_3d[float4][128]
-
-    /// Raw buffers: vertices, indices, attributes and parameter blocks, which a hit reads through `scene.instance`.
-    buffers: bytes[4096]
 
 /// One path segment, in and out.
 ///

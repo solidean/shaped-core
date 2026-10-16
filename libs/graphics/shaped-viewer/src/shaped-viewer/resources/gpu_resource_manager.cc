@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::memcmp
+#include <sgl_modules/tracer.hh>        // the manager's group is module tracer's `binding bindless`
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -199,8 +200,9 @@ gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
 gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource_manager_config const& cfg)
 {
     // The tracer's own layout, so the group a trace binds fits its pipeline and sg resolves its footprint by name.
-    auto group
-        = ctx.persistent.create_staging_binding_group(ctx.cached.acquire_binding_group_layout(bindless_bindings()));
+    // It carries the material sampler palette too, as static samplers nothing sets.
+    auto group = ctx.persistent.create_staging_binding_group(
+        ctx.cached.acquire_binding_group_layout<shaders::tracer::bindless>());
 
     // One array per binding, owned here: an array cannot refuse an acquire on behalf of its siblings, so nothing
     // else may hold one over a binding of this group.

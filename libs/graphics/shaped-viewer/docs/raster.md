@@ -63,11 +63,12 @@ The hybrid joins as a fourth value of the same switch: rasterized primaries, tra
 
 **There is no second BSDF.**
 The generated pixel stage opens with `material_body`: the `sv_supplied_*` constants, one `sv_attribute_*` load per attribute, and `sv_evaluate_material` around the type's own fragment.
-That is byte for byte the text the hit group holds, with two exceptions:
+That is byte for byte the text the hit group holds, with one exception:
 
-- **The sampler palette lives in `raster.drawn`**, a copy of `tracer.traced`'s, since a generated load names the group that holds its sampler and a raster pipeline binds no acceleration structure.
 - **A texture samples at the level the pixel's derivatives pick**, where a hit names level 0.
-  The cutout's opacity and cutoff are the exception, read at level 0 as a hit reads them: a box-filtered mip averages opacity, so a minified cutout would thin and vanish.
+
+Both sample through the same sampler palette, which sits in `tracer.bindless` beside the tables rather than in either path's group 0.
+A generated load names the group that holds its sampler, a raster pipeline binds no `tracer.traced`, and sg allows three groups, all of which a raster pipeline already lists.
 
 Everything after the material is shared code too:
 
@@ -97,9 +98,11 @@ Nothing bounces, and nothing refracts: a glass sphere shows its reflection and n
 
 ## Cutouts, quadrics, decals and drawings
 
-- **A cutout material cuts what the tracer's any-hit would.**
-  The pixel stage reads the type's declared opacity and cutoff through the material's own attribute loads, ahead of the evaluation, and discards.
-  A cutoff above 0 thresholds, as glTF's MASK; a cutoff of 0 is coverage, which a tracer converges to a partial surface and one raster frame cannot, so coverage below one half is cut.
+- **A cutout material cuts through the tracer's own reader.**
+  The pixel stage reads the instance's opacity record through `tracer.instance_opacity`, the function the any-hit cuts through, ahead of the evaluation, and discards.
+  It reads level 0 as a hit does: a box-filtered mip averages opacity, so a minified cutout would thin and vanish.
+  A cutoff above 0 thresholds, as glTF's MASK, and there a pixel is cut exactly where a hit is.
+  **Coverage is the one exception**: a cutoff of 0, which a tracer converges to a partial surface and one raster frame cannot, so coverage below one half is cut.
 - **Quadric batches are not drawn.** The layer logs a warning once and draws its meshes.
   The plan is a pixel stage that ray-casts `quadric.intersect` over each primitive's box and writes its own depth.
   The intersection and the shading context already exist as functions of module `quadric`.
@@ -144,8 +147,8 @@ What a hybrid lighting pass will want that is not here yet:
 
 The pipelines list the tracer's groups in the tracer's order:
 
-- group 0 is `raster.drawn`: the frame block, the instance table, the lights, the environment, the decals, and the sampler palette;
-- group 1 is the manager's bindless tables, `tracer.bindless`, bound as the very group a trace binds;
+- group 0 is `raster.drawn`: the frame block, the instance table, the lights, the environment and the decals;
+- group 1 is the manager's bindless tables and the sampler palette, `tracer.bindless`, bound as the very group a trace binds;
 - group 2 is `slug.tables`, the decal atlas;
 - the inline constants are `raster.draw`, the one row of the instance table a draw is.
 

@@ -258,7 +258,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
 
 // The same trace, shaded through a texture rather than through per-face colours.
 //
-// A permutation samples only when its material does, through module tracer's palette in the trace's own group.
+// A permutation samples only when its material does, through module tracer's palette in the bindless group.
 // Every other path-traced scene in this suite is untextured, so without this a hit group reaching the palette and the
 // bindless texture table is never traced at all.
 //
@@ -294,7 +294,7 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material samples through the p
     REQUIRE(permutation != nullptr);
 
     // The guard this test rests on: a textured material is what puts a sample in the permutation.
-    REQUIRE(permutation->source.contains("tracer.traced.palette_"));
+    REQUIRE(permutation->source.contains("tracer.bindless.palette_"));
 
     auto instances = cc::vector<sg::tlas_instance>();
     instances.push_back(

@@ -34,7 +34,8 @@ enum class sv::bindless_table : sv::u8
 
 namespace sv
 {
-/// The bindings of module `tracer`'s `binding bindless`, in `bindless_table` order — what the manager's group is laid out as.
+/// The tables of module `tracer`'s `binding bindless`, in `bindless_table` order.
+/// The manager's group is laid out as the whole binding, which adds the material sampler palette after them as static samplers.
 [[nodiscard]] cc::span<sg::binding const> bindless_bindings();
 
 /// The shader-visible binding name of `t` — `bindless.textures_2d` and friends, as the module's reflection names it.

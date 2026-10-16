@@ -370,8 +370,8 @@ Gotchas:
 - **A sampled attribute takes TWO slots** — the texture index, and the `sv::attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
 - **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
 - **A sample names its level, 0** — a ray tracing hit shader has no derivatives to pick a mip from.
-  The raster pixel stage is the one spelling that does not: it has derivatives, and samples through `raster.drawn`'s copy of the palette.
-  Its cutout opacity and cutoff still read level 0, since a box-filtered mip averages a cutout away.
+  The raster pixel stage is the one spelling that does not: it has derivatives, so it samples the same palette at the level they pick.
+  Its cutout is not one of its loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0, since a box-filtered mip averages a cutout away.
 - **Every bindless index is `nonuniform`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
 - **Each load is a function of its own**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
@@ -380,7 +380,9 @@ Gotchas:
   So is one naming a module a hit group uses, one starting with `sv_`, and `surface` / `ctx`.
   Rejected rather than sanitized: the type's own fragment is written against the declared name.
 - **A generated permutation does not hot-reload on a module edit** — the key hashes the resolution and the geometry kind, not the modules' contents.
-- **A texture samples through a fixed palette**, never through per-permutation samplers: module `tracer` declares one static sampler per magnification filter and address mode of each axis.
+- **A texture samples through a fixed palette**, never through per-permutation samplers.
+  Module `tracer`'s `binding bindless` declares one static sampler per magnification filter and address mode of each axis.
+  It sits beside the tables because every pipeline that samples a material lists that group, and sg allows no fourth.
   A hit samples level 0, where only the magnification filter applies, so the minification and mip filters are dropped; `sgl_palette_sampler` says what else is.
 
 ## Mesh authoring — geometry + what a material reads
