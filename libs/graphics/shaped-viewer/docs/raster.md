@@ -184,7 +184,8 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
   Two planes a unit apart at 2000, which a standard float depth cannot tell apart, hold the reversed depth test.
   A textured cutout minified until its mips fall under the cutoff holds the cut to level 0.
   A baked occlusion of one half halves what the environment lights.
-- `material-shader-generator-test.cc`: the raster spelling of a cutout material, a textured opacity read at level 0 among them.
+- `material-shader-generator-test.cc`: the raster spelling of a cutout material, cut through `raster.is_cut`.
+- `material-shader-compile-test.cc`: every generated pixel stage compiles, beside its hit group and shade kernel.
 - `render-plan-test.cc`: the slots a raster layer declares.
 - `raster-without-raytracing-test.cc`: a raster layer's capture on a device without ray tracing, and a traced layer there declined with one error; neither builds an acceleration structure.
 - The `shaped-viewer/raster` example draws one scene traced and rasterized side by side.
