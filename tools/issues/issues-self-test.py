@@ -23,6 +23,8 @@ from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location("issues", Path(__file__).with_name("issues.py"))
 issues = importlib.util.module_from_spec(_spec)
+# Registered before it runs: @dataclass resolves its own module through sys.modules, and Python 3.14 fails without it.
+sys.modules["issues"] = issues
 _spec.loader.exec_module(issues)
 
 VERBOSE = "-v" in sys.argv
