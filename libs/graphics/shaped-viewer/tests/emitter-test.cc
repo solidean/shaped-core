@@ -716,6 +716,25 @@ TEST("sv - an emitter's world area follows its placement, exactly under a simila
     CHECK(tg::abs(sv::impl::world_area_of(1.0f, stretched) - 4.0f) < 1e-4f);
 }
 
+// The renderer asks the GPU for the exact area under every placement this says the estimate does not cover.
+// So a similarity must read as one however it is spelled, and a non-uniform scale never may.
+TEST("sv - a similarity is a rotation, possibly mirrored, times one scale")
+{
+    auto const rotation = tg::affine_transform3f::make_rotation(
+        tg::quat_f::make_rotation_axis_angle(tg::normalize(tg::vec3f(1, 2, 3)), tg::angle_f::make_from_degree(40.0f)));
+    CHECK(sv::impl::is_similarity(rotation.linear_mat()));
+    CHECK(sv::impl::is_similarity(
+        tg::compose(rotation, tg::affine_transform3f::make_scaling(tg::vec3f(3, 3, 3))).linear_mat()));
+    CHECK(sv::impl::is_similarity(tg::affine_transform3f::make_scaling(tg::vec3f(-2, 2, 2)).linear_mat()));
+    // A tiny lamp is judged as a large one is, relative to its own scale.
+    CHECK(sv::impl::is_similarity(tg::affine_transform3f::make_scaling(tg::vec3f(1e-4f, 1e-4f, 1e-4f)).linear_mat()));
+    CHECK(sv::impl::is_similarity(tg::affine_transform3f::make_scaling(tg::vec3f(0, 0, 0)).linear_mat()));
+
+    CHECK(!sv::impl::is_similarity(tg::affine_transform3f::make_scaling(tg::vec3f(2, 2, 0.01f)).linear_mat()));
+    CHECK(!sv::impl::is_similarity(
+        tg::compose(rotation, tg::affine_transform3f::make_scaling(tg::vec3f(1, 1, 0))).linear_mat()));
+}
+
 // ReSTIR DI names a light by its index in the table and a triangle by its primitive, so its history is kept under the table's key.
 // Any change to what an index names changes the key, and so does an emitter that moves.
 // A reservoir keeps its point as barycentrics, and its weight holds only under the placement it was drawn under.

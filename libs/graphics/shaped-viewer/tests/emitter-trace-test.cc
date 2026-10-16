@@ -7,6 +7,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/rendering/impl/emitters.hh>
 #include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/scalar/scalar.hh>
 #include <typed-geometry/transform/compose.hh>
@@ -635,6 +636,56 @@ ASYNC_INVOCABLE_TEST("sv - an emitter's area CDF is monotone, ends at one, and g
     }
     CHECK(monotone);
     CHECK(proportional);
+}
+
+// Selection weighs an emitter by its world area, and the estimate from a placement's determinant undercounts a flattened lamp.
+// So the GPU sums the exact area for a placement that is no similarity.
+// A 2x2x2 cube made a 4x4 panel 0.02 thick, then turned, has 32.32 of area where the estimate gives ~6.4.
+// A horizontal quad flattened to nothing along its normal keeps its whole area, where the estimate gives 0.
+ASYNC_INVOCABLE_TEST("sv - an emitter's exact world area under a non-uniform placement is summed on the GPU",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the kernels");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const cube
+        = resources.meshes.acquire(sv::triangle_data::create(box_positions(tg::pos3f(-1, -1, -1), tg::pos3f(1, 1, 1))));
+    auto const quad
+        = resources.meshes.acquire(sv::triangle_data::create(ceiling_quad(tg::pos3f(0, 1, 0), tg::vec2f(0.5f, 0.4f))));
+    resources.wait_for_pending_uploads();
+
+    auto const turn = tg::affine_transform3f::make_rotation(tg::quat_f::make_rotation_axis_angle(
+        tg::normalize(tg::vec3f(1, 0.5f, 0.2f)), tg::angle_f::make_from_degree(35.0f)));
+    auto const panel = tg::compose(turn, tg::affine_transform3f::make_scaling(tg::vec3f(2, 2, 0.01f))).linear_mat();
+    auto const flat = tg::affine_transform3f::make_scaling(tg::vec3f(1, 0, 1)).linear_mat();
+    REQUIRE(!sv::impl::is_similarity(panel));
+    REQUIRE(!sv::impl::is_similarity(flat));
+
+    auto panel_area = cc::optional<f32>();
+    auto flat_area = cc::optional<f32>();
+    auto const start = cc::current_time_steady_secs();
+    while (!panel_area.has_value() || !flat_area.has_value())
+    {
+        (void)ctx.routines.tick();
+        auto cmd = ctx.create_command_list();
+        panel_area = resources.meshes.acquire_world_area(*cmd, cube, panel);
+        flat_area = resources.meshes.acquire_world_area(*cmd, quad, flat);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        if (!panel_area.has_value() || !flat_area.has_value())
+        {
+            REQUIRE(cc::current_time_steady_secs() - start < 120.0);
+            sv_test::drive_ambient_work();
+        }
+    }
+    (void)co_await cc::async_settled(sv::background_work(ctx));
+
+    CHECK(tg::abs(panel_area.value() - 32.32f) < 1e-3f * 32.32f).context(cc::format("panel: {}", panel_area.value()));
+    CHECK(tg::abs(flat_area.value() - 0.8f) < 1e-5f).context(cc::format("flattened quad: {}", flat_area.value()));
+    CHECK(sv::impl::world_area_of(0.8f, tg::affine_transform3f::make_scaling(tg::vec3f(1, 0, 1))) == 0.0f);
 }
 
 namespace

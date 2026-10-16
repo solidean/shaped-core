@@ -279,11 +279,18 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         }
         auto const cdf_index = u32(resources.acquire_buffer(cdf->raw()->as_raw_readonly()));
 
+        // Exact under a similarity; under any other placement the estimate stands in until the GPU's exact sum lands.
+        // Selection alone reads the area, so the stand-in costs noise and the area landing restarts the image once.
+        auto area = impl::world_area_of(object_area, item.transform);
+        if (auto const linear = item.transform.linear_mat(); !impl::is_similarity(linear))
+            if (auto const exact = resources.meshes.acquire_world_area(cmd, item.mesh, linear); exact.has_value())
+                area = exact.value();
+
         out.emitter_lights.push_back(
             {.position = {},
              .path = light_path_mesh,
              .u = {},
-             .area = impl::world_area_of(object_area, item.transform),
+             .area = area,
              .v = {},
              .flags = light_flag_two_sided | (estimate.value().unseen ? light_flag_unseen_emission : 0u),
              // selection's estimate alone: the sampled point's emission is read from data

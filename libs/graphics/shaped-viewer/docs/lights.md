@@ -186,7 +186,10 @@ A pending texture samples a placeholder and a failed one magenta, so either is u
 A dark texture thus lights nothing from the frame its upload lands.
 Under a bias that is not zero, a texture's lane must stay a margin below zero to be dark, since the GPU's filtering, sRGB decode and fused multiply-add round otherwise than the CPU does.
 
-**Its record** carries an estimate of the radiance as `emission`, two-sided, and an estimate of its world area — the object area times `|det M|^(2/3)` — and only selection reads either.
+**Its record** carries an estimate of the radiance as `emission`, two-sided, and its world area, and only selection reads either.
+Under a similarity the area is the object area times `|det M|^(2/3)`, which is exact there.
+Under any other placement that undercounts a flat lamp flattened along its normal, to nothing at a zero scale, so the GPU sums the exact area instead (`mesh_manager::acquire_world_area`).
+The estimate stands in until that lands a frame or two later, and the landing restarts the image once, as the CDF's does.
 Its weight is that area times π times two faces times the luminance, beside the local lights.
 The estimate takes each factor's mean: a constant's value, a texture's through its swizzle and its scale and bias, an attribute's over its elements.
 A texture's and an attribute's means are `sv::value_summary`s, read on the CPU at the acquire that uploads them, while the payload is at hand.
@@ -266,6 +269,12 @@ The key ignores selection and an emitter record's area and emission, which say h
   - the map is an importance-sampled light of its own and no sun light is added.
     Then it is open whether it stays the separate estimator every hit takes today, beside the picked light, or becomes a fifth path in the pick.
 - A stable id per scene item, which picking will want; it is `stable_id<Tag>` again.
+- **Procedural emission that lights the scene.** Emission a fragment computes reaches the camera alone, since next-event estimation reads only the declared attributes.
+  The way there is to run the material's own fragment at a light sample, as a callable, at a material evaluation per shadow ray for every emissive type.
+  Baking each triangle's emission to a constant instead is ruled out: a textured emitter's light sample would then disagree with what a bounce ray sees, which biases the image.
+- **An emitter's power measured on the GPU.** The world area is summed there already for a placement that is not a similarity.
+  A texture's mean is still the CPU's summary, through a decoder for a compressed level; the kernel that walks the triangles could sum area times sampled emission instead.
+  The light table is built on the CPU, so that result lands a frame or two late, which costs noise in that frame rather than an error that lasts.
 
 ## Lower-library gaps
 
@@ -274,3 +283,5 @@ The key ignores selection and an emitter record's area and emission, which say h
 - **typed-geometry types are not hashable.**
   A CPU hash of a light would have to fold `tg::vec3f`, angles and transforms by hand.
   Nothing needs one yet: the trace hash covers the uploaded bytes, which is where equal lights must hash equal.
+- **typed-geometry cannot classify a linear map.**
+  Whether a placement is a similarity, under which an emitter's world area follows from its determinant, is `sv::impl::is_similarity` until it can.

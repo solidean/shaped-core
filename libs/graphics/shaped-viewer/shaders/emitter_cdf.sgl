@@ -4,7 +4,10 @@
 // The buffer holds a float per triangle, cumulative within its block of `block_size` and normalized to the block.
 // Then one per block, cumulative over the mesh and normalized to it, then the mesh's whole object-space area.
 // A triangle's probability is its block's width times its own width within the block, and a zero-area triangle's is exactly 0.
-// Module `tracer` reads it through `emitter_record` (shaders/sgl/tracer_bindings.sgl), whose `emitter_block_size` is this `block_size`.
+// Module `tracer` reads it through `emitter_record` (shaders/sgl/tracer_bindings.sgl), and its `emitter_block_size` constant is this `block_size`.
+//
+// The same file sums an instance's WORLD area under its placement, which selection weighs an emitter by: `world_blocks` and `world_total`,
+// what `sv::mesh_manager::acquire_world_area` dispatches for a placement that is not a similarity.
 
 /// How many triangles one block covers.
 const block_size = 256u
@@ -16,10 +19,14 @@ binding emitter_cdf_io:
     /// Three indices per triangle where `emitter_cdf_shape.is_indexed` is set, and a stand-in nothing reads where it is not.
     indices: bytes
     /// `triangle_count + block_count + 1` floats, laid out as the file's header says.
+    /// For the world-area kernels, `block_count + 1`: each block's world area, then the instance's.
     cdf: mut buffer[float]
 
-/// The mesh's shape.
+/// The mesh's shape, and for the world-area kernels the columns of the linear map that places it, which the CDF's kernels ignore.
 @inline binding emitter_cdf_shape:
+    column_x: float4
+    column_y: float4
+    column_z: float4
     triangle_count: uint
     block_count: uint
     is_indexed: uint
@@ -28,16 +35,28 @@ binding emitter_cdf_io:
 fun position(v: uint){emitter_cdf_io} -> float3:
     return reinterpret_as_float(emitter_cdf_io.vertices.load3(v * 12u))
 
+/// Triangle `t`'s three vertex indices.
+fun triangle_corners(t: uint){emitter_cdf_io, emitter_cdf_shape} -> uint3:
+    let base = t * 3u
+    if emitter_cdf_shape.is_indexed != 0u:
+        return uint3(emitter_cdf_io.indices.load(4u * base), emitter_cdf_io.indices.load(4u * (base + 1u)), emitter_cdf_io.indices.load(4u * (base + 2u)))
+    return uint3(base, base + 1u, base + 2u)
+
 /// Triangle `t`'s object-space area.
 fun triangle_area(t: uint){emitter_cdf_io, emitter_cdf_shape} -> float:
-    let base = t * 3u
-    let mut corner = uint3(base, base + 1u, base + 2u)
-    if emitter_cdf_shape.is_indexed != 0u:
-        corner = uint3(emitter_cdf_io.indices.load(4u * base), emitter_cdf_io.indices.load(4u * (base + 1u)), emitter_cdf_io.indices.load(4u * (base + 2u)))
+    let corner = triangle_corners(t)
     let p0 = position(corner.x)
-    let p1 = position(corner.y)
-    let p2 = position(corner.z)
-    return 0.5 * length(cross(p1 - p0, p2 - p0))
+    return 0.5 * length(cross(position(corner.y) - p0, position(corner.z) - p0))
+
+/// `e` under the shape's linear map.
+fun placed(e: float3){emitter_cdf_shape} -> float3:
+    return emitter_cdf_shape.column_x.xyz * e.x + emitter_cdf_shape.column_y.xyz * e.y + emitter_cdf_shape.column_z.xyz * e.z
+
+/// Triangle `t`'s area under the shape's linear map: its two edges mapped, then crossed, which is exact for any map.
+fun world_triangle_area(t: uint){emitter_cdf_io, emitter_cdf_shape} -> float:
+    let corner = triangle_corners(t)
+    let p0 = position(corner.x)
+    return 0.5 * length(cross(placed(position(corner.y) - p0), placed(position(corner.z) - p0)))
 
 /// One thread per block: its triangles' cumulative areas normalized to the block, and the block's own area after the triangles.
 /// A block with no area keeps zeros, which no draw reaches, since its width over the mesh is 0 as well.
@@ -68,3 +87,22 @@ fun triangle_area(t: uint){emitter_cdf_io, emitter_cdf_shape} -> float:
         emitter_cdf_io.cdf[base + b] = if sum > 0.0 => emitter_cdf_io.cdf[base + b] / sum else 0.0
     if sum > 0.0 => emitter_cdf_io.cdf[base + count - 1] = 1.0
     emitter_cdf_io.cdf[base + count] = sum
+
+/// One thread per block: its triangles' world areas under the shape's linear map, summed into `cdf[block]`.
+@compute(64) fun world_blocks(@thread_id id: int3){emitter_cdf_io, emitter_cdf_shape}:
+    let block = id.x as uint
+    if block >= emitter_cdf_shape.block_count => return
+    let first = block * block_size
+    let last = min(first + block_size, emitter_cdf_shape.triangle_count)
+    let mut sum = 0.0
+    for i in (first as int) ..< (last as int):
+        sum += world_triangle_area(i as uint)
+    emitter_cdf_io.cdf[block as int] = sum
+
+/// One thread for the instance, after `world_blocks`: the blocks' world areas summed into `cdf[block_count]`.
+@compute(1) fun world_total(@thread_id id: int3){emitter_cdf_io, emitter_cdf_shape}:
+    let count = emitter_cdf_shape.block_count as int
+    let mut sum = 0.0
+    for b in 0 ..< count:
+        sum += emitter_cdf_io.cdf[b]
+    emitter_cdf_io.cdf[count] = sum

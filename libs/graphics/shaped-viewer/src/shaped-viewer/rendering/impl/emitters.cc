@@ -242,4 +242,22 @@ f32 impl::world_area_of(f32 object_area, tg::affine_transform3f const& placement
                    + l[2, 0] * (l[0, 1] * l[1, 2] - l[1, 1] * l[0, 2]);
     return object_area * tg::pow(tg::abs(det), 2.0f / 3.0f);
 }
+
+bool impl::is_similarity(tg::mat3f const& linear)
+{
+    auto const x = linear * tg::vec3f(1, 0, 0);
+    auto const y = linear * tg::vec3f(0, 1, 0);
+    auto const z = linear * tg::vec3f(0, 0, 1);
+    auto const xx = tg::dot(x, x);
+    auto const yy = tg::dot(y, y);
+    auto const zz = tg::dot(z, z);
+    auto const scale = cc::max(xx, cc::max(yy, zz));
+    // A map to a point takes every area to nothing, which the estimate gets exactly.
+    if (scale <= 0.0f)
+        return true;
+    // Relative to the squared scale, so a tiny lamp and a huge one are judged alike.
+    auto const tolerance = 1e-5f * scale;
+    return tg::abs(xx - yy) <= tolerance && tg::abs(yy - zz) <= tolerance && tg::abs(tg::dot(x, y)) <= tolerance
+        && tg::abs(tg::dot(y, z)) <= tolerance && tg::abs(tg::dot(x, z)) <= tolerance;
+}
 } // namespace sv

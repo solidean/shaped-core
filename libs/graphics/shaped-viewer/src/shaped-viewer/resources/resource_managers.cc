@@ -1,5 +1,6 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
 #include <shaped-graphics/all.hh>
@@ -254,16 +255,27 @@ bool mesh_manager::_emitter_cdf_kernels_ready()
     {
         _cdf_blocks = shaders::emitter_cdf.blocks.acquire_pipeline(_ctx);
         _cdf_total = shaders::emitter_cdf.total.acquire_pipeline(_ctx);
+        _world_blocks = shaders::emitter_cdf.world_blocks.acquire_pipeline(_ctx);
+        _world_total = shaders::emitter_cdf.world_total.acquire_pipeline(_ctx);
         (void)_ctx.backlog.start(_cdf_blocks);
         (void)_ctx.backlog.start(_cdf_total);
+        (void)_ctx.backlog.start(_world_blocks);
+        (void)_ctx.backlog.start(_world_total);
         return false;
     }
-    if (!_cdf_blocks->is_ready() || !_cdf_total->is_ready())
-        return false;
+    auto const kernels = cc::fixed_array<sg::async_compute_pipeline const*, 4>{&_cdf_blocks, &_cdf_total,
+                                                                               &_world_blocks, &_world_total};
+    for (auto const* k : kernels)
+        if (!(*k)->is_ready())
+            return false;
 
-    auto const* const blocks = _cdf_blocks->try_value();
-    auto const* const total = _cdf_total->try_value();
-    if (blocks == nullptr || total == nullptr || *blocks == nullptr || *total == nullptr)
+    auto built = true;
+    for (auto const* k : kernels)
+    {
+        auto const* const value = (*k)->try_value();
+        built = built && value != nullptr && *value != nullptr;
+    }
+    if (!built)
     {
         CC_LOG_ERROR("the kernels that build an emitter's area CDF did not build, so emissive meshes light nothing");
         _cdf_failed = true;
@@ -311,6 +323,74 @@ sg::buffer<f32> const* mesh_manager::acquire_emitter_cdf(sg::command_list& cmd, 
     add_bytes(id, cdf.size_in_bytes());
     record->emitter_cdf = cc::move(cdf);
     return &record->emitter_cdf;
+}
+
+cc::optional<f32> mesh_manager::acquire_world_area(sg::command_list& cmd, mesh_id id, tg::mat3f const& linear)
+{
+    auto* const record = mutable_record(id);
+    CC_ASSERT(record != nullptr && record->state == residency::complete, "mesh_manager::acquire_world_area needs a "
+                                                                         "resident mesh whose geometry has landed");
+    auto& areas = record->world_areas;
+    for (auto i = isize(0); i < areas.size(); ++i)
+    {
+        if (areas[i].linear != linear)
+            continue;
+        // Asked for again, so it moves to the back, the last to be dropped.
+        if (i + 1 < areas.size())
+        {
+            auto moved = cc::move(areas[i]);
+            areas.remove_at(i);
+            areas.push_back(cc::move(moved));
+        }
+        auto& w = areas.back();
+        if (!w.area.has_value() && w.pending.is_valid() && w.pending.is_ready())
+        {
+            auto const sums = w.pending.try_get_data();
+            if (sums.has_value() && !sums.value().empty())
+                w.area = sums.value()[sums.value().size() - 1];
+            w.pending = {};
+        }
+        return w.area;
+    }
+    if (!_emitter_cdf_kernels_ready())
+        return {};
+
+    auto const triangles = u32(record->triangle_count);
+    auto const blocks = emitter_cdf_block_count(record->triangle_count);
+    auto sums = _ctx.persistent.create_buffer<f32>(isize(blocks) + 1,
+                                                   sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const group = _ctx.transient.create_binding_group(
+        cmd, _ctx.cached.acquire_binding_group_layout<shaders::emitter_cdf_io>(),
+        shaders::emitter_cdf_io{.vertices = record->vertices.reinterpret_as<byte>().as_readonly_buffer(),
+                                .indices = record->indices.reinterpret_as<byte>().as_readonly_buffer(),
+                                .cdf = sums.as_readwrite_buffer()});
+    auto const column = [&](tg::vec3f axis)
+    {
+        auto const c = linear * axis;
+        return tg::vec4f(c[0], c[1], c[2], 0.0f);
+    };
+    auto const shape = shaders::emitter_cdf_shape{.column_x = column(tg::vec3f(1, 0, 0)),
+                                                  .column_y = column(tg::vec3f(0, 1, 0)),
+                                                  .column_z = column(tg::vec3f(0, 0, 1)),
+                                                  .triangle_count = triangles,
+                                                  .block_count = blocks,
+                                                  .is_indexed = record->is_indexed ? 1u : 0u}
+                           .to_block();
+
+    // The blocks, then the instance over them, as the CDF's build runs.
+    cmd.compute.bind_pipeline(**_world_blocks->try_value());
+    cmd.compute.bind_group(0, *group);
+    cmd.compute.set_inline_constants(shape);
+    cmd.compute.dispatch_threads(int(blocks));
+    cmd.compute.bind_pipeline(**_world_total->try_value());
+    cmd.compute.bind_group(0, *group);
+    cmd.compute.set_inline_constants(shape);
+    cmd.compute.dispatch_threads(1);
+
+    if (areas.size() >= max_world_areas)
+        areas.remove_at(0);
+    areas.push_back({.linear = linear, .pending = cmd.download.data_from_buffer(sums), .area = {}});
+    return {};
 }
 
 isize mesh_manager::collect_settled()

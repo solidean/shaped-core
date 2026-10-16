@@ -449,7 +449,7 @@ u64 pt_light_table::key(cc::span<shaders::tracer::emitter_record const> emitters
     for (auto const& l : records)
     {
         // Selection's numbers say how candidates are drawn, never what a kept sample is, so they are left out.
-        // An emissive instance's area and emission are such numbers too, and its area jitters by an ulp under a rotation.
+        // An emissive instance's area, emission and unseen flag are such numbers too, and its area jitters by an ulp under a rotation.
         auto anonymized = l;
         anonymized.select_pdf = 0.0f;
         anonymized.select_cdf = 0.0f;
@@ -457,6 +457,7 @@ u64 pt_light_table::key(cc::span<shaders::tracer::emitter_record const> emitters
         {
             anonymized.area = 0.0f;
             anonymized.emission = tg::vec3f(0, 0, 0);
+            anonymized.flags &= ~light_flag_unseen_emission;
         }
         h = cc::combine_hash(
             h, cc::make_hash_of_bytes(cc::span<shaders::tracer::light_record const>(&anonymized, 1).as_bytes()));

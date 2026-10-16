@@ -5,6 +5,9 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh> // cc::span
+#include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
+#include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
@@ -16,6 +19,7 @@
 #include <shaped-viewer/resources/value_summary.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh> // attribute_format / attribute_frequency, which a record carries
 #include <typed-geometry/geometry/primitives/aabb.hh>
+#include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
 
 /// How much a resource manager may keep resident, and how long an unused resource lingers.
@@ -110,6 +114,19 @@ struct sv::mesh_record
     /// `triangle_count + emitter_cdf_block_count(triangle_count) + 1` floats, laid out as shaders/emitter_cdf.sgl says.
     sg::buffer<f32> emitter_cdf;
 
+    /// One placement's world area, as `mesh_manager::acquire_world_area` sums it on the GPU.
+    struct world_area
+    {
+        /// The linear map it is the area under, which is the whole key: a translation moves no area.
+        tg::mat3f linear;
+        /// The GPU's sums until they land, then nothing.
+        sg::data_future<f32> pending;
+        cc::optional<f32> area;
+    };
+
+    /// The placements asked for most recently, the most recently asked last and at most `mesh_manager::max_world_areas` of them.
+    cc::vector<world_area> world_areas;
+
     /// The object-space box, when the payload declared one — the summary half of the record.
     ///
     /// It outlives the payload, which is the point: a pending mesh is drawn as the shared placeholder box scaled onto
@@ -183,6 +200,17 @@ public:
     /// False once the kernels behind `acquire_emitter_cdf` failed to build, after which no CDF ever will be.
     [[nodiscard]] bool can_build_emitter_cdfs() const { return !_cdf_failed; }
 
+    /// The most placements of one mesh `acquire_world_area` keeps, the one asked for least recently dropped first.
+    /// Generous, since one lamp mesh is often placed many times over, and a placement dropped before its sum lands is summed again.
+    static constexpr isize max_world_areas = 64;
+
+    /// `id`'s exact world area under `linear`, or none until the GPU's sum has landed.
+    ///
+    /// The first ask for a placement records the sum onto `cmd` and reads it back; a later one returns it once it landed.
+    /// Only a placement that is not a similarity needs it, since `impl::world_area_of` is exact for one.
+    /// `id` must be `complete`, for the reason `acquire_blas` gives, and none ever lands once the kernels failed to build.
+    [[nodiscard]] cc::optional<f32> acquire_world_area(sg::command_list& cmd, mesh_id id, tg::mat3f const& linear);
+
     /// Blocks until every queued transfer has landed, then finishes them all.
     ///
     /// For a caller with no frame loop to drain the queue — a test tracing what it just built, or a one-pass tool.
@@ -215,12 +243,14 @@ private:
     /// Its contents are never read — it exists only so the trace's binding group is complete.
     [[nodiscard]] sg::buffer<u32> _acquire_index_stand_in(sg::command_list& cmd);
 
-    /// Whether the two kernels of shaders/emitter_cdf.sgl are built, starting them on first use; polled, never waited on.
+    /// Whether the kernels of shaders/emitter_cdf.sgl are built, starting them on first use; polled, never waited on.
     [[nodiscard]] bool _emitter_cdf_kernels_ready();
 
     sg::context& _ctx;
     sg::async_compute_pipeline _cdf_blocks;
     sg::async_compute_pipeline _cdf_total;
+    sg::async_compute_pipeline _world_blocks;
+    sg::async_compute_pipeline _world_total;
     bool _cdf_failed = false;
     sg::buffer<u32> _index_stand_in;
     sg::blas_handle _placeholder_blas;
@@ -335,7 +365,8 @@ struct sv::attribute_record
     isize element_count = 0;
 
     /// What the elements hold, read at the acquire that uploaded them; empty for a format other than f32 lanes.
-    /// An emissive instance whose emission reads this attribute is weighed by its mean, and is no light at all where it is dark throughout.
+    /// An emissive instance whose emission reads this attribute is weighed by its mean.
+    /// It is no light at all only where the summary is exact and dark throughout; past the elements a summary reads whole, it stays a light.
     cc::optional<value_summary> summary;
 };
 

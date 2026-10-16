@@ -59,6 +59,12 @@ struct emitter_estimate
                                                                  emission_sources const& sources);
 
 /// What `placement` makes of an object-space area: exact under a similarity, and an estimate under a non-uniform scale.
+/// The estimate undercounts a flat lamp flattened along its normal, to nothing at a zero scale, so the renderer asks
+/// `mesh_manager::acquire_world_area` for the exact area there and holds this only until that lands.
 /// Only an emitter's selection weight reads it, which a rough area leaves unbiased.
 [[nodiscard]] f32 world_area_of(f32 object_area, tg::affine_transform3f const& placement);
+
+/// Whether `linear` is a rotation, possibly mirrored, times one uniform scale, under which `world_area_of` is exact.
+/// TEMPORARY until typed-geometry can classify a linear map, which is where this belongs.
+[[nodiscard]] bool is_similarity(tg::mat3f const& linear);
 } // namespace sv::impl
