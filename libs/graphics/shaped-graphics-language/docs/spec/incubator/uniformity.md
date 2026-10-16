@@ -37,7 +37,7 @@ The directive is back, now because SGL has ruled: the pass refuses what is unsou
 ## What exists
 
 The pass is CHK-282 to CHK-284, over the core tree of each entry point, for barriers and for every builtin that takes derivatives.
-It judges an index into a binding array too, which is marked `nonuniform` or proven uniform (CHK-300).
+It judges an index into a binding array too, which is proven uniform or marked `uniform` or `nonuniform` (CHK-300).
 **Soundness is the invariant, not agreement with Tint.**
 The pass must be sound for every target: whatever it accepts reaches each barrier and each derivative in uniform control flow.
 It need not refuse everything Tint refuses.

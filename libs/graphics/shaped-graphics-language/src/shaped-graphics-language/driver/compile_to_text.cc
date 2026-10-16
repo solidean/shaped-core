@@ -135,14 +135,17 @@ cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
     return result;
 }
 
-/// What `front` says of every entry point's text alike: the library files the source reached, and its warnings.
-void add_source_facts(cc::result<emitted_source, cc::string>& text, driver::impl::front_end const& front)
+/// What `front` says of the text of entry point `e`: the library files the source reached, and the warnings of the
+/// program and of `e` (CHK-396).
+void add_source_facts(cc::result<emitted_source, cc::string>& text,
+                      driver::impl::front_end const& front,
+                      check::flat_entry_point const& e)
 {
     if (!text.has_value())
         return;
     for (auto const name : front.library_names)
         text.value().library_files.push_back(cc::string(name));
-    text.value().warnings = front.warnings;
+    text.value().warnings = front.warnings_of(e.function);
 }
 } // namespace
 
@@ -189,8 +192,11 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
         return cc::error(cc::format("{}: error: entry point '{}' is a {} entry point, and a {} one was asked for\n",
                                     request.source_name, e.name, check::stage_name(e.entry_stage),
                                     check::stage_name(request.stage)));
+    // CHK-396: what was judged of another entry point's body is no error of this one
+    if (auto own = front.errors_of(e.function); !own.empty())
+        return cc::error(cc::move(own));
     auto result = emit_text(m, e, request.target, request.source_name);
-    add_source_facts(result, front);
+    add_source_facts(result, front, e);
     return result;
 }
 
@@ -201,11 +207,16 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
         return cc::error(front.errors);
     auto result = cc::vector<entry_text>();
     for (auto const& e : front.module.entry_points)
+    {
+        // CHK-396: an entry point's own errors are that element's, and leave the others built
+        auto own = front.errors_of(e.function);
         for (auto const t : request.targets)
         {
-            auto text = emit_text(front.module, e, t, request.source_name);
-            add_source_facts(text, front);
+            auto text = own.empty() ? emit_text(front.module, e, t, request.source_name)
+                                    : cc::result<emitted_source, cc::string>(cc::error(own));
+            add_source_facts(text, front, e);
             result.push_back({.entry_point = e.name, .target = t, .text = cc::move(text)});
         }
+    }
     return result;
 }

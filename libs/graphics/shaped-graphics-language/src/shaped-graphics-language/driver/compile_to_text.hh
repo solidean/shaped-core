@@ -104,7 +104,7 @@ struct sgl::emitted_source
     cc::vector<cc::string> library_files;
     /// One entry per warning, `cube.sgl:12:5: warning: no-effect: ...` and its notes on the lines under it.
     /// Each is written as an error is, but with no line end after its last line.
-    /// They are the source's and its library files', so every entry point of the source carries the same ones.
+    /// They are the source's and its library files', and those judged of this entry point's inlined body (CHK-396).
     cc::vector<cc::string> warnings;
 };
 
@@ -122,6 +122,7 @@ namespace sgl
 ///
 /// Total: every failure is the error of the result, as text that is meant to be read.
 /// A diagnostic is one line, `cube.sgl:12:5: error: unknown-name: foo`, and an error of any phase means there is no text.
+/// An error judged of another entry point's inlined body is that one's alone, and fails only its compile (CHK-396).
 /// An entry point the source does not hold, and one whose stage is not `request.stage`, are errors that name what the source does hold.
 /// Warnings alone do not fail, and come back as the text's `warnings`; a failure's error holds the errors alone.
 ///

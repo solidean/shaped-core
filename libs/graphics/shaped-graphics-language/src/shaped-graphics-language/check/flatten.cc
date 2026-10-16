@@ -422,18 +422,19 @@ struct flattener
         return ref != nullptr && !entry.at(ref->local).is_mut;
     }
 
-    /// What `nonuniform i` marks, `i`; none for anything else.
-    [[nodiscard]] flat_expr_id marked_by_nonuniform(flat_expr_id id) const
+    /// What `nonuniform i` or `uniform i` marks, `i`; none for anything else.
+    [[nodiscard]] flat_expr_id marked_index(flat_expr_id id) const
     {
         auto const* const call = is_valid(id) ? entry.at(id).node.try_as<flat_call>() : nullptr;
         auto const* const record = call != nullptr ? c.out.builtin_function(call->intrinsic) : nullptr;
-        return record != nullptr && record->is_nonuniform_mark ? entry.at(call->arguments)[0] : flat_expr_id::none;
+        return record != nullptr && record->mark != builtins::index_mark::none ? entry.at(call->arguments)[0]
+                                                                               : flat_expr_id::none;
     }
 
-    /// An index that may stand in several places: a substitutable one, or `nonuniform i` of one, the mark kept on it.
+    /// An index that may stand in several places: a substitutable one, or a mark of one, the mark kept on it.
     [[nodiscard]] bool is_substitutable_index(flat_expr_id id) const
     {
-        return is_substitutable(id) || is_substitutable(marked_by_nonuniform(id));
+        return is_substitutable(id) || is_substitutable(marked_index(id));
     }
 
     /// A construction of literals alone, such as a texel offset, which a target may take only as it is written.
@@ -492,7 +493,7 @@ struct flattener
             return add_expr(x.type, from, flat_buffer_element{.buffer = buffer, .index = index});
         }
         // the mark stays where it was written, which is what a diagnostic about it points at
-        if (auto const marked = marked_by_nonuniform(id); is_valid(marked))
+        if (auto const marked = marked_index(id); is_valid(marked))
         {
             flat_expr_id const arguments[] = {again(marked, from)};
             auto copy = x;
@@ -515,12 +516,12 @@ struct flattener
 
     /// `index` as it may stand in several places: itself where it is substitutable, and otherwise a local of `kind`
     /// bound at `from`.
-    /// `nonuniform i` binds `i` and marks the bound local, since a mark is read only where it indexes (CHK-300).
+    /// A marked `i` binds `i` and marks the bound local, since a mark is read only where it indexes (CHK-300).
     flat_expr_id bound_index(flat_expr_id index, local_kind kind, cc::string_view name, origin from)
     {
         if (is_substitutable_index(index))
             return index;
-        auto const marked = marked_by_nonuniform(index);
+        auto const marked = marked_index(index);
         auto const value = is_valid(marked) ? marked : index;
         auto const local = add_local(kind, name, entry.at(value).type);
         add_stmt(from, flat_let{.local = local, .value = value});
@@ -541,7 +542,7 @@ struct flattener
             return again(index, from);
         // by value: the copy of a mark's argument appends to the arrays
         auto copy = entry.at(index);
-        if (auto const marked = marked_by_nonuniform(index); is_valid(marked))
+        if (auto const marked = marked_index(index); is_valid(marked))
         {
             flat_expr_id const arguments[] = {again_as_written(marked, from)};
             copy.node.as<flat_call>().arguments = add_list(arguments);
@@ -3335,9 +3336,28 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     for (auto const& v : f.stage_violations)
-        report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-               cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
-                          check::stage_name(info.entry_stage), out.at(v.callee).name));
+    {
+        // CHK-398: an atomic counts its stage's invocations, which traversal decides for these two
+        auto const* const record = out.builtin_function(out.at(v.callee).intrinsic);
+        auto const is_atomic = record != nullptr && record->is_atomic;
+        if (is_atomic && info.entry_stage == stage::any_hit)
+            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+                   cc::format("{} is an any_hit entry point, which runs an implementation-defined number of times: for "
+                              "candidates the traversal later rejects, and more than once per candidate unless the "
+                              "geometry sets NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of; so the "
+                              "atomic {} would count something no spec defines",
+                              s.name, out.at(v.callee).name));
+        else if (is_atomic && info.entry_stage == stage::intersection)
+            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+                   cc::format("{} is an intersection entry point, which runs as often as the traversal reaches its "
+                              "box, an implementation-defined number of times; so the atomic {} would count something "
+                              "no spec defines",
+                              s.name, out.at(v.callee).name));
+        else
+            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
+                   cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
+                              check::stage_name(info.entry_stage), out.at(v.callee).name));
+    }
     // CHK-380: HLSL forms a compute stage's quads from its threads' ids, which only one axis keeps consecutive
     auto const is_linear = info.workgroup[0] % 4 == 0 && info.workgroup[1] == 1 && info.workgroup[2] == 1;
     for (auto const& q : is_linear ? cc::span<stage_violation const>() : cc::span<stage_violation const>(f.quad_calls))

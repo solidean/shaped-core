@@ -680,6 +680,31 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                               out.name_of(type)));
             type = checked_module::error_type;
         }
+        // CHK-391: a value of function bodies alone has no layout in any memory yet, workgroup memory included
+        // It is judged before an array is, so the detail names it rather than the array holding it.
+        if (!is_struct && type != checked_module::error_type)
+            if (auto const found = local_only_path(type); !found.path.empty())
+            {
+                // the path is named from what a block or a buffer holds, as CHK-291 names an array's
+                auto root = type;
+                auto is_buffer = false;
+                while (out.at(root).kind == type_kind::array || out.at(root).kind == type_kind::buffer)
+                {
+                    is_buffer = is_buffer || out.at(root).kind == type_kind::buffer;
+                    root = out.at(root).element;
+                }
+                unsupported(
+                    file, span_of(file, f.type),
+                    cc::format("a {} in {}{}, which only a function body holds, since {}", out.name_of(found.type),
+                               is_workgroup ? "workgroup memory"
+                               : is_buffer  ? "a buffer's element"
+                                            : "a constant block",
+                               found.path.starts_with(":") ? cc::string()
+                                                           : cc::format(", {}{}", out.name_of(root), found.path),
+                               found.reason));
+                type = checked_module::error_type;
+            }
+
         // CHK-291: an array's layout in a block is the struct-buffer work's to settle
         if (!is_struct && !is_workgroup && type != checked_module::error_type && out.at(type).kind == type_kind::array)
         {
@@ -959,6 +984,12 @@ void checker::compile_struct(symbol_id id)
                 report(diagnostic_kind::invalid_pipeline, file, span_of(file, ast_of(file).at(m.field).type),
                        cc::format("{} is a ray type, whose payload is a struct, and this is {}", m.name,
                                   out.name_of(m.type)));
+            // CHK-391: a payload is ray data each target lays out, which a value of function bodies alone is not
+            else if (auto const found = local_only_path(m.type);
+                     m.type != checked_module::error_type && !found.path.empty())
+                unsupported(file, span_of(file, ast_of(file).at(m.field).type),
+                            cc::format("a {} in a ray payload, {}{}, which only a function body holds, since {}",
+                                       out.name_of(found.type), out.name_of(m.type), found.path, found.reason));
 
     // CHK-384: a swizzle names fields by their letters and is a vector of their one element type
     auto has_swizzles = false;
@@ -1917,9 +1948,11 @@ void checker::judge_entry_point(symbol_id id)
         {
             judge_edge_arrays(file, where, parameter.type);
             judge_edge_16_bit(file, where, parameter.type);
+            judge_edge_local_only(file, where, parameter.type);
         }
     judge_edge_arrays(file, where, info.result);
     judge_edge_16_bit(file, where, info.result);
+    judge_edge_local_only(file, where, info.result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
     if (info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control

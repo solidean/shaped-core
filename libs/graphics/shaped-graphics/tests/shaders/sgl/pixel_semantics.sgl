@@ -47,6 +47,27 @@ pipeline discard_derivative:
     cull = .none
     format = .rgba32_float
 
+binding pixel_claims:
+    owners: mut buffer[atomic[uint]]
+
+// As `derivative_ps`, and each pixel claims its own slot first: the discarded column 0 goes on as helpers.
+// A helper's atomics store nothing and read what they please, so the strong compare-exchange's loop must not trap one.
+// The slots of column 0 stay 0, every other slot holds its pixel's tag plus one, and the draw ends.
+@pixel fun claiming_ps(p: tagged){pixel_claims} -> tag_target:
+    let x = p.position.x
+    if x < 1.0 => discard
+    let slot = (p.position.x as int) + 4 * (p.position.y as int)
+    let before = pixel_claims.owners[slot].compare_exchange_strong(0u, (p.tag as uint) + 1u)
+    return {
+        value = float4(ddx(x * x), before as float, 0.0, 1.0)
+    }
+
+pipeline discard_claim:
+    vertex = tagged_vs
+    pixel = claiming_ps
+    cull = .none
+    format = .rgba32_float
+
 // The tag, over 100, is the depth written, whatever depth the position rasterized at.
 @pixel struct written_depth:
     value: float4

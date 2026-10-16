@@ -217,6 +217,7 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     }
 
     auto const int_type = type_of_builtin(builtins::k_int, file, where);
+    auto const uint_type = type_of_builtin(builtins::k_uint, file, where);
     auto result = object;
     for (auto const& a : arguments)
     {
@@ -226,14 +227,20 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
                           : ast::expr_id::none;
         auto const index = check_expr(scope, a.value);
         binding_index = outer_index;
-        if (index != error_type && index != int_type)
+        // CHK-287: an `int` or a `uint`, which every target indexes by alike
+        if (index != error_type && index != int_type && index != uint_type)
             report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
-                   cc::format("{} is indexed by an int, and this is a {}",
+                   cc::format("{} is indexed by an int or a uint, and this is a {}",
                               kind == type_kind::buffer ? "a buffer" : "an array", out.name_of(index)));
         // CHK-309: a constant index names one element, and one past the end is refused by every target
         auto const count = out.at(result).count;
-        if (auto const at = index == int_type ? constant_index(file, a.value) : cc::optional<i32>();
-            kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
+        auto at = cc::optional<i64>();
+        if (index == int_type)
+            if (auto const signed_at = constant_index(file, a.value); signed_at.has_value())
+                at = signed_at.value();
+        if (index == uint_type)
+            at = constant_unsigned_index(file, a.value);
+        if (kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
             report(diagnostic_kind::invalid_constant_argument, file, span_of(file, a.value),
                    cc::format("{} is no index into {}, whose elements are 0 ..< {}", at.value(), out.name_of(result),
                               count));
@@ -1487,7 +1494,9 @@ type_id checker::resolve_overload(function_scope& scope,
                               signature_text(spelling, expected)));
         }
         else
-            report(diagnostic_kind::no_matching_overload, file, where, call_text(file, spelling, arguments));
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("{}{}", call_text(file, spelling, arguments),
+                              miss_hint(file, candidates, arguments, spelling)));
         return error_type;
     }
     auto const best = best_of(cc::move(matches));
@@ -1566,10 +1575,11 @@ type_id checker::resolve_overload(function_scope& scope,
     {
         // CHK-300: the mark is what an index into a binding array is written with, and on anything else it means nothing
         auto const* const record = out.builtin_function(out.at(chosen).intrinsic);
-        if (record != nullptr && record->is_nonuniform_mark && id != binding_index)
+        if (record != nullptr && record->mark != builtins::index_mark::none && id != binding_index)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, where,
-                   "`nonuniform i` marks an index into a binding array, and stands only as one: `t[nonuniform i]`");
+                   cc::format("`{0} i` marks an index into a binding array, and stands only as one: `t[{0} i]`",
+                              record->name));
             return error_type;
         }
         return result;
@@ -1758,6 +1768,80 @@ void checker::note_near_misses(i32 file,
         }
         out.near_misses.push_back(miss);
     }
+}
+
+cc::string checker::miss_hint(i32 file,
+                              cc::span<symbol_id const> candidates,
+                              call_arguments const& arguments,
+                              cc::string_view spelling)
+{
+    auto const is_condition = [&](type_id type)
+    {
+        auto const* const record = out.builtin_type_of(type);
+        return record != nullptr && record->leaf_kind == value_kind::boolean;
+    };
+    for (auto const candidate : candidates)
+    {
+        if (out.at(candidate).state != symbol_state::checked)
+            continue;
+        auto const parameters
+            = cc::vector<parameter>::create_copy_of(out.at(out.functions[out.at(candidate).info].parameters));
+        auto is_generic = false;
+        for (auto const& p : parameters)
+            is_generic = is_generic || is_open(p.type);
+        if (is_generic)
+            continue;
+
+        // CHK-316: the marks alone are off, and each place is of its parameter's type exactly
+        auto const bound = bind_arguments(parameters, arguments);
+        if (bound.failure == miss_reason::none)
+        {
+            auto flipped = isize(-1);
+            auto is_one_mark_away = true;
+            for (auto p = isize(0); is_one_mark_away && p < parameters.size(); ++p)
+            {
+                auto const i = bound.slots[p];
+                if (i < 0)
+                    continue;
+                if (parameters[p].is_mut != arguments.written[i].is_mut)
+                {
+                    is_one_mark_away = arguments.types[i] == parameters[p].type;
+                    flipped = flipped < 0 ? p : flipped;
+                }
+                else
+                    is_one_mark_away = chain_of(file, parameters[p], arguments, i).has_value();
+            }
+            if (is_one_mark_away && flipped >= 0)
+            {
+                auto const& p = parameters[flipped];
+                auto const argument = text_of(file, span_of(file, arguments.written[bound.slots[flipped]].expr));
+                if (p.is_mut)
+                    return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, as in `mut "
+                                      "{}`",
+                                      p.name, argument);
+                return cc::format(": {} is no mut parameter, so its argument takes no `mut`", p.name);
+            }
+        }
+
+        // CHK-365: `select(a, b, cond)` is WGSL's order, and SGL's condition stands first
+        auto const n = arguments.written.size();
+        if (n >= 2 && isize(parameters.size()) == n && is_condition(parameters[0].type) && arguments.names.size() == n
+            && arguments.types[n - 1] == parameters[0].type)
+        {
+            auto is_rotated = true;
+            for (auto i = isize(0); is_rotated && i < n; ++i)
+                is_rotated = arguments.names[i].empty() && !arguments.written[i].is_mut && !parameters[i].is_mut
+                          && chain_of(file, parameters[i], arguments, i == 0 ? n - 1 : i - 1).has_value();
+            if (is_rotated)
+            {
+                auto types = cc::vector<type_id>();
+                for (auto const& p : parameters)
+                    types.push_back(p.type);
+                return cc::format(": its condition comes first, as in {}", signature_text(spelling, types));
+            }
+        }
+    }
+    return {};
 }
 
 cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call_arguments const& arguments)

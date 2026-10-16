@@ -331,3 +331,81 @@ TEST("sgl check - a test that reaches a pipeline's trace is unsupported")
     CHECK(r.starts_with("unsupported-yet"));
     CHECK(r.contains("a test that reaches trace_ray, which only the ray-tracing stages run"));
 }
+
+TEST("sgl check - a mat3 is no ray payload, hit attribute or callable's parameter")
+{
+    // CHK-391: what a ray, a hit or a callable carries is ray data a target lays out
+    constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
+    constexpr auto framed = "struct framed:\n    m: mat3\n";
+    CHECK(reports(cc::format("{}rays framed_rays:\n    primary: framed\n", framed))
+              .contains(cc::format("user:[framed] a mat3 in a ray payload, framed.m: mat3, {}", why)));
+    CHECK(reports(cc::format("{}@miss fun gone(p: mut framed):\n    p.m = p.m\n", framed))
+              .contains(cc::format("user:[gone] a mat3 crossing a stage edge, in framed.m: mat3, {}", why)));
+    CHECK(reports(cc::format("{}@closest_hit fun hit(h: procedural_hit[framed], p: mut radiance):\n"
+                             "    p.color = h.attributes.m * p.color\n",
+                             framed))
+              .contains(
+                  cc::format("a mat3 crossing a stage edge, in procedural_hit[framed].attributes.m: mat3, {}", why)));
+    CHECK(reports(cc::format("{}@intersection fun box(b: procedural_box) -> report[framed]:\n    return "
+                             "report.none()\n",
+                             framed))
+              .contains(cc::format("a mat3 crossing a stage edge, in report[framed].attributes.m: mat3, {}", why)));
+    CHECK(reports(cc::format("{}@callable fun turn(f: mut framed):\n    f.m = f.m * f.m\n", framed))
+              .contains(cc::format("user:[turn] a mat3 crossing a stage edge, in framed.m: mat3, {}", why)));
+}
+
+namespace
+{
+/// A ray type, a binding with a counter, and the stage `stage` whose body counts with `call`.
+cc::string counting(cc::string_view stage, cc::string_view call)
+{
+    auto const signature
+        = stage == "raygen"      ? cc::string_view("@raygen fun counter(@launch_id id: int3)")
+        : stage == "miss"        ? cc::string_view("@miss fun counter(p: mut radiance)")
+        : stage == "closest_hit" ? cc::string_view("@closest_hit fun counter(h: triangle_hit, p: mut radiance)")
+        : stage == "callable"    ? cc::string_view("@callable fun counter(p: mut radiance)")
+        : stage == "any_hit"     ? cc::string_view("@any_hit fun counter(c: triangle_candidate, p: mut radiance)")
+                                 : cc::string_view("@intersection fun counter(b: procedural_box)");
+    auto const result = stage == "any_hit"      ? cc::string_view(" -> hit_decision")
+                      : stage == "intersection" ? cc::string_view(" -> report[hit_attributes]")
+                                                : cc::string_view();
+    auto const tail = stage == "any_hit"      ? cc::string_view("    return hit_decision.accept\n")
+                    : stage == "intersection" ? cc::string_view("    return report.none()\n")
+                                              : cc::string_view();
+    return cc::format("require raytracing_pipeline\n"
+                      "struct radiance:\n    color: float\n"
+                      "struct hit_attributes:\n    t: float\n"
+                      "binding counted:\n    counts: mut buffer[atomic[uint]]\n"
+                      "{}{{counted}}{}:\n"
+                      "    {}\n"
+                      "{}",
+                      signature, result, call, tail);
+}
+} // namespace
+
+TEST("sgl check - an atomic stands in a raygen, a miss, a closest hit and a callable, which each run once per ray")
+{
+    // CHK-398
+    for (auto const stage : {"raygen", "miss", "closest_hit", "callable"})
+        for (auto const call : {"counted.counts[0].add(1u)", "let k = counted.counts[0].compare_exchange_strong(0u, 1u)",
+                                "let r = counted.counts[0].compare_exchange_weak(0u, 1u)"})
+            CHECK(reports_for(counting(stage, call)) == "").context(cc::format("{}: {}", stage, call));
+}
+
+TEST("sgl check - an atomic in an any hit or an intersection counts what traversal decides, and is refused")
+{
+    for (auto const call : {"counted.counts[0].add(1u)", "let r = counted.counts[0].compare_exchange_weak(0u, 1u)"})
+    {
+        CHECK(reports_for(counting("any_hit", call))
+                  .contains("counter is an any_hit entry point, which runs an implementation-defined number of times: "
+                            "for candidates the traversal later rejects, and more than once per candidate unless the "
+                            "geometry sets NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of; so the "
+                            "atomic "))
+            .context(call);
+        CHECK(reports_for(counting("intersection", call))
+                  .contains("counter is an intersection entry point, which runs as often as the traversal reaches its "
+                            "box, an implementation-defined number of times; so the atomic "))
+            .context(call);
+    }
+    CHECK(reports_for(counting("any_hit", "counted.counts[0].add(1u)")).starts_with("stage-not-allowed"));
+}

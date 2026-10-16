@@ -8,6 +8,18 @@
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/source/diagnostic.hh>
 
+namespace sgl::check
+{
+/// Whether `ids` holds `id`.
+[[nodiscard]] inline bool holds(cc::span<symbol_id const> ids, symbol_id id)
+{
+    for (auto const x : ids)
+        if (x == id)
+            return true;
+    return false;
+}
+} // namespace sgl::check
+
 /// A second place a diagnostic points at, with what to read there: the declaration a use conflicts with, a way to fix it.
 struct sgl::check::related_note
 {
@@ -31,10 +43,15 @@ struct sgl::check::located_diagnostic
     cc::string detail;
     /// In the order they should be read, each printed as a `note:` line after the diagnostic.
     cc::vector<related_note> notes;
+    /// The entry points whose inlined body it was judged of, by function, which a compile of another one leaves out
+    /// (CHK-396).
+    /// Empty for a diagnostic of the program, which every compile of it reports.
+    cc::vector<symbol_id> entry_points;
 
     [[nodiscard]] bool operator==(located_diagnostic const& rhs) const
     {
-        return what == rhs.what && file == rhs.file && detail == rhs.detail && ast::impl::is_equal(notes, rhs.notes);
+        return what == rhs.what && file == rhs.file && detail == rhs.detail && ast::impl::is_equal(notes, rhs.notes)
+            && ast::impl::is_equal(entry_points, rhs.entry_points);
     }
 };
 
@@ -62,6 +79,18 @@ struct sgl::check::test_expectation
     source_span where;
 
     bool operator==(test_expectation const&) const = default;
+};
+
+/// An entry point's `@expect(error = "kind")` or `@expect(warning = "kind")`, which takes the diagnostics judged of its
+/// inlined body (CHK-397).
+struct sgl::check::entry_expectation
+{
+    /// The entry point's function.
+    symbol_id function = symbol_id::none;
+    i32 file = 0;
+    test_expectation expectation;
+
+    bool operator==(entry_expectation const&) const = default;
 };
 
 /// One `test` of the module, wherever it stands.
@@ -161,6 +190,8 @@ struct sgl::check::checked_module
     cc::vector<test_info> tests;
     /// The flat trees of the tests that checked without an error, each of stage `none` and without a parameter.
     cc::vector<flat_entry_point> test_units;
+    /// Every entry point's expectation of a diagnostic; such an entry point is judged by them, and has no flat tree.
+    cc::vector<entry_expectation> entry_expectations;
 
     /// In the order the demand-driven pass found them, which is deterministic and not source order.
     cc::vector<located_diagnostic> diagnostics;
@@ -301,7 +332,7 @@ struct sgl::check::checked_module
             && is_equal(near_misses, rhs.near_misses) && is_equal(ray_traces, rhs.ray_traces)
             && is_equal(callable_calls, rhs.callable_calls) && is_equal(texel_stores, rhs.texel_stores)
             && is_equal(files, rhs.files) && is_equal(entry_points, rhs.entry_points) && is_equal(tests, rhs.tests)
-            && is_equal(test_units, rhs.test_units) && is_equal(diagnostics, rhs.diagnostics)
-            && builtins == rhs.builtins;
+            && is_equal(test_units, rhs.test_units) && is_equal(entry_expectations, rhs.entry_expectations)
+            && is_equal(diagnostics, rhs.diagnostics) && builtins == rhs.builtins;
     }
 };

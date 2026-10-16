@@ -44,14 +44,14 @@ TEST("sgl check - an array literal is as long as its array, and its elements all
     CHECK(reports_for(in_function("    let xs: float[2] = [1, 2]\n")) == "");
 }
 
-TEST("sgl check - an array is read by as many int indices as it has dimensions, and has a length and nothing else")
+TEST("sgl check - an array is read by one int or uint index per dimension, and has a length and nothing else")
 {
     constexpr auto grid = "    let g: int[2, 3] = [[1, 2, 3], [4, 5, 6]]\n";
     CHECK(reports_for(in_function(cc::format("{}    let a = g[1, 2] + g[1][2] + g.length + g[0].length\n", grid))) == "");
     CHECK(reports_for(in_function(cc::format("{}    let a = g[1, 2, 0]\n", grid)))
               .contains("int[2, 3] takes one to 2 indices"));
     CHECK(reports_for(in_function(cc::format("{}    let a = g[1.0]\n", grid)))
-              .contains("an array is indexed by an int, and this is a float"));
+              .contains("an array is indexed by an int or a uint, and this is a float"));
     CHECK(reports_for(in_function(cc::format("{}    let a = g.count\n", grid)))
               .contains("int[2, 3] has no member count; an array's one member is its length"));
     CHECK(reports_for(in_function("    let a = float[3].fill(0.0)\n"))
@@ -77,6 +77,13 @@ TEST("sgl check - a constant index names an element of its array")
 
     // a value computed at run time is the target's to bound
     CHECK(reports_for(in_function(cc::format("{}    let k = 2\n    let a = g[k]\n", grid))) == "");
+
+    // a uint names its element as an int does
+    CHECK(reports_for(in_function(cc::format("{}    let a = g[1u, k]\n", grid), "const k: uint = 2\n\n")) == "");
+    CHECK(reports_for(in_function(cc::format("{}    let a = g[2u]\n", grid)))
+              .contains("2 is no index into int[2, 3], whose elements are 0 ..< 2"));
+    CHECK(reports_for(in_function(cc::format("{}    let a = g[0, k]\n", grid), "const k = 3u\n\n"))
+              .contains("3 is no index into int[3], whose elements are 0 ..< 3"));
 }
 
 TEST("sgl check - an element of a mutable array is assigned, and its length never is")

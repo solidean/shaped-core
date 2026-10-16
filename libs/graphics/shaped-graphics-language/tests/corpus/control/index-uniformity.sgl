@@ -1,0 +1,109 @@
+// an index into a binding array is proven the same in every invocation, or it says which it is (CHK-300)
+// the verdicts are an entry point's, over the copies of the access its body inlined (CHK-395, CHK-396)
+
+require binding_arrays
+
+binding textures:
+    maps: texture_2d[float4][16]
+    s: sampler
+
+struct material:
+    color_map: uint
+
+binding records:
+    materials: buffer[material]
+
+binding draw:
+    material: uint
+    slot: int
+
+binding work:
+    counts: mut buffer[int]
+    results: mut buffer[float4]
+
+@vertex struct vertex_in:
+    position: float3
+
+struct varyings:
+    @position position: hpos4
+    uv: float2
+    @interpolate(.flat) picked: int
+
+@pixel struct target:
+    color: float4
+
+// a map number counts from 1, and 0 is no map
+fun slot_of(map: uint) -> int => (map - 1u) as int
+
+test slot_of(1u) == 0
+test slot_of(16u) == 15
+
+@vertex fun main_vs(v: vertex_in) -> varyings:
+    return {position = hpos4(v.position.x, v.position.y, v.position.z, 1.0), uv = float2(0.0, 0.0), picked = 0}
+
+// a member of a constant block is the same in every invocation, so the index needs no mark
+@pixel fun constant_ps(v: varyings){textures, draw} -> target:
+    return {color = textures.maps[draw.slot].sample(v.uv, textures.s)}
+
+// so is an element of a read-only buffer at such an index
+@pixel fun record_ps(v: varyings){textures, records, draw} -> target:
+    let m = records.materials[draw.material as int]
+    return {color = textures.maps[slot_of(m.color_map)].sample(v.uv, textures.s)}
+
+// what a stage is handed varies, and the hidden cost of a varying index is always written out
+@pixel fun varying_ps(v: varyings){textures} -> target:
+    return {color = textures.maps[nonuniform v.picked].sample(v.uv, textures.s)}
+
+@expect(error = "non-uniform-index")
+@pixel fun unmarked_varying_ps(v: varyings){textures} -> target:
+    return {color = textures.maps[v.picked].sample(v.uv, textures.s)}
+
+// `uniform` is the author's word where the compiler can prove neither, and against a proven difference it is refused
+@expect(error = "uniform-index-varies")
+@pixel fun asserted_varying_ps(v: varyings){textures} -> target:
+    return {color = textures.maps[uniform v.picked].sample(v.uv, textures.s)}
+
+// a mark on an index proven the same everywhere pays for nothing
+@expect(warning = "needless-nonuniform")
+@pixel fun needless_ps(v: varyings){textures, draw} -> target:
+    return {color = textures.maps[nonuniform draw.slot].sample(v.uv, textures.s)}
+
+// what the shader also writes may be anything, so the compiler proves it neither the same nor different
+@compute(64) fun asserted_cs(@thread_id id: int3){textures, work}:
+    let k = work.counts[0] % 16
+    work.results[id.x] = textures.maps[uniform k].load(int2(0, 0))
+
+@compute(64) fun marked_cs(@thread_id id: int3){textures, work}:
+    let k = work.counts[id.x] % 16
+    work.results[id.x] = textures.maps[nonuniform k].load(int2(0, 0))
+
+@expect(error = "unproven-index")
+@compute(64) fun unproven_cs(@thread_id id: int3){textures, work}:
+    let k = work.counts[0] % 16
+    work.results[id.x] = textures.maps[k].load(int2(0, 0))
+
+// a helper's index is judged by what each call reaching it passes
+fun sample_map(map: uint, uv: float2){textures} -> float4:
+    return textures.maps[slot_of(map)].sample(uv, textures.s)
+
+@pixel fun helped_ps(v: varyings){textures, records, draw} -> target:
+    let m = records.materials[draw.material as int]
+    return {color = sample_map(m.color_map, v.uv) + sample_map(m.color_map + 1u, v.uv)}
+
+// one call passes the same value everywhere and another one that varies, which only splitting the helper serves both
+@expect(error = "mixed-index")
+@pixel fun mixed_ps(v: varyings){textures, records, draw} -> target:
+    let uniform_m = records.materials[draw.material as int]
+    let mut picked = uniform_m
+    if v.uv.x > 0.5 => picked = records.materials[(draw.material as int) + 1]
+    return {color = sample_map(uniform_m.color_map, v.uv) + sample_map(picked.color_map, v.uv)}
+
+// or the mark, which is a choice to pay on the uniform call too, so it is no needless one
+fun sample_map_marked(map: uint, uv: float2){textures} -> float4:
+    return textures.maps[nonuniform slot_of(map)].sample(uv, textures.s)
+
+@pixel fun marked_mixed_ps(v: varyings){textures, records, draw} -> target:
+    let uniform_m = records.materials[draw.material as int]
+    let mut picked = uniform_m
+    if v.uv.x > 0.5 => picked = records.materials[(draw.material as int) + 1]
+    return {color = sample_map_marked(uniform_m.color_map, v.uv) + sample_map_marked(picked.color_map, v.uv)}

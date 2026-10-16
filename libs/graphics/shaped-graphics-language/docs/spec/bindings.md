@@ -359,18 +359,24 @@ binding materials:
 
 let base = materials.albedo[nonuniform p.material].sample(p.uv)
 let fixed = materials.albedo[materials.slot].sample(p.uv)
+let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
 ```
 
 * It is read by element, and an element is the resource itself, handed to a builtin as the member would be.
 * It takes `N` slots from its first, so the resources after it start `N` later, as sg's bindings concept requires of every array.
 * `N` is at least 2: sg and the generated host code bind a count of 1 as a plain member, which is what one resource is written as (CHK-299).
-* An index the uniformity pass cannot prove the same in every invocation is marked `nonuniform i`, or refused (CHK-300).
-  Forgetting the mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
-  A mark on an index the pass proves uniform is a warning, since it pays for nothing.
-  The mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
+* An index the uniformity pass proves the same in every invocation needs no mark, and any other is marked, or refused (CHK-300).
+  `nonuniform i` says it may differ, which every varying index says, however plainly the pass sees it vary.
+  Forgetting that mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
+  `uniform i` is the author's word where the pass proves neither, such as a count read from a buffer the shader writes, and is refused on an index the pass proves varying (CHK-394).
+  A `nonuniform` mark on an index the pass proves uniform is a warning, since it pays for nothing.
+  A mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
+* A function's index is judged by what each call reaching it passes, in each entry point alone (CHK-395, CHK-396).
+  A helper that one call reaches with a uniform index and another with a varying one is split in two, or marked `nonuniform` and pays on both.
 * `T[]`, whose length the host binds, is the spelling an unbounded array has, and `unsupported-yet` until sg binds one.
   An array of samplers, and one of more than one dimension, are `unsupported-yet` too.
-* HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a marked index; WebGPU has no binding arrays, so WGSL refuses by the feature.
+* HLSL writes `Texture2D<float4> albedo[64]` and `NonUniformResourceIndex` around a `nonuniform` index, and a `uniform` one plain, as MSL writes both.
+  WebGPU has no binding arrays, so WGSL refuses by the feature.
 
 ## Workgroup memory
 
@@ -418,8 +424,68 @@ Its operations are builtins that take it first, called as methods: `add`, `subtr
 `load()` reads it, and `store(v)` writes it.
 `and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
 Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
+A pixel and a compute stage take them, and so do the ray-tracing stages that run once per launch, ray or call: a raygen, a miss, a closest hit and a callable.
+An any hit and an intersection run as often as the traversal decides, so an atomic there counts something no spec defines, and is `stage-not-allowed` (CHK-398).
 The host holds a buffer of atomics as the plain integers it is.
-Floats, 64 bits, a compare-exchange and a vertex stage are [the incubator's](incubator/atomics.md).
+Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+
+**A compare-exchange stores `desired` where the atomic holds `expected`, and comes in two forms, each named for what it promises.**
+
+* **`compare_exchange_strong(expected, desired)`** gives the value before, and never fails spuriously.
+  It stored exactly where what it gives is `expected`, so that one comparison is the whole answer.
+* **`compare_exchange_weak(expected, desired)`** gives an `exchange_result[T]`: `old`, the value it read, and `exchanged`, whether it stored.
+  It may fail although `old` is `expected`, so only `exchanged` says it stored, and `old == expected` alone never does.
+  One weak failure never means the atomic is taken: it is retried for as long as `old` is `expected` and nothing was stored.
+
+A slot claim is a strong one, and a weak one stands in its retry loop:
+
+```sgl
+binding table:
+    slots: mut buffer[atomic[uint]]
+
+fun insert(key: uint){table} -> uint:
+    let mut i = key & 1023u
+    for _ in 0 ..< 1024:
+        let before = table.slots[i].compare_exchange_strong(0u, key)
+        if before == 0u or before == key => return i     // claimed, or found
+        i = (i + 1u) & 1023u
+    return 1024u
+
+fun insert_weak(key: uint){table} -> uint:
+    let mut i = key & 1023u
+    for _ in 0 ..< 1024:
+        let mut r = table.slots[i].compare_exchange_weak(0u, key)
+        while r.old == 0u and not r.exchanged:          // a spurious failure: try again
+            r = table.slots[i].compare_exchange_weak(0u, key)
+        if r.exchanged or r.old == key => return i
+        i = (i + 1u) & 1023u
+    return 1024u
+```
+
+What each target does with them ([EMIT-157](semantics/emitting.md#types) to [EMIT-159](semantics/emitting.md#types)):
+
+* HLSL's `InterlockedCompareExchange` is strong, so both forms are it, and the weak one never fails spuriously there.
+* WGSL's `atomicCompareExchangeWeak` is weak, and so is MSL's `atomic_compare_exchange_weak_explicit` by its name.
+  The strong form is a loop the compiler writes around it, which retries only a failure that read `expected`.
+  It costs a branch, and almost always runs once; it is lock-free rather than wait-free, since a device may in principle fail it spuriously again.
+  It never waits for another invocation, so lanes of one SIMD group that leave it at different iterations cannot deadlock it.
+
+Its caveats are the other atomics' and a few of its own:
+
+* Both are relaxed, as every atomic is: neither orders any other memory.
+  A thread that claims a slot and then writes data for it publishes that data to others only through a barrier, or `@coherent` memory and a barrier.
+* A helper invocation of a pixel stage, one that runs for derivatives or after a `discard`, stores nothing, and what its atomics read is undefined.
+  So a helper's `old` and `exchanged` mean nothing, and a weak form's retry loop must not trust them.
+  The strong form's loop skips a helper in MSL, and HLSL's has none.
+  WGSL cannot tell a helper, so WebGPU refuses a pixel stage's strong compare-exchange as `target-lacks-feature`: a weak one in a retry loop, or a compute stage, is the way there.
+* The result of either is non-uniform (CHK-283): an index taken from it into a binding array is `nonuniform`, and a barrier under a branch on it is refused.
+  The strong form's loop is the target's, and leaves the control flow as uniform as it found it, so a barrier after the call is fine.
+* A test runs one invocation, which no other ever races ([EVAL-98](semantics/evaluation.md#errors-of-the-program)).
+  It fails a weak compare-exchange spuriously the first time each call meets `expected`.
+  So a weak one without its retry loop fails its test, as it may on a GPU.
+* A spin lock built from either, where one invocation waits for another to release it, may hang a GPU whose SIMD group cannot run both sides; SGL does not detect one.
+* Like every atomic, both stand in a pixel, a compute, a raygen, a miss, a closest-hit and a callable stage.
+  A ray-tracing stage has no helper invocations, so the strong form's loop needs no test for one there.
 
 **An image's texels are atomics where its member says so.**
 `@atomic` on a `mut` image of the format `r32_uint` or `r32_sint` makes each texel an atomic, which a subscript reaches and the methods above update ([CHK-372](semantics/checking.md#atomics)):
@@ -547,9 +613,9 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
   The builtins that take one are the texture methods of [Sampling](#sampling), called as methods of it: `tex.sample(uv, smp)`.
 * A plain member of a group, as a field of the constant buffer the group owns, for a type whose place in a block every target agrees on.
 * The positional group numbering, and `@inline` last.
-* Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform`.
+* Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform` and `uniform`.
 * `@workgroup` bindings, which take no group.
-* `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
+* `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update above, a strong compare-exchange among them.
 * `@atomic` images of `.r32_uint` and `.r32_sint`, with the same updates, and `@coherent` buffers and images.
 * `acceleration_structure[.geometry]`, which the prelude's `trace` takes ([raytracing.md](raytracing.md)).
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.

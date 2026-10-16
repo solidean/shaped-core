@@ -163,6 +163,19 @@ void sgl::builtins::register_types(registry& r)
         .leaf_count = 16,
     });
 
+    // CHK-391: a value of function bodies alone, so it has no layout, crosses no edge, and is refused in memory
+    r.add(type_record{
+        .declaration = "struct mat3",
+        .doc = "/// Column-major, and a vector stands to its right.\n"
+               "/// A value of function bodies alone, which no GPU memory holds yet.",
+        .hlsl = "float3x3",
+        .wgsl = "mat3x3f",
+        .msl = "float3x3",
+        .leaf_kind = value_kind::scalar_float,
+        .leaf_count = 9,
+        .local_only_reason = "its layout in GPU memory is not decided yet",
+    });
+
     r.add(type_record{
         .declaration = "struct bool32",
         .doc = "/// A bool as GPU memory holds one: four bytes, 0 for false and anything else for true.\n"

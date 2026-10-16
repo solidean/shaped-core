@@ -32,7 +32,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-109's, EMIT-122's and EMIT-159's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence` and `image_atomics`, which core WebGPU has none of.
@@ -79,12 +79,27 @@ struct target_ {
 * **EMIT-120** An atomic is `atomic<u32>` in WGSL and `atomic_uint` in MSL, updated by `atomicAdd(&a, v)` and `atomic_fetch_add_explicit(&a, v, memory_order_relaxed)`.
   HLSL declares the plain integer, and its `Interlocked*` gives the value before through an out parameter, so a local declared ahead of the statement holds it.
   A load is `InterlockedOr` with 0, and a store `InterlockedExchange`, so that no plain access races an update.
+* **EMIT-157** A compare-exchange is HLSL's `InterlockedCompareExchange(a, expected, desired, before)`, which is strong, for either form.
+  The weak form fills `exchange_result[T]`, a struct every target declares as the program's own, from it with `exchanged` as `before == expected`.
+  WGSL's `atomicCompareExchangeWeak` and MSL's `atomic_compare_exchange_weak_explicit` are weak, and the weak form is one call of it ([why](why/emitting.md#emit-157)).
+  WGSL fills the struct from its result's `old_value` and `exchanged`, and MSL from its `bool` and the value it wrote back into `expected`.
+  The strong form there is a loop over that call, which retries a failure that read `expected` and stops at any other.
+  The atomic's place, `expected` and `desired` are each evaluated once, in that order, ahead of any loop.
+  An `@atomic` image's texel is the same in MSL, over its texture's `atomic_compare_exchange_weak`, with the coordinate in place of the pointer.
+* **EMIT-158** In a pixel stage, the strong form's loop keeps a helper invocation from spinning on what its atomics read, which is undefined ([why](why/emitting.md#emit-158)).
+  MSL's loop tests `simd_is_helper_thread()` first, so a helper never enters it.
+  HLSL's has no loop, and WGSL refuses the pixel stage (EMIT-159).
+  A compute and a ray-tracing stage have no helpers, so their loop has no such test.
+* **EMIT-159** `wgsl` refuses a pixel stage that calls `compare_exchange_strong` as `target-lacks-feature`, whose detail says why and what to write instead.
+  WGSL has no test for a helper invocation, so no loop it holds could keep one out ([why](why/emitting.md#emit-159)).
+  A weak compare-exchange is one call, which a helper leaves at once, and a compute stage has no helpers, so WGSL writes both.
 * **EMIT-131** A barrier is the target's own execution barrier with one kind of memory, and MSL's one `threadgroup_barrier` names it by its `mem_flags`.
   `workgroup_barrier` is `GroupMemoryBarrierWithGroupSync` in HLSL, `workgroupBarrier` in WGSL and `mem_threadgroup` in MSL.
   `storage_barrier` is `DeviceMemoryBarrierWithGroupSync`, `storageBarrier` and `mem_device`.
   `texture_barrier` is `DeviceMemoryBarrierWithGroupSync`, `textureBarrier` and `mem_texture`.
 * **EMIT-121** A binding array is its element's declaration with the length after the name, at its first slot, and the resources after it start `count` slots later.
   HLSL wraps an index marked `nonuniform` in `NonUniformResourceIndex`, which DXC carries into SPIR-V as `NonUniform`.
+  MSL needs no mark, and every target writes an index marked `uniform` as the plain index (CHK-394).
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|
@@ -92,6 +107,7 @@ struct target_ {
 | `float3`, `vec3`, `pos3` | `float3` | `vec3f` | `float3` |
 | `float4`, `hpos4` | `float4` | `vec4f` | `float4` |
 | `mat4` | `float4x4` | `mat4x4f` | `float4x4` |
+| `mat3` | `float3x3` | `mat3x3f` | `float3x3` |
 | `int` | `int` | `i32` | `int` |
 | `bool` | `bool` | `bool` | `bool` |
 | `half`, `half3` | `float16_t`, `float16_t3` | `f16`, `vec3h` | `half`, `half3` |
@@ -266,6 +282,8 @@ binding affine:
 * **EMIT-43** HLSL declares every matrix member `column_major` and writes a product `mul(a, b)`; WGSL writes `a * b`, for a matrix times a vector and for a matrix times a matrix.
 * **EMIT-44** `transform_position(m, p)` is the product of `m` and the four-vector `(p, 1.0)`.
 * **EMIT-45** `transform_direction(m, v)` is the `xyz` of the product of `m` and `(v, 0.0)`.
+* **EMIT-156** `mat3(c0, c1, c2)` is `transpose(float3x3(c0, c1, c2))` in HLSL, whose constructor takes rows, and the target's own constructor of three columns in WGSL and MSL.
+  A product of a `mat3` is written as EMIT-43 writes a `mat4`'s, and no memory holds one, so no declaration of a block or a buffer names it (CHK-391).
 
 ## The text
 
@@ -298,7 +316,7 @@ binding affine:
   On dx12 a pixel stage writing `.greater_equal` or `.less_equal` takes its `@position` as `noperspective centroid`, which DXIL requires of one.
 * **EMIT-117** A `discard` is `discard;` in HLSL and WGSL, and `discard_fragment();` in MSL.
 * **EMIT-124** A float `%` is `fmod(a, b)` in MSL, which has no `%` of floats; HLSL's and WGSL's `%` of floats already mean EVAL-83's remainder.
-* **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL.
+* **EMIT-52** Every other builtin function is a call of the target's function of that name, and `mix` is `lerp` in HLSL, with a scalar `t` or a vector one alike.
 * **EMIT-53** A construction of a builtin type is a call of the target's type, on one line: `float3(x, y, z)`, `vec3f(x, y, z)`.
 * **EMIT-73** The operand of a prefix `-` that is no name, call or member stands in parentheses, so `-(-0.4)` never reads as a decrement.
 * **EMIT-74** How a builtin is written is a field of its registry record: a call under a name per target, an infix or a prefix operator, or a writer of its own ([why](why/emitting.md#emit-74)).
@@ -526,7 +544,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 | `too-many-samplers` | EMIT-133 |
 | `too-many-acceleration-structures` | EMIT-135 |
 | `ray-data-conflict` | EMIT-139 |
-| `target-lacks-feature` | EMIT-109 |
+| `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-159 |
 
 ## Open
 
@@ -535,7 +553,8 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
 * Whether `@layout` also promises a buffer element's layout, which EMIT-111 places today without a promise.
 * A struct member of a `@layout(.cpp)` block, which HLSL would read back by building the struct in a local field by field.
-* `mat3`, which SGL has no type for yet: its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
+* `mat3` in GPU memory, which the checker refuses today (CHK-391).
+  Its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
   The host holds a block's as `slib::gpu_mat3` and a buffer's as `tg::mat3f`, which is those 36 bytes.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.
 * Whether the size of an inline block has to agree between targets as its offsets do; WGSL rounds it up to 16 bytes.

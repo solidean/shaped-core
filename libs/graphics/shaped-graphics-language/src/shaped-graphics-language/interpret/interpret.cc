@@ -96,6 +96,14 @@ struct machine
     cc::vector<workgroup_cell> workgroup;
     /// Parallel to `out.buffers`: whether the run stored to that buffer, which is what the outcome keeps.
     cc::vector<bool> is_stored;
+    /// Each weak compare-exchange of the source that met `expected` so far, and whether that last attempt failed.
+    /// One of the source is one wherever it was inlined (EVAL-98).
+    struct weak_exchange
+    {
+        origin from;
+        bool failed = false;
+    };
+    cc::vector<weak_exchange> weak_exchanges;
     /// The value a `leave` or a `return` under way carries.
     value carried;
     int depth = 0;
@@ -162,15 +170,29 @@ struct machine
         return {};
     }
 
+    /// An index is one `int` or one `uint` (CHK-287).
+    [[nodiscard]] static bool is_index(value const& index)
+    {
+        return index.leaves.size() == 1
+            && (index.leaves[0].kind == value_kind::scalar_int || index.leaves[0].kind == value_kind::scalar_uint);
+    }
+
+    /// The element an index names, which a `uint` past the `int`s names as well.
+    [[nodiscard]] static isize index_value(value const& index)
+    {
+        auto const& leaf = index.leaves[0];
+        return leaf.kind == value_kind::scalar_uint ? isize(leaf.as_uint()) : isize(leaf.as_int());
+    }
+
     /// Where element `index` of an array of `type` starts among its scalars; outside it is a program error (EVAL-90).
     flow element_offset(type_id type, value const& index, isize& offset, isize& count)
     {
-        if (index.leaves.size() != 1 || index.leaves[0].kind != value_kind::scalar_int)
-            return type_error("an array index that is no int");
+        if (!is_index(index))
+            return type_error("an array index that is no int and no uint");
         if (!is_valid(type) || m.at(type).kind != type_kind::array)
             return type_error("an element of what is no array");
         auto const& info = m.at(type);
-        auto const at = isize(index.leaves[0].as_int());
+        auto const at = index_value(index);
         if (at < 0 || at >= info.count)
             return fail(run_status::program_error,
                         cc::format("the index {} is out of bounds of {}", at, m.name_of(type)));
@@ -222,7 +244,7 @@ struct machine
             in.push_back_range(v.leaves);
         }
 
-        auto const is_store = !is_valid(record.result);
+        auto const is_store = !is_valid(record.result) && !record.gives_prelude_struct;
         if (where.cell >= 0)
         {
             auto const& cell = workgroup[where.cell];
@@ -240,6 +262,21 @@ struct machine
         record.evaluate(in, after);
         if (after.size() != 1)
             return type_error(cc::format("an atomic '{}' whose evaluator gave no one value", record.name));
+        // EVAL-98: a weak compare-exchange that meets `expected` fails every other time, starting with the first
+        auto is_spurious = false;
+        if (record.gives_prelude_struct && in.size() == 3 && in[0].bits == in[1].bits && limits.fails_weak_exchanges)
+        {
+            auto* site = static_cast<weak_exchange*>(nullptr);
+            for (auto& w : weak_exchanges)
+                if (w.from == x.from)
+                    site = &w;
+            if (site == nullptr)
+                site = &weak_exchanges.emplace_back(weak_exchange{.from = x.from});
+            is_spurious = !site->failed;
+            site->failed = is_spurious;
+            if (is_spurious)
+                after[0] = in[0];
+        }
         if (where.cell >= 0)
         {
             workgroup[where.cell].memory.leaves[offset] = after[0];
@@ -255,6 +292,8 @@ struct machine
         result.leaves.clear();
         if (!is_store)
             result.leaves.push_back(in[0]);
+        if (record.gives_prelude_struct)
+            result.leaves.push_back({.kind = value_kind::boolean, .bits = in[0].bits == in[1].bits && !is_spurious});
         out.trace.push_back(result);
         return {};
     }
@@ -356,7 +395,8 @@ struct machine
         if (is_typed)
             record->evaluate(in, result.leaves);
 
-        auto is_result_typed = is_valid(record->result) || result.leaves.empty();
+        // a prelude struct's leaves are typed by its fields, which `leaf_count_of` below counts
+        auto is_result_typed = is_valid(record->result) || result.leaves.empty() || record->gives_prelude_struct;
         if (is_valid(record->result))
         {
             auto const& returned = m.builtins->at(record->result);
@@ -415,8 +455,8 @@ struct machine
         auto index = value();
         if (auto const f = eval(b.index, index); !f.is_normal())
             return f;
-        if (index.leaves.size() != 1 || index.leaves[0].kind != value_kind::scalar_int)
-            return type_error("a buffer index that is no int");
+        if (!is_index(index))
+            return type_error("a buffer index that is no int and no uint");
         if (!is_known(e, b.buffer))
             return type_error("an expression id that names nothing");
         auto const* const named = e.at(b.buffer).node.try_as<flat_binding_member>();
@@ -435,7 +475,7 @@ struct machine
             return type_error(cc::format("a buffer of {} scalars, which holds no whole number of its elements",
                                          out.buffers[buffer].leaves.size()));
         // EVAL-90: no target agrees on an index past the end, so a correct program never has one
-        auto const at = isize(index.leaves[0].as_int());
+        auto const at = index_value(index);
         auto const length = out.buffers[buffer].leaves.size() / count;
         if (at < 0 || at >= length)
             return fail(run_status::program_error,

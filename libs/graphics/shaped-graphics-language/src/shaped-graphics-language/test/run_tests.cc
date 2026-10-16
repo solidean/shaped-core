@@ -422,6 +422,45 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
                 });
         }
     }
+
+    // CHK-397: an entry point takes the diagnostics judged of its inlined body, which a compile of it would report
+    auto expecting = cc::vector<symbol_id>();
+    for (auto const& x : m.entry_expectations)
+        if (!check::holds(expecting, x.function))
+            expecting.push_back(x.function);
+    for (auto const function : expecting)
+    {
+        auto captured = cc::vector<located_diagnostic>();
+        for (auto const& d : diagnostics)
+            if (check::holds(d.entry_points, function))
+                captured.push_back(d);
+        // one that another entry point has too stays that one's
+        diagnostics.remove_all_where([&](located_diagnostic const& d)
+                                     { return d.entry_points.size() == 1 && d.entry_points[0] == function; });
+        for (auto& d : diagnostics)
+            d.entry_points.remove_all_where([&](symbol_id e) { return e == function; });
+
+        for (auto const& x : m.entry_expectations)
+        {
+            if (x.function != function)
+                continue;
+            auto const wants_warning = x.expectation.kind == expectation_kind::warning;
+            auto is_met = false;
+            for (auto const& d : captured)
+                is_met = is_met
+                      || ((d.what.level == severity::warning) == wants_warning
+                          && cc::glob_matches(x.expectation.pattern, to_string(d.what.kind), cc::glob_option::text));
+            if (!is_met)
+                diagnostics.push_back({
+                    .what = {.kind = diagnostic_kind::unmet_expectation,
+                             .level = default_severity_of(diagnostic_kind::unmet_expectation),
+                             .where = x.expectation.where},
+                    .file = x.file,
+                    .detail = cc::format("no {} of kind {} is judged of this entry point",
+                                         wants_warning ? "warning" : "error", x.expectation.pattern),
+                });
+        }
+    }
 }
 
 located_diagnostic sgl::test::diagnostic_of(checked_module const& m, test_result const& r)

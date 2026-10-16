@@ -115,13 +115,18 @@ TEST("sgl footprint - a pin the code disagrees with is unmet, and says what the 
     CHECK(reports.contains("the footprint of 'main' is \"work.values: write\""));
 }
 
-TEST("sgl footprint - only an entry point has a footprint to pin, and it pins nothing else")
+TEST("sgl footprint - only an entry point has a footprint to pin, and it pins nothing but that and its diagnostics")
 {
     CHECK(reports_for_entry(R"(@expect(footprint = "work: read")
 fun helper(){work} -> float => work.scale
 )")
               .contains("only an entry point has a footprint to pin"));
+    // CHK-397: an entry point expects a diagnostic, and a helper has none of its own to expect
     CHECK(reports_for_entry(R"(@expect(error = "x")
+fun helper(){work} -> float => work.scale
+)")
+              .contains("only a test and an entry point expect a diagnostic"));
+    CHECK(reports_for_entry(R"(@expect(.fail)
 @compute(64) fun main(@thread_id id: int3){work}:
     work.values[id.x] = 1.0
 )")

@@ -620,6 +620,13 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
   Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
 - **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
+  `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-157).
+  `compare_exchange_weak(e, d)` gives `exchange_result[T]`: `old`, and `exchanged`, the only proof it stored; retry while `old == e and not exchanged`.
+  Both are relaxed: publishing what a claim guards needs a barrier.
+  Atomics stand in pixel, compute, raygen, miss, closest-hit and callable stages; in an any hit or an intersection they are `stage-not-allowed` (CHK-398).
+  In a pixel stage a helper's atomics store nothing and read garbage; the strong loop skips one in MSL (EMIT-158).
+  WebGPU refuses a pixel stage's `compare_exchange_strong` (EMIT-159): WGSL cannot tell a helper, so write the weak one in a loop, or use compute.
+  A test fails a weak one spuriously the first time each call meets `e` (EVAL-98), so a missing retry loop fails its test.
 - **`img[xy]` is the image's `load`, and `img[xy] = v` its `store`** (CHK-367): the check pass records the call at the subscript, and `m.texel_stores` holds each assignment's.
   `@atomic` on a `mut` image of `.r32_uint` or `.r32_sint` makes `img[xy]` an atomic, `img[xy].max(v)` (CHK-372), which the flat tree calls as the prelude's internal `texel_max`.
   `@coherent` on a `mut buffer` or image is `globallycoherent` in HLSL and `coherent(device)` in MSL (CHK-368); both features are WGSL's `target-lacks-feature`.

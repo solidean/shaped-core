@@ -90,6 +90,23 @@ test:
 @expect(error = "no-matching-overload")
 test select(bool2(true, false), float3(1.0), float3(2.0)).x == 1.0
 
+// a bool picks a whole value of every type a bool vector picks among, scalars and vectors alike
+test:
+    let c = 2 > 1
+    let k = 5u
+    select(c, k, 7 as uint) == 5u
+    select(not c, k, 7u) == 7u
+    select(c, -1, 1) == -1
+    select(c, float3(1.0), float3(2.0)) == float3(1.0)
+    select(c, uint2(1u, 2u), uint2(3u)) == uint2(1u, 2u)
+    select(c, false, true) == false
+
+// the condition comes first, which is not WGSL's order, and the detail of the error says so
+@expect(error = "no-matching-overload")
+test:
+    let c = true
+    select(1.0, 2.0, c) == 2.0
+
 struct pixel_input:
     @position position: hpos4
 
@@ -102,4 +119,6 @@ struct pixel_input:
     let slope = ddx(x)
     let edge = if fract(x / 8.0) < 0.5 => slope else 0.0
     let side = select(p.position.xy > float2(32.0, 32.0), float2(1.0), float2(0.25))
-    return { color = float4(tone, edge, side.x, side.y) }
+    let band = select(x > 16.0, 3u, 1u)
+    let lift = select(tone > 0.5, float3(0.25), float3(0.0))
+    return { color = float4(tone + lift.x, edge, side.x * (band as float), side.y) }

@@ -229,3 +229,43 @@ It counts in 4-byte components, so a `half` at byte 2 has no spelling.
 It stands only in a `cbuffer`, whose members are globals rather than fields of the `ConstantBuffer` every other block is read through.
 Neither is needed: once no field crosses a row and a padding field fills each gap, dx12's own packing puts every field right behind the one before, which is where the form placed it.
 A memory form on every target, rather than only where a target's own rule disagrees, keeps one shape of text for a promised layout.
+
+## EMIT-157
+
+WGSL and MSL name only a weak compare-exchange, so SGL offers the weak one as it is and builds the strong one on it.
+Both are named for what they promise, so no call reads as one while meaning the other.
+The weak one has to say whether it stored, since a spurious failure reads the expected value and stores nothing.
+WGSL's own result is a struct no program can name, and the WGSL text writes every local's type, so `exchange_result[T]` is SGL's own and every target fills it.
+HLSL's `InterlockedCompareExchange` is strong, and DXC writes SPIR-V's `OpAtomicCompareExchange`, which is strong too; strong satisfies weak, so HLSL needs nothing more.
+SPIR-V's own `OpAtomicCompareExchangeWeak` is deprecated, and "has the same semantics as `OpAtomicCompareExchange`".
+WGSL says "the `exchanged` member of the result structure may be `false` even if the `old_value` member equals `cmp`" (§ 17.8.5).
+MSL describes its `atomic_compare_exchange_weak_explicit` by the strong effect alone (§ 6.16.4.4), but its name and C++ allow the spurious failure, so SGL assumes it.
+
+The strong loop retries only a failure that read `expected`, so a real conflict, which read anything else, ends it at once.
+No invocation ever waits there for another to do something, which is what deadlocks a spin lock in a SIMD group whose lanes cannot progress apart.
+Each lane runs its own attempts and leaves when its own attempt says so, so lanes leaving at different iterations only reconverge after it.
+It is lock-free rather than wait-free: a device may in principle fail a lane spuriously again and again, and no spec bounds it.
+Tint and Naga write WGSL's weak one as the strong instruction on D3D and Vulkan, so only Metal could fail it spuriously, and its spec describes no such failure.
+So the loop almost always runs once.
+In WGSL a `break` is its only exit, so its behavior is {Next}, and the control flow after it is the control flow before it (§ 15.2.6), which keeps a barrier after the call legal.
+MSL and HLSL have no static uniformity rule, and every thread leaves the loop, so a barrier after it is reached by all.
+
+## EMIT-158
+
+A helper invocation of a pixel stage runs for derivatives, or goes on after a `discard`, and its atomics store nothing.
+What they read is no value at all: Vulkan says "values returned by atomic instructions in helper invocations are undefined", and WGSL that they "return indeterminate results" (§ 15.4).
+D3D's helper pixels read 0 from an atomic that returns a value, and a pixel after its `discard` reads an undefined one (D3D11.3 functional spec, § 16.10 and § 16.13).
+MSL says helper threads' "stores and atomic operations [...] have no effect on the underlying memory" (§ 6.11.1), and nothing about what they read.
+So in a helper the strong loop's test, a failure that read `expected`, may hold forever, and a loop that never ends hangs the GPU.
+MSL tells a helper by `simd_is_helper_thread()`, so the loop skips one, and gives `expected`, as meaningless as any value a helper reads.
+HLSL's strong compare-exchange is one instruction, so it needs neither; SM 6.6's `IsHelperLane` would be the test if it ever did.
+A compute stage has no helpers, so its loop needs no test.
+
+## EMIT-159
+
+WGSL has no test for a helper invocation, so its strong loop cannot be kept from one.
+Bounding the loop would end it, at the price of a strong compare-exchange that may give `expected` without having stored, which is the weak one's promise under the strong one's name.
+So WebGPU refuses the pixel stage instead, and the shader says what it means.
+A weak compare-exchange in a retry loop of its own puts the loop in the shader's hands, where a helper's meaningless result is the shader's to handle.
+A compute stage has no helpers, so it takes the strong one on WebGPU as everywhere.
+The refusal is per target and per stage, as EMIT-122's is, since no `require` names what WebGPU lacks here, and every other target writes the stage.

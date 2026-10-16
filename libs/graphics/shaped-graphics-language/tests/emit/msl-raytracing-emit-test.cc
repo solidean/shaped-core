@@ -56,7 +56,7 @@ TEST("sgl emit msl - every stage of sg's ray-tracing pipeline writes, and all ag
         names.appendf("{} ", entry);
     CHECK(names
           == "primary sky open_sky shade cutout shadow_cutout sphere shade_sphere pictured_primary pictured_sky "
-             "sgl_spheres_surface "
+             "counted_primary counted_shade counted_sky sgl_spheres_surface "
              "sgl_spheres_occlusion sgl_empty_closest_hit ");
 
     auto const expected = cc::string("struct sgl_ray_data\n{\n"

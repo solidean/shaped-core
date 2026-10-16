@@ -297,6 +297,26 @@ struct footprint_pin
     source_span where;
 };
 
+/// One access of a binding array by index in one entry point's inlined body, which `judge_indices` judges with every
+/// other access the same index text makes (CHK-300, CHK-395).
+struct index_use
+{
+    /// The entry point's function.
+    symbol_id entry = symbol_id::none;
+    /// The index as written, its mark included: what every inlined copy of one access shares.
+    origin index;
+    /// The marked argument where there is a mark, and the index itself where there is none.
+    origin written;
+    builtins::index_mark mark = {};
+    /// Proven the same in every invocation; proven to vary, by what each invocation is handed (CHK-393); or neither.
+    bool is_uniform = false;
+    bool varies = false;
+    /// What made it not uniform, for a note.
+    related_note why;
+    /// The calls this copy was inlined through, outermost first.
+    cc::vector<call_site> through;
+};
+
 /// One `use` line of a file: the name it binds, and the module that name stands for.
 struct module_use
 {
@@ -406,6 +426,8 @@ struct checker
     cc::vector<require_line> require_lines;
     /// Every entry point's footprint pin, judged once the entry points are flattened (CHK-267).
     cc::vector<footprint_pin> footprint_pins;
+    /// Every access of a binding array by index, in each entry point that reaches it.
+    cc::vector<index_use> index_uses;
 
     // ---- shared helpers (check.cc) ----------------------------------------------------------------------------------
 
@@ -676,6 +698,8 @@ struct checker
     [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
     /// A checked index's value when it is an int literal or names a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
+    /// The same of a `uint` index: a literal with its `u` suffix, or a `const` of `uint`.
+    [[nodiscard]] cc::optional<i64> constant_unsigned_index(i32 file, ast::expr_id expr) const;
     /// A texture, image or sampler type, interned like `buffer_type`; `info` needs no `spelled`.
     [[nodiscard]] type_id resource_type(type_info info);
     /// `acceleration_structure[.geometry]` (CHK-320).
@@ -716,6 +740,12 @@ struct checker
     void index_builtin_symbols();
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
     void judge_uniformity(flat_entry_point const& structured);
+    /// CHK-300, CHK-395: every index into a binding array, judged over the copies the entry points inlined of it.
+    void judge_indices();
+    /// CHK-396: one diagnostic for each that several entry points were judged to have alike, which names them all.
+    void merge_entry_diagnostics();
+    /// CHK-397: an entry point that expects a diagnostic is judged by it alone, and is never built.
+    void drop_expecting_entry_points();
     /// CHK-270, CHK-311 and CHK-312: every constant of the tree folded, and what WGSL would refuse of it reported.
     void judge_constants(flat_entry_point const& structured);
     /// The prelude symbol that declares `id`; `none` for a record no declaration names.
@@ -743,6 +773,19 @@ struct checker
     [[nodiscard]] cc::string sixteen_bit_path(type_id type) const;
     /// CHK-383: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
     void judge_edge_16_bit(i32 file, source_span where, type_id type);
+    /// The first value of function bodies alone that `type` holds, such as a `mat3`, through struct members, arrays and
+    /// a buffer's element; `path` is empty when it holds none (CHK-391).
+    struct local_only_found
+    {
+        /// `: mat3` for `type` itself, `.inner.basis: mat3` for a member.
+        cc::string path;
+        /// Why no memory holds it yet, from its record.
+        cc::string_view reason;
+        type_id type = type_id::none;
+    };
+    [[nodiscard]] local_only_found local_only_path(type_id type) const;
+    /// CHK-391: refuses each value of function bodies alone a struct crossing a stage edge holds.
+    void judge_edge_local_only(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).
@@ -750,8 +793,8 @@ struct checker
 
     // ---- footprint pins (check_footprint.cc) ------------------------------------------------------------------------
 
-    /// Records the `@expect(footprint = "...")` among the attributes of function `id`; any other `@expect` there is
-    /// reported, since a function's only expectation is its footprint.
+    /// Records the `@expect(footprint = "...")` among the attributes of function `id`, and an entry point's expected
+    /// diagnostics (CHK-397); any other `@expect` there is reported.
     void read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_entry_point);
     /// `unmet-expectation` for every pin whose entry point's footprint says otherwise (CHK-267).
     void judge_footprint_pins();
@@ -1005,6 +1048,14 @@ struct checker
                           ast::expr_id call,
                           cc::span<symbol_id const> candidates,
                           call_arguments const& arguments);
+    /// What a call that matched none of `candidates` was one step from, as a clause its detail ends in; empty for none.
+    /// A candidate that a `mut` mark alone keeps from matching names the mark (CHK-316).
+    /// One whose first parameter is a condition, and that the arguments would match with the last one moved to the
+    /// front, says that the condition comes first, as WGSL's `select` does not have it (CHK-365).
+    [[nodiscard]] cc::string miss_hint(i32 file,
+                                       cc::span<symbol_id const> candidates,
+                                       call_arguments const& arguments,
+                                       cc::string_view spelling);
     /// Remembers how call `id` fills the parameters of `callee`, which is what the flat tree is written from.
     void record_call(i32 file,
                      ast::expr_id id,
