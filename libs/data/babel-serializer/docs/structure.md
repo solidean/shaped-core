@@ -118,9 +118,14 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
   It chose OpenPBR over metallic-roughness precisely because those five land on `transmission_*`, `coat_*` and `fuzz_*` natively.
   None of them cross today, so that payoff is unrealised and every sv import says so in its issues.
   Typed fields on `material` rather than raw JSON, since the set is small, stable and specified.
-- `[planned]` **extensions / extras raw access** — a `read_options{ bool keep_json_document; }` plus an optional `json::document` member and a per-object `i32 json_node`.
-  Deliberately not in v1: retaining the whole JSON document alongside the parsed structure doubles memory against read-once-into-a-native-structure.
-  A stored `json::ref` would also dangle across a `cc::move(data)`.
+- `[done]` **`EXT_meshopt_compression`**: a compressed bufferView is decoded during read, over the vendored meshoptimizer decoders, and `view_of` reads it like any other.
+- `[done]` **extensions / extras raw access**: `read_options::keep_json_document` keeps `data::json`, every element records its `json_node`, and `data::json_of(element)` is the ref.
+  Opt-in, since the document costs about as much memory again as the parsed structure.
+  A stored `json::ref` dangles across a `cc::move(data)`; `json_of` called afresh does not.
+- `[done]` **registered extensions**: `read_options::extensions` names the extensions a caller implements, so a file may require them.
+  One that changes bytes registers a hook for bufferViews, accessors or both, and `view_of` reads what it decoded.
+  EXT_meshopt_compression runs through the same hooks, as the reader's own registration.
+  Images, textures and materials have no hooks: an extension on them adds information, which the caller reads through `json_of`.
 - `[planned]` **a node's composed local transform** — blocked on typed-geometry, which has no TRS composition yet.
   The reader stores `matrix` or TRS in whichever form the file used and composes nothing; [lower-library-gaps.md](lower-library-gaps.md) has that gap and the rest.
 - `[planned]` **writer**.

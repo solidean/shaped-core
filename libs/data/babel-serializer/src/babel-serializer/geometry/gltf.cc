@@ -6,6 +6,7 @@
 #include <clean-core/common/utility.hh> // cc::move, cc::unit, cc::memcpy
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/format.hh>
+#include <meshoptimizer.h>
 
 // The parse is two stages, and the split is what makes the zero-copy promise work:
 // the container stage only locates the JSON chunk and the BIN chunk inside the input bytes, then the document
@@ -23,10 +24,102 @@ constexpr u32 glb_magic = 0x46546C67;      // 'g','l','T','F' little-endian
 constexpr u32 glb_chunk_json = 0x4E4F534A; // 'J','S','O','N'
 constexpr u32 glb_chunk_bin = 0x004E4942;  // 'B','I','N',0
 
-/// Whether this reader interprets `name` — the one extension a file may require of it.
+/// Whether this reader interprets `name` — the extensions a file may require of it.
 [[nodiscard]] bool is_implemented_extension(cc::string_view name)
 {
-    return name == "KHR_lights_punctual";
+    return name == "KHR_lights_punctual" || name == "EXT_meshopt_compression";
+}
+
+/// EXT_meshopt_compression's packed bytes, decoded and unfiltered: `m.count` elements of `m.byte_stride` bytes.
+/// meshoptimizer asserts on a stride or count its codec cannot take, so each is checked against the extension's rules first.
+[[nodiscard]] cc::result<cc::pinned_data<byte const>> decode_meshopt(gltf::meshopt_compression const& m,
+                                                                     cc::span<byte const> packed)
+{
+    using gltf::meshopt_filter;
+    using gltf::meshopt_mode;
+
+    auto const stride = m.byte_stride;
+    if (m.mode == meshopt_mode::attributes && (stride % 4 != 0 || stride > 256))
+        return cc::error(
+            cc::format("EXT_meshopt_compression: attributes of stride {} are not a multiple of 4 up to 256", stride));
+    if (m.mode != meshopt_mode::attributes && stride != 2 && stride != 4)
+        return cc::error(cc::format("EXT_meshopt_compression: indices of {} bytes are neither 2 nor 4", stride));
+    if (m.mode == meshopt_mode::triangles && m.count % 3 != 0)
+        return cc::error(cc::format("EXT_meshopt_compression: {} triangle indices are no whole triangles", m.count));
+    if (m.mode != meshopt_mode::attributes && m.filter != meshopt_filter::none)
+        return cc::error("EXT_meshopt_compression: a filter applies to attributes alone");
+
+    auto out = cc::pinned_data<byte>::create_uninitialized(isize(m.count * stride));
+    auto const* const src = reinterpret_cast<unsigned char const*>(packed.data());
+    auto const count = size_t(m.count);
+    auto const status = m.mode == meshopt_mode::attributes
+                          ? meshopt_decodeVertexBuffer(out.data(), count, size_t(stride), src, size_t(packed.size()))
+                      : m.mode == meshopt_mode::triangles
+                          ? meshopt_decodeIndexBuffer(out.data(), count, size_t(stride), src, size_t(packed.size()))
+                          : meshopt_decodeIndexSequence(out.data(), count, size_t(stride), src, size_t(packed.size()));
+    if (status != 0)
+        return cc::error(
+            cc::format("EXT_meshopt_compression: the packed bytes do not decode (meshoptimizer says {})", status));
+
+    switch (m.filter)
+    {
+    case meshopt_filter::none:
+        break;
+    case meshopt_filter::octahedral:
+        if (stride != 4 && stride != 8)
+            return cc::error(
+                cc::format("EXT_meshopt_compression: an octahedral filter needs a stride of 4 or 8, not {}", stride));
+        meshopt_decodeFilterOct(out.data(), count, size_t(stride));
+        break;
+    case meshopt_filter::quaternion:
+        if (stride != 8)
+            return cc::error(
+                cc::format("EXT_meshopt_compression: a quaternion filter needs a stride of 8, not {}", stride));
+        meshopt_decodeFilterQuat(out.data(), count, size_t(stride));
+        break;
+    case meshopt_filter::exponential:
+        meshopt_decodeFilterExp(out.data(), count, size_t(stride));
+        break;
+    case meshopt_filter::color:
+        if (stride != 4 && stride != 8)
+            return cc::error(
+                cc::format("EXT_meshopt_compression: a color filter needs a stride of 4 or 8, not {}", stride));
+        meshopt_decodeFilterColor(out.data(), count, size_t(stride));
+        break;
+    }
+    return out.as_bytes();
+}
+
+/// EXT_meshopt_compression as the reader's own extension: the view's packed bytes, from the buffer the extension names.
+[[nodiscard]] gltf::decoded_bytes decode_meshopt_view(gltf::buffer_view_decode const& c)
+{
+    auto const& view = c.doc.buffer_views[int(c.view)];
+    if (!view.meshopt.has_value())
+        return cc::error("EXT_meshopt_compression: the view's extension did not parse");
+    auto const& m = view.meshopt.value();
+
+    auto const* const source = c.doc.find(m.buffer);
+    if (source == nullptr)
+        return cc::error("EXT_meshopt_compression: names no buffer");
+    if (!source->resolved)
+        return cc::optional<cc::pinned_data<byte const>>(); // its packed bytes were never fetched
+    if (!source->data.span().is_subspan({.offset = m.byte_offset, .size = m.byte_length}))
+        return cc::error(cc::format("EXT_meshopt_compression: the packed bytes lie outside buffer {}", int(m.buffer)));
+
+    auto decoded = decode_meshopt(m, source->data.span().subspan({.offset = m.byte_offset, .size = m.byte_length}));
+    if (decoded.has_error())
+        return cc::error(cc::move(decoded).error());
+    return cc::optional<cc::pinned_data<byte const>>(cc::move(decoded).value());
+}
+
+/// The extensions this reader implements through the same hooks a caller's use.
+[[nodiscard]] cc::span<gltf::extension const> builtin_extensions()
+{
+    static auto const meshopt = &decode_meshopt_view;
+    static gltf::extension const builtins[] = {
+        {.name = "EXT_meshopt_compression", .decode_buffer_view = meshopt},
+    };
+    return builtins;
 }
 
 // JSON member readers.
@@ -263,6 +356,33 @@ struct gltf_parser
 
     gltf::data result;
 
+    /// Whether the caller implements `name`, by `read_options::extensions`.
+    [[nodiscard]] bool is_caller_extension(cc::string_view name) const
+    {
+        for (auto const& e : opts.extensions)
+            if (e.name == name)
+                return true;
+        return false;
+    }
+
+    /// The caller's extensions must name each one once, and none this reader implements itself.
+    [[nodiscard]] cc::result<cc::unit> check_registered_extensions() const
+    {
+        for (auto i = isize(0); i < opts.extensions.size(); ++i)
+        {
+            auto const name = opts.extensions[i].name;
+            if (name.empty())
+                return cc::error("glTF read: a registered extension has no name");
+            if (is_implemented_extension(name))
+                return cc::error(cc::format(
+                    "glTF read: extension '{}' is implemented by this reader and cannot be registered", name));
+            for (auto j = isize(0); j < i; ++j)
+                if (opts.extensions[j].name == name)
+                    return cc::error(cc::format("glTF read: extension '{}' is registered twice", name));
+        }
+        return cc::unit{};
+    }
+
     // issues
 public:
     /// Record something skipped, unresolvable or tolerated.
@@ -435,24 +555,25 @@ public:
         auto parsed = json::read(json_bytes);
         CC_RETURN_IF_ERROR(parsed).with_context("while parsing the glTF JSON");
 
-        auto const document = cc::move(parsed).value();
+        auto document = cc::move(parsed).value();
         auto const root = document.root();
         if (!root.is_object())
             return cc::error("glTF parse error: the document root must be a JSON object");
 
         CC_RETURN_IF_ERROR(parse_asset(root));
 
+        CC_RETURN_IF_ERROR(check_registered_extensions());
         collect_strings(root["extensionsUsed"], result.extensions_used);
         collect_strings(root["extensionsRequired"], result.extensions_required);
         for (auto const& extension : result.extensions_required)
-            if (!is_implemented_extension(extension))
+            if (!is_implemented_extension(extension) && !is_caller_extension(extension))
                 return cc::error(cc::format("glTF parse error: the file requires extension '{}', which this reader "
                                             "does not implement",
                                             extension));
 
         // Every extension but the implemented one is dropped on the floor, and each is on the record.
         for (auto const& extension : result.extensions_used)
-            if (!is_implemented_extension(extension))
+            if (!is_implemented_extension(extension) && !is_caller_extension(extension))
                 add_issue(gltf::issue_kind::unsupported,
                           cc::format("extension '{}' is used by the file but not interpreted", extension));
 
@@ -473,7 +594,12 @@ public:
         parse_samplers(root);
 
         CC_RETURN_IF_ERROR(validate_indices());
+        CC_RETURN_IF_ERROR(decode_extensions(document));
         CC_RETURN_IF_ERROR(resolve_images());
+
+        // Handed over last: every ref above points into `document`, and none is used after this.
+        if (opts.keep_json_document)
+            result.json = cc::move(document);
         return cc::unit{};
     }
 
@@ -517,12 +643,18 @@ public:
         {
             auto const entry = buffers[i];
             auto buf = gltf::buffer();
+            buf.json_node = entry.node_index();
             buf.uri = string_member(entry, "uri");
             buf.byte_length = int_member(entry, "byteLength");
             if (buf.byte_length < 0)
                 return cc::error(cc::format("glTF parse error: buffer {} declares a negative byteLength", i));
 
-            if (buf.uri.empty())
+            if (bool_member(entry["extensions"]["EXT_meshopt_compression"], "fallback"))
+            {
+                // A placeholder every view of which decodes from another buffer: there is nothing in it worth fetching.
+                buf.is_fallback = true;
+            }
+            else if (buf.uri.empty())
             {
                 // No URI is legal only for the GLB BIN chunk, which the spec binds to buffer 0.
                 if (!has_bin_chunk)
@@ -584,6 +716,7 @@ public:
         {
             auto const entry = views[i];
             auto view = gltf::buffer_view();
+            view.json_node = entry.node_index();
             view.buffer = index_member<gltf::buffer_index>(entry, "buffer");
             view.byte_offset = int_member(entry, "byteOffset");
             view.byte_length = int_member(entry, "byteLength");
@@ -594,7 +727,132 @@ public:
             if (view.byte_offset < 0 || view.byte_length < 0 || view.byte_stride < 0)
                 return cc::error(cc::format("glTF parse error: bufferView {} has a negative offset, length or stride", i));
 
+            if (auto const ext = entry["extensions"]["EXT_meshopt_compression"]; ext.is_object())
+            {
+                auto packed = parse_meshopt(ext, i);
+                CC_RETURN_IF_ERROR(packed);
+                view.meshopt = cc::move(packed).value();
+            }
+
             result.buffer_views.push_back(cc::move(view));
+        }
+        return cc::unit{};
+    }
+
+    /// A bufferView's EXT_meshopt_compression object; an unknown mode or filter fails the read, since the bytes need it.
+    static cc::result<gltf::meshopt_compression> parse_meshopt(json::ref ext, isize view)
+    {
+        auto m = gltf::meshopt_compression();
+        m.buffer = index_member<gltf::buffer_index>(ext, "buffer");
+        m.byte_offset = int_member(ext, "byteOffset");
+        m.byte_length = int_member(ext, "byteLength");
+        m.byte_stride = int_member(ext, "byteStride");
+        m.count = int_member(ext, "count");
+        if (m.byte_offset < 0 || m.byte_length < 0 || m.byte_stride <= 0 || m.count < 0)
+            return cc::error(cc::format("glTF parse error: bufferView {}'s EXT_meshopt_compression has a negative "
+                                        "offset, "
+                                        "length or count, or no stride",
+                                        view));
+
+        auto const mode = string_member(ext, "mode");
+        if (mode == "ATTRIBUTES")
+            m.mode = gltf::meshopt_mode::attributes;
+        else if (mode == "TRIANGLES")
+            m.mode = gltf::meshopt_mode::triangles;
+        else if (mode == "INDICES")
+            m.mode = gltf::meshopt_mode::indices;
+        else
+            return cc::error(
+                cc::format("glTF parse error: bufferView {}'s EXT_meshopt_compression has mode '{}'", view, mode));
+
+        auto const filter = ext.has("filter") ? string_member(ext, "filter") : cc::string("NONE");
+        if (filter == "NONE")
+            m.filter = gltf::meshopt_filter::none;
+        else if (filter == "OCTAHEDRAL")
+            m.filter = gltf::meshopt_filter::octahedral;
+        else if (filter == "QUATERNION")
+            m.filter = gltf::meshopt_filter::quaternion;
+        else if (filter == "EXPONENTIAL")
+            m.filter = gltf::meshopt_filter::exponential;
+        else if (filter == "COLOR")
+            m.filter = gltf::meshopt_filter::color;
+        else
+            return cc::error(
+                cc::format("glTF parse error: bufferView {}'s EXT_meshopt_compression has filter '{}'", view, filter));
+        return m;
+    }
+
+    /// Every extension that decodes bytes, the reader's own first: each bufferView, then each accessor, carrying one.
+    /// A hook's bytes must be exactly what the element declares; one that cannot decode leaves the element undecoded, on the record.
+    cc::result<cc::unit> decode_extensions(json::document const& document)
+    {
+        auto all = cc::vector<gltf::extension const*>();
+        for (auto const& e : builtin_extensions())
+            all.push_back(&e);
+        for (auto const& e : opts.extensions)
+            all.push_back(&e);
+
+        for (auto i = isize(0); i < result.buffer_views.size(); ++i)
+        {
+            auto const carried = json::ref(&document, result.buffer_views[i].json_node)["extensions"];
+            for (auto const* const e : all)
+            {
+                auto const object = carried[e->name];
+                if (!e->decode_buffer_view.is_valid() || !object.is_valid())
+                    continue;
+                auto& view = result.buffer_views[i];
+                if (!view.decoded_by.empty())
+                    return cc::error(cc::format("glTF parse error: bufferView {} is decoded by both '{}' and '{}'", i,
+                                                view.decoded_by, e->name));
+                view.decoded_by = cc::string(e->name);
+
+                auto decoded = e->decode_buffer_view(
+                    {.doc = result, .view = gltf::buffer_view_index(int(i)), .extension = object});
+                CC_RETURN_IF_ERROR(decoded).with_context(cc::format("while decoding bufferView {} by {}", i, e->name));
+                if (!decoded.value().has_value())
+                {
+                    add_issue(gltf::issue_kind::unresolved,
+                              cc::format("bufferView {} not decoded: {} left it undecoded", i, e->name));
+                    continue;
+                }
+                if (decoded.value().value().size() != view.byte_length)
+                    return cc::error(cc::format("glTF parse error: bufferView {} decodes to {} bytes by {}, and "
+                                                "declares {}",
+                                                i, decoded.value().value().size(), e->name, view.byte_length));
+                view.decoded = cc::move(decoded.value().value());
+            }
+        }
+
+        for (auto i = isize(0); i < result.accessors.size(); ++i)
+        {
+            auto const carried = json::ref(&document, result.accessors[i].json_node)["extensions"];
+            for (auto const* const e : all)
+            {
+                auto const object = carried[e->name];
+                if (!e->decode_accessor.is_valid() || !object.is_valid())
+                    continue;
+                auto& acc = result.accessors[i];
+                if (!acc.decoded_by.empty())
+                    return cc::error(cc::format("glTF parse error: accessor {} is decoded by both '{}' and '{}'", i,
+                                                acc.decoded_by, e->name));
+                acc.decoded_by = cc::string(e->name);
+
+                auto decoded
+                    = e->decode_accessor({.doc = result, .accessor = gltf::accessor_index(int(i)), .extension = object});
+                CC_RETURN_IF_ERROR(decoded).with_context(cc::format("while decoding accessor {} by {}", i, e->name));
+                if (!decoded.value().has_value())
+                {
+                    add_issue(gltf::issue_kind::unresolved,
+                              cc::format("accessor {} not decoded: {} left it undecoded", i, e->name));
+                    continue;
+                }
+                auto const want = acc.count * acc.element_size();
+                if (decoded.value().value().size() != want)
+                    return cc::error(cc::format("glTF parse error: accessor {} decodes to {} bytes by {}, where {} "
+                                                "elements take {}",
+                                                i, decoded.value().value().size(), e->name, acc.count, want));
+                acc.decoded = cc::move(decoded.value().value());
+            }
         }
         return cc::unit{};
     }
@@ -615,6 +873,7 @@ public:
                     cc::format("glTF parse error: accessor {} is sparse, which this reader does not implement", i));
 
             auto acc = gltf::accessor();
+            acc.json_node = entry.node_index();
             acc.buffer_view = index_member<gltf::buffer_view_index>(entry, "bufferView");
             acc.byte_offset = int_member(entry, "byteOffset");
 
@@ -669,6 +928,7 @@ public:
         {
             auto const entry = meshes[i];
             auto msh = gltf::mesh();
+            msh.json_node = entry.node_index();
             msh.first_primitive = i32(result.primitives.size());
 
             auto const primitives = entry["primitives"];
@@ -676,6 +936,7 @@ public:
             {
                 auto const prim_entry = primitives[p];
                 auto prim = gltf::primitive();
+                prim.json_node = prim_entry.node_index();
                 prim.first_attribute = i32(result.attributes.size());
 
                 auto const attributes = prim_entry["attributes"];
@@ -729,6 +990,8 @@ public:
             auto const entry = lights[i];
             auto l = gltf::light();
 
+            l.json_node = entry.node_index();
+
             auto const type = entry["type"].as_string();
             if (type == "directional")
                 l.type = gltf::light_type::directional;
@@ -763,6 +1026,7 @@ public:
         {
             auto const entry = nodes[i];
             auto nod = gltf::node();
+            nod.json_node = entry.node_index();
             nod.first_child = i32(result.node_children.size());
 
             auto const children = entry["children"];
@@ -808,6 +1072,7 @@ public:
         {
             auto const entry = scenes[i];
             auto scn = gltf::scene();
+            scn.json_node = entry.node_index();
             scn.first_node = i32(result.scene_nodes.size());
 
             auto const nodes = entry["nodes"];
@@ -831,6 +1096,8 @@ public:
         {
             auto const entry = materials[i];
             auto mat = gltf::material();
+
+            mat.json_node = entry.node_index();
 
             auto const pbr = entry["pbrMetallicRoughness"];
             mat.base_color_factor = vec4_member(pbr, "baseColorFactor", tg::vec4f(1, 1, 1, 1));
@@ -865,6 +1132,7 @@ public:
         {
             auto const entry = textures[i];
             auto tex = gltf::texture();
+            tex.json_node = entry.node_index();
             tex.sampler = index_member<gltf::sampler_index>(entry, "sampler");
             tex.source = index_member<gltf::image_index>(entry, "source");
             tex.name = string_member(entry, "name");
@@ -882,6 +1150,7 @@ public:
         {
             auto const entry = images[i];
             auto img = gltf::image();
+            img.json_node = entry.node_index();
             img.uri = string_member(entry, "uri");
             img.mime_type = string_member(entry, "mimeType");
             img.buffer_view = index_member<gltf::buffer_view_index>(entry, "bufferView");
@@ -900,6 +1169,7 @@ public:
         {
             auto const entry = samplers[i];
             auto smp = gltf::sampler();
+            smp.json_node = entry.node_index();
             smp.mag_filter = filter_member(entry, "magFilter", i);
             smp.min_filter = filter_member(entry, "minFilter", i);
             smp.wrap_s = wrap_member(entry, "wrapS", i);
@@ -1141,15 +1411,46 @@ accessor_index data::find_attribute(primitive const& p, cc::string_view semantic
 
 cc::result<accessor_view> data::view_of(accessor const& a) const
 {
+    // An accessor an extension decodes is its decoded elements, tightly packed, whatever its bufferView says.
+    if (!a.decoded_by.empty())
+    {
+        if (!a.decoded.has_value())
+            return cc::error(cc::format("gltf: the accessor is decoded by {}, which left it undecoded", a.decoded_by));
+        return accessor_view{
+            .bytes = a.decoded.value(),
+            .stride = a.element_size(),
+            .count = a.count,
+            .element_size = a.element_size(),
+            .component = a.component,
+            .type = a.type,
+            .normalized = a.normalized,
+        };
+    }
+
     auto const* const view = find(a.buffer_view);
     if (view == nullptr)
         return cc::error("gltf: the accessor has no bufferView (its data is implicitly all zero)");
 
-    auto const* const buf = find(view->buffer);
-    if (buf == nullptr)
-        return cc::error("gltf: the accessor's bufferView has no buffer");
-    if (!buf->resolved)
-        return cc::error(cc::format("gltf: the accessor's buffer was never resolved (uri '{}')", buf->uri));
+    // A view an extension decodes is its decoded bytes, whole; any other is a window into its buffer.
+    auto bytes = cc::pinned_data<byte const>();
+    auto view_start = i64(0);
+    if (!view->decoded_by.empty())
+    {
+        if (!view->decoded.has_value())
+            return cc::error(cc::format("gltf: the accessor's bufferView is decoded by {}, which left it undecoded",
+                                        view->decoded_by));
+        bytes = view->decoded.value();
+    }
+    else
+    {
+        auto const* const buf = find(view->buffer);
+        if (buf == nullptr)
+            return cc::error("gltf: the accessor's bufferView has no buffer");
+        if (!buf->resolved)
+            return cc::error(cc::format("gltf: the accessor's buffer was never resolved (uri '{}')", buf->uri));
+        bytes = buf->data;
+        view_start = view->byte_offset;
+    }
 
     auto const element_size = a.element_size();
     if (element_size <= 0)
@@ -1158,14 +1459,14 @@ cc::result<accessor_view> data::view_of(accessor const& a) const
     // A bufferView without a byteStride is tightly packed, so the element size IS the stride.
     // The accessor's own byte_offset sits on top of the bufferView's.
     auto const stride = view->byte_stride > 0 ? view->byte_stride : element_size;
-    auto const start = view->byte_offset + a.byte_offset;
+    auto const start = view_start + a.byte_offset;
     auto const needed = a.count > 0 ? (a.count - 1) * stride + element_size : i64(0);
 
-    if (!buf->data.span().is_subspan({.offset = start, .size = needed}))
+    if (!bytes.span().is_subspan({.offset = start, .size = needed}))
         return cc::error("gltf: the accessor's element range lies outside its buffer");
 
     return accessor_view{
-        .bytes = buf->data.subdata({.offset = start, .size = needed}),
+        .bytes = bytes.subdata({.offset = start, .size = needed}),
         .stride = stride,
         .count = a.count,
         .element_size = element_size,

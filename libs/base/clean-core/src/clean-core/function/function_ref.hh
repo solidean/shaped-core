@@ -20,8 +20,9 @@ struct cc::function_ref<R(Args...)>
 {
     // internal storage
 private:
-    void* _payload = nullptr;
-    cc::function_ptr<R(void*, Args...)> _thunk = nullptr;
+    // const, so a const callable binds without a cast; the thunk restores exactly the constness it was bound with
+    void const* _payload = nullptr;
+    cc::function_ptr<R(void const*, Args...)> _thunk = nullptr;
 
     // construction
 public:
@@ -30,6 +31,7 @@ public:
 
     /// Construct from any callable — function pointer, lambda, functor, pointer-to-member function, pointer-to-member object.
     /// Takes every kind of reference, since it must not outlive its argument anyway.
+    /// A const callable is invoked as const, so a `mutable` lambda held in a const variable is refused rather than mutated.
     template <class F>
         requires(!std::is_same_v<std::remove_cvref_t<F>, function_ref>)
     function_ref(F&& f) : _payload(&f)
@@ -39,7 +41,10 @@ public:
 
         using Fn = std::remove_reference_t<F>;
         // NOLINTBEGIN
-        _thunk = [](void* p, Args... args) -> R { return cc::invoke(*static_cast<Fn*>(p), cc::forward<Args>(args)...); };
+        // Fn carries the bound object's own constness, so the const_cast restores what the payload's type erased:
+        // a non-const object is invoked as non-const, which it always was, and a const one stays const.
+        _thunk = [](void const* p, Args... args) -> R
+        { return cc::invoke(*static_cast<Fn*>(const_cast<void*>(p)), cc::forward<Args>(args)...); };
         // NOLINTEND
     }
 

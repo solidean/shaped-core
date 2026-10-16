@@ -32,6 +32,9 @@ Add entries as we discover them, and remove them as they land.
 
 ## platform
 
+- **A directory listing.**
+  Nothing in clean-core enumerates a directory's entries.
+  The sgl tool reaches for `<filesystem>` to list a module directory (`tools/sgl/module_dirs.cc`), and a consumer checking a folder of assets takes its files from the shell's glob.
 - **`cc::symbolizer` is not thread-safe, and the symbolize tests flake because of it.**
   `platform/symbolize.cc` calls `SymInitialize`, `SymFromAddr` and `SymGetLineFromAddr64` with no lock of any kind.
   Microsoft documents every DbgHelp entry point as single-threaded — concurrent calls give "unexpected behavior or memory corruption".

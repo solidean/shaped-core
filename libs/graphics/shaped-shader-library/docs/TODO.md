@@ -42,3 +42,13 @@ What is already implemented is [structure.md](structure.md)'s tagged tree, and t
   Until then the copy stands, and two costs come with it.
   Two presets configured from one checkout write the same files, so the source tree carries whichever version configured last.
   And a read-only source tree cannot configure.
+- **A pipeline's SGL groups are numbered by position, and the host is never told the number.**
+  A generated binding struct has no `group_index`, so `scope.bind<G>(group)` does not compile for it, and a caller writes `bind_group(1, ...)` from the order it worked out by hand.
+  Reordering two declarations then binds the wrong group without any diagnostic.
+  How to expose it is open: a per-pipeline index table in the generated pipeline type is one shape, a `group_index` fixed by the binding declaration another.
+- **Maybe: a binding's host path as a generated constant.**
+  `sg::bindless_array::for_binding(ctx, group, "scene_textures.textures")` and `declare_array_texture_access` take the path as a string, so a typo is a run-time assert.
+  The generated group could name each array binding's path, so a caller writes `lumion_shaders::scene_textures::textures_path` instead.
+- **A consumer of shaped-core needs `SC_BUILD_TOOLS=ON` for any SGL package.**
+  `sc_add_shader_package` runs the `sgl` tool at build time, and the tool is built only with the tools, which also builds the linter and the language server.
+  A consumer that writes HLSL, WGSL or MSL alone does not need it; one writing SGL could build `sgl` alone, behind a narrower option.
