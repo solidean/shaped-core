@@ -3,6 +3,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-rendering/impl/build_failure.hh>
 #include <sr_sgl_shaders.hh>
 
 namespace sr
@@ -105,6 +106,7 @@ cc::shared_async<cc::unit> box_filter_mipmap_routine::init(sg::routine_init_scop
     auto const* const built = program.pipeline->try_value();
     if (built == nullptr)
     {
+        impl::log_build_failure(program.pipeline, "box_filter_mipmap", params().format);
         fail_init(); // the shader did not build, which a format SGL has no image of never does
         co_return;
     }

@@ -419,6 +419,7 @@ if(SC_BUILD_TESTS)
             tests/fsr-test.cc
             tests/mix-test.cc
             tests/nrd-test.cc
+            tests/svgf-reference-test.cc
             tests/oidn-test.cc
             tests/nn-conv-test.cc
             tests/nn-ops-test.cc

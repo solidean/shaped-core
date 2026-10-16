@@ -85,7 +85,7 @@ struct oidn_tile_plan
 /// same pipeline either way, so a network created later finds them already built.
 struct oidn_programs
 {
-    /// What the output pass writes, which its shader names: a four-channel float or normalized format.
+    /// What the output pass writes, which its shader names: a float or normalized format.
     sg::pixel_format output_format = sg::pixel_format::rgba32_float;
 
     sg::binding_group_layout_handle conv_layout = nullptr;

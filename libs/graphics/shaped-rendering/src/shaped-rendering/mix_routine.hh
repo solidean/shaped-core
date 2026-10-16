@@ -26,11 +26,11 @@ public:
     ///
     /// The two must have the same extent, and they must not be the same texture.
     /// Blending an image into itself is a no-op written the expensive way.
-    /// `destination` must carry `image` usage, in a four-channel float or normalized format the device reads and writes as an image.
+    /// `destination` must carry `image` usage, in a float or normalized format the device reads and writes as an image.
     /// `weight` 0 and 1 are still dispatched rather than skipped: a caller stepping a fade reaches them on the frames
     /// where the answer is one input exactly, and branching here would make those frames differ in cost for nothing.
     ///
-    /// False while the shader for `destination`'s format is still compiling, or after a compile that did not build.
+    /// False while the shader for `destination`'s format is still compiling, or after a compile that did not build, which init logged.
     /// `destination` is untouched either way, which for a fade means the frame shows whichever image it already held.
     [[nodiscard]] static bool execute(sg::command_list& cmd,
                                       sg::texture_2d const& destination,

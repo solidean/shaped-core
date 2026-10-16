@@ -8,6 +8,8 @@
 //
 // Feature maps are HWC: index (y * width + x) * channels + c.
 
+require extended_image_formats
+
 // the format of the image `output_cs` writes, which is the caller's output
 @option const target_format: pixel_format = .rgba32_float
 
@@ -173,4 +175,4 @@ binding nn_output_images:
 
     // Undoing the scale the input applied, so the result is in the caller's units.
     let scale = if nn_output_constants.input_scale != 0.0 => 1.0 / nn_output_constants.input_scale else 0.0
-    nn_output_images.target[dst] = float4(..(value * scale), 1.0)
+    nn_output_images.target[dst] = float4(..(value * scale), 1.0) as texel[target_format]

@@ -5,8 +5,9 @@
 // Alpha crosses with the color, so fading between two images of the same thing leaves the alpha alone.
 
 require readwrite_image_formats
+require extended_image_formats
 
-// the destination's format, which the routine sets to the image it is handed: a four-channel float or normalized one
+// the destination's format, which the routine sets to the image it is handed: a float or normalized one
 @option const destination_format: pixel_format = .rgba16_float
 
 @inline binding mix_constants:
@@ -22,5 +23,5 @@ binding mix_images:
     let size = mix_images.destination.size()
     if id.x >= size.x or id.y >= size.y => return
 
-    let blended = mix(mix_images.destination[id.xy], mix_images.source.load(id.xy), mix_constants.weight)
+    let blended = mix(mix_images.destination[id.xy], mix_images.source.load(id.xy) as texel[destination_format], mix_constants.weight)
     mix_images.destination[id.xy] = blended

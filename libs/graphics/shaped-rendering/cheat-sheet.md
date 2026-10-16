@@ -448,7 +448,7 @@ sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal,
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::oidn_denoise_routine::execute(cmd, inputs, history, {.network = sr::oidn_network_size::small})  // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP base, small ~1.6x faster; never `automatic`
 sr::fsr_upscale_routine::execute(cmd, {.color, .depth, .motion, .jitter, .output}, upscale_history, {.sharpening = true})  // -> sr::upscale_outcome; a CLEAN image only
-sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = mix(dst, src, w) IN PLACE, w in [0,1]; false while compiling
+sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = mix(dst, src, w) IN PLACE, w in [0,1]; false while compiling, and after a failed compile, which logs why
 sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the destination's format: one compile each
 ```
 
@@ -460,7 +460,7 @@ sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the desti
   One per view or layer, dropped with it.
 - **The front's readiness gates nothing.** Acquiring it registers it, and its init prewarms every supported member.
   `sr::reconstruct_routine::prewarm(ctx, output_format)` at startup starts their compiles before the first call.
-- **The native members are keyed by the output's format**, which their last pass writes: four channels, float or normalized.
+- **The native members are keyed by the output's format**, which their last pass writes: any float or normalized format the device writes as an image.
   A new output format is a compile of its own, so its first call reports `pending`.
 - **`fresh_samples` lives in the settings, not beside the call**, so planning a frame and running it read one answer.
   False (the default) is a converging mean and picks among the spatial members; true is this frame's own samples plus motion vectors.
