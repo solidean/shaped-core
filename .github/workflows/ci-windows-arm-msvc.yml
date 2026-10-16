@@ -31,11 +31,16 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
 
-      # PROBE (throwaway branch): the standalone WARP reproduction alone, built with the arm64 MSVC toolchain.
-      - name: MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: arm64
+      # PROBE (throwaway branch): which sv test files fastfail on this image's WARP-as-hardware, one process each.
+      - name: Build
+        run: uv run dev.py build -t shaped-viewer-test --preset relwithdebinfo-arm64-windows-msvc --toolset 14.44 --keep-going
 
-      - name: WARP reproduction
-        run: uv run docs/bugs-external/warp-arm64-pac-fastfail/run.py
+      - name: Each sv test file on its own
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem libs/graphics/shaped-viewer/tests -Filter *-test.cc | Sort-Object Name
+          foreach ($f in $files) {
+            $out = uv run dev.py test $f.Name --preset relwithdebinfo-arm64-windows-msvc --toolset 14.44 2>&1 | Out-String
+            $line = ($out -split "`n" | Where-Object { $_ -match 'shaped-viewer-test (succeeded|failed)|no test matched|nothing to run' } | Select-Object -First 1)
+            Write-Host ("RESULT {0,-45} {1}" -f $f.Name, ($line -replace '^\s+', ''))
+          }
