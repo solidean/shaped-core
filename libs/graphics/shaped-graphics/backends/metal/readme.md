@@ -431,7 +431,16 @@ A miss would then be silent, which is the same failure as having no oracle at al
 `MTL4CommitFeedback` reports a failure that arrives after the call that caused it, which is exactly what sg's deferred error channel is for.
 So every commit carries a handler, and an error reaches `ctx.take_pending_errors()`.
 
-Metal's timeout, device-removed and access-revoked codes mean the device itself is gone and mark the context lost; everything else is one command buffer failing.
+A code is read in its domain, and an MTL4 commit reports in `MTL4CommandQueueErrorDomain`, whose numbers are not the classic `MTLCommandBufferError` ones.
+Timeout, not-permitted, device-removed and access-revoked mean the device itself is gone, and mark the context lost.
+Everything else is one command buffer failing.
+
+**A GPU page fault arrives as that timeout**, and the system then refuses every later submission of the process.
+No queued `signalEvent` runs again, so every timeline stops where it was.
+So a loss also abandons both timelines: `metal_epoch_system::abandon_timelines` signals them to their maximum from the host, as dx12 does to a removed fence.
+Every wait returns and every listener fires, and the portable layer, which checks the loss first, fails a pending completion rather than settling it.
+Without that, `epochs_in_flight_completion`, `idle_completion` and shutdown's drain each parked forever on a value nothing would signal.
+`sg metal - a lost device settles the waits its stopped queue strands` is that sequence, with a queue stopped by a wait instead of by a fault.
 
 The handler runs on a dispatch queue at a time nothing here controls, which can be after `shutdown` has returned.
 So it captures a [`metal_feedback_sink`](src/shaped-graphics/backends/metal/metal_feedback.hh) rather than the context, and shutdown detaches it.

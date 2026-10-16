@@ -102,7 +102,12 @@ void metal_context::set_inline_download_budget(isize bytes)
 void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)
 {
     if (kind == sg::device_error_kind::device_lost)
+    {
         mark_device_lost(cc::string(message));
+
+        // After the mark, so whatever this wakes finds the loss and settles as an error rather than as success.
+        _epochs.abandon_timelines();
+    }
     else
         report_device_error({.kind = kind, .message = cc::string(message)});
 }
@@ -311,8 +316,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
               auto* const error = feedback->error();
               if (error != nullptr)
-                  sink->report(device_error_kind_of(NS::UInteger(error->code())),
-                               describe_error(error, "a metal command buffer failed"));
+                  sink->report(device_error_kind_of(error), describe_error(error, "a metal command buffer failed"));
 
               for (auto& download : *downloads)
               {
