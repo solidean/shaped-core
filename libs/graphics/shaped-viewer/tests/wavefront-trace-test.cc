@@ -1393,8 +1393,9 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
 // Picked by power alone it is drawn one time in 11 and weighted up when it is, so the corner is noise.
 // The table mixes half uniform in, which brings that within reach of uniform selection and keeps the mean.
 // Pure power is written into the same records by hand, as the table used to.
-// Measured where the corner light carries most of the image, which a lamp-only run marks: over the whole frame pure power
-// is a little better, since the lamp lights nearly all of it, and that is the trade the mixture makes.
+// Measured where the corner light carries most of the image, which a lamp-only run marks.
+// A corner light dimmer still covers too few pixels to say anything, and over a whole frame the lamp lights most of,
+// power alone can come out ahead; the corner is where starving a light shows.
 ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a dim light near what it lights keeps a fair share of the choice",
                      (sg::context_handle const& ctx_h))
 {
