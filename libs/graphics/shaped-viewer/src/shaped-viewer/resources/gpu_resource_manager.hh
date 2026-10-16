@@ -268,7 +268,8 @@ public:
     /// No bindless index is minted here — the block's bytes are this epoch's, and `describe_instance` is what builds them.
     ///
     /// Content-cached on `r.parameter_key`, so re-acquiring an unchanged mesh every frame is a lookup.
-    /// Nothing is evicted: a record is ids and tens of bytes, bounded by the distinct (material, mesh) pairs a scene draws.
+    /// Nothing is evicted, and a record is ids and tens of bytes.
+    /// The key holds texture and attribute ids, so each eviction and re-upload of one a material reads mints a new record, and the old one stays, naming a dead id nothing reads.
     [[nodiscard]] instance_id acquire_instance(resolved_material const& r, material_parameter_layout const& layout);
 
     /// Whether `id` names a record this manager minted.

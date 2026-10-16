@@ -1471,6 +1471,93 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR DI keeps the image of many 
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// ReSTIR's re-shade lights a surface only from its face's own side, as next-event estimation does.
+//
+// The floor's authored normal leans 55 degrees off its face, so a light below the floor still lies above the shading frame.
+// The light casts no shadow, so nothing but that rule keeps it off the side the camera sees; the same light mirrored above
+// the floor shows the setup lights at all.
+// A parallel light reaches the floor through next-event estimation alone, which DI resamples; a rect off toward -x through
+// the continuation too, which GI resamples.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's re-shade does not light a surface from behind its face",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 0.5f};
+    auto ground = sv_test::cornell_box{};
+    sv_test::cb_push_quad(ground, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          white);
+    auto mesh = sv_test::as_mesh("tilted floor", ground.positions, ground.materials);
+
+    // The authored normal leans off the floor's +y toward -x, so it faces both lights and the camera.
+    // The frame is +z turned a quarter turn about cross(+z, authored), which carries +z onto it.
+    auto const authored = tg::normalize(tg::vec3f(-1.0f, 0.7f, 0.0f));
+    auto const half = tg::sqrt(0.5f);
+    auto const frame = tg::vec4f(-authored[1] * half, authored[0] * half, 0.0f, half);
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec4f>::create_filled(ground.positions.size(), frame)));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto scene = cornell_scene{};
+    scene.item = resources.acquire_scene_item(mesh);
+    resources.wait_for_pending_uploads();
+    REQUIRE(resources.meshes.get_ptr(scene.item.mesh) != nullptr);
+    auto const* const permutation = resources.shaders.find(scene.item.shader_key);
+    REQUIRE(permutation != nullptr);
+    scene.instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, scene.item.mesh), .instance_id = 0, .hit_group_offset = 0});
+    scene.hit_groups.push_back(permutation);
+    scene.camera = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    scene.camera.projection.aspect_ratio = 1.0;
+
+    struct mirrored
+    {
+        sv::light above;
+        sv::light below;
+    };
+    auto const pairs = cc::vector<mirrored>{
+        {.above = sv::light::directional(tg::vec3f(1, -1, 0)).lux(2).casts_shadows(false),
+         .below = sv::light::directional(tg::vec3f(1, 1, 0)).lux(2).casts_shadows(false)},
+        {.above
+         = sv::light::rect(tg::pos3f(-3, 1, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 2)).nits(4).casts_shadows(false),
+         .below
+         = sv::light::rect(tg::pos3f(-3, -1, 0), tg::vec3f(0, 0, 2), tg::vec3f(1, 0, 0)).nits(4).casts_shadows(false)},
+    };
+    constexpr int frames = 8;
+    auto const reuse = restir_reuse{.history = true, .spatial = true, .di = true, .max_bounces = 2};
+    for (auto const& pair : pairs)
+    {
+        auto const one = [](sv::light const& l)
+        {
+            auto records = cc::vector<sv::shaders::tracer::light_record>();
+            records.push_back(sv::light_record_of(l));
+            return sv::pt_light_table::grouped(records);
+        };
+        scene.lights = one(pair.above);
+        auto const lit = mean_luminance_of((co_await run_restir(ctx, resources, scene, frames, reuse)).mean);
+        scene.lights = one(pair.below);
+        auto const behind = mean_luminance_of((co_await run_restir(ctx, resources, scene, frames, reuse)).mean);
+        CHECK(lit > 0.1f).context(cc::format("lit from above: {}", lit));
+        CHECK(behind < 0.01f * lit).context(cc::format("lit from behind: {}, from above: {}", behind, lit));
+    }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // ReSTIR DI on every kind of light at once — a rect, a two-sided rect, a point with a cone, a sun and a sky disc — over a glossy wall.
 // A light reaching the visible point best through the BSDF's narrow lobe must keep its light, so the resampled mean is the plain one.
 // So must the image without the spatial pass.
