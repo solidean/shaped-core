@@ -184,7 +184,7 @@ ASYNC_INVOCABLE_TEST("sg - each blend factor, op and write-mask channel leaves i
     auto pipelines = cc::vector<sg::raster_pipeline_handle>();
     for (auto const& c : cases)
         pipelines.push_back(co_await ctx->cached.acquire_raster_pipeline(
-            shaders::rects.floating, {},
+            shaders::rects::floating, {},
             [state = c.state](sg::raster_pipeline_description& d) { d.color_targets[0] = state; }));
 
     auto const width = int(cases.size());
@@ -197,7 +197,7 @@ ASYNC_INVOCABLE_TEST("sg - each blend factor, op and write-mask channel leaves i
                                                          {.width = width,
                                                           .height = 1,
                                                           .colors = {sg::pixel_format::rgba16_float},
-                                                          .target_set = shaders::rect_target::name,
+                                                          .target_set = shaders::rects::rect_target::name,
                                                           .clear_color = destination},
                                                          [&](sg::rendering_scope& scope)
                                                          {
@@ -225,7 +225,7 @@ ASYNC_INVOCABLE_TEST("sg - a blend constant never set reads as 0", (sg::context_
                                  .alpha = {.source = sg::blend_factor::constant, .target = sg::blend_factor::zero}},
     };
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(
-        shaders::rects.floating, {}, [state](sg::raster_pipeline_description& d) { d.color_targets[0] = state; });
+        shaders::rects::floating, {}, [state](sg::raster_pipeline_description& d) { d.color_targets[0] = state; });
 
     auto const batch = sg_test::rect_batch(*ctx, {sg_test::rect_at(0, 0, 1, 1, 1, 1, 0.5f, source)});
 
@@ -233,7 +233,7 @@ ASYNC_INVOCABLE_TEST("sg - a blend constant never set reads as 0", (sg::context_
                                                          {.width = 1,
                                                           .height = 1,
                                                           .colors = {sg::pixel_format::rgba16_float},
-                                                          .target_set = shaders::rect_target::name,
+                                                          .target_set = shaders::rects::rect_target::name,
                                                           .clear_color = destination},
                                                          [&](sg::rendering_scope& scope)
                                                          {

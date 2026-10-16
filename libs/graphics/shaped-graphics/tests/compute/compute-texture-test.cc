@@ -51,8 +51,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples a texture through a static samp
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await shaders::textures.copy_accumulate.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::post>();
+    auto const pipeline = co_await shaders::textures::copy_accumulate.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::textures::post>();
 
     auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::texture);
     auto const dst = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::image);
@@ -65,7 +65,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples a texture through a static samp
     cmd->upload.bytes_to_texture(src.raw(), cc::span<byte const>(texels));
     cmd->upload.bytes_to_texture(acc.raw(), cc::as_bytes(ones));
     auto const group = ctx->transient.create_binding_group(*cmd, layout,
-                                                           shaders::post{
+                                                           shaders::textures::post{
                                                                .texel_size = tg::vec2f(1.0f / k_extent, 1.0f / k_extent),
                                                                .src = src.as_texture_view(),
                                                                .dst = dst.as_image_view<sg::pixel_format::rgba8_unorm>(),
@@ -108,10 +108,10 @@ ASYNC_INVOCABLE_TEST("sg - one group's static sampler samples at whichever slot 
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const at_slot_0 = co_await shaders::textures.copy_accumulate.acquire_pipeline(*ctx);
-    auto const at_slot_1 = co_await shaders::textures.copy_second_slot.acquire_pipeline(*ctx);
-    auto const post_layout = ctx->cached.acquire_binding_group_layout<shaders::post>();
-    auto const sampled_layout = ctx->cached.acquire_binding_group_layout<shaders::sampled>();
+    auto const at_slot_0 = co_await shaders::textures::copy_accumulate.acquire_pipeline(*ctx);
+    auto const at_slot_1 = co_await shaders::textures::copy_second_slot.acquire_pipeline(*ctx);
+    auto const post_layout = ctx->cached.acquire_binding_group_layout<shaders::textures::post>();
+    auto const sampled_layout = ctx->cached.acquire_binding_group_layout<shaders::textures::sampled>();
 
     auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::texture);
     auto const dst = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::image);
@@ -122,7 +122,7 @@ ASYNC_INVOCABLE_TEST("sg - one group's static sampler samples at whichever slot 
     auto cmd = ctx->create_command_list();
     cmd->upload.bytes_to_texture(src.raw(), cc::span<byte const>(texels));
     auto const post = ctx->transient.create_binding_group(*cmd, post_layout,
-                                                          shaders::post{
+                                                          shaders::textures::post{
                                                               .texel_size = tg::vec2f(1.0f / k_extent, 1.0f / k_extent),
                                                               .src = src.as_texture_view(),
                                                               .dst = dst.as_image_view<sg::pixel_format::rgba8_unorm>(),
@@ -130,7 +130,7 @@ ASYNC_INVOCABLE_TEST("sg - one group's static sampler samples at whichever slot 
                                                           });
     auto const sampled
         = ctx->transient.create_binding_group(*cmd, sampled_layout,
-                                              shaders::sampled{
+                                              shaders::textures::sampled{
                                                   .src = src.as_texture_view(),
                                                   .smp = {},
                                                   .dst = second.as_image_view<sg::pixel_format::rgba8_unorm>(),
@@ -169,8 +169,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler the group bin
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await shaders::textures.copy_dynamic.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampled>();
+    auto const pipeline = co_await shaders::textures::copy_dynamic.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::textures::sampled>();
 
     auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::texture);
     auto const dst = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::image);
@@ -180,7 +180,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler the group bin
     cmd->upload.bytes_to_texture(src.raw(), cc::span<byte const>(texels));
     auto const group
         = ctx->transient.create_binding_group(*cmd, layout,
-                                              shaders::sampled{
+                                              shaders::textures::sampled{
                                                   .src = src.as_texture_view(),
                                                   .smp = {.min_filter = sg::sampler_filter::nearest,
                                                           .mag_filter = sg::sampler_filter::nearest,
@@ -215,16 +215,16 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
     // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
-    auto const& vs = co_await shaders::textures.screen_vs->acquire(*ctx);
-    auto const& ps = co_await shaders::textures.textured_ps->acquire(*ctx);
+    auto const& vs = co_await shaders::textures::screen_vs->acquire(*ctx);
+    auto const& ps = co_await shaders::textures::textured_ps->acquire(*ctx);
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline({
-        .layout = shaders::textures.screen_vs.acquire_layout(*ctx),
+        .layout = shaders::textures::screen_vs.acquire_layout(*ctx),
         .vertex_shader = vs,
         .fragment_shader = ps,
-        .vertex_input = shaders::screen_vertex::layout(),
+        .vertex_input = shaders::textures::screen_vertex::layout(),
         .rasterization = {.cull = sg::cull_mode::none},
-        .color_targets = shaders::textured_target::states{.color = {.format = sg::pixel_format::rgba8_unorm}},
-        .target_set = shaders::textured_target::name,
+        .color_targets = shaders::textures::textured_target::states{.color = {.format = sg::pixel_format::rgba8_unorm}},
+        .target_set = shaders::textures::textured_target::name,
     });
 
     // A 4 by 4 texture drawn onto a 4 by 4 target: each pixel's centre is a texel's, so the level is 0 and nothing filters in.
@@ -248,8 +248,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
                                              .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
 
     auto const corner = [](float x, float y, float u, float v)
-    { return shaders::screen_vertex{.corner = tg::vec3f(x, y, 0.0f), .uv = tg::vec2f(u, v)}; };
-    shaders::screen_vertex const quad[] = {
+    { return shaders::textures::screen_vertex{.corner = tg::vec3f(x, y, 0.0f), .uv = tg::vec2f(u, v)}; };
+    shaders::textures::screen_vertex const quad[] = {
         corner(-1, -1, 0, 1), corner(1, -1, 1, 1), corner(1, 1, 1, 0),
         corner(-1, -1, 0, 1), corner(1, 1, 1, 0),  corner(-1, 1, 0, 0),
     };
@@ -257,12 +257,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
 
     auto cmd = ctx->create_command_list();
     cmd->upload.bytes_to_texture(albedo.raw(), cc::span<byte const>(texels));
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::material>();
-    auto const group
-        = ctx->transient.create_binding_group(*cmd, layout, shaders::material{.albedo = albedo.as_texture_view()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::textures::material>();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout, shaders::textures::material{.albedo = albedo.as_texture_view()});
     {
         auto pass = cmd->raster.render_to(
-            shaders::textured_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+            shaders::textures::textured_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
         pass.bind_pipeline(*pipeline);
         pass.bind_group(0, *group);
         pass.bind_vertex_buffer(vertices.as_vertex_buffer());
@@ -289,7 +289,7 @@ cc::shared_async<int> clamped_copy_mismatches(sg::context_handle ctx, sg::comput
     if (auto* const home = ctx->device_home())
         co_await cc::async_resume_on(*home);
 
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampled>();
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::textures::sampled>();
     auto const src = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::texture);
     auto const dst = make_texture(ctx, sg::pixel_format::rgba8_unorm, sg::texture_usage::image);
     auto const texels = pattern();
@@ -297,7 +297,7 @@ cc::shared_async<int> clamped_copy_mismatches(sg::context_handle ctx, sg::comput
     auto cmd = ctx->create_command_list();
     cmd->upload.bytes_to_texture(src.raw(), cc::span<byte const>(texels));
     auto const group = ctx->transient.create_binding_group(*cmd, layout,
-                                                           shaders::sampled{
+                                                           shaders::textures::sampled{
                                                                .src = src.as_texture_view(),
                                                                .smp = {},
                                                                .dst = dst.as_image_view<sg::pixel_format::rgba8_unorm>(),
@@ -331,7 +331,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL shader samples through a sampler of the file, 
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await shaders::textures.copy_clamped.acquire_pipeline(*ctx);
+    auto const pipeline = co_await shaders::textures::copy_clamped.acquire_pipeline(*ctx);
     CHECK((co_await clamped_copy_mismatches(ctx, pipeline)) == 0);
 }
 
@@ -344,7 +344,7 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler
 
     // One shader under two layouts that differ only in their bound sampler's address mode.
     // On dx12 such a pipeline neither hands out nor takes a blob, for docs/bugs-external/d3d12-cached-pso-static-sampler-mixup/.
-    auto const& shader = co_await shaders::textures.copy_clamped->acquire(*ctx);
+    auto const& shader = co_await shaders::textures::copy_clamped->acquire(*ctx);
     auto const layout_with = [&](sg::sampler_address_mode address)
     {
         sg::bound_sampler const samplers[] = {{.binding = {.name = "clamped",
@@ -356,7 +356,7 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline over static samplers keeps its own sampler
                                                            .mag_filter = sg::sampler_filter::nearest,
                                                            .address_u = address,
                                                            .address_v = address}}};
-        return ctx->cached.acquire_pipeline_layout<shaders::sampled>(samplers);
+        return ctx->cached.acquire_pipeline_layout<shaders::textures::sampled>(samplers);
     };
     auto const clamping = layout_with(sg::sampler_address_mode::clamp_edge);
     auto const first = co_await ctx->uncached.create_compute_pipeline_async({.shader = shader, .layout = clamping});
@@ -387,7 +387,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pipeline carries the sampler of the file its p
     // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::textures.clamped_draw);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::textures::clamped_draw);
 
     // Every row is alike, so which way up a backend draws does not matter.
     constexpr int extent = 4;
@@ -409,8 +409,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pipeline carries the sampler of the file its p
                                              .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
 
     auto const corner = [](float x, float y, float u, float v)
-    { return shaders::screen_vertex{.corner = tg::vec3f(x, y, 0.0f), .uv = tg::vec2f(u, v)}; };
-    shaders::screen_vertex const quad[] = {
+    { return shaders::textures::screen_vertex{.corner = tg::vec3f(x, y, 0.0f), .uv = tg::vec2f(u, v)}; };
+    shaders::textures::screen_vertex const quad[] = {
         corner(-1, -1, 0, 1), corner(1, -1, 1, 1), corner(1, 1, 1, 0),
         corner(-1, -1, 0, 1), corner(1, 1, 1, 0),  corner(-1, 1, 0, 0),
     };
@@ -418,12 +418,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pipeline carries the sampler of the file its p
 
     auto cmd = ctx->create_command_list();
     cmd->upload.bytes_to_texture(albedo.raw(), cc::span<byte const>(texels));
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::material>();
-    auto const group
-        = ctx->transient.create_binding_group(*cmd, layout, shaders::material{.albedo = albedo.as_texture_view()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::textures::material>();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout, shaders::textures::material{.albedo = albedo.as_texture_view()});
     {
         auto pass = cmd->raster.render_to(
-            shaders::textured_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+            shaders::textures::textured_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
         pass.bind_pipeline(*pipeline);
         pass.bind_group(0, *group);
         pass.bind_vertex_buffer(vertices.as_vertex_buffer());
@@ -452,21 +452,22 @@ template <sg::pixel_format Format>
 cc::shared_async<cc::vector<byte>> fill_image(sg::context_handle ctx)
 {
     // one value of the file's options, which the entry point and the group both take
-    auto const values = shaders::option_formats_options{.output_format = Format};
-    auto const pipeline = co_await shaders::option_formats.fill.acquire_pipeline(*ctx, values);
+    auto const values = shaders::option_formats::options{.output_format = Format};
+    auto const pipeline = co_await shaders::option_formats::fill.acquire_pipeline(*ctx, values);
     // a helper is an unhomed async: it moves to where the device lives before its first bound call
     if (auto* const home = ctx->device_home())
         co_await cc::async_resume_on(*home);
 
     // the group's layout follows the format its option has, as the shader's does
-    auto const layout = ctx->cached.acquire_binding_group_layout(shaders::paint::declared_bindings(values),
-                                                                 shaders::paint::declared_samplers());
+    auto const layout = ctx->cached.acquire_binding_group_layout(
+        shaders::option_formats::paint::declared_bindings(values), shaders::option_formats::paint::declared_samplers());
     auto const image = make_texture(ctx, Format, sg::texture_usage::image);
 
     auto cmd = ctx->create_command_list();
-    auto const group = ctx->transient.create_binding_group(
-        *cmd, layout,
-        shaders::paint{.color = tg::vec4f(0.0f, 1.0f, 0.25f, 1.0f), .target = image.as_image_view<Format>()});
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::option_formats::paint{.color = tg::vec4f(0.0f, 1.0f, 0.25f, 1.0f),
+                                                                             .target = image.as_image_view<Format>()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(k_extent, k_extent);

@@ -27,6 +27,21 @@ namespace
 // The generated package symbols are process-wide globals, so two libraries would fight over who owns the assets they point at.
 bool g_library_alive = false;
 
+/// The namespace an SGL file's generated types stand in: the package's, then the file's path folded into one identifier.
+/// sgl_host_code.py's identifier_of folds it the same way: the extension dropped, and '/' and '-' each a '_'.
+cc::string file_namespace_of(cc::string_view host_namespace, cc::string_view path)
+{
+    if (host_namespace.empty())
+        return {};
+    auto const name_start = path.rfind('/') + 1;
+    auto const extension = path.rfind('.');
+    auto const stem = extension > name_start ? path.subview({.start = 0, .end = extension}) : path;
+    auto out = cc::format("{}::", host_namespace);
+    for (auto const c : stem)
+        out.push_back(c == '/' || c == '-' ? '_' : c);
+    return out;
+}
+
 /// The name a compiler reflects `b` under: the identifier the text spells it with.
 cc::string_view emitted_name_of(sg::binding const& b)
 {
@@ -477,7 +492,8 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
 
     // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
-                  package.host_namespace, package.language, stage, entry_point, format, options);
+                  file_namespace_of(package.host_namespace, impl::relative_to(virtual_path, package.name)),
+                  package.language, stage, entry_point, format, options);
     return outcome;
 }
 
@@ -498,7 +514,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          cc::string_view label,
                                          cc::string_view source_dir,
                                          cc::string_view package_root,
-                                         cc::string_view host_namespace,
+                                         cc::string_view file_namespace,
                                          shader_language language,
                                          sg::shader_stage stage,
                                          cc::string_view entry_point,
@@ -609,7 +625,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
             target_set = cc::format("sgl_modules::{}", target_set);
         }
         else if (!target_set.empty())
-            target_set = host_namespace.empty() ? cc::string() : cc::format("{}::{}", host_namespace, target_set);
+            target_set = file_namespace.empty() ? cc::string() : cc::format("{}::{}", file_namespace, target_set);
     }
     // A preprocessor that renamed the entry point says so, and the compile has to ask for the name the text declares.
     if (!preprocessed.value().entry_point.empty())

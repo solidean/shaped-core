@@ -152,7 +152,7 @@ struct probe_result
     float samples = 0.0f;
 };
 
-static_assert(sizeof(sv_test::shaders::probe_case) == sizeof(probe_case),
+static_assert(sizeof(sv_test::shaders::bsdf_probe::probe_case) == sizeof(probe_case),
               "probe_case must match probe_case in tests/shaders/bsdf_probe.sgl");
 
 /// Dispatches `cases` through the probe and returns one mean per case.
@@ -161,7 +161,7 @@ static_assert(sizeof(sv_test::shaders::probe_case) == sizeof(probe_case),
 /// would put test-only machinery in the library.
 cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc::span<probe_case const> cases)
 {
-    auto const& entry = sv_test::shaders::bsdf_probe.measure;
+    auto const& entry = sv_test::shaders::bsdf_probe::measure;
     auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
@@ -171,7 +171,7 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // the probe shader must build; without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::probe>();
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::bsdf_probe::probe>();
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
@@ -189,10 +189,11 @@ cc::shared_async<cc::vector<probe_result>> run_probe_chunk(sg::context& ctx, cc:
     // SGL reads no buffer's length, so the probe is told both counts.
     auto const group = ctx.transient.create_binding_group(
         *cmd, group_layout,
-        sv_test::shaders::probe{.cases = case_buffer.reinterpret_as<sv_test::shaders::probe_case>().as_readonly_buffer(),
-                                .results = result_buffer.as_readwrite_buffer(),
-                                .item_count = u32(item_count),
-                                .case_count = u32(cases.size())});
+        sv_test::shaders::bsdf_probe::probe{
+            .cases = case_buffer.reinterpret_as<sv_test::shaders::bsdf_probe::probe_case>().as_readonly_buffer(),
+            .results = result_buffer.as_readwrite_buffer(),
+            .item_count = u32(item_count),
+            .case_count = u32(cases.size())});
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(item_count);
 

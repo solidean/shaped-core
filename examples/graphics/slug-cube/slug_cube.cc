@@ -48,7 +48,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-using cube_vertex = shaders::cube_vertex;
+using cube_vertex = shaders::slug_cube::cube_vertex;
 
 // Left-handed, z into [0, 1]: the same pair sgl-cube carries, for the same reason (tg has no transform module yet).
 [[nodiscard]] tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
@@ -313,7 +313,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
     // The star lives in the font's atlas, so the cube's shader and the routine bind the same two textures.
     auto const star = font.atlas().add(sr::compile_slug_shape(pentagram(100.0f))).value();
 
-    auto const building = ctx->cached.acquire_raster_pipeline(shaders::slug_cube.pipeline, {.color = color_format});
+    auto const building = ctx->cached.acquire_raster_pipeline(shaders::slug_cube::pipeline, {.color = color_format});
     co_await cc::async_settled(building);
     auto const* const pipeline = building->try_value();
     if (pipeline == nullptr)
@@ -324,7 +324,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
     }
     // The atlas's textures as module `slug`'s binding, the one group sr's routine binds as well.
     auto const tables_layout = ctx->cached.acquire_binding_group_layout<sgl_modules::slug::tables>();
-    auto const decal_layout = ctx->cached.acquire_binding_group_layout<shaders::decal>();
+    auto const decal_layout = ctx->cached.acquire_binding_group_layout<shaders::slug_cube::decal>();
 
     auto const vertices = ctx->persistent.create_buffer_from_data(build_cube_mesh(star.em_bounds), sg::buffer_usage::vertex_buffer);
     auto const indices = ctx->persistent.create_buffer_from_data(build_cube_indices(), sg::buffer_usage::index_buffer);
@@ -543,7 +543,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
                                       .bands = font.atlas().band_texture().as_texture_view()});
         auto const decal = ctx->transient.create_binding_group(
             *cmd, decal_layout,
-            shaders::decal{.banding = star.banding,
+            shaders::slug_cube::decal{.banding = star.banding,
                            .glyph = star.glyph(),
                            .color = tg::vec4f(0.96f, 0.80f, 0.30f, 1.0f)});
         {
@@ -559,7 +559,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
             pass.bind_group(1, *decal);
             pass.bind_vertex_buffers({vertices.as_vertex_buffer()});
             pass.bind_index_buffer(indices.as_index_buffer());
-            pass.set_inline_constants(shaders::constants{.view_projection = view_projection}.to_block());
+            pass.set_inline_constants(shaders::slug_cube::constants{.view_projection = view_projection}.to_block());
             pass.draw_indexed({.index_range = {.offset = 0, .size = 36}});
 
             // Each face's runs with its face's frame; the bias keeps them in front of the face they lie on.

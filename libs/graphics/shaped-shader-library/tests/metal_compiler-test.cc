@@ -235,8 +235,8 @@ ASYNC_TEST("slib metal compiler - the sgl edge carries a package to metal", excl
     lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));
     lib.add_package(slib_test::sgl_shaders::package());
 
-    auto const vs_node = slib_test::sgl_shaders::cube.main_vs->acquire(sg::shader_format::metal_lib);
-    auto const ps_node = slib_test::sgl_shaders::cube.main_ps->acquire(sg::shader_format::metal_lib);
+    auto const vs_node = slib_test::sgl_shaders::cube::main_vs->acquire(sg::shader_format::metal_lib);
+    auto const ps_node = slib_test::sgl_shaders::cube::main_ps->acquire(sg::shader_format::metal_lib);
     co_await cc::async_settled(vs_node);
     co_await cc::async_settled(ps_node);
 

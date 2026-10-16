@@ -21,7 +21,7 @@ cc::shared_async<sg::raster_pipeline_handle> depth_pipeline(sg::context& ctx,
                                                             cc::unique_function<void(sg::depth_stencil_state&)> edit)
 {
     co_return co_await ctx.cached.acquire_raster_pipeline(
-        shaders::rects.depth_tested, {},
+        shaders::rects::depth_tested, {},
         [edit = cc::move(edit)](sg::raster_pipeline_description& d) mutable { edit(d.depth_stencil); });
 }
 
@@ -29,7 +29,7 @@ cc::shared_async<sg::raster_pipeline_handle> depth_pipeline(sg::context& ctx,
 cc::shared_async<sg::raster_pipeline_handle> stencil_pipeline(sg::context& ctx,
                                                               cc::unique_function<void(sg::raster_pipeline_description&)> edit)
 {
-    co_return co_await ctx.cached.acquire_raster_pipeline(shaders::rects.stencil_tested, {}, cc::move(edit));
+    co_return co_await ctx.cached.acquire_raster_pipeline(shaders::rects::stencil_tested, {}, cc::move(edit));
 }
 
 /// What `op` leaves of `value`, with `reference` for `replace`.
@@ -107,7 +107,7 @@ ASYNC_INVOCABLE_TEST("sg - each depth compare_op passes its own rows of a depth 
                                                           .height = height,
                                                           .colors = {sg::pixel_format::rgba8_unorm},
                                                           .depth_stencil = sg::pixel_format::depth32_float,
-                                                          .target_set = shaders::rect_target::name},
+                                                          .target_set = shaders::rects::rect_target::name},
                                                          [&](sg::rendering_scope& scope)
                                                          {
                                                              scope.bind_pipeline(*fill);
@@ -225,7 +225,7 @@ ASYNC_INVOCABLE_TEST("sg - each stencil_op leaves its own value, in the slot and
          .height = height,
          .colors = {sg::pixel_format::rgba8_unorm},
          .depth_stencil = sg::pixel_format::depth32_float_stencil8,
-         .target_set = shaders::rect_target::name},
+         .target_set = shaders::rects::rect_target::name},
         [&](sg::rendering_scope& scope)
         {
             for (auto y = 0; y < height; ++y)
@@ -304,7 +304,7 @@ ASYNC_INVOCABLE_TEST("sg - the stencil read mask narrows the comparison and the 
                                                           .height = 1,
                                                           .colors = {sg::pixel_format::rgba8_unorm},
                                                           .depth_stencil = sg::pixel_format::depth32_float_stencil8,
-                                                          .target_set = shaders::rect_target::name},
+                                                          .target_set = shaders::rects::rect_target::name},
                                                          [&](sg::rendering_scope& scope)
                                                          {
                                                              for (auto x = 0; x < width; ++x)

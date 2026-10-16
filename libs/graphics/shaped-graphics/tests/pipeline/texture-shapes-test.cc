@@ -61,8 +61,8 @@ ASYNC_INVOCABLE_TEST("sg - every texture view dimension reads the slice, face or
     auto const cubes
         = ctx->persistent.create_texture_cube_array({.format = format, .size = 1, .cube_count = 2, .usage = usage});
 
-    auto const pipeline = co_await shaders::shapes.read_shapes.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::shape_views>();
+    auto const pipeline = co_await shaders::shapes::read_shapes.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::shapes::shape_views>();
     auto const names = ctx->persistent.create_buffer_from_data(
         cc::vector<float>::create_filled(13, -1.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
@@ -91,7 +91,7 @@ ASYNC_INVOCABLE_TEST("sg - every texture view dimension reads the slice, face or
 
     auto const group = ctx->transient.create_binding_group(
         *cmd, layout,
-        shaders::shape_views{
+        shaders::shapes::shape_views{
             .line = line.as_texture_view(),
             .lines = lines.as_texture_view(),
             .line_of_lines = lines.as_texture_1d_view({.slice = 1}),

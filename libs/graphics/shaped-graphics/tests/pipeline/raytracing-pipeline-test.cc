@@ -29,7 +29,7 @@ namespace
 {
 constexpr int grid = 8;
 
-using path_t = shaders::raytracing_pipeline_path_t;
+using path_t = shaders::raytracing_pipeline::path_t;
 
 struct expected_cell
 {
@@ -72,7 +72,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
 
-    auto const desc = co_await shaders::raytracing_pipeline.path.description(*ctx);
+    auto const desc = co_await shaders::raytracing_pipeline::path.description(*ctx);
     CHECK(desc.max_recursion_depth == 2u);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
@@ -101,10 +101,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one
     };
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::traced>();
-    auto const group = ctx->transient.create_binding_group(
-        *cmd, layout,
-        shaders::traced{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::traced>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::raytracing_pipeline::traced{.world = tlas->as_view(),
+                                                                                   .hits = hits.as_readwrite_buffer(),
+                                                                                   .ids = ids.as_readwrite_buffer()});
     cmd->raytracing.bind_pipeline(*pipeline);
     cmd->raytracing.bind_group(0, *group);
     cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
@@ -145,8 +147,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's raygen and miss store i
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
 
-    using pictured_t = shaders::raytracing_pipeline_pictured_path_t;
-    auto const desc = co_await shaders::raytracing_pipeline.pictured_path.description(*ctx);
+    using pictured_t = shaders::raytracing_pipeline::pictured_path_t;
+    auto const desc = co_await shaders::raytracing_pipeline::pictured_path.description(*ctx);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
 
@@ -179,12 +181,14 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's raygen and miss store i
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
     auto const traced = ctx->transient.create_binding_group(
-        *cmd, ctx->cached.acquire_binding_group_layout<shaders::traced>(),
-        shaders::traced{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::traced>(),
+        shaders::raytracing_pipeline::traced{.world = tlas->as_view(),
+                                             .hits = hits.as_readwrite_buffer(),
+                                             .ids = ids.as_readwrite_buffer()});
     auto const pictured = ctx->transient.create_binding_group(
-        *cmd, ctx->cached.acquire_binding_group_layout<shaders::pictured>(),
-        shaders::pictured{.picture = picture.as_image_view<sg::pixel_format::rgba32_float>(),
-                          .marks = marks.as_image_view<sg::pixel_format::rgba32_float>()});
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::pictured>(),
+        shaders::raytracing_pipeline::pictured{.picture = picture.as_image_view<sg::pixel_format::rgba32_float>(),
+                                               .marks = marks.as_image_view<sg::pixel_format::rgba32_float>()});
     cmd->raytracing.bind_pipeline(*pipeline);
     cmd->raytracing.bind_group(0, *traced);
     cmd->raytracing.bind_group(1, *pictured);
@@ -233,7 +237,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's procedural group report
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
 
-    auto const desc = co_await shaders::raytracing_pipeline.path.description(*ctx);
+    auto const desc = co_await shaders::raytracing_pipeline::path.description(*ctx);
     CHECK(desc.max_attribute_size == 12);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
@@ -258,10 +262,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's procedural group report
     sg::tlas_instance const instances[] = {{.blas = blas, .instance_id = 30, .hit_group_offset = table->offset_of(row)}};
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::traced>();
-    auto const group = ctx->transient.create_binding_group(
-        *cmd, layout,
-        shaders::traced{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::traced>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::raytracing_pipeline::traced{.world = tlas->as_view(),
+                                                                                   .hits = hits.as_readwrite_buffer(),
+                                                                                   .ids = ids.as_readwrite_buffer()});
     cmd->raytracing.bind_pipeline(*pipeline);
     cmd->raytracing.bind_group(0, *group);
     cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
@@ -359,11 +365,11 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline takes a hit group the hos
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
 
-    using open_t = shaders::raytracing_open_open_path_t;
+    using open_t = shaders::raytracing_open::open_path_t;
     auto const hit_shaders = co_await slib::compile_hit_group(
         ctx.get(), &sg_test::shader_fixtures(), &open_t::definition(), k_runtime_group, "material", "runtime.sgl");
     REQUIRE(hit_shaders.size() == open_t::ray_count);
-    auto const desc = co_await shaders::raytracing_open.open_path.description(*ctx, {.hit_groups = hit_shaders});
+    auto const desc = co_await shaders::raytracing_open::open_path.description(*ctx, {.hit_groups = hit_shaders});
     CHECK(desc.max_recursion_depth == 2u);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
@@ -391,11 +397,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline takes a hit group the hos
     };
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::traced_open>();
-    auto const group = ctx->transient.create_binding_group(*cmd, layout,
-                                                           shaders::traced_open{.world = tlas->as_view(),
-                                                                                .hits = hits.as_readwrite_buffer(),
-                                                                                .ids = ids.as_readwrite_buffer()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing_open::traced_open>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::raytracing_open::traced_open{.world = tlas->as_view(),
+                                                                                    .hits = hits.as_readwrite_buffer(),
+                                                                                    .ids = ids.as_readwrite_buffer()});
     cmd->raytracing.bind_pipeline(*pipeline);
     cmd->raytracing.bind_group(0, *group);
     cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
@@ -438,13 +445,13 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline calls the module's callab
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
 
-    using apply_t = shaders::raytracing_callables_apply_t;
+    using apply_t = shaders::raytracing_callables::apply_t;
     CHECK(apply_t::first_host_callable == 2);
     auto const squared = co_await slib::compile_callable(ctx.get(), &sg_test::shader_fixtures(), &apply_t::definition(),
                                                          k_squared, "squared", "squared.sgl");
     auto host = slib::raytracing_host_parts();
     host.callables.push_back(squared);
-    auto const desc = co_await shaders::raytracing_callables.apply.description(*ctx, host);
+    auto const desc = co_await shaders::raytracing_callables::apply.description(*ctx, host);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
     auto const table = ctx->uncached.create_raytracing_shader_table(apply_t::table_description(pipeline, host));
@@ -454,9 +461,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline calls the module's callab
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
     auto const values = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(count), usage);
     auto cmd = ctx->create_command_list();
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::operands>();
-    auto const group
-        = ctx->transient.create_binding_group(*cmd, layout, shaders::operands{.values = values.as_readwrite_buffer()});
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing_callables::operands>();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout, shaders::raytracing_callables::operands{.values = values.as_readwrite_buffer()});
     cmd->raytracing.bind_pipeline(*pipeline);
     cmd->raytracing.bind_group(0, *group);
     cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), count);
@@ -500,8 +507,8 @@ ASYNC_INVOCABLE_TEST("sg - a host's hit group or callable the declaration cannot
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
-    using open_t = shaders::raytracing_open_open_path_t;
-    using apply_t = shaders::raytracing_callables_apply_t;
+    using open_t = shaders::raytracing_open::open_path_t;
+    using apply_t = shaders::raytracing_callables::apply_t;
     auto const* const library = &sg_test::shader_fixtures();
     auto const group = [&](cc::string source, cc::string name)
     { return slib::compile_hit_group(ctx.get(), library, &open_t::definition(), cc::move(source), cc::move(name)); };
@@ -519,7 +526,7 @@ ASYNC_INVOCABLE_TEST("sg - a host's hit group or callable the declaration cannot
     auto const widened
         = group(runtime_group_with("    is_lit: int\n", "    is_lit: int\n    extra: float\n"), "material");
     auto const not_open = slib::compile_hit_group(
-        ctx.get(), library, &shaders::raytracing_pipeline_path_t::definition(), k_runtime_group, "material");
+        ctx.get(), library, &shaders::raytracing_pipeline::path_t::definition(), k_runtime_group, "material");
     auto const other_parameter
         = slib::compile_callable(ctx.get(), library, &apply_t::definition(),
                                  "require raytracing_pipeline\nstruct operand:\n    x: float\n    y: float\n"
@@ -546,8 +553,8 @@ ASYNC_INVOCABLE_TEST("sg - a host's hit group or callable the declaration cannot
 
 TEST("sg - a table asks for as many callables of the host's as the declaration takes")
 {
-    using apply_t = shaders::raytracing_callables_apply_t;
-    using path_t = shaders::raytracing_pipeline_path_t;
+    using apply_t = shaders::raytracing_callables::apply_t;
+    using path_t = shaders::raytracing_pipeline::path_t;
     auto host = slib::raytracing_host_parts();
     host.callables.push_back({});
     // the host's callable takes a record after the module's two
@@ -566,8 +573,8 @@ concept takes_row = requires(sg::raytracing_shader_table_description& t, Group g
 
 TEST("sg - a generated pipeline's hit group index is its own type")
 {
-    using path_t = shaders::raytracing_pipeline_path_t;
-    using open_t = shaders::raytracing_open_open_path_t;
+    using path_t = shaders::raytracing_pipeline::path_t;
+    using open_t = shaders::raytracing_open::open_path_t;
     static_assert(takes_row<path_t, path_t::hit_group>);
     // another pipeline's group, and a bare position, are no hit group of `path`
     static_assert(!takes_row<path_t, open_t::hit_group>);

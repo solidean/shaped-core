@@ -11,8 +11,8 @@ cc::shared_async<cc::unit> blit_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    auto const vs = sgl_shaders::blit.main_vs->acquire(ctx);
-    auto const ps = sgl_shaders::blit.main_ps->acquire(ctx);
+    auto const vs = sgl_shaders::blit::main_vs->acquire(ctx);
+    auto const ps = sgl_shaders::blit::main_ps->acquire(ctx);
 
     // Settled rather than awaited for the value: a shader that did not compile is this routine's verdict to report,
     // not an error to propagate — fail_init says so in the vocabulary a caller already branches on.
@@ -32,11 +32,11 @@ cc::shared_async<cc::unit> blit_routine::init(sg::routine_init_scope scope)
     }
 
     // Only the pixel stage lists a group, so its layout is the pipeline's.
-    _group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::blit_source>();
+    _group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::blit::blit_source>();
 
     // One instance means one pipeline to build, rather than a map filled lazily on the frame path.
     _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
-        .layout = sgl_shaders::blit.main_ps.acquire_layout(ctx),
+        .layout = sgl_shaders::blit::main_ps.acquire_layout(ctx),
         .vertex_shader = *compiled_vs,
         .fragment_shader = *compiled_ps,
         .topology = sg::primitive_topology::triangle_list, // no vertex input: the vertex index places the triangle
@@ -69,7 +69,7 @@ sg::routine_outcome blit_routine::execute(sg::rendering_scope& scope, sg::textur
         return sg::routine_outcome::declined;
 
     auto const group = cmd.context().transient.create_binding_group(
-        cmd, self->_group_layout, sgl_shaders::blit_source{.texture = src.as_texture_view()});
+        cmd, self->_group_layout, sgl_shaders::blit::blit_source{.texture = src.as_texture_view()});
 
     scope.bind_pipeline(**pipeline);
     scope.bind_group(0, *group);

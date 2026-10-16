@@ -35,6 +35,7 @@ slib's [cheat sheet](../../../../shaped-shader-library/cheat-sheet.md) shows wha
 
 **Names are mirrored into the host language.**
 A binding `frame_data` becomes a struct in C++.
+Each file's names stand in a namespace of its own there, as they do in SGL, so two files may each declare `frame_data`.
 That is why `-` is not a symbol character, and why snake_case is the convention on both sides: no host language can spell a dash in a name.
 
 ## What it touches

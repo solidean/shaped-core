@@ -17,7 +17,7 @@
 #include <sr_sgl_shaders.hh>
 
 // slug_quads.sgl's instance stream reaches C++ as a generated struct; the public one has to be it byte for byte.
-using generated_instance = sr::sgl_shaders::slug_vertex::per_instance;
+using generated_instance = sr::sgl_shaders::slug_quads::slug_vertex::per_instance;
 static_assert(sizeof(sr::slug_instance) == sizeof(generated_instance),
               "slug_instance is not slug_quads.sgl's instance stream");
 static_assert(offsetof(sr::slug_instance, em_to_object) == offsetof(generated_instance, em_to_object),
@@ -31,8 +31,9 @@ static_assert(offsetof(sr::slug_instance, banding) == offsetof(generated_instanc
 static_assert(offsetof(sr::slug_instance, glyph_location) == offsetof(generated_instance, glyph),
               "glyph moved in slug_quads.sgl");
 static_assert(offsetof(sr::slug_instance, color) == offsetof(generated_instance, color), "color moved in slug_quads.sgl");
-static_assert(sizeof(tg::vec2f) == sizeof(sr::sgl_shaders::slug_vertex::per_vertex), "the corner stream is one float2");
-static_assert(sizeof(sr::slug_quad) == sizeof(sr::sgl_shaders::slug_job_vertex::per_instance),
+static_assert(sizeof(tg::vec2f) == sizeof(sr::sgl_shaders::slug_quads::slug_vertex::per_vertex),
+              "the corner stream is one float2");
+static_assert(sizeof(sr::slug_quad) == sizeof(sr::sgl_shaders::slug_quads::slug_job_vertex::per_instance),
               "slug_quad is not slug_quads.sgl's job instance stream");
 
 namespace sr
@@ -41,9 +42,9 @@ cc::shared_async<cc::unit> slug_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    auto const vs = sgl_shaders::slug_quads.main_vs->acquire(ctx);
-    auto const job_vs = sgl_shaders::slug_quads.main_job_vs->acquire(ctx);
-    auto const ps = sgl_shaders::slug_quads.main_ps->acquire(ctx);
+    auto const vs = sgl_shaders::slug_quads::main_vs->acquire(ctx);
+    auto const job_vs = sgl_shaders::slug_quads::main_job_vs->acquire(ctx);
+    auto const ps = sgl_shaders::slug_quads::main_ps->acquire(ctx);
     co_await cc::async_settled(vs);
     co_await cc::async_settled(job_vs);
     co_await cc::async_settled(ps);
@@ -73,14 +74,15 @@ cc::shared_async<cc::unit> slug_routine::init(sg::routine_init_scope scope)
             {.format = sg::pixel_format::r32_float, .width = 1, .height = 1, .usage = sg::texture_usage::texture});
 
     _group_layout = ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>();
-    auto const layout = ctx.cached.acquire_pipeline_layout<sgl_modules::slug::tables, sgl_shaders::slug_draw>();
+    auto const layout
+        = ctx.cached.acquire_pipeline_layout<sgl_modules::slug::tables, sgl_shaders::slug_quads::slug_draw>();
 
     // Both windings reach the screen: a shape's axes may flip it, and a quad is never seen from behind on purpose.
     auto desc = sg::raster_pipeline_description{
         .layout = layout,
         .vertex_shader = *compiled_vs,
         .fragment_shader = *compiled_ps,
-        .vertex_input = sgl_shaders::slug_vertex::layout(),
+        .vertex_input = sgl_shaders::slug_quads::slug_vertex::layout(),
         .topology = sg::primitive_topology::triangle_list,
         .rasterization = {.cull = sg::cull_mode::none},
         .color_targets = {{.format = params().color, .blend = sg::blend_premultiplied_alpha}}};
@@ -93,12 +95,12 @@ cc::shared_async<cc::unit> slug_routine::init(sg::routine_init_scope scope)
     _pipeline = ctx.cached.acquire_raster_pipeline(desc);
 
     // The job form: the same pixel stage and state, with quads that read their shape and frame from the job's tables.
-    _job_group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::slug_job>();
+    _job_group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::slug_quads::slug_job>();
     auto job_desc = desc;
-    job_desc.layout
-        = ctx.cached.acquire_pipeline_layout<sgl_modules::slug::tables, sgl_shaders::slug_job, sgl_shaders::slug_draw>();
+    job_desc.layout = ctx.cached.acquire_pipeline_layout<sgl_modules::slug::tables, sgl_shaders::slug_quads::slug_job,
+                                                         sgl_shaders::slug_quads::slug_draw>();
     job_desc.vertex_shader = *compiled_job_vs;
-    job_desc.vertex_input = sgl_shaders::slug_job_vertex::layout();
+    job_desc.vertex_input = sgl_shaders::slug_quads::slug_job_vertex::layout();
     _job_pipeline = ctx.cached.acquire_raster_pipeline(job_desc);
 
     co_await cc::async_settled(_pipeline);
@@ -109,7 +111,7 @@ cc::shared_async<cc::unit> slug_routine::init(sg::routine_init_scope scope)
 namespace
 {
 /// The per-draw constants: `object_to_clip` as rows, and the scope's size for the dilation.
-[[nodiscard]] sgl_shaders::slug_draw draw_constants(sg::rendering_scope const& scope, slug_view const& view)
+[[nodiscard]] sgl_shaders::slug_quads::slug_draw draw_constants(sg::rendering_scope const& scope, slug_view const& view)
 {
     auto const size = scope.render_target_size();
     auto const& m = view.object_to_clip;
@@ -227,11 +229,11 @@ sg::routine_outcome slug_routine::execute(sg::rendering_scope& scope,
         sgl_modules::slug::tables{.curves = atlas.curve_texture().as_texture_view(),
                                   .bands = atlas.band_texture().as_texture_view()});
     auto const& probe = view.probe_depth.raw() != nullptr ? view.probe_depth : self->_no_probe_depth;
-    auto const job_tables
-        = ctx.transient.create_binding_group(cmd, self->_job_group_layout,
-                                             sgl_shaders::slug_job{.records = atlas.record_texture().as_texture_view(),
-                                                                   .frames = job.frames.as_texture_view(),
-                                                                   .probe_depth = probe.as_texture_view()});
+    auto const job_tables = ctx.transient.create_binding_group(
+        cmd, self->_job_group_layout,
+        sgl_shaders::slug_quads::slug_job{.records = atlas.record_texture().as_texture_view(),
+                                          .frames = job.frames.as_texture_view(),
+                                          .probe_depth = probe.as_texture_view()});
 
     cover_whole_target(scope);
     scope.bind_pipeline(**pipeline);

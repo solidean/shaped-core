@@ -224,12 +224,13 @@ private:
     /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, rewrite bindings, compile.
     /// The two differ only in where the text came from and what its includes are searched against, so everything after that is here.
     /// `package_root` is empty for a source belonging to no package, which simply drops one search root.
+    /// `file_namespace` is where the file's generated types stand, empty for such a source.
     void _compile_text(compile_outcome& outcome,
                        cc::string source,
                        cc::string_view label,
                        cc::string_view source_dir,
                        cc::string_view package_root,
-                       cc::string_view host_namespace,
+                       cc::string_view file_namespace,
                        shader_language language,
                        sg::shader_stage stage,
                        cc::string_view entry_point,

@@ -20,17 +20,20 @@ struct layout_constants_gpu
 };
 
 // A field moved in the shader is a compile error here rather than a wrong sample.
-static_assert(sizeof(layout_constants_gpu) == sizeof(sv::shaders::layout_constants),
+static_assert(sizeof(layout_constants_gpu) == sizeof(sv::shaders::layout::layout_constants),
               "the layout constants are not the size layout.sgl's block states");
-static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_0) == offsetof(layout_constants_gpu, uv_scale_bias_0),
+static_assert(offsetof(sv::shaders::layout::layout_constants, uv_scale_bias_0)
+                  == offsetof(layout_constants_gpu, uv_scale_bias_0),
               "uv_scale_bias_0 moved in layout.sgl");
-static_assert(offsetof(sv::shaders::layout_constants, uv_scale_bias_1) == offsetof(layout_constants_gpu, uv_scale_bias_1),
+static_assert(offsetof(sv::shaders::layout::layout_constants, uv_scale_bias_1)
+                  == offsetof(layout_constants_gpu, uv_scale_bias_1),
               "uv_scale_bias_1 moved in layout.sgl");
-static_assert(offsetof(sv::shaders::layout_constants, tint) == offsetof(layout_constants_gpu, tint),
+static_assert(offsetof(sv::shaders::layout::layout_constants, tint) == offsetof(layout_constants_gpu, tint),
               "tint moved in layout.sgl");
-static_assert(offsetof(sv::shaders::layout_constants, wipe) == offsetof(layout_constants_gpu, wipe),
+static_assert(offsetof(sv::shaders::layout::layout_constants, wipe) == offsetof(layout_constants_gpu, wipe),
               "wipe moved in layout.sgl");
-static_assert(offsetof(sv::shaders::layout_constants, separator_color) == offsetof(layout_constants_gpu, separator_color),
+static_assert(offsetof(sv::shaders::layout::layout_constants, separator_color)
+                  == offsetof(layout_constants_gpu, separator_color),
               "separator_color moved in layout.sgl");
 
 /// A uv rect as the shader wants it: a scale and a bias applied to the covering triangle's [0,1] corner.
@@ -68,10 +71,10 @@ cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    auto const vs = sv::shaders::layout.main_vs->acquire(ctx);
-    auto const border_ps = sv::shaders::layout.border_ps->acquire(ctx);
-    auto const view_ps = sv::shaders::layout.view_ps->acquire(ctx);
-    auto const wipe_ps = sv::shaders::layout.wipe_ps->acquire(ctx);
+    auto const vs = sv::shaders::layout::main_vs->acquire(ctx);
+    auto const border_ps = sv::shaders::layout::border_ps->acquire(ctx);
+    auto const view_ps = sv::shaders::layout::view_ps->acquire(ctx);
+    auto const wipe_ps = sv::shaders::layout::wipe_ps->acquire(ctx);
 
     // All four are in flight from their acquire, so settling them one after another costs no concurrency.
     co_await cc::async_settled(vs);
@@ -98,8 +101,9 @@ cc::shared_async<cc::unit> layout_routine::init(sg::routine_init_scope scope)
 
     // The group is what layout.sgl declared, so it serves every kind whatever a stage happens to reference:
     // a one-source draw simply binds its primary twice.
-    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::layout_sources>();
-    auto const pipeline_layout = ctx.cached.acquire_pipeline_layout<shaders::layout_sources, shaders::layout_constants>();
+    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::layout::layout_sources>();
+    auto const pipeline_layout
+        = ctx.cached.acquire_pipeline_layout<shaders::layout::layout_sources, shaders::layout::layout_constants>();
 
     // Every pipeline this format needs, built here rather than on demand: a draw happens inside the caller's open
     // rendering scope, and that is where nothing may wait.
@@ -207,9 +211,9 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
                 continue;
             group = ctx.transient.create_binding_group(
                 cmd, self->_group_layout,
-                shaders::layout_sources{.source_0 = textures.targets[0].as_texture_view(),
-                                        .source_1 = textures.targets[0].as_texture_view(),
-                                        .source_sampler = {}});
+                shaders::layout::layout_sources{.source_0 = textures.targets[0].as_texture_view(),
+                                                .source_1 = textures.targets[0].as_texture_view(),
+                                                .source_sampler = {}});
         }
         else
         {
@@ -231,13 +235,13 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
                 = d.sampler == sampler_mode::nearest ? sg::sampler_filter::nearest : sg::sampler_filter::linear;
             group = ctx.transient.create_binding_group(
                 cmd, self->_group_layout,
-                shaders::layout_sources{.source_0 = primary->as_texture_view(),
-                                        .source_1 = secondary->as_texture_view(),
-                                        .source_sampler = {.min_filter = filter,
-                                                           .mag_filter = filter,
-                                                           .mip_filter = sg::sampler_filter::nearest,
-                                                           .address_u = sg::sampler_address_mode::clamp_edge,
-                                                           .address_v = sg::sampler_address_mode::clamp_edge}});
+                shaders::layout::layout_sources{.source_0 = primary->as_texture_view(),
+                                                .source_1 = secondary->as_texture_view(),
+                                                .source_sampler = {.min_filter = filter,
+                                                                   .mag_filter = filter,
+                                                                   .mip_filter = sg::sampler_filter::nearest,
+                                                                   .address_u = sg::sampler_address_mode::clamp_edge,
+                                                                   .address_v = sg::sampler_address_mode::clamp_edge}});
         }
 
         scope.set_viewport(

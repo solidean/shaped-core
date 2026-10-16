@@ -51,8 +51,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL @atomic image keeps each texel's maximum and c
     if (!ctx->supports(sg::feature::image_atomics))
         SKIP("this context has no image atomics");
 
-    auto const pipeline = co_await shaders::coherence.reduce_max.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::texel_maxima>();
+    auto const pipeline = co_await shaders::coherence::reduce_max.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::coherence::texel_maxima>();
 
     // scattered values, so that the largest of a texel's 64 stands anywhere among them
     constexpr auto count = 16 * 64;
@@ -74,9 +74,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL @atomic image keeps each texel's maximum and c
     cmd->upload.bytes_to_texture(counts.raw(), cc::as_bytes(zeros));
     auto const group = ctx->transient.create_binding_group(
         *cmd, layout,
-        shaders::texel_maxima{.values = values.as_readonly_buffer(),
-                              .maxima = maxima.as_image_view<sg::pixel_format::r32_uint>(),
-                              .counts = counts.as_image_view<sg::pixel_format::r32_uint>()});
+        shaders::coherence::texel_maxima{.values = values.as_readonly_buffer(),
+                                         .maxima = maxima.as_image_view<sg::pixel_format::r32_uint>(),
+                                         .counts = counts.as_image_view<sg::pixel_format::r32_uint>()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);
@@ -104,8 +104,8 @@ ASYNC_INVOCABLE_TEST("sg - SGL's @coherent buffer and image take every invocatio
     if (!ctx->supports(sg::feature::device_coherence))
         SKIP("this context has no device coherence");
 
-    auto const pipeline = co_await shaders::coherence.publish.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::handoff>();
+    auto const pipeline = co_await shaders::coherence::publish.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::coherence::handoff>();
 
     // what coherence promises is visibility to another workgroup within the dispatch, which no readback can observe;
     // this shows that the declarations compile, bind and run, and that each write lands
@@ -117,11 +117,11 @@ ASYNC_INVOCABLE_TEST("sg - SGL's @coherent buffer and image take every invocatio
     auto const mip = make_image(ctx, sg::pixel_format::r32_float, 16, count / 16);
 
     auto cmd = ctx->create_command_list();
-    auto const group
-        = ctx->transient.create_binding_group(*cmd, layout,
-                                              shaders::handoff{.partials = partials.as_readwrite_buffer(),
-                                                               .counter = counter.as_readwrite_buffer(),
-                                                               .mip = mip.as_image_view<sg::pixel_format::r32_float>()});
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, layout,
+        shaders::coherence::handoff{.partials = partials.as_readwrite_buffer(),
+                                    .counter = counter.as_readwrite_buffer(),
+                                    .mip = mip.as_image_view<sg::pixel_format::r32_float>()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);
