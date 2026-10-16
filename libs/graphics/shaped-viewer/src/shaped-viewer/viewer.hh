@@ -214,6 +214,17 @@ private:
     /// Writes only the view's persistent zoom — never a camera, and never anything a trace reads.
     void zoom_at(tg::pos2f window_point, float ticks);
 
+    /// Asks for the surface point under `window_point` to become its view's orbit centre.
+    /// Only the trace knows that point, so this records the request, and `read_back_pick` and `apply_pick` finish it frames later.
+    void request_pick(tg::pos2f window_point);
+
+    /// Reads the primary depth under a pending pick back, in this frame's command list, once its view traced in it.
+    void read_back_pick(viewer_definition const& def, render_plan const& plan);
+
+    /// Starts the picked view's glide to its new orbit centre once its depth has landed.
+    /// A click on the background reads an escaped ray, and moves nothing.
+    void apply_pick();
+
     friend class frame;
     friend class frame_iterator;
     friend class frame_range;

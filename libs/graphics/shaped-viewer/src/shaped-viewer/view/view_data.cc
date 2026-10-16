@@ -49,9 +49,9 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         // moving a couple of thousand frames in — right where an uncapped estimate is still converging.
         out.push_back({.id = temporal_id::accumulation(u8(i)), .format = sg::pixel_format::rgba32_float});
 
-        // Only what a raster pass after the trace is occluded by, so only for a layer with drawings or annotations.
-        if (v.layers[i].needs_primary_depth())
-            out.push_back({.id = temporal_id::primary_depth(u8(i)), .format = sg::pixel_format::r32_float});
+        // What a raster pass after the trace is occluded by, and what a double-click reads the orbit centre off.
+        // The second is why every traced layer keeps one, drawings or not.
+        out.push_back({.id = temporal_id::primary_depth(u8(i)), .format = sg::pixel_format::r32_float});
 
         // A rasterized layer writes its whole G-buffer every frame, denoised or not: it is what a lighting pass after it reads.
         // The slots are the guides', in the guides' formats, so a denoiser or a hybrid pass reads either path's alike.

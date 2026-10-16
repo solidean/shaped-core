@@ -464,9 +464,10 @@ struct ensured_slot
     if (resized)
     {
         // UAV-written by whatever fills it, sampled by whatever reads it back — every temporal resource needs both.
+        // Copyable too, so the host can read one back: a double-click reads a texel of the primary depth.
         // A slot the renderer mints is a render target too, since a raster frame draws the very slots a trace writes;
-        // a caller's own keeps to the two, as its format need not be renderable.
-        auto usage = sg::texture_usage::texture | sg::texture_usage::image;
+        // a caller's own keeps to these, as its format need not be renderable.
+        auto usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src;
         if (temporal_id >= sv::temporal_id::caller_range_end)
             usage |= sg::texture_usage::render_target;
         auto const desc
@@ -721,8 +722,8 @@ struct raster_scene
     // Held across the draws: the tables are what a pixel reaches every mesh and texture through.
     auto const bindless = resources.freeze();
 
-    auto* const primary_depth
-        = l.needs_primary_depth() ? rec.temporal.get_ptr(temporal_id::primary_depth(layer)) : nullptr;
+    // Every layer keeps one, since a double-click picks off it whether or not anything draws over the frame.
+    auto* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
 
     auto stand_ins = stand_in_report{};
     auto const outcome = raster_routine::execute(
@@ -1085,11 +1086,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_split = has_split ? 1 : 0;
     }
 
-    // The depth a layer's 3D drawings are occluded by, on every frame that traces it — after the hash, so a drawing
-    // coming or going never restarts the image.
-    // Keyed on the same condition `temporal_inputs_of` declares it on, so the slot was sized by this frame's resolve.
-    auto* const depth_slot
-        = l.needs_primary_depth() ? rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer)) : nullptr;
+    // The depth a layer's 3D drawings are occluded by and a pick reads, on every frame that traces it — after the hash,
+    // so a drawing coming or going never restarts the image.
+    auto* const depth_slot = rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer));
     if (depth_slot != nullptr)
     {
         fc.write_primary_depth = 1;

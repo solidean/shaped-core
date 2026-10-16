@@ -31,6 +31,7 @@ Anything a session finds and does not finish becomes an issue, not a note in cha
 `issues claim <id> --as "Claude (for <user's name>)"`.
 The claim pushes one commit and nothing else, and needs no pre-push gate; tell the user it went out.
 If it is claimed already, stop and ask; never `--force` on your own initiative.
+The one exception is a leftover claim whose closing is in the commit history: clear it ([the guide](../../../docs/guides/issue-tracking.md#claimed--pushed-at-once)).
 
 ## Resolving an issue
 

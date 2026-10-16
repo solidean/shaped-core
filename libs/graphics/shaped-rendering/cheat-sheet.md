@@ -112,6 +112,7 @@ win->start_text_input();              // begin text_events + IME for this window
   next keystroke, and a paste arrives as one `text_event`.
 - **Text input is off until `start_text_input()`**, because while it is on the OS may swallow keystrokes to compose.
 - **Wheel deltas are fractional** on trackpads; the platform's inverted-scroll flag is already applied.
+- **A double-click is `mouse_button_event::clicks == 2`** on the second press, timed and spaced by the OS's own setting — never by a timer of your own.
 - **Positions are `tg::pos2f`, motions `tg::vec2f`** — `pos - pos` gives the `vec` between them.
   tg has no `.x`/`.y`: index with `p[0]` / `p[1]`.
 - **`input_event::payload` is a `cc::variant`**, and the `try_as_*` accessors above are one-liners over its `try_as<T>()`.

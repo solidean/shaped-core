@@ -684,12 +684,19 @@ sv::orbit_state                  // { pos3d target; f64 distance; angle_d azimut
 o.to_camera()                    // -> camera (camera::orbiting plus the fov); orbit_state::from_camera(cam, distance) is the lossy inverse
 sv::orbit_camera_controller      // { orbit_state orbit; camera_controller_config config; }
 c.handle(sr::input_event) -> bool  // apply one event ALREADY routed to this view; true if the camera actually moved
+c.focus_on(pos3d) -> bool        // start a glide to orbit this point at config.focus_approach (0.7) of its depth, view direction kept; false behind the eye
+c.update(dt) -> bool             // advance that glide (config.focus_seconds, ease-out); true while moving. A pan cancels it; cancel_focus() too
+c.is_focusing()                  // whether update would still move the camera
 c.camera() / c.is_dragging()     // the resulting camera / whether a drag is in progress
+sv::primary_hit_position(record, pixel, resolution, depth, near) // -> optional<pos3d>: a texel of the trace's primary depth back to world; none = escaped
 sv::camera_controller_config     // { f64 orbit_degrees_per_pixel, pan_units_per_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
 ```
 
 Left drag orbits, middle drag pans the target (scaled by distance, so one drag covers the same screen fraction at every zoom), the wheel scales the distance geometrically.
-It is **event-driven and time-free** — every input carries the motion it caused, so there is no `update(dt)` to schedule and a view that gets no input produces none.
+**A double-click orbits the surface under the cursor**: `sv::viewer` reads one texel of the trace's primary depth back and calls `focus_on`.
+The glide starts a frame or two after the click, and a click on the background moves nothing.
+It is **event-driven** — every input carries the motion it caused, and a view that gets no input produces none.
+The glide is its one motion over time, so a caller running its own pump calls `update(dt)` every frame; `sv::viewer` does that for you.
 `sv::viewer` drives one per view for you; a caller running its own event pump (see `viewer-window-manual-test.cc`) just feeds it `wsys->events()`.
 
 ```cpp
