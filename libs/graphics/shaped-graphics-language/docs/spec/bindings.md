@@ -425,7 +425,26 @@ Its operations are builtins that take it first, called as methods: `add`, `subtr
 `and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
 Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
 The host holds a buffer of atomics as the plain integers it is.
-Floats, 64 bits, a compare-exchange and a vertex stage are [the incubator's](incubator/atomics.md).
+Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
+
+**`compare_exchange(expected, desired)` stores `desired` where the atomic holds `expected`, and gives the value before.**
+It is strong: it stored exactly where what it gives is `expected`, so that one comparison is the whole answer.
+
+```sgl
+binding table:
+    slots: mut buffer[atomic[uint]]
+
+fun insert(key: uint){table} -> uint:
+    let mut i = key & 1023u
+    for _ in 0 ..< 1024:
+        let before = table.slots[i].compare_exchange(0u, key)
+        if before == 0u or before == key => return i     // claimed, or found
+        i = (i + 1u) & 1023u
+    return 1024u
+```
+
+WGSL's and MSL's own compare-exchange is weak, and may fail although the value matched.
+So there it is a loop that retries exactly such a failure, which HLSL's strong one never has ([EMIT-157](semantics/emitting.md#types)).
 
 **An image's texels are atomics where its member says so.**
 `@atomic` on a `mut` image of the format `r32_uint` or `r32_sint` makes each texel an atomic, which a subscript reaches and the methods above update ([CHK-372](semantics/checking.md#atomics)):
@@ -555,7 +574,7 @@ Everything not named here is the diagnostic `unsupported-yet`, never a guess.
 * The positional group numbering, and `@inline` last.
 * Binding arrays of textures, images and buffers, under `require binding_arrays`, with `nonuniform` and `uniform`.
 * `@workgroup` bindings, which take no group.
-* `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update but a compare-exchange.
+* `atomic[uint]` and `atomic[int]`, in a `mut buffer` and in workgroup memory, with every update above, a strong compare-exchange among them.
 * `@atomic` images of `.r32_uint` and `.r32_sint`, with the same updates, and `@coherent` buffers and images.
 * `acceleration_structure[.geometry]`, which the prelude's `trace` takes ([raytracing.md](raytracing.md)).
 * A resource's host name, its path `binding.member` ([CHK-171](semantics/checking.md#bindings)), which the text reports beside the identifier it minted.

@@ -229,3 +229,19 @@ It counts in 4-byte components, so a `half` at byte 2 has no spelling.
 It stands only in a `cbuffer`, whose members are globals rather than fields of the `ConstantBuffer` every other block is read through.
 Neither is needed: once no field crosses a row and a padding field fills each gap, dx12's own packing puts every field right behind the one before, which is where the form placed it.
 A memory form on every target, rather than only where a target's own rule disagrees, keeps one shape of text for a promised layout.
+
+## EMIT-157
+
+WGSL and MSL offer only a weak compare-exchange, so SGL had to pick between exposing that and building the strong one on it.
+The weak one needs a result that says whether it stored, since a spurious failure reads the expected value and stores nothing.
+That result is a struct in WGSL whose type no program can name, so a `let` with its type written out, which is how the WGSL text declares every local, could not hold it.
+The strong one gives a plain value, and the one comparison `before == expected` says whether it stored, on every target.
+Most uses want the strong one anyway: a claim of a hash table's slot that failed spuriously would move on and leave an empty slot behind.
+
+The loop retries only a failure that read `expected`, so a real conflict, which read anything else, ends it at once.
+A spurious failure is transient, which is all a weak compare-exchange promises, and C++ builds its strong compare-exchange from the weak one the same way.
+In WGSL the loop is left by a `break` alone, so the control flow after it is as uniform as before it, and a barrier after a compare-exchange stays legal.
+HLSL's `InterlockedCompareExchange` is strong already, so it needs no loop.
+
+The test interpreter runs one invocation, so nothing fails its compare-exchange spuriously, and the strong result is exactly what it computes.
+With a weak one exposed, the interpreter would have had to pick whether a test ever saw a spurious failure, and a test could not pin the shader's behaviour either way.

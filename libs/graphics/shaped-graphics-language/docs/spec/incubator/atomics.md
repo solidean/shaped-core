@@ -17,14 +17,9 @@ Each thing below is what one target or another lacks, so each comes back behind 
 | a vertex stage's atomics and stores | WebGPU; vulkan needs `vertexPipelineStoresAndAtomics` | `vertex_stores`, lifting `@stages(.pixel, .compute)` from the builtins |
 | orderings stronger than relaxed | WGSL, which has relaxed alone | acquire and release as named arguments, once a shader needs orderings rather than the coherence `@coherent` gives |
 
-## A compare-exchange
-
-**It is left out of the floor for its result, not for want of a target.**
-Every target has one, and WGSL's is weak: it may fail although the value matched, so the result has to say whether it exchanged, not only what it read.
-WGSL returns that as a struct whose type no program can name, and HLSL gives the value before through an out parameter, so `exchange_result[T]` needs a spelling in each.
-A helper struct written ahead of the entry point, filled from the target's own result, is the likely shape; `exchanged` must come from the target and never from comparing values.
+The compare-exchange has left the incubator: it is strong on every target, a loop over the weak one in WGSL and MSL ([EMIT-157](../semantics/emitting.md#types)).
 
 ## Open
 
-* Whether a compare-exchange returns a struct, or takes the expected value and gives a `bool` with the value before in a named argument.
+* Whether a weak compare-exchange is worth its own builtin beside the strong one, for a loop that retries anyway and would save the inner one.
 * Whether HLSL's `Interlocked*` without an out value, for an update whose result is dropped, is worth a writer of its own.

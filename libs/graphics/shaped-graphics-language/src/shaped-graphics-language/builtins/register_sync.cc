@@ -110,6 +110,7 @@ enum class atomic_op : u8
     exchange,
     load,
     store,
+    compare_exchange,
 };
 
 struct atomic_info
@@ -138,26 +139,97 @@ constexpr atomic_info k_atomics[] = {
     {atomic_op::exchange, "exchange", "Exchange", "Exchange", "exchange", "/// Stores `v`, and gives the value before."},
     {atomic_op::load, "load", "Or", "Load", "load", "/// The value, read in one step."},
     {atomic_op::store, "store", "Exchange", "Store", "store", "/// Stores `v` in one step."},
+    {atomic_op::compare_exchange, "compare_exchange", "CompareExchange", "CompareExchangeWeak", "compare_exchange_weak",
+     "/// Stores `desired` where the value is `expected`, and gives the value before.\n"
+     "/// So it stored exactly where what it gives is `expected`."},
 };
 
 constexpr cc::string_view k_atomics_hlsl[] = {
     "InterlockedAdd", "InterlockedMin", "InterlockedMax",      "InterlockedAnd",
-    "InterlockedOr",  "InterlockedXor", "InterlockedExchange",
+    "InterlockedOr",  "InterlockedXor", "InterlockedExchange", "InterlockedCompareExchange",
 };
 constexpr cc::string_view k_atomics_wgsl[] = {
-    "atomicAdd", "atomicSub", "atomicMin",      "atomicMax",  "atomicAnd",
-    "atomicOr",  "atomicXor", "atomicExchange", "atomicLoad", "atomicStore",
+    "atomicAdd",
+    "atomicSub",
+    "atomicMin",
+    "atomicMax",
+    "atomicAnd",
+    "atomicOr",
+    "atomicXor",
+    "atomicExchange",
+    "atomicLoad",
+    "atomicStore",
+    "atomicCompareExchangeWeak",
 };
 constexpr cc::string_view k_atomics_msl[] = {
-    "atomic_fetch_add_explicit", "atomic_fetch_sub_explicit", "atomic_fetch_min_explicit", "atomic_fetch_max_explicit",
-    "atomic_fetch_and_explicit", "atomic_fetch_or_explicit",  "atomic_fetch_xor_explicit", "atomic_exchange_explicit",
-    "atomic_load_explicit",      "atomic_store_explicit",     "memory_order_relaxed",
+    "atomic_fetch_add_explicit", "atomic_fetch_sub_explicit", "atomic_fetch_min_explicit",
+    "atomic_fetch_max_explicit", "atomic_fetch_and_explicit", "atomic_fetch_or_explicit",
+    "atomic_fetch_xor_explicit", "atomic_exchange_explicit",  "atomic_load_explicit",
+    "atomic_store_explicit",     "memory_order_relaxed",      "atomic_compare_exchange_weak_explicit",
 };
+
+/// A compare-exchange is a loop in WGSL and MSL, and HLSL's out value (EMIT-157).
+bool every_language(language)
+{
+    return true;
+}
 
 /// The data word: the operation, and whether the atomic holds an `int`.
 u32 atomic_data(atomic_op op, bool is_signed)
 {
     return u32(op) | (is_signed ? 0x100u : 0u);
+}
+
+/// A fresh name of the text, or `desired` itself where no text is being written.
+cc::string minted(call_context const& ctx, cc::string_view desired)
+{
+    return ctx.mint.is_valid() ? ctx.mint(desired) : cc::string(desired);
+}
+
+/// EMIT-157: WGSL's and MSL's compare-exchange is weak, so a loop retries the one that failed on the expected value.
+/// The atomic's place, `expected` and `desired` are each evaluated once, in that order, ahead of the loop.
+written write_strong_exchange(call_context const& ctx,
+                              cc::string_view place,
+                              cc::string_view expected,
+                              cc::string_view desired)
+{
+    auto const is_signed = (ctx.data & 0x100u) != 0;
+    auto const before = minted(ctx, "exchange_before");
+    auto const expected_name = minted(ctx, "exchange_expected");
+    auto const desired_name = minted(ctx, "exchange_desired");
+    auto const place_name = minted(ctx, "exchange_place");
+    auto result = written{.text = before};
+    if (ctx.target == language::wgsl)
+    {
+        auto const t = is_signed ? "i32" : "u32";
+        auto const exchanged = minted(ctx, "exchange_result");
+        result.lines.push_back(cc::format("let {} = &{};", place_name, place));
+        result.lines.push_back(cc::format("let {}: {} = {};", expected_name, t, expected));
+        result.lines.push_back(cc::format("let {}: {} = {};", desired_name, t, desired));
+        result.lines.push_back(cc::format("var {}: {};", before, t));
+        result.lines.push_back("loop {");
+        result.lines.push_back(cc::format("    let {} = atomicCompareExchangeWeak({}, {}, {});", exchanged, place_name,
+                                          expected_name, desired_name));
+        result.lines.push_back(cc::format("    {} = {}.old_value;", before, exchanged));
+        result.lines.push_back(cc::format("    if {}.exchanged || {} != {} {{", exchanged, before, expected_name));
+        result.lines.push_back("        break;");
+        result.lines.push_back("    }");
+        result.lines.push_back("}");
+        return result;
+    }
+    // MSL hands the value it read back through `expected`, which a failure that read the expected value leaves alone
+    auto const t = is_signed ? "int" : "uint";
+    result.lines.push_back(cc::format("const auto {} = &{};", place_name, place));
+    result.lines.push_back(cc::format("const {} {} = {};", t, expected_name, expected));
+    result.lines.push_back(cc::format("const {} {} = {};", t, desired_name, desired));
+    result.lines.push_back(cc::format("{} {} = {};", t, before, expected_name));
+    auto const weak = cc::format("atomic_compare_exchange_weak_explicit({}, &{}, {}, memory_order_relaxed, "
+                                 "memory_order_relaxed)",
+                                 place_name, before, desired_name);
+    result.lines.push_back(cc::format("while (!{} && {} == {})", weak, before, expected_name));
+    result.lines.push_back("{");
+    result.lines.push_back("}");
+    return result;
 }
 
 written write_atomic(call_context const& ctx)
@@ -166,15 +238,19 @@ written write_atomic(call_context const& ctx)
     auto const is_signed = (ctx.data & 0x100u) != 0;
     auto const& a = ctx.arguments[0].text;
     auto const v = ctx.arguments.size() > 1 ? wrapped(ctx.arguments[1], precedence::primary) : cc::string();
+    if (info.op == atomic_op::compare_exchange && ctx.target != language::hlsl)
+        return write_strong_exchange(ctx, a, ctx.arguments[1].text, ctx.arguments[2].text);
     switch (ctx.target)
     {
     case language::hlsl:
     {
         // `Interlocked*` gives the value before through an out parameter, so a local declared ahead holds it
-        auto const before = ctx.mint.is_valid() ? ctx.mint("atomic_before") : cc::string("atomic_before");
+        auto const before = minted(ctx, "atomic_before");
         auto const operand = info.op == atomic_op::subtract ? cc::format("-{}", v)
                            : info.op == atomic_op::load     ? cc::string(is_signed ? "0" : "0u")
-                                                            : v;
+                           : info.op == atomic_op::compare_exchange
+                               ? cc::format("{}, {}", v, wrapped(ctx.arguments[2], precedence::primary))
+                               : v;
         auto result = written{.text = before};
         result.lines.push_back(cc::format("{} {};", is_signed ? "int" : "uint", before));
         result.lines.push_back(cc::format("Interlocked{}({}, {}, {});", info.hlsl, a, operand, before));
@@ -222,6 +298,8 @@ scalar updated(atomic_op op, scalar old, scalar v)
         return {.kind = kind, .bits = b};
     case atomic_op::load:
         return old;
+    case atomic_op::compare_exchange:
+        break;
     }
     return old;
 }
@@ -233,11 +311,19 @@ void atomic_update(cc::span<scalar const> in, cc::vector<scalar>& out)
     out.push_back(updated<IsSigned>(Op, in[0], in.size() > 1 ? in[1] : in[0]));
 }
 
+/// The atomic's value, `expected` and `desired`: a run is one invocation, so no other update makes it fail (EVAL-93).
+void exchanged(cc::span<scalar const> in, cc::vector<scalar>& out)
+{
+    out.push_back(in[0].bits == in[1].bits ? in[2] : in[0]);
+}
+
 template <bool IsSigned>
 evaluator evaluator_of(atomic_op op)
 {
     switch (op)
     {
+    case atomic_op::compare_exchange:
+        return exchanged;
     case atomic_op::add:
         return atomic_update<atomic_op::add, IsSigned>;
     case atomic_op::subtract:
@@ -293,8 +379,8 @@ written write_texel_atomic(call_context const& ctx)
         auto const index = is_array ? cc::format("int{}({}, {})", dim + 1, xy, ctx.arguments[2].text) : cc::string(xy);
         auto arguments = cc::vector<written>();
         arguments.push_back({.text = cc::format("{}[{}]", image, index)});
-        if (has_operand)
-            arguments.push_back(ctx.arguments[operand]);
+        for (auto i = operand; i < ctx.arguments.size(); ++i)
+            arguments.push_back(ctx.arguments[i]);
         return write_atomic({.target = ctx.target,
                              .arguments = arguments,
                              .builtins = ctx.builtins,
@@ -312,6 +398,33 @@ written write_texel_atomic(call_context const& ctx)
         auto const v = has_operand ? cc::string(ctx.arguments[operand].text) : cc::string();
         switch (info.op)
         {
+        case atomic_op::compare_exchange:
+        {
+            // EMIT-157 as a buffer atomic's, with the coordinate in place of the pointer: each evaluated once, first
+            auto const t = is_signed ? "int" : "uint";
+            auto const at = minted(ctx, "exchange_texel");
+            auto const expected = minted(ctx, "exchange_expected");
+            auto const desired = minted(ctx, "exchange_desired");
+            auto const before = minted(ctx, "exchange_before");
+            auto result = written{.text = cc::format("{}.x", before)};
+            auto const texel_type = dim == 1 ? cc::string("uint") : cc::format("uint{}", dim);
+            result.lines.push_back(cc::format("const {} {} = {}({});", texel_type, at, texel_type, xy));
+            auto where = cc::string(at);
+            if (is_array)
+            {
+                auto const layer = minted(ctx, "exchange_layer");
+                result.lines.push_back(cc::format("const uint {} = uint({});", layer, ctx.arguments[2].text));
+                where.appendf(", {}", layer);
+            }
+            result.lines.push_back(cc::format("const {} {} = {};", t, expected, ctx.arguments[operand].text));
+            result.lines.push_back(cc::format("const {} {} = {};", t, desired, ctx.arguments[operand + 1].text));
+            result.lines.push_back(cc::format("{} {} = {}({});", vector, before, vector, expected));
+            result.lines.push_back(cc::format("while (!{}.atomic_compare_exchange_weak({}, &{}, {}({})) && {}.x == {})",
+                                              image, where, before, vector, desired, before, expected));
+            result.lines.push_back("{");
+            result.lines.push_back("}");
+            return result;
+        }
         case atomic_op::load:
             return {.text = cc::format("{}.atomic_load({}).x", image, coordinate)};
         case atomic_op::store:
@@ -413,17 +526,19 @@ void sgl::builtins::register_sync(registry& r)
         auto const t = is_signed ? "int" : "uint";
         for (auto const& info : k_atomics)
         {
-            auto const signature = info.op == atomic_op::load ? cc::format("fun load(a: atomic[{0}]) -> {0}", t)
-                                 : info.op == atomic_op::store
-                                     ? cc::format("fun store(a: out atomic[{0}], v: {0})", t)
-                                     : cc::format("fun {1}(a: mut atomic[{0}], v: {0}) -> {0}", t, info.name);
+            auto const signature
+                = info.op == atomic_op::load  ? cc::format("fun load(a: atomic[{0}]) -> {0}", t)
+                : info.op == atomic_op::store ? cc::format("fun store(a: out atomic[{0}], v: {0})", t)
+                : info.op == atomic_op::compare_exchange
+                    ? cc::format("fun compare_exchange(a: mut atomic[{0}], expected: {0}, desired: {0}) -> {0}", t)
+                    : cc::format("fun {1}(a: mut atomic[{0}], v: {0}) -> {0}", t, info.name);
             r.add(function_record{
                 .signature = cc::format("@stages(.pixel, .compute) {}", signature),
                 .doc = info.doc,
                 .evaluate = is_signed ? evaluator_of<true>(info.op) : evaluator_of<false>(info.op),
                 .write = {.kind = spelling_kind::custom,
                           .custom = write_atomic,
-                          .writes_lines = is_hlsl,
+                          .writes_lines = info.op == atomic_op::compare_exchange ? every_language : is_hlsl,
                           .data = atomic_data(info.op, is_signed),
                           .hlsl_names = k_atomics_hlsl,
                           .wgsl_names = k_atomics_wgsl,
@@ -452,10 +567,12 @@ void sgl::builtins::register_sync(registry& r)
                 = cc::format("i: mut {}[{}], xy: {}{}", entry.image, t, coordinate, is_array ? ", layer: int" : "");
             for (auto const& info : k_atomics)
             {
-                auto const signature = info.op == atomic_op::load ? cc::format("fun texel_load({}) -> {}", texel, t)
-                                     : info.op == atomic_op::store
-                                         ? cc::format("fun texel_store({}, v: {})", texel, t)
-                                         : cc::format("fun texel_{}({}, v: {}) -> {}", info.name, texel, t, t);
+                auto const signature
+                    = info.op == atomic_op::load  ? cc::format("fun texel_load({}) -> {}", texel, t)
+                    : info.op == atomic_op::store ? cc::format("fun texel_store({}, v: {})", texel, t)
+                    : info.op == atomic_op::compare_exchange
+                        ? cc::format("fun texel_compare_exchange({0}, expected: {1}, desired: {1}) -> {1}", texel, t)
+                        : cc::format("fun texel_{}({}, v: {}) -> {}", info.name, texel, t, t);
                 r.add(function_record{
                     .signature = cc::format("@internal @stages(.pixel, .compute) {}", signature),
                     .doc = info.doc,
@@ -464,7 +581,7 @@ void sgl::builtins::register_sync(registry& r)
                                                             : texel_zero<false>,
                     .write = {.kind = spelling_kind::custom,
                               .custom = write_texel_atomic,
-                              .writes_lines = is_hlsl,
+                              .writes_lines = info.op == atomic_op::compare_exchange ? is_not_wgsl : is_hlsl,
                               .data = texel_atomic_data(info.op, is_signed, entry.shape),
                               .hlsl_names = k_atomics_hlsl},
                     .is_atomic = true,

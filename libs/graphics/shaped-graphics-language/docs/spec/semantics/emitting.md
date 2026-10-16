@@ -79,6 +79,11 @@ struct target_ {
 * **EMIT-120** An atomic is `atomic<u32>` in WGSL and `atomic_uint` in MSL, updated by `atomicAdd(&a, v)` and `atomic_fetch_add_explicit(&a, v, memory_order_relaxed)`.
   HLSL declares the plain integer, and its `Interlocked*` gives the value before through an out parameter, so a local declared ahead of the statement holds it.
   A load is `InterlockedOr` with 0, and a store `InterlockedExchange`, so that no plain access races an update.
+* **EMIT-157** A compare-exchange is HLSL's `InterlockedCompareExchange(a, expected, desired, before)`, which is strong.
+  WGSL's `atomicCompareExchangeWeak` and MSL's `atomic_compare_exchange_weak_explicit` are weak, so each stands in a loop ([why](why/emitting.md#emit-157)).
+  The loop retries a failure that read `expected`, and stops at any other.
+  The atomic's place, `expected` and `desired` are each evaluated once, ahead of the loop, in that order: a pointer and two locals.
+  An `@atomic` image's texel is the same loop in MSL, over its texture's `atomic_compare_exchange_weak`, with the coordinate in place of the pointer.
 * **EMIT-131** A barrier is the target's own execution barrier with one kind of memory, and MSL's one `threadgroup_barrier` names it by its `mem_flags`.
   `workgroup_barrier` is `GroupMemoryBarrierWithGroupSync` in HLSL, `workgroupBarrier` in WGSL and `mem_threadgroup` in MSL.
   `storage_barrier` is `DeviceMemoryBarrierWithGroupSync`, `storageBarrier` and `mem_device`.

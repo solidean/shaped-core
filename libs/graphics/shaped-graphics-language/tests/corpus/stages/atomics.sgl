@@ -28,3 +28,32 @@ test:
     counters.slots[2].bit_or(1) == 8
     counters.slots[2].bit_xor(3) == 9
     counters.slots[2].load() == 10
+
+// a compare-exchange stores only where the value is the expected one, and gives the value before either way
+fun claim_slot(key: uint){counters} -> uint:
+    let mut i = key & 3u
+    for _ in 0 ..< 4:
+        let before = counters.slots[i].compare_exchange(0u, key)
+        if before == 0u or before == key => return i
+        i = (i + 1u) & 3u
+    return 4u
+
+test:
+    for i in 0 ..< 4 => counters.slots[i].store(0)
+    claim_slot(5u) == 1
+    claim_slot(9u) == 2
+    claim_slot(5u) == 1
+    claim_slot(2u) == 3
+    claim_slot(4u) == 0
+    claim_slot(7u) == 4
+    counters.slots[1].load() == 5
+    counters.slots[2].load() == 9
+    counters.slots[3].load() == 2
+
+// a run is one invocation, so a compare-exchange that meets the expected value always stores
+test:
+    counters.lowest.store(-1)
+    counters.lowest.compare_exchange(3, 8) == -1
+    counters.lowest.load() == -1
+    counters.lowest.compare_exchange(-1, 8) == -1
+    counters.lowest.load() == 8

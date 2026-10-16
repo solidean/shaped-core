@@ -22,3 +22,26 @@ binding tally:
         for i in 0 ..< 64:
             total += tile.partial[i]
         tally.sums[group.x] = total * 1000 + tile.seen.load()
+
+binding table:
+    slots: mut buffer[atomic[uint]]
+    found_at: mut buffer[uint]
+    winners: mut buffer[atomic[int]]
+
+@workgroup binding election:
+    owner: atomic[int]
+
+// Every key from 1 to 1024 is inserted by four threads into a table of 1024 slots, by linear probing.
+// A thread claims an empty slot or finds the slot holding its key, and records where; each workgroup elects one thread.
+@compute(64) fun insert(@thread_id id: int3, @local_thread_index local: int, @workgroup_id group: int3){table, election}:
+    if local == 0 => election.owner.store(-1)
+    workgroup_barrier()
+    if election.owner.compare_exchange(-1, local) == -1 => table.winners[group.x].add(1)
+
+    let key = ((id.x as uint) & 1023u) + 1u
+    let mut slot = (key * 2654435761u) >> 22u
+    for _ in 0 ..< 1024:
+        let before = table.slots[slot].compare_exchange(0u, key)
+        if before == 0u or before == key => break
+        slot = (slot + 1u) & 1023u
+    table.found_at[id.x] = slot

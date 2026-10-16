@@ -274,6 +274,80 @@ TEST("sgl emit - HLSL writes subtract, load and store as the Interlocked updates
     CHECK(hlsl.contains("    InterlockedExchange(shared_hits, 7, atomic_before_2);\n"));
 }
 
+TEST("sgl emit - a compare-exchange is HLSL's own, and a loop over the weak one in WGSL and MSL")
+{
+    // EMIT-157: a retry follows only a failure that read the expected value, so every target gives the strong result
+    constexpr auto source = "binding table:\n"
+                            "    slots: mut buffer[atomic[uint]]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){table}:\n"
+                            "    let key = (id.x as uint) + 1u\n"
+                            "    let before = table.slots[id.x & 1023].compare_exchange(0u, key)\n"
+                            "    if before != 0u => table.slots[0].add(1u)\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+        CHECK(text_of(source, t).contains("    uint atomic_before;\n"
+                                          "    InterlockedCompareExchange(table_slots[id.x & 1023], 0u, key, "
+                                          "atomic_before);\n"
+                                          "    const uint before = atomic_before;\n"));
+    CHECK(text_of(source, target::wgsl)
+              .contains("    let exchange_place = &table_slots[id.x & 1023];\n"
+                        "    let exchange_expected: u32 = 0u;\n"
+                        "    let exchange_desired: u32 = key;\n"
+                        "    var exchange_before: u32;\n"
+                        "    loop {\n"
+                        "        let exchange_result = atomicCompareExchangeWeak(exchange_place, exchange_expected, "
+                        "exchange_desired);\n"
+                        "        exchange_before = exchange_result.old_value;\n"
+                        "        if exchange_result.exchanged || exchange_before != exchange_expected {\n"
+                        "            break;\n"
+                        "        }\n"
+                        "    }\n"
+                        "    let before: u32 = exchange_before;\n"));
+    // MSL's failure writes the value it read into the expected one, which a spurious failure leaves as it was
+    CHECK(text_of(source, target::msl)
+              .contains("    const auto exchange_place = &table_slots[id.x & 1023];\n"
+                        "    const uint exchange_expected = 0u;\n"
+                        "    const uint exchange_desired = key;\n"
+                        "    uint exchange_before = exchange_expected;\n"
+                        "    while (!atomic_compare_exchange_weak_explicit(exchange_place, &exchange_before, "
+                        "exchange_desired, memory_order_relaxed, memory_order_relaxed) && exchange_before == "
+                        "exchange_expected)\n"
+                        "    {\n"
+                        "    }\n"
+                        "    const uint before = exchange_before;\n"));
+}
+
+TEST("sgl emit - a compare-exchange of workgroup memory evaluates its place and operands once, ahead of the loop")
+{
+    // the operands may have effects of their own, which a retry must not repeat
+    constexpr auto source = "@workgroup binding shared:\n"
+                            "    owner: atomic[int]\n"
+                            "    count: atomic[int]\n"
+                            "\n"
+                            "binding work:\n"
+                            "    values: mut buffer[int]\n"
+                            "\n"
+                            "@compute(64) fun cs(@local_thread_index li: int){shared, work}:\n"
+                            "    work.values[li] = shared.owner.compare_exchange(-1, shared.count.add(1))\n";
+    CHECK(text_of(source, target::hlsl_dx12)
+              .contains("    InterlockedAdd(shared_count, 1, atomic_before);\n"
+                        "    int atomic_before_1;\n"
+                        "    InterlockedCompareExchange(shared_owner, (-1), atomic_before, atomic_before_1);\n"));
+    CHECK(text_of(source, target::wgsl)
+              .contains("    let exchange_place = &shared_owner;\n"
+                        "    let exchange_expected: i32 = -1;\n"
+                        "    let exchange_desired: i32 = atomicAdd(&shared_count, 1);\n"
+                        "    var exchange_before: i32;\n"
+                        "    loop {\n"));
+    CHECK(text_of(source, target::msl)
+              .contains("    const auto exchange_place = &shared_owner;\n"
+                        "    const int exchange_expected = -1;\n"
+                        "    const int exchange_desired = atomic_fetch_add_explicit(&shared_count, 1, "
+                        "memory_order_relaxed);\n"
+                        "    int exchange_before = exchange_expected;\n"
+                        "    while ("));
+}
+
 TEST("sgl emit - a call whose argument holds an atomic is written, not only the atomic")
 {
     // the atomic's lines stand ahead of the statement, and the store that reads its value still follows them
