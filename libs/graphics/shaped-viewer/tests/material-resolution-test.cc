@@ -295,7 +295,7 @@ TEST("sv::resolve_material - the two keys separate the shader from its parameter
     CHECK(sampled_other.parameter_key != sampled.parameter_key);
 }
 
-TEST("sv::resolve_material - a channel swizzle is shape, but only as far as it is read")
+TEST("sv::resolve_material - a channel swizzle forks both keys, but only as far as it is read")
 {
     auto const type = make_type(); // one f32 attribute, so exactly one selector is ever read
     auto const bare = sv::material::create("bare", sv::material_type_id(0), {});
@@ -313,10 +313,12 @@ TEST("sv::resolve_material - a channel swizzle is shape, but only as far as it i
     auto const from_g = sampled_with(sv::channel_swizzle::of_channel(sv::texture_channel::g));
     auto const from_b = sampled_with(sv::channel_swizzle::of_channel(sv::texture_channel::b));
 
-    // Which channel a component reads is generated code rather than a value, so it forks the permutation...
+    // Which channel a component reads is generated code, so it forks the permutation...
     CHECK(from_g.permutation_key != from_b.permutation_key);
-    // ...and leaves the parameters alone, which is what lets one packed texture bind twice over a single upload.
-    CHECK(from_g.parameter_key == from_b.parameter_key);
+    // ...and the parameters too, since a slot's placeholder texel is written into the channel it reads.
+    // Shared, the second material would read the first one's placeholder from the wrong channel while the texture streams.
+    // The texture still uploads once: that is keyed on its content, not on how it is read.
+    CHECK(from_g.parameter_key != from_b.parameter_key);
 
     // A selector past the declaration's component count is never read, so it cannot fork anything.
     // That is the canonicalization: an identity swizzle hashes identically however its unread tail was spelled.
@@ -324,6 +326,7 @@ TEST("sv::resolve_material - a channel swizzle is shape, but only as far as it i
     tail.components[2] = sv::texture_channel::zero;
     tail.components[3] = sv::texture_channel::one;
     CHECK(sampled_with(tail).permutation_key == sampled_with(sv::channel_swizzle()).permutation_key);
+    CHECK(sampled_with(tail).parameter_key == sampled_with(sv::channel_swizzle()).parameter_key);
 }
 
 TEST("sv::resolve_material - a sampler forks the permutation only as far as its palette sampler differs")
@@ -352,7 +355,7 @@ TEST("sv::resolve_material - a sampler forks the permutation only as far as its 
     CHECK(clamped.permutation_key != plain.permutation_key);
 }
 
-TEST("sv::resolve_material - a sample transform is a VALUE, unlike the swizzle beside it")
+TEST("sv::resolve_material - a sample transform's numbers are values, and only whether there is one is shape")
 {
     auto const type = make_type(); // one f32 attribute
     auto const bare = sv::material::create("bare", sv::material_type_id(0), {});

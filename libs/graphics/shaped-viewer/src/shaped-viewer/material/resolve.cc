@@ -276,8 +276,10 @@ resolved_material resolve_material(material_type const& type, material const& ma
             shape.add_pod(a.uv->frequency);
             // The generated text names a palette sampler, so that name is the shape; what else the state says is not read.
             shape.add_string(sgl_palette_sampler(a.sample->sampler));
-            // The swizzle is generated code rather than a value, so it belongs in the shape — and only as far as it is read.
+            // The swizzle is generated code, so it belongs in the shape — and only as far as it is read.
+            // It is a value too: the placeholder a slot shows until its texture lands sits in the channel the swizzle reads.
             impl::add_swizzle(shape, a.sample->swizzle, a.format.component_count());
+            impl::add_swizzle(values, a.sample->swizzle, a.format.component_count());
 
             // The transform splits the other way: whether there is one at all decides the generated code, and what it
             // scales by is a value the block carries — so a normal map's scale never forks a permutation.

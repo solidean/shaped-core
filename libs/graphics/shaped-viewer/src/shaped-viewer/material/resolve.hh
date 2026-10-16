@@ -103,8 +103,9 @@ struct sv::resolved_attribute
 /// So gold and copper — two materials over one type, differing only in their constants — share one generated shader and one
 /// pipeline, and only a texture sample forces a second.
 ///
-/// `parameter_key` covers the resolved values: the constant bytes, the texture ids, and the content hash and id of each
-/// mesh-sourced attribute.
+/// `parameter_key` covers the resolved values: the constant bytes, the texture ids and the channels each is read through,
+/// and the content hash and id of each mesh-sourced attribute.
+/// The channels are there because a slot's placeholder texel is written into the channel its swizzle reads.
 /// The id is what a slot points at, and an evicted attribute's bytes come back under a new one.
 /// It keys the per-instance slot those values are written into.
 struct sv::resolved_material

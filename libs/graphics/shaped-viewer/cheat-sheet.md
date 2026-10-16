@@ -258,7 +258,8 @@ So every declaration resolves to something and a mesh carrying none of what a ty
 **The two keys are the point.**
 `permutation_key` covers only the SHAPE of the resolution, plus the type's hash — so gold and copper share one generated shader.
 That shape is which rank won, the geometric frequency, the uv attribute, the sampler, and the read part of the channel swizzle.
-`parameter_key` covers the resolved values (constant bytes, texture ids, each mesh attribute's hash and id), and keys the per-instance slot they are written into.
+`parameter_key` covers the resolved values (constant bytes, texture ids and the channels they are read through, each mesh attribute's hash and id).
+It keys the per-instance slot they are written into.
 Only a texture sample forces a second permutation, which is what makes "the shader stays the same" mechanical rather than aspirational.
 Neither is what a shader cache is keyed on: `material_shader_key` folds `permutation_key` together with the options it is generated under, and a `scene_item::shader_key` is that.
 
@@ -313,8 +314,8 @@ auto const plaster = lib.register_type(sv::material_type::create({.name = "plast
 - **A sample transform splits the OTHER way from the swizzle.**
   Only *whether* there is one reaches `permutation_key`, since that decides whether the shader carries a multiply-add; the numbers live in the parameter block.
   So two materials differing only in a normal scale share one permutation, exactly as gold and copper do — and an identity transform costs neither a slot nor an instruction.
-- **A channel swizzle is generated code, not a value**, so it lives in `permutation_key` and never in `parameter_key`.
-  One metallic-roughness map therefore binds twice (`base_metalness` from `.b`, `specular_roughness` from `.g`) over a SINGLE upload — the content hash is the same bytes either way.
+- **A channel swizzle forks both keys**: it is generated code, so it is in `permutation_key`, and a slot's placeholder texel sits in the channel it reads, so it is in `parameter_key` too.
+  One metallic-roughness map still binds twice (`base_metalness` from `.b`, `specular_roughness` from `.g`) over a SINGLE upload, since a texture uploads once per content hash, whatever reads it.
   Only the selectors the declaration's `component_count()` reads enter the key, which is what makes identity swizzles hash identically.
   A `zero` / `one` selector cannot be spelled as a letter swizzle, so the generator widens it through the declaration's own type (`float3(texel.b, texel.g, 1.0)`).
 - **Color space is part of `texture_data`'s `sg::pixel_format`**, and therefore part of its hash — so a texture bound as both sRGB and linear uploads twice.
