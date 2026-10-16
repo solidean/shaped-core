@@ -793,11 +793,13 @@ TEST("sv - a raster layer implies its G-buffer and nothing a denoiser keeps")
     CHECK(format_of(sv::temporal_id::specular_albedo_guide(0)) == sg::pixel_format::rgba16_float);
     CHECK(format_of(sv::temporal_id::roughness_guide(0)) == sg::pixel_format::r16_float);
     CHECK(format_of(sv::temporal_id::motion_guide(0)) == sg::pixel_format::rg32_float);
+    // Every traced layer keeps one, since a double-click picks off it.
+    CHECK(format_of(sv::temporal_id::primary_depth(0)) == sg::pixel_format::r32_float);
 
     // No denoised image, no frame samples: what a parent samples is the raster image itself.
     CHECK(!format_of(sv::temporal_id::denoised(0)).has_value());
     CHECK(!format_of(sv::temporal_id::frame_samples(0)).has_value());
-    CHECK(plan.temporals.size() == 7);
+    CHECK(plan.temporals.size() == 8);
 }
 
 // A scene layer that is authored but holds no geometry.

@@ -1086,14 +1086,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_split = has_split ? 1 : 0;
     }
 
-    // The depth a layer's 3D drawings are occluded by and a pick reads, on every frame that traces it — after the hash,
-    // so a drawing coming or going never restarts the image.
+    // The depth a layer's 3D drawings are occluded by and a pick reads — set after the hash, so a drawing coming or going
+    // never restarts the image.
     auto* const depth_slot = rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer));
-    if (depth_slot != nullptr)
-    {
-        fc.write_primary_depth = 1;
-        fc.near_plane = f32(v.camera.projection.near_plane);
-    }
+    auto const draws_over = !l.drawings.empty() || !l.annotations.empty();
 
     // A frame whose image changed traces at the upscaler's input extent, every primary ray at one jitter, and the
     // temporal member denoises it on its own samples before the upscaler brings it to the view's size.
@@ -1103,13 +1099,21 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto upscale_settings = schedule.temporal_settings;
     upscale_settings.upscaler = l.settings.reconstruct.upscaler;
     // A layer that can never trace at the upscaler's extent holds no paths for it.
-    if (!has_temporal || depth_slot != nullptr || upscale_settings.upscaler == sr::upscale_method::none)
+    if (!has_temporal || draws_over || upscale_settings.upscaler == sr::upscale_method::none)
         slot->scaled_paths = {};
-    auto const may_scale = image_changed && writes_temporal && depth_slot == nullptr;
+    auto const may_scale = image_changed && writes_temporal && !draws_over;
     auto const input_extent = may_scale
                                 ? sr::reconstruct_input_extent(ctx, upscale_settings, tr.resolution, traceable_guides())
                                 : tr.resolution;
     auto const scaled = input_extent != tr.resolution;
+
+    // Written only at the slot's own size: a scaled frame leaves it to the next full-size one, and keeps
+    // `accum_frame` at 0, which a pick reads as no depth to take yet.
+    if (depth_slot != nullptr && !scaled)
+    {
+        fc.write_primary_depth = 1;
+        fc.near_plane = f32(v.camera.projection.near_plane);
+    }
 
     auto jitter = tg::vec2f(0, 0);
     if (scaled)
