@@ -258,6 +258,14 @@ D3D's helper pixels read 0 from an atomic that returns a value, and a pixel afte
 MSL says helper threads' "stores and atomic operations [...] have no effect on the underlying memory" (§ 6.11.1), and nothing about what they read.
 So in a helper the strong loop's test, a failure that read `expected`, may hold forever, and a loop that never ends hangs the GPU.
 MSL tells a helper by `simd_is_helper_thread()`, so the loop skips one, and gives `expected`, as meaningless as any value a helper reads.
-WGSL has no such test, so the loop is bounded; 64 attempts that each read `expected` and stored nothing happen only to a helper, or to a device no target knows of.
 HLSL's strong compare-exchange is one instruction, so it needs neither; SM 6.6's `IsHelperLane` would be the test if it ever did.
-A compute stage has no helpers, so its loop stays unbounded and never gives up early.
+A compute stage has no helpers, so its loop needs no test.
+
+## EMIT-159
+
+WGSL has no test for a helper invocation, so its strong loop cannot be kept from one.
+Bounding the loop would end it, at the price of a strong compare-exchange that may give `expected` without having stored, which is the weak one's promise under the strong one's name.
+So WebGPU refuses the pixel stage instead, and the shader says what it means.
+A weak compare-exchange in a retry loop of its own puts the loop in the shader's hands, where a helper's meaningless result is the shader's to handle.
+A compute stage has no helpers, so it takes the strong one on WebGPU as everywhere.
+The refusal is per target and per stage, as EMIT-122's is, since no `require` names what WebGPU lacks here, and every other target writes the stage.

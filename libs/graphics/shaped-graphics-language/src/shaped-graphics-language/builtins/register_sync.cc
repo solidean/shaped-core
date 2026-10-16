@@ -198,9 +198,6 @@ cc::string minted(call_context const& ctx, cc::string_view desired)
     return ctx.mint.is_valid() ? ctx.mint(desired) : cc::string(desired);
 }
 
-/// EMIT-158: a pixel stage's strong compare-exchange in WGSL gives up after this many failures that read `expected`.
-constexpr int k_strong_attempts_in_wgsl_pixel = 64;
-
 /// Where a compare-exchange outside HLSL updates: a buffer's or workgroup memory's atomic, or in MSL a texel.
 struct exchange_place
 {
@@ -245,14 +242,8 @@ written write_exchange(call_context const& ctx,
         result.lines.push_back(cc::format("let {}: {} = {};", expected_name, t, expected));
         result.lines.push_back(cc::format("let {}: {} = {};", desired_name, t, desired));
         result.lines.push_back(cc::format("var {}: {};", before, t));
-        if (ctx.is_pixel_stage)
-        {
-            auto const attempt = minted(ctx, "exchange_attempt");
-            result.lines.push_back(
-                cc::format("for (var {0} = 0; {0} < {1}; {0}++) {{", attempt, k_strong_attempts_in_wgsl_pixel));
-        }
-        else
-            result.lines.push_back("loop {");
+        // a pixel stage's is refused (EMIT-159), since WGSL cannot keep a helper out of this loop
+        result.lines.push_back("loop {");
         result.lines.push_back(cc::format("    let {} = atomicCompareExchangeWeak({}, {}, {});", exchanged, place_name,
                                           expected_name, desired_name));
         result.lines.push_back(cc::format("    {} = {}.old_value;", before, exchanged));

@@ -393,10 +393,10 @@ TEST("sgl emit - a weak compare-exchange fills the prelude's exchange_result fro
                         "exchange_stored};\n"));
 }
 
-TEST("sgl emit - a pixel stage's strong compare-exchange keeps helper invocations out of its loop")
+TEST("sgl emit - a pixel stage's strong compare-exchange keeps helpers out of its loop, and WebGPU refuses it")
 {
-    // EMIT-158: a helper's atomics store nothing and read anything, so MSL skips the loop on one, and WGSL, which cannot
-    // tell one, bounds it; HLSL's own is strong and has no loop
+    // EMIT-158: a helper's atomics store nothing and read anything, so MSL skips the loop on one; HLSL's has no loop
+    // EMIT-159: WGSL cannot tell a helper, so it refuses the pixel stage, and takes a weak one and a compute stage's
     constexpr auto source = "binding claims:\n"
                             "    owners: mut buffer[atomic[uint]]\n"
                             "\n"
@@ -415,13 +415,19 @@ TEST("sgl emit - a pixel stage's strong compare-exchange keeps helper invocation
               .contains("    while (!simd_is_helper_thread() && !atomic_compare_exchange_weak_explicit(exchange_place, "
                         "&exchange_before, exchange_desired, memory_order_relaxed, memory_order_relaxed) && "
                         "exchange_before == exchange_expected)\n"));
-    auto const wgsl = text_of(source, target::wgsl);
-    CHECK(wgsl.contains("    for (var exchange_attempt = 0; exchange_attempt < 64; exchange_attempt++) {\n"
-                        "        let exchange_outcome = atomicCompareExchangeWeak(exchange_place, exchange_expected, "
-                        "exchange_desired);\n"));
-    CHECK(!wgsl.contains("loop {"));
-    CHECK(text_of(source, target::hlsl_dx12)
-              .contains("    InterlockedCompareExchange(claims_owners[int(p.position.x)], 0u, 1u, atomic_before);\n"));
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+        CHECK(text_of(source, t).contains("    InterlockedCompareExchange(claims_owners[int(p.position.x)], 0u, 1u, "
+                                          "atomic_before);\n"));
+    CHECK(sgl::emit::dump_errors(emit_source(source, 0, target::wgsl))
+          == "target-lacks-feature ps is a pixel stage that calls compare_exchange_strong, which WebGPU cannot keep "
+             "safe: WGSL has no test for a helper invocation, whose atomics give undefined values, so the loop the "
+             "compiler writes could spin forever; use compare_exchange_weak in a retry loop of your own, or move the "
+             "work to a compute stage\n");
+
+    // the weak one is one call, which a helper leaves at once, whatever it reads
+    auto weak = cc::string(source);
+    weak.replace_all("compare_exchange_strong(0u, 1u)", "compare_exchange_weak(0u, 1u).old");
+    CHECK(text_of(weak, target::wgsl).contains("atomicCompareExchangeWeak(&claims_owners[i32(p.position.x)], 0u, 1u)"));
 }
 
 TEST("sgl emit - a call whose argument holds an atomic is written, not only the atomic")

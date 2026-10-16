@@ -623,7 +623,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-157).
   `compare_exchange_weak(e, d)` gives `exchange_result[T]`: `old`, and `exchanged`, the only proof it stored; retry while `old == e and not exchanged`.
   Both are relaxed: publishing what a claim guards needs a barrier.
-  In a pixel stage a helper's atomics store nothing and read garbage; the strong loop skips one in MSL and stops after 64 tries in WGSL (EMIT-158).
+  In a pixel stage a helper's atomics store nothing and read garbage; the strong loop skips one in MSL (EMIT-158).
+  WebGPU refuses a pixel stage's `compare_exchange_strong` (EMIT-159): WGSL cannot tell a helper, so write the weak one in a loop, or use compute.
   A test fails a weak one spuriously the first time each call meets `e` (EVAL-98), so a missing retry loop fails its test.
 - **`img[xy]` is the image's `load`, and `img[xy] = v` its `store`** (CHK-367): the check pass records the call at the subscript, and `m.texel_stores` holds each assignment's.
   `@atomic` on a `mut` image of `.r32_uint` or `.r32_sint` makes `img[xy]` an atomic, `img[xy].max(v)` (CHK-372), which the flat tree calls as the prelude's internal `texel_max`.

@@ -113,6 +113,8 @@ ASYNC_INVOCABLE_TEST("sg - a strong compare-exchange in a pixel stage leaves hel
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (ctx->backend() == sg::backend_kind::webgpu)
+        SKIP("WebGPU refuses a pixel stage's strong compare-exchange, since WGSL cannot tell a helper (EMIT-159)");
 
     // `derivative_ps`'s 4 × 2 target, where each pixel claims its own slot before the derivative.
     // Column 0 discards first and goes on as helpers, whose compare-exchange stores nothing and must not loop forever.

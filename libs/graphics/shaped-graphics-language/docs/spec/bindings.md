@@ -460,7 +460,7 @@ fun insert_weak(key: uint){table} -> uint:
     return 1024u
 ```
 
-What each target does with them ([EMIT-157](semantics/emitting.md#types), [EMIT-158](semantics/emitting.md#types)):
+What each target does with them ([EMIT-157](semantics/emitting.md#types) to [EMIT-159](semantics/emitting.md#types)):
 
 * HLSL's `InterlockedCompareExchange` is strong, so both forms are it, and the weak one never fails spuriously there.
 * WGSL's `atomicCompareExchangeWeak` is weak, and so is MSL's `atomic_compare_exchange_weak_explicit` by its name.
@@ -473,7 +473,9 @@ Its caveats are the other atomics' and a few of its own:
 * Both are relaxed, as every atomic is: neither orders any other memory.
   A thread that claims a slot and then writes data for it publishes that data to others only through a barrier, or `@coherent` memory and a barrier.
 * A helper invocation of a pixel stage, one that runs for derivatives or after a `discard`, stores nothing, and what its atomics read is undefined.
-  So a helper's `old` and `exchanged` mean nothing; the strong form's loop skips a helper in MSL and gives up after 64 attempts in WGSL, so none hangs.
+  So a helper's `old` and `exchanged` mean nothing, and a weak form's retry loop must not trust them.
+  The strong form's loop skips a helper in MSL, and HLSL's has none.
+  WGSL cannot tell a helper, so WebGPU refuses a pixel stage's strong compare-exchange as `target-lacks-feature`: a weak one in a retry loop, or a compute stage, is the way there.
 * The result of either is non-uniform (CHK-283): an index taken from it into a binding array is `nonuniform`, and a barrier under a branch on it is refused.
   The strong form's loop is the target's, and leaves the control flow as uniform as it found it, so a barrier after the call is fine.
 * A test runs one invocation, which no other ever races ([EVAL-98](semantics/evaluation.md#errors-of-the-program)).

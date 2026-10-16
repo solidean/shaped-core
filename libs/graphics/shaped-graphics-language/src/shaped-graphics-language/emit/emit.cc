@@ -160,6 +160,25 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                                                           e.name, k->value, max_roots)});
             break;
         }
+        // EMIT-159: WGSL cannot tell a helper invocation, whose atomics read anything, so the strong loop could spin
+        if (e.entry_stage == check::stage::pixel)
+            for (auto const& x : e.exprs)
+            {
+                auto const* const call = x.node.try_as<check::flat_call>();
+                auto const* const record = call == nullptr ? nullptr : m.builtin_function(call->intrinsic);
+                if (record == nullptr || !record->is_atomic || record->name != "compare_exchange_strong")
+                    continue;
+                result.errors.push_back(
+                    {.kind = error_kind::target_lacks_feature,
+                     .symbol = e.function,
+                     .detail = cc::format("{} is a pixel stage that calls compare_exchange_strong, which WebGPU cannot "
+                                          "keep safe: WGSL has no test for a helper invocation, whose atomics give "
+                                          "undefined values, so the loop the compiler writes could spin forever; use "
+                                          "compare_exchange_weak in a retry loop of your own, or move the work to a "
+                                          "compute stage",
+                                          e.name)});
+                break;
+            }
         if (!result.errors.empty())
             return result;
     }

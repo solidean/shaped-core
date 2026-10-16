@@ -32,7 +32,7 @@ Back to the [semantics](_index.md); the reasons are in [why/emitting.md](why/emi
 * **EMIT-10** A module that reported an error is the error `module-has-errors`, whichever entry point is asked for.
 * **EMIT-11** An entry point the module does not hold is `unknown-entry-point`.
 * **EMIT-12** A construct that no emitter carries yet is `unsupported`, and its detail names the construct; an emitter never guesses an address.
-* **EMIT-13** No error depends on the target but EMIT-109's and EMIT-122's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
+* **EMIT-13** No error depends on the target but EMIT-109's, EMIT-122's and EMIT-159's: an entry point is written for every target or for none ([why](why/emitting.md#emit-13)).
 * **EMIT-109** An entry point that needs a feature no device of the target has is `target-lacks-feature`, and its detail names the feature.
   Today that is `wgsl` against `binding_arrays`, `multisampled_array_textures`, `raytracing_pipeline`, `geometry_shader` and `tessellation_shader`.
   It is also `wgsl` against `shader_int16`, `device_coherence` and `image_atomics`, which core WebGPU has none of.
@@ -88,8 +88,10 @@ struct target_ {
   An `@atomic` image's texel is the same in MSL, over its texture's `atomic_compare_exchange_weak`, with the coordinate in place of the pointer.
 * **EMIT-158** In a pixel stage, the strong form's loop keeps a helper invocation from spinning on what its atomics read, which is undefined ([why](why/emitting.md#emit-158)).
   MSL's loop tests `simd_is_helper_thread()` first, so a helper never enters it.
-  WGSL can tell no helper, so its loop gives up after 64 attempts, each a failure that read `expected`, and gives that value although it stored nothing.
-  HLSL's has no loop.
+  HLSL's has no loop, and WGSL refuses the pixel stage (EMIT-159).
+* **EMIT-159** `wgsl` refuses a pixel stage that calls `compare_exchange_strong` as `target-lacks-feature`, whose detail says why and what to write instead.
+  WGSL has no test for a helper invocation, so no loop it holds could keep one out ([why](why/emitting.md#emit-159)).
+  A weak compare-exchange is one call, which a helper leaves at once, and a compute stage has no helpers, so WGSL writes both.
 * **EMIT-131** A barrier is the target's own execution barrier with one kind of memory, and MSL's one `threadgroup_barrier` names it by its `mem_flags`.
   `workgroup_barrier` is `GroupMemoryBarrierWithGroupSync` in HLSL, `workgroupBarrier` in WGSL and `mem_threadgroup` in MSL.
   `storage_barrier` is `DeviceMemoryBarrierWithGroupSync`, `storageBarrier` and `mem_device`.
@@ -541,7 +543,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 | `too-many-samplers` | EMIT-133 |
 | `too-many-acceleration-structures` | EMIT-135 |
 | `ray-data-conflict` | EMIT-139 |
-| `target-lacks-feature` | EMIT-109 |
+| `target-lacks-feature` | EMIT-109, EMIT-122, EMIT-159 |
 
 ## Open
 
