@@ -201,6 +201,9 @@ private:
     friend class canvas_ref;
     friend class mesh_ref;
     friend class quadric_ref;
+    friend class vertices_ref;
+    friend class edges_ref;
+    friend class faces_ref;
     friend class light_ref;
 
     frame() = default; // a closed frame
@@ -255,6 +258,50 @@ private:
     /// Must run after the last authoring call and before the frame is flattened, which is why the viewer calls it rather
     /// than the sugar placing as it goes: a batch is one scene item, and it cannot be placed until it is complete.
     void _flush_immediate_quadrics();
+
+    /// Which part of a tg object an immediate shape draws.
+    enum class shape_kind : u8
+    {
+        vertices,
+        edges,
+        faces,
+    };
+
+    /// One `scene_ref::add_vertices` / `add_edges` / `add_faces` call, kept as its f32 geometry until the frame flushes.
+    ///
+    /// Its style and material stay writable until then, which is what the ref the call handed back writes.
+    /// The geometry is runs of the three pools below, so a call allocates nothing of its own.
+    struct immediate_shape
+    {
+        view_index view = view_index(0);
+        u32 layer = 0;
+        shape_kind kind = shape_kind::vertices;
+        material_id material = material_id::invalid;
+        vertex_style vertex = {}; // read for `vertices`
+        edge_style edge = {};     // read for `edges`
+        isize first_point = 0;
+        isize point_count = 0;
+        isize first_segment = 0;
+        isize segment_count = 0;
+        isize first_triangle = 0;
+        isize triangle_count = 0;
+    };
+
+    cc::vector<immediate_shape> _immediate_shapes;
+    cc::vector<tg::pos3f> _shape_points;
+    cc::vector<tg::segment3f> _shape_segments;
+    cc::vector<tg::triangle3f> _shape_triangles;
+
+    /// Records a shape and returns its index, which its ref names it by.
+    [[nodiscard]] u32 _add_immediate_shape(immediate_shape shape,
+                                           cc::span<tg::pos3f const> points,
+                                           cc::span<tg::segment3f const> segments,
+                                           cc::span<tg::triangle3f const> triangles);
+
+    /// Draws every recorded shape and clears them: vertices and edges into the immediate quadric batches, faces into one mesh per (view, layer, material).
+    /// Must run before `_flush_immediate_quadrics`, which places the batches this fills.
+    void _flush_immediate_shapes();
+
     layout_tree _nodes;              ///< the shared node pool every layout layer indexes into
     cc::vector<view_index> _windows; ///< each window's root view
     cc::vector<view_id> _window_ids;

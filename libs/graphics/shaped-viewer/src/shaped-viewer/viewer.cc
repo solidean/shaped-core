@@ -721,8 +721,10 @@ void viewer::finish_frame(frame& f)
     if (!f._open)
         return;
 
-    // Whatever the immediate quadric calls accumulated becomes a scene item now, before anything reads the views.
+    // Whatever the immediate calls accumulated becomes scene items now, before anything reads the views.
     // It has to be here rather than in the sugar: a batch is one item, and it is not placeable until it is complete.
+    // Shapes first, since their vertices and edges land in the quadric batches.
+    f._flush_immediate_shapes();
     f._flush_immediate_quadrics();
 
     // The frame's authored views become the definition verbatim, and the frame's layout tree becomes the one layer of

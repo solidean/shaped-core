@@ -35,6 +35,30 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
   The `Check` type, the runner and the individual gates' machinery are all reusable.
 - Its own `CMakePresets.json`: the diag-launcher paths in ours are `${sourceDir}`-relative, so a consumer points them into the submodule.
 
+## Keeping the submodules current
+
+`uv run dev.py submodules sync` fetches each submodule's tracked branch, the `branch =` its `.gitmodules` entry names, and fast-forwards to it.
+**It never touches local work**, so it is safe to run at any time:
+
+| The submodule is | sync |
+|---|---|
+| on its tracked branch, clean, nothing unpushed | fast-forwards it |
+| detached at a commit the branch contains, as `git submodule update` leaves it | checks the branch out, then fast-forwards it |
+| carrying uncommitted changes to tracked files | refuses |
+| carrying commits its remote branch lacks, on the branch or detached | refuses |
+| on another branch | skips it |
+| without a `branch =` | skips it |
+
+Untracked files do not count: a fast-forward never touches one, and git refuses rather than overwrite it.
+Nothing is ever reset, rebased or merged, and a refusal exits non-zero, naming what is in the way.
+
+Moving a submodule changes the commit the superproject records.
+`--bump` commits each moved pointer in a commit of its own; a project's own bump rules still apply, and its `check` enforces them.
+`--dry-run` reports what would move, and `sync <path>` limits it to some submodules.
+
+Set `update = merge` on each `.gitmodules` entry as well.
+Then a bare `git submodule update --remote` merges into the checked-out branch instead of detaching HEAD, so even the raw git command strands no commit.
+
 ## What does not carry over yet
 
 - `lint clang-tidy` runs `tools/lint/clang-tidy.py`, which roots itself at shaped-core and reads shaped-core's gate list.

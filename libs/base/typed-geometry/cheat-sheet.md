@@ -344,7 +344,8 @@ seg.length();  tri.area();  tri.perimeter();  box.volume();   // by intrinsic di
 aabb3.area();  sphere3.area();          // a 3D SOLID's area() is its surface; a boundary answers only its own measure
                                         //   (sphere3f_surface has area(), no volume(); aabb2_boundary has length())
 o.centroid();  o.bounds();              // pos; aabb<D,T>
-o.vertices();  o.edges();               // cc::fixed_array — polytopes; vertices() also on segment and box, which have no edges()
+o.vertices();  o.edges();               // cc::fixed_array — polytopes, box and frustum too; segment has vertices() and no edges()
+o.faces();                               // aabb3 / box3 / frustum: 6 quads, wound counterclockwise from outside; tetrahedron: 4 triangles
 tri.normal();  tri.plane();             // 3D, unit, counter-clockwise; also box2in3.normal(), disk3.plane()
 o.any_point();                          // a point of the set (for a surface ON it, not the center)
 seg.unbounded();  ray.unbounded();      // the line through it
@@ -471,6 +472,7 @@ tg::div_trunc / mod_trunc / div_floor / mod_floor / div_ceil(a, b);  // same wid
 tg::div_mod_trunc(a, b); tg::div_mod_floor(a, b);          // -> {quotient, remainder} from one division
 tg::div_floor<fi32>(x, w); tg::div_ceil<fi32>(x, w);       // quotient known to fit fi32: udiv128 estimate + exact fix
 tg::div_floor_ceil<fi32>(x, w);                            // -> {floor, ceil}
+tg::ratio_to_f64(x, w); tg::ratio_to_f32(x, w);           // x / w correctly rounded (to nearest, ties to even); any widths
 x.to_f64(); x.to_f32(); fi128(2.5);                        // correctly rounded out; truncating in
 x.sign(); x.is_negative();                                 // int -1/0/+1 without a branch; bool
 u.count_leading_zeroes(); u.popcount(); u.bit_width();     // fixed_uint only; s.magnitude_bit_width() for signed

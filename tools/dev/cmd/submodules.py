@@ -1,0 +1,59 @@
+"""`submodules` — keep the submodules on the branches `.gitmodules` names, without risking local work.
+
+The rules are tools/dev/lib/project/submodules.py's docstring; docs/guides/building-and-testing.md has the workflow.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+from tools.dev import console
+from tools.dev.lib.project import submodules as lib
+
+from .context import Context
+
+NAME = "submodules"
+
+_COLORS = {"updated": console.green, "would update": console.green, "up-to-date": console.dim,
+           "skipped": console.yellow, "refused": console.red}
+
+
+def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
+    p = sub.add_parser(NAME, help="Fast-forward the submodules to the branches .gitmodules names, never touching local work")
+    s = p.add_subparsers(dest="submodules_cmd", required=True, metavar="<command>")
+    q = s.add_parser("sync", help="fetch, then fast-forward every clean submodule on (or detached within) its tracked branch")
+    q.add_argument("paths", nargs="*", help="only these submodules (default: all checked-out ones)")
+    q.add_argument("--dry-run", action="store_true", help="fetch and report, change nothing")
+    q.add_argument("--no-fetch", action="store_true", help="use the remote-tracking branches as they are")
+    q.add_argument("--bump", action="store_true",
+                   help="commit each moved pointer in this repository, one commit per submodule")
+    return p
+
+
+def run(args: argparse.Namespace, ctx: Context) -> None:
+    subs = lib.list_submodules(ctx.root)
+    if args.paths:
+        wanted = {p.replace("\\", "/").rstrip("/") for p in args.paths}
+        unknown = wanted - {s.path for s in subs}
+        if unknown:
+            ctx.die(f"not a checked-out submodule: {', '.join(sorted(unknown))}")
+        subs = [s for s in subs if s.path in wanted]
+    if not subs:
+        print(console.dim("no checked-out submodules"), file=sys.stderr)
+        sys.exit(0)
+
+    outcomes = [lib.sync(ctx.root, s, dry_run=args.dry_run, fetch=not args.no_fetch) for s in subs]
+    width = max(len(o.path) for o in outcomes)
+    for o in outcomes:
+        print(f"  {o.path:<{width}}  {_COLORS[o.status](f"{o.status:<12}")}  {o.detail}")
+
+    if args.bump and not args.dry_run:
+        for s in subs:
+            subject = lib.bump(ctx.root, s)
+            if subject:
+                print(f"  committed: {subject}")
+    elif any(o.old != o.new and o.status == "updated" for o in outcomes):
+        print(console.dim("the superproject now records new submodule commits; bump each in a commit of its own, or rerun with --bump"),
+              file=sys.stderr)
+    sys.exit(0 if all(o.ok for o in outcomes) else 1)

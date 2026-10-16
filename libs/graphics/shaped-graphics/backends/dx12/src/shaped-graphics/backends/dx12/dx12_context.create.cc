@@ -2,6 +2,7 @@
 
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/string/conversion.hh> // utf16_to_utf8 — DXGI_ADAPTER_DESC1::Description is wide
 #include <clean-core/string/format.hh>
@@ -137,6 +138,30 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
                                          u16(umd.LowPart >> 16), u16(umd.LowPart & 0xFFFF));
 
     return info;
+}
+
+/// The shader model every shader sg runs is compiled for, which is DXC's default profile and what SGL's HLSL relies on.
+constexpr auto k_required_shader_model = D3D_SHADER_MODEL_6_8;
+
+/// An error naming the adapter and its driver when the device cannot run shaders of `k_required_shader_model`.
+///
+/// Checked at creation because the driver otherwise refuses each pipeline with a bare E_INVALIDARG.
+/// A runtime that does not know the model fails the query itself, which is the same answer.
+cc::optional<cc::string> check_shader_model(ID3D12Device* device, IDXGIAdapter1* adapter)
+{
+    auto data = D3D12_FEATURE_DATA_SHADER_MODEL{.HighestShaderModel = k_required_shader_model};
+    auto const queried = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)));
+    if (queried && data.HighestShaderModel >= k_required_shader_model)
+        return {};
+
+    auto const info = describe_adapter(adapter);
+    auto const driver = info.driver_version.empty() ? cc::string("unknown") : info.driver_version;
+    auto const reached = queried ? cc::format("supports shader model {}.{} at most", int(data.HighestShaderModel) >> 4,
+                                              int(data.HighestShaderModel) & 0xF)
+                                 : cc::string("does not report shader model support");
+    return cc::format("the dx12 adapter '{}' (driver {}) {}, and sg compiles every shader for shader model {}.{}; "
+                      "updating the GPU driver usually raises it",
+                      info.name, driver, reached, int(k_required_shader_model) >> 4, int(k_required_shader_model) & 0xF);
 }
 
 dx12_message_severity to_sg_severity(D3D12_MESSAGE_SEVERITY severity)
@@ -414,6 +439,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
     if (HRESULT hr = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)); FAILED(hr))
         return dx12_error(hr, "D3D12CreateDevice failed");
     process_has_device() = true;
+
+    if (auto const refusal = check_shader_model(device.Get(), adapter.Get()); refusal.has_value())
+        return cc::error(refusal.value());
 
     D3D12_COMMAND_QUEUE_DESC queue_desc = {};
     queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
