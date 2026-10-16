@@ -51,6 +51,17 @@ jobs:
           New-ItemProperty -Path $k -Name DumpType -Value 2 -PropertyType DWord -Force | Out-Null
           New-ItemProperty -Path $k -Name DumpCount -Value 5 -PropertyType DWord -Force | Out-Null
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name Disabled -Value 0 -ErrorAction SilentlyContinue
+          $cdb = Get-ChildItem -Recurse 'C:\Program Files (x86)\Windows Kits\10\Debuggers\arm64' -Filter cdb.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          Write-Host "cdb: $($cdb.FullName)"
+          $script = @(
+            'sxe -c ".echo ===FAULT===; .lastevent; .ecxr; kn 80; .echo ===ALL===; ~*kn 50; .dump /ma C:\dumps\fastfail.dmp; q" c0000409',
+            'sxe -c ".echo ===AV===; .lastevent; .ecxr; kn 80; .echo ===ALL===; ~*kn 50; .dump /ma C:\dumps\av.dmp; q" av',
+            'g'
+          )
+          Set-Content -Path C:\dumps\probe.cdb -Value $script -Encoding ascii
+          "SC_PROBE_CDB=$($cdb.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SC_PROBE_CDB_SCRIPT=C:\dumps\probe.cdb" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "_NT_SYMBOL_PATH=srv*C:\symcache*https://msdl.microsoft.com/download/symbols" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Test
         continue-on-error: true

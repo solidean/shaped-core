@@ -223,6 +223,9 @@ def test(
                 # --tests first: a nexus binary runs its default app or command, or lists what it holds, unless the line
                 # selects tests — and ahead of the name, so a test named like one of its commands still means the test.
                 cmd = [*launcher, str(target.artifact), "--tests"]
+                # PROBE (throwaway branch): run the binary under cdb, which a fastfail still reports to.
+                if os.environ.get("SC_PROBE_CDB"):
+                    cmd = [os.environ["SC_PROBE_CDB"], "-g", "-G", "-cf", os.environ["SC_PROBE_CDB_SCRIPT"], *cmd]
                 if test_name:
                     cmd.append(test_name)
                 # Forward verbosity to the runner: nexus' -v prints "- start <test>" before each test, so a crash or hang pinpoints the last one that started.
