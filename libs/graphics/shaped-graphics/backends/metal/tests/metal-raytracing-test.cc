@@ -806,3 +806,79 @@ ASYNC_TEST("sg metal - each ray type traces through its own intersection table")
         .context(cc::format("ray type 0 read {}, expected record 4 to accept the hit", values[0]));
     CHECK(values[1] == k_miss).context(cc::format("ray type 1 read {}, expected record 5 to reject the hit", values[1]));
 }
+
+// The bug this check exists for, as an application first wrote it.
+// A BLAS of two geometries is built with the default stride, under a table of two ray types and one row.
+// On metal geometry 1 then reaches record 2 through ray type 1's table, which holds 2 records.
+// The hit calls past the table's end, which is a GPU page fault, and the system answers it by refusing the process the GPU.
+// So it is caught at record time, and the list is dropped rather than submitted.
+ASYNC_TEST("sg metal - a shader table too short for a BLAS's geometries is logged by default")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // A fresh context, so this is the default rather than a switch the test turned on.
+    // A wrong record is undefined behavior, not a portability matter, so the checks follow CC_ASSERT.
+    CHECK(ctx->hit_record_checks() == (CC_ASSERT_ENABLED != 0));
+    CHECK(!ctx->portability_checks());
+
+    constexpr float k_two_triangles[18] = {
+        10, 10, 0, 11, 10, 0, 10, 11, 0, // geometry 0
+        0,  0,  0, 1,  0,  0, 0,  1,  0, // geometry 1
+    };
+    auto const vertices = ctx->persistent.create_raw_buffer(
+        isize(sizeof(k_two_triangles)), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+    auto upload = ctx->create_command_list();
+    upload->upload.bytes_to_buffer(vertices, cc::as_bytes(cc::span<float const>(k_two_triangles)));
+    ctx->submit_command_list(cc::move(upload));
+
+    auto desc = sg::raytracing_pipeline_description{};
+    auto const raygen = desc.add_raygen_shader(ray_type_shader(sg::shader_stage::raygen, "raygen_ray_types"));
+    auto const miss = desc.add_miss_shader(ray_type_shader(sg::shader_stage::miss, "miss_marker"));
+    auto const accept
+        = desc.add_hit_shader({.closest_hit = ray_type_shader(sg::shader_stage::closest_hit, "closest_hit_marker")});
+
+    auto table_desc = sg::raytracing_shader_table_description{.ray_count = 2};
+    auto const raygen_slot = table_desc.add_raygen_shader(raygen);
+    (void)table_desc.add_miss_shader(miss);
+    sg::hit_shader_handle const row[2] = {accept, accept};
+    auto const instance_row = table_desc.add_hit_row(row);
+
+    sg::blas_triangles const geometries[2] = {
+        {.vertices = vertices, .vertex_count = 3},
+        {.vertices = vertices, .vertex_count = 3, .vertex_offset_in_bytes = 9 * isize(sizeof(float))},
+    };
+    auto cmd = ctx->create_command_list();
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(geometries));
+    auto const instance = sg::tlas_instance{.blas = blas, .hit_group_offset = u32(instance_row)};
+    auto const tlas = cmd->raytracing.build_tlas(cc::span<sg::tlas_instance const>(&instance, 1));
+    ctx->submit_command_list(cc::move(cmd));
+
+    // Through the context's scope rather than `bind_scene`, since the scope is what records the tlas for the check.
+    auto const scene = finish_scene(ctx, tlas);
+    sg::named_view const views[2] = {
+        {.name = "scene", .view = scene.tlas->as_view()},
+        {.name = "out",
+         .view = scene.out->as_raw_readwrite({.offset = 0, .size = scene.out->size_in_bytes()}, isize(sizeof(float)))},
+    };
+    auto const group = ctx->persistent.create_binding_group(scene.layout, views);
+
+    desc.layout = scene.pipeline_layout;
+    auto pipeline = ctx->create_metal_raytracing_pipeline(desc, sg::lifetime_scope::persistent);
+    REQUIRE(pipeline.has_value()).context(pipeline.has_error() ? pipeline.error().to_string() : cc::string());
+    table_desc.pipeline = pipeline.value();
+    auto table = ctx->create_metal_raytracing_shader_table(table_desc, sg::lifetime_scope::persistent);
+    REQUIRE(table.has_value()).context(table.has_error() ? table.error().to_string() : cc::string());
+
+#if CC_ASSERT_ENABLED
+    nx::expect_error("built with hit_record_stride 1, and the shader table traces 2 ray types", nx::exactly(1));
+#endif
+
+    auto trace = ctx->create_command_list();
+    trace->raytracing.bind_pipeline(*pipeline.value());
+    trace->raytracing.bind_group(0, *group);
+    trace->raytracing.dispatch_rays(*table.value(), raygen_slot, int(k_thread_count), 1, 1);
+    ctx->drop_command_list(cc::move(trace));
+    co_await ctx->idle_completion();
+}
