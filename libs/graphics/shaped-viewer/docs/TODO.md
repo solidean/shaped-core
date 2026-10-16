@@ -242,47 +242,23 @@ What is left is narrower than it was:
   Whatever lands has to account for tests running concurrently.
   `material-resolution-test.cc` already installs its own material library process-wide without `nx::exclusive`, hedging around the race with `CHECK(builds <= 1)`.
 
-## Known issue: the inline readback path fastfails on Windows on ARM
+## Known issue: WARP fastfails on Windows on ARM, which sv's ARM skips date from
 
-`openpbr-bsdf-test` and `volumetric-furnace-test` are skipped there, under `CC_ARCH_ARM64 && _WIN32`.
-The skip applies to every sv test that reads back through `cmd.download`, the probes and the furnace among them.
-[structure.md](structure.md) had already noted that path was never exercised here, so this is the first time sv has asked for an inline readback at all.
+The Windows ARM CI image has no GPU, and its Basic Render Driver enumerates once without DXGI's software flag.
+sg took it for hardware until it learned that Microsoft's vendor id is always WARP, so sv's "hardware" tests ran on WARP there.
+That WARP fastfails out of its pixel JIT: `0xC0000409` with no output, past every handler, a few seconds in.
+[warp-arm64-pac-fastfail](../../../../docs/bugs-external/warp-arm64-pac-fastfail/readme.md) has the stack and what does not trigger it.
+The Windows ARM job runs no dx12 test since, as every Windows job but Windows Clang already did.
 
-**What happens.**
-`shaped-viewer-test` exits `0xC0000409` with no output whatsoever, roughly seven seconds in.
-Bisected with flushed markers to the advance-and-drain (now a blocking get on `ctx.idle_completion()`), on the probe's ECHO dispatch.
-That dispatch is 32 threads reading one struct and writing four floats, and its command list also recorded a `cmd.download`.
-The workload is therefore not the cause, and neither is the closure.
+**The skips this left.**
+`openpbr-bsdf-test`, `volumetric-furnace-test` and every sv test reading back through `cmd.download` skip under `CC_ARCH_ARM64 && _WIN32`.
+They name "the inline readback path fastfails", which is what bisecting with flushed markers pointed at, before anyone had a stack.
+They are very likely this WARP fault: the same silent exit, on the same adapter, with no vendor driver in the process.
+They stay until a run on Windows on ARM with a real GPU says otherwise, since CI can no longer reach them.
 
-**What it is not.**
-Not an assertion: nexus installs clean-core's crash handler, which hooks an SEH filter and `SIGABRT` and prints the running test, and `abort()` raises `SIGABRT`.
-An earlier failure in the same binary proved that path works, arriving as a clean message.
-Not a lost device: the wait was wrapped in a `catch (sg::device_lost_exception const&)` that never fired.
-A `__fastfail` bypasses both handlers and loses buffered output, which is why this reads as a silent exit — and `/GS` uses exactly that for a genuine stack-cookie failure.
-
-**Where to look, with hardware.**
-The obvious first move is `ctx.download` instead of `cmd.download`.
-sg documents the context-level one for a bulk, off-the-frame-path read, which is what both tests actually want.
-It would say whether the inline staging ring is the part that breaks.
-`libs/base/clean-core/tests/record/record-async-scope-test.cc` records a separate MSVC ARM64 defect around coroutine resume.
-The completion machinery the epoch advance waits on is that same `cc::async`, so it is worth reading before assuming the two are unrelated.
-sg's own `transfer/download-async-test.cc` passes on that leg, so whatever this is, it needs the combination rather than the download alone.
-
-## Known issue: a hit-group compile test fastfails on Windows on ARM, beside the suite
-
-`material-shader-compile-test`'s "every builtin material type compiles as a hit group, on triangles and on quadrics" is skipped there, under `CC_ARCH_ARM64 && _WIN32`.
-It reads nothing back, so this is not the readback issue above, though it exits the same way: `0xC0000409`, no output, a few seconds in.
-
-**What the probes showed.**
-A throwaway branch printed a flushed marker as each test started and ended, and around each SGL and DXC compile.
-In the full binary this test was the only one of 231 that started and never ended, and no GPU test had started yet.
-Run alone it passes, and run beside the two other compile-heavy tests in that file it passes too, so it needs more of the binary's concurrency than those.
-DXC already gets one compiler per thread, and nothing the crash ran through changed in slib or DXC's wrapper.
-x64 never shows it, which points at a race that x64's stronger memory ordering hides.
-
-**Where to look, with hardware.**
-A crash dump (WER `LocalDumps` on the runner) rather than more markers: the markers lose the faulting thread.
-The same MSVC ARM64 coroutine defect named above is the first suspect, since every compile here resumes through `cc::async`.
+**Re-checking.**
+On a Windows on ARM machine with a GPU, drop the skips and run sv's tests: that answers whether the readback path ever had a fault of its own.
+With `SC_DX12_ADAPTER=warp` the same run says whether WARP is fixed.
 
 ## What the OpenPBR surface still needs
 

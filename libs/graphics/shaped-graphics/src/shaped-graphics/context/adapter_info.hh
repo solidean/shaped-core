@@ -37,6 +37,7 @@ struct sg::adapter_info
     cc::optional<i64> dedicated_video_memory_bytes;
 
     /// A software rasterizer rather than real hardware — WARP, lavapipe.
+    /// On dx12 that is every adapter of Microsoft's vendor id, flagged as software or not.
     /// Its "driver" is the runtime, so a blob it produced is worth even less across machines than a real driver's.
     bool is_software = false;
 };
