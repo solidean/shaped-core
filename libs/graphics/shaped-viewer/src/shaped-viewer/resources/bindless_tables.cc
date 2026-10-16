@@ -37,8 +37,7 @@ static_assert(sizeof(texture_arrays) / sizeof(texture_arrays[0]) == u32(sv::bind
         }
         auto const expected
             = i < isize(sv::bindless_table::buffers) ? texture_arrays[i].name : bindless_arrays::buffers.name;
-        CC_ASSERT(name == expected, "module tracer's `binding bindless` declares its tables in sv::bindless_table "
-                                    "order");
+        CC_ASSERT(name == expected, "`binding bindless` declares its tables in sv::bindless_table order");
         CC_ASSERT(bindings[i].count >= 2, "a bindless table needs at least 2 elements — sg reads a count of 1 as a "
                                           "scalar binding");
     }
