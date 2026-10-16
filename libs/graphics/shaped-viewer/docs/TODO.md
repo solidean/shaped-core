@@ -268,6 +268,22 @@ It would say whether the inline staging ring is the part that breaks.
 The completion machinery the epoch advance waits on is that same `cc::async`, so it is worth reading before assuming the two are unrelated.
 sg's own `transfer/download-async-test.cc` passes on that leg, so whatever this is, it needs the combination rather than the download alone.
 
+## Known issue: a hit-group compile test fastfails on Windows on ARM, beside the suite
+
+`material-shader-compile-test`'s "every builtin material type compiles as a hit group, on triangles and on quadrics" is skipped there, under `CC_ARCH_ARM64 && _WIN32`.
+It reads nothing back, so this is not the readback issue above, though it exits the same way: `0xC0000409`, no output, a few seconds in.
+
+**What the probes showed.**
+A throwaway branch printed a flushed marker as each test started and ended, and around each SGL and DXC compile.
+In the full binary this test was the only one of 231 that started and never ended, and no GPU test had started yet.
+Run alone it passes, and run beside the two other compile-heavy tests in that file it passes too, so it needs more of the binary's concurrency than those.
+DXC already gets one compiler per thread, and nothing the crash ran through changed in slib or DXC's wrapper.
+x64 never shows it, which points at a race that x64's stronger memory ordering hides.
+
+**Where to look, with hardware.**
+A crash dump (WER `LocalDumps` on the runner) rather than more markers: the markers lose the faulting thread.
+The same MSVC ARM64 coroutine defect named above is the first suspect, since every compile here resumes through `cc::async`.
+
 ## What the OpenPBR surface still needs
 
 `openpbr.surface` is OpenPBR's parameter set and module `openpbr` (shaders/sgl/openpbr_*.sgl) is the layered BSDF over it: fuzz over coat over a base that

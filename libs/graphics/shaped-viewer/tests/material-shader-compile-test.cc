@@ -87,6 +87,10 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
 
 TEST("sv - every builtin material type compiles as a hit group, on triangles and on quadrics")
 {
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — fastfails beside the rest of the suite, though not alone; see "
+         "libs/graphics/shaped-viewer/docs/TODO.md");
+#endif
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
 
