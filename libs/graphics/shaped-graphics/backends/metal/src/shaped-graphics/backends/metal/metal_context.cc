@@ -640,6 +640,8 @@ void metal_context::arm_completion_signal(u64 submission, u64 epoch)
 
 void metal_context::park_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
 {
+    _completion.park_count.fetch_add(1, cc::memory_order_relaxed);
+
     // **Two GPU timelines and a host wake, and Metal cannot wait on several at once.**
     // Vulkan parks one `vkWaitSemaphores` with WAIT_ANY over all three; `MTL::SharedEvent::waitUntilSignaledValue`
     // takes a single event, so a waiter built on it would miss whichever of the others fired first.
@@ -717,8 +719,12 @@ void metal_context::wake_completion_signal(u64 generation)
     // The host source, kept apart from the GPU one so neither masks the other.
     // Raised rather than assigned: generations are handed out strictly increasing, and a later wake may already have
     // raised it further.
+    //
+    // **The generation itself, not one past it.**
+    // A park that read this generation is not owed a wake by it, and storing one past it released that park forever.
+    // The waiter then spun at a full core for the rest of the context's life, from the first lowered target on.
     auto const guard = std::lock_guard(_completion.mutex);
-    _completion.host_generation = cc::max(_completion.host_generation, generation + 1);
+    _completion.host_generation = cc::max(_completion.host_generation, generation);
     _completion.condition.notify_all();
 }
 

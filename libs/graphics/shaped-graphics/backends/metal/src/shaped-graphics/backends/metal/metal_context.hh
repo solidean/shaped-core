@@ -208,6 +208,10 @@ public:
     /// Raise the GPU side of the completion generation; `metal_feedback_sink` is the only caller.
     void notify_completion_signal();
 
+    /// How many times the completion waiter has parked.
+    /// It grows with the signals and wakes the waiter is given, so a test reads a spin as a count that runs away.
+    [[nodiscard]] u64 completion_park_count() const { return _completion.park_count.load(cc::memory_order_relaxed); }
+
     /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
     ///
     /// Public because the sink is a separate object by necessity — it has to outlive this context — and a friend
@@ -413,6 +417,9 @@ private:
         /// The highest generation `wake_completion_signal` has been given.
         /// Compared against the caller's own `wake_generation`, which is the counter it read before parking.
         u64 host_generation = 0;
+
+        /// How many times the waiter has called `park_for_completion_signal`, read by `completion_park_count`.
+        cc::atomic<u64> park_count = 0;
     };
 
     mutable completion_signal _completion;
