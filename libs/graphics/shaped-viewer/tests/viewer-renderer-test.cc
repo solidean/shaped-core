@@ -1,5 +1,6 @@
 #include "viewer_test_env.hh"
 
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -161,6 +162,68 @@ ASYNC_INVOCABLE_TEST("sv - viewer renderer with no views still runs the clear (h
                                            }));
 
     CHECK(true); // the pass opened and closed with no draws, so the begin-op ran
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// Eight views, each with a mesh of its own, all new on the first frame.
+// Each view's trace once minted its own snapshot of the bindless tables, a whole-table copy in the persistent descriptor
+// heap each, and on dx12's default heap the sixth no longer fit: the frame threw out of the trace.
+// The frame now acquires every trace's resources first and mints once; an error logged by a declined trace fails the test.
+ASYNC_INVOCABLE_TEST("sv - many views bringing new meshes in one frame share one bindless snapshot (headless)",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto constexpr view_count = 8;
+    auto const output_size = tg::vec2i(8 * view_count, 8);
+
+    auto def = sv::viewer_definition{};
+    for (auto i = 0; i < view_count; ++i)
+    {
+        auto const cloud = sv_test::make_triangle_cloud(16, 0x5EED0000u + u64(i));
+        auto v = sv::view_data{};
+        v.id = sv::view_id::from_string("view", u64(i));
+        v.resolution = tg::vec2i(8, 8);
+        v.camera = sv::camera::orbiting(tg::pos3d::zero, 4.0, tg::angle_d::make_from_degree(0.0),
+                                        tg::angle_d::make_from_degree(20.0));
+        sv::ensure_scene_3d(v).items.push_back(
+            resources.acquire_scene_item(sv_test::as_mesh(cc::format("cloud {}", i), cloud.positions, cloud.materials)));
+        def.views.push_back(cc::move(v));
+    }
+    resources.wait_for_pending_uploads();
+    (void)add_layout_root(def, {}, {.rows = 1});
+
+    auto const plan = plan_for(def, output_size);
+    REQUIRE(plan.traces.size() == view_count);
+
+    auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                          .width = output_size[0],
+                                                          .height = output_size[1],
+                                                          .usage = sg::texture_usage::render_target});
+    auto store = sv::view_store{};
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               resources.advance_to(ctx.current_epoch());
+                                               return sv::viewer_renderer::execute(
+                                                   cmd, def, plan, resources, store,
+                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+                                           }));
+    CHECK(resources.meshes.count() == view_count);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

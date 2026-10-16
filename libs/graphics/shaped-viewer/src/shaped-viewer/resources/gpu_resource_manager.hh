@@ -5,6 +5,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/result.hh>
 #include <sgl_modules/tracer.hh> // sv::shaders::tracer::instance_record
 #include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-graphics/fwd.hh>
@@ -193,6 +194,10 @@ public:
     /// Locks, snapshots the group, and unlocks when the returned value dies — the form to reach for.
     /// A clean snapshot is the cached handle, so freezing an unchanged working set costs nothing.
     [[nodiscard]] bound_resources freeze();
+
+    /// `freeze`, failing rather than throwing when the snapshot cannot be minted — descriptor-heap exhaustion — and then left unlocked.
+    /// The form for a frame's own traces: a failed snapshot declines that trace instead of tearing the frame down.
+    [[nodiscard]] cc::result<bound_resources> try_freeze();
 
     /// Records whatever follow-up work this epoch's budget allows, oldest request first.
     ///
