@@ -67,6 +67,20 @@ public:
     /// Takes no guard: it reads nothing this routine initializes, only the store and the context's persistent allocator.
     [[nodiscard]] static plan_resources resolve(sg::command_list& cmd, render_plan const& plan, view_store& store);
 
+    /// Acquires every bindless index the trace at `trace_index` will read, without recording the trace.
+    ///
+    /// A frame runs it for each of its traces before the first one, so their resources all land in the tables before the
+    /// first `freeze`, and the frame mints one snapshot rather than one per view that brought something new.
+    /// Each snapshot is a copy of the whole table in the persistent descriptor heap, so a first frame of many views would
+    /// otherwise exhaust it.
+    /// Re-acquiring within an epoch touches no descriptor, so the trace's own acquires afterwards leave the snapshot clean.
+    static void acquire_trace(sg::command_list& cmd,
+                              viewer_definition const& def,
+                              render_plan const& plan,
+                              u32 trace_index,
+                              plan_resources const& res,
+                              gpu_resource_manager& resources);
+
     /// Records the trace at `trace_index` into its own accumulation texture.
     /// Must be called with no rendering scope open, and before anything samples that texture.
     ///
