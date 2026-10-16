@@ -798,6 +798,8 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
             out.append(f"    sg::bound_view {binding.name};\n")
 
     out.append("\n")
+    out.append(emit_array_bindings(f"'{entry.path}' namespace {group.name}",
+                                   [(b.name, b.name, b.type, b.count) for b in group.bindings], GeneratorError))
     out.append("    /// The group index the attribute gave, so no call site writes the number.\n")
     out.append(f"    static constexpr int group_index = {group.group};\n")
     out.append("\n")
@@ -822,6 +824,30 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
     out.append("// So a protocol mismatch names this group rather than a scope template's constraint.\n")
     out.append(f"static_assert(sg::declared_binding_group<{group.name}>);\n")
     out.append(f"}} // namespace {manifest.namespace}\n")
+    return "".join(out)
+
+
+ARRAY_FAMILIES = {"buffer": "buffer", "bytes": "buffer", "texture": "texture", "image": "texture"}
+
+
+def emit_array_bindings(where: str, bindings: list[tuple[str, str, str, int]], error: type[Exception]) -> str:
+    """A group's `arrays` struct: one sg handle per binding array, which `declare_array_*_access` takes.
+
+    Each of `bindings` is (member, reflection name, sg::binding_type enumerator, count).
+    A misspelled member is then a compile error, where a reflection name string is a lookup at run time.
+    A group without a binding array gets no struct, so no member can collide with a name it never emits.
+    """
+    arrays = [(member, name, ARRAY_FAMILIES[kind]) for member, name, kind, count in bindings
+              if count > 1 and kind in ARRAY_FAMILIES]
+    if not arrays:
+        return ""
+    if any(member == "arrays" for member, _, _, _ in bindings):
+        raise error(f"{where} has a member named 'arrays', which its generated handles take as their struct's name")
+    out = ["    /// Its binding arrays, as `declare_array_buffer_access` / `declare_array_texture_access` name them.\n"]
+    out.append("    struct arrays\n    {\n")
+    for member, name, family in arrays:
+        out.append(f'        static constexpr sg::{family}_array_binding {member} = {{.name = "{name}"}};\n')
+    out.append("    };\n\n")
     return "".join(out)
 
 

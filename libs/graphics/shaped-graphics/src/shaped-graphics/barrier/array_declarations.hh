@@ -46,9 +46,16 @@ struct sg::impl::array_site
     ArrayBinding const* array = nullptr;
 };
 
+/// Holds state keyed on group addresses, so it is neither copyable nor movable.
 class sg::impl::array_declaration_book
 {
 public:
+    array_declaration_book() = default;
+    array_declaration_book(array_declaration_book const&) = delete;
+    array_declaration_book(array_declaration_book&&) = delete;
+    array_declaration_book& operator=(array_declaration_book const&) = delete;
+    array_declaration_book& operator=(array_declaration_book&&) = delete;
+
     /// Adds live declaration `id` of the buffer array `name`.
     void declare_buffers(u32 id, cc::string_view name, cc::span<array_buffer_access const> elements);
 
@@ -56,19 +63,16 @@ public:
     void declare_textures(u32 id, cc::string_view name, cc::span<array_texture_access const> elements);
 
     /// Ends declaration `id` if it lives here, and says whether it did.
-    /// One that saw an op bind an array of its family yet never met its own asserts, once it is gone.
-    /// Not while an exception thrown since it was made is unwinding.
     bool withdraw(u32 id);
 
     /// Ends every declaration here, as a rendering scope's close does.
-    /// Each owes the check withdraw runs, and the first that fails it asserts once all are gone.
     void end_all();
 
     [[nodiscard]] bool is_empty() const { return _declarations.empty(); }
 
     /// Meets every array the op's bound groups hold with the live declarations naming it, and tracks what that decides.
     ///
-    /// Every array is met and checked before any is tracked, so a declaration that asserts leaves the op untouched.
+    /// Every array is checked before any is tracked, so a declaration that asserts leaves the op untouched.
     /// `track_buffer(element, stages, access)` and `track_texture(element, stages, access, layout)` track one declared element,
     /// marking its resource an array member and returning its `member_track`.
     /// `cover(array, element, plan)` tracks one element of an array covered whole, which is not an application.
@@ -76,14 +80,14 @@ public:
     /// Returns whether some array of the op was skipped, which the backend arms its `array_skip_guard` with.
     template <class ArrayBinding, class TrackBuffer, class TrackTexture, class Cover>
     [[nodiscard]] bool apply(cc::span<array_site<ArrayBinding> const> sites,
-               pipeline_footprint const* footprint,
-               void const* pipeline,
-               pipeline_stage_flags op_stages,
-               u64 const& member_writes,
-               stat_counts& stats,
-               TrackBuffer&& track_buffer,
-               TrackTexture&& track_texture,
-               Cover&& cover);
+                             pipeline_footprint const* footprint,
+                             void const* pipeline,
+                             pipeline_stage_flags op_stages,
+                             u64 const& member_writes,
+                             stat_counts& stats,
+                             TrackBuffer&& track_buffer,
+                             TrackTexture&& track_texture,
+                             Cover&& cover);
 
 private:
     /// What the live declarations naming one array add up to.
@@ -95,9 +99,6 @@ private:
         /// Bumped whenever a declaration naming it is made or ends, so an application of another set is never current.
         u32 generation = 0;
         int live = 0;
-
-        /// Live declarations naming it that no op has met yet.
-        int unmet = 0;
         array_declarations declared;
     };
 
@@ -107,14 +108,6 @@ private:
         isize name_index = 0;
         cc::vector<array_buffer_access> buffers;
         cc::vector<array_texture_access> textures;
-        bool is_texture = false;
-        bool met = false;
-
-        /// Whether some op had a bound group holding an array of its family, the only evidence a name can be misspelled.
-        bool saw_family = false;
-
-        /// `std::uncaught_exceptions()` when it was made; an end that finds more in flight is unwinding past it.
-        int exceptions_in_flight = 0;
     };
 
     /// One array binding of one bound group, which its application is found by.
@@ -176,17 +169,6 @@ private:
 
     void add(declaration d, cc::string_view name, bool is_texture);
     void recount(isize name_index);
-    void meet(isize name_index);
-
-    /// Marks every live declaration of the family `is_texture` names as having seen an op bind an array of it.
-    void see_family(bool is_texture);
-
-    /// Whether `d`, ending now, passes the never-met check.
-    /// It fails only where some op bound an array of its family and none carried its name, and never while an exception thrown since it was made is unwinding.
-    [[nodiscard]] static bool passes_met_check(declaration const& d);
-
-    /// Asserts `passed`, the never-met check of a declaration of `name_index` that just ended: where a misspelled name is caught.
-    void check_met(isize name_index, bool passed) const;
 
     /// Asserts that every element the declarations naming `name_index` list is in range of `elements` and not vacant.
     template <class Elements>
@@ -197,10 +179,6 @@ private:
 
     /// A record's address is stable across later inserts.
     cc::map<application_key, application> _applications;
-
-    /// Live declarations of each family that have not seen an op bind an array of it, so an op skips the walk once all have.
-    int _buffers_unseen = 0;
-    int _textures_unseen = 0;
 
     /// Ops `apply` has met, which tells a skip of this op from an earlier one's.
     u64 _ops = 0;
@@ -265,17 +243,11 @@ bool sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> c
                                              TrackTexture&& track_texture,
                                              Cover&& cover)
 {
-    auto saw_buffers = false;
-    auto saw_textures = false;
     for (auto const& site : sites)
     {
-        saw_buffers = saw_buffers || !site.array->is_texture;
-        saw_textures = saw_textures || site.array->is_texture;
-
         auto const name_index = find(site.array->name, site.array->is_texture);
         if (name_index < 0 || _names[name_index].live == 0)
             continue;
-        meet(name_index);
 
         // Checked once per group and declaration set: a different group at the same name checks again.
         auto const generation = _names[name_index].generation;
@@ -286,10 +258,6 @@ bool sg::impl::array_declaration_book::apply(cc::span<array_site<ArrayBinding> c
             app.checked_generation = generation;
         }
     }
-    if (saw_buffers)
-        see_family(false);
-    if (saw_textures)
-        see_family(true);
 
     ++_ops;
     auto const writes_before = member_writes;

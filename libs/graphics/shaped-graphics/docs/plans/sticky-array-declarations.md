@@ -1,6 +1,6 @@
 # Plan: sticky array declarations
 
-Status: **built** — the [decisions](#decisions) record what an independent review settled, and [where it is built](#where-it-is-built) names the code.
+Status: **built** — the [decisions](#decisions) record what is settled, and [where it is built](#where-it-is-built) names the code.
 An array declaration used to cover one dispatch or draw, so a caller binding a large bindless table for many ops paid O(elements) per op.
 This plan makes a declaration live until the caller withdraws it, so sg pays O(elements) once and O(arrays) per op after that.
 Background: [barriers](../concepts/barriers.md) for the tracking model and [bindings — array bindings](../concepts/bindings.md#array-bindings) for the contract.
@@ -22,35 +22,46 @@ Two dx12 prerequisites have landed separately, and the plan builds on them:
   It folds the upload value of every touched buffer and texture.
   It folds the download value of every buffer the list writes, and of every texture it touches.
   A texture owes that whatever the list does to it, since its entry barrier can change the layout a copy-queue readback is still using.
-  vulkan folds at the same point, before its own submission lock ([vulkan_command_list.cc:159-178](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc#L159-L178)).
+  vulkan folds at the same point, before its own submission lock, in `vulkan_context`'s submit.
+  That is [vulkan_command_list.cc](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc).
   The record-time fold is gone from `track_*`.
 
 ## Where it is built
 
-- **The value and its lifetime**: [`sg::array_access_declaration`](../../src/shaped-graphics/command_list/array_access_declaration.hh#L28), made by the facades.
-  The compute and trace facades make it in [compute.hh](../../src/shaped-graphics/command_list/compute.hh#L81-L91) and [raytracing.hh](../../src/shaped-graphics/command_list/raytracing.hh#L77-L85).
-  The raster facades make it in [raster.hh](../../src/shaped-graphics/command_list/raster.hh#L159-L168).
-  The core list keeps the links and ends them all when it dies ([command_list.cc:9-39](../../src/shaped-graphics/command_list/command_list.cc#L9-L39)).
-  Every backend's submit ends them too, silently ([command_list.cc:92-96](../../src/shaped-graphics/command_list/command_list.cc#L92-L96)).
-  It ends the raster ones at `close_rendering` ([raster.cc:109-110](../../src/shaped-graphics/command_list/raster.cc#L109-L110)).
-- **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one.
-  The compute pair and the withdraw are at [command_list.hh:138-148](../../src/shaped-graphics/command_list/command_list.hh#L138-L148).
-  The raster pair is at [command_list.hh:191-196](../../src/shaped-graphics/command_list/command_list.hh#L191-L196).
-- **What every backend shares**: [`sg::impl::array_declaration_book`](../../src/shaped-graphics/barrier/array_declarations.hh#L44).
+Links here name files and symbols rather than lines, which move.
+
+- **The value and its lifetime**: `sg::array_access_declaration` in [array_access_declaration.hh](../../src/shaped-graphics/command_list/array_access_declaration.hh), made by the facades.
+  The compute and trace facades make it as `declare_array_buffer_access` / `declare_array_texture_access`.
+  Those are in [compute.hh](../../src/shaped-graphics/command_list/compute.hh) and [raytracing.hh](../../src/shaped-graphics/command_list/raytracing.hh).
+  The raster facades make it in [raster.hh](../../src/shaped-graphics/command_list/raster.hh).
+  The core list keeps the links and ends them all when it dies, in `command_list::~command_list` and `end_array_declarations`.
+  Both are in [command_list.cc](../../src/shaped-graphics/command_list/command_list.cc).
+  Every backend's submit ends them too, silently, through `sg::impl::end_array_declarations_at_submit`.
+  It ends the raster ones in `command_list::close_rendering` ([raster.cc](../../src/shaped-graphics/command_list/raster.cc)).
+- **The array a declaration names** is an `sg::buffer_array_binding` or `sg::texture_array_binding` ([binding.hh](../../src/shaped-graphics/binding/binding.hh)).
+  A shader package generates one per binding array, as `<group>::arrays::<member>`.
+  The by-name overloads turn a reflection name into one through `command_list::named_buffer_array` / `named_texture_array`.
+  Those assert `context::holds_array_binding`, a walk over the live layouts `context::note_array_layout` kept as `ctx.uncached` created them.
+- **The backend seam**: the four virtuals return an id, and `withdraw_array_declaration` ends one, all in [command_list.hh](../../src/shaped-graphics/command_list/command_list.hh).
+  They take the array's name, which the facades read off the handle.
+- **What every backend shares**: `sg::impl::array_declaration_book` in [array_declarations.hh](../../src/shaped-graphics/barrier/array_declarations.hh).
   It holds one bind point's declarations, their per-name generations and the application records.
-  Its `apply` is the per-op procedure under [what an op does](#what-an-op-does).
-  Its `withdraw` and `end_all` are where a declaration ends, and where the never-met check runs ([array_declarations.cc:44-93](../../src/shaped-graphics/barrier/array_declarations.cc#L44-L93)).
+  Its `apply` is the per-op procedure under [what an op does](#what-an-op-does), and returns whether a skip stands.
+  Its `withdraw` and `end_all` are where a declaration ends.
+  `sg::impl::array_skip_guard`, beside it, is what each backend's barrier flush checks a standing skip with.
 - **The backends** feed it their bound groups and their trackers, each from its own `declare_array_accesses`.
-  dx12's is at [dx12_command_list.cc:498](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L498).
-  vulkan's is at [vulkan_command_list.compute.cc:150](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc#L150).
-  metal's is at [metal_command_list.cc:925](../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L925).
+  dx12's is in [dx12_command_list.cc](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc).
+  vulkan's is in [vulkan_command_list.compute.cc](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc).
+  metal's is in [metal_command_list.cc](../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc).
   Each tracker reports `sg::impl::member_track` from inside the lock its declare takes, and the list counts `member_writes`.
-  metal retains every bound group and reads it at each op ([bind_group_to_table](../../backends/metal/src/shaped-graphics/backends/metal/metal_command_list.cc#L742)).
+  metal retains every bound group and reads it at each op, from `metal_command_list::bind_group_to_table`.
   webgpu returns ids for its empty declarations.
-- **sv**: `bound_resources::declare_*_access` return an [`sv::declared_tables`](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.hh#L134).
-  The wavefront makes one per `execute` ([wavefront_routine.cc:268](../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L268)).
-  A raster pass makes one once it opens ([raster_routine.cc:278](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L278)).
-  A trace makes one for itself ([pathtrace_routine.cc:339](../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc#L339)).
+- **sv**: `bound_resources::declare_*_access` return an `sv::declared_tables` ([gpu_resource_manager.hh](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.hh)).
+  Its tables are declared by the handles module `tracer` generates, through `sv::texture_array_of` and `sv::buffer_array`.
+  Those are in [bindless_tables.hh](../../../shaped-viewer/src/shaped-viewer/resources/bindless_tables.hh).
+  The wavefront makes one per `wavefront_routine::execute` ([wavefront_routine.cc](../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc)).
+  A raster pass makes one once it opens, in `raster_routine::execute` ([raster_routine.cc](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc)).
+  A trace makes one for itself, in `pathtrace_routine::execute` ([pathtrace_routine.cc](../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc)).
 - **The count** a test reads is `sg::stat::array_element_tracks`.
 - **Tests**: [array-declaration-book-test.cc](../../tests/barrier/array-declaration-book-test.cc) has no device.
   [sticky-array-test.cc](../../tests/barrier/sticky-array-test.cc) runs on every backend with binding arrays.
@@ -71,7 +82,7 @@ if (second == second_group::bindless)
 ```
 
 `declare_compute_access` rebuilds one element vector per table from everything acquired this epoch, and hands it to sg.
-That is `declare_tables` in [gpu_resource_manager.cc:119-142](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L119-L142).
+That is `declare_tables` in [gpu_resource_manager.cc](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc).
 On Intel's Sponza (405 meshes, 72 textures) that is on the order of 2000 buffer elements and a couple hundred textures, every time.
 
 What was measured (720p window, upscaled moving frames, `relwithdebinfo`, with other GPU work running on the machine, so indicative rather than exact):
@@ -85,7 +96,7 @@ What was measured (720p window, upscaled moving frames, `relwithdebinfo`, with o
 | main-thread stack samples in `dispatch_indirect` → `declare_array_accesses` | 10 of 12 |
 | ...of those, in `track_buffer_access` | 8 |
 
-A round dispatches extend, connect, and one shade per permutation ([wavefront_routine.cc:303-351](../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L303-L351)).
+A round dispatches extend, connect, and one shade per permutation (`wavefront_routine::execute`).
 That is ~30 bindless dispatches per round, assuming ~28 permutations.
 A moving frame drains 22 rounds of those, so ~660 ops times ~2200 elements is ~1.45 M element tracks per frame.
 The megakernel does not suffer: it traces once per frame.
@@ -199,18 +210,18 @@ Skipping that re-declaration drops a barrier nothing needed.
 
 ## Every caller
 
-These are the callers the change touched, at their lines in the tree that ships this doc.
+These are the callers the change touched, by the function or file that holds them.
 A test written for the new API, such as `sticky-array-test.cc`, is not among them.
 
 | caller | where | before | after |
 |---|---|---|---|
-| sv wavefront | [wavefront_routine.cc:268](../../../shaped-viewer/src/shaped-viewer/rendering/wavefront_routine.cc#L268) | in `use`, per bindless dispatch: ~660 declares per moving frame | one declaration before the round loop |
-| sv raster | [raster_routine.cc:282](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L282) | one per draw — 405 on Sponza, the same O(elements) each | one declaration per rendering scope, before the draw loop |
-| sv megakernel | [pathtrace_routine.cc:339](../../../shaped-viewer/src/shaped-viewer/rendering/pathtrace_routine.cc#L339) | one declare, one trace | the same, holding the result across the trace |
-| sv `bound_resources` | [gpu_resource_manager.cc:118-167](../../../shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc#L118-L167) | three `void declare_*_access(cmd)` | return a value that holds the declarations |
-| sg tests | `tests/pipeline/dispatch-test.cc:799,807`, `tests/compute/compute-sync-test.cc:100,193` | declare, dispatch | hold the result across the op |
-| backend tests | `vulkan-raster-test.cc:381,444`, `metal-vertex-input-test.cc:429-605`, `metal-compute-test.cc:320` | the same | the same |
-| dxc tests | `shaped-shader-compiler-dxc/tests/end-to-end-array-bindings-test.cc` | the same, plus lifecycle cases | see [tests](#tests) |
+| sv wavefront | `wavefront_routine::execute` | in `use`, per bindless dispatch: ~660 declares per moving frame | one declaration before the round loop |
+| sv raster | `raster_routine::execute` | one per draw — 405 on Sponza, the same O(elements) each | one declaration per rendering scope, before the draw loop |
+| sv megakernel | `pathtrace_routine::execute` | one declare, one trace | the same, holding the result across the trace |
+| sv `bound_resources` | `declare_tables` in `gpu_resource_manager.cc` | three `void declare_*_access(cmd)` | return a value that holds the declarations |
+| sg tests | `tests/pipeline/dispatch-test.cc`, `tests/compute/compute-sync-test.cc` | declare, dispatch | hold the result across the op, declared by handle |
+| backend tests | `vulkan-raster-test.cc`, `metal-vertex-input-test.cc`, `metal-compute-test.cc` | the same | the same; vulkan's by name, metal's by a hand-spelled handle |
+| dxc tests | `shaped-shader-compiler-dxc/tests/end-to-end-array-bindings-test.cc` | the same, plus lifecycle cases | by name, see [tests](#tests) |
 
 shaped-rendering, the examples and every other library declare nothing.
 `plan_array_declarations` is called only from the book's `apply`, which the three backends share, and from `tests/barrier/array-plan-test.cc`.
@@ -253,13 +264,23 @@ On every scope that has the pair today, it is replaced by:
 /// Array element usage cannot be inferred, since a shader may index only some elements, or use them differently.
 /// Every live declaration naming an array applies to it, and an empty `elements` declares it unused.
 /// Elements are resolved against whichever bound group holds the array at each op, and checked the first time this declaration meets that group.
+/// `array` is what the shader package generates for the binding, `<group>::arrays::<member>`.
+[[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                   cc::span<array_buffer_access const> elements);
+
+/// The by-name form, for a layout no shader package generates; it asserts that a layout the context holds has the array.
 [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
                                                                    cc::span<array_buffer_access const> elements);
 
-/// The texture form: each element also names the layout it must be in.
+/// The texture forms: each element also names the layout it must be in.
+[[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                    cc::span<array_texture_access const> elements);
 [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
                                                                     cc::span<array_texture_access const> elements);
 ```
+
+`sg::buffer_array_binding` and `sg::texture_array_binding` hold the array's reflection name, and their type is its family.
+A shader package generates one per binding array, so a misspelled array does not compile, and the wrong family does not either.
 
 The raster forms say "every draw" and still require an open rendering scope.
 The backend virtuals return the id the token carries, and one new virtual ends it:
@@ -280,7 +301,7 @@ sv shows how that goes wrong: `freeze()` hands back the *same* cached group when
 A later routine that binds that group and forgets to declare would inherit a declaration that misses elements — silently, where today it logs and covers the array.
 Tying the lifetime to a value keeps "forgetting is loud": once the value dies, the array is undeclared again.
 `rendering_scope` is the precedent for a recording guard tied to a list.
-webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list.cc:83](../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.cc#L83)).
+webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list.cc](../../backends/webgpu/src/shaped-graphics/backends/webgpu/webgpu_command_list.cc)).
 
 ### When a declaration is in force
 
@@ -293,25 +314,16 @@ webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list
   A drop is what exception unwinding does to a half-recorded list, and a value destroyed later must find its token dead rather than a freed list.
 - **Binding a pipeline or a group does not end it.**
   This is load-bearing: dx12 and vulkan reset every bound group when a pipeline is bound.
-  dx12 does it at [dx12_command_list.cc:265](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L265).
-  vulkan does it at [vulkan_command_list.compute.cc:36](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc#L36).
+  dx12 does it in `dx12_command_list::compute_bind_pipeline` ([dx12_command_list.cc](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc)).
+  vulkan does it in `vulkan_command_list::compute_bind_pipeline` ([vulkan_command_list.compute.cc](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc)).
   The wavefront rebinds the pipeline and the bindless group before every dispatch, so a declaration that ended on a rebind would end at every op.
 - **An op where no bound group holds the array leaves the declaration dormant**, rather than asserting as today.
   The wavefront's segment, sort and argument kernels bind no bindless group, and its declaration has to survive them.
-- **A declaration that never met its array in its whole lifetime asserts when it ends, if some op of its bind point bound an array of its family.**
-  That is where the misspelled name is caught, since a dormant declaration is otherwise legitimate.
-  "Met" means some op had a bound group holding an array of that name and family.
-  Only an op binding arrays of the family, none of them named so, is evidence the name could be wrong.
-  A bind point that ran no op, or bound only arrays of the other family, proves nothing, so a frame with nothing to draw ends its declarations silently.
-  Each declaration records whether it saw its family, and the book skips that walk once every live declaration of the family has.
-  The check runs at withdraw, at destruction, and when a rendering scope's close ends a raster declaration.
-  The scope close matters most: raster declarations are scoped, so a misspelled raster name would otherwise never be reported.
-  A submit and a list drop end a declaration without the check.
-- **The never-met check does not run while an exception unwinds.**
-  A declaration is made after its list, so unwinding destroys it first, and the check would turn the exception into an abort.
-  Each declaration records `std::uncaught_exceptions()` when it is made, and its end skips the check when that count has grown since.
-- **webgpu never runs the never-met check.**
-  It has no binding arrays, so no declaration there can meet one, and an empty declaration must still work as it does everywhere else.
+- **A misspelled name is caught where it is declared, never where it ends.**
+  A dormant declaration is legitimate, so nothing an op binds can tell a misspelling from an array this frame happens not to bind.
+  The generated handle makes a misspelling a compile error.
+  The by-name overload looks the name up at the declare, in the array bindings of every layout the context holds, and asserts if no array of that name and family is there.
+  Ending a declaration — withdraw, destruction, scope close, submit, drop — never asserts, so neither unwinding nor an empty frame needs a special case.
 - **Compute and raytracing stay one bind point**, as they are on every backend today.
 
 A declaration is keyed by name and family, never by bind event.
@@ -321,11 +333,10 @@ Every live declaration naming an array applies to it, unioned exactly as today's
 
 At each dispatch, trace or draw, every array binding of every bound group meets the declarations first, and then each is planned and applied:
 
-1. **Meet and check.** An array whose name and family have live declarations marks them all met.
-   The first time a group's array meets a set of declarations, every element they list is checked for range and vacancy against *that* group's array.
+1. **Check.** The first time a group's array meets a set of live declarations naming it, every element they list is checked for range and vacancy against *that* group's array.
    The check is per declaration, not per name: a declaration made after its name already met a group bumps the name's generation, so that group checks the set again at its next op there.
    Checking per group is what fixes the existing first-group-only bug, and a different group at the same name checks again.
-   Every array is met and checked before any is tracked ([array_declarations.hh:236-260](../../src/shaped-graphics/barrier/array_declarations.hh#L236-L260)).
+   Every array is checked before any is tracked, in the first loop of `array_declaration_book::apply`.
    So a declaration that asserts leaves the op untouched.
 2. **Plan.** Summarize the live declarations naming the array — named, any element, access union — and call `plan_array_declarations` exactly as today.
    The summary is kept per name and family, recounted at every declare and end, so reading it here costs O(1).
@@ -333,11 +344,12 @@ At each dispatch, trace or draw, every array binding of every bound group meets 
 3. **Apply, or skip.** An `as_declared` read-only array is skipped iff it is [current](#a-write-between-two-reads) and its key is covered.
    Otherwise every element is tracked — and always for a declaration that writes, declared or widened by `widen_by`, as today.
    An application keeps no resolved resource.
-   It indexes the group's array afresh for every element it tracks ([array_declarations.hh:353-372](../../src/shaped-graphics/barrier/array_declarations.hh#L353-L372)).
+   It indexes the group's array afresh for every element it tracks, in `array_declaration_book::track_declared`.
    No caller holds a writable table across ops, so stickiness never needs to cover that case.
 
 **The key.**
-An array's [application record](../../src/shaped-graphics/barrier/array_declarations.hh#L114-L144) is found by the group's identity and the array's binding.
+An array's application record is found by the group's identity and the array's binding.
+That is `array_declaration_book::application`, in [array_declarations.hh](../../src/shaped-graphics/barrier/array_declarations.hh).
 It holds the generation of the name and family it was applied at, and the stages and access applied since its last invalidation, as a union.
 The generation is per name and family: declaring or withdrawing a declaration of `tables.textures_2d` bumps that array's alone, so a one-op declaration of another name leaves this one current.
 The key is **covered** when the generation matches and the op's stages and access are within the recorded union.
@@ -372,7 +384,7 @@ It is current iff `member_writes` at the end of the op still equals that snapsho
 A member written later in the same op — a vertex buffer, another array's application — moves the counter past the snapshot.
 
 A member written *earlier* in the same op, before the application, does not.
-`declare_group_accesses` runs before `declare_array_accesses` ([dx12_command_list.cc:340-343](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L340-L343)).
+`declare_group_accesses` runs before `declare_array_accesses`, in every op of every backend (`dx12_command_list::compute_dispatch`, for one).
 So at application `track_access` also reports whether the slot's current-op state already holds a write (`has_curr_writes()`) or a pending layout change.
 Either makes the application not current.
 Without that, a scalar write to element `e1` in the op that first applies the array would leave it current, and the next op would skip `e1`'s read-after-write barrier.
@@ -382,6 +394,12 @@ A skip is decided per array, before the op's later arrays track, so a member one
 Texture T read through array A and moved to a storage layout through array B of the same op is that case: declaring A again would have combined both uses in the op's one barrier.
 So once every array of the op has tracked, an op whose count moved since it began applies every array it skipped after all.
 An op that wrote no member pays one compare for that.
+
+**So every write of an op is tracked before its arrays are.**
+The re-check covers only the writes made while the arrays apply.
+A write tracked after `declare_array_accesses` returns and before the op's barriers flush would leave a skipped element in the wrong state.
+Every such track is a read today — dx12's shader table and vertex and index buffers, vulkan's shader table, metal's TLAS — and that is checked rather than assumed.
+`apply` returns whether a skip stands, the backend arms an `array_skip_guard` with the count, and its `flush_barriers` asserts the count unchanged.
 
 The counter is list-wide and invalidates every declaration, which is coarse but cheap and obviously right.
 A member write inside a run of read-only dispatches does not happen in any caller today: every bindless element is written before the trace starts.
@@ -402,8 +420,8 @@ The rules in [barriers.md](../concepts/barriers.md) are unchanged in what they d
 
 P2 moved dx12's transfer waits to submit, so a transfer enqueued into a member after its application still makes the list wait.
 One record-time read is left: a texture with a transfer in flight is tracked in `general` rather than its declared layout.
-That is `has_pending_transfer()` in dx12's `track_texture_access` ([dx12_command_list.cc:127](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc#L127)).
-vulkan's texture track reads it the same way ([vulkan_command_list.cc:471](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc#L471)).
+That is `has_pending_transfer()` in `dx12_command_list::track_texture_access` ([dx12_command_list.cc](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc)).
+vulkan's `vulkan_command_list::track_texture` reads it the same way ([vulkan_command_list.cc](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.cc)).
 Sticky freezes that choice at application, where today the next re-declaring op re-reads it.
 A transfer that finishes mid-list leaves the texture in `general`, which serves the read.
 A transfer enqueued mid-list into a member texture leaves its declared layout in place, where today a later op would move it to `general`.
@@ -413,15 +431,14 @@ A transfer enqueued mid-list into a member texture leaves its declared layout in
 
 **dx12, vulkan, metal.**
 Each replaces its four pending lists with two `array_declaration_book`s, one per bind point.
-A book's entry holds the token's id, an index into the book's names, the copied elements, and whether it has met its array.
-It also holds `std::uncaught_exceptions()` as it was when the declaration was made.
-Per name and family the book keeps the generation, the live and unmet counts, and the summary of the live declarations, recounted at every declare and end.
+A book's entry holds the token's id, an index into the book's names, and the copied elements.
+Per name and family the book keeps the generation, the live count, and the summary of the live declarations, recounted at every declare and end.
 It also keeps a small application cache, one record per (group, array binding), as described under [the key](#what-an-op-does).
-The list keeps `member_writes`.
-Withdraw erases the entry, bumps its name's generation, and runs the never-met check.
-`raster_end_rendering` ends the raster entries last, so the never-met check, which asserts on the first that fails it, finds the scope closed.
-Submit unlinks any value still alive, as a drop does; the entries go with the list, and neither runs the check.
-No end runs the check while an exception unwinds.
+A book is neither copyable nor movable, since that cache is keyed on group addresses.
+The list keeps `member_writes`, and an `array_skip_guard` its barrier flush checks.
+Withdraw erases the entry and bumps its name's generation.
+`raster_end_rendering` ends the raster entries.
+Submit unlinks any value still alive, as a drop does, and the entries go with the list.
 `track_access` gains a "from an array application" argument and returns whether it hit a member in the write bucket, and whether the slot's current op already held a write or layout change.
 
 **metal** additionally retains each bound group, as dx12 does with `group.weak_from_this().lock()`, and reads its arrays through it.
@@ -433,14 +450,16 @@ metal counts each barrier in `metal_command_list::barriers_emitted` and in the c
 An MTL4 barrier names no resource, so metal counts no `buffer_barriers`, `texture_barriers` or `texture_transitions`, and its tests read `barriers_emitted`.
 
 **webgpu.** Has no arrays: the virtuals assert empty spans as today, and return an id so the value works.
-Its withdraw keeps nothing, so the never-met check never runs there; no op there could show a declaration an array anyway.
+Its withdraw keeps nothing.
 
 **The core.** `array_access_declaration`, its token, the facades returning it, and `plan_array_declarations` unchanged.
 
 ### What it costs
 
 Per op, for an array whose declaration is current: one summary read, one `plan_array_declarations` call, one key compare.
-The book finds the name by linear search and the record by one hash lookup on (group, binding), so that is O(bound arrays × names) — sv binds eight tables — and no element is touched.
+Per site the book finds the name by linear search twice, once to check and once to plan, and looks the record up on (group, binding) in each of those passes that reaches it.
+So that is O(bound arrays × names) — sv binds eight tables — and no element is touched.
+`plan_of` runs for every site of every op, skips included.
 Records are never dropped within a list, so a caller binding a new group per draw grows the map by one per draw and pays a constant lookup, not a scan over every earlier group.
 The O(elements) work happens once per array per list, again after any member write, and again when a key is not covered.
 
@@ -536,8 +555,8 @@ for (auto const& draw : d.draws)
 }
 ```
 
-A pass whose draws list is empty never meets the tables, and binds no other array either, so its close ends the declarations silently.
-sv declares unconditionally once the pass is open ([raster_routine.cc:275-278](../../../shaped-viewer/src/shaped-viewer/rendering/raster_routine.cc#L275-L278)).
+A pass whose draws list is empty never meets the tables, and its close ends the declarations.
+sv declares unconditionally once the pass is open, in `raster_routine::execute`.
 Pipelines touching the tables at different stages re-apply once each until the recorded union covers them both, then skip.
 The environment draw binds no bindless group, so the declaration is dormant there.
 
@@ -557,7 +576,7 @@ One application, one trace: the cost is today's, and only the spelling changes.
 Three buffers `e0`, `e1`, `e2` sit in array `tables.buffers`, and `e1` is also bound as a scalar `readwrite` binding of a group `patch`:
 
 ```cpp
-auto const declared = cmd.compute.declare_array_buffer_access("tables.buffers", reads_of_e0_e1_e2);
+auto const declared = cmd.compute.declare_array_buffer_access(shaders::tables::arrays::buffers, reads_of_e0_e1_e2);
 
 cmd.compute.bind_pipeline(*reader);   // indexes tables.buffers
 cmd.compute.bind_group(0, *tables);
@@ -592,7 +611,7 @@ Op 3 then re-applies and gets the read-after-write barrier, which is what flush 
 ### The API break
 
 Every declare call changes from a statement to a value, and `[[nodiscard]]` is what keeps one from dying on the line it was made.
-A call written as today's statement would declare and withdraw at once — and then assert as never met; the warning catches it first.
+A call written as today's statement would declare and withdraw at once; the warning catches it.
 Who changes: sv's `bound_resources` and its three call sites, the sg, vulkan, metal and dxc tests listed under [every caller](#every-caller), and the backends' virtuals.
 No shim keeps the old per-op form: a caller that wants one op writes `{ auto const d = ...; dispatch; }`.
 
@@ -601,9 +620,6 @@ No shim keeps the old per-op form: a caller that wants one op writes `{ auto con
 - **A missed invalidation is a silent race.**
   Every path that tracks a resource must report member writes, and a backend that adds a new tracking path must too.
   The tests below pin it per path; the debug layers and synchronization validation catch the rest.
-- **A declaration that meets its array only on some frames** asserts as never met on a frame whose ops bind other arrays of its family and never its own.
-  Its owner must declare only where it will meet it on such a frame.
-  A frame binding no array of its family, an empty one included, ends it silently.
 - **The `has_pending_transfer()` layout choice is frozen at application** — see [record-time reads that remain](#record-time-reads-that-remain).
 - **metal's group identity rests on retaining the group**; a backend that copies group contents instead must key on a group serial.
 
@@ -620,7 +636,6 @@ New tests, tier 1 (run against every backend that has binding arrays) unless not
 - **Two declarations at different layouts** holding one texture — on one bind point, across raster and compute, and as the A, B, A group alternation at one name.
   Each skip must leave the texture in the layout its op needs.
 - **A compute declaration alive across a rendering scope that writes a member** re-applies at the next dispatch.
-- **metal: a transient group freed and a new one allocated at the same address** is a new identity, checked again.
 - **A one-op declaration of another name** leaves the sticky array current: no element tracks at the next op.
 - **An upload enqueued into a member after its application, before submit**, still makes the list wait, on dx12 (P2).
 - **The first-meeting check in `release`**: it runs on the release presets too, or the test documents that it compiles out with the other asserts.
@@ -631,28 +646,27 @@ New tests, tier 1 (run against every backend that has binding arrays) unless not
   That one needs no device, and is in `array-declaration-book-test.cc`.
 - **Two bound groups holding one name at different sizes**: an index valid only in the larger asserts — the first-group-only bug.
 - **Withdraw makes the array undeclared**: the next op logs "declared no access" and covers it.
-- **A declaration that never met its array, where an op bound one of its family, asserts at withdraw**, and a dropped list ends one silently.
+- **A by-name declaration of a name no layout holds asserts at the declare**, on every bind point and in either family's wrong overload, and a dropped list ends one silently.
 - **Scope close ends a raster one**, and destroying the value afterwards does nothing.
-- **A raster declaration that never met its array asserts when its scope closes**, where a draw bound an array of its family, and the list is whole after.
-  A scope that draws nothing ends one silently.
-- **Unwinding past a declaration that never met its array does not assert**, for a value the unwinding destroys and for a scope it closes.
 - **Submit with a live declaration ends it silently**, in every build, and destroying the value afterwards does nothing.
-- **A declaration whose bind point saw no op ends without asserting**, withdrawn or ended by its scope, on every backend, webgpu included.
-- **Only an op binding an array of the declaration's family counts**: one that saw no op, or only the other family's arrays, ends silently, and one that saw its family under other names asserts.
+- **A declaration whose bind point saw no op ends silently**, withdrawn or ended by its scope, on every backend, webgpu included.
+- **A member written between a standing skip and its flush asserts at the flush.**
   That one needs no device, and is in `array-declaration-book-test.cc`.
+- **A generated group has a handle per binding array, and none for a group without one**; a member named `arrays` is refused.
+  That is `sgl-host-code-self-test.py`.
 
 Existing tests that change:
 
 - `tests/pipeline/dispatch-test.cc` "a group bound for a dispatch is not bound at a later draw" probed with the per-op assert at the draw.
   That assert read "declare_array_buffer_access names no buffer array binding of a bound group".
-  It becomes the end-of-life never-met assert, which fires only where a draw bound a buffer array the declaration did not meet.
-  So the probe is a raster declaration of another name, whose withdraw stays silent because the rects' draw binds no array.
+  The probe is now a raster declaration of the dispatch's array, of an element past its end: the first-meeting check would assert at a draw that still bound it.
+  metal's two stale-group tests in `metal-vertex-input-test.cc` probe the same way.
 - `end-to-end-array-bindings-test.cc` "a draw resolves only its own bind point's declarations" keeps its cases, with the declarations held as values.
   "A declaration still pending when its scope closes goes with the scope" becomes "a raster declaration ends with its scope".
-  The declaration that case ends sees no draw, so the close ends it silently.
+  The declaration that case ends sees no draw, and the close ends it.
   "A compute declaration waits for a dispatch" becomes "a compute declaration is never met by a draw", which its vacant element would assert on.
-- The undeclared-array tests (dxc :205, :790, `vulkan-raster-test.cc:407`) keep their `nx::exactly(...)` counts.
-- The out-of-range test in `metal-vertex-input-test.cc:437` still asserts at the draw, since the check runs at first meeting.
+- The undeclared-array tests, in the dxc end-to-end tests and `vulkan-raster-test.cc`, keep their `nx::exactly(...)` counts.
+- The out-of-range test in `metal-vertex-input-test.cc` still asserts at the draw, since the check runs at first meeting.
 - `tests/barrier/array-plan-test.cc` is unchanged: `plan_array_declarations` is.
 
 ### Docs to update
@@ -676,6 +690,20 @@ Keep the per-op API, and have sg notice that this op's declaration equals the la
   That is cheap next to today, but it is not O(arrays), and a span whose order shifts silently falls off the fast path.
 - **The same hard part:** skipping still needs the member-write invalidation, so it is no simpler inside sg.
 
+### A generated handle per binding array
+
+How a declaration names its array.
+A reflection name string is checked against nothing until an op meets it, and a dormant declaration is legitimate, so only its end could tell a misspelling.
+An end-of-life "never met" check did that, and fired or not depending on what each frame bound.
+A pass declaring its bindless table asserted on a frame whose materials bound only another texture array, and was silent the next.
+
+- **Chosen: a typed handle.** A shader package generates `<group>::arrays::<member>`, an `sg::buffer_array_binding` or `sg::texture_array_binding`, beside the group types it already emits.
+  A misspelling or the wrong family is a compile error.
+- **Kept beside it: a declare-time lookup.** Reflected and hand-written layouts have no package, so the by-name overload asserts at the declare unless some layout the context holds has the array.
+  What a frame binds no longer matters.
+- **Rejected: access given at group creation.** Access is a property of a use rather than of a group: one group serves a read here and a write there, and its layouts change under it.
+  Every write and every layout change would need a per-op override, which is the declaration again.
+
 ### Make each element track cheaper
 
 P1 and P2 are this alternative's cheap half, and they landed first.
@@ -688,10 +716,10 @@ It still matters for the first application, every `cover_all`, every writing dec
 - **A value type, `[[nodiscard]]`** — not `void` "until replaced", whose leak into the next routine is silent.
 - **No [dedupe inside sg](#sg-dedupes-repeated-identical-declarations)** — its invalidation is the same work, and it keeps O(elements) per op.
 - **Covered by, not equal** — the applied stages and access are a union since the last invalidation; texture layouts still match exactly, through the generation.
-- **The typo assert is kept, moved to end of life** — a declaration that never met its array asserts at withdraw, destruction or scope close.
-- **The typo assert fires only where it can mean a misspelling** — some op of its bind point bound an array of its family and none carried its name.
-  An empty frame proves nothing about a name, so a caller declares unconditionally rather than only where a draw or dispatch will happen.
-- **The lifecycle's edge cases are settled** — submit ends declarations silently, unwinding and webgpu skip the never-met check, and first meeting is per declaration.
+- **A misspelled array is caught at the declare** — by a [generated handle](#a-generated-handle-per-binding-array), or by the by-name overload's lookup in the context's layouts.
+  An end-of-life check fired or not depending on what a frame bound, which made it the worst kind of assert, so it is gone.
+- **The lifecycle's edge cases are settled** — submit ends declarations silently, ending one never asserts, and first meeting is per declaration.
+- **Every write of an op is tracked before its arrays**, which a standing skip asserts at the barrier flush.
 - **A different group at the same name is checked again**, per group, rather than ending the declaration.
 - **Transfer waits fold at submit** — a prerequisite, landed as P2.
 - **Lock fusion first and separately** — landed as P1.

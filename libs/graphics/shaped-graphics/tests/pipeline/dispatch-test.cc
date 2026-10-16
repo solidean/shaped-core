@@ -771,8 +771,8 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
         SKIP("this context has no binding arrays");
 
     // `lanes` carries the buffer array `lanes.sources`, and the rects' groups carry none.
-    // A declaration of another name asserts when it ends only where an op bound a buffer array it did not meet.
-    // So a raster declaration's withdraw shows whether the dispatch's group is still bound at the draw.
+    // A raster declaration of an element past its end asserts at the first draw whose bound groups hold it.
+    // So a draw that does not assert shows that the dispatch's group is not bound there.
     auto const gather = co_await shaders::binding_arrays.gather.acquire_pipeline(*ctx);
     auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::rects.floating);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::lanes>();
@@ -795,16 +795,16 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    auto const declared = cmd->compute.declare_array_buffer_access("lanes.sources", reads);
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::lanes::arrays::sources, reads);
     cmd->compute.dispatch_threads(64);
     {
         auto scope
             = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},
                                      .target_set = shaders::rect_target::name});
         scope.bind_pipeline(*draw);
-        auto declared = scope.declare_array_buffer_access("lanes.absent", {});
+        sg::array_buffer_access const past_the_end[] = {{.index = 3, .access = sg::access_flag::shader_read}};
+        auto const declared = scope.declare_array_buffer_access(shaders::lanes::arrays::sources, past_the_end);
         batch.draw(scope, 0);
-        declared.withdraw();
     }
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));

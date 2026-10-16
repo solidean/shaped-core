@@ -1,5 +1,3 @@
-#include <clean-core/common/macros.hh>  // CC_ASSERT_ENABLED
-#include <clean-core/common/utility.hh> // CC_DEFER
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <nexus/test.hh>
@@ -118,10 +116,6 @@ struct fake_list
     return out;
 }
 
-/// Thrown to unwind past a declaration.
-struct unwound
-{
-};
 } // namespace
 
 TEST("sg::impl::array_declaration_book - a current read-only application is skipped")
@@ -349,118 +343,24 @@ TEST("sg::impl::array_declaration_book - a declaration made after its name met a
     CHECK_ASSERTS(list.op(table));
 }
 
-TEST("sg::impl::array_declaration_book - a declaration no op bound an array of its family for ends silently")
+TEST("sg::impl::array_declaration_book - end_all ends every declaration, and the next op finds the array undeclared")
 {
-    // No op at all, as on a frame with nothing to draw: dormant all its life, which proves nothing about its name.
-    auto list = fake_list();
-    list.book.declare_buffers(1, "tables.bufers", reads(1));
-    list.book.declare_textures(2, "tables.textrues", {});
-    CHECK(list.book.withdraw(1));
-    list.book.declare_buffers(3, "tables.bufers", reads(1));
-    list.book.end_all();
-    CHECK(list.book.is_empty());
-
-    // Ops binding only arrays of the other family, each met by a declaration of its own.
-    auto const images = textures("tables.textures", 2);
-    sg::array_texture_access const read_image[]
-        = {{.index = 0, .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture}};
-    list.book.declare_buffers(4, "tables.bufers", reads(1));
-    list.book.declare_textures(5, "tables.textures", read_image);
-    list.op(images);
-    list.op(images);
-    CHECK(list.book.withdraw(4));
-    CHECK(list.book.withdraw(5));
-}
-
-TEST("sg::impl::array_declaration_book - a declaration that saw only arrays of its family under other names asserts at "
-     "withdraw")
-{
-    auto list = fake_list();
-    auto const table = buffers("tables.buffers", 3);
-    auto const images = textures("tables.textures", 2);
-    list.book.declare_buffers(1, "tables.buffers", reads(1));
-    list.book.declare_textures(2, "tables.textures", {});
-    list.book.declare_textures(3, "tables.textrues", {});
-    list.op(table);
-    list.op(images);
-    CHECK(list.book.withdraw(1));
-    CHECK(list.book.withdraw(2));
-#if CC_ASSERT_ENABLED
-    CHECK_ASSERTS(list.book.withdraw(3));
-#else
-    CHECK(list.book.withdraw(3));
-#endif
-    CHECK(list.book.is_empty());
-}
-
-TEST("sg::impl::array_declaration_book - a declaration that never met its array asserts at withdraw")
-{
-    // The array the misspelled declaration misses is undeclared, so it is covered, and that is logged once.
+    // Logged once per pipeline, binding and message, which an earlier test's list at this address may have spent.
     nx::allow_errors("declared no access for a bound array");
     auto list = fake_list();
     auto const table = buffers("tables.buffers", 3);
-    list.book.declare_buffers(1, "tables.bufers", reads(1));
-    list.op(table);
-    CHECK_ASSERTS(list.book.withdraw(1));
-}
-
-TEST("sg::impl::array_declaration_book - end_all ends every declaration, and one that never met its array asserts once "
-     "all are gone")
-{
-    auto list = fake_list();
-    auto const table = buffers("tables.buffers", 3);
     list.book.declare_buffers(1, "tables.buffers", reads(1));
+    list.book.declare_buffers(2, "tables.buffers", reads(2));
     list.op(table);
+    CHECK(list.tracked == 3);
     list.book.end_all();
     CHECK(list.book.is_empty());
     CHECK(!list.book.withdraw(1));
-
-    list.book.declare_buffers(2, "tables.buffers", reads(1));
-    list.book.declare_buffers(3, "tables.bufers", reads(1));
-    list.op(table);
-#if CC_ASSERT_ENABLED
-    CHECK_ASSERTS(list.book.end_all());
-#else
-    list.book.end_all();
-#endif
-    CHECK(list.book.is_empty());
     CHECK(!list.book.withdraw(2));
-    CHECK(!list.book.withdraw(3));
-}
 
-TEST("sg::impl::array_declaration_book - an end while an exception unwinds past a declaration skips the never-met "
-     "check")
-{
-    auto list = fake_list();
-    auto const table = buffers("tables.buffers", 3);
-    list.book.declare_buffers(1, "tables.bufers", reads(1));
-    list.book.declare_buffers(2, "tables.bufers", reads(1));
-
-    // An op binding a buffer array of another name, so both would fail the check outside an unwinding.
-    list.book.declare_buffers(3, "tables.buffers", reads(1));
     list.op(table);
-
-    // Ended from a destructor, as unwinding ends a declaration's value, and as it closes a rendering scope.
-    auto const withdraw_while_unwinding = [&]
-    {
-        CC_DEFER
-        {
-            CHECK(list.book.withdraw(1));
-        };
-        throw unwound{};
-    };
-    auto const end_all_while_unwinding = [&]
-    {
-        CC_DEFER
-        {
-            list.book.end_all();
-        };
-        throw unwound{};
-    };
-    CHECK_THROWS_AS(withdraw_while_unwinding(), unwound);
-    CHECK_THROWS_AS(end_all_while_unwinding(), unwound);
-    CHECK(list.book.is_empty());
-    CHECK(!list.book.withdraw(3));
+    CHECK(list.tracked == 3);
+    CHECK(list.covered == 3);
 }
 
 TEST("sg::impl::array_skip_guard - a member written between a skip and its flush asserts at the flush")

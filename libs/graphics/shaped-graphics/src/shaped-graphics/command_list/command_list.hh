@@ -144,7 +144,6 @@ protected:
                                                                    cc::span<array_texture_access const> elements) = 0;
 
     // Ends declaration `id`, which is live: the token guarantees it.
-    // One that never met its array, where an op bound an array of its family, asserts unless an exception is unwinding past it.
     virtual void withdraw_array_declaration(u32 id) = 0;
 
     // The id a backend's next array declaration takes, unique within this list.
@@ -261,6 +260,13 @@ protected:
 
     /// Wraps declaration `id`, just made on the compute or the raster bind point, in the value that keeps it in force.
     [[nodiscard]] array_access_declaration adopt_array_declaration(u32 id, bool raster);
+
+    /// The array a by-name declaration names, which must be a buffer array of some layout the context holds.
+    /// Where a misspelled name is caught, at the declare, whatever the ops after it bind.
+    [[nodiscard]] buffer_array_binding named_buffer_array(cc::string_view name);
+
+    /// The texture form: `name` must be a texture array of some layout the context holds.
+    [[nodiscard]] texture_array_binding named_texture_array(cc::string_view name);
 
 private:
     friend class array_access_declaration;

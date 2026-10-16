@@ -233,6 +233,8 @@ enum class texture_sample_type;
 enum class sampler_binding_type;
 enum class access_mode;
 struct binding;
+struct buffer_array_binding; // a buffer array by its layout's name, as a shader package generates it (binding/binding.hh)
+struct texture_array_binding; // the texture form
 struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
@@ -293,8 +295,8 @@ struct array_plan;                              // how a dispatch tracks one bou
 struct array_declaration_link; // what a live array declaration and its list share (command_list/array_access_declaration.hh)
 using array_declaration_token = std::shared_ptr<array_declaration_link>;
 class array_declaration_book; // one bind point's live array declarations (barrier/array_declarations.hh)
-class array_skip_guard;       // what an op's skipped arrays leave its barrier flush to check (barrier/array_declarations.hh)
-struct member_track;          // what tracking one declared array element found
+class array_skip_guard; // what an op's skipped arrays leave its barrier flush to check (barrier/array_declarations.hh)
+struct member_track;    // what tracking one declared array element found
 template <class ArrayBinding>
 struct array_site; // one array binding of one bound group, as an op meets it
 // the counts `cmd` recorded, for its backend to fold in at submit; defined in command_list/command_list.cc

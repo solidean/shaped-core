@@ -130,7 +130,7 @@ void declare_tables(Scope& scope, Tables const& tables, cc::vector<sg::array_acc
             buffers.clear();
             for (auto const e : t.acquired)
                 buffers.push_back({.index = i32(e), .access = sg::access_flag::shader_read});
-            declared.push_back(scope.declare_array_buffer_access(name_of(t.table), buffers));
+            declared.push_back(scope.declare_array_buffer_access(buffer_array(), buffers));
             continue;
         }
 
@@ -138,7 +138,7 @@ void declare_tables(Scope& scope, Tables const& tables, cc::vector<sg::array_acc
         for (auto const e : t.acquired)
             textures.push_back(
                 {.index = i32(e), .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture});
-        declared.push_back(scope.declare_array_texture_access(name_of(t.table), textures));
+        declared.push_back(scope.declare_array_texture_access(texture_array_of(t.table), textures));
     }
 }
 } // namespace

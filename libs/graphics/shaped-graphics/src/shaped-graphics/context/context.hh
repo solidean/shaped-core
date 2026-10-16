@@ -430,6 +430,14 @@ private:
     [[nodiscard]] bool claim_render_pass_split_warning(cc::string_view cause);
     friend class command_list;
 
+    /// Keeps `layout` where `holds_array_binding` looks, while it lives, if it has an array binding at all.
+    /// Every layout the context creates passes through here, from ctx.uncached.
+    void note_array_layout(binding_group_layout_handle const& layout);
+
+    /// Whether a layout created here and still alive has an array binding `name`, of textures or images where `is_texture` says so and of buffers or bytes otherwise.
+    /// The lookup behind a by-name array declaration; it takes a lock and walks every such layout, so it runs only where an assert does.
+    [[nodiscard]] bool holds_array_binding(cc::string_view name, bool is_texture);
+
     cc::mutex<cc::vector<pending_completion>> _pending_completions;
     std::unique_ptr<completion_signals> _completion_signals;
 
@@ -798,6 +806,9 @@ protected:
 
     // The split causes already warned about; command lists record on any thread.
     cc::mutex<cc::vector<cc::string>> _warned_split_causes;
+
+    // The layouts with an array binding, for holds_array_binding; an expired one is dropped at the next note.
+    cc::mutex<cc::vector<std::weak_ptr<binding_group_layout const>>> _array_layouts;
     cc::string _device_loss_reason;
 
     // Built-in pipeline/layout cache reached via ctx.cached.

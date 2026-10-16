@@ -7,11 +7,17 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-/// The suffix of each table's name after the module's `bindless.`, in `bindless_table` order.
-constexpr cc::string_view table_names[] = {"textures_1d",   "textures_1d_array",   "textures_2d", "textures_2d_array",
-                                           "textures_cube", "textures_cube_array", "textures_3d", "buffers"};
+using bindless_arrays = sv::shaders::tracer::bindless::arrays;
 
-static_assert(sizeof(table_names) / sizeof(table_names[0]) == u32(sv::bindless_table::count_), "one name per table");
+/// The texture tables' generated handles, in `bindless_table` order; `buffers` follows them.
+constexpr sg::texture_array_binding texture_arrays[] = {
+    bindless_arrays::textures_1d,       bindless_arrays::textures_1d_array, bindless_arrays::textures_2d,
+    bindless_arrays::textures_2d_array, bindless_arrays::textures_cube,     bindless_arrays::textures_cube_array,
+    bindless_arrays::textures_3d,
+};
+
+static_assert(sizeof(texture_arrays) / sizeof(texture_arrays[0]) == u32(sv::bindless_table::buffers),
+              "one handle per texture table, and the buffer table last");
 
 /// The module's tables, checked once against the enum: a table added to one and not the other asserts here.
 /// The material sampler palette follows them in the binding, and is all that may.
@@ -29,8 +35,10 @@ static_assert(sizeof(table_names) / sizeof(table_names[0]) == u32(sv::bindless_t
             CC_ASSERT(is_sampler, "`binding bindless` declares samplers alone after its tables");
             continue;
         }
-        CC_ASSERT(name.starts_with("bindless.") && name.subview(9) == table_names[i],
-                  "module tracer's `binding bindless` declares its tables in sv::bindless_table order");
+        auto const expected
+            = i < isize(sv::bindless_table::buffers) ? texture_arrays[i].name : bindless_arrays::buffers.name;
+        CC_ASSERT(name == expected, "module tracer's `binding bindless` declares its tables in sv::bindless_table "
+                                    "order");
         CC_ASSERT(bindings[i].count >= 2, "a bindless table needs at least 2 elements — sg reads a count of 1 as a "
                                           "scalar binding");
     }
@@ -48,6 +56,17 @@ cc::string_view sv::name_of(bindless_table t)
 {
     CC_ASSERT(t < bindless_table::count_, "not a bindless table");
     return bindless_bindings()[u32(t)].name;
+}
+
+sg::texture_array_binding sv::texture_array_of(bindless_table t)
+{
+    CC_ASSERT(t < bindless_table::buffers, "not a texture table");
+    return texture_arrays[u32(t)];
+}
+
+sg::buffer_array_binding sv::buffer_array()
+{
+    return bindless_arrays::buffers;
 }
 
 u32 sv::capacity_of(bindless_table t)

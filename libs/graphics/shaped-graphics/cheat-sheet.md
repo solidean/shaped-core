@@ -351,7 +351,7 @@ cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  /
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
 cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state; blend constants are 0 until set, per rendering scope
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
-cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // -> sg::array_access_declaration — as on cmd.compute, every draw while it lives; also ends with the scope, whose close ASSERTS on one never met where a draw bound an array of its family
+cmd.raster.declare_array_buffer_access(G::arrays::member | "name", elements) / declare_array_texture_access(…)  // -> sg::array_access_declaration — as on cmd.compute, every draw while it lives; also ends with the scope
                                                          //   an element is tracked at the stages the code touches its array in (every stage of the op without a footprint)
 cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.size=1}})   // void — ranges are cc::offset_size {first, count}
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
@@ -779,16 +779,18 @@ cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group cou
                                          //   each count must be at most 65535 too; larger is undefined, and webgpu skips the dispatch
                                          //   the args must not be bound writable to the same dispatch (webgpu refuses it); bytes: dispatch_groups_indirect_bytes(raw_buffer_handle, offset_in_bytes % 4 == 0)
 //   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
-auto d = cmd.compute.declare_array_buffer_access(name, elements)  // [[nodiscard]] -> sg::array_access_declaration — in force for EVERY dispatch/trace while `d` lives
-cmd.compute.declare_array_texture_access(name, elements) // same for a texture array (elements also carry a layout)
-                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pair)
+auto d = cmd.compute.declare_array_buffer_access(G::arrays::member, elements)  // [[nodiscard]] -> sg::array_access_declaration — in force for EVERY dispatch/trace while `d` lives
+cmd.compute.declare_array_texture_access(G::arrays::member, elements) // same for a texture array (elements also carry a layout)
+                                                         // G::arrays::member is the sg::buffer_array_binding / sg::texture_array_binding the shader package generates: a typo does not compile
+cmd.compute.declare_array_buffer_access("set.name", elements)  // by reflection name, for a layout no package generates (reflected, hand-written)
+                                                         //   ASSERTS at the declare unless a layout this context holds has a buffer (texture) array of that name
+                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pairs)
                                                          // an array the code indexes and nobody declared LOGS and gets a global barrier; one it never indexes needs none
-d.withdraw();                                            // ends it now; destroying it does the same. Move-only; a moved-from one ends nothing
+d.withdraw();                                            // ends it now; destroying it does the same. Move-only; a moved-from one ends nothing; ending one never asserts
                                                          // compute + raytracing are one bind point; a pipeline/group rebind ends nothing; an op binding no such array leaves it dormant
-                                                         // once applied, a later op reading the array the same way skips the element work, until an element is written
-                                                         // GOTCHA: if ops bound arrays of its family (buffer / texture) and none carried its name, it ASSERTS when it ends — a misspelled name
-                                                         //   one whose bind point saw no op, or only the other family's arrays, ends silently, so an empty frame needs no special case
-                                                         //   not while an exception unwinds past it, so unwinding never turns into an abort here
+                                                         // once applied, a later op reading the array at stages and access it already applied skips the element work
+                                                         //   GOTCHA: the write counter is per LIST — a write to any resource any application tracked ends EVERY application,
+                                                         //   and an op at new stages or access re-applies once
                                                          // a submitted or dropped list ends its declarations silently; a value outliving it then does nothing
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).

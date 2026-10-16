@@ -737,6 +737,7 @@ The drawing manager does: `acquire(set)` hashes the set, and `scene_ref::add_ann
 sv::bindless_table          // enum class : u8 — textures_1d / _1d_array / _2d / _2d_array / cube / cube_array / _3d / buffers (+ count_)
 sv::bindless_bindings()     // -> span<sg::binding const> — `binding bindless` of shaders/sgl/tracer_bindings.sgl, in table order: THE layout
 sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: bindless.textures_2d, bindless.buffers, … — what a footprint resolves by
+sv::texture_array_of(table) / sv::buffer_array()  // -> sg::texture_array_binding / sg::buffer_array_binding — the module's generated handles, which declare_array_*_access takes
 sv::capacity_of(table)      // -> u32 — the module's element count for it; a size is changed in the .sgl, not in a config
 sv::bindless_group          // -> int — 1: the slot the tables bind at in the tracer's pipeline layout
 

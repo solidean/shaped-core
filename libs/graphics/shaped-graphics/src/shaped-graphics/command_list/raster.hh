@@ -161,9 +161,14 @@ public:
     /// An array the pipeline's code indexes with no live declaration logs and is covered whole, and an empty `elements` declares it unused.
     /// Array element usage cannot be inferred, since a shader may index only some elements, or use them differently.
     /// Each element is tracked at the stages the pipeline's code touches the array in, as a scalar binding is.
+    /// `array` is what the shader package generates for the binding, and the by-name overload checks the name as the compute one does.
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                       cc::span<array_buffer_access const> elements);
     [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
                                                                        cc::span<array_buffer_access const> elements);
     /// The texture form: each element also names the layout it must be in.
+    [[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                        cc::span<array_texture_access const> elements);
     [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
                                                                         cc::span<array_texture_access const> elements);
     /// Overrides the rendering scope's viewport / scissor for subsequent draws.
@@ -226,8 +231,12 @@ public:
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
     void bind_index_buffer(index_buffer_view const& view);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                       cc::span<array_buffer_access const> elements);
     [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
                                                                        cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                        cc::span<array_texture_access const> elements);
     [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
                                                                         cc::span<array_texture_access const> elements);
     void set_viewport(viewport const& vp);
@@ -289,8 +298,12 @@ public:
     void bind_vertex_buffers(std::initializer_list<vertex_buffer_view> views, int first_slot = 0);
     void bind_vertex_buffer(vertex_buffer_view const& view, int slot = 0);
     void bind_index_buffer(index_buffer_view const& view);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                       cc::span<array_buffer_access const> elements);
     [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
                                                                        cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                        cc::span<array_texture_access const> elements);
     [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
                                                                         cc::span<array_texture_access const> elements);
     void set_viewport(viewport const& vp);

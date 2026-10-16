@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/record/log.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -21,6 +22,24 @@ array_access_declaration command_list::adopt_array_declaration(u32 id, bool rast
     });
     _live_array_declarations.push_back(link);
     return array_access_declaration(cc::move(link));
+}
+
+buffer_array_binding command_list::named_buffer_array(cc::string_view name)
+{
+    CC_ASSERTF(context().holds_array_binding(name, false),
+               "an array declaration names '{}', and no binding group layout this context holds has a buffer array of "
+               "that name. Is it misspelled, or an array of textures?",
+               name);
+    return {.name = name};
+}
+
+texture_array_binding command_list::named_texture_array(cc::string_view name)
+{
+    CC_ASSERTF(context().holds_array_binding(name, true),
+               "an array declaration names '{}', and no binding group layout this context holds has a texture array of "
+               "that name. Is it misspelled, or an array of buffers?",
+               name);
+    return {.name = name};
 }
 
 void command_list::end_array_declaration(impl::array_declaration_link& link)

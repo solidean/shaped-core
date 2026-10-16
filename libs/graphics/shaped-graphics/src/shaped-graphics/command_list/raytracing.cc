@@ -134,17 +134,31 @@ void command_list_raytracing_scope::dispatch_rays(raytracing_shader_table const&
 }
 
 array_access_declaration command_list_raytracing_scope::declare_array_buffer_access(
-    cc::string_view binding_name,
+    buffer_array_binding array,
     cc::span<array_buffer_access const> elements)
 {
     // Ray tracing binds through the compute path (same root signature, same bind point), so the compute seam serves both.
-    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_buffer_access(binding_name, elements), false);
+    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_buffer_access(array.name, elements), false);
+}
+
+array_access_declaration command_list_raytracing_scope::declare_array_buffer_access(
+    cc::string_view binding_name,
+    cc::span<array_buffer_access const> elements)
+{
+    return declare_array_buffer_access(_cmd.named_buffer_array(binding_name), elements);
+}
+
+array_access_declaration command_list_raytracing_scope::declare_array_texture_access(
+    texture_array_binding array,
+    cc::span<array_texture_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_texture_access(array.name, elements), false);
 }
 
 array_access_declaration command_list_raytracing_scope::declare_array_texture_access(
     cc::string_view binding_name,
     cc::span<array_texture_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_texture_access(binding_name, elements), false);
+    return declare_array_texture_access(_cmd.named_texture_array(binding_name), elements);
 }
 } // namespace sg

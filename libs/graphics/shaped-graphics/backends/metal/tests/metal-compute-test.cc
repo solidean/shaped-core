@@ -18,6 +18,10 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+/// The fixtures' buffer array, `inputs`, as an array declaration takes it.
+/// Spelled by hand: these layouts come from create_metal_binding_group_layout, which the by-name lookup does not see.
+constexpr auto k_inputs_array = sg::buffer_array_binding{.name = "inputs"};
+
 constexpr auto k_copy_both = sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst;
 
 /// The reflection, written by hand next to the shader rather than produced by a reflector.
@@ -316,7 +320,7 @@ ASYNC_TEST("sg metal - an array binding's elements are declared one by one")
     auto declares = cc::vector<sg::array_buffer_access>();
     for (auto e = 0; e < k_inputs; ++e)
         declares.push_back({.index = e, .access = sg::access_flag::shader_read});
-    auto const declared = cmd->compute.declare_array_buffer_access("inputs", declares);
+    auto const declared = cmd->compute.declare_array_buffer_access(k_inputs_array, declares);
     cmd->compute.dispatch_groups(k_count, 1, 1);
 
     auto future = cmd->download.bytes_from_buffer(output, 0, output->size_in_bytes());
@@ -401,7 +405,7 @@ TEST("sg metal - a transient group freed after its bind is retained, and its suc
 
     auto cmd = ctx->create_command_list();
     {
-        auto const declared = cmd->compute.declare_array_buffer_access("inputs", declares);
+        auto const declared = cmd->compute.declare_array_buffer_access(k_inputs_array, declares);
         cmd->compute.bind_pipeline(*pipeline.value());
 
         auto first = group_of(true);

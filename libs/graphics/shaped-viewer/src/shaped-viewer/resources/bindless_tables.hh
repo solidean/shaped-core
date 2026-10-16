@@ -39,8 +39,13 @@ namespace sv
 [[nodiscard]] cc::span<sg::binding const> bindless_bindings();
 
 /// The shader-visible binding name of `t` — `bindless.textures_2d` and friends, as the module's reflection names it.
-/// That name is what sg resolves an access declaration's footprint by.
 [[nodiscard]] cc::string_view name_of(bindless_table t);
+
+/// Texture table `t` as an array declaration takes it, the handle the module generates; `t` must not be `buffers`.
+[[nodiscard]] sg::texture_array_binding texture_array_of(bindless_table t);
+
+/// The buffer table as an array declaration takes it.
+[[nodiscard]] sg::buffer_array_binding buffer_array();
 
 /// How many elements table `t` holds, as the module declares it.
 [[nodiscard]] u32 capacity_of(bindless_table t);

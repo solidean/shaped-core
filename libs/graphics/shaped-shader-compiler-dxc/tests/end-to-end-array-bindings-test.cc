@@ -841,7 +841,6 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: a draw resolves o
 
     // A raster declaration ends with its scope, and destroying its value afterwards does nothing.
     // Held past the scope on purpose: still in force, it would meet the next scope's group and assert on the vacant element.
-    // Its own scope draws nothing, so no op shows it an array of its family, and the close ends it silently.
     {
         auto outlived = sg::array_access_declaration();
         cmd->raster.manual.begin_rendering({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
@@ -861,7 +860,6 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: a draw resolves o
 
     // A compute declaration is never met by a draw, however many draws bind its array: meeting this one would assert on
     // its vacant element.
-    // No op of its own bind point ever ran, so it ends silently.
     {
         auto compute = cmd->compute.declare_array_buffer_access("RasterBufs", vacant_access);
         {

@@ -1371,7 +1371,6 @@ void metal_command_list::raster_end_rendering()
     clear_bound_groups();
 
     // The core ended the values' half already; this is the list's.
-    // Last, since one that never met its array asserts here, and the scope must be closed whatever catches that.
     _raster_arrays.end_all();
 }
 

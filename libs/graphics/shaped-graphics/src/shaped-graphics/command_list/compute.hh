@@ -86,11 +86,21 @@ public:
     /// Array element usage cannot be inferred, since a shader may index only some elements, or use them differently.
     /// Every live declaration naming an array applies to it, and an empty `elements` declares it unused.
     /// Elements are resolved against whichever bound group holds the array at each op, and checked the first time they meet that group.
-    /// `binding_name` is the array binding's reflection name, and each `array_buffer_access` names one element and how it is accessed.
+    /// `array` is what the shader package generates for the binding, `<group>::arrays::<member>`.
+    /// Each `array_buffer_access` names one element and how it is accessed.
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                       cc::span<array_buffer_access const> elements);
+
+    /// The by-name form, for a layout no shader package generates: `binding_name` is the array binding's reflection name.
+    /// It must be a buffer array of some binding group layout the context holds, which is asserted here.
     [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
                                                                        cc::span<array_buffer_access const> elements);
 
     /// The texture form: each element also names the layout it must be in.
+    [[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                        cc::span<array_texture_access const> elements);
+
+    /// The texture form by name, which must be a texture array of some layout the context holds.
     [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
                                                                         cc::span<array_texture_access const> elements);
 

@@ -18,7 +18,6 @@ sg::array_access_declaration::~array_access_declaration()
 
 void sg::array_access_declaration::withdraw()
 {
-    // Taken out first, so a withdraw that asserts leaves this value ended rather than half so.
     auto const token = cc::move(_token);
     if (token != nullptr && token->list != nullptr)
         token->list->end_array_declaration(*token);
