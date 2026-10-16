@@ -243,6 +243,11 @@ struct sr::mouse_button_event
 
     bool is_down = false;
 
+    /// How many presses in quick succession this one completes: 1 for a single click, 2 for a double-click, and so on.
+    /// The platform decides what counts as quick and close enough, so a double-click honors the user's system setting.
+    /// A release carries the count of the press it ends.
+    int clicks = 1;
+
     /// Cursor position when the button changed, in pixels relative to the window's client area.
     tg::pos2f cursor_pos;
 };

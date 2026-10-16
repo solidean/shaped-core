@@ -667,6 +667,7 @@ void window_system::poll_events()
                                .payload = mouse_button_event{.button = impl::mouse_button_from_sdl(event.button.button),
                                                              .modifiers = _modifiers,
                                                              .is_down = event.button.down,
+                                                             .clicks = int(event.button.clicks),
                                                              .cursor_pos = impl::pixels_from_logical(
                                                                  event.button.x, event.button.y, density_of(w))}});
             break;

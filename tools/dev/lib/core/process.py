@@ -459,6 +459,7 @@ def run_step(
     started_at = profile.now() # not time.time(): its granularity would let sequential steps overlap
     timed_out = False
     asked = False
+    launch_error: OSError | None = None
     # A mirrored step owns the screen, so the region parks for its duration rather than also holding a row.
     # The handle is opened here and finished at the very end: the summary it collapses to is only known once the child
     # has exited and its result has been assembled, long after the block below has closed.
@@ -468,36 +469,44 @@ def run_step(
     with (ui.suspend() if mirror else contextlib.nullcontext()), \
          open(stdout_path, "w", encoding="utf-8", errors="replace") as out_f, \
          open(stderr_path, "w", encoding="utf-8", errors="replace") as err_f:
-        proc = subprocess.Popen(
-            cmd, cwd=str(cwd), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", errors="replace", bufsize=1,
-        )
-        # Both streams feed the one row, so ninja's stdout edges and the compiler's stderr diagnostics
-        # interleave in the tail the way they actually happened.
-        feed = live.feed
-        threads = [
-            threading.Thread(target=_pump, args=(proc.stdout, out_f, sys.stdout if mirror else None, feed)),
-            threading.Thread(target=_pump, args=(proc.stderr, err_f, sys.stderr if mirror else None, feed)),
-        ]
-        for t in threads:
-            t.start()
         try:
-            proc.wait(timeout=timeout if timeout else None)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            # Ask where it is before killing it — see _request_crash_report.
-            asked = _request_crash_report(proc)
-            if asked:
-                try:
-                    proc.wait(timeout=_CRASH_REPORT_GRACE_S)
-                except subprocess.TimeoutExpired:
-                    pass
-            if proc.poll() is None:
-                proc.kill()
-            proc.wait()
-        for t in threads:
-            t.join()
+            proc = subprocess.Popen(
+                cmd, cwd=str(cwd), env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+            )
+        except OSError as e:
+            # A step that cannot even start, such as a declared but unbuilt binary, is that step failing.
+            # Raising would abort every step after it, and a whole test run would end in a traceback.
+            launch_error = e
+            proc = None
+            err_f.write(f"[dev.py] could not launch {cmd[0]}: {e}\n")
+        if proc is not None:
+            # Both streams feed the one row, so ninja's stdout edges and the compiler's stderr diagnostics
+            # interleave in the tail the way they actually happened.
+            feed = live.feed
+            threads = [
+                threading.Thread(target=_pump, args=(proc.stdout, out_f, sys.stdout if mirror else None, feed)),
+                threading.Thread(target=_pump, args=(proc.stderr, err_f, sys.stderr if mirror else None, feed)),
+            ]
+            for t in threads:
+                t.start()
+            try:
+                proc.wait(timeout=timeout if timeout else None)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                # Ask where it is before killing it — see _request_crash_report.
+                asked = _request_crash_report(proc)
+                if asked:
+                    try:
+                        proc.wait(timeout=_CRASH_REPORT_GRACE_S)
+                    except subprocess.TimeoutExpired:
+                        pass
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait()
+            for t in threads:
+                t.join()
         if timed_out:
             err_f.write(f"\n[dev.py] TIMEOUT: '{name or step_type}' exceeded {timeout:.0f}s, then killed.\n")
             if asked:
@@ -514,7 +523,8 @@ def run_step(
         if pointer:
             ui.write_line(pointer)
 
-    returncode = 124 if timed_out else proc.returncode
+    # 127 is the shell's "command not found", the nearest convention for a step that never started.
+    returncode = 127 if launch_error is not None else 124 if timed_out else proc.returncode
     profile.record(
         name or step_type, type=step_type, start=started_at, end=started_at + duration_s,
         extra={"returncode": returncode, "timed_out": timed_out, "command": cmd},
@@ -532,7 +542,9 @@ def run_step(
     )
 
     label = name or step_type
-    if timed_out:
+    if launch_error is not None:
+        summary = console.red(f"  {label} could not launch: {launch_error.strerror or launch_error}")
+    elif timed_out:
         summary = console.red(f"  {label} TIMED OUT after {timeout:.0f}s (killed) in {duration_s * 1000:.0f} ms")
     else:
         extra = ""

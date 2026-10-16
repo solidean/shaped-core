@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pyyaml>=6"]
 # ///
 
 """shaped-core's build & test entry point: project policy plus CLI wiring.
@@ -42,6 +42,7 @@ from tools.dev.cmd import (  # noqa: E402
     format,
     info,
     install,
+    issues,
     lint,
     list_presets,
     list_targets,
@@ -49,6 +50,7 @@ from tools.dev.cmd import (  # noqa: E402
     pgo,
     profiling,
     run,
+    submodules,
     symbolize,
     test,
     test_web,
@@ -67,6 +69,7 @@ COMMANDS = [
     format,
     lint,
     check,
+    issues,
     coverage,
     pgo,
     compile_time,
@@ -78,6 +81,7 @@ COMMANDS = [
     profiling,
     deps,
     install,
+    submodules,
     doctor,
     list_presets,
     list_targets,
