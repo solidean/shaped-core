@@ -28,6 +28,15 @@ constexpr auto depth_format = sg::pixel_format::depth32_float;
 /// The seed of a surface pipeline's key, which hashes the permutation's key and the bindless layout it was built against.
 constexpr u64 surface_key_seed = 0x5a5f3c;
 
+/// A group binds only at a pipeline built against its very layout object, so the manager's layout is part of the key.
+[[nodiscard]] cc::hash128 surface_key_of(sv::material_permutation const& p, sv::bound_resources const& bindless)
+{
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_pod(p.key);
+    b.add_pod(bindless.layout().get());
+    return cc::hash128::create(b.written_bytes(), surface_key_seed);
+}
+
 /// `raster.targets` as a pipeline states it: each target in the format its slot is allocated in.
 [[nodiscard]] raster::targets::states target_states()
 {
@@ -150,12 +159,7 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
                                                                 material_permutation const* p,
                                                                 bound_resources const& bindless)
 {
-    // A group binds only at a pipeline built against its very layout object, so the manager's layout is part of the key.
-    auto& b = cc::byte_stream_builder::thread_local_scratch();
-    b.add_pod(p->key);
-    b.add_pod(bindless.layout().get());
-    auto const key = cc::hash128::create(b.written_bytes(), surface_key_seed);
-    auto& s = _surfaces.entry(key).get_or_emplace(surface_pipeline{});
+    auto& s = _surfaces.entry(surface_key_of(*p, bindless)).get_or_emplace(surface_pipeline{});
     if (s.pipeline != nullptr)
         return s.pipeline;
     if (s.failed)
@@ -262,7 +266,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         if (pipeline == nullptr)
         {
             // _surface_pipeline_of made the entry, so it is there to ask whether the compile settled.
-            pending = pending || !self->_surfaces.get_ptr(p->key)->failed;
+            pending = pending || !self->_surfaces.get_ptr(surface_key_of(*p, *d.bindless))->failed;
             pipeline = fallback;
             p = d.fallback;
             substituted = true;

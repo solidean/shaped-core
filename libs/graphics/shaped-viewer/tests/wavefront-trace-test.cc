@@ -729,6 +729,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - an image past one row of groups is
 
     constexpr auto size = tg::vec2i(4096, 1040);
     static_assert(isize(size[0]) * isize(size[1]) > isize(65535) * 64, "the image needs a second row of groups");
+    // 68 MB of rgba32_float is past the inline readback ring, which sg reports once.
+    nx::expect_warning("an inline readback of * did not fit the *-byte readback ring*", nx::exactly(1));
 
     auto positions = cc::vector<tg::pos3f>();
     for (auto const p : {tg::pos3f(-40, -40, 0), tg::pos3f(40, -40, 0), tg::pos3f(40, 40, 0), tg::pos3f(-40, -40, 0),
