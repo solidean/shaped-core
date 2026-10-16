@@ -3,6 +3,8 @@
 #include <clean-core/common/utility.hh> // cc::min, cc::max
 #include <shaped-viewer/impl/content_hash.hh>
 
+using namespace cc::primitive_defines;
+
 namespace
 {
 tg::aabb3f united(tg::aabb3f const& a, tg::aabb3f const& b)
@@ -48,6 +50,26 @@ void sv::quadric_set::add_capsule(tg::segment3f const& s, float radius)
 {
     for (auto const& p : capsule_primitives(s, radius))
         add(p);
+}
+
+isize sv::quadric_set::add_vertices(cc::span<tg::pos3f const> points, vertex_style const& style)
+{
+    for (auto const& p : points)
+        add_sphere(tg::sphere3f(p, style.radius));
+    return points.size();
+}
+
+isize sv::quadric_set::add_edges(cc::span<tg::segment3f const> edges,
+                                 cc::span<tg::pos3f const> vertices,
+                                 edge_style const& style)
+{
+    auto const before = primitive_count();
+    auto const joined = style.vertices && !vertices.empty();
+    for (auto const& e : edges)
+        add_line(e, {.radius = style.radius, .ends = joined ? line_ends::open : style.ends});
+    if (joined)
+        add_vertices(vertices, {.radius = style.joint_radius()});
+    return primitive_count() - before;
 }
 
 void sv::quadric_set::clear()

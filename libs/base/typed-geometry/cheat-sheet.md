@@ -344,7 +344,8 @@ seg.length();  tri.area();  tri.perimeter();  box.volume();   // by intrinsic di
 aabb3.area();  sphere3.area();          // a 3D SOLID's area() is its surface; a boundary answers only its own measure
                                         //   (sphere3f_surface has area(), no volume(); aabb2_boundary has length())
 o.centroid();  o.bounds();              // pos; aabb<D,T>
-o.vertices();  o.edges();               // cc::fixed_array — polytopes; vertices() also on segment and box, which have no edges()
+o.vertices();  o.edges();               // cc::fixed_array — polytopes, box and frustum too; segment has vertices() and no edges()
+o.faces();                               // aabb3 / box3 / frustum: 6 quads, wound counterclockwise from outside; tetrahedron: 4 triangles
 tri.normal();  tri.plane();             // 3D, unit, counter-clockwise; also box2in3.normal(), disk3.plane()
 o.any_point();                          // a point of the set (for a surface ON it, not the center)
 seg.unbounded();  ray.unbounded();      // the line through it
