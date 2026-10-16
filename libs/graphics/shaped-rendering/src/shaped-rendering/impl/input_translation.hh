@@ -32,4 +32,12 @@ namespace sr::impl
 /// SDL reports the raw direction plus a flag rather than pre-correcting it, so forgetting this inverts scrolling
 /// for every user who has natural scrolling on.
 [[nodiscard]] float wheel_amount(float raw, SDL_MouseWheelDirection direction);
+
+/// SDL's pixel density with its failure value replaced: SDL_GetWindowPixelDensity returns 0 on error, and a 0 here would collapse every position onto the origin.
+[[nodiscard]] float pixel_density_from_sdl(float density);
+
+/// An SDL event coordinate, which is in logical units, in the pixels sr reports input in.
+/// `density` is the window's pixels per logical unit, so a Retina window's (10, 20) is (20, 40).
+[[nodiscard]] tg::pos2f pixels_from_logical(float x, float y, float density);
+[[nodiscard]] tg::vec2f pixels_from_logical_delta(float dx, float dy, float density);
 } // namespace sr::impl

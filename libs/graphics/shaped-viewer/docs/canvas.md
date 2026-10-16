@@ -26,7 +26,7 @@ They differ in where they are added and in what depth means.
 
 - **2D instances go on the canvas layer**, `view_ref::add_canvas`, in the view's logical pixels: y down, from the top-left or from any corner.
   Nothing occludes them, and later ones draw over earlier ones.
-  A logical pixel is the window's content scale in texture pixels, so text keeps its physical size on a high-DPI display.
+  A logical pixel is the window's `display_scale` in texture pixels, so text keeps its physical size on a high-DPI display.
 - **3D instances go on a scene**, `scene_ref::add_drawing`, in world units, seen through the view's camera.
   They are drawn after the trace, so traced geometry in front of them hides them, and they hide nothing traced: no shadow, not in a reflection.
   The trace writes its primary-hit depth for a layer that holds drawings, a fill pass turns it into a depth target, and the layer's drawings draw tested against it in a pass of their own.

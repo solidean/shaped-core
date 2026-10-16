@@ -29,7 +29,7 @@ This is where the graphics family meets the operating system.
 
 ```text
 sr::window_system      [done]  platform init + the event pump; creates windows; main-thread bound, one per process
-sr::window             [done]  one OS window: native handle, pixel size, minimized state, latched close request
+sr::window             [done]  one OS window: native handle, pixel and logical size, minimized state, latched close request
 multiple windows       [done]  per-window state and id-keyed dispatch; wsys->windows() enumerates them
 sr::input_event        [done]  keyboard (physical + character), text/IME, mouse move/button/wheel, relative mode
                                one globally-ordered stream per frame, drained through wsys->events()
@@ -39,7 +39,7 @@ window position       [done]  position()/set_position(); write-through, so a get
 window focus          [done]  is_focused() as of the last poll, focus() to ask for it
 borderless / topmost  [done]  window_description: has_decoration, is_always_on_top, has_taskbar_icon, is_focusable
 fullscreen            [planned]
-HiDPI                  [planned]  SDL_WINDOW_HIGH_PIXEL_DENSITY once a per-monitor-DPI UI needs it
+HiDPI                 [done]  high-density windows: pixel width()/height() and input, logical sizes and desktop coords
 gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see TODO
 ```
 

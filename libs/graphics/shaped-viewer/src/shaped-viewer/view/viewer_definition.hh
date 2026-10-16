@@ -18,7 +18,7 @@ struct sv::viewer_definition
     layout_tree nodes;
     view_index root_view = view_index(0);
 
-    /// Texture pixels per logical pixel, which a canvas's 2D instances are placed in: the window's content scale.
+    /// Texture pixels per logical pixel, which a canvas's 2D instances are placed in: the window's display_scale.
     /// 1 for a headless frame, which has no window to ask.
     f32 content_scale = 1.0f;
 

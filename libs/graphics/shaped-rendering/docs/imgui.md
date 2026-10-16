@@ -51,7 +51,7 @@ auto imgui = sr::imgui_context::create();
 // Per frame:
 wsys->poll_events();
 imgui.process_events(*wsys);          // feed this frame's input
-imgui.begin_frame(*win, dt);          // size from the window; hands it imgui's text-input intent
+imgui.begin_frame(*win, dt);          // logical size + pixel density from the window; hands it imgui's text-input intent
 ImGui::ShowDemoWindow();
 imgui.end_frame();
 
@@ -216,6 +216,15 @@ Three things are worth knowing:
   A *button* event does send its position, because there the trickle is the point: the click lands at the position it happened at.
 
 Ask `wants_keyboard()` / `wants_mouse()` before acting on the same input yourself, or a camera will spin while the user drags a slider.
+
+## High-density displays
+
+imgui works in the window's logical units, the way Dear ImGui's own SDL and macOS backends do.
+`begin_frame(window&, dt)` sets `DisplaySize` to `window::logical_size()` and `DisplayFramebufferScale` to `window::pixel_density()`.
+`process_event` divides mouse positions, which `sr` reports in pixels, by that density.
+imgui rasterizes its fonts at the framebuffer scale, so text on a Retina display is drawn from 2x glyphs rather than magnified ones.
+The routine scales scissor rects by `ImDrawData::FramebufferScale`, so nothing else changes in the drawing.
+A viewport window reports its own density through `Platform_GetWindowFramebufferScale`, which is what keeps a viewport dragged onto a display of another density crisp.
 
 ## Cursors and the clipboard
 
