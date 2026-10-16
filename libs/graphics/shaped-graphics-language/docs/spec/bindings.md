@@ -427,8 +427,15 @@ Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, si
 The host holds a buffer of atomics as the plain integers it is.
 Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
 
-**`compare_exchange(expected, desired)` stores `desired` where the atomic holds `expected`, and gives the value before.**
-It is strong: it stored exactly where what it gives is `expected`, so that one comparison is the whole answer.
+**A compare-exchange stores `desired` where the atomic holds `expected`, and comes in two forms, each named for what it promises.**
+
+* **`compare_exchange_strong(expected, desired)`** gives the value before, and never fails spuriously.
+  It stored exactly where what it gives is `expected`, so that one comparison is the whole answer.
+* **`compare_exchange_weak(expected, desired)`** gives an `exchange_result[T]`: `old`, the value it read, and `exchanged`, whether it stored.
+  It may fail although `old` is `expected`, so only `exchanged` says it stored, and `old == expected` alone never does.
+  One weak failure never means the atomic is taken: it is retried for as long as `old` is `expected` and nothing was stored.
+
+A slot claim is a strong one, and a weak one stands in its retry loop:
 
 ```sgl
 binding table:
@@ -437,14 +444,43 @@ binding table:
 fun insert(key: uint){table} -> uint:
     let mut i = key & 1023u
     for _ in 0 ..< 1024:
-        let before = table.slots[i].compare_exchange(0u, key)
+        let before = table.slots[i].compare_exchange_strong(0u, key)
         if before == 0u or before == key => return i     // claimed, or found
+        i = (i + 1u) & 1023u
+    return 1024u
+
+fun insert_weak(key: uint){table} -> uint:
+    let mut i = key & 1023u
+    for _ in 0 ..< 1024:
+        let mut r = table.slots[i].compare_exchange_weak(0u, key)
+        while r.old == 0u and not r.exchanged:          // a spurious failure: try again
+            r = table.slots[i].compare_exchange_weak(0u, key)
+        if r.exchanged or r.old == key => return i
         i = (i + 1u) & 1023u
     return 1024u
 ```
 
-WGSL's and MSL's own compare-exchange is weak, and may fail although the value matched.
-So there it is a loop that retries exactly such a failure, which HLSL's strong one never has ([EMIT-157](semantics/emitting.md#types)).
+What each target does with them ([EMIT-157](semantics/emitting.md#types), [EMIT-158](semantics/emitting.md#types)):
+
+* HLSL's `InterlockedCompareExchange` is strong, so both forms are it, and the weak one never fails spuriously there.
+* WGSL's `atomicCompareExchangeWeak` is weak, and so is MSL's `atomic_compare_exchange_weak_explicit` by its name.
+  The strong form is a loop the compiler writes around it, which retries only a failure that read `expected`.
+  It costs a branch, and almost always runs once; it is lock-free rather than wait-free, since a device may in principle fail it spuriously again.
+  It never waits for another invocation, so lanes of one SIMD group that leave it at different iterations cannot deadlock it.
+
+Its caveats are the other atomics' and a few of its own:
+
+* Both are relaxed, as every atomic is: neither orders any other memory.
+  A thread that claims a slot and then writes data for it publishes that data to others only through a barrier, or `@coherent` memory and a barrier.
+* A helper invocation of a pixel stage, one that runs for derivatives or after a `discard`, stores nothing, and what its atomics read is undefined.
+  So a helper's `old` and `exchanged` mean nothing; the strong form's loop skips a helper in MSL and gives up after 64 attempts in WGSL, so none hangs.
+* The result of either is non-uniform (CHK-283): an index taken from it into a binding array is `nonuniform`, and a barrier under a branch on it is refused.
+  The strong form's loop is the target's, and leaves the control flow as uniform as it found it, so a barrier after the call is fine.
+* A test runs one invocation, which no other ever races ([EVAL-98](semantics/evaluation.md#errors-of-the-program)).
+  It fails a weak compare-exchange spuriously the first time each call meets `expected`.
+  So a weak one without its retry loop fails its test, as it may on a GPU.
+* A spin lock built from either, where one invocation waits for another to release it, may hang a GPU whose SIMD group cannot run both sides; SGL does not detect one.
+* Like every atomic, both are `@stages(.pixel, .compute)`.
 
 **An image's texels are atomics where its member says so.**
 `@atomic` on a `mut` image of the format `r32_uint` or `r32_sint` makes each texel an atomic, which a subscript reaches and the methods above update ([CHK-372](semantics/checking.md#atomics)):

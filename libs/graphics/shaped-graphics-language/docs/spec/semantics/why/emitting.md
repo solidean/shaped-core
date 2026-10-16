@@ -232,16 +232,32 @@ A memory form on every target, rather than only where a target's own rule disagr
 
 ## EMIT-157
 
-WGSL and MSL offer only a weak compare-exchange, so SGL had to pick between exposing that and building the strong one on it.
-The weak one needs a result that says whether it stored, since a spurious failure reads the expected value and stores nothing.
-That result is a struct in WGSL whose type no program can name, so a `let` with its type written out, which is how the WGSL text declares every local, could not hold it.
-The strong one gives a plain value, and the one comparison `before == expected` says whether it stored, on every target.
-Most uses want the strong one anyway: a claim of a hash table's slot that failed spuriously would move on and leave an empty slot behind.
+WGSL and MSL name only a weak compare-exchange, so SGL offers the weak one as it is and builds the strong one on it.
+Both are named for what they promise, so no call reads as one while meaning the other.
+The weak one has to say whether it stored, since a spurious failure reads the expected value and stores nothing.
+WGSL's own result is a struct no program can name, and the WGSL text writes every local's type, so `exchange_result[T]` is SGL's own and every target fills it.
+HLSL's `InterlockedCompareExchange` is strong, and DXC writes SPIR-V's `OpAtomicCompareExchange`, which is strong too; strong satisfies weak, so HLSL needs nothing more.
+SPIR-V's own `OpAtomicCompareExchangeWeak` is deprecated, and "has the same semantics as `OpAtomicCompareExchange`".
+WGSL says "the `exchanged` member of the result structure may be `false` even if the `old_value` member equals `cmp`" (§ 17.8.5).
+MSL describes its `atomic_compare_exchange_weak_explicit` by the strong effect alone (§ 6.16.4.4), but its name and C++ allow the spurious failure, so SGL assumes it.
 
-The loop retries only a failure that read `expected`, so a real conflict, which read anything else, ends it at once.
-A spurious failure is transient, which is all a weak compare-exchange promises, and C++ builds its strong compare-exchange from the weak one the same way.
-In WGSL the loop is left by a `break` alone, so the control flow after it is as uniform as before it, and a barrier after a compare-exchange stays legal.
-HLSL's `InterlockedCompareExchange` is strong already, so it needs no loop.
+The strong loop retries only a failure that read `expected`, so a real conflict, which read anything else, ends it at once.
+No invocation ever waits there for another to do something, which is what deadlocks a spin lock in a SIMD group whose lanes cannot progress apart.
+Each lane runs its own attempts and leaves when its own attempt says so, so lanes leaving at different iterations only reconverge after it.
+It is lock-free rather than wait-free: a device may in principle fail a lane spuriously again and again, and no spec bounds it.
+Tint and Naga write WGSL's weak one as the strong instruction on D3D and Vulkan, so only Metal could fail it spuriously, and its spec describes no such failure.
+So the loop almost always runs once.
+In WGSL a `break` is its only exit, so its behavior is {Next}, and the control flow after it is the control flow before it (§ 15.2.6), which keeps a barrier after the call legal.
+MSL and HLSL have no static uniformity rule, and every thread leaves the loop, so a barrier after it is reached by all.
 
-The test interpreter runs one invocation, so nothing fails its compare-exchange spuriously, and the strong result is exactly what it computes.
-With a weak one exposed, the interpreter would have had to pick whether a test ever saw a spurious failure, and a test could not pin the shader's behaviour either way.
+## EMIT-158
+
+A helper invocation of a pixel stage runs for derivatives, or goes on after a `discard`, and its atomics store nothing.
+What they read is no value at all: Vulkan says "values returned by atomic instructions in helper invocations are undefined", and WGSL that they "return indeterminate results" (§ 15.4).
+D3D's helper pixels read 0 from an atomic that returns a value, and a pixel after its `discard` reads an undefined one (D3D11.3 functional spec, § 16.10 and § 16.13).
+MSL says helper threads' "stores and atomic operations [...] have no effect on the underlying memory" (§ 6.11.1), and nothing about what they read.
+So in a helper the strong loop's test, a failure that read `expected`, may hold forever, and a loop that never ends hangs the GPU.
+MSL tells a helper by `simd_is_helper_thread()`, so the loop skips one, and gives `expected`, as meaningless as any value a helper reads.
+WGSL has no such test, so the loop is bounded; 64 attempts that each read `expected` and stored nothing happen only to a helper, or to a device no target knows of.
+HLSL's strong compare-exchange is one instruction, so it needs neither; SM 6.6's `IsHelperLane` would be the test if it ever did.
+A compute stage has no helpers, so its loop stays unbounded and never gives up early.

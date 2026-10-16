@@ -58,62 +58,68 @@ ASYNC_INVOCABLE_TEST("sg - SGL's workgroup memory, barriers and atomics agree ac
         CHECK(got_bins[b] == count / 4);
 }
 
-ASYNC_INVOCABLE_TEST("sg - SGL's compare-exchange claims each slot of a hash table once, under every thread at once",
+ASYNC_INVOCABLE_TEST("sg - SGL's strong and weak compare-exchange each claim every slot of a hash table once, under "
+                     "every thread at once",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await shaders::sync.insert.acquire_pipeline(*ctx);
+    // `insert` takes the strong one, and `insert_weak` the weak one in its retry loop: the same table either way
+    auto const strong = co_await shaders::sync.insert.acquire_pipeline(*ctx);
+    auto const weak = co_await shaders::sync.insert_weak.acquire_pipeline(*ctx);
     auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::table>();
-
-    constexpr auto slot_count = 1024;
-    constexpr auto count = 4 * slot_count;
-    constexpr auto groups = count / 64;
-    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
-    auto const slots = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(slot_count), usage);
-    auto const found_at = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count), usage);
-    auto const winners = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_defaulted(groups), usage);
-
-    auto cmd = ctx->create_command_list();
-    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
-                                                           shaders::table{.slots = slots.as_readwrite_buffer(),
-                                                                          .found_at = found_at.as_readwrite_buffer(),
-                                                                          .winners = winners.as_readwrite_buffer()});
-    cmd->compute.bind_pipeline(*pipeline);
-    cmd->compute.bind_group(0, *group);
-    cmd->compute.dispatch_threads(count);
-    auto const slots_back = cmd->download.data_from_buffer(slots);
-    auto const found_back = cmd->download.data_from_buffer(found_at);
-    auto const winners_back = cmd->download.data_from_buffer(winners);
-    ctx->submit_command_list(cc::move(cmd));
-
-    // 1024 keys fill 1024 slots, so every key stands exactly once, and every thread found the slot that holds its key
-    auto const got_slots = co_await slots_back.data();
-    REQUIRE(got_slots.size() == isize(slot_count));
-    auto seen = cc::vector<i32>::create_defaulted(slot_count + 1);
-    for (auto const key : got_slots)
+    for (auto const is_weak : {false, true})
     {
-        REQUIRE(key >= 1u);
-        REQUIRE(key <= u32(slot_count));
-        ++seen[key];
-    }
-    for (auto key = 1; key <= slot_count; ++key)
-        CHECK(seen[key] == 1).context(cc::format("key {}", key));
-    auto const got_found = co_await found_back.data();
-    REQUIRE(got_found.size() == isize(count));
-    for (auto i = 0; i < count; ++i)
-    {
-        REQUIRE(got_found[i] < u32(slot_count));
-        CHECK(got_slots[got_found[i]] == u32(i % slot_count + 1)).context(cc::format("thread {}", i));
-    }
+        auto const* const kind = is_weak ? "weak" : "strong";
+        constexpr auto slot_count = 1024;
+        constexpr auto count = 4 * slot_count;
+        constexpr auto groups = count / 64;
+        auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+        auto const slots = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(slot_count), usage);
+        auto const found_at = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count), usage);
+        auto const winners = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_defaulted(groups), usage);
 
-    // of the 64 threads of a workgroup that race to replace -1, exactly one wins
-    auto const got_winners = co_await winners_back.data();
-    REQUIRE(got_winners.size() == isize(groups));
-    for (auto g = 0; g < groups; ++g)
-        CHECK(got_winners[g] == 1).context(cc::format("workgroup {}", g));
+        auto cmd = ctx->create_command_list();
+        auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                               shaders::table{.slots = slots.as_readwrite_buffer(),
+                                                                              .found_at = found_at.as_readwrite_buffer(),
+                                                                              .winners = winners.as_readwrite_buffer()});
+        cmd->compute.bind_pipeline(is_weak ? *weak : *strong);
+        cmd->compute.bind_group(0, *group);
+        cmd->compute.dispatch_threads(count);
+        auto const slots_back = cmd->download.data_from_buffer(slots);
+        auto const found_back = cmd->download.data_from_buffer(found_at);
+        auto const winners_back = cmd->download.data_from_buffer(winners);
+        ctx->submit_command_list(cc::move(cmd));
+
+        // 1024 keys fill 1024 slots, so every key stands exactly once, and every thread found the slot that holds its key
+        auto const got_slots = co_await slots_back.data();
+        REQUIRE(got_slots.size() == isize(slot_count));
+        auto seen = cc::vector<i32>::create_defaulted(slot_count + 1);
+        for (auto const key : got_slots)
+        {
+            REQUIRE(key >= 1u);
+            REQUIRE(key <= u32(slot_count));
+            ++seen[key];
+        }
+        for (auto key = 1; key <= slot_count; ++key)
+            CHECK(seen[key] == 1).context(cc::format("{}: key {}", kind, key));
+        auto const got_found = co_await found_back.data();
+        REQUIRE(got_found.size() == isize(count));
+        for (auto i = 0; i < count; ++i)
+        {
+            REQUIRE(got_found[i] < u32(slot_count));
+            CHECK(got_slots[got_found[i]] == u32(i % slot_count + 1)).context(cc::format("{}: thread {}", kind, i));
+        }
+
+        // of the 64 threads of a workgroup that race to replace -1, exactly one wins
+        auto const got_winners = co_await winners_back.data();
+        REQUIRE(got_winners.size() == isize(groups));
+        for (auto g = 0; g < groups; ++g)
+            CHECK(got_winners[g] == 1).context(cc::format("{}: workgroup {}", kind, g));
+    }
 }
 
 ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per element and indexed per thread",

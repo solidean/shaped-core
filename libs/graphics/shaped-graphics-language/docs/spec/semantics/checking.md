@@ -967,7 +967,7 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
   So one ray that every invocation traces and decides alike hits the same instance in each of them, and any other hit is non-uniform.
   A `mut` buffer or image is so whether it is named directly or as an element of a binding array.
   Every read of workgroup memory is non-uniform, whatever was stored to it, but one through `workgroup_uniform_load` (CHK-374).
-  So is the result of every atomic and of every subgroup operation (CHK-377).
+  So is the result of every atomic and of every subgroup operation (CHK-377), a compare-exchange's `old` and `exchanged` included.
   Every other value is uniform: a literal, a `const`, a member of a constant block, and an element of a read-only buffer at a uniform index.
 * **CHK-284** Control flow is non-uniform inside an `if`, a `case` or a loop whose condition is non-uniform, and the right side of an `and` or an `or` whose left side is.
   It stays so after an `if` or a `case` one of whose sides leaves in non-uniform control flow, and for the rest of the entry point after such a `return`.

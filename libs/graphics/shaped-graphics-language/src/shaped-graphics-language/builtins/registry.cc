@@ -122,6 +122,11 @@ void registry::add_comment(cc::string_view text)
     items.push_back({.kind = registry_item::kind_t::comment, .comment = text});
 }
 
+void registry::add_declaration(cc::string_view text)
+{
+    items.push_back({.kind = registry_item::kind_t::declaration, .comment = text});
+}
+
 cc::string registry::prelude_text() const
 {
     auto out = cc::string(k_header);
@@ -138,6 +143,9 @@ cc::string registry::prelude_text() const
         case registry_item::kind_t::comment:
             out.appendf("\n{}\n", item.comment);
             break;
+        case registry_item::kind_t::declaration:
+            out.appendf("\n{}\n", item.comment);
+            break;
         case registry_item::kind_t::type:
             // a struct with a block needs the empty line, and one without reads better with it
             if (previous != registry_item::kind_t::comment)
@@ -146,7 +154,7 @@ cc::string registry::prelude_text() const
             out.appendf("@shadowable(false)\n@builtin {}\n", types[item.index].declaration);
             break;
         case registry_item::kind_t::function:
-            if (previous == registry_item::kind_t::type)
+            if (previous == registry_item::kind_t::type || previous == registry_item::kind_t::declaration)
                 out += "\n";
             doc(functions[item.index].doc);
             out.appendf("@builtin {}\n", functions[item.index].signature);
@@ -203,8 +211,8 @@ void registry::finalize()
             record.named_only.push_back(p.is_named_only ? cc::string(file.text_of(p.name)) : cc::string());
         }
         record.result = find_type(type_name_at(file, ast, f->return_type));
-        CC_ASSERT(is_valid(record.result) || !ast::is_valid(f->return_type), "a builtin signature whose result is no "
-                                                                             "registered type");
+        CC_ASSERT(is_valid(record.result) || !ast::is_valid(f->return_type) || record.gives_prelude_struct,
+                  "a builtin signature whose result is no registered type");
         CC_ASSERT(record.evaluate != nullptr, "a builtin function without an evaluator");
         CC_ASSERT(record.write.kind != spelling_kind::custom || record.write.custom != nullptr, "a custom spelling "
                                                                                                 "without a writer");

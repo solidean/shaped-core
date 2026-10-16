@@ -96,6 +96,14 @@ struct machine
     cc::vector<workgroup_cell> workgroup;
     /// Parallel to `out.buffers`: whether the run stored to that buffer, which is what the outcome keeps.
     cc::vector<bool> is_stored;
+    /// Each weak compare-exchange of the source that met `expected` so far, and whether that last attempt failed.
+    /// One of the source is one wherever it was inlined (EVAL-98).
+    struct weak_exchange
+    {
+        origin from;
+        bool failed = false;
+    };
+    cc::vector<weak_exchange> weak_exchanges;
     /// The value a `leave` or a `return` under way carries.
     value carried;
     int depth = 0;
@@ -236,7 +244,7 @@ struct machine
             in.push_back_range(v.leaves);
         }
 
-        auto const is_store = !is_valid(record.result);
+        auto const is_store = !is_valid(record.result) && !record.gives_prelude_struct;
         if (where.cell >= 0)
         {
             auto const& cell = workgroup[where.cell];
@@ -254,6 +262,21 @@ struct machine
         record.evaluate(in, after);
         if (after.size() != 1)
             return type_error(cc::format("an atomic '{}' whose evaluator gave no one value", record.name));
+        // EVAL-98: a weak compare-exchange that meets `expected` fails every other time, starting with the first
+        auto is_spurious = false;
+        if (record.gives_prelude_struct && in.size() == 3 && in[0].bits == in[1].bits && limits.fails_weak_exchanges)
+        {
+            auto* site = static_cast<weak_exchange*>(nullptr);
+            for (auto& w : weak_exchanges)
+                if (w.from == x.from)
+                    site = &w;
+            if (site == nullptr)
+                site = &weak_exchanges.emplace_back(weak_exchange{.from = x.from});
+            is_spurious = !site->failed;
+            site->failed = is_spurious;
+            if (is_spurious)
+                after[0] = in[0];
+        }
         if (where.cell >= 0)
         {
             workgroup[where.cell].memory.leaves[offset] = after[0];
@@ -269,6 +292,8 @@ struct machine
         result.leaves.clear();
         if (!is_store)
             result.leaves.push_back(in[0]);
+        if (record.gives_prelude_struct)
+            result.leaves.push_back({.kind = value_kind::boolean, .bits = in[0].bits == in[1].bits && !is_spurious});
         out.trace.push_back(result);
         return {};
     }
@@ -370,7 +395,8 @@ struct machine
         if (is_typed)
             record->evaluate(in, result.leaves);
 
-        auto is_result_typed = is_valid(record->result) || result.leaves.empty();
+        // a prelude struct's leaves are typed by its fields, which `leaf_count_of` below counts
+        auto is_result_typed = is_valid(record->result) || result.leaves.empty() || record->gives_prelude_struct;
         if (is_valid(record->result))
         {
             auto const& returned = m.builtins->at(record->result);

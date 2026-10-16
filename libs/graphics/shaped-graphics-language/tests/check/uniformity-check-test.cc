@@ -172,6 +172,67 @@ TEST("sgl check - workgroup memory and an atomic's result differ between threads
     CHECK(reports_for(shared("    if work.enabled or synced() => work.output[0] = 1\n") + synced) == "");
 }
 
+TEST("sgl check - a compare-exchange's result differs between threads, and its loop leaves the flow as it found it")
+{
+    // what either form read, and whether the weak one stored, is another thread's business as much as this one's
+    CHECK(reports_for(shared("    if shared.hits.compare_exchange_strong(0, id.x) == 0 => workgroup_barrier()\n"))
+              .contains(kind));
+    CHECK(reports_for(shared("    let r = shared.hits.compare_exchange_weak(0, id.x)\n"
+                             "    if r.exchanged => workgroup_barrier()\n"))
+              .contains(kind));
+    CHECK(reports_for(shared("    let mut r = shared.hits.compare_exchange_weak(0, id.x)\n"
+                             "    while r.old == 0 and not r.exchanged:\n"
+                             "        r = shared.hits.compare_exchange_weak(0, id.x)\n"
+                             "        workgroup_barrier()\n"))
+              .contains(kind));
+
+    // the strong one's loop is the target's, inside the call, and every thread leaves it: a barrier after it holds
+    CHECK(reports_for(shared("    let before = shared.hits.compare_exchange_strong(0, id.x)\n"
+                             "    workgroup_barrier()\n"
+                             "    work.output[id.x] = before\n"))
+          == "");
+}
+
+TEST("sgl check - an index read from a compare-exchange is marked nonuniform")
+{
+    constexpr auto source = "require binding_arrays\n"
+                            "\n"
+                            "binding work:\n"
+                            "    claims: mut buffer[atomic[int]]\n"
+                            "    sources: buffer[int][4]\n"
+                            "    output: mut buffer[int]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){{work}}:\n"
+                            "    let k = work.claims[0].{} & 3\n"
+                            "    work.output[id.x] = work.sources[{}k][0]\n";
+    for (auto const call : {"compare_exchange_strong(0, id.x)", "compare_exchange_weak(0, id.x).old"})
+    {
+        CHECK(reports_for(cc::format(source, call, "")).contains("non-uniform-index")).context(call);
+        CHECK(reports_for(cc::format(source, call, "nonuniform ")) == "").context(call);
+    }
+}
+
+TEST("sgl check - a pixel stage samples with derivatives after a strong compare-exchange")
+{
+    // its loop leaves every pixel of the quad where it found it, and only helpers skip it (EMIT-158)
+    CHECK(reports_for("binding material:\n"
+                      "    @sampler(smp) albedo: texture_2d[float4]\n"
+                      "    smp: sampler\n"
+                      "    claims: mut buffer[atomic[uint]]\n"
+                      "\n"
+                      "struct pixel_input:\n"
+                      "    @position position: hpos4\n"
+                      "    uv: float2\n"
+                      "\n"
+                      "@pixel struct target:\n"
+                      "    color: float4\n"
+                      "\n"
+                      "@pixel fun ps(p: pixel_input){material} -> target:\n"
+                      "    let before = material.claims[p.position.x as int].compare_exchange_strong(0u, 1u)\n"
+                      "    return {color = material.albedo.sample(p.uv) * (before as float)}\n")
+          == "");
+}
+
 TEST("sgl check - a `while` condition is tested again by the invocations a divergent break left behind")
 {
     // the first test runs in every pixel, the second only in those that did not break

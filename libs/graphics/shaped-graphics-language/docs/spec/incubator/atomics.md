@@ -17,9 +17,9 @@ Each thing below is what one target or another lacks, so each comes back behind 
 | a vertex stage's atomics and stores | WebGPU; vulkan needs `vertexPipelineStoresAndAtomics` | `vertex_stores`, lifting `@stages(.pixel, .compute)` from the builtins |
 | orderings stronger than relaxed | WGSL, which has relaxed alone | acquire and release as named arguments, once a shader needs orderings rather than the coherence `@coherent` gives |
 
-The compare-exchange has left the incubator: it is strong on every target, a loop over the weak one in WGSL and MSL ([EMIT-157](../semantics/emitting.md#types)).
+The compare-exchange has left the incubator, as a strong and a weak form ([bindings.md](../bindings.md#atomics), [EMIT-157](../semantics/emitting.md#types)).
 
 ## Open
 
-* Whether a weak compare-exchange is worth its own builtin beside the strong one, for a loop that retries anyway and would save the inner one.
+* Whether a ray-tracing stage takes atomics, which every target would allow, beside the pixel and compute stages.
 * Whether HLSL's `Interlocked*` without an out value, for an update whose result is dropped, is worth a writer of its own.

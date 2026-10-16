@@ -139,8 +139,8 @@ TEST("sgl emit - an atomic image's compare-exchange is HLSL's own, and a loop ov
                             "    @atomic offsets: mut image_2d_array[.r32_sint]\n"
                             "\n"
                             "@compute(8, 8) fun claim(@thread_id id: int3){set}:\n"
-                            "    let a = set.depth[id.xy].compare_exchange(0u, 7u)\n"
-                            "    let b = set.offsets[id.xy, layer = 2].compare_exchange(0, id.x)\n"
+                            "    let a = set.depth[id.xy].compare_exchange_strong(0u, 7u)\n"
+                            "    let b = set.offsets[id.xy, layer = 2].compare_exchange_strong(0, id.x)\n"
                             "    set.depth[id.xy].store(a + (b as uint))\n";
     auto const dx12 = text_of(source, target::hlsl_dx12);
     CHECK(dx12.contains("    InterlockedCompareExchange(set_depth[id.xy], 0u, 7u, atomic_before);\n"

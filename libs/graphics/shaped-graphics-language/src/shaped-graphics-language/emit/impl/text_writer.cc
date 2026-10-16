@@ -547,14 +547,16 @@ struct writer
         case builtins::spelling_kind::custom:
         {
             auto mint = [&](cc::string_view desired) { return p.names.mint(desired); };
-            auto result = how.custom(
-                {.target = d.language(),
-                 .arguments = arguments,
-                 .builtins = *p.m.builtins,
-                 .data = how.data,
-                 .mint = mint,
-                 .result_type = p.m.builtin_type_of(type) != nullptr ? type_text(p, d, type) : cc::string_view(),
-                 .is_device_coherent = is_device_coherent});
+            auto result = how.custom({.target = d.language(),
+                                      .arguments = arguments,
+                                      .builtins = *p.m.builtins,
+                                      .data = how.data,
+                                      .mint = mint,
+                                      .result_type = p.m.builtin_type_of(type) != nullptr || record.gives_prelude_struct
+                                                       ? type_text(p, d, type)
+                                                       : cc::string_view(),
+                                      .is_device_coherent = is_device_coherent,
+                                      .is_pixel_stage = p.e.entry_stage == check::stage::pixel});
             // the statements its value needs, ahead of the one that holds it
             for (auto const& l : result.lines)
                 line(l);

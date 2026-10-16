@@ -2430,6 +2430,14 @@
 /// `m`, a member of workgroup memory, read once every thread of the workgroup has arrived.
 @builtin @stages(.compute) fun workgroup_uniform_load(m: ushort4) -> ushort4
 
+// What a weak compare-exchange gives, a struct of fields every target declares as a program's own.
+// The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it stored (EMIT-157).
+
+/// What a weak compare-exchange read, and whether it stored `desired`.
+struct exchange_result[T]:
+    old: T
+    exchanged: bool
+
 // Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.
 // Each is relaxed, and each but a store gives the value before; a vertex stage has none (CHK-296).
 /// Adds `v`, wrapping, and gives the value before.
@@ -2453,8 +2461,11 @@
 /// Stores `v` in one step.
 @builtin @stages(.pixel, .compute) fun store(a: out atomic[uint], v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @stages(.pixel, .compute) fun compare_exchange(a: mut atomic[uint], expected: uint, desired: uint) -> uint
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @stages(.pixel, .compute) fun compare_exchange_strong(a: mut atomic[uint], expected: uint, desired: uint) -> uint
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @stages(.pixel, .compute) fun compare_exchange_weak(a: mut atomic[uint], expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @stages(.pixel, .compute) fun add(a: mut atomic[int], v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2476,8 +2487,11 @@
 /// Stores `v` in one step.
 @builtin @stages(.pixel, .compute) fun store(a: out atomic[int], v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @stages(.pixel, .compute) fun compare_exchange(a: mut atomic[int], expected: int, desired: int) -> int
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @stages(.pixel, .compute) fun compare_exchange_strong(a: mut atomic[int], expected: int, desired: int) -> int
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @stages(.pixel, .compute) fun compare_exchange_weak(a: mut atomic[int], expected: int, desired: int) -> exchange_result[int]
 
 // The atomics of an `@atomic` image's texels, which the flat tree calls for `img[xy].max(v)` (CHK-373).
 // Each takes the image, the coordinate and an array's layer where the buffer atomic takes the atomic.
@@ -2502,8 +2516,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d[uint], xy: int, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_1d[uint], xy: int, expected: uint, desired: uint) -> uint
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_1d[uint], xy: int, expected: uint, desired: uint) -> uint
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_1d[uint], xy: int, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d[int], xy: int, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2525,8 +2542,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d[int], xy: int, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_1d[int], xy: int, expected: int, desired: int) -> int
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_1d[int], xy: int, expected: int, desired: int) -> int
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_1d[int], xy: int, expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d_array[uint], xy: int, layer: int, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2548,8 +2568,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d_array[uint], xy: int, layer: int, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_1d_array[uint], xy: int, layer: int, expected: uint, desired: uint) -> uint
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_1d_array[uint], xy: int, layer: int, expected: uint, desired: uint) -> uint
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_1d_array[uint], xy: int, layer: int, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_1d_array[int], xy: int, layer: int, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2571,8 +2594,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_1d_array[int], xy: int, layer: int, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_1d_array[int], xy: int, layer: int, expected: int, desired: int) -> int
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_1d_array[int], xy: int, layer: int, expected: int, desired: int) -> int
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_1d_array[int], xy: int, layer: int, expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d[uint], xy: int2, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2594,8 +2620,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d[uint], xy: int2, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_2d[uint], xy: int2, expected: uint, desired: uint) -> uint
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_2d[uint], xy: int2, expected: uint, desired: uint) -> uint
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_2d[uint], xy: int2, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d[int], xy: int2, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2617,8 +2646,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d[int], xy: int2, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_2d[int], xy: int2, expected: int, desired: int) -> int
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_2d[int], xy: int2, expected: int, desired: int) -> int
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_2d[int], xy: int2, expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2640,8 +2672,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d_array[uint], xy: int2, layer: int, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_2d_array[uint], xy: int2, layer: int, expected: uint, desired: uint) -> uint
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_2d_array[uint], xy: int2, layer: int, expected: uint, desired: uint) -> uint
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_2d_array[uint], xy: int2, layer: int, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_2d_array[int], xy: int2, layer: int, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2663,8 +2698,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_2d_array[int], xy: int2, layer: int, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_2d_array[int], xy: int2, layer: int, expected: int, desired: int) -> int
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_2d_array[int], xy: int2, layer: int, expected: int, desired: int) -> int
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_2d_array[int], xy: int2, layer: int, expected: int, desired: int) -> exchange_result[int]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_3d[uint], xy: int3, v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2686,8 +2724,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_3d[uint], xy: int3, v: uint)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_3d[uint], xy: int3, expected: uint, desired: uint) -> uint
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_3d[uint], xy: int3, expected: uint, desired: uint) -> uint
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_3d[uint], xy: int3, expected: uint, desired: uint) -> exchange_result[uint]
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @internal @stages(.pixel, .compute) fun texel_add(i: mut image_3d[int], xy: int3, v: int) -> int
 /// Subtracts `v`, wrapping, and gives the value before.
@@ -2709,8 +2750,11 @@
 /// Stores `v` in one step.
 @builtin @internal @stages(.pixel, .compute) fun texel_store(i: mut image_3d[int], xy: int3, v: int)
 /// Stores `desired` where the value is `expected`, and gives the value before.
-/// So it stored exactly where what it gives is `expected`.
-@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange(i: mut image_3d[int], xy: int3, expected: int, desired: int) -> int
+/// It never fails spuriously: it stored exactly where what it gives is `expected`.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_strong(i: mut image_3d[int], xy: int3, expected: int, desired: int) -> int
+/// Stores `desired` where the value is `expected`, and gives the value before and whether it stored.
+/// It may fail although the value was `expected`, so only `exchanged` says it stored: retry in a loop.
+@builtin @internal @stages(.pixel, .compute) fun texel_compare_exchange_weak(i: mut image_3d[int], xy: int3, expected: int, desired: int) -> exchange_result[int]
 
 // Subgroup operations, which exchange values between the invocations the hardware runs together.
 // Each needs `subgroups`, stands only in uniform control flow, and gives a value that differs
