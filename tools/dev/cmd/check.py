@@ -152,6 +152,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             (Path("tools") / "dev" / "changes-self-test.py", []),
             (Path("tools") / "dev" / "ui-self-test.py", []),
             (Path("tools") / "dev" / "symbolize-self-test.py", []),
+            (Path("tools") / "dev" / "submodules-self-test.py", []),
             (Path("extern") / "manifest-self-test.py", []),
             (Path("libs") / "base" / "clean-simd" / "tools" / "check-link-map.py", ["--self-test"]),
         )
