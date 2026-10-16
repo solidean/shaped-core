@@ -140,7 +140,12 @@ What a hybrid lighting pass will want that is not here yet:
 - **The material itself, rather than its albedos.** A traced bounce off a primary hit needs the closure, which the G-buffer does not carry.
   The likely shape is a visibility buffer: instance and primitive per pixel, with the barycentrics recomputed.
   The lighting pass then re-evaluates the material through the same generated body, sorted per permutation as the wavefront's shade stage is.
-  That is two `uint`s per pixel added to the targets, and the reason `raster.varyings` already carries both.
+  `raster.varyings` already carries both, and one `rg32_uint` target holds them.
+  **It replaces a target rather than adding one**: the frame writes eight, which is D3D12's maximum.
+  `primary_depth` is the one to give up, since it is `max(1 - near / depth, 0)` of the `depth` target wherever a surface is, and 1 where the depth is 0.
+  A fullscreen pass after the raster then fills its slot from the depth guide, as cheap as `depth_fill_routine` is.
+  Once the lighting pass re-evaluates the material per pixel, `albedo`, `specular_albedo` and `roughness` are its outputs too, and the raster could stop writing them.
+  Whether it does is the hybrid's call, by what its denoiser reads.
 - **Object motion**, which needs scene items with an identity that survives a frame, as the tracer's motion does.
 
 ## Bindings
