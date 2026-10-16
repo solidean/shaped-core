@@ -1,7 +1,8 @@
-// A probe that calls every helper of modules `pt` and `scene` the camera probe does not, so each is compiled, run and measured.
+// A probe that calls every helper of modules `pt` and `scene` the camera probe does not, and `openpbr`'s ReSTIR guide, so each is compiled, run and measured.
 //
 // These are held to properties a test can check exactly — a unit direction, a weight pair summing to one, a ray landing where it was aimed.
 // pt-support-probe-test.cc says what each lane must hold.
+use openpbr
 use pt
 use scene
 
@@ -30,7 +31,7 @@ binding pt_support_io:
     /// The 16 SH coefficients of the environment, as `sv::background_gpu` lays them out, as `tracer.traced.background` declares it.
     sh: buffer[float4]
 
-    /// Ten per item, in the order `pt_support_measure` writes them.
+    /// `results_per_item` of pt-support-probe-test.cc per item, in the order `pt_support_measure` writes them.
     results: mut buffer[float4]
 
     item_count: uint
@@ -115,7 +116,22 @@ fun probe_direction(u: float3) -> float3:
     let stable = if again.x == packed.x and again.y == packed.y => 1.0 else 0.0
     let w9 = float4(back.x, stable, length(pt.unpack_unit(pt.pack_unit(n)) - n), 0.0)
 
-    let base = id.x * 10
+    // How rough ReSTIR takes a surface to be when it decides whether to reconnect there: a base of roughness 0.5 alone,
+    // the same base under a smooth coat at weight 0.3, a surface with no specular lobe at all, and what the guide reads for the coated one.
+    let mut plain = openpbr.surface()
+    plain.specular_roughness = 0.5
+    let mut coated = plain
+    coated.coat_weight = 0.3
+    coated.coat_roughness = 0.0
+    let mut diffuse = openpbr.surface()
+    diffuse.specular_weight = 0.0
+    diffuse.base_metalness = 0.0
+    diffuse.coat_weight = 0.0
+    let plain_r = openpbr.pt_reconnect_roughness(plain)
+    let coated_r = openpbr.pt_reconnect_roughness(coated)
+    let w10 = float4(plain_r, coated_r, openpbr.pt_reconnect_roughness(diffuse), openpbr.pt_roughness(coated))
+
+    let base = id.x * 11
     pt_support_io.results[base] = w0
     pt_support_io.results[base + 1] = w1
     pt_support_io.results[base + 2] = w2
@@ -126,3 +142,4 @@ fun probe_direction(u: float3) -> float3:
     pt_support_io.results[base + 7] = w7
     pt_support_io.results[base + 8] = w8
     pt_support_io.results[base + 9] = w9
+    pt_support_io.results[base + 10] = w10

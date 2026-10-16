@@ -555,11 +555,12 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
     cc::remove_file(partial);
 }
 
-// ReSTIR GI's phase G0 through the viewer: the frame that restarts keeps the records and shades its primary hits again,
+// ReSTIR through the viewer: the frame that restarts keeps the records and shades its primary hits again,
 // and the temporal denoiser is handed the re-shade's image instead of the paths'.
-// Without reuse the two are the same estimate, which wavefront-trace-test.cc pins per pixel.
+// The view resamples spatially and by DI from the first such frame, so the two images are not the same estimate here;
+// wavefront-trace-test.cc pins their equality with reuse off.
 // Two captures are not deterministic, so this one pins that the setting reaches the tracer and the image keeps its brightness.
-ASYNC_INVOCABLE_TEST("sv - a ReSTIR layer reaches the tracer and keeps the image's brightness while reuse is off",
+ASYNC_INVOCABLE_TEST("sv - a ReSTIR layer reaches the tracer and keeps the image's brightness",
                      (sg::context_handle const& ctx_h),
                      nx::config::recorded)
 {

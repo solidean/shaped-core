@@ -90,7 +90,7 @@ struct sv::wavefront_trace_desc
     /// The routine itself keeps GI's records across a moved instance, so a caller whose scene changed has to clear `restir_written`.
     bool restir_history = true;
 
-    /// Whether reuse also traces the reverse visibility, which leaves it unbiased on a Lambertian scene at one more ray.
+    /// Whether reuse also traces the reverse visibility, which leaves it unbiased on a Lambertian scene: one more ray a pixel for temporal reuse, and five with the spatial pass's two neighbors.
     /// The tests' variant; the default skips it, and darkens contact and corners slightly for it.
     bool restir_exact = false;
 

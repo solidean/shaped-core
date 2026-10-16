@@ -625,8 +625,10 @@ struct surface_payload:
     albedo: float3
     /// normal-incidence specular reflectance (F0), for the specular guide
     specular_albedo: float3
-    /// perceptual roughness of the sharpest specular lobe
+    /// perceptual roughness for the denoiser's guide, the coat blended over the base
     roughness: float
+    /// the least roughness over the specular lobes that carry weight, which decides whether ReSTIR may reconnect here
+    reconnect_roughness: float
 
     /// which lobe the continuation was drawn from, one of `openpbr.bsdf_lobe_*`
     lobe: uint
@@ -678,7 +680,7 @@ rays path_rays:
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
 fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
+    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:

@@ -475,10 +475,11 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
     // The footprint is the camera's pixel at this segment's length: exact for a primary ray, and too small past a bounce, whose jitter antialiases instead.
     apply_decals(mut surface, ray_origin + ray_dir * hit_t, n, traced.frame[0].pixel_spread * hit_t)
 
-    // Before any early return below: every path out must have written all three.
+    // Before any early return below: every path out must have written them.
     payload.albedo = openpbr.pt_diffuse_albedo(surface)
     payload.specular_albedo = openpbr.pt_specular_albedo(surface)
     payload.roughness = openpbr.pt_roughness(surface)
+    payload.reconnect_roughness = openpbr.pt_reconnect_roughness(surface)
 
     // A dispersive interface collapses the path onto ONE wavelength, drawn before the closure is prepared, since the index it refracts at is what the choice decides.
     // A path that already collapsed keeps its wavelength.

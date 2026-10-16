@@ -293,9 +293,9 @@ So the final shading needs pieces of its own:
 **The plan had a second generated entry per permutation, `sv_restir_shade`; the mode replaced it.**
 It costs no second pipeline per permutation, and one uniform branch in every shade kernel.
 Each kernel is larger and compiles longer for it, since the re-shade's closure and decals are inlined beside the round's.
-Whether the larger kernel lowers shade's occupancy is measured on Sponza before phase G1 lands, through the wavefront benchmark given a ReSTIR variant.
+Whether the larger kernel lowers shade's occupancy was to be measured on Sponza before phase G1, through the wavefront benchmark given a ReSTIR variant; it is still owed.
 The viewer times still frames alone, and ReSTIR runs on restarting ones, so `sv.wavefront.restir` reaches a recording only from a caller that times one.
-Before G1 the re-shade's identity is also checked on a glossy and a coated item: the box is all matte, and G1's target function rests on that agreement.
+The re-shade's identity is checked per pixel on the matte box alone; on a glossy and a coated item, which G1's target function rests on, it is still owed.
 A path the frame splits carries `path_flag_split`, so a frame that finishes it later, a still one, recombines its light all the same.
 
 G0's records cost ~170 bytes per traced pixel, ~39 MB at 640x360 and ~350 MB at 1080p, allocated on first use.
@@ -320,7 +320,7 @@ Including the BSDF follows the paper's Equation 9 rather than its Equation 10, s
 
 The final shading needs the exact BSDF (decision 7):
 
-- **Re-evaluate the material** in `sv_restir_shade`, from the persisted hit; the starting point, exact for every lobe, at the cost above.
+- **Re-evaluate the material** in the shade kernel's re-shade mode, from the persisted hit; the starting point, exact for every lobe, at the cost above.
 - **Store a closure** at bounce 0, and shade in one generic kernel, with no second entry and no sort.
   Only what `openpbr.bsdf_eval_split` reads, never the whole `openpbr.bsdf`: the media, the subsurface interior and the emission stay out.
   That is about 50 floats, ~100 bytes as halves: ~23 MB at 640x360 and ~92 MB at 1280x720.
@@ -354,11 +354,12 @@ Phase G1 has the layout.
 For comparison, the wavefront's own path state is about 500 MB at 1080p.
 
 **The records live on the accumulation slot, beside the path state, one set per extent.**
-`restir` sits beside `paths` and `scaled_restir` beside `scaled_paths`, in `impl::temporal_slot`, and the store's budget counts their bytes where it counts the paths'.
+As built they are fields of `wavefront_state`, so `paths` and `scaled_paths` on `impl::temporal_slot` each carry their own, and they go when it does.
 A 720p view holding both carries ~460 MB; the full-size set is needed only while the young still frames feed the temporal member, and may be dropped after the fade.
 
 **They reset on what the temporal member's history resets on**: the scene hash, kept on the `frame_samples` slot as `reset_hash`, and a camera cut.
-They do not reset on camera motion, which is what they exist to survive, nor on a change of extent ([The camera stops](#the-camera-stops)).
+They do not reset on camera motion, which is what they exist to survive.
+A change of extent builds a new path state, so as built it drops them; surviving one, as [The camera stops](#the-camera-stops) wants, is open.
 
 **The visible surface keeps its previous frame**, so the temporal pass can weigh a candidate against the surface it is reused from.
 Storing `x_v` in the reservoir instead, as the paper does, saves the second copy and loses the previous closure, which the MIS weights need.
@@ -375,7 +376,7 @@ After the drain and before resolve, each a dense dispatch over the traced pixels
    Each costs a reconnection shift and a visibility ray.
    `k` is 2, drawn within a radius that follows the image's size.
    More where the history is short, as after a disocclusion, is open.
-3. **The sort of the persisted primary hits**, then **`sv_restir_shade`** per permutation.
+3. **The sort of the persisted primary hits**, then **each permutation's shade kernel in its re-shade mode**.
    It writes `frame_samples` and, for a split-signal member, `frame_diffuse`, `frame_specular` and the hit distance.
 
 Whether the spatial output or the temporal one feeds the next frame is a tuning choice.
@@ -409,14 +410,14 @@ Traced primaries stay as the reference the hybrid is tested against.
 ### Reprojection, disocclusion, cuts and scene changes
 
 **Reprojection uses the reservoirs' own camera and extent rather than the motion guide.**
-`x_v` is projected into the camera and extent the history was written under, which the records keep.
-For a static scene that is what `motion_guide` encodes, and it stays right across an extent change and a skipped frame.
+`x_v` is projected into the camera the history was written under, which the records keep; an extent change drops the records with their path state.
+For a static scene that is what `motion_guide` encodes, and it stays right across a skipped frame that did not move the camera.
 Object motion, once scene items have an identity that survives a frame, needs the motion guide instead.
 
 **A history is accepted when its surface is this one** (proposal 6), and otherwise the pixel starts from its candidate:
 
 - the previous `x_v` lies within a small distance of this `x_v`'s tangent plane, relative to view depth;
-- the shading normals are within 25°.
+- the geometric normals are within 25°.
 
 That rule applies the same way in both directions of the MIS weights, or it biases the result.
 
@@ -491,6 +492,7 @@ The specular half keeps the pixel's own path's, as today, since the reservoir's 
 
 **Reconnectable means rough on both sides**, by GRIS's criterion: the minimum roughness of the lobes that carry significant weight, above about 0.2.
 A minimum, because a clearcoat over a diffuse base is glossy however rough the base is.
+Built as `openpbr.pt_reconnect_roughness`, a lobe counting where its weight is above 0.05; the denoiser's roughness guide is a blend and decides nothing here.
 
 | at `x_v` | what happens |
 |---|---|
@@ -600,7 +602,7 @@ The generalized balance heuristic is why `exact` costs `k`²: every sample is te
 | visibility rays: 3 per pixel, at connect's ≤ ~3–4 ns per ray in a full still round | ~2–3 ms, estimated |
 | resampling arithmetic | ~1 ms, estimated |
 | sorting the persisted hits | ~0.3 ms, estimated from sort's 0.8–1.5 ms at four times the pixels |
-| `sv_restir_shade` per permutation | ~2–3 ms, estimated from shade's full-occupancy cost, without sampling or next-event estimation |
+| the re-shade per permutation | ~2–3 ms, estimated from shade's full-occupancy cost, without sampling or next-event estimation |
 | **total** | **~28–30 ms**, estimated |
 
 Beside it, CPU recording grows by ~28 dispatches and their declarations, not measured.
@@ -614,7 +616,7 @@ What follows from it:
   Rounds 2–4 hold ~356,000 of ~795,000 segments.
   At ~45% of extend through connect's ~19–20 ms, that is ~8–9 ms saved, estimated by segment share.
   Begin, resolve, args and the drain's empty rounds stay.
-- **Shade is the largest stage either way**, ~9.8 of the moving frame's 22 ms, and `sv_restir_shade` adds to it.
+- **Shade is the largest stage either way**, ~9.8 of the moving frame's 22 ms, and the re-shade adds to it.
   Making shade cheaper pays twice here, and is a prerequisite rather than a part of this plan.
 
 What to expect of the image, from the papers and others' practice rather than measurement:
@@ -638,7 +640,7 @@ GPU tests take their time; each phase narrows the expensive ones under `nx::is_t
 Whichever track reaches it first builds it, and the other uses it:
 
 - **The records** on the accumulation slot, per extent, with their resets and their byte count.
-- **The persisted primary hit, its sort, and the generated `sv_restir_shade` entry.**
+- **The persisted primary hit, its sort, and the shade kernels' re-shade mode.**
 - **Per-pass random streams.**
 - **The reservoir math as pure SGL functions with `test` blocks**, which the interpreter runs without a GPU: merging, the Jacobian, the MIS weights.
   Among them a deterministic two-pixel test: for a sample shifted between two domains, the `m_i` sum to one over the shift's domain, in both directions.
@@ -653,8 +655,9 @@ On the Cornell box the re-shade gives back each path's own estimate to ~5e-4, a 
 
 - **The estimator is today's**: with reuse off, a Cornell box agrees with the wavefront block by block, within the noise of the sample count.
   The roulette differs, so the comparison is statistical.
-- **The candidate is right**: on a box lit by one rect light, `x_s` and `L_i` read back for a pixel match a direct computation.
-- **`sv_restir_shade` is the shade**: its image of the primary hits equals the round-0 shade's direct and emitted light, to rounding.
+- **The candidate is right**: owed as stated — on a box lit by one rect light, `x_s` and `L_i` read back for a pixel match a direct computation.
+  Built is weaker: every `x_s` read back lies inside the box.
+- **The re-shade is the shade**, built: its image of the primary hits equals each path's own estimate, to a half's rounding.
 
 **Phase G0.5, optional: a stored reduced closure** as a measured baseline for the re-shade's cost, with its bias on `openpbr-spheres` recorded beside it.
 
@@ -710,7 +713,7 @@ At two neighbors that is nine target evaluations, and it needs no canonical spec
 The result goes to `restir_spatial`, which the re-shade shades; the temporal reservoir stays what the next frame reuses, per open question 3.
 
 Measured on the Cornell box over 48 frames, the indirect half's per-frame error against 192 plain frames' mean:
-0.243 plain, 0.181 with neighbors alone, 0.129 with temporal reuse alone, 0.117 with both, ~2.1x.
+0.243 plain, 0.181 with neighbors alone, 0.129 with temporal reuse alone, 0.117 with both, ~2.1x; 0.121 with both since the near-contact and Jacobian bounds.
 Those are at the image's own radius, which the 32x32 test image clamps to its 2-pixel floor; at 12 pixels the neighbors gained nothing over temporal reuse.
 Every resampled mean stays within 0.15% of the plain one with `exact`, and 0.7% without.
 A fixed 16 pixels would reach across half of the test's 32x32 image and keep one neighbor in six, which is why the radius follows the image.
@@ -721,7 +724,7 @@ A fixed 16 pixels would reach across half of the test's 32x32 image and keep one
   Every sample carries the same radiance, so an error in the weights or the Jacobian shows as a wrong mean rather than as noise.
 - **No light leaks through occluders, `exact`**: a wall between a lit and an unlit region; the unlit side matches the reference.
 - **A glossy `x_s` is not reused**: a glossy floor seen from a diffuse wall, default variant, within a loose bound of the reference.
-  A clearcoat over a rough base is not reconnected, which a readback of the shift's outcome pins.
+  A clearcoat over a rough base is not reconnected: the support probe pins `pt_reconnect_roughness` for a smooth coat at weight 0.3, and a readback of the shift's outcome is owed.
 - dx12 against vulkan, to rounding, as the raster tests do.
 - **Half-resolution or checkerboarded reservoirs** are this phase's lever for 1080p, measured rather than tested.
 

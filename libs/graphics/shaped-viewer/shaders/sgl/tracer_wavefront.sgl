@@ -776,7 +776,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         // Decided by the material, never by this frame's sample, so the history's domain never depends on a draw.
         let collapses = surface.transmission_dispersion_scale > 0.0 and surface.transmission_weight > 0.0
         let shiftable = all(md.sigma_t <= float3(0.0)) and not collapses
-        let rough = p.roughness >= restir_reconnect_roughness
+        let rough = p.reconnect_roughness >= restir_reconnect_roughness
         let kinds = restir_surface_visible | (if shiftable => restir_surface_shiftable else 0u) | (if rough => restir_surface_rough else 0u)
         traced.restir_surfaces[restir_index(slot, false)] = pack_surface(restir_surface(ray_origin + ray_dir * hit.t, kinds, n, p.roughness, p.albedo, p.specular_albedo))
         st.flags = st.flags | path_flag_split
@@ -794,7 +794,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         // ReSTIR's `x_s`: the normal a reconnection is weighed by, and whether it is rough enough to reconnect to at all.
         if (at_s.flags & restir_flag_candidate) != 0u:
             at_s.n_s = p.normal
-            if p.roughness >= restir_reconnect_roughness => at_s.flags = at_s.flags | restir_flag_reconnectable
+            if p.reconnect_roughness >= restir_reconnect_roughness => at_s.flags = at_s.flags | restir_flag_reconnectable
             at_s_changed = true
     if at_s_changed => traced.restir_candidates[s] = pack_candidate(at_s)
 

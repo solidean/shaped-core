@@ -87,7 +87,7 @@ struct sv::render_settings
 
     /// Whether the wavefront's restarting frames that feed a temporal denoiser resample their paths by ReSTIR GI and DI.
     /// The converging mean stays plain path tracing; only what the denoiser is handed changes — libs/graphics/shaped-viewer/docs/plans/restir-gi.md.
-    /// The records cost ~390 bytes per traced pixel, kept as long as the layer's path state.
+    /// The records cost ~400 bytes per traced pixel, kept as long as the layer's path state.
     bool restir = false;
 
     /// How long a moving image keeps its moving stream after it last changed, in milliseconds.

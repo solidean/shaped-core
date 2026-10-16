@@ -32,3 +32,20 @@ fun pt_specular_albedo(s: surface) -> float3:
 /// Perceptual roughness rather than the GGX alpha, since that is what every denoiser's guide is specified in.
 fun pt_roughness(s: surface) -> float:
     return saturate(mix(s.specular_roughness, s.coat_roughness, saturate(s.coat_weight)))
+
+/// A lobe whose weight is below this carries too little light for its sharpness to decide anything.
+const reconnect_lobe_weight = 0.05
+
+/// The least roughness over the specular lobes that carry weight, which is what decides whether ReSTIR may reconnect at this surface.
+///
+/// A minimum rather than `pt_roughness`'s blend: a partial smooth coat over a rough base still reflects a sharp highlight,
+/// and a reconnection treats the light leaving here as the same from every direction.
+/// The base's specular lobe carries weight through its dielectric weight or its metalness, the coat through its own weight.
+/// A surface with neither is diffuse, and as rough as anything can be.
+fun pt_reconnect_roughness(s: surface) -> float:
+    let mut least = 1.0
+    if s.specular_weight > reconnect_lobe_weight or s.base_metalness > reconnect_lobe_weight:
+        least = min(least, s.specular_roughness)
+    if s.coat_weight > reconnect_lobe_weight:
+        least = min(least, s.coat_roughness)
+    return saturate(least)

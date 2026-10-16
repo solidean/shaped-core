@@ -400,6 +400,7 @@ fun component_of(v: float3, i: uint) -> float:
     p.albedo = float3(0.0)
     p.specular_albedo = float3(0.0)
     p.roughness = 0.0
+    p.reconnect_roughness = 0.0
     p.lobe = openpbr.bsdf_lobe_diffuse
     p.bsdf_pdf = 0.0
     p.hit_t = -1.0

@@ -31,7 +31,7 @@ namespace
 static_assert(sizeof(sv_test::shaders::probe_light) == sizeof(sv::shaders::tracer::light_record),
               "probe_light in tests/shaders/pt_support_probe.sgl must match sv::shaders::tracer::light_record");
 
-constexpr isize results_per_item = 10;
+constexpr isize results_per_item = 11;
 constexpr float pi = 3.14159265358979323846f;
 
 /// The tracer's PCG step, on the CPU, which the GPU must reproduce to the bit.
@@ -298,6 +298,13 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
         CHECK(w[9][0] == 1.0f + 1.0f / 1024.0f).context(where("a packed channel rounds to nearest"));
         CHECK(w[9][1] == 1.0f).context(where("packing what came back gives the same bits"));
         CHECK(w[9][2] < 1e-4f).context(where("a unit vector through its octahedral form"));
+
+        // ReSTIR reconnects only where every lobe that carries weight is rough, so a partial smooth coat over a rough base is not.
+        // The denoiser's guide blends the two instead, which would have called that surface rough enough.
+        CHECK(near(w[10][0], 0.5f, 1e-6f)).context(where("a lone base reconnects at its own roughness"));
+        CHECK(w[10][1] == 0.0f).context(where("a smooth coat at weight 0.3 makes its base smooth to a reconnection"));
+        CHECK(w[10][2] == 1.0f).context(where("a surface with no specular lobe is as rough as anything"));
+        CHECK(near(w[10][3], 0.35f, 1e-6f)).context(where("while the guide blends the coat over the base"));
     }
 
     // Both branches of the rect test were taken, so neither set of checks above was vacuous.
