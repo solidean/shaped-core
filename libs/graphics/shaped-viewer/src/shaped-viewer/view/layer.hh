@@ -80,9 +80,6 @@ struct sv::layer
     /// scene_3d: drawings projected onto the traced surfaces, painted at every hit in the order they were added.
     cc::vector<decal_placement> decals;
 
-    /// scene_3d: whether anything drawn after the trace needs its primary-hit depth.
-    [[nodiscard]] bool needs_primary_depth() const { return !drawings.empty() || !annotations.empty(); }
-
     /// ui: which of the frame's registered draw callbacks fills this layer.
     u32 ui_callback = u32(-1);
 };

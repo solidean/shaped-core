@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -43,7 +44,7 @@ struct sv::orbit_state
 /// image restarts on the move rather than on the switch.
 enum class sv::camera_style
 {
-    /// Left-drag orbits, middle-drag pans, the wheel dollies.
+    /// Left-drag orbits, middle-drag pans, the wheel dollies, and a double-click orbits the surface point under the cursor.
     /// The default, and what a subject-centred view wants.
     orbit,
 
@@ -69,14 +70,21 @@ struct sv::camera_controller_config
 
     /// How far the eye may be lifted; must stay under 90 degrees.
     tg::angle_d max_elevation = tg::angle_d::make_from_degree(89.0);
+
+    /// How long `focus_on` takes to carry the camera to its new centre, in seconds; 0 arrives on the next `update`.
+    f64 focus_seconds = 0.35;
+
+    /// Where `focus_on` lands, as a fraction of the point's depth: below 1 moves in on it, 1 keeps the depth.
+    f64 focus_approach = 0.7;
 };
 
 /// The built-in orbit controller: it consumes `sr::input_event`s already routed to one view and drives an `orbit_state`.
 ///
-/// Event-driven and time-free — every input carries the delta it caused, so there is no `update(dt)` to schedule and no frame the controller has to be called on.
-/// A view that gets no input produces no motion by construction.
+/// Event-driven: every input carries the delta it caused, so a view that gets no input produces no motion by construction.
+/// The one motion over time is a focus, which `update(dt)` carries out, and it is idle otherwise.
 ///
 /// Left drag orbits, middle drag pans the target, the wheel changes distance.
+/// A double-click re-centres the orbit on the surface under the cursor, which only the viewer can see, so it calls `focus_on`.
 /// The keyboard is deliberately untouched: a WASD camera integrates over time, which is fps_camera_controller's job.
 class sv::orbit_camera_controller
 {
@@ -86,16 +94,43 @@ public:
 
     /// Apply one event, and report whether it actually moved the camera.
     /// Events for other views must be filtered out before this — the controller has no idea which view it belongs to.
+    /// A pan cancels a focus in flight, since both move the target; an orbit or a zoom rides along with it.
     bool handle(sr::input_event const& e);
+
+    /// Start carrying the camera to orbit `point`, and report whether it will move.
+    /// Over `config.focus_seconds` the eye glides so `point` ends mid-image, `config.focus_approach` of its depth away, the view direction unchanged.
+    /// Nothing moves until `update`; a point not in front of the camera is refused.
+    bool focus_on(tg::pos3d point);
+
+    /// Advance a focus by `dt` seconds, and report whether the camera moved.
+    /// Call it every frame: a focus moves the camera on frames that see no event at all.
+    bool update(f64 dt);
+
+    /// Stop a focus where it is, for a camera something else has taken over.
+    void cancel_focus() { _focus = {}; }
 
     [[nodiscard]] sv::camera camera() const { return orbit.to_camera(); }
 
     /// Whether a drag is in progress, so a caller can keep routing motion to this view while the button is held.
     [[nodiscard]] bool is_dragging() const { return _orbiting || _panning; }
 
+    /// Whether a focus is still on its way, so `update` would move the camera.
+    [[nodiscard]] bool is_focusing() const { return _focus.has_value(); }
+
 private:
+    /// A focus in flight: where the target and the distance started and where they end.
+    struct focus_motion
+    {
+        tg::pos3d from_target = tg::pos3d::zero;
+        tg::pos3d to_target = tg::pos3d::zero;
+        f64 from_distance = 1.0;
+        f64 to_distance = 1.0;
+        f64 elapsed = 0.0;
+    };
+
     bool _orbiting = false;
     bool _panning = false;
+    cc::optional<focus_motion> _focus;
 };
 
 /// Where a free-look camera is, in the parameters a user actually manipulates.
