@@ -49,8 +49,8 @@ ASYNC_INVOCABLE_TEST("sg - two dispatches that only load a mut buffer need no ba
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await shaders::footprint.scale.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::traffic>();
+    auto const pipeline = co_await shaders::footprint::scale.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::footprint::traffic>();
     auto const values = ctx->persistent.create_buffer_from_data(
         ramp(), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     auto const warm_result = make_buffer(*ctx);
@@ -62,7 +62,8 @@ ASYNC_INVOCABLE_TEST("sg - two dispatches that only load a mut buffer need no ba
         auto cmd = ctx->create_command_list();
         auto const group = ctx->transient.create_binding_group(
             *cmd, layout,
-            shaders::traffic{.values = values.as_readwrite_buffer(), .result = warm_result.as_readwrite_buffer()});
+            shaders::footprint::traffic{.values = values.as_readwrite_buffer(),
+                                        .result = warm_result.as_readwrite_buffer()});
         cmd->compute.bind_pipeline(*pipeline);
         cmd->compute.bind_group(0, *group);
         cmd->compute.dispatch_threads(k_count);
@@ -71,9 +72,11 @@ ASYNC_INVOCABLE_TEST("sg - two dispatches that only load a mut buffer need no ba
 
     auto cmd = ctx->create_command_list();
     auto const group_a = ctx->transient.create_binding_group(
-        *cmd, layout, shaders::traffic{.values = values.as_readwrite_buffer(), .result = result_a.as_readwrite_buffer()});
+        *cmd, layout,
+        shaders::footprint::traffic{.values = values.as_readwrite_buffer(), .result = result_a.as_readwrite_buffer()});
     auto const group_b = ctx->transient.create_binding_group(
-        *cmd, layout, shaders::traffic{.values = values.as_readwrite_buffer(), .result = result_b.as_readwrite_buffer()});
+        *cmd, layout,
+        shaders::footprint::traffic{.values = values.as_readwrite_buffer(), .result = result_b.as_readwrite_buffer()});
     auto const before = ctx->metrics.stats();
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group_a);
@@ -103,15 +106,16 @@ ASYNC_INVOCABLE_TEST("sg - a dispatch that reads what the one before it wrote pa
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const fill = co_await shaders::footprint.fill.acquire_pipeline(*ctx);
-    auto const scale = co_await shaders::footprint.scale.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::traffic>();
+    auto const fill = co_await shaders::footprint::fill.acquire_pipeline(*ctx);
+    auto const scale = co_await shaders::footprint::scale.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::footprint::traffic>();
     auto const values = make_buffer(*ctx);
     auto const result = make_buffer(*ctx);
 
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
-        *cmd, layout, shaders::traffic{.values = values.as_readwrite_buffer(), .result = result.as_readwrite_buffer()});
+        *cmd, layout,
+        shaders::footprint::traffic{.values = values.as_readwrite_buffer(), .result = result.as_readwrite_buffer()});
     auto const before = ctx->metrics.stats();
     // `fill` writes values and leaves result alone; `scale` reads values and writes result for the first time.
     cmd->compute.bind_pipeline(*fill);
@@ -141,15 +145,16 @@ ASYNC_INVOCABLE_TEST("sg - a dispatch that reads what an inline upload wrote pay
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const scale = co_await shaders::footprint.scale.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::traffic>();
+    auto const scale = co_await shaders::footprint::scale.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::footprint::traffic>();
     auto const values = make_buffer(*ctx);
     auto const result = make_buffer(*ctx);
     auto const data_in = ramp();
 
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
-        *cmd, layout, shaders::traffic{.values = values.as_readwrite_buffer(), .result = result.as_readwrite_buffer()});
+        *cmd, layout,
+        shaders::footprint::traffic{.values = values.as_readwrite_buffer(), .result = result.as_readwrite_buffer()});
     auto const before = ctx->metrics.stats();
     cmd->upload.data_to_buffer(values, cc::span<float const>(data_in));
     cmd->compute.bind_pipeline(*scale);
@@ -182,18 +187,18 @@ ASYNC_INVOCABLE_TEST("sg - a draw pays for the buffer its vertex stage reads, an
     // Nothing states a buffer's access before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
-    auto const fill = co_await shaders::footprint.fill.acquire_pipeline(*ctx);
-    auto const traffic_layout = ctx->cached.acquire_binding_group_layout<shaders::traffic>();
-    auto const shift_layout = ctx->cached.acquire_binding_group_layout<shaders::shift>();
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.shifted);
+    auto const fill = co_await shaders::footprint::fill.acquire_pipeline(*ctx);
+    auto const traffic_layout = ctx->cached.acquire_binding_group_layout<shaders::footprint::traffic>();
+    auto const shift_layout = ctx->cached.acquire_binding_group_layout<shaders::footprint::shift>();
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::shifted);
 
     auto const offsets = make_buffer(*ctx);
     auto const unused_result = make_buffer(*ctx);
-    auto const corners
-        = ctx->persistent.create_buffer_from_data(cc::vector<shaders::shift_corner>{{.position = tg::vec3f(-1, -1, 0)},
-                                                                                    {.position = tg::vec3f(3, -1, 0)},
-                                                                                    {.position = tg::vec3f(-1, 3, 0)}},
-                                                  sg::buffer_usage::vertex_buffer);
+    auto const corners = ctx->persistent.create_buffer_from_data(
+        cc::vector<shaders::footprint::shift_corner>{{.position = tg::vec3f(-1, -1, 0)},
+                                                     {.position = tg::vec3f(3, -1, 0)},
+                                                     {.position = tg::vec3f(-1, 3, 0)}},
+        sg::buffer_usage::vertex_buffer);
     auto const unsampled
         = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
                                              .width = 4,
@@ -212,7 +217,7 @@ ASYNC_INVOCABLE_TEST("sg - a draw pays for the buffer its vertex stage reads, an
         cmd->upload.bytes_to_texture(unsampled.raw(), texels);
         {
             auto pass = cmd->raster.render_to(
-                shaders::shift_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+                shaders::footprint::shift_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
         }
         ctx->submit_command_list(cc::move(cmd));
     }
@@ -220,16 +225,17 @@ ASYNC_INVOCABLE_TEST("sg - a draw pays for the buffer its vertex stage reads, an
     auto cmd = ctx->create_command_list();
     auto const traffic = ctx->transient.create_binding_group(
         *cmd, traffic_layout,
-        shaders::traffic{.values = offsets.as_readwrite_buffer(), .result = unused_result.as_readwrite_buffer()});
+        shaders::footprint::traffic{.values = offsets.as_readwrite_buffer(),
+                                    .result = unused_result.as_readwrite_buffer()});
     auto const shift = ctx->transient.create_binding_group(
         *cmd, shift_layout,
-        shaders::shift{.offsets = offsets.as_readonly_buffer(), .unsampled = unsampled.as_texture_view()});
+        shaders::footprint::shift{.offsets = offsets.as_readonly_buffer(), .unsampled = unsampled.as_texture_view()});
     auto const before = ctx->metrics.stats();
     cmd->compute.bind_pipeline(*fill);
     cmd->compute.bind_group(0, *traffic);
     cmd->compute.dispatch_threads(k_count);
     {
-        auto pass = cmd->raster.render_to(shaders::shift_target{.color = image.as_render_target_view()});
+        auto pass = cmd->raster.render_to(shaders::footprint::shift_target{.color = image.as_render_target_view()});
         pass.bind_pipeline(*pipeline);
         pass.bind_group(0, *shift);
         pass.bind_vertex_buffers({corners.as_vertex_buffer()});
@@ -269,11 +275,11 @@ cc::shared_async<cc::pair<cc::vector<byte>, sg::stats>> draws_in_one_rendering(s
     if (auto* const home = ctx.device_home())
         co_await cc::async_resume_on(*home);
 
-    auto const corners
-        = ctx.persistent.create_buffer_from_data(cc::vector<shaders::shift_corner>{{.position = tg::vec3f(-1, -1, 0)},
-                                                                                   {.position = tg::vec3f(3, -1, 0)},
-                                                                                   {.position = tg::vec3f(-1, 3, 0)}},
-                                                 sg::buffer_usage::vertex_buffer);
+    auto const corners = ctx.persistent.create_buffer_from_data(
+        cc::vector<shaders::footprint::shift_corner>{{.position = tg::vec3f(-1, -1, 0)},
+                                                     {.position = tg::vec3f(3, -1, 0)},
+                                                     {.position = tg::vec3f(-1, 3, 0)}},
+        sg::buffer_usage::vertex_buffer);
     auto const image
         = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
                                             .width = k_side,
@@ -284,7 +290,7 @@ cc::shared_async<cc::pair<cc::vector<byte>, sg::stats>> draws_in_one_rendering(s
         auto cmd = ctx.create_command_list();
         {
             auto pass = cmd->raster.render_to(
-                shaders::shift_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
+                shaders::footprint::shift_target{.color = image.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))});
         }
         auto warm = cc::vector<sg::data_future<float>>();
         for (auto const& b : settle)
@@ -297,7 +303,7 @@ cc::shared_async<cc::pair<cc::vector<byte>, sg::stats>> draws_in_one_rendering(s
     auto cmd = ctx.create_command_list();
     auto const before = ctx.metrics.stats();
     {
-        auto pass = cmd->raster.render_to(shaders::shift_target{.color = image.as_render_target_view()});
+        auto pass = cmd->raster.render_to(shaders::footprint::shift_target{.color = image.as_render_target_view()});
         pass.bind_vertex_buffers({corners.as_vertex_buffer()});
         for (auto const& step : steps)
         {
@@ -328,8 +334,9 @@ cc::shared_async<cc::pair<cc::vector<byte>, sg::stats>> two_draws(sg::context& c
     if (auto* const home = ctx.device_home())
         co_await cc::async_resume_on(*home);
 
-    auto const group = ctx.persistent.create_binding_group(ctx.cached.acquire_binding_group_layout<shaders::marks>(),
-                                                           shaders::marks{.hits = hits.as_readwrite_buffer()});
+    auto const group
+        = ctx.persistent.create_binding_group(ctx.cached.acquire_binding_group_layout<shaders::footprint::marks>(),
+                                              shaders::footprint::marks{.hits = hits.as_readwrite_buffer()});
     co_return co_await draws_in_one_rendering(
         ctx, {{.pipeline = &first, .group = group.get()}, {.pipeline = &second, .group = group.get()}}, {hits});
 }
@@ -357,8 +364,8 @@ ASYNC_INVOCABLE_TEST("sg - a draw reading what the previous draw's pixel shader 
     // The split this test provokes on purpose warns on every backend but dx12, as many times as that backend splits.
     nx::allow_warnings("was closed and reopened around", "sg");
 
-    auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.marking);
-    auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.reading);
+    auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::marking);
+    auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::reading);
     // Zeroed, so a read that raced ahead of the write reads 0 rather than whatever the allocation held.
     auto const hits
         = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_filled(k_side * k_side, 0.0f),
@@ -381,7 +388,7 @@ ASYNC_INVOCABLE_TEST("sg - two draws that only read one buffer never split the p
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.reading);
+    auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::reading);
     auto const hits
         = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_filled(k_side * k_side, 0.0f),
                                                   sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
@@ -408,14 +415,15 @@ ASYNC_INVOCABLE_TEST("sg - a draw that reads and writes what the previous draw w
     // The split this test provokes on purpose warns on every backend but dx12, as many times as that backend splits.
     nx::allow_warnings("was closed and reopened around", "sg");
 
-    auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.marking);
-    auto const accumulating = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.accumulating);
-    auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.reading);
+    auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::marking);
+    auto const accumulating = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::accumulating);
+    auto const reading = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::reading);
     auto const hits
         = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_filled(k_side * k_side, 0.0f),
                                                   sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
-    auto const group = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::marks>(),
-                                                            shaders::marks{.hits = hits.as_readwrite_buffer()});
+    auto const group
+        = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::footprint::marks>(),
+                                               shaders::footprint::marks{.hits = hits.as_readwrite_buffer()});
 
     // The middle draw's own write is what the last one reads, so a split that forgot it lets the last draw race it.
     auto const [pixels, d] = co_await draws_in_one_rendering(*ctx,
@@ -443,8 +451,8 @@ ASYNC_INVOCABLE_TEST("sg - a draw writing what the previous draw read through a 
     // The split this test provokes on purpose warns on every backend but dx12, as many times as that backend splits.
     nx::allow_warnings("was closed and reopened around", "sg");
 
-    auto const peeking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.peeking);
-    auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint.marking);
+    auto const peeking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::peeking);
+    auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::footprint::marking);
     constexpr auto k_before = 50.0f;
     auto const hits = ctx->persistent.create_buffer_from_data(
         cc::vector<float>::create_filled(k_side * k_side, k_before),
@@ -453,10 +461,11 @@ ASYNC_INVOCABLE_TEST("sg - a draw writing what the previous draw read through a 
         = ctx->persistent.create_buffer_from_data(cc::vector<float>::create_filled(k_side * k_side, 0.0f),
                                                   sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     auto const peek = ctx->persistent.create_binding_group(
-        ctx->cached.acquire_binding_group_layout<shaders::peek>(),
-        shaders::peek{.hits = hits.as_readonly_buffer(), .seen = seen.as_readwrite_buffer()});
-    auto const marks = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::marks>(),
-                                                            shaders::marks{.hits = hits.as_readwrite_buffer()});
+        ctx->cached.acquire_binding_group_layout<shaders::footprint::peek>(),
+        shaders::footprint::peek{.hits = hits.as_readonly_buffer(), .seen = seen.as_readwrite_buffer()});
+    auto const marks
+        = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::footprint::marks>(),
+                                               shaders::footprint::marks{.hits = hits.as_readwrite_buffer()});
 
     // `peek_ps` copies `hits` into `seen`, then `mark_ps` overwrites `hits` through a different group.
     auto const [pixels, d] = co_await draws_in_one_rendering(

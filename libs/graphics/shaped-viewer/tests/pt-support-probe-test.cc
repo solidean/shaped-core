@@ -28,7 +28,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-static_assert(sizeof(sv_test::shaders::probe_light) == sizeof(sv::shaders::tracer::light_record),
+static_assert(sizeof(sv_test::shaders::pt_support_probe::probe_light) == sizeof(sv::shaders::tracer::light_record),
               "probe_light in tests/shaders/pt_support_probe.sgl must match sv::shaders::tracer::light_record");
 
 constexpr isize results_per_item = 9;
@@ -148,7 +148,7 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler that reaches DXIL to build the probe shader");
 
-    auto const& entry = sv_test::shaders::pt_support_probe.pt_support_measure;
+    auto const& entry = sv_test::shaders::pt_support_probe::pt_support_measure;
     auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
@@ -157,7 +157,8 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr);
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::pt_support_io>();
+    auto const group_layout
+        = ctx.cached.acquire_binding_group_layout<sv_test::shaders::pt_support_probe::pt_support_io>();
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
@@ -179,8 +180,8 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
 
     auto const group = ctx.transient.create_binding_group(
         *cmd, group_layout,
-        sv_test::shaders::pt_support_io{
-            .lights = light_buffer.reinterpret_as<sv_test::shaders::probe_light>().as_readonly_buffer(),
+        sv_test::shaders::pt_support_probe::pt_support_io{
+            .lights = light_buffer.reinterpret_as<sv_test::shaders::pt_support_probe::probe_light>().as_readonly_buffer(),
             .sh = sh_buffer.as_readonly_buffer(),
             .results = result_buffer.as_readwrite_buffer(),
             .item_count = u32(item_count),

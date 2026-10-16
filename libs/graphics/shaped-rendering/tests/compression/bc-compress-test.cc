@@ -215,7 +215,7 @@ cc::shared_async<cc::vector<tg::vec4f>> decode(sg::context& ctx, sg::texture_2d 
 {
     auto const width = cc::max(1, texture.width() >> level);
     auto const height = cc::max(1, texture.height() >> level);
-    auto const& entry = sr_test::sgl_shaders::bc_decode.main_cs;
+    auto const& entry = sr_test::sgl_shaders::bc_decode::main_cs;
     auto const shader = entry->acquire(ctx);
     co_await cc::async_settled(shader);
     REQUIRE(shader->try_value() != nullptr);
@@ -223,7 +223,7 @@ cc::shared_async<cc::vector<tg::vec4f>> decode(sg::context& ctx, sg::texture_2d 
         = ctx.cached.acquire_compute_pipeline({.shader = *shader->try_value(), .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
-    auto const layout = ctx.cached.acquire_binding_group_layout<sr_test::sgl_shaders::decode_io>();
+    auto const layout = ctx.cached.acquire_binding_group_layout<sr_test::sgl_shaders::bc_decode::decode_io>();
 
     auto const count = isize(width) * height;
     auto cmd = ctx.create_command_list();
@@ -231,11 +231,13 @@ cc::shared_async<cc::vector<tg::vec4f>> decode(sg::context& ctx, sg::texture_2d 
         = ctx.transient.create_buffer<tg::vec4f>(count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
     auto const group = ctx.transient.create_binding_group(
         *cmd, layout,
-        sr_test::sgl_shaders::decode_io{.source = texture.as_texture_view({.mips = {.start = level, .count = 1}}),
-                                        .texels = texels.as_readwrite_buffer()});
+        sr_test::sgl_shaders::bc_decode::decode_io{
+            .source = texture.as_texture_view({.mips = {.start = level, .count = 1}}),
+            .texels = texels.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*built);
     cmd->compute.bind_group(0, *group);
-    cmd->compute.set_inline_constants(sr_test::sgl_shaders::decode_constants{.width = width, .height = height}.to_block());
+    cmd->compute.set_inline_constants(
+        sr_test::sgl_shaders::bc_decode::decode_constants{.width = width, .height = height}.to_block());
     cmd->compute.dispatch_threads(width, height);
     auto readback = cmd->download.data_from_buffer(texels);
     ctx.submit_command_list(cc::move(cmd));

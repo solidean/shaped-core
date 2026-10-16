@@ -30,7 +30,7 @@ bool oidn_denoise_routine::is_available(sg::context const& ctx)
     // weights were fetched.
     for (auto const& asset :
          {shaders::nn_conv.compute.main_cs, shaders::nn_input.compute.main_cs, shaders::nn_output.compute.main_cs,
-          sgl_shaders::nn_pool.main_cs.asset, sgl_shaders::nn_upsample.main_cs.asset})
+          sgl_shaders::nn_pool::main_cs.asset, sgl_shaders::nn_upsample::main_cs.asset})
         if (asset == nullptr || !asset->can_acquire(ctx))
             return false;
     return true;

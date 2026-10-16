@@ -52,7 +52,7 @@ struct probe_result
     return cam;
 }
 
-static_assert(sizeof(sv_test::shaders::camera_probe_case) == sizeof(camera_probe_case),
+static_assert(sizeof(sv_test::shaders::camera_probe::camera_probe_case) == sizeof(camera_probe_case),
               "camera_probe_case must match camera_probe_case in tests/shaders/camera_probe.sgl");
 
 /// Dispatches `cases` through the probe and reads one result back per case.
@@ -61,7 +61,7 @@ static_assert(sizeof(sv_test::shaders::camera_probe_case) == sizeof(camera_probe
 /// routine would put test-only machinery in the library.
 cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, cc::span<camera_probe_case const> cases)
 {
-    auto const& entry = sv_test::shaders::camera_probe.camera_measure;
+    auto const& entry = sv_test::shaders::camera_probe::camera_measure;
     auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
@@ -71,7 +71,7 @@ cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, cc::span<
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::camera_probe_io>();
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::camera_probe::camera_probe_io>();
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
@@ -89,8 +89,8 @@ cc::shared_async<cc::vector<probe_result>> run_probe(sg::context& ctx, cc::span<
     // SGL reads no buffer's length, so the probe is told the count.
     auto const group = ctx.transient.create_binding_group(
         *cmd, group_layout,
-        sv_test::shaders::camera_probe_io{
-            .cases = case_buffer.reinterpret_as<sv_test::shaders::camera_probe_case>().as_readonly_buffer(),
+        sv_test::shaders::camera_probe::camera_probe_io{
+            .cases = case_buffer.reinterpret_as<sv_test::shaders::camera_probe::camera_probe_case>().as_readonly_buffer(),
             .results = result_buffer.as_readwrite_buffer(),
             .count = u32(cases.size())});
     cmd->compute.bind_group(0, *group);

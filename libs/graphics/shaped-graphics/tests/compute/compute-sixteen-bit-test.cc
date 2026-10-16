@@ -18,9 +18,9 @@ namespace shaders = sg::test::sgl_shaders;
 // and short arithmetic that wraps at 16 bits.
 
 // The generated structs are the layout: a half3 packs at 2 bytes in a buffer's element.
-static_assert(sizeof(shaders::weighted) == 12);
-static_assert(offsetof(shaders::weighted, tint) == 4);
-static_assert(offsetof(shaders::weighted, scale) == 10);
+static_assert(sizeof(shaders::sixteen_bit::weighted) == 12);
+static_assert(offsetof(shaders::sixteen_bit::weighted, tint) == 4);
+static_assert(offsetof(shaders::sixteen_bit::weighted, scale) == 10);
 
 ASYNC_INVOCABLE_TEST("sg - an SGL compute shader computes in halves over a block and buffers of them",
                      (sg::context_handle const& ctx))
@@ -31,12 +31,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader computes in halves over a block
     if (!ctx->supports(sg::feature::shader_f16))
         SKIP("this context has no 16-bit floats");
 
-    auto const pipeline = co_await shaders::sixteen_bit.mix_halves.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::blend>();
+    auto const pipeline = co_await shaders::sixteen_bit::mix_halves.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sixteen_bit::blend>();
 
     // every value and every step is exact in a half, so any rounding or fusing a GPU picks gives these bits
     constexpr auto count = 256;
-    auto inputs = cc::vector<shaders::weighted>();
+    auto inputs = cc::vector<shaders::sixteen_bit::weighted>();
     for (auto i = 0; i < count; ++i)
         inputs.push_back({.weight = float(i % 8),
                           .tint = tg::vec<3, tg::f16>(tg::f16(i % 16), tg::f16(0.5f), tg::f16(-1.0f)),
@@ -48,8 +48,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader computes in halves over a block
                                                   sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     auto cmd = ctx->create_command_list();
-    auto const group = ctx->transient.create_binding_group(*cmd, layout,
-                                                           shaders::blend{.gain = tg::f16(4.0f),
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::sixteen_bit::blend{.gain = tg::f16(4.0f),
                                                                           .offset = 0.5f,
                                                                           .inputs = input_buffer.as_readonly_buffer(),
                                                                           .halves = halves.as_readwrite_buffer()});
@@ -78,8 +79,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's shorts and ushorts wrap at 16
     if (!ctx->supports(sg::feature::shader_int16))
         SKIP("this context has no 16-bit integers");
 
-    auto const pipeline = co_await shaders::sixteen_bit.sum_shorts.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::short_sums>();
+    auto const pipeline = co_await shaders::sixteen_bit::sum_shorts.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sixteen_bit::short_sums>();
 
     constexpr auto count = 256;
     auto deltas = cc::vector<tg::vec<2, i16>>();
@@ -94,7 +95,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL compute shader's shorts and ushorts wrap at 16
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
         *cmd, layout,
-        shaders::short_sums{.deltas = delta_buffer.as_readonly_buffer(), .totals = totals.as_readwrite_buffer()});
+        shaders::sixteen_bit::short_sums{.deltas = delta_buffer.as_readonly_buffer(),
+                                         .totals = totals.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);
@@ -120,8 +122,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL subgroup sum over halves agrees with the CPU a
     if (!ctx->supports(sg::feature::subgroups) || !ctx->supports(sg::feature::shader_f16))
         SKIP("this context has no subgroup operations over 16-bit floats");
 
-    auto const pipeline = co_await shaders::subgroups.reduce_halves.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::wave_halves>();
+    auto const pipeline = co_await shaders::subgroups::reduce_halves.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::subgroups::wave_halves>();
 
     // every partial sum is a small integer, which a half holds exactly in whatever order a GPU adds
     constexpr auto count = 4 * 128;
@@ -137,7 +139,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL subgroup sum over halves agrees with the CPU a
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
         *cmd, layout,
-        shaders::wave_halves{.values = value_buffer.as_readonly_buffer(), .sums = sums.as_readwrite_buffer()});
+        shaders::subgroups::wave_halves{.values = value_buffer.as_readonly_buffer(), .sums = sums.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);

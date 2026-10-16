@@ -18,7 +18,7 @@
 using namespace cc::primitive_defines;
 
 namespace probes = sr_test::sgl_shaders;
-using path_t = probes::slug_traced_pipeline_slug_path_t;
+using path_t = probes::slug_traced_pipeline::slug_path_t;
 
 // Slug shapes as traced geometry on a live device, every ray held to the CPU reference.
 // The quads lie at z = 0 in pixel space, and each ray of a 128 × 128 grid runs along +z through its pixel's centre:
@@ -116,11 +116,11 @@ struct traced_fixture
         if (raytraced != nullptr)
         {
             auto const probe = ctx->transient.create_binding_group(
-                *cmd, ctx->cached.acquire_binding_group_layout<probes::pipeline_probe>(),
-                probes::pipeline_probe{.world = tlas->as_view(),
-                                       .width = grid,
-                                       .firsts = firsts.as_readonly_buffer(),
-                                       .hits = hits.as_readwrite_buffer()});
+                *cmd, ctx->cached.acquire_binding_group_layout<probes::slug_traced_pipeline::pipeline_probe>(),
+                probes::slug_traced_pipeline::pipeline_probe{.world = tlas->as_view(),
+                                                             .width = grid,
+                                                             .firsts = firsts.as_readonly_buffer(),
+                                                             .hits = hits.as_readwrite_buffer()});
             cmd->raytracing.bind_pipeline(*raytraced);
             cmd->raytracing.bind_group(0, *tables);
             cmd->raytracing.bind_group(1, *shapes);
@@ -129,12 +129,12 @@ struct traced_fixture
         }
         else
         {
-            auto const probe
-                = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<probes::probe>(),
-                                                      probes::probe{.world = tlas->as_view(),
-                                                                    .width = grid,
-                                                                    .firsts = firsts.as_readonly_buffer(),
-                                                                    .hits = hits.as_readwrite_buffer()});
+            auto const probe = ctx->transient.create_binding_group(
+                *cmd, ctx->cached.acquire_binding_group_layout<probes::slug_traced::probe>(),
+                probes::slug_traced::probe{.world = tlas->as_view(),
+                                           .width = grid,
+                                           .firsts = firsts.as_readonly_buffer(),
+                                           .hits = hits.as_readwrite_buffer()});
             cmd->compute.bind_pipeline(*compute);
             cmd->compute.bind_group(0, *tables);
             cmd->compute.bind_group(1, *shapes);
@@ -241,7 +241,7 @@ ASYNC_INVOCABLE_TEST("sr::slug traced - the any-hit decision keeps exactly the r
         SKIP("this device has no ray queries");
     auto const f = make_scene();
 
-    auto const building = probes::slug_traced.trace_shapes.acquire_pipeline(*ctx);
+    auto const building = probes::slug_traced::trace_shapes.acquire_pipeline(*ctx);
     co_await cc::async_settled(building);
     REQUIRE(building->try_value() != nullptr);
     auto const got = co_await f->trace(ctx, *building->try_value());
@@ -259,7 +259,7 @@ ASYNC_INVOCABLE_TEST("sr::slug traced - a pipeline's hit group cuts the same ray
         SKIP("this device has no ray-tracing pipelines");
     auto const f = make_scene();
 
-    auto const desc = co_await probes::slug_traced_pipeline.slug_path.description(*ctx);
+    auto const desc = co_await probes::slug_traced_pipeline::slug_path.description(*ctx);
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
     REQUIRE(pipeline != nullptr);
     auto const got = co_await f->trace(ctx, nullptr, pipeline);
@@ -280,7 +280,7 @@ ASYNC_INVOCABLE_TEST("sr::slug traced - a decal's coverage at a traced hit match
         SKIP("this device has no ray queries");
     auto const f = make_scene();
 
-    auto const building = probes::slug_traced.cover_hits.acquire_pipeline(*ctx);
+    auto const building = probes::slug_traced::cover_hits.acquire_pipeline(*ctx);
     co_await cc::async_settled(building);
     REQUIRE(building->try_value() != nullptr);
     auto const got = co_await f->trace(ctx, *building->try_value());

@@ -113,8 +113,8 @@ ASYNC_INVOCABLE_TEST("sg - each sampler address mode, filter and level clamp rea
     clamped_down.max_lod = 0.0f;
     probes.push_back({clamped_down, tg::vec4f(0.125f, 0.125f, 1, 0), 0.2f, 0.2f, "max_lod"});
 
-    auto const pipeline = co_await shaders::sampling.sample_at.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::probe>();
+    auto const pipeline = co_await shaders::sampling::sample_at.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampling::probe>();
 
     auto const source
         = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
@@ -154,12 +154,12 @@ ASYNC_INVOCABLE_TEST("sg - each sampler address mode, filter and level clamp rea
         outputs.push_back(
             ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(probes.size()),
                                                     sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src));
-        auto const group
-            = ctx->transient.create_binding_group(*cmd, layout,
-                                                  shaders::probe{.source = source.as_texture_view(),
-                                                                 .smp = probes[i].sampler,
-                                                                 .at = coordinates.as_readonly_buffer(),
-                                                                 .values = outputs.back().as_readwrite_buffer()});
+        auto const group = ctx->transient.create_binding_group(
+            *cmd, layout,
+            shaders::sampling::probe{.source = source.as_texture_view(),
+                                     .smp = probes[i].sampler,
+                                     .at = coordinates.as_readonly_buffer(),
+                                     .values = outputs.back().as_readwrite_buffer()});
         cmd->compute.bind_group(0, *group);
         cmd->compute.dispatch_threads(int(probes.size()));
         futures.push_back(cmd->download.data_from_buffer(outputs.back()));
@@ -212,8 +212,8 @@ ASYNC_INVOCABLE_TEST("sg - a comparison sampler passes each compare_op's own ref
         return false;
     };
 
-    auto const pipeline = co_await shaders::sampling.compare_at.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::compared>();
+    auto const pipeline = co_await shaders::sampling::compare_at.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::sampling::compared>();
     auto const depth
         = ctx->persistent.create_texture_2d({.format = sg::pixel_format::depth32_float,
                                              .width = 1,
@@ -236,13 +236,13 @@ ASYNC_INVOCABLE_TEST("sg - a comparison sampler passes each compare_op's own ref
             cc::vector<float>::create_filled(3, -1.0f), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src));
         auto const group = ctx->transient.create_binding_group(
             *cmd, layout,
-            shaders::compared{.depth = depth.as_texture_view(),
-                              .smp = sg::sampler{.min_filter = sg::sampler_filter::nearest,
-                                                 .mag_filter = sg::sampler_filter::nearest,
-                                                 .mip_filter = sg::sampler_filter::nearest,
-                                                 .compare = op},
-                              .references = refs.as_readonly_buffer(),
-                              .values = outputs.back().as_readwrite_buffer()});
+            shaders::sampling::compared{.depth = depth.as_texture_view(),
+                                        .smp = sg::sampler{.min_filter = sg::sampler_filter::nearest,
+                                                           .mag_filter = sg::sampler_filter::nearest,
+                                                           .mip_filter = sg::sampler_filter::nearest,
+                                                           .compare = op},
+                                        .references = refs.as_readonly_buffer(),
+                                        .values = outputs.back().as_readwrite_buffer()});
         cmd->compute.bind_group(0, *group);
         cmd->compute.dispatch_threads(3);
         futures.push_back(cmd->download.data_from_buffer(outputs.back()));

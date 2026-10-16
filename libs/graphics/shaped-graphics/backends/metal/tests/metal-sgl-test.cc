@@ -30,7 +30,7 @@ namespace
 constexpr auto k_size = 8;
 
 /// One triangle whose bounding square covers the whole target, so every texel it reaches is written by the shader.
-[[nodiscard]] cc::vector<shaders::cube_vertex> covering_triangle()
+[[nodiscard]] cc::vector<shaders::cube::cube_vertex> covering_triangle()
 {
     auto const color = tg::vec3f(0.25f, 0.5f, 0.75f);
     return {
@@ -67,8 +67,8 @@ ASYNC_TEST("sg metal - an SGL package compiles for metal", exclusive("slib-shade
     lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));
     lib.add_package(shaders::package());
 
-    auto const vs = shaders::cube.main_vs->acquire(*ctx);
-    auto const ps = shaders::cube.main_ps->acquire(*ctx);
+    auto const vs = shaders::cube::main_vs->acquire(*ctx);
+    auto const ps = shaders::cube::main_ps->acquire(*ctx);
     co_await cc::async_settled(vs);
     co_await cc::async_settled(ps);
 
@@ -94,8 +94,8 @@ ASYNC_TEST("sg metal - a draw from an SGL shader writes what the shader computed
     lib.add_compiler(slib::create_sgl_compiler(slib::create_metal_compiler()));
     lib.add_package(shaders::package());
 
-    auto const vs = shaders::cube.main_vs->acquire(*ctx);
-    auto const ps = shaders::cube.main_ps->acquire(*ctx);
+    auto const vs = shaders::cube::main_vs->acquire(*ctx);
+    auto const ps = shaders::cube::main_ps->acquire(*ctx);
     co_await cc::async_settled(vs);
     co_await cc::async_settled(ps);
     REQUIRE(vs->has_value()).context(failure_of(vs));
@@ -103,10 +103,10 @@ ASYNC_TEST("sg metal - a draw from an SGL shader writes what the shader computed
 
     // Built through the cache, so the frontend's layout fit sees the reflection before the backend does.
     auto desc = sg::raster_pipeline_description{
-        .layout = shaders::cube.main_vs.acquire_layout(*ctx),
+        .layout = shaders::cube::main_vs.acquire_layout(*ctx),
         .vertex_shader = *vs->try_value(),
         .fragment_shader = *ps->try_value(),
-        .vertex_input = shaders::cube_vertex::layout(),
+        .vertex_input = shaders::cube::cube_vertex::layout(),
         .rasterization = {.cull = sg::cull_mode::none},
     };
     desc.color_targets.push_back({.format = sg::pixel_format::rgba8_unorm});
@@ -119,17 +119,17 @@ ASYNC_TEST("sg metal - a draw from an SGL shader writes what the shader computed
     auto const target = make_color_target(ctx);
     auto const vertices = covering_triangle();
     auto const vertex_buffer
-        = ctx->persistent.create_raw_buffer(isize(vertices.size()) * isize(sizeof(shaders::cube_vertex)),
+        = ctx->persistent.create_raw_buffer(isize(vertices.size()) * isize(sizeof(shaders::cube::cube_vertex)),
                                             sg::buffer_usage::vertex_buffer | sg::buffer_usage::copy_dst);
 
     // One unit right in clip space, so the left half of the target keeps the clear colour.
     // Not the identity, which is its own transpose: a row/column-major mismatch would move the other half instead.
-    auto const constants = shaders::constants{
+    auto const constants = shaders::cube::constants{
         .view_projection = tg::rigid_transform3f::make_translation(tg::vec3f(1, 0, 0)).to_mat(),
     };
 
     auto cmd = ctx->create_command_list();
-    cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<shaders::cube_vertex const>(vertices)));
+    cmd->upload.bytes_to_buffer(vertex_buffer, cc::as_bytes(cc::span<shaders::cube::cube_vertex const>(vertices)));
     {
         auto info = sg::rendering_info{};
         // Red, so a texel the shader never wrote is loud in the readback.
@@ -137,7 +137,7 @@ ASYNC_TEST("sg metal - a draw from an SGL shader writes what the shader computed
         auto scope = cmd->raster.render_to(info);
         scope.bind_pipeline(**pipeline->try_value());
         scope.set_inline_constants(constants.to_block());
-        scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(shaders::cube_vertex))});
+        scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(shaders::cube::cube_vertex))});
         scope.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     auto future = cmd->download.bytes_from_texture(target.raw());

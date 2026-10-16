@@ -53,12 +53,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they 
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    auto const pool_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_pool_features>();
-    auto const up_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_upsample_features>();
+    auto const pool_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_pool::nn_pool_features>();
+    auto const up_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_upsample::nn_upsample_features>();
     auto pool_pipeline = sg::compute_pipeline_handle();
     auto up_pipeline = sg::compute_pipeline_handle();
-    co_await build_sgl(ctx, sr::sgl_shaders::nn_pool.main_cs, "nn_pool", pool_pipeline);
-    co_await build_sgl(ctx, sr::sgl_shaders::nn_upsample.main_cs, "nn_upsample", up_pipeline);
+    co_await build_sgl(ctx, sr::sgl_shaders::nn_pool::main_cs, "nn_pool", pool_pipeline);
+    co_await build_sgl(ctx, sr::sgl_shaders::nn_upsample::main_cs, "nn_upsample", up_pipeline);
 
     // A 4x4 map of two channels, every value distinct so a wrong texel is a wrong number.
     constexpr auto src_w = 4;
@@ -94,22 +94,24 @@ ASYNC_INVOCABLE_TEST("sr - the network's pool and upsample move the texels they 
     cmd->compute.bind_pipeline(*pool_pipeline);
     cmd->compute.bind_group(0, *ctx.transient.create_binding_group(
                                    *cmd, pool_layout,
-                                   sr::sgl_shaders::nn_pool_features{.source = src.as_readonly_buffer(),
-                                                                     .target = pooled.as_readwrite_buffer()}));
+                                   sr::sgl_shaders::nn_pool::nn_pool_features{.source = src.as_readonly_buffer(),
+                                                                              .target = pooled.as_readwrite_buffer()}));
     cmd->compute.set_inline_constants(
-        sr::sgl_shaders::nn_pool_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels}.to_block());
+        sr::sgl_shaders::nn_pool::nn_pool_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels}
+            .to_block());
     cmd->compute.dispatch_threads(channels, src_w / 2, src_h / 2);
 
     auto const up = ctx.transient.create_buffer<f32>(src_w * src_h * channels,
                                                      sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
     cmd->compute.bind_pipeline(*up_pipeline);
-    cmd->compute.bind_group(0, *ctx.transient.create_binding_group(
-                                   *cmd, up_layout,
-                                   sr::sgl_shaders::nn_upsample_features{.source = pooled.as_readonly_buffer(),
-                                                                         .target = up.as_readwrite_buffer()}));
+    cmd->compute.bind_group(0, *ctx.transient.create_binding_group(*cmd, up_layout,
+                                                                   sr::sgl_shaders::nn_upsample::nn_upsample_features{
+                                                                       .source = pooled.as_readonly_buffer(),
+                                                                       .target = up.as_readwrite_buffer()}));
     cmd->compute.set_inline_constants(
-        sr::sgl_shaders::nn_upsample_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels}.to_block());
+        sr::sgl_shaders::nn_upsample::nn_upsample_constants{.width = src_w / 2, .height = src_h / 2, .channels = channels}
+            .to_block());
     cmd->compute.dispatch_threads(channels, src_w / 2, src_h / 2);
 
     auto const pooled_back = sg::data_future<f32>(cmd->download.data_from_buffer(pooled));

@@ -475,8 +475,8 @@ bool oidn_programs::build(sg::context& ctx)
     conv_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_conv_bindings>();
     input_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_input_bindings>();
     output_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_output_bindings>();
-    pool_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::nn_pool_features>();
-    upsample_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::nn_upsample_features>();
+    pool_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::nn_pool::nn_pool_features>();
+    upsample_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::nn_upsample::nn_upsample_features>();
 
     // Acquiring is idempotent and cached, so this simply picks up whatever has finished compiling since last time.
     auto const one = [&](slib::shader_asset_handle const& asset, sg::binding_group_layout_handle const& layout,
@@ -523,8 +523,8 @@ bool oidn_programs::build(sg::context& ctx)
         out = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     };
 
-    one_sgl(sgl_shaders::nn_pool.main_cs, pool);
-    one_sgl(sgl_shaders::nn_upsample.main_cs, upsample);
+    one_sgl(sgl_shaders::nn_pool::main_cs, pool);
+    one_sgl(sgl_shaders::nn_upsample::main_cs, upsample);
 
     return is_ready();
 }
@@ -542,7 +542,7 @@ cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx)
     // The shaders first, because a pipeline cannot be built before its shader exists.
     for (auto const& asset :
          {shaders::nn_conv.compute.main_cs, shaders::nn_input.compute.main_cs, shaders::nn_output.compute.main_cs,
-          sgl_shaders::nn_pool.main_cs.asset, sgl_shaders::nn_upsample.main_cs.asset})
+          sgl_shaders::nn_pool::main_cs.asset, sgl_shaders::nn_upsample::main_cs.asset})
     {
         auto const shader = asset->acquire(ctx);
         co_await cc::async_settled(shader);
@@ -613,14 +613,15 @@ void oidn_network::build_groups()
 
     for (auto const& p : k_pools)
         _pool_groups.push_back(ctx.persistent.create_binding_group(
-            _programs.pool_layout, sgl_shaders::nn_pool_features{.source = _features[p.source].as_readonly_buffer(),
-                                                                 .target = _features[p.target].as_readwrite_buffer()}));
+            _programs.pool_layout,
+            sgl_shaders::nn_pool::nn_pool_features{.source = _features[p.source].as_readonly_buffer(),
+                                                   .target = _features[p.target].as_readwrite_buffer()}));
 
     for (auto const& u : k_upsamples)
         _upsample_groups.push_back(ctx.persistent.create_binding_group(
             _programs.upsample_layout,
-            sgl_shaders::nn_upsample_features{.source = _features[u.source].as_readonly_buffer(),
-                                              .target = _features[u.target].as_readwrite_buffer()}));
+            sgl_shaders::nn_upsample::nn_upsample_features{.source = _features[u.source].as_readonly_buffer(),
+                                                           .target = _features[u.target].as_readwrite_buffer()}));
 }
 
 sg::buffer<f32> const& oidn_network::output_tensor() const
@@ -718,7 +719,8 @@ bool oidn_network::execute(sg::command_list& cmd,
                         cmd.compute.bind_pipeline(**_programs.pool->try_value());
                         cmd.compute.bind_group(0, *_pool_groups[i]);
                         cmd.compute.set_inline_constants(
-                            sgl_shaders::nn_pool_constants{.width = e[0], .height = e[1], .channels = channels}.to_block());
+                            sgl_shaders::nn_pool::nn_pool_constants{.width = e[0], .height = e[1], .channels = channels}
+                                .to_block());
                         cmd.compute.dispatch_threads(channels, e[0], e[1]);
                     }
                 }
@@ -733,7 +735,9 @@ bool oidn_network::execute(sg::command_list& cmd,
                         cmd.compute.bind_pipeline(**_programs.upsample->try_value());
                         cmd.compute.bind_group(0, *_upsample_groups[i]);
                         cmd.compute.set_inline_constants(
-                            sgl_shaders::nn_upsample_constants{.width = e[0], .height = e[1], .channels = channels}
+                            sgl_shaders::nn_upsample::nn_upsample_constants{.width = e[0],
+                                                                            .height = e[1],
+                                                                            .channels = channels}
                                 .to_block());
                         cmd.compute.dispatch_threads(channels, e[0], e[1]);
                     }

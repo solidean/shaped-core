@@ -18,21 +18,21 @@
 // One source reaches dx12, vulkan and webgpu, and the WebGPU arm needs no external compiler at all: that is the reason
 // SGL is tier 1's shading language rather than HLSL, whose fixtures cannot exist without DXC.
 // `double_values.sgl:*` declares the package, and the build asked the SGL compiler what that file holds:
-// its entry point, with the stage the source gives it, and `binding work`, which became `shaders::work`.
+// its entry point, with the stage the source gives it, and `binding work`, which became `shaders::double_values::work`.
 
 using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
 
 // A group fixes no index of its own: SGL numbers it by its position in each entry point's list.
-static_assert(sg::declared_binding_set<shaders::work>);
-static_assert(!sg::declared_binding_group<shaders::work>);
+static_assert(sg::declared_binding_set<shaders::double_values::work>);
+static_assert(!sg::declared_binding_group<shaders::double_values::work>);
 
 // A field is the view its member's access and element take, so a wrong buffer fails to compile rather than to bind.
-static_assert(std::is_assignable_v<decltype(shaders::work::values)&, sg::readwrite_buffer_view<float>>);
-static_assert(!std::is_assignable_v<decltype(shaders::work::values)&, sg::readonly_buffer_view<float>>); // `mut`
-static_assert(!std::is_assignable_v<decltype(shaders::work::values)&, sg::readwrite_buffer_view<int>>);  // `[float]`
-static_assert(std::is_assignable_v<decltype(shaders::factor::by)&, sg::readonly_buffer_view<float>>);
+static_assert(std::is_assignable_v<decltype(shaders::double_values::work::values)&, sg::readwrite_buffer_view<float>>);
+static_assert(!std::is_assignable_v<decltype(shaders::double_values::work::values)&, sg::readonly_buffer_view<float>>); // `mut`
+static_assert(!std::is_assignable_v<decltype(shaders::double_values::work::values)&, sg::readwrite_buffer_view<int>>); // `[float]`
+static_assert(std::is_assignable_v<decltype(shaders::double_values::factor::by)&, sg::readonly_buffer_view<float>>);
 
 TEST("sg - the SGL fixtures reach at least one format on every build")
 {
@@ -52,7 +52,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // The asset picks the format by asking the context what it accepts, so this names no backend.
-    auto const& compiled = co_await shaders::double_values.main->acquire(*ctx);
+    auto const& compiled = co_await shaders::double_values::main->acquire(*ctx);
 
     CHECK(compiled.stage == sg::shader_stage::compute);
     REQUIRE(compiled.workgroup_size.has_value());
@@ -61,7 +61,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL package's generated group is what its compiled
     // The table the host builds its layout from, and the bindings the shader reflects, name the same resources at the
     // same slots with the same kinds.
     // The group and the space are the entry point's to decide, so they are the one thing the generated table leaves out.
-    auto const declared = shaders::work::declared_bindings();
+    auto const declared = shaders::double_values::work::declared_bindings();
     REQUIRE(compiled.bindings.size() == declared.size());
     for (auto i = isize(0); i < declared.size(); ++i)
     {
@@ -86,8 +86,8 @@ ASYNC_TEST("sg - the WGSL an SGL group becomes reflects every fact its generated
     if (!has_wgsl)
         SKIP("no WGSL compiler is registered in this build");
 
-    auto const& compiled = co_await shaders::textures.copy_accumulate->acquire(sg::shader_format::wgsl);
-    auto const declared = shaders::post::declared_bindings();
+    auto const& compiled = co_await shaders::textures::copy_accumulate->acquire(sg::shader_format::wgsl);
+    auto const declared = shaders::textures::post::declared_bindings();
     REQUIRE(compiled.bindings.size() == declared.size());
     for (auto const& want : declared)
     {

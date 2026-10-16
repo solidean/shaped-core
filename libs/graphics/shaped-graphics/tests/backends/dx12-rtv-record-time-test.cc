@@ -42,7 +42,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - an RTV slot overwritten after the bind still dra
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     auto& dx = static_cast<dx12::dx12_context&>(*ctx);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::rects.floating);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::rects::floating);
     auto const white = tg::vec4f(1, 1, 1, 1);
     sg_test::rect const rects[] = {sg_test::rect_at(0, 0, k_width, k_height, k_width, k_height, 0.5f, white)};
     auto const batch = sg_test::rect_batch(*ctx, rects);
@@ -59,7 +59,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - an RTV slot overwritten after the bind still dra
         {.width = k_width,
          .height = k_height,
          .colors = {sg::pixel_format::rgba16_float},
-         .target_set = shaders::rect_target::name},
+         .target_set = shaders::rects::rect_target::name},
         [&](sg::command_list& cmd, sg_test::offscreen_targets const& targets)
         {
             {
@@ -68,7 +68,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - an RTV slot overwritten after the bind still dra
             }
 
             auto info = targets.cleared();
-            info.target_set = shaders::rect_target::name;
+            info.target_set = shaders::rects::rect_target::name;
             {
                 auto scope = cmd.raster.render_to(info);
 

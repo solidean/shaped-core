@@ -903,7 +903,7 @@ ctx.cached.acquire_compute_pipeline({.shader=, .layout=})      // -> sg::async_c
                                                                //   drive: cc::async_blocking_get(p) -> compute_pipeline_handle; or poll p->is_ready()/try_value()
 ctx.cached.acquire_raster_pipeline(raster_desc)               // -> sg::async_raster_pipeline  async PSO build; keyed on all shaders + layout + vertex input + every fixed-function state
 ctx.cached.acquire_raster_pipeline(source, parts, customize)  // any sg::raster_pipeline_source: `source.description(ctx, parts, customize)` is acquired
-                                                              //   — a generated SGL pipeline is one: acquire_raster_pipeline(shaders::cube.pipeline, {.color = f})
+                                                              //   — a generated SGL pipeline is one: acquire_raster_pipeline(shaders::cube::pipeline, {.color = f})
                                                               //   parts is `S::open`, not deduced, so a braced {.field = …} works; customize edits the description last
 ctx.cached.acquire_raster_pipeline(shared_async<desc>)       // the same once a description arrives; its failure is the result's
                                                                //   NOT keyed on .cached_pipeline — that blob only accelerates a build

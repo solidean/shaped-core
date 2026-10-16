@@ -10,8 +10,8 @@ cc::shared_async<cc::unit> depth_fill_routine::init(sg::routine_init_scope scope
 {
     auto& ctx = scope.context();
 
-    auto const vs = shaders::depth_fill.main_vs->acquire(ctx);
-    auto const ps = shaders::depth_fill.main_ps->acquire(ctx);
+    auto const vs = shaders::depth_fill::main_vs->acquire(ctx);
+    auto const ps = shaders::depth_fill::main_ps->acquire(ctx);
     co_await cc::async_settled(vs);
     co_await cc::async_settled(ps);
 
@@ -26,9 +26,9 @@ cc::shared_async<cc::unit> depth_fill_routine::init(sg::routine_init_scope scope
         co_return;
     }
 
-    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::depth_fill_source>();
+    _group_layout = ctx.cached.acquire_binding_group_layout<shaders::depth_fill::depth_fill_source>();
     auto const pipeline = ctx.cached.acquire_raster_pipeline({
-        .layout = shaders::depth_fill.main_ps.acquire_layout(ctx),
+        .layout = shaders::depth_fill::main_ps.acquire_layout(ctx),
         .vertex_shader = *compiled_vs,
         .fragment_shader = *compiled_ps,
         .topology = sg::primitive_topology::triangle_list, // no vertex input: the vertex index
@@ -59,7 +59,7 @@ sg::routine_outcome depth_fill_routine::execute(sg::rendering_scope& scope, sg::
 
     auto& ctx = cmd.context();
     auto const group = ctx.transient.create_binding_group(
-        cmd, self->_group_layout, shaders::depth_fill_source{.source = source.as_texture_view()});
+        cmd, self->_group_layout, shaders::depth_fill::depth_fill_source{.source = source.as_texture_view()});
     scope.bind_pipeline(*self->_pipeline);
     scope.bind_group(0, *group);
     scope.draw({.vertex_range = {.offset = 0, .size = 3}});

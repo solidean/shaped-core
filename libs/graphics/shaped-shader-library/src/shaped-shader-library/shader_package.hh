@@ -40,7 +40,8 @@ struct slib::shader_package
     /// Identifies the package and, by default, where it mounts.
     cc::string_view name;
 
-    /// The C++ namespace the package's generated types live in, which is what an SGL render target is named under.
+    /// The C++ namespace the package's generated symbols live in.
+    /// An SGL file's stand in a namespace of its own within it, which is what its render target is named under.
     cc::string_view host_namespace;
 
     shader_language language = shader_language::hlsl;
