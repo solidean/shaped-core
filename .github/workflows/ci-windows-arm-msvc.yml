@@ -38,10 +38,48 @@ jobs:
         continue-on-error: true
 
       - name: Build
-        run: uv run dev.py --collect-logs build/ci-logs.zip build --preset relwithdebinfo-arm64-windows-msvc --toolset 14.44 --diag-archive build/ci-diag.zip --keep-going
+        run: uv run dev.py --collect-logs build/ci-logs.zip build -t shaped-viewer-test --preset relwithdebinfo-arm64-windows-msvc --toolset 14.44 --diag-archive build/ci-diag.zip --keep-going
+
+      # PROBE (throwaway branch): a full dump of whatever fastfails, since a fastfail bypasses our crash handler.
+      - name: Enable crash dumps
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:\dumps | Out-Null
+          $k = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+          New-Item -Path $k -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpFolder -Value 'C:\dumps' -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpType -Value 2 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $k -Name DumpCount -Value 5 -PropertyType DWord -Force | Out-Null
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name Disabled -Value 0 -ErrorAction SilentlyContinue
 
       - name: Test
-        run: uv run dev.py --collect-logs build/ci-logs.zip test --preset relwithdebinfo-arm64-windows-msvc --toolset 14.44 --merged-xml-report build/ci-test-results.xml
+        continue-on-error: true
+        run: uv run dev.py --collect-logs build/ci-logs.zip test shaped-viewer-test --preset relwithdebinfo-arm64-windows-msvc --toolset 14.44 --merged-xml-report build/ci-test-results.xml
+
+      - name: Read the dump
+        if: always()
+        shell: pwsh
+        run: |
+          Get-ChildItem C:\dumps -ErrorAction SilentlyContinue | Format-Table Name, Length
+          $exe = Get-ChildItem -Recurse build -Filter shaped-viewer-test.exe | Select-Object -First 1
+          New-Item -ItemType Directory -Force build\probe | Out-Null
+          Copy-Item C:\dumps\* build\probe -ErrorAction SilentlyContinue
+          if ($exe) { Copy-Item $exe.FullName build\probe; Copy-Item ($exe.FullName -replace '\.exe$', '.pdb') build\probe -ErrorAction SilentlyContinue }
+          $cdb = Get-ChildItem -Recurse 'C:\Program Files (x86)\Windows Kits\10\Debuggers' -Filter cdb.exe -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'arm64' } | Select-Object -First 1
+          if (-not $cdb) { $cdb = Get-ChildItem -Recurse 'C:\Program Files (x86)\Windows Kits\10\Debuggers' -Filter cdb.exe -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          Write-Host "cdb: $($cdb.FullName)"
+          $dump = Get-ChildItem C:\dumps -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($cdb -and $dump -and $exe) {
+            & $cdb.FullName -z $dump.FullName -y "$($exe.DirectoryName);srv*C:\symcache*https://msdl.microsoft.com/download/symbols" -c ".ecxr; .echo ===FAULT===; kn 60; .echo ===ALL===; ~*kn 40; q" | Tee-Object build\probe\stacks.txt
+          }
+
+      - name: Upload the dump
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm-crash-dump
+          path: build/probe
+          if-no-files-found: warn
 
       - name: Upload diagnostics
         if: always()
