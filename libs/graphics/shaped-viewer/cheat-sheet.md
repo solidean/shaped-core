@@ -877,8 +877,10 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 - **The G-buffer is written every frame, denoised or not**, into the guide slots of the same meaning.
   Those are `normal_guide`, `depth_guide`, `albedo_guide`, `specular_albedo_guide`, `roughness_guide` and `motion_guide`.
   `reconstruct` is ignored, and nothing denoises.
-- **Quadric batches are skipped**, with one warning per layer; triangle meshes, cutouts, decals and drawings work.
-- **No ray tracing needed**: a raster layer builds no acceleration structure and never waits on the tracer, so it draws on any device.
+- **A landed quadric batch is skipped**, with one warning per layer; triangle meshes, cutouts, decals and drawings work.
+  One still streaming draws as its placeholder box, as a pending mesh does.
+- **No ray tracing needed**: a raster layer builds no acceleration structure and never waits on the tracer.
+  It does need `binding_arrays`, which `tracer.bindless` requires, so it draws on dx12, vulkan and metal and not on webgpu.
   A traced layer on a device without `raytracing_pipeline` is declined, with one logged error; `viewer::try_create` no longer refuses such a device.
 
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.

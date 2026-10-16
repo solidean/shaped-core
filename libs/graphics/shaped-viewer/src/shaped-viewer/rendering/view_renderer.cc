@@ -75,7 +75,7 @@ struct resolved_view
     /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
     cc::vector<cc::hash128> permutations;
 
-    /// How many triangles `instances[i]`'s geometry holds — a placeholder's cube included — and 0 for a quadric batch.
+    /// How many triangles `instances[i]`'s geometry holds — a placeholder's cube included — and 0 for a landed quadric batch.
     /// What a raster frame draws per row; no trace reads it.
     cc::vector<u32> triangle_counts;
 
@@ -169,7 +169,8 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.records.push_back(resources.describe_instance(cmd, item.quadrics, item.instance));
             place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
             out.parameter_blocks.push_back(item.instance);
-            out.triangle_counts.push_back(0);
+            // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
+            out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_vertices().element_count() / 3) : 0);
 
             // Set for any batch, pending or not: a pending one is a triangle instance this frame and a procedural one
             // the next, and the stand-in has to already be compiling by then.

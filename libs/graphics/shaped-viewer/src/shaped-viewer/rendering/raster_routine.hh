@@ -158,6 +158,6 @@ private:
                                                                   material_permutation const* p,
                                                                   bound_resources const& bindless);
 
-    /// Keyed on the permutation's key; dropped by every reload.
+    /// Keyed on the permutation's key and the bindless layout the pipeline was built against; dropped by every reload.
     cc::map<cc::hash128, surface_pipeline> _surfaces;
 };

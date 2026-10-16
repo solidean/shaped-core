@@ -47,6 +47,7 @@ Nothing a raster frame records traces, and nothing it needs waits on something t
 - **No hit group compiles.** A permutation's hit group stays cold until a trace starts it; a raster frame compiles only the permutation's pixel stage.
 - **The pipelines need no feature of it.** The raster stages list `raster.drawn`, `tracer.bindless` and `slug.tables`, and none of them holds an acceleration structure.
   Module `tracer`'s file-level `require raytracing_pipeline` binds only the stages that list a binding needing it.
+  `tracer.bindless` does require `binding_arrays`, so a raster layer needs that feature, which WebGPU lacks.
 - **The geometry buffers carry build-input usage only where the device builds structures**, since vulkan refuses it on a device without them.
 
 A traced layer on such a device is declined, with one logged error naming the missing feature, rather than drawn blank: nothing it could draw is its image.
@@ -103,7 +104,8 @@ Nothing bounces, and nothing refracts: a glass sphere shows its reflection and n
   It reads level 0 as a hit does: a box-filtered mip averages opacity, so a minified cutout would thin and vanish.
   A cutoff above 0 thresholds, as glTF's MASK, and there a pixel is cut exactly where a hit is.
   **Coverage is the one exception**: a cutoff of 0, which a tracer converges to a partial surface and one raster frame cannot, so coverage below one half is cut.
-- **Quadric batches are not drawn.** The layer logs a warning once and draws its meshes.
+- **Quadric batches are not drawn once they land.** The layer logs a warning once and draws its meshes.
+  A batch still streaming is drawn as its placeholder box through the fallback, as a pending mesh is and as a trace draws it.
   The plan is a pixel stage that ray-casts `quadric.intersect` over each primitive's box and writes its own depth.
   The intersection and the shading context already exist as functions of module `quadric`.
 - **Decals are painted** through the same functions the tracer paints with.

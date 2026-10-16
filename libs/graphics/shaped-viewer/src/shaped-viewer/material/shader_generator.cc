@@ -416,12 +416,15 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
     for (auto i = 0; i < r.attributes.size(); ++i)
     {
         auto const& a = r.attributes[i];
-        if (a.name != r.type->opacity_attribute || a.frequency == material_frequency::material_type)
+        if (a.name != r.type->opacity_attribute)
             continue;
 
         switch (a.frequency)
         {
         case material_frequency::material_type:
+            // The signature's own default, which nothing supplied: it cannot cut out.
+            break;
+
         case material_frequency::material:
         case material_frequency::mesh_instance:
             out.kind = material_opacity_kind::constant;

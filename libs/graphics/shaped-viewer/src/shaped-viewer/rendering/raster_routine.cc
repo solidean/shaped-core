@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <sgl_modules/slug.hh>
 #include <shaped-graphics/all.hh>
@@ -23,6 +24,9 @@ namespace tracer = sv::shaders::tracer;
 /// The depth a raster frame tests its surfaces against, which nothing outside the frame reads.
 /// It is reversed — `near / depth`, cleared to 0 at infinity — so a float resolves a far surface as finely as a near one.
 constexpr auto depth_format = sg::pixel_format::depth32_float;
+
+/// The seed of a surface pipeline's key, which hashes the permutation's key and the bindless layout it was built against.
+constexpr u64 surface_key_seed = 0x5a5f3c;
 
 /// `raster.targets` as a pipeline states it: each target in the format its slot is allocated in.
 [[nodiscard]] raster::targets::states target_states()
@@ -146,7 +150,12 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
                                                                 material_permutation const* p,
                                                                 bound_resources const& bindless)
 {
-    auto& s = _surfaces.entry(p->key).get_or_emplace(surface_pipeline{});
+    // A group binds only at a pipeline built against its very layout object, so the manager's layout is part of the key.
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_pod(p->key);
+    b.add_pod(bindless.layout().get());
+    auto const key = cc::hash128::create(b.written_bytes(), surface_key_seed);
+    auto& s = _surfaces.entry(key).get_or_emplace(surface_pipeline{});
     if (s.pipeline != nullptr)
         return s.pipeline;
     if (s.failed)
@@ -316,8 +325,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     auto const declared = d.bindless->declare_raster_access(cmd);
     for (auto const& draw : d.draws)
     {
-        CC_ASSERT(isize(draw.permutation) < pipelines.size(), "a raster draw names a permutation the frame does not "
-                                                              "hold");
+        CC_ASSERT(isize(draw.permutation) < pipelines.size(), "a raster draw names a permutation the frame holds");
         if (draw.triangle_count == 0)
             continue;
         pass.bind_pipeline(*pipelines[draw.permutation]);
