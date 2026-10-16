@@ -653,6 +653,7 @@ bool oidn_network::execute(sg::command_list& cmd,
     auto const output_group = ctx.transient.create_binding_group(
         cmd, _programs.output_layout,
         sgl_shaders::nn_output_images{.source = _features[f_out].as_readonly_buffer(),
+                                      .color = color.as_texture_view(),
                                       .target = output.as_any_image_view()});
 
     // One pass per tile, each writing only its interior.
