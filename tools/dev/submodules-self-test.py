@@ -13,6 +13,7 @@ Each builds a throwaway superproject whose submodule's remote is a local bare re
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -172,6 +173,27 @@ def test_bump_commits_only_the_pointer(base: Path):
     assert git(w.parent, "show", "--name-only", "--format=", "HEAD") == "extern/lib"
     assert lib.recorded(w.parent, w.sub) == w.c3
     assert "A  staged.txt" in git(w.parent, "status", "--porcelain")
+
+
+def test_a_missing_submodule_is_initialized_then_synced(base: Path):
+    w = World(base)
+    git(w.parent, "submodule", "deinit", "-q", "-f", "extern/lib")
+    assert lib.list_submodules(w.parent) == [] and lib.list_submodules(w.parent, missing=True) == [w.sub]
+    o = lib.init(w.parent, w.sub, dry_run=True)
+    assert o.status == "would init" and not (w.lib / ".git").exists(), o
+    # The library's own git calls clone from a local path, which git allows only when told to.
+    os.environ.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="protocol.file.allow", GIT_CONFIG_VALUE_0="always")
+    try:
+        o = lib.init(w.parent, w.sub)
+    finally:
+        for k in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+            os.environ.pop(k)
+    assert o.status == "initialized" and w.head() == w.c1, o
+    assert lib.list_submodules(w.parent) == [w.sub]
+    identity(w.lib)
+    o = w.sync()
+    assert o.status == "updated" and w.head() == w.c3, o
+    assert git(w.lib, "symbolic-ref", "--short", "HEAD") == "main"
 
 
 # ---------------------------------------------------------------------------
