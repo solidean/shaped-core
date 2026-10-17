@@ -120,6 +120,79 @@ struct seq_element_of<ItemT>
     using type = typename std::remove_cvref_t<ItemT>::tuple_t;
 };
 
+/// Whether an item refers to storage it does not hold: a reference, or a pack with a reference anywhere in it.
+/// Such an item is what may dangle once its source steps or moves.
+template <class T>
+inline constexpr bool seq_holds_references = std::is_reference_v<T>;
+template <class... Ts>
+inline constexpr bool seq_holds_references<seq_pack<Ts...>> = (seq_holds_references<Ts> || ...);
+
+/// An item with every reference in it replaced by a copy of what it refers to: U& is U, a pack holds values.
+template <class T>
+struct seq_owned
+{
+    using type = std::remove_cvref_t<T>;
+
+    // the item as that copy; Move moves out of what a reference names, for a source that owns its elements
+    template <bool Move, class X>
+    [[nodiscard]] static constexpr type make(X&& x)
+    {
+        if constexpr (Move && std::is_reference_v<T>)
+            return type(cc::move(x));
+        else
+            return type(cc::forward<X>(x));
+    }
+};
+template <class... Ts>
+struct seq_owned<seq_pack<Ts...>>
+{
+    using type = seq_pack<typename seq_owned<Ts>::type...>;
+
+    template <bool Move, class X>
+    [[nodiscard]] static constexpr type make(X&& x)
+    {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>)
+        {
+            return impl::seq_make_pack<typename seq_owned<Ts>::type...>(
+                seq_owned<Ts>::template make<Move>(seq_pack<Ts...>::template item<Is>(cc::forward<X>(x)))...);
+        }(std::index_sequence_for<Ts...>{});
+    }
+};
+
+/// An item pulled from the source at from, as the same item of the source moved to to.
+/// Every reference in it that points into the bytes of from moves to the same offset in to; see seq_rebase.
+template <class T>
+struct seq_rebased
+{
+    template <class S>
+    [[nodiscard]] static constexpr T make(T&& x, S const&, S&)
+    {
+        return cc::move(x);
+    }
+};
+template <class U>
+struct seq_rebased<U&>
+{
+    template <class S>
+    [[nodiscard]] static constexpr U& make(U& x, S const& from, S& to)
+    {
+        return *impl::seq_rebase(&x, from, to);
+    }
+};
+template <class... Ts>
+struct seq_rebased<seq_pack<Ts...>>
+{
+    template <class S>
+    [[nodiscard]] static constexpr seq_pack<Ts...> make(seq_pack<Ts...>&& x, S const& from, S& to)
+    {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>)
+        {
+            return impl::seq_make_pack<Ts...>(
+                seq_rebased<Ts>::make(seq_pack<Ts...>::template item<Is>(cc::move(x)), from, to)...);
+        }(std::index_sequence_for<Ts...>{});
+    }
+};
+
 /// An item as its element: a pack becomes its tuple, anything else is forwarded unchanged.
 template <class X>
 [[nodiscard]] constexpr decltype(auto) seq_as_element(X&& x)
@@ -155,16 +228,19 @@ inline constexpr bool seq_spread_invocable_idx<F, X, std::index_sequence<Is...>>
     = cc::is_invocable<F&, isize, decltype(std::remove_cvref_t<X>::template item<Is>(std::declval<X>()))...>;
 
 /// How a callback takes an item, decided once at compile time by the first form it accepts.
-/// Over a pack the order is spread, idx_spread, item, idx_item, otherwise item, idx_item:
+/// Over a pack the order is spread, idx_spread, item, idx_item, element, idx_element, otherwise item, idx_item:
 /// so f(isize i, auto w) over a zip of ints takes (a, b), never (idx, pack).
+/// The element forms hand a pack over as its materialized cc::tuple, for a callback written against the element type.
 /// A form is not checked for ambiguity: asking whether a generic lambda takes the other form would compile its body
 /// with that form's arguments, which is a hard error rather than a no.
 enum class seq_call_form
 {
-    item,       // f(item)
-    idx_item,   // f(idx, item)
-    spread,     // f(a, b, ...) for a pack
-    idx_spread, // f(idx, a, b, ...) for a pack
+    item,        // f(item)
+    idx_item,    // f(idx, item)
+    spread,      // f(a, b, ...) for a pack
+    idx_spread,  // f(idx, a, b, ...) for a pack
+    element,     // f(tuple) for a pack
+    idx_element, // f(idx, tuple) for a pack
 };
 
 template <class F, class X>
@@ -179,11 +255,20 @@ template <class F, class X>
             return seq_call_form::idx_spread;
         else if constexpr (cc::is_invocable<F&, X&&>)
             return seq_call_form::item;
+        else if constexpr (cc::is_invocable<F&, isize, X&&>)
+            return seq_call_form::idx_item;
         else
         {
-            static_assert(cc::is_invocable<F&, isize, X&&>, "a callback over a zip takes (a, b, ...), (isize idx, a, "
-                                                            "b, ...), (item) or (isize idx, item)");
-            return seq_call_form::idx_item;
+            using tuple_t = typename std::remove_cvref_t<X>::tuple_t;
+            if constexpr (seq_is_complete<tuple_t> && cc::is_invocable<F&, tuple_t const&>)
+                return seq_call_form::element;
+            else
+            {
+                static_assert(seq_is_complete<tuple_t> && cc::is_invocable<F&, isize, tuple_t const&>,
+                              "a callback over a zip or window takes (a, b, ...), (isize idx, a, b, ...), (item), "
+                              "(isize idx, item), or the materialized cc::tuple, with or without an index first");
+                return seq_call_form::idx_element;
+            }
         }
     }
     else if constexpr (cc::is_invocable<F&, X&&>)
@@ -197,7 +282,8 @@ template <class F, class X>
 
 template <class F, class X>
 inline constexpr bool seq_call_takes_idx
-    = seq_call_form_of<F, X>() == seq_call_form::idx_item || seq_call_form_of<F, X>() == seq_call_form::idx_spread;
+    = seq_call_form_of<F, X>() == seq_call_form::idx_item || seq_call_form_of<F, X>() == seq_call_form::idx_spread
+   || seq_call_form_of<F, X>() == seq_call_form::idx_element;
 
 /// Calls f with x in the form f takes; idx is the item's position and is advanced only when f takes it.
 template <class F, class X>
@@ -208,6 +294,10 @@ constexpr decltype(auto) seq_call(F& f, isize& idx, X&& x)
         return cc::invoke(f, cc::forward<X>(x));
     else if constexpr (form == seq_call_form::idx_item)
         return cc::invoke(f, idx++, cc::forward<X>(x));
+    else if constexpr (form == seq_call_form::element)
+        return cc::invoke(f, impl::seq_as_element(cc::forward<X>(x)));
+    else if constexpr (form == seq_call_form::idx_element)
+        return cc::invoke(f, idx++, impl::seq_as_element(cc::forward<X>(x)));
     else
     {
         using is_t = std::make_index_sequence<std::tuple_size_v<std::remove_cvref_t<X>>>;

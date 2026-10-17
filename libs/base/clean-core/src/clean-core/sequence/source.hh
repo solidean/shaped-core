@@ -524,29 +524,35 @@ struct strided_source
 
 /// A source known to be non-empty, by construction or by a check already made.
 /// It is the source itself with the trait flipped, so it forwards every capability for free.
-/// advance and truncate are hidden, since either may empty it: take and skip unwrap it to reach them.
+/// advance and truncate stay, so every adaptor over it keeps them: take and skip, which use them, drop the trait.
 template <class S>
 struct non_empty_source : S
 {
-    using base_t = S;
     static constexpr bool is_non_empty = true;
 
     constexpr explicit non_empty_source(S&& s) : S(cc::move(s)) {}
-
-    void advance(isize) = delete;
-    void truncate(isize) = delete;
 };
 
-/// The source under a non_empty_source, or S itself.
+/// A source that may be empty although S, under it, was typed non-empty: what take and skip of a non-empty one return.
+/// Like non_empty_source, it is S itself with the trait flipped.
 template <class S>
-struct seq_without_non_empty
+struct maybe_empty_source : S
 {
-    using type = S;
+    static constexpr bool is_non_empty = false;
+
+    constexpr explicit maybe_empty_source(S&& s) : S(cc::move(s)) {}
+};
+
+/// S without its non-emptiness: S itself, the source under a non_empty_source, or a maybe_empty_source over it.
+template <class S>
+struct seq_maybe_empty
+{
+    using type = std::conditional_t<seq_is_non_empty<S>, maybe_empty_source<S>, S>;
 };
 template <class S>
-struct seq_without_non_empty<non_empty_source<S>>
+struct seq_maybe_empty<non_empty_source<S>>
 {
-    using type = S;
+    using type = typename seq_maybe_empty<S>::type;
 };
 
 /// A sequence over source, non-empty at compile time when IsNonEmpty.

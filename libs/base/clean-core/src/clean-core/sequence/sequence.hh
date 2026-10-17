@@ -795,17 +795,10 @@ public:
     /// A sequence non-empty at compile time may become empty, so the result is no longer typed non-empty.
     [[nodiscard]] constexpr auto take(isize n) &&
     {
-        using base_t = typename impl::seq_without_non_empty<SourceT>::type;
         if constexpr (impl::seq_has_truncate<SourceT>)
         {
             _source.truncate(n < 0 ? 0 : n);
-            return cc::move(*this);
-        }
-        else if constexpr (!std::is_same_v<base_t, SourceT> && impl::seq_has_truncate<base_t>)
-        {
-            auto base = base_t(static_cast<base_t&&>(_source));
-            base.truncate(n < 0 ? 0 : n);
-            return sequence<base_t>(cc::move(base));
+            return cc::move(*this)._as_maybe_empty();
         }
         else
             return sequence<impl::take_source<SourceT>>(impl::take_source<SourceT>(cc::move(_source), n));
@@ -815,17 +808,10 @@ public:
     /// A sequence non-empty at compile time may become empty, so the result is no longer typed non-empty.
     [[nodiscard]] constexpr auto skip(isize n) &&
     {
-        using base_t = typename impl::seq_without_non_empty<SourceT>::type;
         if constexpr (impl::seq_has_advance<SourceT>)
         {
             _source.advance(n < 0 ? 0 : n);
-            return cc::move(*this);
-        }
-        else if constexpr (!std::is_same_v<base_t, SourceT> && impl::seq_has_advance<base_t>)
-        {
-            auto base = base_t(static_cast<base_t&&>(_source));
-            base.advance(n < 0 ? 0 : n);
-            return sequence<base_t>(cc::move(base));
+            return cc::move(*this)._as_maybe_empty();
         }
         else
             return sequence<impl::skip_source<SourceT>>(impl::skip_source<SourceT>(cc::move(_source), n));
@@ -1258,6 +1244,16 @@ public:
     //
 private:
     SourceT _source;
+
+    // this sequence, no longer typed non-empty, after take or skip reshaped its source
+    constexpr auto _as_maybe_empty() &&
+    {
+        using source_t = typename impl::seq_maybe_empty<SourceT>::type;
+        if constexpr (std::is_same_v<source_t, SourceT>)
+            return cc::move(*this);
+        else
+            return sequence<source_t>(source_t(static_cast<SourceT&&>(_source)));
+    }
 
     // state from the first element via init, then step(state, item) over the rest
     // precondition: is_non_empty

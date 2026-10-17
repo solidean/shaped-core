@@ -14,39 +14,37 @@ template <class T, std::size_t>
 using seq_repeat_type = T;
 
 /// How a window or chunk over S holds its items, and the pack of N it yields.
-/// Indexed, it reads them through at(): a reference stays one, a prvalue is held in the pack by value.
-/// Buffered, it keeps the last next() results: references only where they are borrowed, since a reference into the
-/// source itself may die at the next step (flatten's owned inner containers), and a copy otherwise.
-/// A buffered window's pack then holds const references into that buffer, valid until the next step.
+/// Indexed, it reads them through at() and never steps S: a reference stays one, a prvalue is held in the pack by value.
+/// Buffered, it keeps the last next() results, and an item holding references (a reference, or a zip's pack of them)
+/// is kept as it is only from a borrowed source: a reference into the source itself may die at the next step,
+/// as flatten's owned inner containers do, so it is copied otherwise.
+/// A buffered value's pack then holds const references into the buffer, valid until the next step.
 template <class S, bool IsIndexed, class Is>
 struct seq_group;
 template <class S, bool IsIndexed, std::size_t... Is>
 struct seq_group<S, IsIndexed, std::index_sequence<Is...>>
 {
     using inner_item_t = typename S::item_t;
-    static constexpr bool keeps_reference = std::is_reference_v<inner_item_t> && (IsIndexed || seq_is_borrowed<S>);
+    static constexpr bool keeps_item = IsIndexed || !seq_holds_references<inner_item_t> || seq_is_borrowed<S>;
 
     // what the buffer holds per item, and how the pack names it
-    using buffered_t = std::conditional_t<keeps_reference, inner_item_t, std::remove_cvref_t<inner_item_t>>;
-    using ref_t = std::conditional_t<keeps_reference,
-                                     inner_item_t,
-                                     std::conditional_t<IsIndexed, std::remove_cvref_t<inner_item_t>, buffered_t const&>>;
+    using buffered_t = std::conditional_t<keeps_item, inner_item_t, typename seq_owned<inner_item_t>::type>;
+    using ref_t = std::conditional_t<std::is_reference_v<buffered_t> || IsIndexed, buffered_t, buffered_t const&>;
     using type = seq_pack<seq_repeat_type<ref_t, Is>...>;
 
     // one next() result of S as the buffer holds it
     template <class R>
     [[nodiscard]] static constexpr seq_next_t<buffered_t> buffer(R&& r)
     {
-        if constexpr (std::is_same_v<std::remove_cvref_t<R>, seq_next_t<buffered_t>>)
+        if constexpr (keeps_item)
             return cc::move(r);
         else
         {
             if (!r)
                 return {};
-            if constexpr (seq_is_expiring<S>)
-                return seq_next_t<buffered_t>(seq_emplace, [&] { return buffered_t(cc::move(*r)); });
-            else
-                return seq_next_t<buffered_t>(seq_emplace, [&] { return buffered_t(*r); });
+            return seq_next_t<buffered_t>(
+                seq_emplace,
+                [&] { return seq_owned<inner_item_t>::template make<seq_is_expiring<S>>(impl::seq_get(r)); });
         }
     }
 };
@@ -108,15 +106,16 @@ struct window_source
         return true;
     }
 
+    // buffered, each element after the first N - 1 completes one window
     [[nodiscard]] constexpr isize size() const
-        requires is_indexed
+        requires seq_has_size<S>
     {
-        auto const windows = _inner.size() - isize(N) + 1;
+        auto const windows = _filled ? _inner.size() : _inner.size() - isize(N) + 1;
         auto const left = windows - _front - _back;
         return left < 0 ? 0 : left;
     }
     [[nodiscard]] constexpr bool is_empty() const
-        requires is_indexed
+        requires seq_has_size<S>
     {
         return this->size() == 0;
     }
@@ -124,6 +123,12 @@ struct window_source
         requires is_indexed
     {
         return this->_window_at(_front + i, std::make_index_sequence<N>{});
+    }
+    constexpr void truncate(isize n)
+        requires is_indexed
+    {
+        auto const size = this->size();
+        _back += size - impl::seq_min(n, size);
     }
 
     [[nodiscard]] constexpr seq_slot<item_t> next()
@@ -215,13 +220,14 @@ struct chunk_source
         return true;
     }
 
+    // buffered, the input has only ever been stepped by whole chunks
     [[nodiscard]] constexpr isize size() const
-        requires is_indexed
+        requires seq_has_size<S>
     {
         return _inner.size() / isize(N) - _front - _back;
     }
     [[nodiscard]] constexpr bool is_empty() const
-        requires is_indexed
+        requires seq_has_size<S>
     {
         return this->size() == 0;
     }
@@ -229,6 +235,12 @@ struct chunk_source
         requires is_indexed
     {
         return this->_chunk_at(_front + i, std::make_index_sequence<N>{});
+    }
+    constexpr void truncate(isize n)
+        requires is_indexed
+    {
+        auto const size = this->size();
+        _back += size - impl::seq_min(n, size);
     }
 
     [[nodiscard]] constexpr seq_slot<item_t> next()
@@ -316,6 +328,12 @@ struct step_source
         requires is_indexed
     {
         return _inner.at((_front + i) * _k);
+    }
+    constexpr void truncate(isize n)
+        requires is_indexed
+    {
+        auto const size = this->size();
+        _back += size - impl::seq_min(n, size);
     }
 
     [[nodiscard]] constexpr seq_next_t<item_t> next()

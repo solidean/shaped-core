@@ -7,13 +7,19 @@
 
 namespace cc::impl
 {
+/// Whether the references a callback F returns outlive the sequence wherever its input's do.
+/// A function holding no state can only return references into its arguments or into what outlives it;
+/// one with captures may return a reference into them, which dies with the sequence.
+template <class F>
+inline constexpr bool seq_returns_borrowed = std::is_empty_v<F> || std::is_member_pointer_v<F>;
+
 template <class S, class F>
 struct map_source
 {
     using inner_item_t = typename S::item_t;
     using item_t = typename seq_item_of<seq_call_result_t<F, inner_item_t>>::type;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
-    static constexpr bool is_borrowed = seq_is_borrowed<S>;
+    static constexpr bool is_borrowed = seq_is_borrowed<S> && (!seq_holds_references<item_t> || seq_returns_borrowed<F>);
     static constexpr bool is_infinite = seq_is_infinite<S>;
     static constexpr bool takes_idx = seq_call_takes_idx<F, inner_item_t>;
 
@@ -186,8 +192,9 @@ struct filter_source
 
 /// A source whose first element was pulled to learn it exists, and is held until asked for.
 /// This is the one element a runtime non-empty check over a source without is_empty() must buffer.
-/// That element may reference storage inside the source (repeat's value, a temporary fixed_vector it owns),
-/// so moving the source carries the reference along to the same place in the moved-to source.
+/// That element may reference storage inside the source (repeat's value, a temporary fixed_vector it owns, a window's
+/// buffer), alone or inside a zip's pack, so moving the source carries each reference to the same place in the copy.
+/// Constant evaluation cannot follow it there, so a pulled element that references the source is not constexpr.
 template <class S>
 struct peeked_source
 {
@@ -200,13 +207,19 @@ struct peeked_source
     S _rest;
     seq_next_t<item_t> _first;
 
-    // first, pulled from the source at from, as a reference into the source at to
+    // first, pulled from the source at from, as the same item of the source at to: every reference in it is carried
     static constexpr seq_next_t<item_t> _carry(seq_next_t<item_t>&& first, S const& from, S& to)
     {
-        if constexpr (std::is_reference_v<item_t> && !seq_is_borrowed<S>)
+        if constexpr (!seq_holds_references<item_t> || seq_is_borrowed<S>)
+            return cc::move(first);
+        else if constexpr (std::is_reference_v<item_t>)
             return impl::seq_rebase(first, from, to);
         else
-            return cc::move(first);
+        {
+            if (!first)
+                return {};
+            return seq_next_t<item_t>(seq_emplace, [&] { return seq_rebased<item_t>::make(cc::move(*first), from, to); });
+        }
     }
 
     constexpr peeked_source(seq_next_t<item_t>&& first, S&& rest)
@@ -312,7 +325,14 @@ struct take_source
         return this->size() == 0;
     }
 
-    // from the back, the input's elements past the first n are dropped first
+    constexpr void truncate(isize n)
+        requires seq_has_size<S> || seq_is_infinite<S>
+    {
+        _n = impl::seq_min(_n, n < 0 ? 0 : n);
+    }
+
+    // from the back, the input's elements past the first n are dropped first; the input cannot truncate, or this
+    // source would not exist, so that steps them back, evaluating what its next_back() evaluates
     [[nodiscard]] constexpr seq_next_t<item_t> next_back()
         requires seq_has_next_back<S> && seq_has_size<S>
     {
@@ -367,6 +387,11 @@ struct skip_source
     {
         auto const n = _inner.size() - _n;
         return n < 0 ? 0 : n;
+    }
+    constexpr void truncate(isize n)
+        requires seq_has_truncate<S>
+    {
+        _inner.truncate(_n + impl::seq_min(n, this->size()));
     }
 
     // from the back, the skipped front is simply never reached
@@ -591,8 +616,8 @@ struct filter_map_source
     using inner_item_t = typename S::item_t;
     using result_t = std::remove_cvref_t<seq_call_result_t<F, inner_item_t>>;
     using item_t = typename seq_filter_map_item<result_t>::type;
-    // a pointer result may point into the input's elements, so it outlives the sequence only where they do
-    static constexpr bool is_borrowed = std::is_reference_v<item_t> && seq_is_borrowed<S>;
+    // a pointer result may point into the input's elements or the callback's state, see seq_returns_borrowed
+    static constexpr bool is_borrowed = std::is_reference_v<item_t> && seq_is_borrowed<S> && seq_returns_borrowed<F>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
 
     S _inner;

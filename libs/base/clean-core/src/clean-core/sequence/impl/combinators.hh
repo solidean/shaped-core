@@ -163,6 +163,19 @@ struct chain_source
     {
         return _a.contains(v) || _b.contains(v);
     }
+
+    constexpr void truncate(isize n)
+        requires seq_has_truncate<A> && seq_has_truncate<B>
+    {
+        auto const in_a = _in_b ? 0 : _a.size();
+        if (n < in_a)
+        {
+            _a.truncate(n);
+            _b.truncate(0);
+        }
+        else
+            _b.truncate(n - in_a);
+    }
 };
 
 /// One item of each source per step, as a pack, until the shortest ends.
@@ -281,7 +294,8 @@ struct zip_source
         }(rest_index_t{});
     }
 
-    // a side cut to n elements: truncated where it can be, stepped back unevaluated otherwise
+    // a side cut to n elements: truncated where it can be, otherwise stepped back, which evaluates what its next_back()
+    // evaluates
     template <class Side>
     static constexpr void _trim(Side& side, isize n)
     {
