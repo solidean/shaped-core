@@ -599,6 +599,7 @@ if(SC_BUILD_TESTS)
         tests/sequence/sequence-reductions-test.cc
         tests/sequence/sequence-groups-test.cc
         tests/sequence/sequence-compare-test.cc
+        tests/sequence/sequence-lifetime-test.cc
 
         tests/string/conversion-test.cc
         tests/string/format-test.cc

@@ -1,0 +1,242 @@
+#include <clean-core/container/fixed_array.hh>
+#include <clean-core/container/fixed_vector.hh>
+#include <clean-core/container/map.hh>
+#include <clean-core/container/tuple.hh>
+#include <clean-core/container/vector.hh>
+#include <clean-core/sequence/sequence.hh>
+#include <nexus/test.hh>
+
+using namespace cc::primitive_defines;
+
+// Where a sequence's references live and how long, and which traits survive an adaptor.
+// Each test here pins a case the obvious implementation gets wrong.
+
+namespace
+{
+template <class T>
+bool equals(cc::vector<T> const& a, std::initializer_list<T> b)
+{
+    if (a.size() != isize(b.size()))
+        return false;
+    isize i = 0;
+    for (auto const& x : b)
+        if (!(a[i++] == x))
+            return false;
+    return true;
+}
+
+// a value that marks itself when moved from or destroyed, so a read through a stale reference shows
+struct marked
+{
+    int v;
+
+    explicit marked(int x) : v(x) {}
+    marked(marked const& rhs) = default;
+    marked(marked&& rhs) noexcept : v(rhs.v) { rhs.v = -7; }
+    marked& operator=(marked const& rhs) = default;
+    marked& operator=(marked&& rhs) noexcept
+    {
+        v = rhs.v;
+        rhs.v = -7;
+        return *this;
+    }
+    ~marked() { v = -999; }
+};
+
+auto const positive = [](marked const& m) { return m.v > 0; };
+
+template <class M>
+concept has_const_temporary_keys = requires(M const&& m) { static_cast<M const&&>(m).keys(); };
+template <class M>
+concept has_const_temporary_values = requires(M const&& m) { static_cast<M const&&>(m).values(); };
+template <class M>
+concept has_const_lvalue_values = requires(M const& m) { m.values(); };
+} // namespace
+
+TEST("sequence lifetime - windows over prvalues hold them by value")
+{
+    // iota has positions and yields prvalues, so each window holds its own copies
+    CHECK(equals(cc::iota(5).pairwise().map([](isize a, isize b) { return a + b; }).to_vector(),
+                 std::initializer_list<isize>{1, 3, 5, 7}));
+    CHECK(equals(cc::iota(7).chunks<3>().map([](isize a, isize, isize c) { return a * c; }).to_vector(),
+                 std::initializer_list<isize>{0, 15}));
+    CHECK(cc::iota(10).is_sorted());
+    CHECK(!cc::iota(10).map([](isize i) { return i == 4 ? 0 : i; }).is_sorted());
+
+    auto const v = cc::vector<int>{3, 1, 4, 1, 5};
+    CHECK(equals(
+        v.values().map([](int x) { return x * 10; }).pairwise().map([](int a, int b) { return b - a; }).to_vector(),
+        {-20, 30, -30, 40}));
+}
+
+TEST("sequence lifetime - a window calls a map once per element")
+{
+    auto const v = cc::vector<int>{1, 2, 3, 4};
+    int calls = 0;
+    auto const counted = [&](int x)
+    {
+        ++calls;
+        return x;
+    };
+
+    v.values().map(counted).pairwise().consume();
+    CHECK(calls == 4);
+
+    calls = 0;
+    CHECK(v.values().map(counted).is_sorted());
+    CHECK(calls == 4);
+
+    // a chunk reaches each element once anyway, so it keeps its positions
+    calls = 0;
+    static_assert(decltype(v.values().map(counted).chunks<2>())::has_known_size);
+    v.values().map(counted).chunks<2>().consume();
+    CHECK(calls == 4);
+}
+
+TEST("sequence lifetime - the element a runtime non-empty check pulls survives the move")
+{
+    // repeat's items reference its own value, and the filter has no is_empty(), so the first element is pulled
+    CHECK(cc::repeat(marked(42), 2).filter(positive).assert_non_empty().first().v == 42);
+
+    if (auto s = cc::repeat(marked(5), 3).filter(positive).try_as_non_empty(); s.has_value())
+        CHECK(cc::move(s.value()).map([](marked const& m) { return m.v; }).sum() == 15);
+    else
+        CHECK(false);
+
+    // a temporary fixed_vector is owned inline, so its elements move with the sequence
+    using marked_vector = cc::fixed_vector<marked, 4>;
+    CHECK((marked_vector{marked(1), marked(2)}.values().filter(positive).assert_non_empty().first().v == 1));
+    auto const sum = marked_vector{marked(3), marked(4)}
+                         .values()
+                         .filter(positive)
+                         .assert_non_empty()
+                         .map([](marked const& m) { return m.v; })
+                         .sum();
+    CHECK(sum == 7);
+}
+
+TEST("sequence lifetime - flatten over owned inner containers")
+{
+    auto const make = [](isize i) { return cc::fixed_array<int, 2>{int(10 * i), int(10 * i + 1)}; };
+
+    // each inner array dies when the next one opens, so a window or dedup over it copies rather than points
+    static_assert(!decltype(cc::iota(3).map(make).flatten())::has_borrowed_elements);
+    CHECK(equals(cc::iota(3).map(make).flatten().pairwise().map([](int a, int b) { return a * 100 + b; }).to_vector(),
+                 {1, 110, 1011, 1120, 2021}));
+    CHECK(equals(
+        cc::iota(3).map([](isize i) { return cc::fixed_array<int, 2>{int(i), int(i)}; }).flatten().dedup().to_vector(),
+        {0, 1, 2}));
+}
+
+TEST("sequence lifetime - borrowed elements need a borrowed input")
+{
+    auto const v = cc::vector<int>{1, 2, 3};
+    auto const pick = [](int const& x) -> int const* { return x > 1 ? &x : nullptr; };
+
+    static_assert(decltype(v.values().filter_map(pick))::has_borrowed_elements);
+    static_assert(!decltype(cc::vector<int>{1, 2, 3}.values().filter_map(pick))::has_borrowed_elements);
+    CHECK((cc::vector<int>{1, 2, 3}.values().filter_map(pick).sum_from(0) == 5));
+
+    // an initializer list's array dies with the expression, so no pointer may escape
+    static_assert(!decltype(cc::values_of({1, 2, 3}))::has_borrowed_elements);
+    CHECK(cc::values_of({1, 2, 3}).assert_non_empty().sum() == 6);
+
+    // a const temporary can be neither borrowed nor moved from
+    static_assert(!has_const_temporary_keys<cc::map<int, int>>);
+    static_assert(!has_const_temporary_values<cc::map<int, int>>);
+    static_assert(has_const_lvalue_values<cc::map<int, int>>);
+}
+
+TEST("sequence lifetime - enumerate keeps every trait")
+{
+    auto const v = cc::vector<int>{4, 5, 6};
+
+    static_assert(decltype(v.values().enumerate())::has_known_size);
+    static_assert(decltype(v.values().enumerate())::is_reversible);
+    static_assert(decltype(v.values().assert_non_empty().enumerate())::is_non_empty);
+    static_assert(decltype(cc::repeat(1).enumerate())::is_infinite);
+
+    CHECK(v.values().assert_non_empty().enumerate().map([](isize i, int x) { return i * x; }).last() == 12);
+    CHECK(v.values().enumerate().map([](isize i, int x) { return i + x; }).try_last().value() == 8);
+    CHECK(v.values().enumerate().reversed().map([](isize i, int) { return i; }).first_or(-1) == 2);
+    CHECK(equals(v.values().enumerate().skip(1).map([](isize i, int x) { return i * 10 + x; }).to_vector(),
+                 std::initializer_list<isize>{15, 26}));
+    CHECK(equals(cc::repeat(7).enumerate().take(3).map([](isize i, int x) { return i + x; }).to_vector(),
+                 std::initializer_list<isize>{7, 8, 9}));
+
+    isize sum = 0;
+    for (auto&& [i, x] : v.values().enumerate().reversed())
+        sum = sum * 10 + i;
+    CHECK(sum == 210);
+}
+
+TEST("sequence lifetime - zip trims its longer sides without walking them")
+{
+    auto const v = cc::vector<int>{1, 2, 3};
+
+    // the iota side reaches 10^12: stepping it back one element at a time would never finish
+    CHECK(cc::zip(v, cc::iota(1'000'000'000'000)).reversed().map([](int a, isize b) { return a * 10 + b; }).first_or(-1)
+          == 32);
+    CHECK(cc::zip(v, cc::iota(1'000'000'000'000)).try_last().has_value());
+}
+
+TEST("sequence lifetime - take and skip on a compile-time non-empty sequence keep their positions")
+{
+    auto const a = cc::fixed_array<int, 4>{1, 2, 3, 4};
+    using taken = decltype(a.values().take(2));
+
+    static_assert(decltype(a.values())::is_non_empty);
+    static_assert(!taken::is_non_empty);
+    static_assert(taken::has_known_size && taken::is_reversible);
+    static_assert(cc::impl::seq_has_range<taken::source_t>);
+    static_assert(cc::impl::seq_has_range<decltype(a.values().skip(1))::source_t>);
+
+    CHECK(equals(a.values().take(2).to_vector(), {1, 2}));
+    CHECK(equals(a.values().skip(3).to_vector(), {4}));
+    CHECK(equals(a.values().take_last(2).to_vector(), {3, 4}));
+}
+
+TEST("sequence lifetime - infinite and non-empty propagate")
+{
+    static_assert(decltype(cc::vector<int>().values().chain(cc::repeat(1)))::is_non_empty);
+    static_assert(decltype(cc::zip(cc::single(1), cc::repeat(2)))::is_non_empty);
+    static_assert(decltype(cc::single(1).map([](int) { return cc::repeat(1); }).flatten())::is_infinite);
+
+    // a step past the end does not overflow the size
+    auto const v = cc::vector<int>{1, 2, 3};
+    CHECK(v.values().step_by(isize(1) << 62).count() == 1);
+}
+
+TEST("sequence lifetime - keys and predicates take an index and spread items")
+{
+    auto const a = cc::vector<int>{1, 5, 2, 8};
+    auto const b = cc::vector<int>{3, 4, 6, 7};
+
+    auto const [less, more] = cc::zip(a, b).partition([](int x, int y) { return x < y; });
+    CHECK(less.size() == 2);
+    CHECK(more.size() == 2);
+
+    auto const by_half = a.values().count_by([](isize i, int) { return i < 2; });
+    CHECK(by_half.get(true) == 2);
+
+    CHECK(cc::zip(a, b).assert_non_empty().min_by([](int x, int y) { return y - x; }).get<0>() == 5);
+    CHECK(a.values().assert_non_empty().max_by([](isize i, int x) { return x - int(i) * 10; }) == 1);
+
+    auto const sums = cc::zip(a, b).scan(0, [](int acc, int x, int y) { return acc + x * y; }).to_vector();
+    CHECK(equals(sums, {3, 23, 35, 91}));
+
+    CHECK(equals(a.values().dedup_by([](isize i, int) { return i / 2; }).to_vector(), {1, 2}));
+
+    auto const m = cc::zip(a, b).to_map([](int x, int) { return x; }, [](isize i, int, int y) { return y + int(i); });
+    CHECK(m.get(8) == 10);
+
+    int keys = 0;
+    CHECK(a.values().is_sorted_by(
+        [&](int x)
+        {
+            ++keys;
+            return x % 3;
+        }));
+    CHECK(keys == 4);
+    CHECK(cc::zip(a, b).is_sorted_by([](int, int y) { return y; }));
+}

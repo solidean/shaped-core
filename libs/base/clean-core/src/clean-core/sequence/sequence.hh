@@ -37,8 +37,9 @@ struct cc::partition_result
 ///
 /// A sequence references the container it came from and must not outlive it; it is a temporary, like span.
 /// Terminal operations are &&-qualified and consume it, so `cc::move(s).count()` is how a named one is spent.
-/// A callback may take a leading `isize` index, its item's position in the sequence it is applied to.
-/// A zip's items reach a callback spread, f(a, b), where it takes them that way.
+/// Every callback, keys and predicates included, may take a leading `isize` index, its item's position in the sequence
+/// it is applied to, and receives a zip's or a window's items spread, f(a, b), where it takes them that way.
+/// Where both fit, spread wins: f(isize i, auto w) over a zip of ints is f(a, b).
 template <class SourceT>
 struct cc::sequence
 {
@@ -337,7 +338,7 @@ public:
             [] { return cc::optional<element_t>(); });
     }
 
-    /// The element whose key(element) is smallest by operator<, the first of equal ones, by value.
+    /// The element whose key(idx?, item) is smallest by operator<, the first of equal ones, by value.
     template <class KeyF>
     [[nodiscard]] constexpr element_t min_by(KeyF&& key) &&
     {
@@ -346,7 +347,7 @@ public:
         return this->template _best_by<true>(key);
     }
 
-    /// The element whose key(element) is largest by operator<, the first of equal ones, by value.
+    /// The element whose key(idx?, item) is largest by operator<, the first of equal ones, by value.
     template <class KeyF>
     [[nodiscard]] constexpr element_t max_by(KeyF&& key) &&
     {
@@ -626,12 +627,11 @@ public:
         return cc::move(*this).pairwise().all([](auto const& a, auto const& b) { return !bool(b < a); });
     }
 
-    /// Whether no element's key is smaller than the key before it.
+    /// Whether no element's key(idx?, item) is smaller than the key before it; each key is computed once.
     template <class KeyF>
     [[nodiscard]] constexpr bool is_sorted_by(KeyF&& key) &&
     {
-        return cc::move(*this).pairwise().all([&](auto const& a, auto const& b)
-                                              { return !bool(cc::invoke(key, b) < cc::invoke(key, a)); });
+        return cc::move(*this).map(cc::forward<KeyF>(key)).is_sorted();
     }
 
     //
@@ -705,14 +705,19 @@ public:
     constexpr void min_ptr_into(element_ptr_t& p) && { p = this->template _best_ptr<true>(p); }
     constexpr void max_ptr_into(element_ptr_t& p) && { p = this->template _best_ptr<false>(p); }
     /// p becomes a pointer to the element whose key is smallest among *p and every element; a null p takes the first.
+    /// The key takes no index, since *p has no position in this sequence.
     template <class KeyF>
     constexpr void min_ptr_by_into(element_ptr_t& p, KeyF&& key) &&
     {
+        static_assert(!impl::seq_call_takes_idx<std::remove_reference_t<KeyF>, impl::seq_view_t<item_t>>,
+                      "min_ptr_by_into(p, key): the element p points to has no position here, so key takes no index");
         this->template _best_ptr_by<true>(p, key);
     }
     template <class KeyF>
     constexpr void max_ptr_by_into(element_ptr_t& p, KeyF&& key) &&
     {
+        static_assert(!impl::seq_call_takes_idx<std::remove_reference_t<KeyF>, impl::seq_view_t<item_t>>,
+                      "max_ptr_by_into(p, key): the element p points to has no position here, so key takes no index");
         this->template _best_ptr_by<false>(p, key);
     }
 
@@ -787,24 +792,40 @@ public:
     }
 
     /// The first n elements; a source that can truncate itself does, so this adds no layer.
+    /// A sequence non-empty at compile time may become empty, so the result is no longer typed non-empty.
     [[nodiscard]] constexpr auto take(isize n) &&
     {
+        using base_t = typename impl::seq_without_non_empty<SourceT>::type;
         if constexpr (impl::seq_has_truncate<SourceT>)
         {
             _source.truncate(n < 0 ? 0 : n);
             return cc::move(*this);
+        }
+        else if constexpr (!std::is_same_v<base_t, SourceT> && impl::seq_has_truncate<base_t>)
+        {
+            auto base = base_t(static_cast<base_t&&>(_source));
+            base.truncate(n < 0 ? 0 : n);
+            return sequence<base_t>(cc::move(base));
         }
         else
             return sequence<impl::take_source<SourceT>>(impl::take_source<SourceT>(cc::move(_source), n));
     }
 
     /// All but the first n elements; a source that can advance itself skips them unevaluated.
+    /// A sequence non-empty at compile time may become empty, so the result is no longer typed non-empty.
     [[nodiscard]] constexpr auto skip(isize n) &&
     {
+        using base_t = typename impl::seq_without_non_empty<SourceT>::type;
         if constexpr (impl::seq_has_advance<SourceT>)
         {
             _source.advance(n < 0 ? 0 : n);
             return cc::move(*this);
+        }
+        else if constexpr (!std::is_same_v<base_t, SourceT> && impl::seq_has_advance<base_t>)
+        {
+            auto base = base_t(static_cast<base_t&&>(_source));
+            base.advance(n < 0 ? 0 : n);
+            return sequence<base_t>(cc::move(base));
         }
         else
             return sequence<impl::skip_source<SourceT>>(impl::skip_source<SourceT>(cc::move(_source), n));
@@ -846,10 +867,11 @@ public:
     }
 
     /// Each element with its position: callbacks take (isize i, item).
+    /// It keeps every trait and capability of this sequence: non-empty, infinite, sized, reversible.
     [[nodiscard]] constexpr auto enumerate() &&
     {
-        using source = impl::zip_source<impl::iota_source, SourceT>;
-        return sequence<source>(source(impl::iota_source(0, impl::seq_unbounded), cc::move(_source)));
+        using source = impl::enumerate_source<SourceT>;
+        return sequence<source>(source(cc::move(_source)));
     }
 
     /// The elements of each element, which is a sequence or a container whose values() is taken.
@@ -909,7 +931,7 @@ public:
         return sequence<source>(source(cc::move(_source), std::decay_t<F>(cc::forward<F>(f))));
     }
 
-    /// The running fold: acc = f(acc, item) per element, each acc an element; scan(0, plus) is the prefix sums.
+    /// The running fold: acc = f(acc, idx?, item) per element, each acc an element; scan(0, plus) is the prefix sums.
     template <class InitT, class F>
     [[nodiscard]] constexpr auto scan(InitT&& init, F&& f) &&
     {
@@ -926,7 +948,7 @@ public:
         return sequence<source>(source(cc::move(_source), impl::seq_identity_key{}));
     }
 
-    /// Each run of consecutive elements with equal key(element), as its first.
+    /// Each run of consecutive elements with equal key(idx?, item), as its first.
     template <class KeyF>
     [[nodiscard]] constexpr auto dedup_by(KeyF&& key) &&
     {
@@ -1050,79 +1072,84 @@ public:
         return v;
     }
 
-    /// The elements grouped by key(element) into a cc::map from each key to the elements with it, in sequence order.
+    /// The elements grouped by key(idx?, item) into a cc::map from each key to the elements with it, in sequence order.
     /// Include <clean-core/container/map.hh> and <clean-core/container/vector.hh> to call it.
     template <class KeyF>
     [[nodiscard]] constexpr auto to_grouped_map(KeyF&& key) &&
     {
-        using key_t = std::remove_cvref_t<decltype(cc::invoke(key, std::declval<element_t const&>()))>;
+        using key_t = _key_t<KeyF>;
         using map_t = cc::map<key_t, cc::vector<element_t>>;
         static_assert(impl::seq_is_complete<map_t>, "to_grouped_map() needs <clean-core/container/map.hh>");
         static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
         map_t groups;
+        auto call = impl::seq_indexed_call<std::remove_reference_t<KeyF>>{key};
         (void)impl::seq_try_fold(_source,
                                  [&]<class X>(X&& x)
                                  {
-                                     auto e = element_t(impl::seq_as_element(cc::forward<X>(x)));
-                                     auto k = key_t(cc::invoke(key, static_cast<element_t const&>(e)));
-                                     groups[k].push_back(cc::move(e));
+                                     auto k = key_t(call(impl::seq_view(x)));
+                                     groups[k].push_back(element_t(impl::seq_as_element(cc::forward<X>(x))));
                                      return false;
                                  });
         return groups;
     }
 
-    /// How many elements each key(element) has, as a cc::map from key to count.
+    /// How many elements each key(idx?, item) has, as a cc::map from key to count.
     /// Include <clean-core/container/map.hh> to call it.
     template <class KeyF>
     [[nodiscard]] constexpr auto count_by(KeyF&& key) &&
     {
-        using key_t = std::remove_cvref_t<decltype(cc::invoke(key, std::declval<element_t const&>()))>;
+        using key_t = _key_t<KeyF>;
         using map_t = cc::map<key_t, typename impl::seq_dependent<SourceT, isize>::type>;
         static_assert(impl::seq_is_complete<map_t>, "count_by() needs <clean-core/container/map.hh>");
         static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
         map_t counts;
+        auto call = impl::seq_indexed_call<std::remove_reference_t<KeyF>>{key};
         (void)impl::seq_try_fold(_source,
-                                 [&](auto const& x)
+                                 [&]<class X>(X&& x)
                                  {
-                                     ++counts[key_t(cc::invoke(key, x))];
+                                     ++counts[key_t(call(impl::seq_view(x)))];
                                      return false;
                                  });
         return counts;
     }
 
-    /// The elements that satisfy pred(item) and those that do not, each in sequence order.
+    /// The elements that satisfy pred(idx?, item) and those that do not, each in sequence order.
     /// Include <clean-core/container/vector.hh> to call it.
     template <class P>
     [[nodiscard]] constexpr cc::partition_result<element_t> partition(P&& pred) &&
     {
         static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
         auto result = cc::partition_result<element_t>();
+        auto call = impl::seq_indexed_call<std::remove_reference_t<P>>{pred};
         (void)impl::seq_try_fold(
             _source,
             [&]<class X>(X&& x)
             {
-                bool const passes = bool(cc::invoke(pred, static_cast<X const&>(x)));
+                bool const passes = bool(call(impl::seq_view(x)));
                 (passes ? result.passed : result.failed).push_back(impl::seq_as_element(cc::forward<X>(x)));
                 return false;
             });
         return result;
     }
 
-    /// A cc::map from key(element) to value(element); a later element replaces an earlier one with the same key.
+    /// A cc::map from key(idx?, item) to value(idx?, item); a later element replaces an earlier one with the same key.
     /// Include <clean-core/container/map.hh> to call it.
     template <class KeyF, class ValueF>
     [[nodiscard]] constexpr auto to_map(KeyF&& key, ValueF&& value) &&
     {
-        using key_t = std::remove_cvref_t<decltype(cc::invoke(key, std::declval<element_t const&>()))>;
-        using value_t = std::remove_cvref_t<decltype(cc::invoke(value, std::declval<element_t const&>()))>;
+        using key_t = _key_t<KeyF>;
+        using value_t = _key_t<ValueF>;
         using map_t = cc::map<key_t, value_t>;
         static_assert(impl::seq_is_complete<map_t>, "to_map() needs <clean-core/container/map.hh>");
         static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
         map_t m;
+        auto call_key = impl::seq_indexed_call<std::remove_reference_t<KeyF>>{key};
+        auto call_value = impl::seq_indexed_call<std::remove_reference_t<ValueF>>{value};
         (void)impl::seq_try_fold(_source,
-                                 [&](auto const& x)
+                                 [&]<class X>(X&& x)
                                  {
-                                     m[key_t(cc::invoke(key, x))] = value_t(cc::invoke(value, x));
+                                     auto k = key_t(call_key(impl::seq_view(x)));
+                                     m[cc::move(k)] = value_t(call_value(impl::seq_view(x)));
                                      return false;
                                  });
         return m;
@@ -1393,14 +1420,16 @@ private:
         static_assert(has_borrowed_elements, "a pointer reduction needs references that outlive the sequence");
         static_assert(!is_infinite, "this reduction traverses every element, and the sequence is infinite: .take(n) "
                                     "first");
-        using key_t = std::remove_cvref_t<decltype(cc::invoke(key, std::declval<element_t const&>()))>;
+        using key_t = _key_t<KeyF>;
         cc::optional<key_t> best_key;
-        if (p != nullptr)
-            best_key.emplace_value(cc::invoke(key, static_cast<element_t const&>(*p)));
+        if constexpr (!impl::seq_call_takes_idx<KeyF, impl::seq_view_t<item_t>>)
+            if (p != nullptr)
+                best_key.emplace_value(cc::invoke(key, impl::seq_view(*p)));
+        auto call = impl::seq_indexed_call<KeyF>{key};
         (void)impl::seq_try_fold(_source,
                                  [&](item_t x)
                                  {
-                                     auto k = key_t(cc::invoke(key, static_cast<element_t const&>(x)));
+                                     auto k = key_t(call(impl::seq_view(x)));
                                      if (p == nullptr || (IsMin ? k < best_key.value() : best_key.value() < k))
                                      {
                                          p = &x;
@@ -1430,20 +1459,24 @@ private:
                                  });
     }
 
+    // what key(idx?, item) returns, as the value a reduction keeps
+    template <class KeyF>
+    using _key_t = std::remove_cvref_t<impl::seq_call_result_t<std::remove_reference_t<KeyF>, impl::seq_view_t<item_t>>>;
+
     template <bool IsMin, class KeyF>
     constexpr element_t _best_by(KeyF& key)
     {
-        using key_t = std::remove_cvref_t<decltype(cc::invoke(key, std::declval<element_t const&>()))>;
+        using key_t = _key_t<KeyF>;
         struct best
         {
             element_t element;
             key_t key;
         };
+        auto call = impl::seq_indexed_call<KeyF>{key};
         auto const make = [&]<class X>(X&& x)
         {
-            auto e = element_t(impl::seq_as_element(cc::forward<X>(x)));
-            auto k = key_t(cc::invoke(key, static_cast<element_t const&>(e)));
-            return best{cc::move(e), cc::move(k)};
+            auto k = key_t(call(impl::seq_view(x)));
+            return best{element_t(impl::seq_as_element(cc::forward<X>(x))), cc::move(k)};
         };
         return this
             ->_fold_from_first(make,
@@ -1563,11 +1596,12 @@ template <class RangeT>
     auto s = impl::seq_source_of(cc::forward<RangeT>(range));
     return cc::sequence<decltype(s)>(cc::move(s));
 }
-/// An initializer list is borrowed: its backing array lives until the end of the full expression.
+/// An initializer list's backing array lives until the end of the full expression, so the sequence must not outlive it:
+/// `auto s = cc::values_of({1, 2, 3});` dangles, and no pointer into it escapes (find() does not compile).
 template <class T>
 [[nodiscard]] constexpr auto values_of(std::initializer_list<T> il)
 {
-    return cc::sequence<impl::span_source<T const>>(impl::span_source<T const>(il.begin(), il.end()));
+    return cc::sequence<impl::initializer_list_source<T>>(impl::initializer_list_source<T>(il));
 }
 
 /// The index sequence 0 .. size of any sized range, a C array included.

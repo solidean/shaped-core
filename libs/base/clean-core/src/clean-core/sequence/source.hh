@@ -19,6 +19,7 @@
 //   bool contains(auto const& v) const   // optional: membership without a scan, answered for the untouched source
 //   begin(), end()                       // optional: the remaining elements as a range, which range-for then uses directly
 //   item_t at(isize i)                   // optional, with size(): the i-th remaining element, 0 <= i < size()
+//   static constexpr bool has_pure_at    // optional, default false: at(i) evaluates nothing, so asking twice is free
 //   void advance(isize n)                // optional, with size(): drop the first min(n, size()) elements unevaluated
 //   void truncate(isize n)               // optional, with size(): keep only the first min(n, size()) elements
 //   next_back()                          // optional: the last remaining element, as next() returns the first
@@ -30,7 +31,9 @@
 //
 // next() and next_back() may be called any number of times in any mix, then try_fold or try_rfold at most once,
 // after which the source is spent.
-// at, advance and truncate are for the sequence layer before any next(), never interleaved with it.
+// at, advance and truncate address the elements remaining, so they may follow next() and next_back().
+// A reference a source hands out may point into the source itself (repeat's value, a temporary fixed_vector it owns):
+// it is valid only while that source object lives, so a source is never moved once it has handed one out.
 // try_fold must spell its return type `bool`: detection checks the declaration, never the body.
 // See libs/base/clean-core/docs/sequence.md.
 
@@ -194,6 +197,8 @@ concept seq_has_range = requires(S& s) {
 template <class S>
 concept seq_has_at = seq_has_size<S> && requires(S& s) { s.at(isize(0)); };
 template <class S>
+concept seq_has_pure_at = seq_has_at<S> && requires { requires S::has_pure_at; };
+template <class S>
 concept seq_has_advance = seq_has_size<S> && requires(S& s) { s.advance(isize(0)); };
 template <class S>
 concept seq_has_truncate = seq_has_size<S> && requires(S& s) { s.truncate(isize(0)); };
@@ -254,8 +259,29 @@ template <class S, class StepF>
     return a < b ? a : b;
 }
 
-/// The end of an index range that does not end, for enumerate's positions: far past any real count.
-inline constexpr isize seq_unbounded = isize(1) << 62;
+/// At least one element at compile time: non-empty by trait, or infinite.
+template <class S>
+inline constexpr bool seq_never_empty = seq_is_non_empty<S> || seq_is_infinite<S>;
+
+/// p, when it points into the bytes of from, as the same offset into to; anything else unchanged.
+/// It carries a reference a source handed out into its own storage across a move of that source,
+/// which is sound because a source's move keeps each member at its offset.
+template <class T, class S>
+[[nodiscard]] constexpr T* seq_rebase(T* p, S const& from, S& to)
+{
+    if consteval
+    {
+        return p;
+    }
+    else
+    {
+        auto const q = reinterpret_cast<u64>(p);     // NOLINT
+        auto const b = reinterpret_cast<u64>(&from); // NOLINT
+        if (q < b || q >= b + sizeof(S))
+            return p;
+        return reinterpret_cast<T*>(reinterpret_cast<unsigned char*>(&to) + (q - b)); // NOLINT
+    }
+}
 
 //
 // built-in sources
@@ -267,6 +293,7 @@ struct span_source
 {
     using item_t = T&;
     static constexpr bool is_borrowed = true;
+    static constexpr bool has_pure_at = true;
 
     T* _p;
     T* _end;
@@ -326,6 +353,7 @@ struct iota_source
 {
     using item_t = isize;
     static constexpr bool is_borrowed = true;
+    static constexpr bool has_pure_at = true;
 
     isize _i;
     isize _end;
@@ -380,6 +408,7 @@ struct owning_source
 {
     using item_t = std::remove_pointer_t<decltype(std::declval<ContainerT&>().data())>&;
     static constexpr bool is_expiring = true;
+    static constexpr bool has_pure_at = true;
 
     ContainerT _container;
     isize _i = 0;
@@ -441,6 +470,7 @@ struct strided_source
     using item_t = T&;
     using byte_ptr = std::conditional_t<std::is_const_v<T>, unsigned char const*, unsigned char*>;
     static constexpr bool is_borrowed = true;
+    static constexpr bool has_pure_at = true;
 
     byte_ptr _start;
     isize _stride;
@@ -494,16 +524,29 @@ struct strided_source
 
 /// A source known to be non-empty, by construction or by a check already made.
 /// It is the source itself with the trait flipped, so it forwards every capability for free.
-/// advance and truncate are hidden, since either may empty it.
+/// advance and truncate are hidden, since either may empty it: take and skip unwrap it to reach them.
 template <class S>
 struct non_empty_source : S
 {
+    using base_t = S;
     static constexpr bool is_non_empty = true;
 
     constexpr explicit non_empty_source(S&& s) : S(cc::move(s)) {}
 
     void advance(isize) = delete;
     void truncate(isize) = delete;
+};
+
+/// The source under a non_empty_source, or S itself.
+template <class S>
+struct seq_without_non_empty
+{
+    using type = S;
+};
+template <class S>
+struct seq_without_non_empty<non_empty_source<S>>
+{
+    using type = S;
 };
 
 /// A sequence over source, non-empty at compile time when IsNonEmpty.
@@ -517,11 +560,15 @@ template <bool IsNonEmpty, class S>
         return cc::sequence<source_t>(cc::move(source));
 }
 
-/// values() of a contiguous container: borrowing over an lvalue, owning over a non-const temporary.
+/// values() of a contiguous container: borrowing over an lvalue, owning over a temporary.
+/// A const temporary can be neither borrowed, since it dies, nor moved from, so it is refused.
 template <bool IsNonEmpty, class C>
 [[nodiscard]] constexpr auto seq_contiguous_values(C&& c)
 {
-    if constexpr (std::is_lvalue_reference_v<C> || std::is_const_v<std::remove_reference_t<C>>)
+    static_assert(std::is_lvalue_reference_v<C> || !std::is_const_v<std::remove_reference_t<C>>,
+                  "values() of a const temporary: it dies with the expression and cannot be moved from, "
+                  "so drop the const or bind it to a variable first");
+    if constexpr (std::is_lvalue_reference_v<C>)
     {
         using element_t = std::remove_pointer_t<decltype(c.data())>;
         return impl::seq_make<IsNonEmpty>(span_source<element_t>(c.data(), c.data() + c.size()));

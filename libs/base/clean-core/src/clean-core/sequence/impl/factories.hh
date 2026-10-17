@@ -16,6 +16,7 @@ struct repeat_source
     using item_t = T const&;
     static constexpr bool is_infinite = IsInfinite;
     static constexpr bool is_non_empty = IsInfinite;
+    static constexpr bool has_pure_at = !IsInfinite;
 
     T _value;
     isize _n = 0;
@@ -167,6 +168,7 @@ struct iterator_source
         a[i];
         a += i;
     };
+    static constexpr bool has_pure_at = is_random_access && std::is_lvalue_reference_v<deref_t>;
 
     It _it;
     End _end;
@@ -272,7 +274,11 @@ template <class R>
 [[nodiscard]] constexpr auto seq_range_source(R&& r)
 {
     using range_t = std::remove_cvref_t<R>;
-    constexpr bool is_owned = !std::is_lvalue_reference_v<R> && !std::is_const_v<std::remove_reference_t<R>>;
+    constexpr bool is_owned = !std::is_lvalue_reference_v<R>;
+    static_assert(
+        !is_owned || !std::is_const_v<std::remove_reference_t<R>> || std::is_array_v<std::remove_reference_t<R>>,
+        "a sequence over a const temporary: it dies with the expression and cannot be moved from, "
+        "so drop the const or bind it to a variable first");
     if constexpr (std::is_array_v<std::remove_reference_t<R>>)
     {
         using element_t = std::remove_extent_t<std::remove_reference_t<R>>;
@@ -295,10 +301,21 @@ template <class R>
         return iterator_source<decltype(r.begin()), decltype(r.end())>(r.begin(), r.end());
 }
 
-/// An initializer list's backing array lives until the end of the full expression, so it is borrowed, never owned.
+/// The source over an initializer list's backing array, which lives only until the end of the full expression:
+/// a span, but not borrowed, so no pointer into it escapes the sequence.
+template <class T>
+struct initializer_list_source : span_source<T const>
+{
+    static constexpr bool is_borrowed = false;
+
+    constexpr explicit initializer_list_source(std::initializer_list<T> il) : span_source<T const>(il.begin(), il.end())
+    {
+    }
+};
+
 template <class T>
 [[nodiscard]] constexpr auto seq_range_source(std::initializer_list<T> il)
 {
-    return span_source<T const>(il.begin(), il.end());
+    return initializer_list_source<T>(il);
 }
 } // namespace cc::impl

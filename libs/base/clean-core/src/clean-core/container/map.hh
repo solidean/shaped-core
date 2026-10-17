@@ -302,12 +302,14 @@ public:
     /// On a temporary the sequence takes the map over.
     [[nodiscard]] auto keys() const& { return cc::impl::seq_make<false>(key_source<true>(this)); }
     [[nodiscard]] auto keys() && { return cc::impl::seq_make<false>(owning_node_source<true>(cc::move(*this))); }
+    auto keys() const&& = delete; // a const temporary dies with the expression and cannot be moved from
 
     /// The mapped values as a cc::sequence, in iteration order.
     /// On a temporary the sequence takes the map over, and materializing moves the values out.
     [[nodiscard]] auto values() & { return cc::impl::seq_make<false>(node_source<false, false>(this)); }
     [[nodiscard]] auto values() const& { return cc::impl::seq_make<false>(node_source<false, true>(this)); }
     [[nodiscard]] auto values() && { return cc::impl::seq_make<false>(owning_node_source<false>(cc::move(*this))); }
+    auto values() const&& = delete;
 
     // ctors / dtor
 public:

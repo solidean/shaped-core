@@ -12,8 +12,8 @@
 //   cc::println("{:.2f}", ws.values());          // the spec applies to each element: [0.50, 1.25]
 //   cc::println("{}", cc::zip(a, b));            // a zip's items print as tuples: [(1, 4), (2, 5)]
 //
-// Formatting a sequence consumes it, as every terminal operation does.
-// cc::format takes its arguments by const reference, so the formatter casts that away: never format a const sequence object.
+// Formatting a sequence consumes it, as every terminal operation does, so it must be an rvalue:
+// cc::println("{}", s) on a named s does not compile, and cc::println("{}", cc::move(s)) spends it.
 
 template <class S>
 struct cc::impl::seq_format_support
@@ -91,6 +91,9 @@ struct cc::impl::seq_format_support
 template <class S>
 struct cc::custom::formatter<cc::sequence<S>>
 {
+    // format_validate_category refuses an lvalue or const argument, so the one format() receives is a non-const rvalue
+    static constexpr bool consumes_argument = true;
+
     static consteval void validate(cc::string_view spec)
     {
         cc::impl::seq_format_support<S>::template validate_element<std::remove_cvref_t<typename cc::sequence<S>::item_t>>(

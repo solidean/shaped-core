@@ -81,6 +81,7 @@ public:
     /// On a temporary the sequence takes the set over.
     [[nodiscard]] auto values() const& { return _map.keys(); }
     [[nodiscard]] auto values() && { return cc::move(_map).keys(); }
+    auto values() const&& = delete; // a const temporary dies with the expression and cannot be moved from
 
     // iteration
 public:

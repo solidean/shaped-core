@@ -154,7 +154,11 @@ template <class F, class X, std::size_t... Is>
 inline constexpr bool seq_spread_invocable_idx<F, X, std::index_sequence<Is...>>
     = cc::is_invocable<F&, isize, decltype(std::remove_cvref_t<X>::template item<Is>(std::declval<X>()))...>;
 
-/// How a callback takes an item, decided once at compile time.
+/// How a callback takes an item, decided once at compile time by the first form it accepts.
+/// Over a pack the order is spread, idx_spread, item, idx_item, otherwise item, idx_item:
+/// so f(isize i, auto w) over a zip of ints takes (a, b), never (idx, pack).
+/// A form is not checked for ambiguity: asking whether a generic lambda takes the other form would compile its body
+/// with that form's arguments, which is a hard error rather than a no.
 enum class seq_call_form
 {
     item,       // f(item)
@@ -216,6 +220,31 @@ constexpr decltype(auto) seq_call(F& f, isize& idx, X&& x)
 
 template <class F, class X>
 using seq_call_result_t = decltype(impl::seq_call(std::declval<F&>(), std::declval<isize&>(), std::declval<X>()));
+
+/// The const view of an item a key or predicate callback receives, which must not consume it.
+template <class ItemT>
+using seq_view_t = std::remove_reference_t<ItemT> const&;
+
+template <class X>
+[[nodiscard]] constexpr std::remove_reference_t<X> const& seq_view(X&& x)
+{
+    return x;
+}
+
+/// f with its first argument bound, invocable exactly where f is, so seq_call still picks the form f takes after it.
+template <class F, class A>
+struct seq_bind_front
+{
+    F& f;
+    A const& a;
+
+    template <class... Xs>
+        requires cc::is_invocable<F&, A const&, Xs...>
+    constexpr decltype(auto) operator()(Xs&&... xs) const
+    {
+        return cc::invoke(f, a, cc::forward<Xs>(xs)...);
+    }
+};
 
 /// A callback with its own position counter, for a sequence-layer reduction.
 template <class F>

@@ -13,34 +13,63 @@ namespace cc::impl
 template <class T, std::size_t>
 using seq_repeat_type = T;
 
-/// The pack of N items a window or chunk yields: each item of the input, by reference where the input has references.
-/// A prvalue input is buffered, so its window holds const references into that buffer, valid until the next step.
-template <class ItemT, class Is>
-struct seq_group_pack;
-template <class ItemT, std::size_t... Is>
-struct seq_group_pack<ItemT, std::index_sequence<Is...>>
+/// How a window or chunk over S holds its items, and the pack of N it yields.
+/// Indexed, it reads them through at(): a reference stays one, a prvalue is held in the pack by value.
+/// Buffered, it keeps the last next() results: references only where they are borrowed, since a reference into the
+/// source itself may die at the next step (flatten's owned inner containers), and a copy otherwise.
+/// A buffered window's pack then holds const references into that buffer, valid until the next step.
+template <class S, bool IsIndexed, class Is>
+struct seq_group;
+template <class S, bool IsIndexed, std::size_t... Is>
+struct seq_group<S, IsIndexed, std::index_sequence<Is...>>
 {
-    using ref_t = std::conditional_t<std::is_reference_v<ItemT>, ItemT, ItemT const&>;
+    using inner_item_t = typename S::item_t;
+    static constexpr bool keeps_reference = std::is_reference_v<inner_item_t> && (IsIndexed || seq_is_borrowed<S>);
+
+    // what the buffer holds per item, and how the pack names it
+    using buffered_t = std::conditional_t<keeps_reference, inner_item_t, std::remove_cvref_t<inner_item_t>>;
+    using ref_t = std::conditional_t<keeps_reference,
+                                     inner_item_t,
+                                     std::conditional_t<IsIndexed, std::remove_cvref_t<inner_item_t>, buffered_t const&>>;
     using type = seq_pack<seq_repeat_type<ref_t, Is>...>;
+
+    // one next() result of S as the buffer holds it
+    template <class R>
+    [[nodiscard]] static constexpr seq_next_t<buffered_t> buffer(R&& r)
+    {
+        if constexpr (std::is_same_v<std::remove_cvref_t<R>, seq_next_t<buffered_t>>)
+            return cc::move(r);
+        else
+        {
+            if (!r)
+                return {};
+            if constexpr (seq_is_expiring<S>)
+                return seq_next_t<buffered_t>(seq_emplace, [&] { return buffered_t(cc::move(*r)); });
+            else
+                return seq_next_t<buffered_t>(seq_emplace, [&] { return buffered_t(*r); });
+        }
+    }
 };
 
 /// Every N consecutive elements, overlapping: windows<2> is pairwise.
+/// Each element is in up to N windows, so it is an index loop only where at() evaluates nothing, and buffers otherwise:
+/// a map's function is still called once per element.
 template <class S, std::size_t N>
 struct window_source
 {
     static_assert(N > 0, "a window has at least one element");
 
-    using inner_item_t = typename S::item_t;
-    using item_t = typename seq_group_pack<inner_item_t, std::make_index_sequence<N>>::type;
-    using ref_t = typename seq_group_pack<inner_item_t, std::make_index_sequence<N>>::ref_t;
-    static constexpr bool is_indexed = seq_has_at<S>;
-    static constexpr bool is_borrowed = is_indexed && seq_is_borrowed<S> && std::is_reference_v<inner_item_t>;
+    static constexpr bool is_indexed = seq_has_pure_at<S>;
+    using group = seq_group<S, is_indexed, std::make_index_sequence<N>>;
+    using item_t = typename group::type;
+    using ref_t = typename group::ref_t;
     static constexpr bool is_infinite = seq_is_infinite<S>;
+    static constexpr bool has_pure_at = is_indexed;
 
     S _inner;
     isize _front = 0; // windows taken from the front
     isize _back = 0;  // windows taken from the back
-    seq_next_t<inner_item_t> _slots[is_indexed ? 1 : N];
+    seq_next_t<typename group::buffered_t> _slots[is_indexed ? 1 : N];
     bool _filled = false;
 
     constexpr explicit window_source(S&& inner) : _inner(cc::move(inner)) {}
@@ -63,14 +92,14 @@ struct window_source
         {
             for (std::size_t k = 0; k < N; ++k)
             {
-                _slots[k] = _inner.next();
+                _slots[k] = group::buffer(_inner.next());
                 if (!_slots[k])
                     return false;
             }
             _filled = true;
             return true;
         }
-        auto r = _inner.next();
+        auto r = group::buffer(_inner.next());
         if (!r)
             return false;
         for (std::size_t k = 0; k + 1 < N; ++k)
@@ -145,22 +174,23 @@ struct window_source
 };
 
 /// Consecutive groups of N, not overlapping; a trailing group of fewer than N is dropped.
+/// Each element is in one chunk, so any source with positions is an index loop.
 template <class S, std::size_t N>
 struct chunk_source
 {
     static_assert(N > 0, "a chunk has at least one element");
 
-    using inner_item_t = typename S::item_t;
-    using item_t = typename seq_group_pack<inner_item_t, std::make_index_sequence<N>>::type;
-    using ref_t = typename seq_group_pack<inner_item_t, std::make_index_sequence<N>>::ref_t;
     static constexpr bool is_indexed = seq_has_at<S>;
-    static constexpr bool is_borrowed = is_indexed && seq_is_borrowed<S> && std::is_reference_v<inner_item_t>;
+    using group = seq_group<S, is_indexed, std::make_index_sequence<N>>;
+    using item_t = typename group::type;
+    using ref_t = typename group::ref_t;
     static constexpr bool is_infinite = seq_is_infinite<S>;
+    static constexpr bool has_pure_at = seq_has_pure_at<S>;
 
     S _inner;
     isize _front = 0;
     isize _back = 0;
-    seq_next_t<inner_item_t> _slots[is_indexed ? 1 : N];
+    seq_next_t<typename group::buffered_t> _slots[is_indexed ? 1 : N];
 
     constexpr explicit chunk_source(S&& inner) : _inner(cc::move(inner)) {}
 
@@ -178,7 +208,7 @@ struct chunk_source
     {
         for (std::size_t k = 0; k < N; ++k)
         {
-            _slots[k] = _inner.next();
+            _slots[k] = group::buffer(_inner.next());
             if (!_slots[k])
                 return false;
         }
@@ -258,6 +288,7 @@ struct step_source
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
+    static constexpr bool has_pure_at = seq_has_pure_at<S>;
 
     S _inner;
     isize _k;
@@ -273,7 +304,8 @@ struct step_source
     [[nodiscard]] constexpr isize size() const
         requires is_indexed
     {
-        return (_inner.size() + _k - 1) / _k - _front - _back;
+        auto const n = _inner.size();
+        return (n == 0 ? 0 : (n - 1) / _k + 1) - _front - _back;
     }
     [[nodiscard]] constexpr bool is_empty() const
         requires is_indexed

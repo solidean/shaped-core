@@ -186,6 +186,8 @@ struct filter_source
 
 /// A source whose first element was pulled to learn it exists, and is held until asked for.
 /// This is the one element a runtime non-empty check over a source without is_empty() must buffer.
+/// That element may reference storage inside the source (repeat's value, a temporary fixed_vector it owns),
+/// so moving the source carries the reference along to the same place in the moved-to source.
 template <class S>
 struct peeked_source
 {
@@ -195,13 +197,32 @@ struct peeked_source
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
 
-    seq_next_t<item_t> _first;
     S _rest;
+    seq_next_t<item_t> _first;
 
-    constexpr peeked_source(seq_next_t<item_t>&& first, S&& rest) : _first(cc::move(first)), _rest(cc::move(rest))
+    // first, pulled from the source at from, as a reference into the source at to
+    static constexpr seq_next_t<item_t> _carry(seq_next_t<item_t>&& first, S const& from, S& to)
+    {
+        if constexpr (std::is_reference_v<item_t> && !seq_is_borrowed<S>)
+            return impl::seq_rebase(first, from, to);
+        else
+            return cc::move(first);
+    }
+
+    constexpr peeked_source(seq_next_t<item_t>&& first, S&& rest)
+      : _rest(cc::move(rest)), _first(peeked_source::_carry(cc::move(first), rest, _rest))
     {
         CC_ASSERT(bool(_first), "a peeked source needs its first element");
     }
+
+    constexpr peeked_source(peeked_source&& rhs) noexcept
+      : _rest(cc::move(rhs._rest)), _first(peeked_source::_carry(cc::move(rhs._first), rhs._rest, _rest))
+    {
+    }
+    peeked_source(peeked_source const&) = delete;
+    peeked_source& operator=(peeked_source const&) = delete;
+    peeked_source& operator=(peeked_source&&) = delete;
+    ~peeked_source() = default;
 
     [[nodiscard]] constexpr seq_next_t<item_t> next()
     {
@@ -460,6 +481,7 @@ struct reverse_source
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
+    static constexpr bool has_pure_at = seq_has_pure_at<S>;
 
     S _inner;
 
@@ -507,6 +529,7 @@ struct reverse_source
 };
 
 /// The input unchanged, with f(idx?, item) called on each element as it passes.
+/// It has no size, so count() passes every element by f rather than answering from the input's.
 template <class S, class F>
 struct inspect_source
 {
@@ -540,11 +563,6 @@ struct inspect_source
                                   });
     }
 
-    [[nodiscard]] constexpr isize size() const
-        requires seq_has_size<S>
-    {
-        return _inner.size();
-    }
     [[nodiscard]] constexpr bool is_empty() const
         requires seq_has_is_empty<S>
     {
@@ -573,7 +591,8 @@ struct filter_map_source
     using inner_item_t = typename S::item_t;
     using result_t = std::remove_cvref_t<seq_call_result_t<F, inner_item_t>>;
     using item_t = typename seq_filter_map_item<result_t>::type;
-    static constexpr bool is_borrowed = std::is_reference_v<item_t>;
+    // a pointer result may point into the input's elements, so it outlives the sequence only where they do
+    static constexpr bool is_borrowed = std::is_reference_v<item_t> && seq_is_borrowed<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
 
     S _inner;
@@ -624,7 +643,7 @@ struct filter_map_source
     }
 };
 
-/// The running fold: acc = f(acc, item) per element, and each acc in turn is an element.
+/// The running fold: acc = f(acc, idx?, item) per element, and each acc in turn is an element.
 template <class S, class AccT, class F>
 struct scan_source
 {
@@ -635,6 +654,7 @@ struct scan_source
     S _inner;
     AccT _acc;
     F _f;
+    isize _idx = 0;
 
     constexpr scan_source(S&& inner, AccT&& init, F&& f)
       : _inner(cc::move(inner)), _acc(cc::move(init)), _f(cc::move(f))
@@ -644,7 +664,8 @@ struct scan_source
     template <class X>
     constexpr void _step(X&& x)
     {
-        _acc = AccT(cc::invoke(_f, static_cast<AccT const&>(_acc), cc::forward<X>(x)));
+        auto f = seq_bind_front<F, AccT>{_f, _acc};
+        _acc = AccT(impl::seq_call(f, _idx, cc::forward<X>(x)));
     }
 
     [[nodiscard]] constexpr seq_slot<AccT> next()
@@ -688,24 +709,26 @@ struct seq_identity_key
     }
 };
 
-/// Each run of consecutive elements with equal keys, as its first element.
-/// Over references with the identity key it remembers the last element by pointer; otherwise it keeps a copy of the key.
+/// Each run of consecutive elements with equal key(idx?, item), as its first element.
+/// Over borrowed references with the identity key it remembers the last element by pointer;
+/// otherwise it keeps a copy of the key, since a reference into the source may die at the next step.
 template <class S, class KeyF>
 struct dedup_source
 {
     using item_t = typename S::item_t;
-    using element_t = std::remove_cvref_t<item_t>;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
-    static constexpr bool keeps_pointer = std::is_same_v<KeyF, seq_identity_key> && std::is_reference_v<item_t>;
-    using key_t = std::remove_cvref_t<decltype(cc::invoke(std::declval<KeyF&>(), std::declval<element_t const&>()))>;
+    static constexpr bool keeps_pointer
+        = std::is_same_v<KeyF, seq_identity_key> && std::is_reference_v<item_t> && seq_is_borrowed<S>;
+    using key_t = std::remove_cvref_t<seq_call_result_t<KeyF, seq_view_t<item_t>>>;
     using last_t = std::conditional_t<keeps_pointer, std::remove_reference_t<item_t>*, seq_slot<key_t>>;
 
     S _inner;
     KeyF _key;
     last_t _last = {};
+    isize _idx = 0;
 
     constexpr dedup_source(S&& inner, KeyF&& key) : _inner(cc::move(inner)), _key(cc::move(key)) {}
 
@@ -722,7 +745,7 @@ struct dedup_source
         }
         else
         {
-            auto k = key_t(cc::invoke(_key, static_cast<element_t const&>(x)));
+            auto k = key_t(impl::seq_call(_key, _idx, impl::seq_view(x)));
             if (_last && *_last == k)
                 return false;
             _last = seq_slot<key_t>(seq_emplace, [&] { return cc::move(k); });
@@ -749,6 +772,100 @@ struct dedup_source
                                           return false;
                                       return step(cc::forward<X>(x));
                                   });
+    }
+};
+
+/// Each item with its position, as (isize idx, item): enumerate's source.
+/// The position is an offset, so every capability of the input carries over.
+template <class S>
+struct enumerate_source
+{
+    using inner_item_t = typename S::item_t;
+    using item_t = seq_pack<isize, inner_item_t>;
+    static constexpr bool is_non_empty = seq_is_non_empty<S>;
+    static constexpr bool is_borrowed = seq_is_borrowed<S>;
+    static constexpr bool is_infinite = seq_is_infinite<S>;
+    static constexpr bool has_pure_at = seq_has_pure_at<S>;
+
+    S _inner;
+    isize _idx = 0; // the position of the first element left
+
+    constexpr explicit enumerate_source(S&& inner) : _inner(cc::move(inner)) {}
+
+    template <class X>
+    static constexpr item_t _pack(isize i, X&& x)
+    {
+        return impl::seq_make_pack<isize, inner_item_t>(i, cc::forward<X>(x));
+    }
+
+    [[nodiscard]] constexpr seq_slot<item_t> next()
+    {
+        auto r = _inner.next();
+        if (!r)
+            return {};
+        auto const i = _idx++;
+        return seq_slot<item_t>(seq_emplace, [&] { return enumerate_source::_pack(i, impl::seq_get(r)); });
+    }
+
+    [[nodiscard]] constexpr bool try_fold(auto&& step)
+    {
+        if constexpr (seq_has_at<S>)
+        {
+            auto const n = _inner.size();
+            for (isize i = 0; i < n; ++i)
+                if (step(enumerate_source::_pack(_idx + i, _inner.at(i))))
+                    return true;
+            return false;
+        }
+        else
+            return impl::seq_try_fold(_inner, [&]<class X>(X&& x) -> bool
+                                      { return step(enumerate_source::_pack(_idx++, cc::forward<X>(x))); });
+    }
+
+    [[nodiscard]] constexpr isize size() const
+        requires seq_has_size<S>
+    {
+        return _inner.size();
+    }
+    [[nodiscard]] constexpr bool is_empty() const
+        requires seq_has_is_empty<S>
+    {
+        return _inner.is_empty();
+    }
+
+    [[nodiscard]] constexpr item_t at(isize i)
+        requires seq_has_at<S>
+    {
+        return enumerate_source::_pack(_idx + i, _inner.at(i));
+    }
+    constexpr void advance(isize n)
+        requires seq_has_advance<S>
+    {
+        auto const k = impl::seq_min(n, _inner.size());
+        _inner.advance(k);
+        _idx += k;
+    }
+    constexpr void truncate(isize n)
+        requires seq_has_truncate<S>
+    {
+        _inner.truncate(n);
+    }
+
+    [[nodiscard]] constexpr seq_slot<item_t> next_back()
+        requires seq_has_next_back<S> && seq_has_size<S>
+    {
+        auto const i = _idx + _inner.size() - 1;
+        auto r = _inner.next_back();
+        if (!r)
+            return {};
+        return seq_slot<item_t>(seq_emplace, [&] { return enumerate_source::_pack(i, impl::seq_get(r)); });
+    }
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+        requires seq_has_next_back<S> && seq_has_size<S>
+    {
+        auto i = _idx + _inner.size() - 1;
+        return impl::seq_try_rfold(
+            _inner, [&]<class X>(X&& x) -> bool { return step(enumerate_source::_pack(i--, cc::forward<X>(x))); });
     }
 };
 } // namespace cc::impl

@@ -125,7 +125,12 @@ TEST("sequence - inspect, filter_map, scan, dedup")
     int peeked = 0;
     CHECK(v.values().inspect([&](int x) { peeked += x; }).filter(odd).count() == 6);
     CHECK(peeked == 14);
-    static_assert(decltype(v.values().inspect([](int) {}))::has_known_size);
+
+    // inspect has no size, so count() passes every element by it
+    static_assert(!decltype(v.values().inspect([](int) {}))::has_known_size);
+    int counted = 0;
+    CHECK(v.values().inspect([&](int) { ++counted; }).count() == 7);
+    CHECK(counted == 7);
 
     // an optional result keeps its value, an empty one drops the element
     auto const halve_evens = [](int x) { return x % 2 == 0 ? cc::optional<int>(x / 2) : cc::optional<int>(); };

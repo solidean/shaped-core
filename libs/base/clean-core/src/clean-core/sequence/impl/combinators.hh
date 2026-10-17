@@ -16,7 +16,7 @@ template <class S>
 inline constexpr bool seq_is_sequence<cc::sequence<S>> = true;
 
 /// The source behind x: a sequence's own, the one x.values() hands out, or one over x as a foreign range.
-/// A temporary container is owned either way.
+/// A temporary container is owned either way, and one whose values() refuses a temporary is refused here too.
 template <class X>
 [[nodiscard]] constexpr auto seq_source_of(X&& x)
 {
@@ -28,7 +28,13 @@ template <class X>
     else if constexpr (requires { cc::forward<X>(x).values(); })
         return seq_dependent<X, seq_access>::type::source(cc::forward<X>(x).values());
     else
+    {
+        static_assert(
+            !requires(std::remove_cvref_t<X>& c) { c.values(); },
+            "this container's values() refuses a temporary, so it cannot be one here either: "
+            "bind it to a variable first");
         return impl::seq_range_source(cc::forward<X>(x));
+    }
 }
 
 /// The item two chained sequences share: the same element type, as a reference where both are one.
@@ -53,7 +59,7 @@ template <class A, class B>
 struct chain_source
 {
     using item_t = typename seq_chain_item<typename A::item_t, typename B::item_t>::type;
-    static constexpr bool is_non_empty = seq_is_non_empty<A> || seq_is_non_empty<B>;
+    static constexpr bool is_non_empty = seq_never_empty<A> || seq_never_empty<B>;
     static constexpr bool is_borrowed = seq_is_borrowed<A> && seq_is_borrowed<B>;
     static constexpr bool is_expiring = seq_is_expiring<A> && seq_is_expiring<B>;
     static constexpr bool is_infinite = seq_is_infinite<A> || seq_is_infinite<B>;
@@ -166,9 +172,10 @@ template <class S0, class... Ss>
 struct zip_source
 {
     using item_t = seq_pack<typename S0::item_t, typename Ss::item_t...>;
-    static constexpr bool is_non_empty = seq_is_non_empty<S0> && (seq_is_non_empty<Ss> && ...);
+    static constexpr bool is_non_empty = seq_never_empty<S0> && (seq_never_empty<Ss> && ...);
     static constexpr bool is_borrowed = seq_is_borrowed<S0> && (seq_is_borrowed<Ss> && ...);
     static constexpr bool is_indexed = seq_has_at<S0> && (seq_has_at<Ss> && ...);
+    static constexpr bool has_pure_at = seq_has_pure_at<S0> && (seq_has_pure_at<Ss> && ...);
     static constexpr bool is_sized = seq_has_size<S0> && (seq_has_size<Ss> && ...);
     static constexpr bool is_infinite = seq_is_infinite<S0> && (seq_is_infinite<Ss> && ...);
     static constexpr bool is_reversible = is_sized && seq_has_next_back<S0> && (seq_has_next_back<Ss> && ...);
@@ -274,6 +281,17 @@ struct zip_source
         }(rest_index_t{});
     }
 
+    // a side cut to n elements: truncated where it can be, stepped back unevaluated otherwise
+    template <class Side>
+    static constexpr void _trim(Side& side, isize n)
+    {
+        if constexpr (seq_has_truncate<Side>)
+            side.truncate(n);
+        else
+            while (side.size() > n)
+                (void)side.next_back();
+    }
+
     // from the back, every side first drops what reaches past the shortest
     [[nodiscard]] constexpr seq_next_t<item_t> next_back()
         requires is_reversible
@@ -281,15 +299,8 @@ struct zip_source
         return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> seq_next_t<item_t>
         {
             auto const n = this->size();
-            while (_first.size() > n)
-                (void)_first.next_back();
-            ((
-                 [&]
-                 {
-                     while (this->template _r<Is>().size() > n)
-                         (void)this->template _r<Is>().next_back();
-                 }()),
-             ...);
+            zip_source::_trim(_first, n);
+            (zip_source::_trim(this->template _r<Is>(), n), ...);
             if (n == 0)
                 return {};
             auto r0 = _first.next_back();
@@ -341,7 +352,8 @@ struct flatten_source
     using inner_source_t = decltype(impl::seq_source_of(std::declval<outer_item_t>()));
     using item_t = typename inner_source_t::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S> && seq_is_borrowed<inner_source_t>;
-    static constexpr bool is_infinite = seq_is_infinite<S>;
+    // an infinite outer may hold only empty inners, which never ends either; an infinite first inner never ends
+    static constexpr bool is_infinite = seq_is_infinite<S> || (seq_never_empty<S> && seq_is_infinite<inner_source_t>);
     static constexpr bool is_reversible = seq_has_next_back<S> && seq_has_next_back<inner_source_t>;
 
     S _outer;

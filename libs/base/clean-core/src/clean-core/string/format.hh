@@ -149,6 +149,17 @@ consteval void format_validate_arg_fields(string_view fmt, isize target)
     }
 }
 
+/// A formatter declaring `consumes_argument` spends its argument (a cc::sequence's does), so the argument must be an
+/// rvalue: formatting a named one would consume it unseen, and a const one is undefined.
+template <class T>
+consteval void format_validate_category()
+{
+    if constexpr (requires { requires cc::custom::formatter<std::remove_cvref_t<T>>::consumes_argument; })
+        static_assert(!std::is_lvalue_reference_v<T> && !std::is_const_v<std::remove_reference_t<T>>,
+                      "formatting this argument consumes it, as formatting a cc::sequence does: "
+                      "pass it as a temporary or through cc::move");
+}
+
 /// Validates every field against the type of the argument it references, assigning each argument its index
 /// in turn.
 ///
@@ -160,6 +171,7 @@ consteval void format_validate_args(string_view fmt)
 {
     isize index = 0;
     (format_validate_arg_fields<Args>(fmt, index++), ...);
+    (format_validate_category<Args>(), ...);
 }
 } // namespace impl
 
