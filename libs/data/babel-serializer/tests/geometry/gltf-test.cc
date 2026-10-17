@@ -458,6 +458,42 @@ TEST("gltf - node transforms keep the form the file used")
     CHECK(doc.nodes[2].scale == tg::vec3f(1, 1, 1)); // the spec's default scale is one, not zero
     CHECK(doc.nodes[2].rotation == tg::quat_f::identity);
     CHECK(doc.children_of(doc.nodes[2]).empty());
+
+    // local_transform reads whichever form the file used
+    CHECK(doc.nodes[0].local_transform()(tg::pos3f(1, 1, 1)) == tg::pos3f(6, 7, 8));
+    // scale 2, then half a turn about z, then the translation
+    auto const moved = doc.nodes[1].local_transform()(tg::pos3f(1, 0, 0));
+    CHECK((moved - tg::pos3f(-1, 2, 3)).length() < 1e-5f);
+    CHECK(doc.nodes[2].local_transform()(tg::pos3f(4, 5, 6)) == tg::pos3f(4, 5, 6));
+}
+
+TEST("gltf - a node matrix that is not affine is malformed, and keeps its affine part")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "nodes": [{"matrix": [1, 0, 0, 0.5, 0, 1, 0, 0, 0, 0, 1, 0, 5, 6, 7, 1]}]})"))
+                         .value();
+
+    CHECK(doc.has_issue_of(babel::gltf::issue_kind::malformed));
+    CHECK((doc.nodes[0].matrix[0, 3]) == 0);
+    CHECK(doc.nodes[0].local_transform()(tg::pos3f(0, 0, 0)) == tg::pos3f(5, 6, 7));
+}
+
+TEST("gltf - a vec3 accessor's stated bounds come back as a box")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "accessors": [
+            {"componentType": 5126, "count": 3, "type": "VEC3", "min": [-1, 0, 2], "max": [3, 4, 5]},
+            {"componentType": 5126, "count": 3, "type": "VEC3"},
+            {"componentType": 5126, "count": 3, "type": "VEC2", "min": [0, 0], "max": [1, 1]}
+        ]})"))
+                         .value();
+
+    REQUIRE(doc.accessors.size() == 3);
+    auto const b = doc.bounds_of(doc.accessors[0]);
+    REQUIRE(b.has_value());
+    CHECK(b.value() == tg::aabb3f(tg::pos3f(-1, 0, 2), tg::pos3f(3, 4, 5)));
+    CHECK(!doc.bounds_of(doc.accessors[1]).has_value()); // the file stated none
+    CHECK(!doc.bounds_of(doc.accessors[2]).has_value()); // not a vec3
 }
 
 TEST("gltf - materials, textures, samplers and images")

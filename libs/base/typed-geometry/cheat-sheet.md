@@ -212,7 +212,10 @@ tg::similarity_transform3f::make_uniform_scaling(s);  // s must be POSITIVE; the
 tg::scaling_transform3f::make_scaling(vec);
 tg::rigid_transform3f::make_rotation(quat);           // D==3; make_rotation(angle) for D==2
 tg::affine_transform3f::make_from_linear_mat(mat3);
-tg::projective_transform3f::make_from_mat(mat4);      // projective only
+tg::projective_transform3f::make_from_mat(mat4);      // any homogeneous matrix
+tg::affine_transform3f::make_from_mat(mat4);          // last row MUST be exactly (0, 0, 0, 1); asserts otherwise
+tg::affine_transform3f::make_trs(t, quat, s);          // scale, then rotation, then translation: glTF / USD order;
+                                                       //   a negative scale mirrors; also on projective_transform3
 
 t.translation();  t.rotation();  t.uniform_scale();  t.scale();   // gated on the class
                                            // translation() is in TARGET space; scale() indexes SOURCE axes
@@ -244,6 +247,7 @@ a.composed(b);                             // applies b FIRST, then a — NO ope
                                            // opt-in per type; probe with requires { a.composed(b); }
 #include <typed-geometry/transform/compose.hh>
 tg::compose(a, b);                         // a.composed(b) if that exists, else tg::composed_transform<A,B>
+tg::compose(a, b, c, ...);                 // nested: compose(a, b, c)(x) == a(b(c(x))) — the LAST applies first
                                            // — a compile-time choice, so the return type says which
 tg::composed_transform<A, B>(outer, inner);  // stores both; applies `inner` first, then `outer`
                                            // composes ANY two transforms, at the cost of not fusing
@@ -302,6 +306,12 @@ tg::ndc_from_pixel(pixel, size);  tg::pixel_from_ndc(ndc, size); // pixels: top-
 ```cpp
 #include <typed-geometry/geometry/primitives/aabb.hh>      // and box/triangle/segment/ray/line/plane/halfspace.hh
 tg::aabb<D,T>     {pos min, max}              // solid box {x : min <= x <= max}              — finite
+tg::aabb3f();  tg::aabb3f::empty;             // DEFAULT IS THE EMPTY BOX: min = +inf, max = -inf (highest/lowest for ints)
+b.is_empty();                                 //   min > max on some axis; a flat or point box is NOT empty
+                                              //   union / intersection / contains / intersects handle it; measures,
+                                              //   readings, distance & support ASSERT; transformed keeps it empty
+tg::aabb_of(p, tri, points, sphere, ...);     // the box around pos, anything with .bounds(), and ranges of either
+tg::aabb3f::of(...);                          //   same, naming the box type (converts scalars); nothing -> empty
 tg::aabb_boundary<D,T>                        // its faces; aabb3f_surface
 tg::box<D,DA,T>   {pos center; mat<D,DA> half_extents}  // {center + H*c : c in [-1,1]^D}; columns = half-axes,
                                               //   NOT necessarily orthogonal (any affine image of a box is a box)
@@ -461,6 +471,7 @@ tg::traits::has_sqrt<T>;  tg::traits::has_trigonometry<T>;   // inline constexpr
 tg::traits::has_abs<T>;  tg::traits::has_exponential<T>;  tg::traits::has_rounding<T>;
 tg::traits::has_pow2<T>;                  // the exact base-two family; f32/f64 only
 tg::traits::is_zero(x);  tg::traits::is_one(x);   // bool — routed through the trait (symbolic-friendly)
+tg::traits::lowest<T>();  tg::traits::highest<T>(); // the extremes of T's order: +-inf for floats and f16, the limits for ints / fixed_int
 tg::one<T>();                             // T   — multiplicative identity (always)
 tg::sqrt(x);                              // T   — requires has_sqrt<T>
 tg::abs(x);                               // T   — constexpr; requires has_abs<T> (integers too, not bool)
