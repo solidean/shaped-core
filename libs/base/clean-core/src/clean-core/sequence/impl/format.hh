@@ -36,16 +36,20 @@ struct cc::impl::seq_format_support
             cc::impl::format_one(out, spec, x);
     }
 
+    // a named helper rather than a lambda: MSVC refuses a generic lambda called inside a consteval function
+    template <class X, std::size_t... Is>
+    static consteval void validate_pack(cc::string_view spec, std::index_sequence<Is...>)
+    {
+        (seq_format_support::validate_element<std::remove_cvref_t<decltype(X::template item<Is>(std::declval<X const&>()))>>(
+             spec),
+         ...);
+    }
+
     template <class X>
     static consteval void validate_element(cc::string_view spec)
     {
         if constexpr (seq_is_pack<X>)
-            [&]<std::size_t... Is>(std::index_sequence<Is...>)
-            {
-                (seq_format_support::validate_element<
-                     std::remove_cvref_t<decltype(X::template item<Is>(std::declval<X const&>()))>>(spec),
-                 ...);
-            }(std::make_index_sequence<std::tuple_size_v<X>>{});
+            seq_format_support::validate_pack<X>(spec, std::make_index_sequence<std::tuple_size_v<X>>{});
         else
             cc::impl::format_validate_spec_for<X>(spec);
     }
