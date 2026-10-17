@@ -63,7 +63,7 @@ struct tg::scalar_traits
 };
 
 // std::sqrt and the std trig functions honor errno, which costs codegen for a contract nobody wants.
-// Routed through them for now; libs/base/typed-geometry/docs/TODO.md tracks the replacement.
+// Routed through them for now; issue: perf-tg-std-math-routing
 template <>
 struct tg::scalar_traits<cc::f32>
 {
