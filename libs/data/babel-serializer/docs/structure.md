@@ -121,9 +121,8 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
 - `[planned]` **extensions / extras raw access** — a `read_options{ bool keep_json_document; }` plus an optional `json::document` member and a per-object `i32 json_node`.
   Deliberately not in v1: retaining the whole JSON document alongside the parsed structure doubles memory against read-once-into-a-native-structure.
   A stored `json::ref` would also dangle across a `cc::move(data)`.
-- `[planned]` **a node's composed local transform** — blocked on typed-geometry, which has no TRS composition yet.
-  The reader stores `matrix` or TRS in whichever form the file used and composes nothing.
-  [feat-tg-transform-builders](../../../base/typed-geometry/docs/issues/feat-tg-transform-builders.md) is that gap.
+- `[done]` **a node's composed local transform** — `node::local_transform()`, matrix or TRS as one `tg::affine_transform3f`.
+  The reader still stores `matrix` or TRS in whichever form the file used; `local_transform()` composes it on demand.
 - `[planned]` **writer**.
 
 ### stl [done]

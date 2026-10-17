@@ -257,13 +257,45 @@ public:
     }
 
     /// an arbitrary homogeneous matrix.
-    /// Only a projective transform can hold one unchanged.
+    /// A projective transform holds any; an affine one holds a matrix whose last row is (0, ..., 0, 1), exactly.
+    /// That is the shape every affine matrix read from a file has, a glTF node's `matrix` among them.
     [[nodiscard]] static constexpr homogeneous_transform make_from_mat(mat<DSource + 1, DTarget + 1, T> const& m)
-        requires(has_projection)
+        requires(has_projection
+                 || (has_translation && linear_flags == tg::impl::linear_kind::general_linear && DSource == DTarget))
     {
         homogeneous_transform r;
-        r._representation.m = m;
+        if constexpr (has_projection)
+            r._representation.m = m;
+        else
+        {
+            for (int c = 0; c < DSource; ++c)
+                CC_ASSERT(tg::traits::is_zero(m[c, DTarget]), "an affine matrix's last row is (0, ..., 0, 1)");
+            CC_ASSERT(tg::traits::is_one(m[DSource, DTarget]), "an affine matrix's last row is (0, ..., 0, 1)");
+            for (int c = 0; c < DSource; ++c)
+                for (int row = 0; row < DTarget; ++row)
+                    r._representation.linear.linear[c, row] = m[c, row];
+            for (int row = 0; row < DTarget; ++row)
+                r._representation.translation.data[row] = m[DSource, row];
+        }
         return r;
+    }
+
+    /// translation, rotation and scale, applied scale first: the order glTF, USD and every engine store a node's transform in.
+    /// A scale factor may be negative, which mirrors, or zero, which flattens: glTF hides a node that way.
+    [[nodiscard]] static constexpr homogeneous_transform make_trs(vec<3, T> const& translation,
+                                                                  quat<T> const& rotation,
+                                                                  vec<3, T> const& scale)
+        requires(DSource == 3 && DTarget == 3 && tg::impl::transform_is_subclass(tg::impl::transform_class::affine, Flags))
+    {
+        auto const trs
+            = homogeneous_transform<3, 3, T, tg::impl::transform_class::translation>::make_translation(translation)
+                  .composed(homogeneous_transform<3, 3, T, tg::impl::transform_class::rotation>::make_rotation(rotation))
+                  .composed(
+                      homogeneous_transform<3, 3, T, tg::impl::transform_class::signed_scaling>::make_scaling(scale));
+        if constexpr (decltype(trs)::flags == Flags)
+            return trs;
+        else
+            return homogeneous_transform(trs);
     }
 
     // special values

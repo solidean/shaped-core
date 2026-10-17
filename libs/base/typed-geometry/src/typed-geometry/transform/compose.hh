@@ -25,4 +25,12 @@ template <class TransformA, class TransformB>
         return composed_transform<TransformA, TransformB>(a, b);
 }
 
+/// the transform that applies the last argument first and the first one last, like nested application: compose(a, b, c)(x) == a(b(c(x))).
+/// Composing a translation, a rotation and a scaling this way is make_trs's order.
+template <class TransformA, class TransformB, class TransformC, class... Rest>
+[[nodiscard]] constexpr auto compose(TransformA const& a, TransformB const& b, TransformC const& c, Rest const&... rest)
+{
+    return tg::compose(a, tg::compose(b, c, rest...));
+}
+
 } // namespace tg

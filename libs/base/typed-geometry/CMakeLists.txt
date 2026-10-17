@@ -204,6 +204,7 @@ if(SC_BUILD_TESTS)
         tests/transform/transform-ops-test.cc
         tests/transform/dispatch-test.cc
         tests/transform/projective-test.cc
+        tests/transform/trs-test.cc
 
         tests/camera/projection-test.cc
         tests/camera/view-test.cc
