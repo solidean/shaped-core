@@ -6,6 +6,9 @@ sc_add_single_file_examples(clean-core
     string.cc
     result.cc
     map.cc
+    sequence-basics.cc
+    sequence-non-empty.cc
+    sequence-pipelines.cc
     system-info.cc
     system-monitor.cc
     LINK clean-core

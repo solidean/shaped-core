@@ -411,7 +411,7 @@ public:
 
     /// This sequence as a non-empty one, or empty if it has no elements.
     ///
-    ///   if (auto s = v.values().filter(p).try_as_non_empty())
+    ///   if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value())
     ///       use(cc::move(s.value()).sum());
     [[nodiscard]] constexpr auto try_as_non_empty() &&
     {
