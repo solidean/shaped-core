@@ -29,7 +29,7 @@ The [readme](../readme.md#file-organization) has the per-folder table, the inclu
   Written from the vulkan build-out and grown as it goes, because only a second implementation knows which of the first one's choices were the API leaking through.
 - [testing](testing.md) — the two test tiers: backend-agnostic API tests (`INVOCABLE_TEST`, run against every backend) vs per-backend smoke + internal-invariant suites, and where a new test goes.
 - [tier1-pipeline-tests](tier1-pipeline-tests.md) — the plan for executing the pipeline semantics in tier 1: the harness, the enum zoo, and the sg follow-ups it found.
-- [TODO](TODO.md) — running list of known follow-ups.
+- [issues](issues/) — open issues: known bugs, gaps and follow-ups, one file each.
 
 ## Concepts
 

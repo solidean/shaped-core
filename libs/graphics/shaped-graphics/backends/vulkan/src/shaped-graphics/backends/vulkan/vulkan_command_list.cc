@@ -297,6 +297,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 // A wait dst stage creates an execution dependency for that stage and later ones only, and the back
                 // buffer's entry transition runs ahead of every stage in the prepended buffer — so the narrower mask
                 // leaves it unordered against the acquire.
+                // issue: bug-sg-pure-layout-transition-empty-scope
                 wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
             }
             u32 const wait_count = u32(waits.size());

@@ -387,7 +387,7 @@ rules:
 
   - kind: allow-include
     value: <memory>
-    reason: "TODO: std::shared_ptr / std::unique_ptr predate the cc:: ones here — migrate to clean-core/memory/"
+    reason: "std::shared_ptr / std::unique_ptr where the cc:: ones cannot serve yet: a polymorphic upcast (key_value_cache, threaded_actor) or an aliasing, type-erased owner (pinned_data)"
     files:
       - src/clean-core/container/key_value_cache.hh
       - src/clean-core/container/pinned_data.hh

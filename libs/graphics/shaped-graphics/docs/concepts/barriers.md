@@ -228,7 +228,7 @@ It is an ordinary command list, so its submit waits on the texture's pending-tra
 a job still being enqueued is one nothing will ever signal.
 
 **The async-ready layout is `general` on both backends**, and `sg::async_direction` is accepted and ignored.
-A direction-specific layout on vulkan would keep more compression and cannot be held: see [TODO](../TODO.md) for the
+A direction-specific layout on vulkan would keep more compression and cannot be held: see [perf-sg-direction-specific-async-layout](../issues/perf-sg-direction-specific-async-layout.md) for the
 submit-call-order reason and what would earn it back.
 
 

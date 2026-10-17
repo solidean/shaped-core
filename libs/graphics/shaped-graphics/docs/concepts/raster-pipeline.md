@@ -108,7 +108,8 @@ See [bindings](bindings.md#array-bindings).
 ## Deferred
 
 **Indirect draws**, **dynamic** primitive topology and depth bias (baked into the PSO for now), and **mesh / task** stages.
-Geometry and tessellation stages are **in** (dx12 and vulkan). See [TODO](../TODO.md).
+Geometry and tessellation stages are **in** (dx12 and vulkan).
+What is still open is [epic-sg-raster-gaps](../issues/epic-sg-raster-gaps.md).
 
 ## See also
 

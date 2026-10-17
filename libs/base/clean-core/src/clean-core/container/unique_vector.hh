@@ -3,11 +3,9 @@
 #include <clean-core/container/impl/allocating_container.hh>
 
 
-// TODO:
-// - retyping APIs
-// - equality, order, hashing
-// - contains/contains_where/find/find_where/count/count_where
-// - sort
+// issue: feat-cc-container-equality-and-order
+// issue: feat-cc-container-search-family
+// issue: feat-cc-container-retyping
 
 
 /// Dynamically allocated vector of T elements with move-only semantics.

@@ -14,7 +14,7 @@ shaped-viewer is built on [shaped-rendering](../../shaped-rendering/readme.md), 
 - [canvas](canvas.md) — drawings: 2D vector content built once like a mesh, instanced on a canvas in 2D and on a scene in 3D.
 - [quadrics](quadrics.md) — analytic quadric primitives as a second scene-item kind: the record, the procedural BLAS batching, and the material fork.
 - [coding-guidelines](coding-guidelines.md) — sv-specific conventions (thin for now) on top of the repo-wide ones.
-- [TODO](TODO.md) — running list of known follow-ups.
+- [issues](issues/) — what is broken, planned or open, one file each; `uv run dev.py issues list --in libs/graphics/shaped-viewer` lists them.
 
 ## Conventions
 

@@ -398,7 +398,7 @@ public:
     /// Appends a 3D scene layer to this view.
     ///
     /// A traced layer writes no alpha, so it is forced to `layer_blend::replace`: a second scene layer overwrites the
-    /// first rather than compositing over it (see libs/graphics/shaped-viewer/docs/TODO.md).
+    /// first rather than compositing over it (issue: feat-sv-traced-layer-alpha).
     /// Until that lands, calling this twice in a frame is legal but only the last layer is visible.
     [[nodiscard]] scene_ref add_scene();
 

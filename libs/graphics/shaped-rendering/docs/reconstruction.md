@@ -69,17 +69,17 @@ Two routes widen it, and the cheap-looking one was tried and is not cheap.
 **`nrd::PipelineDesc` carries a `computeShaderSPIRV` beside its DXIL, and turning it on is genuinely one line.**
 The DXC `extern/dxc` already pins emits SPIR-V, so `NRD_EMBEDS_SPIRV_SHADERS ON` plus `SHADERMAKE_DXC_VK_PATH` produces 31 SPIR-V blobs with no second compiler and no network.
 What does not follow is a working vulkan arm.
-Built that far and run against a validating vulkan context, two things break, and neither is a line of configuration.
+Built that far and run against a validating vulkan context, two things broke, and neither was a line of configuration.
 
 - **NRD uses two register spaces, which are two descriptor sets under Vulkan.**
   `nrd_session::create` builds one binding group, which is one set, so the constants land outside the layout it declares:
   `vkCreateComputePipelines(): ... uses descriptor [Set 1, Binding 2, variable "REBLUR_SplitScreenConstants"] but the binding was not declared in the VkPipelineLayoutCreateInfo::pSetLayouts[1]`.
   dx12 does not care, which is why the DXIL path never noticed.
-- **NRD's shaders want compute derivatives**, and sg's vulkan backend enables no such feature:
+- **NRD's shaders want compute derivatives**, which sg's vulkan backend did not enable at the time:
   `SPIR-V Capability ComputeDerivativeGroupQuadsKHR was declared, but ... computeDerivativeGroupQuads` is required.
-  So is the `VK_KHR_compute_shader_derivatives` extension, which is the same gap seen from the instance side.
+  sg now probes and enables `VK_KHR_compute_shader_derivatives` where present, so this half is closed.
 
-Both are answerable — a second binding group here, a device feature in sg — and neither is in this change.
+The second binding group is what remains, and [feat-nrd-vulkan-second-binding-group](issues/feat-nrd-vulkan-second-binding-group.md) tracks it.
 **With validation off the same run passes**, which is worth knowing before anyone reads a green run as support.
 
 Beyond that, NRD ships its shaders as source, and `PipelineDesc::shaderIdentifier` exists so a custom integration can supply its own compiled form.
@@ -142,7 +142,7 @@ AMD's precompiled shader headers, and the FidelityFX_SC tool that makes them, ar
 Each pass is compiled through slib instead, from a wrapper that states the permutation's defines and includes AMD's pass.
 The context flags are fixed — linear HDR in, low-resolution motion, inverted infinite depth — so one variant of each pass is all the host code ever asks for, and the backend refuses any other.
 The portable path is the one built: fp32, no forced wave64, no Lanczos lookup table.
-The fp16 and wave64 variants AMD tunes for are a follow-up that needs sg to report 16-bit support; [TODO.md](TODO.md) has it.
+The fp16 and wave64 variants AMD tunes for are a follow-up: [perf-fsr-fp16-wave64-permutations](issues/perf-fsr-fp16-wave64-permutations.md).
 
 **The inputs meet FSR's conventions in the backend, and sr's guides stay as they are.**
 - Depth: sr's linear view depth is converted to an inverted, infinite-far device depth by a small pass, `near / depth`, which FSR reads back as the same view depth.
@@ -168,8 +168,10 @@ FSR keeps two full images at the output extent and about a dozen at the traced o
 **Where it runs today.**
 - It builds where extern/fidelityfx was fetched, which is Windows: the host code calls MSVC's secure C runtime and uses `__declspec` unconditionally.
 - It runs on the hardware adapter.
-  WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass, and the FSR image tests skip there; [TODO.md](TODO.md) records what bisecting it established.
-- It runs on vulkan too, through a patch that gives each of AMD's register classes its own SPIR-V binding range; [TODO.md](TODO.md) has what replaces it.
+  WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass, and the FSR image tests skip there.
+  [bug-warp-fsr-shading-change-pyramid-crash](issues/bug-warp-fsr-shading-change-pyramid-crash.md) records what bisecting it established.
+- It runs on vulkan too, through a patch that gives each of AMD's register classes its own SPIR-V binding range.
+  [debt-fsr-spirv-binding-patch](issues/debt-fsr-spirv-binding-patch.md) has what replaces it.
 
 ## The OIDN member
 
@@ -241,7 +243,7 @@ The CPU figure is `uv run dev.py test "OIDN's CPU device timed at 1080p" --manua
   On a 256x256 tile, 16x1 is 8.0 ms where 16x2 is 10.9 and 8x2 is 9.4.
   The wave's lanes already share the input, so a second blocking dimension only costs registers.
 - **Half precision would buy memory rather than speed**, since the limit is cache lines rather than bytes, and memory is what buys a larger tile.
-  It is optional on every backend, so it wants a feature level; [TODO.md](TODO.md) has what that takes.
+  It is optional on every backend, so it wants a feature level; [perf-oidn-half-precision](issues/perf-oidn-half-precision.md) has what that takes.
 - **Once the member runs on WebGPU, its default limits will cap the tile before memory does.**
   `maxStorageBufferBindingSize` defaults to 128 MiB, and the largest binding is one full-resolution map of sixty-four channels.
   That is 50 MiB at the default cap, 110 MiB at 768 and 137 MiB at 1024, so the cap cannot go far past 768 on a device with default limits.
@@ -261,7 +263,7 @@ The oracle below is what makes each step cheap to try: a step either keeps the o
    SGL already has both halves it needs: `@workgroup` bindings and `workgroup_barrier()`.
 2. **Fusion**: each max pool folded into the convolution before it, and each upsample and concat into the convolution after it, as OIDN does.
    It removes eight passes and their round trips through memory.
-3. **Half precision**, behind a feature level, for storage first and arithmetic second; [TODO.md](TODO.md) has what it takes here.
+3. **Half precision**, behind a feature level, for storage first and arithmetic second; [perf-oidn-half-precision](issues/perf-oidn-half-precision.md) has what it takes here.
 4. **Winograd F(2x2, 3x3)**, since every layer is 3x3: 2.25x fewer multiplies, less after its transforms, and worth doing only after 1.
 5. **Matrix hardware**, the remaining ~3x to OIDN's own 20.6 ms.
    Vulkan and Metal expose it today; DirectX's is in preview and WebGPU's experimental, so it waits, and a non-matrix path stays mandatory.

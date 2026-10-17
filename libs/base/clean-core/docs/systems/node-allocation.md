@@ -126,7 +126,7 @@ Still open:
   A downstream index-based store runs this design under a multi-generation stress test; it is not in clean-core yet.
 - **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use.
 - **A leaked node is invisible to a leak checker** — the slab is the allocation, so a dead slot is unused bytes in a live block.
-  A build mode routing every class through the large-node path would fix it; [TODO](../TODO.md) has the shape.
+  A build mode routing every class through the large-node path would fix it; [feat-cc-node-alloc-direct-mode](../issues/feat-cc-node-alloc-direct-mode.md) has the shape.
 
 **Confidence gaps — `TODO`s before the cross-thread guarantee is *proven*, not just *argued*:**
 

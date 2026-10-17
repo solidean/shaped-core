@@ -163,7 +163,7 @@ void resize_images(sg::context& ctx, view_images& v, tg::vec2i extent, tg::vec2i
     return tg::dual(tg::cross(a, b));
 }
 
-// TODO(typed-geometry): perspective / look_at belong in tg's transform module, which does not carry them yet.
+// perspective / look_at belong in tg's transform module, which does not carry them yet; issue: question-tg-camera-projection-helpers.
 // The convention is pinned here, as it is in examples/vdoc/cube-editor/camera.hh: left-handed, z into [0, 1].
 // tg::mat is COLUMN-major and subscripts m[col, row], which is what the row gather below is about.
 
@@ -400,7 +400,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
     // The blit samples what the denoiser computed this frame, and imgui draws the geometry prepare() uploaded, so each
     // draw's barrier is found inside its scope, and vulkan splits the scope for it.
-    // Nothing states a scope's accesses before it opens yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    // Nothing states a scope's accesses before it opens yet; issue: feat-sg-declare-scope-accesses-up-front.
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
     // A named capture selects the member, so the harness can walk every one of them rather than photographing

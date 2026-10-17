@@ -30,7 +30,7 @@ enum class cc::float_notation : char
 
 namespace cc
 {
-// TODO: move me
+// Belongs in a more central header than this one.
 using byte = std::byte;
 
 // in hex

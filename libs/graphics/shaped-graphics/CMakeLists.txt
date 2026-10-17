@@ -272,11 +272,8 @@ if(SC_BUILD_TESTS)
     # each invocable runnable by name across all backends. Only meaningful when some driver actually registers —
     # a compiled-but-unregistered backend leaves every invocable orphaned (100+ of them), which fails the binary.
     #
-    # TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
-    # support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
-    # It would make this `if(_sg_test_drivers)` guard unnecessary (a driver is always present), let large parts
-    # of the suite run on headless CI without a GPU, and double as a reference oracle to validate real backends
-    # against. Future work.
+    # A CPU / validation backend would make this guard unnecessary, since a driver would always be present.
+    # issue: feat-sg-cpu-validation-backend
     if(_sg_test_drivers)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc

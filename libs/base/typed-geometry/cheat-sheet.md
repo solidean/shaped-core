@@ -444,7 +444,7 @@ tg::scale_by_pow2(x, n);                  // (T, int) -> T          — x * 2^n 
 tg::exponent_of(x);                       // T -> int               — floor(log2(|x|)); x finite and non-zero
 tg::split_pow2(x);                        // T -> tg::pow2_split<T> {significand, exponent}
 tg::pi<T>;                                // inline constexpr T  (scalar/constants.hh)
-// scalars: f32/f64 have the lot (via std:: — see docs/TODO.md); all integer types except plain `char`
+// scalars: f32/f64 have the lot (via std:: — see docs/issues/perf-tg-std-math-routing.md); all integer types except plain `char`
 // get one/is_zero/is_one + abs (signed/unsigned char count; `char` does not); bool is special.
 // round/floor/ceil return T, not an int — narrow explicitly: int(tg::round(x)).
 // tg::abs on the most negative integer is UB — that value has no representable magnitude.

@@ -49,7 +49,8 @@ Two values that could agree on the chosen inputs get a second quad with inputs t
 What metal still has to be shown doing:
 
 - **A discarded pixel still takes part in its quad's derivatives.**
-  WGSL demotes; MSL's `discard_fragment` may end the pixel, and the emulation SGL's TODO describes waits on the test on metal.
+  WGSL demotes; MSL's `discard_fragment` may end the pixel.
+  The emulation [feat-sgl-discard-helper-emulation](../../shaped-graphics-language/docs/issues/feat-sgl-discard-helper-emulation.md) describes waits on the test on metal.
 
 ## Geometry and tessellation stages
 

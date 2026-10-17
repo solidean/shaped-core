@@ -70,9 +70,7 @@ public:
     // There is no linear history in the format: an op DAG is partially ordered, `collect_reachable` returns ops
     // sorted by id BYTES (reproducible, and therefore chronologically meaningless), and `children` is arrival order.
     // A single-user file is a single-parent chain though, so first-parent ancestry IS its history.
-    //
-    // TODO(versioned-document): `cc::vector<op_id> first_parent_chain(op_id) const` on op_graph would be ~20 lines
-    // there and would serve every undo and history UI, instead of each one rebuilding the walk below.
+    // issue: feat-vdoc-first-parent-chain
 
     /// Oldest first; `revision()` indexes it.
     [[nodiscard]] cc::span<vdoc::op_id const> timeline() const { return _timeline; }

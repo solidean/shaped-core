@@ -161,7 +161,7 @@ Not invariants — v1 shortcuts:
 - **Async texture copies assume the texture is already in the COMMON layout** — the copy queue can't run layout barriers.
   A freshly-created texture qualifies.
   One left in a shader/attachment layout by a direct-queue list must be transitioned back first, or uploaded inline (`cmd.upload.bytes_to_texture` drives the barrier).
-  There is no way to ask for that transition today, which is what the prepare-for-async command in the [TODO](../TODO.md) adds.
+  `cmd.prepare_for_async` asks for that transition.
 - **Resource lifetime spans the copy queue.**
   The copy queue is decoupled from epochs, so a buffer whose last reference is dropped while an async upload to it is still in flight must not be freed when its epoch retires.
   Deferred deletion carries a second gate: each expiring resource is tagged with the buffer's `_pending_async_upload_value`.

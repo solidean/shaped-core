@@ -385,7 +385,7 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
 // A blocking wait sweeps the pump registry itself, so it does the copy actor's turn and the sweep is redundant here.
 // The case the sweep exists for is a loop paced slowly enough that the GPU is never behind — a real display's vsync,
 // or a frame limiter — and no test reaches it yet.
-// libs/graphics/shaped-viewer/docs/TODO.md carries it.
+// issue: debt-sv-pump-sweep-untested
 INVOCABLE_TEST("sv - a frame loop lands its streamed payloads", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;

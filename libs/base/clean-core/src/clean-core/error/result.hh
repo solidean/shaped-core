@@ -13,8 +13,7 @@
 
 #include <type_traits>
 
-// TODO:
-// - maybe plan a custom site-propagation protocol, so error type conversions can track original sites
+// An open idea: a site-propagation protocol, so error type conversions can track the original sites.
 
 // =========================================================================================================
 // cc::any_error - Move-only error container with context chaining

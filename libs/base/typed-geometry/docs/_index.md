@@ -43,7 +43,7 @@ Add one when a module lands, and cover the big rationales there; the small ones 
 - [plans/geometry-query-matrix](plans/geometry-query-matrix.md) — the `geometry/query/` layer: member verbs, the per-pair seam and its fallback ladder.
   Also the GJK / EPA floor and the special-case policy.
 - [plans/old-tg-carryover](plans/old-tg-carryover.md) — the object roster in waves, the unary verbs, measures, parameters and sampling, and what of the old tg was left out.
-- [TODO](TODO.md) — running list of known follow-ups.
+- [issues](issues/) — open issues: known bugs, gaps and follow-ups, one file each.
 - [cheat-sheet](../cheat-sheet.md) — the public API at a glance, one symbol per line.
 
 ## Conventions

@@ -364,8 +364,7 @@ FfxErrorCode get_device_capabilities(FfxInterface*, FfxDeviceCapabilities* out)
 {
     // The portable permutation, whatever the device: no 16-bit arithmetic, no forced wave64, and a wave width that
     // keeps the host code off the Lanczos lookup table.
-    // What each device could run faster is a follow-up once sg reports 16-bit support.
-    // libs/graphics/shaped-rendering/docs/TODO.md has it.
+    // What each device could run faster is issue: perf-fsr-fp16-wave64-permutations.
     *out = {};
     out->maximumSupportedShaderModel = FFX_SHADER_MODEL_6_2;
     out->waveLaneCountMin = 32;

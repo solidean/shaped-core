@@ -228,7 +228,7 @@ endif()
 # sr's own shader packages, one per language: a package has one.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
 # A routine's shaders go in the SGL package, which reaches dx12, vulkan, webgpu and metal from one source.
-# The HLSL package holds the shaders not yet ported; docs/TODO.md says what holds each back.
+# The HLSL package holds the shaders not yet ported; issue: chore-sr-port-hlsl-to-sgl says what holds each back.
 #
 # Deliberately not gated on a compiler existing.
 # Package generation needs none — it emits C++ descriptors and embeds the sources;

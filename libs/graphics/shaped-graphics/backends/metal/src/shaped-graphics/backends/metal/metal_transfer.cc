@@ -172,8 +172,7 @@ void metal_transfer_system::wait_for_queues(MTL4::CommandQueue* queue,
 
     // And behind any streaming transfer still filling this resource.
     //
-    // **Metal orders the async tier against streams, where dx12 does not** — see libs/graphics/shaped-graphics/docs/TODO.md, which records the gap
-    // on the backend that has it.
+    // **Metal orders the async tier against streams, where dx12 does not** — issue: bug-sg-dx12-async-transfer-ignores-stream.
     // The per-resource streaming timeline is what makes it cheap here: an async transfer waits on the same value a
     // command list would, and `promote_to_async` is then purely the statement of intent it is documented to be.
     if (auto const wait = pending_stream_wait(resource); wait.event != nullptr)

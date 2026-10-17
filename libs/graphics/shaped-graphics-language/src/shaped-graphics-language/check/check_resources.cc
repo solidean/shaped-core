@@ -222,7 +222,7 @@ type_id checker::resolve_resource_applied(i32 file, ast::expr_id expr, ast::inde
     }
 
     // CHK-200 (temporary): the argument is read as exactly an enum case of sg's formats, or a const of one.
-    // Values as type arguments in general are in libs/graphics/shaped-graphics-language/docs/TODO.md.
+    // Any value as a type argument is the general form, issue: feat-sgl-values-as-type-arguments
     auto const argument = arguments[0].value;
     auto const* const dot = ast_of(file).at(argument).node.try_as<ast::leading_dot>();
     auto format = dot != nullptr ? find_image_format(text_of(file, dot->name)) : -1;

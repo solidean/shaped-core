@@ -3,10 +3,9 @@
 #include <clean-core/container/impl/allocating_container.hh>
 
 
-// TODO:
-// - retyping APIs
-// - resize APIs? -> would be totally fine I think
-// - equality, order, hashing
+// issue: feat-cc-container-equality-and-order
+// issue: feat-cc-container-retyping
+// Also not yet: resize APIs, which would be totally fine.
 
 
 template <class T>

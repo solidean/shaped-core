@@ -10,9 +10,9 @@
 // functions and belong in `tg::mesh` once it exists.
 // Moving them down is then a file move rather than a rewrite.
 //
-// TODO, once generated frames land: ours will not match MikkTSpace, which nearly every DCC tool bakes normal maps
-// against.
+// Once generated frames land, ours will not match MikkTSpace, which nearly every DCC tool bakes normal maps against.
 // Nothing here generates a tangent yet, so the divergence has nowhere to show up.
+// issue: feat-sv-mikktspace-tangents
 
 namespace sv
 {

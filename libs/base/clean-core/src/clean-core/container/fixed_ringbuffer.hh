@@ -8,9 +8,8 @@
 #include <type_traits>
 
 
-// TODO:
-// - equality, order
-// - contains/find/count and the predicate-based removal family
+// issue: feat-cc-container-equality-and-order
+// issue: feat-cc-container-search-family
 
 
 /// Fixed-capacity ring buffer: a queue over `N` inline slots with strict O(1) push and pop at **both** ends,

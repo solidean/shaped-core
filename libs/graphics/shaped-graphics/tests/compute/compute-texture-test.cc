@@ -212,7 +212,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pixel shader samples a texture at the level it
 
     // The texture this draw samples was uploaded in this list, so its barrier is found only at the draw, and a backend
     // that cannot hold it inside a pass splits the scope for it.
-    // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    // Nothing states a texture's first use before a scope yet; issue: feat-sg-declare-scope-accesses-up-front.
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
     auto const& vs = co_await shaders::textures.screen_vs->acquire(*ctx);
@@ -384,7 +384,7 @@ ASYNC_INVOCABLE_TEST("sg - an SGL pipeline carries the sampler of the file its p
 
     // The texture this draw samples was uploaded in this list, so its barrier is found only at the draw, and a backend
     // that cannot hold it inside a pass splits the scope for it.
-    // Nothing states a texture's first use before a scope yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    // Nothing states a texture's first use before a scope yet; issue: feat-sg-declare-scope-accesses-up-front.
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
     auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::textures.clamped_draw);

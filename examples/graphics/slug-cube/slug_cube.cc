@@ -475,7 +475,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
 
     // The routine draws the instances prepare() uploaded and the atlas textures it filled, so each draw's barrier is found
     // inside the scope, and vulkan splits the scope for it.
-    // Nothing states a scope's accesses before it opens yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    // Nothing states a scope's accesses before it opens yet; issue: feat-sg-declare-scope-accesses-up-front.
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
     // Both routine parametrizations this frame uses, named up front so the first frame does not decline.

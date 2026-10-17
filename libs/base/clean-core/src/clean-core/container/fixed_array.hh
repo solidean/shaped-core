@@ -5,8 +5,7 @@
 #include <utility>
 
 
-// TODO:
-// - equality, order, hashing
+// issue: feat-cc-container-equality-and-order
 
 
 /// Fixed-size array of exactly N elements of type T.
