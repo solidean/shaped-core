@@ -58,6 +58,16 @@ public:
     [[nodiscard]] constexpr T const* begin() const { return _data; }
     [[nodiscard]] constexpr T const* end() const { return _data + N; }
 
+    // sequences
+public:
+    /// The elements as a cc::sequence, referencing this array, or owning it when called on a temporary.
+    [[nodiscard]] constexpr auto values(this auto&& self)
+    {
+        return cc::impl::seq_contiguous_values<(N > 0)>(cc::forward<decltype(self)>(self));
+    }
+    /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
+    [[nodiscard]] constexpr auto indices() const { return cc::impl::seq_index_values<(N > 0)>(*this); }
+
     // queries
 public:
     /// Returns the compile-time size N.
@@ -128,6 +138,16 @@ public:
     [[nodiscard]] constexpr T* end() { return nullptr; }
     [[nodiscard]] constexpr T const* begin() const { return nullptr; }
     [[nodiscard]] constexpr T const* end() const { return nullptr; }
+
+    // sequences
+public:
+    /// The elements as a cc::sequence, referencing this array, or owning it when called on a temporary.
+    [[nodiscard]] constexpr auto values(this auto&& self)
+    {
+        return cc::impl::seq_contiguous_values<false>(cc::forward<decltype(self)>(self));
+    }
+    /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
+    [[nodiscard]] constexpr auto indices() const { return cc::impl::seq_index_values<false>(*this); }
 
     // queries
 public:

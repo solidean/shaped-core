@@ -190,6 +190,16 @@ public:
     [[nodiscard]] T const* begin() const { return data(); }
     [[nodiscard]] T const* end() const { return data() + size(); }
 
+    // sequences
+public:
+    /// The elements as a cc::sequence, referencing this vector, or owning it when called on a temporary.
+    [[nodiscard]] constexpr auto values(this auto&& self)
+    {
+        return cc::impl::seq_contiguous_values<false>(cc::forward<decltype(self)>(self));
+    }
+    /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
+    [[nodiscard]] constexpr auto indices() const { return cc::impl::seq_index_values<false>(*this); }
+
     // queries
 public:
     [[nodiscard]] isize size() const { return is_small() ? isize(sso_size()) : heap_ptr()->size(); }

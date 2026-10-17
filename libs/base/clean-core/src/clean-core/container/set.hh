@@ -75,6 +75,13 @@ public:
     void clear() { _map.clear(); }
     void reserve(isize n) { _map.reserve(n); }
 
+    // sequences
+public:
+    /// The elements as a cc::sequence, in iteration order; contains(x) is the set's own lookup.
+    /// On a temporary the sequence takes the set over.
+    [[nodiscard]] auto values() const& { return _map.keys(); }
+    [[nodiscard]] auto values() && { return cc::move(_map).keys(); }
+
     // iteration
 public:
     [[nodiscard]] iterator begin() const { return iterator{_map.begin()}; }

@@ -191,6 +191,15 @@ public:
         return {cc::span<T const>(slots + isize(_start), first), cc::span<T const>(slots, size() - first)};
     }
 
+    /// The elements front to back as a cc::sequence: the two segments, chained.
+    /// Only on an lvalue: a temporary's elements wrap, so owning it would mean a linearize() nobody asked for.
+    [[nodiscard]] auto values() & { return _segments_sequence<T>(segments()); }
+    [[nodiscard]] auto values() const& { return _segments_sequence<T const>(segments()); }
+    auto values() && = delete;
+
+    /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
+    [[nodiscard]] constexpr auto indices() const { return cc::impl::seq_index_values<false>(*this); }
+
     /// Rearranges the elements so they occupy one contiguous run, and returns it.
     /// A ring whose content does not wrap is already linear and is left exactly where it is, rather than moved to slot 0.
     ///
@@ -546,6 +555,16 @@ private:
     }
 
     /// Whether `slot` held a live element in a layout of `count` elements starting at `start`.
+    template <class U, class SegmentsT>
+    [[nodiscard]] static auto _segments_sequence(SegmentsT const& segs)
+    {
+        using source_t = cc::impl::span_source<U>;
+        using chain_t = cc::impl::chain_source<source_t, source_t>;
+        auto const& [a, b] = segs;
+        return cc::impl::seq_make<false>(
+            chain_t(source_t(a.data(), a.data() + a.size()), source_t(b.data(), b.data() + b.size())));
+    }
+
     /// Only linearize needs this: it walks all `cap` slots, live or not.
     [[nodiscard]] static constexpr bool _slot_was_live(isize slot, isize start, isize count, isize cap)
     {

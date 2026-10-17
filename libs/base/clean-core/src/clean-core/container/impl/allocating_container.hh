@@ -177,29 +177,13 @@ public:
 
     // sequences
 public:
-    /// The elements as a cc::sequence, referencing this container, which must outlive it.
-    [[nodiscard]] constexpr auto values() &
+    /// The elements as a cc::sequence, referencing this container, or owning it when called on a temporary.
+    [[nodiscard]] constexpr auto values(this auto&& self)
     {
-        return cc::sequence<cc::impl::span_source<T>>(cc::impl::span_source<T>(_data.obj_start, _data.obj_end));
+        return cc::impl::seq_contiguous_values<false>(cc::forward<decltype(self)>(self));
     }
-    [[nodiscard]] constexpr auto values() const&
-    {
-        return cc::sequence<cc::impl::span_source<T const>>(
-            cc::impl::span_source<T const>(_data.obj_start, _data.obj_end));
-    }
-    /// On a temporary, the sequence takes the container over, so one returned by a function needs no variable.
-    [[nodiscard]] constexpr auto values() &&
-    {
-        using source = cc::impl::owning_source<ContainerT>;
-        return cc::sequence<source>(source(static_cast<ContainerT&&>(*this)));
-    }
-
     /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
-    [[nodiscard]] constexpr auto indices() const
-    {
-        using source = typename cc::impl::seq_dependent<T, cc::impl::iota_source>::type;
-        return cc::sequence<source>(source(0, size()));
-    }
+    [[nodiscard]] constexpr auto indices() const { return cc::impl::seq_index_values<false>(*this); }
 
     // queries
 public:
