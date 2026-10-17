@@ -52,9 +52,6 @@ namespace
 {
 using cube_vertex = shaders::cube_vertex;
 
-/// The classic 3-vector cross product: tg's `cross` is the wedge, so the vector form is its Hodge dual.
-[[nodiscard]] tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
-
 [[nodiscard]] tg::mat4f rotation_y(tg::angle_f a)
 {
     auto m = tg::mat4f::identity;
@@ -110,7 +107,7 @@ constexpr int decal_face = 5; // the top face carries the star
     {
         auto const n = face_normals[face];
         auto const u = tg::vec3f(n[1], n[2], n[0]);
-        auto const v = cross3(n, u);
+        auto const v = tg::dual(tg::cross(n, u));
         for (auto corner = 0; corner < 4; ++corner)
         {
             auto const su = (corner == 1 || corner == 2) ? 1.0f : -1.0f;
@@ -207,8 +204,8 @@ void append_circle(cc::vector<sr::slug_instance>& out, sr::slug_font& font, cc::
 [[nodiscard]] tg::mat4f face_frame(int face)
 {
     auto const n = face_normals[face];
-    auto const up = tg::vec3f(0, 1, 0);
-    auto const right = cross3(n, up);
+    // the face as a viewer outside it sees it, looking along -n
+    auto const [right, up] = tg::orthonormal_basis(-n, tg::vec3f(0, 1, 0));
     auto m = tg::mat4f::identity;
     for (auto i = 0; i < 3; ++i)
     {

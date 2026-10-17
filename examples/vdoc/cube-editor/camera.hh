@@ -3,7 +3,6 @@
 #include <typed-geometry/linalg/mat.hh>
 #include <clean-core/common/utility.hh>
 #include <typed-geometry/camera/camera.hh>
-#include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/angle.hh>
@@ -12,10 +11,6 @@
 namespace cube_editor
 {
 using namespace cc::primitive_defines;
-
-/// The classic 3-vector cross product.
-/// tg's `cross` is the wedge and returns a bivector, so the vector form is its Hodge dual.
-[[nodiscard]] inline tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
 
 /// An orbit camera, which is the whole camera state this example has.
 /// It is persisted in the vdoc file's workspace, so it survives a restart without ever becoming an edit.

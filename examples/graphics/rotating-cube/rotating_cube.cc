@@ -97,10 +97,6 @@ static_assert(sizeof(tg::mat4f) == sizeof(shaders::cube_constants),
 constexpr int cube_vertex_count = 24; // four per face: a shared corner carries three different normals
 constexpr int cube_index_count = 36;
 
-/// The classic 3-vector cross product.
-/// tg's `cross` is the wedge and returns a bivector, so the vector form is its Hodge dual.
-[[nodiscard]] tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
-
 /// The camera: it orbits a fixed target, and that is all the state this example keeps.
 struct orbit_camera
 {
@@ -146,7 +142,7 @@ struct orbit_camera
         auto const n = normals[face];
         // Two in-plane axes, picked so the winding stays consistent across all six faces.
         auto const u = tg::vec3f(n[1], n[2], n[0]);
-        auto const v = cross3(n, u);
+        auto const v = tg::dual(tg::cross(n, u));
 
         for (auto corner = 0; corner < 4; ++corner)
         {

@@ -158,13 +158,6 @@ void resize_images(sg::context& ctx, view_images& v, tg::vec2i extent, tg::vec2i
     v.composed = make_image(ctx, extent);
 }
 
-/// The classic 3-vector cross product.
-/// tg's `cross` is the wedge and returns a bivector, so the vector form is its Hodge dual.
-[[nodiscard]] tg::vec3f cross3(tg::vec3f a, tg::vec3f b)
-{
-    return tg::dual(tg::cross(a, b));
-}
-
 /// An orbiting pinhole camera, plus the view-projection that says where its world points were last frame.
 struct camera
 {
@@ -182,8 +175,8 @@ struct camera
     }
 
     [[nodiscard]] tg::vec3f forward() const { return tg::normalize(target - this->eye()); }
-    [[nodiscard]] tg::vec3f right() const { return tg::normalize(cross3(tg::vec3f(0, 1, 0), this->forward())); }
-    [[nodiscard]] tg::vec3f up() const { return cross3(this->forward(), this->right()); }
+    [[nodiscard]] tg::vec3f right() const { return tg::orthonormal_basis(this->forward(), tg::vec3f(0, 1, 0)).first; }
+    [[nodiscard]] tg::vec3f up() const { return tg::orthonormal_basis(this->forward(), tg::vec3f(0, 1, 0)).second; }
 
     /// Left-handed, with a forward [0, 1] depth range.
     [[nodiscard]] tg::projective_transform3f projection(float aspect) const

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
-#include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -16,12 +15,6 @@
 
 namespace tg::impl
 {
-template <class T>
-[[nodiscard]] vec<3, T> cross3(vec<3, T> const& a, vec<3, T> const& b)
-{
-    return tg::dual(tg::cross(a, b));
-}
-
 /// The rigid map taking world space into the frame whose axes, in world space, are `x`, `y`, `z` around `eye`.
 template <class T>
 [[nodiscard]] rigid_transform<3, T> make_view(pos<3, T> const& eye,
@@ -47,10 +40,8 @@ template <class T>
     CC_ASSERT(!tg::traits::is_zero(forward.length_sqr()), "a view needs a non-zero view direction: eye and target must "
                                                           "differ");
     auto const f = forward.normalized();
-    auto const r = impl::cross3(up, f).normalized();
-    CC_ASSERT(!tg::traits::is_zero(r.length_sqr()), "look_to needs an up vector that is not parallel to the view "
-                                                    "direction");
-    return impl::make_view(eye, r, impl::cross3(f, r), f);
+    auto const [right, camera_up] = tg::orthonormal_basis(f, up);
+    return impl::make_view(eye, right, camera_up, f);
 }
 
 /// The left-handed view from `eye` toward `target`; the two must differ.
@@ -72,11 +63,10 @@ template <class T>
 {
     CC_ASSERT(!tg::traits::is_zero(forward.length_sqr()), "a view needs a non-zero view direction: eye and target must "
                                                           "differ");
-    auto const f = forward.normalized();
-    auto const r = impl::cross3(f, up).normalized();
-    CC_ASSERT(!tg::traits::is_zero(r.length_sqr()), "look_to_rh needs an up vector that is not parallel to the view "
-                                                    "direction");
-    return impl::make_view(eye, r, impl::cross3(r, f), -f);
+    // the camera's +z points backward, and (right, up, -forward) is a right-handed basis like any other
+    auto const back = -forward.normalized();
+    auto const [right, camera_up] = tg::orthonormal_basis(back, up);
+    return impl::make_view(eye, right, camera_up, back);
 }
 
 template <class T>

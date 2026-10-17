@@ -59,6 +59,8 @@ tg::dot(a, b);                             // T   — dot product
 tg::normalize(v);                          // vec — free form of v.normalized() (requires has_sqrt<T>)
 tg::any_orthogonal(v);                     // vec — perpendicular to v, any length, never near zero for a nonzero v
 tg::orthonormal_basis(n);                  // pair<vec3, vec3> {u, w}: (u, w, n) right-handed orthonormal; n MUST be unit
+tg::orthonormal_basis(n, up);              // the same with the roll fixed: w toward up. n = forward gives {right, up},
+                                           //   a camera frame in either handedness; up must not be parallel to n
 ```
 
 ## pos — point (affine arithmetic)
