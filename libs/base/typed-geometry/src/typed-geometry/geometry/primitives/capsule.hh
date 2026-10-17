@@ -21,6 +21,8 @@
 template <int D, class T>
 struct tg::capsule
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "capsule requires a positive dimension");
 
     segment<D, T> axis;
@@ -140,6 +142,8 @@ public:
 template <int D, class T>
 struct tg::capsule_boundary
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "capsule_boundary requires a positive dimension");
 
     segment<D, T> axis;

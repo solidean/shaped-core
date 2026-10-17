@@ -26,6 +26,8 @@
 template <int D, class T>
 struct tg::aabb
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "aabb requires a positive dimension");
 
     pos<D, T> min;
@@ -213,6 +215,8 @@ struct tg::object_traits<tg::aabb<D, T>>
 template <int D, class T>
 struct tg::aabb_boundary
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "aabb_boundary requires a positive dimension");
 
     pos<D, T> min;

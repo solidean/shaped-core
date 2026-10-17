@@ -180,6 +180,8 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/sampling-benchmark.cc
         tests/benchmarks/query-benchmark.cc
 
+        tests/scalar_t-test.cc
+
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc
         tests/linalg/pos-test.cc

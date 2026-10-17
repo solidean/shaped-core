@@ -29,6 +29,8 @@
 template <int D, class T>
 struct tg::pos
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "pos requires a positive dimension");
 
     T data[D] = {};
