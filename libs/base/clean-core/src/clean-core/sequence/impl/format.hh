@@ -54,18 +54,32 @@ struct cc::impl::seq_format_support
             cc::impl::format_validate_spec_for<X>(spec);
     }
 
+    // every element through the fold directly: a callback would spread a one-item pack, which then loses its parentheses
+    template <class StepF>
+    static void each_element(cc::sequence<S>&& s, StepF&& step)
+    {
+        static_assert(!cc::sequence<S>::is_infinite, "formatting an infinite sequence never ends: .take(n) first");
+        auto source = seq_access::source(cc::move(s));
+        (void)impl::seq_try_fold(source,
+                                 [&](auto const& x)
+                                 {
+                                     step(x);
+                                     return false;
+                                 });
+    }
+
     static void format(cc::format_sink const& out, cc::string_view spec, cc::sequence<S>&& s)
     {
         out.put("[");
         bool first = true;
-        cc::move(s).each(
-            [&](auto const& x)
-            {
-                if (!first)
-                    out.put(", ");
-                first = false;
-                seq_format_support::format_element(out, spec, x);
-            });
+        seq_format_support::each_element(cc::move(s),
+                                         [&](auto const& x)
+                                         {
+                                             if (!first)
+                                                 out.put(", ");
+                                             first = false;
+                                             seq_format_support::format_element(out, spec, x);
+                                         });
         out.put("]");
     }
 
@@ -76,14 +90,14 @@ struct cc::impl::seq_format_support
         auto const sink = cc::format_sink{&result, [](void* ctx, char const* data, isize size)
                                           { static_cast<cc::string*>(ctx)->append(cc::string_view(data, size)); }};
         bool first = true;
-        cc::move(s).each(
-            [&](auto const& x)
-            {
-                if (!first)
-                    cc::impl::format_one(sink, "", separator);
-                first = false;
-                seq_format_support::format_element(sink, "", x);
-            });
+        seq_format_support::each_element(cc::move(s),
+                                         [&](auto const& x)
+                                         {
+                                             if (!first)
+                                                 cc::impl::format_one(sink, "", separator);
+                                             first = false;
+                                             seq_format_support::format_element(sink, "", x);
+                                         });
         return result;
     }
 };

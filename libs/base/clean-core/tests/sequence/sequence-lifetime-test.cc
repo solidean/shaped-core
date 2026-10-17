@@ -6,9 +6,11 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/sequence/iterator_ranges.hh>
 #include <clean-core/sequence/sequence.hh>
+#include <clean-core/string/format.hh>
 #include <nexus/test.hh>
 
 #include <iterator>
+#include <vector>
 
 using namespace cc::primitive_defines;
 
@@ -51,6 +53,26 @@ struct marked
 
 auto const positive = [](marked const& m) { return m.v > 0; };
 
+// a key that views its element rather than owning a copy, so a moved-out element shows through it
+struct marked_ref
+{
+    marked const* p;
+
+    friend bool operator<(marked_ref a, marked_ref b) { return a.p->v < b.p->v; }
+    friend bool operator==(marked_ref a, marked_ref b) { return a.p->v == b.p->v; }
+};
+auto const view_of = [](marked const& m) { return marked_ref{&m}; };
+
+// a contiguous view over someone else's elements, as std::span is
+struct marked_view
+{
+    marked* p;
+    isize n;
+
+    [[nodiscard]] marked* data() const { return p; }
+    [[nodiscard]] isize size() const { return n; }
+};
+
 template <class M>
 concept has_const_temporary_keys = requires(M const&& m) { static_cast<M const&&>(m).keys(); };
 template <class M>
@@ -71,6 +93,8 @@ int const& mass_of(particle const& p)
 // 1 .. n, each the iterator's own member, so a reference to it is overwritten by the next step
 struct stashing_range
 {
+    int* increments = nullptr; // counts what the range was stepped, to see a take(n) does not read ahead
+
     struct iterator
     {
         using iterator_category = std::input_iterator_tag;
@@ -78,21 +102,24 @@ struct stashing_range
         using difference_type = long long;
 
         int current;
+        int* increments;
 
         int const& operator*() const { return current; }
         iterator& operator++()
         {
             ++current;
+            if (increments != nullptr)
+                ++*increments;
             return *this;
         }
-        void operator++(int) { ++current; }
+        void operator++(int) { ++*this; }
         bool operator==(iterator const& rhs) const { return current == rhs.current; }
     };
 
     int n;
 
-    [[nodiscard]] iterator begin() const { return {1}; }
-    [[nodiscard]] iterator end() const { return {n + 1}; }
+    [[nodiscard]] iterator begin() const { return {1, increments}; }
+    [[nodiscard]] iterator end() const { return {n + 1, nullptr}; }
 };
 
 struct move_only
@@ -609,9 +636,9 @@ TEST("sequence lifetime - a sized source answers non-emptiness without evaluatin
 
 TEST("sequence lifetime - an input iterator's references are not borrowed")
 {
-    static_assert(!decltype(cc::values_of(stashing_range{3}))::has_borrowed_elements);
+    static_assert(!decltype(cc::values_of(stashing_range{.n = 3}))::has_borrowed_elements);
     auto const pairs
-        = cc::values_of(stashing_range{4}).pairwise().map([](int a, int b) { return a * 10 + b; }).to_vector();
+        = cc::values_of(stashing_range{.n = 4}).pairwise().map([](int a, int b) { return a * 10 + b; }).to_vector();
     CHECK(equals(pairs, {12, 23, 34}));
 }
 
@@ -628,4 +655,63 @@ TEST("sequence lifetime - a key may take the tuple by rvalue")
     auto const b = cc::vector<int>{4, 5, 6};
     auto const smallest = cc::zip(a, b).assert_non_empty().min_by([](cc::tuple<int, int>&& t) { return t.get<0>(); });
     CHECK(smallest.get<1>() == 5);
+}
+
+TEST("sequence lifetime - a key viewing its element survives an owning sequence")
+{
+    auto const make = [] { return cc::vector<marked>{marked(3), marked(1), marked(4), marked(2)}; };
+
+    CHECK(make().values().assert_non_empty().min_by(view_of).v == 1);
+    CHECK(make().values().assert_non_empty().max_by(view_of).v == 4);
+
+    auto const deduped = cc::vector<marked>{marked(1), marked(1), marked(2)}.values().dedup_by(view_of).to_vector();
+    CHECK(deduped.size() == 2);
+}
+
+TEST("sequence lifetime - a temporary view over someone else's elements moves nothing out")
+{
+    auto ms = cc::vector<marked>{marked(1), marked(2)};
+    auto const copied = cc::values_of(marked_view{ms.data(), ms.size()}).to_vector();
+    CHECK(copied[1].v == 2);
+    CHECK(ms[0].v == 1);
+    CHECK(ms[1].v == 2);
+}
+
+TEST("sequence lifetime - iota's contains takes integers only")
+{
+    CHECK(cc::iota(10).contains(3));
+    CHECK(!cc::iota(10).contains(3.5));
+    CHECK(cc::iota(10).contains(u8(9)));
+    CHECK(!cc::iota(10).contains(~u64(0)));
+    CHECK(!cc::iota(10).filter([](isize) { return true; }).contains(3.5));
+}
+
+TEST("sequence lifetime - a proxy reference materializes as its value")
+{
+    auto const bits = std::vector<bool>{true, false, true};
+    auto const v = cc::values_of(bits).to_vector();
+    static_assert(std::is_same_v<std::remove_cvref_t<decltype(v[0])>, bool>);
+    CHECK(v[0]);
+    CHECK(!v[1]);
+    CHECK(cc::values_of(std::vector<bool>{false, true}).count_if([](bool b) { return b; }) == 1);
+}
+
+TEST("sequence lifetime - an input range read as an lvalue, and taken from without reading ahead")
+{
+    int increments = 0;
+    auto const r = stashing_range{.increments = &increments, .n = 10};
+    CHECK(equals(cc::values_of(r).take(3).to_vector(), {1, 2, 3}));
+    CHECK(increments <= 3);
+    CHECK(cc::values_of(r).assert_non_empty().first() == 1);
+    if (auto s = cc::values_of(r).skip(2).try_as_non_empty(); s.has_value())
+        CHECK(cc::move(s.value()).first() == 3);
+    else
+        CHECK(false);
+}
+
+TEST("sequence lifetime - a one-item pack formats as a tuple")
+{
+    auto const v = cc::vector<int>{1, 2};
+    CHECK(cc::format("{}", v.values().chunks<1>()) == "[(1), (2)]");
+    CHECK(v.values().windows<1>().join(" ") == "(1) (2)");
 }

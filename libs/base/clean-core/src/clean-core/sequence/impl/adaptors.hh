@@ -10,6 +10,8 @@ namespace cc::impl
 /// Whether the references a callback F returns outlive the sequence wherever its input's do.
 /// A function holding no state can only return references into its arguments or into what outlives it;
 /// one with captures may return a reference into them, which dies with the sequence.
+/// Assumed of a stateless one: it does not return a reference to static scratch it overwrites per call.
+/// Nor may any F return an lvalue into a prvalue argument, which dies with the step.
 template <class F>
 inline constexpr bool seq_returns_borrowed = std::is_empty_v<F> || std::is_member_pointer_v<F>
                                           || (std::is_pointer_v<F> && std::is_function_v<std::remove_pointer_t<F>>);
@@ -744,7 +746,8 @@ struct dedup_source
     using item_t = typename S::item_t;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_expiring = seq_is_expiring<S>;
+    // a key that views an element would see it moved out from under it, so only the identity key, kept as a copy, moves
+    static constexpr bool is_expiring = seq_is_expiring<S> && std::is_same_v<KeyF, seq_identity_key>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
     static constexpr bool keeps_pointer
         = std::is_same_v<KeyF, seq_identity_key> && std::is_reference_v<item_t> && seq_is_borrowed<S>;

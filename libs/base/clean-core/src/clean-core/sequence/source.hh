@@ -380,7 +380,17 @@ struct iota_source
 
     [[nodiscard]] constexpr isize size() const { return _end - _i; }
     [[nodiscard]] constexpr bool is_empty() const { return _i == _end; }
-    [[nodiscard]] constexpr bool contains(isize i) const { return _i <= i && i < _end; }
+    // only an integer can be one of the elements; a 3.5 converted to isize would be
+    template <class V>
+        requires std::is_integral_v<V>
+    [[nodiscard]] constexpr bool contains(V v) const
+    {
+        if constexpr (std::is_unsigned_v<V>)
+            if (u64(v) > (~u64(0) >> 1)) // past every isize
+                return false;
+        auto const i = isize(v);
+        return _i <= i && i < _end;
+    }
 
     [[nodiscard]] constexpr isize at(isize i) const { return _i + i; }
     constexpr void advance(isize n) { _i += impl::seq_min(n, size()); }
@@ -403,11 +413,12 @@ struct iota_source
 
 /// A source that owns its container, which is what values() on an rvalue container hands out.
 /// It addresses by index rather than pointer, so moving the source is safe even for inline storage.
-template <class ContainerT>
+/// IsExpiring is false for a foreign temporary, which may be a view (a std::span) over elements it does not own.
+template <class ContainerT, bool IsExpiring>
 struct owning_source
 {
     using item_t = std::remove_pointer_t<decltype(std::declval<ContainerT&>().data())>&;
-    static constexpr bool is_expiring = true;
+    static constexpr bool is_expiring = IsExpiring;
     static constexpr bool has_pure_at = true;
 
     ContainerT _container;
@@ -580,7 +591,7 @@ template <bool IsNonEmpty, class C>
         return impl::seq_make<IsNonEmpty>(span_source<element_t>(c.data(), c.data() + c.size()));
     }
     else
-        return impl::seq_make<IsNonEmpty>(owning_source<std::remove_cvref_t<C>>(cc::move(c)));
+        return impl::seq_make<IsNonEmpty>(owning_source<std::remove_cvref_t<C>, true>(cc::move(c)));
 }
 
 /// indices() of an indexed container.

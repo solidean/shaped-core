@@ -516,6 +516,8 @@ public:
     [[nodiscard]] constexpr bool equals(OtherT&& other) &&
     {
         auto b = impl::seq_source_of(cc::forward<OtherT>(other));
+        static_assert(!is_infinite || !impl::seq_is_infinite<decltype(b)>, "equals() of two infinite sequences never "
+                                                                           "ends");
         if constexpr (has_known_size && impl::seq_has_size<decltype(b)>)
             if (_source.size() != b.size())
                 return false;
@@ -541,6 +543,7 @@ public:
     [[nodiscard]] constexpr bool starts_with(PrefixT&& prefix) &&
     {
         auto p = impl::seq_source_of(cc::forward<PrefixT>(prefix));
+        static_assert(!impl::seq_is_infinite<decltype(p)>, "starts_with() an infinite prefix never ends");
         if constexpr (impl::seq_has_at<SourceT> && impl::seq_has_at<decltype(p)>)
         {
             auto const n = p.size();
@@ -564,6 +567,8 @@ public:
     [[nodiscard]] constexpr cc::optional<typename impl::seq_dependent<SourceT, isize>::type> mismatch(OtherT&& other) &&
     {
         auto b = impl::seq_source_of(cc::forward<OtherT>(other));
+        static_assert(!is_infinite || !impl::seq_is_infinite<decltype(b)>, "mismatch() of two infinite sequences may "
+                                                                           "never end");
         if constexpr (impl::seq_has_at<SourceT> && impl::seq_has_at<decltype(b)>)
         {
             auto const na = _source.size();
@@ -596,6 +601,8 @@ public:
     [[nodiscard]] constexpr auto compare(OtherT&& other) &&
     {
         auto b = impl::seq_source_of(cc::forward<OtherT>(other));
+        static_assert(!is_infinite || !impl::seq_is_infinite<decltype(b)>, "compare() of two infinite sequences may "
+                                                                           "never end");
         using other_element_t = typename impl::seq_element_of<typename decltype(b)::item_t>::type;
         using order_t = decltype(std::declval<element_t const&>() <=> std::declval<other_element_t const&>());
         auto result = order_t(isize(0) <=> isize(0));
@@ -1059,6 +1066,7 @@ public:
     }
 
     /// The elements grouped by key(idx?, item) into a cc::map from each key to the elements with it, in sequence order.
+    /// The map keeps the keys, so a key must own its value rather than view the element.
     /// Include <clean-core/container/map.hh> and <clean-core/container/vector.hh> to call it.
     template <class KeyF>
     [[nodiscard]] constexpr auto to_grouped_map(KeyF&& key) &&
@@ -1079,7 +1087,7 @@ public:
         return groups;
     }
 
-    /// How many elements each key(idx?, item) has, as a cc::map from key to count.
+    /// How many elements each key(idx?, item) has, as a cc::map from key to count; a key must own its value.
     /// Include <clean-core/container/map.hh> to call it.
     template <class KeyF>
     [[nodiscard]] constexpr auto count_by(KeyF&& key) &&
@@ -1119,6 +1127,7 @@ public:
     }
 
     /// A cc::map from key(idx?, item) to value(idx?, item); a later element replaces an earlier one with the same key.
+    /// The map keeps both, so neither may view the element.
     /// Include <clean-core/container/map.hh> to call it.
     template <class KeyF, class ValueF>
     [[nodiscard]] constexpr auto to_map(KeyF&& key, ValueF&& value) &&
@@ -1478,16 +1487,47 @@ private:
     template <class KeyF>
     using _key_t = std::remove_cvref_t<impl::seq_call_result_t<std::remove_reference_t<KeyF>, impl::seq_view_t<item_t>>>;
 
+    // over references that stay put for the whole fold (borrowed, or owned by this sequence) the best is tracked by
+    // pointer and taken once at the end, so a key viewing its element stays valid; otherwise each candidate is taken,
+    // and a key must own its value
     template <bool IsMin, class KeyF>
     constexpr element_t _best_by(KeyF& key)
     {
         using key_t = _key_t<KeyF>;
+        auto call = impl::seq_indexed_call<KeyF>{key};
+        if constexpr (std::is_reference_v<item_t> && (impl::seq_is_borrowed<SourceT> || impl::seq_is_expiring<SourceT>))
+        {
+            struct best_ref
+            {
+                element_ptr_t element;
+                key_t key;
+            };
+            auto const make = [&](item_t x) { return best_ref{&x, key_t(call(impl::seq_view(x)))}; };
+            auto b = this->_fold_from_first(make,
+                                            [&](best_ref& b, item_t x)
+                                            {
+                                                auto k = key_t(call(impl::seq_view(x)));
+                                                if (IsMin ? k < b.key : b.key < k)
+                                                {
+                                                    b.element = &x;
+                                                    b.key = cc::move(k);
+                                                }
+                                            });
+            return sequence::_take(*b.element);
+        }
+        else
+            return this->template _best_by_value<IsMin>(call);
+    }
+
+    template <bool IsMin, class CallT>
+    constexpr element_t _best_by_value(CallT& call)
+    {
+        using key_t = std::remove_cvref_t<decltype(call(std::declval<impl::seq_view_t<item_t>>()))>;
         struct best
         {
             element_t element;
             key_t key;
         };
-        auto call = impl::seq_indexed_call<KeyF>{key};
         auto const make = [&]<class X>(X&& x)
         {
             auto k = key_t(call(impl::seq_view(x)));

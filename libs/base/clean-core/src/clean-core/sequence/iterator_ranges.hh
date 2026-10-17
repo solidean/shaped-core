@@ -16,8 +16,10 @@ template <class It, class End>
 struct iterator_source
 {
     using deref_t = decltype(*std::declval<It&>());
-    using item_t = std::conditional_t<std::is_lvalue_reference_v<deref_t>, deref_t, std::remove_cvref_t<deref_t>>;
-    // an input iterator may hand out a reference into itself (std::istream_iterator), which the next step overwrites
+    // a prvalue or proxy reference (std::vector<bool>) is the iterator's value type, so no proxy outlives its range
+    using item_t = std::conditional_t<std::is_lvalue_reference_v<deref_t>, deref_t, std::iter_value_t<It>>;
+    // an input iterator may hand out a reference into itself (std::istream_iterator), which the next step overwrites;
+    // a forward one is taken at its word that it does not, as std::forward_iterator's multipass guarantee requires
     static constexpr bool is_borrowed = std::is_pointer_v<It> || std::forward_iterator<It>;
     static constexpr bool is_random_access = requires(It a, End b, isize i) {
         { b - a };
@@ -116,7 +118,8 @@ struct owning_range_source
     using end_t = decltype(std::declval<R&>().end());
     using inner_t = iterator_source<it_t, end_t>;
     using item_t = typename inner_t::item_t;
-    static constexpr bool is_expiring = std::is_lvalue_reference_v<item_t>;
+    // a temporary range may be a view over elements it does not own (std::views::reverse(v)), so nothing moves out
+    static constexpr bool is_expiring = false;
 
     R* _range;
     inner_t _inner;

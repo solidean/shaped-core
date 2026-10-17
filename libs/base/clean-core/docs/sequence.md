@@ -146,6 +146,9 @@ The one place a source moves after handing out such an item is the element a run
 That wrapper carries every reference in it to the same offset in the moved-to source, which constant evaluation cannot do, so that path is not `constexpr`.
 A callback with captures may return a reference into them, so a `map` or `filter_map` whose function holds state yields references that are not borrowed.
 A stateless lambda, a function pointer or a member pointer, `map(&particle::mass)`, keeps them borrowed.
+That is a contract on the callback, which the type cannot check: it does not return a reference to static or `thread_local` scratch it overwrites per call.
+No callback may return an lvalue into a prvalue argument, a member of a temporary say, which dies with the step that made it.
+A forward iterator is taken at its word that it is multipass, so one that stashes its element in itself breaks the same way.
 A zip's, enumerate's or window's pack, nested or not, materializes as tuples of values, so nothing materialized references the source.
 
 ### Internal iteration
@@ -218,6 +221,9 @@ A callback may take a leading `isize` index or omit it; the no-index form is tri
 That holds for every callback: maps and predicates, and the keys of `min_by`, `count_by`, `to_map`, `partition`, `dedup_by` and the rest.
 A key sees the item as a const view, before it is materialized, so over a zip it takes `(a, b)` rather than a tuple.
 `scan`'s function takes the accumulator first, `f(acc, idx?, item)`.
+A key that only decides, as in `min_by`, `max_by` and `dedup_by`, may view its element.
+One the result keeps, as in `to_map`, `to_grouped_map` and `count_by`, must own its value.
+A zip's, enumerate's or window's pack has no comparisons, so `min`, `dedup`, `is_sorted` or `equals` over one needs a `map` to something comparable first.
 `is_sorted_by(key)` is `map(key).is_sorted()`, so each key is computed once.
 `min_ptr_by_into(p, key)` is the one key without an index, since the element `p` already points to has no position in the sequence.
 The index is the position in the sequence the callback is applied to: a filter's predicate counts its input, and a map after the filter counts the elements that passed.
