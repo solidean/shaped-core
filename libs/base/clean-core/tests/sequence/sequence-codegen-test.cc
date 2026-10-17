@@ -1,4 +1,5 @@
 #include <clean-core/common/macros.hh>
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
@@ -301,6 +302,40 @@ CC_DONT_INLINE int seq_probe_pairwise_seq(cc::span<int const> s)
     return s.values().pairwise().map([](int a, int b) { return b - a; }).sum_from(0);
 }
 
+// a window over a map buffers, so the map is called once per element rather than once per window it is in
+CC_DONT_INLINE int seq_probe_map_pairwise_naive(cc::span<int const> s)
+{
+    if (s.size() < 2)
+        return 0;
+    int acc = 0;
+    int prev = s[0] * 3;
+    for (isize i = 1; i < s.size(); ++i)
+    {
+        int const cur = s[i] * 3;
+        acc += cur - prev;
+        prev = cur;
+    }
+    return acc;
+}
+CC_DONT_INLINE int seq_probe_map_pairwise_seq(cc::span<int const> s)
+{
+    return s.values().map([](int x) { return x * 3; }).pairwise().map([](int a, int b) { return b - a; }).sum_from(0);
+}
+
+// take and skip of a sequence non-empty at compile time reach the span's own truncate and advance
+CC_DONT_INLINE int seq_probe_fixed_take_naive(cc::fixed_array<int, 16> const& a, isize n)
+{
+    int acc = 0;
+    auto const k = n < 16 ? n : 16;
+    for (isize i = 1; i < k; ++i)
+        acc += a[i] * 2;
+    return acc;
+}
+CC_DONT_INLINE int seq_probe_fixed_take_seq(cc::fixed_array<int, 16> const& a, isize n)
+{
+    return a.values().map([](int x) { return x * 2; }).take(n).skip(1).sum_from(0);
+}
+
 CC_DONT_INLINE int seq_probe_chunks_naive(cc::span<int const> s)
 {
     int acc = 0;
@@ -410,4 +445,11 @@ TEST("sequence - codegen probes agree with their naive loops")
     CHECK(seq_probe_equals_seq(s, s) == seq_probe_equals_naive(s, s));
     CHECK(seq_probe_indices_contains_seq(v, 10));
     CHECK(!seq_probe_indices_contains_seq(v, 11));
+    CHECK(seq_probe_map_pairwise_seq(s) == seq_probe_map_pairwise_naive(s));
+
+    auto fa = cc::fixed_array<int, 16>();
+    for (isize i = 0; i < 16; ++i)
+        fa[i] = int(i * i) - 20;
+    CHECK(seq_probe_fixed_take_seq(fa, 9) == seq_probe_fixed_take_naive(fa, 9));
+    CHECK(seq_probe_fixed_take_seq(fa, 40) == seq_probe_fixed_take_naive(fa, 40));
 }
