@@ -150,6 +150,8 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         runners = (
             (Path("tools") / "dev" / "profile-self-test.py", []),
             (Path("tools") / "dev" / "changes-self-test.py", []),
+            (Path("tools") / "dev" / "roots-self-test.py", []),
+            (Path("tools") / "dev" / "jsruntime-self-test.py", []),
             (Path("tools") / "dev" / "ui-self-test.py", []),
             (Path("tools") / "dev" / "symbolize-self-test.py", []),
             (Path("tools") / "dev" / "submodules-self-test.py", []),

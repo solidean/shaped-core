@@ -197,7 +197,7 @@ type_id checker::check_pipeline_trace(function_scope& scope, ast::expr_id id, as
 
     handed.push_back(arguments[0].value);
     auto const world = check_expr(scope, arguments[0].value);
-    handed.pop_back();
+    handed.remove_back();
     if (world != checked_module::error_type && out.at(world).kind != type_kind::acceleration_structure)
     {
         report(diagnostic_kind::type_mismatch, file, span_of(file, arguments[0].value),

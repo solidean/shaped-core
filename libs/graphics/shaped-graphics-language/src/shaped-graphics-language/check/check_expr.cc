@@ -185,7 +185,7 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     // CHK-367: an image is handed to the `load` or the `store` its subscript stands for
     handed.push_back(node.object);
     auto const object = check_expr(scope, node.object);
-    handed.pop_back();
+    handed.remove_back();
     subscripted = outer;
     if (object == error_type)
         return error_type;
@@ -939,7 +939,7 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
 
         handed.push_back(a.value);
         auto const type = check_expr(scope, a.value);
-        handed.pop_back();
+        handed.remove_back();
         if (type == error_type)
         {
             result.is_poisoned = true;
@@ -1396,7 +1396,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     // `a.foo(…)` is `foo(a, …)`, and a field of `a` takes part in no call (CHK-249)
     handed.push_back(member.object);
     auto const receiver = check_expr(scope, member.object);
-    handed.pop_back();
+    handed.remove_back();
     if (receiver != error_type && out.at(receiver).kind == type_kind::stream)
         return check_stream_call(scope, id, call, receiver);
     auto arguments = check_arguments(scope, call.arguments, false);

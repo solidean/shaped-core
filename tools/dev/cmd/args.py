@@ -95,7 +95,13 @@ def jsruntime(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--deno-path", metavar="PATH", default=None,
-        help="deno executable or its install dir; also selects deno as the runtime. Falls back to SC_DENO_PATH.",
+        help="deno executable or its install dir; also selects deno as the runtime. Falls back to SC_DENO_PATH, "
+             "then the `dev.py install deno` one in ~/tools/deno.",
+    )
+    p.add_argument(
+        "--v8-flag", metavar="FLAG", action="append", default=None,
+        help="A V8 flag for the runtime, repeatable, e.g. --v8-flag=--experimental-wasm-wide_arithmetic; node takes it "
+             "as its own option, deno inside --v8-flags. Falls back to SC_V8_FLAGS (whitespace-separated).",
     )
 
 
