@@ -137,7 +137,7 @@ struct lhs_holder
         return binary_expr_capture<L, R>{lhs, rhs, cmp_op::not_equal, bool(lhs != rhs)};
     }
 
-    // TODO: && and || guardrails
+    // issue: feat-nexus-check-logical-operator-guardrails
 };
 
 // Binary expression capture: stores lhs, rhs, operator, and passed
@@ -400,7 +400,7 @@ template <class T>
 //   SKIP();                              // skips with default note
 //   SKIP("not implemented yet");         // skips with custom message
 //
-// TODO: currently doesn't interact with SECTION properly
+// issue: bug-nexus-skip-inside-section
 #define SKIP(...)                                                                                         \
     ::nx::impl::check_handle::make(::nx::impl::check_kind::check, ::nx::impl::cmp_op::skip, "SKIP", true, \
                                    cc::source_location::current())                                        \
