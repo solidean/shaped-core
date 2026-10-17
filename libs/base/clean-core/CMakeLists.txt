@@ -574,6 +574,7 @@ if(SC_BUILD_TESTS)
         tests/container/pinned_data-test.cc
         tests/container/vector-test.cc
         tests/container/unique_vector-test.cc
+        tests/container/unique_array-test.cc
         tests/container/ringbuffer-test.cc
         tests/container/fixed_ringbuffer-test.cc
         tests/container/bitset-test.cc

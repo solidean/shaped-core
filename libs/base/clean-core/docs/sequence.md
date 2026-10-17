@@ -19,10 +19,9 @@ This doc is in two halves.
 
 ## What exists today
 
-**Entry points.** `values()` and `indices()` on `vector`, `array`, `unique_vector`, `span` and `fixed_span`.
+**Entry points.** `values()` and `indices()` on `vector`, `array`, `unique_vector`, `unique_array`, `span` and `fixed_span`.
 `values()` on a temporary container moves it into the sequence; on an lvalue it references it.
 `fixed_span<T, N>` with `N > 0` hands out sequences that are non-empty at compile time.
-`unique_array` is left out: its base names `array<T>` as the derived container, so an owning `values() &&` would move from the wrong type.
 The other containers (maps, sets, ringbuffers, small and fixed vectors) do not have entry points yet.
 
 **Reductions.** `count`, `count_if`, `any`, `all`, `none`, `contains`, `index_of` (→ `cc::optional<isize>`), `each`.
