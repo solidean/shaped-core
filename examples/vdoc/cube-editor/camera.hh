@@ -17,7 +17,6 @@ using namespace cc::primitive_defines;
 /// tg's `cross` is the wedge and returns a bivector, so the vector form is its Hodge dual.
 [[nodiscard]] inline tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
 
-
 /// An orbit camera, which is the whole camera state this example has.
 /// It is persisted in the vdoc file's workspace, so it survives a restart without ever becoming an edit.
 struct orbit_camera

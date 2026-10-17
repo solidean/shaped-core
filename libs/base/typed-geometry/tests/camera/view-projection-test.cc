@@ -8,10 +8,9 @@
 #include <typed-geometry/camera/camera.hh>
 #include <typed-geometry/geometry/query/query.hh>
 
-// The round trip is view_projection's contract, so it is checked as a property over random inputs, for every
-// convention and for a perspective with a finite far plane, one with an infinite far plane, and an orthographic one.
-// The oracle for clipping is the point projection alone: a world point is visible when it is in front of the camera
-// and lands inside the clip volume.
+// The round trip is view_projection's contract, so it is checked as a property over random inputs.
+// Every convention is checked with a finite, an infinite, an off-center and an orthographic projection.
+// The oracle for clipping is the point projection alone: a world point is visible when it is in front of the camera and lands inside the clip volume.
 
 namespace
 {
@@ -41,6 +40,9 @@ cc::vector<setup> all_setups()
                        .infinite_far = true});
         out.push_back({.name = name + " orthographic",
                        .vp = tg::view_projection_d::make(view, fam.orthographic(8, 6, 0.5, 40), fam.depth)});
+        out.push_back({.name = name + " off-center",
+                       .vp = tg::view_projection_d::make(
+                           view, fam.perspective_off_center(-0.3, 0.6, -0.2, 0.4, 0.5, 40), fam.depth)});
     }
     return out;
 }
@@ -53,7 +55,8 @@ f64 inner_depth(tg::view_projection_d const& vp, cc::random& rng)
     return rng.uniform(lo + 0.02 * (hi - lo), hi - 0.02 * (hi - lo));
 }
 
-bool is_visible(tg::view_projection_d const& vp, tg::pos3d p)
+/// Inside the clip volume by more than `margin`; a negative margin also accepts points just outside it.
+bool is_visible(tg::view_projection_d const& vp, tg::pos3d p, f64 margin = 1e-6)
 {
     auto const w = tg::impl::projective_w(vp.world_to_clip(), p);
     if (w <= 0)
@@ -61,7 +64,6 @@ bool is_visible(tg::view_projection_d const& vp, tg::pos3d p)
     auto const q = vp.project(p);
     auto const lo = vp.near_depth() < vp.far_depth() ? vp.near_depth() : vp.far_depth();
     auto const hi = vp.near_depth() < vp.far_depth() ? vp.far_depth() : vp.near_depth();
-    auto constexpr margin = 1e-6;
     return -1 + margin < q.data[0] && q.data[0] < 1 - margin && -1 + margin < q.data[1] && q.data[1] < 1 - margin
         && lo + margin < q.data[2] && q.data[2] < hi - margin;
 }
@@ -71,10 +73,40 @@ tg::pos3d random_world_point(cc::random& rng)
     return tg::pos3d(rng.uniform(-30.0, 30.0), rng.uniform(-30.0, 30.0), rng.uniform(-30.0, 30.0));
 }
 
-/// the parameter of `p` along `origin + t * dir`
-f64 parameter_along(tg::pos3d origin, tg::vec3d dir, tg::pos3d p)
+/// the parameter an end at infinity stands for
+auto constexpr k_unbounded = 1e300;
+
+/// The parameter along `origin + t * dir` that the NDC end `ndc` of a projected object stands for.
+/// On an infinite far plane it is the vanishing point, so the end is at infinity, and the pick ray through it runs along the object.
+f64 end_parameter(setup const& s, tg::pos3d origin, tg::vec3d dir, tg::pos3d ndc, bool upper)
 {
-    return tg::dot(p - origin, dir) / tg::dot(dir, dir);
+    if (s.infinite_far && tgtest::approx(ndc.data[2], s.vp.far_depth(), 1e-9))
+    {
+        auto const pick = s.vp.unproject(tg::pos2d(ndc.data[0], ndc.data[1]));
+        CHECK(tgtest::approx(pick.dir, (upper ? dir : -dir).normalized(), 1e-6));
+        return upper ? k_unbounded : -k_unbounded;
+    }
+    auto const p = s.vp.unproject(ndc);
+    auto const t = tg::dot(p - origin, dir) / tg::dot(dir, dir);
+    CHECK(tgtest::approx(origin + dir * t, p, 1e-6)); // the end lies on the object
+    return t;
+}
+
+/// Every visible sample in [lo, hi] lies inside [t0, t1], and every sample well inside [t0, t1] is visible.
+/// An empty interval, t0 > t1, therefore checks that nothing sampled is visible.
+template <class AtT>
+void check_interval_against_samples(tg::view_projection_d const& vp, AtT const& at, f64 t0, f64 t1, f64 lo, f64 hi)
+{
+    auto constexpr samples = 400;
+    for (auto k = 0; k <= samples; ++k)
+    {
+        auto const t = lo + (hi - lo) * k / samples;
+        // a sample clearly inside the volume is inside the interval, and one inside the interval is at worst on the volume's boundary
+        if (is_visible(vp, at(t)))
+            CHECK((t0 - 1e-6 <= t && t <= t1 + 1e-6));
+        if (t0 + 1e-3 < t && t < t1 - 1e-3)
+            CHECK(is_visible(vp, at(t), -1e-9));
+    }
 }
 } // namespace
 
@@ -95,12 +127,13 @@ TEST("tg camera - a point projects and unprojects back")
         }
 }
 
-TEST("tg camera - the pick ray starts on the near plane and stays on its pixel")
+TEST("tg camera - the pick ray starts on the near plane, stays on its pixel and points into the scene")
 {
     for (auto const& s : all_setups())
         SECTION("{}", s.name)
         {
             auto rng = cc::random(0x91C6);
+            auto const toward_far = s.vp.far_depth() - s.vp.near_depth();
             for (auto i = 0; i < 100; ++i)
             {
                 auto const xy = tg::pos2d(rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0));
@@ -111,9 +144,39 @@ TEST("tg camera - the pick ray starts on the near plane and stays on its pixel")
                 {
                     auto const q = s.vp.project(r.at(t));
                     CHECK(tgtest::approx(tg::pos2d(q.data[0], q.data[1]), xy, 1e-7));
+                    // an orthographic ray pointing backward stays on its pixel too, so the depth says which way it goes
+                    CHECK((q.data[2] - s.vp.near_depth()) * toward_far > 0);
                 }
             }
         }
+}
+
+TEST("tg camera - the f32 pick ray stays precise far from the origin")
+{
+    // the direction comes from the far end, so it does not degrade with the eye's distance over the near distance
+    auto const vp_d = tg::view_projection_d::make(tg::look_at(tg::pos3d(1000, 300, -2000), tg::pos3d(1010, 295, -1990)),
+                                                  tg::perspective(tg::angle_d::make_from_degree(45), 1.5, 0.1));
+    auto const vp_f = tg::view_projection_f::make(tg::look_at(tg::pos3f(1000, 300, -2000), tg::pos3f(1010, 295, -1990)),
+                                                  tg::perspective(tg::angle_f::make_from_degree(45), 1.5f, 0.1f));
+    for (auto const xy : {tg::pos2d(0, 0), tg::pos2d(0.7, -0.4), tg::pos2d(-1, 1)})
+    {
+        auto const exact = vp_d.unproject(xy).dir;
+        auto const r = vp_f.unproject(tg::pos2f(f32(xy.data[0]), f32(xy.data[1])));
+        auto const d = tg::vec3d(r.dir.data[0], r.dir.data[1], r.dir.data[2]);
+        CHECK((d - exact).length() < 1e-5);
+    }
+}
+
+TEST("tg camera - a point round-trips in f32 too")
+{
+    auto const vp = tg::view_projection_f::make(tg::look_at(tg::pos3f(2, 1, -6), tg::pos3f(0.5f, -0.5f, 1)),
+                                                tg::perspective(tg::angle_f::make_from_degree(60), 1.5f, 0.5f, 40.0f));
+    auto rng = cc::random(0xF32F);
+    for (auto i = 0; i < 100; ++i)
+    {
+        auto const q = tg::pos3f(rng.uniform(-1.0f, 1.0f), rng.uniform(-1.0f, 1.0f), rng.uniform(0.05f, 0.95f));
+        CHECK(tgtest::approx(vp.project(vp.unproject(q)), q, 1e-4f));
+    }
 }
 
 TEST("tg camera - a segment projects to its visible part")
@@ -129,31 +192,18 @@ TEST("tg camera - a segment projects to its visible part")
                 auto const dir = seg.pos1 - seg.pos0;
                 auto const projected = s.vp.project(seg);
 
-                // the visible interval, as parameters along the segment
+                // the visible interval, as parameters along the segment; empty when nothing came back
                 auto t0 = 1.0;
                 auto t1 = 0.0;
                 if (projected.has_value())
                 {
                     ++visible_count;
-                    auto const back = s.vp.unproject(projected.value());
-                    t0 = parameter_along(seg.pos0, dir, back.pos0);
-                    t1 = parameter_along(seg.pos0, dir, back.pos1);
-                    // both ends lie on the segment
-                    CHECK(tgtest::approx(seg.pos0 + dir * t0, back.pos0, 1e-6));
-                    CHECK(tgtest::approx(seg.pos0 + dir * t1, back.pos1, 1e-6));
+                    t0 = end_parameter(s, seg.pos0, dir, projected.value().pos0, false);
+                    t1 = end_parameter(s, seg.pos0, dir, projected.value().pos1, true);
                     CHECK(t0 > -1e-9);
                     CHECK(t1 < 1 + 1e-9);
                 }
-                // every visible sample is inside the interval, and every sample well inside it is visible
-                for (auto k = 0; k <= 64; ++k)
-                {
-                    auto const t = k / 64.0;
-                    auto const visible = is_visible(s.vp, seg.pos0 + dir * t);
-                    if (visible)
-                        CHECK((t0 - 1e-6 <= t && t <= t1 + 1e-6));
-                    if (t0 + 1e-3 < t && t < t1 - 1e-3)
-                        CHECK(visible);
-                }
+                check_interval_against_samples(s.vp, [&](f64 t) { return seg.pos0 + dir * t; }, t0, t1, 0, 1);
             }
             CHECK(visible_count > 10); // the property was not checked vacuously
         }
@@ -166,69 +216,55 @@ TEST("tg camera - a ray projects to its visible part, ending at its vanishing po
         {
             auto rng = cc::random(0x4A75);
             auto reaches_infinity = 0;
+            auto visible_count = 0;
             for (auto i = 0; i < 300; ++i)
             {
                 auto const r
                     = tg::ray3d(random_world_point(rng), (random_world_point(rng) - tg::pos3d::zero).normalized());
                 auto const projected = s.vp.project(r);
 
-                // samples along the ray, out to well past the far plane
-                auto first_visible = -1.0;
-                auto last_visible = -1.0;
-                for (auto k = 0; k <= 400; ++k)
+                auto t0 = 1.0;
+                auto t1 = 0.0;
+                if (projected.has_value())
                 {
-                    auto const t = k * 0.25;
-                    if (is_visible(s.vp, r.at(t)))
-                    {
-                        if (first_visible < 0)
-                            first_visible = t;
-                        last_visible = t;
-                    }
+                    ++visible_count;
+                    t0 = end_parameter(s, r.origin, r.dir, projected.value().pos0, false);
+                    t1 = end_parameter(s, r.origin, r.dir, projected.value().pos1, true);
+                    if (t1 == k_unbounded)
+                        ++reaches_infinity;
                 }
-                if (first_visible < 0)
-                    continue; // nothing sampled is visible; a sliver between samples may still be
-                REQUIRE(projected.has_value());
-
-                auto const& seg = projected.value();
-                auto const start = s.vp.unproject(seg.pos0);
-                CHECK(tgtest::approx(start, r.at(r.parameter_of(start)), 1e-6));
-                CHECK(r.parameter_of(start) <= first_visible + 1e-6);
-
-                auto const at_far = tgtest::approx(seg.pos1.data[2], s.vp.far_depth(), 1e-9);
-                if (s.infinite_far && at_far)
-                {
-                    // the vanishing point: the pick ray through it runs parallel to r
-                    ++reaches_infinity;
-                    auto const pick = s.vp.unproject(tg::pos2d(seg.pos1.data[0], seg.pos1.data[1]));
-                    CHECK(tgtest::approx(pick.dir, r.dir, 1e-6));
-                }
-                else
-                {
-                    auto const end = s.vp.unproject(seg.pos1);
-                    CHECK(tgtest::approx(end, r.at(r.parameter_of(end)), 1e-6));
-                    CHECK(r.parameter_of(end) >= last_visible - 1e-6);
-                }
+                check_interval_against_samples(s.vp, [&](f64 t) { return r.at(t); }, t0, t1, 0, 100);
             }
+            CHECK(visible_count > 10);
             if (s.infinite_far)
                 CHECK(reaches_infinity > 0);
         }
 }
 
-TEST("tg camera - a line projects like the two rays it is made of")
+TEST("tg camera - a line projects to its visible part, in both directions")
 {
     for (auto const& s : all_setups())
         SECTION("{}", s.name)
         {
             auto rng = cc::random(0x11AE);
-            for (auto i = 0; i < 100; ++i)
+            auto visible_count = 0;
+            for (auto i = 0; i < 200; ++i)
             {
                 auto const l
                     = tg::line3d(random_world_point(rng), (random_world_point(rng) - tg::pos3d::zero).normalized());
                 auto const projected = s.vp.project(l);
-                auto const forward = s.vp.project(tg::ray3d(l.origin, l.dir));
-                auto const backward = s.vp.project(tg::ray3d(l.origin, -l.dir));
-                CHECK(projected.has_value() == (forward.has_value() || backward.has_value()));
+
+                auto t0 = 1.0;
+                auto t1 = 0.0;
+                if (projected.has_value())
+                {
+                    ++visible_count;
+                    t0 = end_parameter(s, l.origin, l.dir, projected.value().pos0, false);
+                    t1 = end_parameter(s, l.origin, l.dir, projected.value().pos1, true);
+                }
+                check_interval_against_samples(s.vp, [&](f64 t) { return l.origin + l.dir * t; }, t0, t1, -100, 100);
             }
+            CHECK(visible_count > 10);
         }
 }
 
@@ -246,12 +282,28 @@ TEST("tg camera - the frustum is the view volume, in every convention")
                 if (is_visible(s.vp, p))
                     CHECK(f.contains(p));
             }
-            // and a point just outside each side of the clip volume is outside the frustum
+            // a point just outside each side of the clip volume is outside the frustum
             for (auto const q :
                  {tg::pos3d(1.01, 0, 0.5), tg::pos3d(-1.01, 0, 0.5), tg::pos3d(0, 1.01, 0.5), tg::pos3d(0, -1.01, 0.5)})
             {
                 auto const depth = (s.vp.near_depth() + s.vp.far_depth()) / 2;
                 CHECK(!f.contains(s.vp.unproject(tg::pos3d(q.data[0], q.data[1], depth))));
+            }
+
+            // the near plane is planes[4], with the eye's side outside it
+            auto const axis = s.vp.unproject(tg::pos2d(0, 0));
+            auto const on_plane = [](tg::plane3d const& pl, tg::pos3d p)
+            { return tgtest::approx(tg::dot(pl.normal, p - tg::pos3d::zero), pl.dist, 1e-6); };
+            CHECK(on_plane(f.planes[4], axis.origin));
+            CHECK(!f.contains(axis.at(-0.05)));
+            CHECK(f.contains(axis.at(0.05)));
+            if (!s.infinite_far)
+            {
+                // and the far plane is planes[5], with everything beyond it outside
+                auto const far_center = s.vp.unproject(tg::pos3d(0, 0, s.vp.far_depth()));
+                CHECK(on_plane(f.planes[5], far_center));
+                CHECK(!f.contains(far_center + axis.dir * 0.05));
+                CHECK(f.contains(far_center - axis.dir * 0.05));
             }
         }
 }

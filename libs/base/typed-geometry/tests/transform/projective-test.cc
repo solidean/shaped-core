@@ -73,6 +73,15 @@ TEST("tg projective - a triangle transforms vertex by vertex")
         CHECK_ASSERTS(tg::segment3f(tg::pos3f(0, 0, 2), tg::pos3f(0, 0, -4)).transformed(p));
     }
 
+    SECTION("a negated matrix is the same map, and is accepted")
+    {
+        // every w flips sign, so one side of the projection is all that can be asked of the vertices
+        auto const negated = tg::projective_transform3f::make_from_mat(p.to_mat() * -1.0f);
+        auto const r = tri.transformed(negated);
+        CHECK(tgtest::approx(r.pos0, tri.pos0.transformed(p), 1e-4f));
+        CHECK(tgtest::approx(r.pos2, tri.pos2.transformed(p), 1e-4f));
+    }
+
     SECTION("a segment behaves the same way")
     {
         auto const s = tg::segment3f(tg::pos3f(0, 0, 2), tg::pos3f(1, 1, 9));

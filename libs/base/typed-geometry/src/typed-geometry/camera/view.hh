@@ -10,8 +10,8 @@
 
 /// View transforms: world space into the camera's frame, as a rigid transform.
 ///
-/// The frame is the one the projections in camera/projection.hh read: +x right, +y up, and +z forward for the
-/// left-handed default, -z forward for `_rh`.
+/// The frame is the one the projections in camera/projection.hh read: +x right, +y up.
+/// +z is forward for the left-handed default, -z for `_rh`.
 /// `up` only fixes the roll, so it need not be unit length or perpendicular to the view direction, but it must not be parallel to it.
 
 namespace tg::impl
@@ -44,6 +44,8 @@ template <class T>
                                             vec<3, T> const& up = vec<3, T>(0, 1, 0))
     requires(tg::traits::has_sqrt<T>)
 {
+    CC_ASSERT(!tg::traits::is_zero(forward.length_sqr()), "a view needs a non-zero view direction: eye and target must "
+                                                          "differ");
     auto const f = forward.normalized();
     auto const r = impl::cross3(up, f).normalized();
     CC_ASSERT(!tg::traits::is_zero(r.length_sqr()), "look_to needs an up vector that is not parallel to the view "
@@ -68,6 +70,8 @@ template <class T>
                                                vec<3, T> const& up = vec<3, T>(0, 1, 0))
     requires(tg::traits::has_sqrt<T>)
 {
+    CC_ASSERT(!tg::traits::is_zero(forward.length_sqr()), "a view needs a non-zero view direction: eye and target must "
+                                                          "differ");
     auto const f = forward.normalized();
     auto const r = impl::cross3(f, up).normalized();
     CC_ASSERT(!tg::traits::is_zero(r.length_sqr()), "look_to_rh needs an up vector that is not parallel to the view "

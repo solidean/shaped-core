@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/error/optional.hh>
 #include <typed-geometry/camera/fwd.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -85,15 +86,15 @@ make_perspective(handedness hand, T left, T right, T bottom, T top, T n, perspec
     m[3, 2] = depth.b;
     m[2, 3] = T(1);
     if (hand == handedness::right)
-        for (int r = 0; r < 4; ++r)
+        for (auto r = 0; r < 4; ++r)
             m[2, r] = -m[2, r];
     return projective_transform<3, T>::make_from_mat(m);
 }
 
 template <class T>
-[[nodiscard]] constexpr perspective_depth_row<T> perspective_depth_any(clip_depth depth, T n, T const* f)
+[[nodiscard]] constexpr perspective_depth_row<T> perspective_depth_any(clip_depth depth, T n, cc::optional<T> const& f)
 {
-    return f ? perspective_depth(depth, n, *f) : perspective_depth_infinite(depth, n);
+    return f.has_value() ? perspective_depth(depth, n, f.value()) : perspective_depth_infinite(depth, n);
 }
 
 template <class T>
@@ -102,7 +103,7 @@ template <class T>
                                                               angle<T> vertical_fov,
                                                               T aspect,
                                                               T n,
-                                                              T const* f)
+                                                              cc::optional<T> const& f)
     requires(tg::traits::has_trigonometry<T>)
 {
     CC_ASSERT(aspect > T(0), "a perspective projection needs a positive aspect ratio");
@@ -141,6 +142,16 @@ make_orthographic(handedness hand, clip_depth depth, T left, T right, T bottom, 
     auto const offset = vec<3, T>(-(right + left) / (right - left), -(top + bottom) / (top - bottom), z.data[1]);
     return ResultT::make_translation(offset).composed(ResultT::make_scaling(scale));
 }
+
+/// The orthographic projection of a view-space box: a right-handed view looks down -z, so its box's z extent is [-far, -near].
+template <class ResultT, class T>
+[[nodiscard]] constexpr ResultT make_orthographic_of_box(handedness hand, clip_depth depth, aabb<3, T> const& box)
+{
+    auto const n = hand == handedness::right ? -box.max.data[2] : box.min.data[2];
+    auto const f = hand == handedness::right ? -box.min.data[2] : box.max.data[2];
+    return make_orthographic<ResultT>(hand, depth, box.min.data[0], box.max.data[0], box.min.data[1], box.max.data[1],
+                                      n, f);
+}
 } // namespace tg::impl
 
 namespace tg
@@ -154,21 +165,23 @@ namespace tg
 //   perspective_off_center_<suffix>(left, right, bottom, top, near_distance[, far_distance])
 //   orthographic_<suffix>(width, height, near_distance, far_distance)
 //   orthographic_off_center_<suffix>(left, right, bottom, top, near_distance, far_distance)
+//   orthographic_<suffix>(view_volume), the view-space box that becomes the clip volume
 // with <suffix> one of lh_reverse_z, rh_reverse_z, lh_zero_to_one, rh_zero_to_one, lh_minus_one_to_one, rh_minus_one_to_one.
-// An orthographic projection whose depth axis keeps its direction is a scaling_translation_transform, and one that
-// flips it a signed_scaling_translation_transform.
+// An orthographic projection whose depth axis keeps its direction is a scaling_translation_transform.
+// One that flips it is a signed_scaling_translation_transform.
 
 #define TG_IMPL_PROJECTION_FAMILY(SUFFIX, HAND, DEPTH, ORTHO_T)                                                     \
     template <class T>                                                                                              \
     [[nodiscard]] projective_transform<3, T> perspective_##SUFFIX(angle<T> vertical_fov, T aspect, T near_distance) \
     {                                                                                                               \
-        return impl::make_perspective_fov<T>(HAND, DEPTH, vertical_fov, aspect, near_distance, nullptr);            \
+        return impl::make_perspective_fov<T>(HAND, DEPTH, vertical_fov, aspect, near_distance, cc::optional<T>());  \
     }                                                                                                               \
     template <class T>                                                                                              \
     [[nodiscard]] projective_transform<3, T> perspective_##SUFFIX(angle<T> vertical_fov, T aspect, T near_distance, \
                                                                   T far_distance)                                   \
     {                                                                                                               \
-        return impl::make_perspective_fov(HAND, DEPTH, vertical_fov, aspect, near_distance, &far_distance);         \
+        return impl::make_perspective_fov(HAND, DEPTH, vertical_fov, aspect, near_distance,                         \
+                                          cc::optional<T>(far_distance));                                           \
     }                                                                                                               \
     template <class T>                                                                                              \
     [[nodiscard]] constexpr projective_transform<3, T> perspective_off_center_##SUFFIX(T left, T right, T bottom,   \
@@ -196,6 +209,11 @@ namespace tg
     {                                                                                                               \
         return impl::make_orthographic<ORTHO_T<3, T>>(HAND, DEPTH, left, right, bottom, top, near_distance,         \
                                                       far_distance);                                                \
+    }                                                                                                               \
+    template <class T>                                                                                              \
+    [[nodiscard]] constexpr ORTHO_T<3, T> orthographic_##SUFFIX(aabb<3, T> const& view_volume)                      \
+    {                                                                                                               \
+        return impl::make_orthographic_of_box<ORTHO_T<3, T>>(HAND, DEPTH, view_volume);                             \
     }
 
 TG_IMPL_PROJECTION_FAMILY(lh_reverse_z,
@@ -283,7 +301,6 @@ template <class T>
 template <class T>
 [[nodiscard]] constexpr signed_scaling_translation_transform<3, T> orthographic(aabb<3, T> const& view_volume)
 {
-    return orthographic_off_center(view_volume.min.data[0], view_volume.max.data[0], view_volume.min.data[1],
-                                   view_volume.max.data[1], view_volume.min.data[2], view_volume.max.data[2]);
+    return orthographic_lh_reverse_z(view_volume);
 }
 } // namespace tg

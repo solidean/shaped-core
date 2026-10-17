@@ -55,7 +55,6 @@ using cube_vertex = shaders::cube_vertex;
 /// The classic 3-vector cross product: tg's `cross` is the wedge, so the vector form is its Hodge dual.
 [[nodiscard]] tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
 
-
 [[nodiscard]] tg::mat4f rotation_y(tg::angle_f a)
 {
     auto m = tg::mat4f::identity;

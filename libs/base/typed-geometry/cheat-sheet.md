@@ -293,7 +293,7 @@ tg::ndc_from_pixel(pixel, size);  tg::pixel_from_ndc(ndc, size); // pixels: top-
 ```
 
 - **The depth convention is passed, not read off the matrix** — a zoo projection's caller passes the `clip_depth` its name states.
-- **`segment` / `triangle` `.transformed(projective)` assert every vertex has w > 0**; `vp.project` is the spelling that clips.
+- **`segment` / `triangle` `.transformed(projective)` assert every vertex is on one side of the projection** (one sign of w); `vp.project` is the spelling that clips.
 
 ## geometry primitives (each denotes a set of points)
 

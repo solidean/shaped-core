@@ -670,15 +670,22 @@ inline homogeneous_transform<DSource, DTarget, T, Flags> const homogeneous_trans
 
 namespace tg::impl
 {
-/// The homogeneous w a projective transform gives `p`: positive in front of the projection, zero at infinity.
-/// A primitive that has to stay convex under a projection asserts it at its vertices.
+/// The homogeneous w a projective transform gives `p`: zero at infinity, and one sign on each side of the projection.
+/// Which sign is in front depends on the matrix, since -M is the same map as M.
 template <int D, class T, transform_flags Flags>
 [[nodiscard]] constexpr T projective_w(homogeneous_transform<D, D, T, Flags> const& t, pos<D, T> const& p)
 {
     auto const m = t.to_mat();
-    T w = m[D, D];
+    auto w = m[D, D];
     for (int c = 0; c < D; ++c)
         w += m[c, D] * p.data[c];
     return w;
+}
+
+/// Whether every point keeps to one side of the projection, the condition for a convex hull to map onto the hull of its images.
+template <class... Ws>
+[[nodiscard]] constexpr bool one_side_of_projection(Ws... ws)
+{
+    return ((ws > decltype(ws)(0)) && ...) || ((ws < decltype(ws)(0)) && ...);
 }
 } // namespace tg::impl

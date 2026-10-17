@@ -24,9 +24,8 @@
 ///     project(unproject(xy).at(t)).xy == xy                   for every t >= 0: the pick ray
 ///     unproject(*project(s))     == the part of s inside the view volume
 ///
-/// A segment, a ray or a line projects to its visible part: it is clipped to the view volume in homogeneous clip space,
-/// where a point at infinity is an ordinary point with w = 0, so a ray running off to an infinite far plane ends at its
-/// vanishing point on the far depth.
+/// A segment, a ray or a line projects to its visible part, clipped to the view volume in homogeneous clip space.
+/// There a point at infinity is an ordinary point with w = 0, so a ray running off to an infinite far plane ends at its vanishing point on the far depth.
 /// Clipping is what makes the answer a bounded segment whatever goes in; nothing visible gives none.
 ///
 /// The convention is not read off the matrix: a zoo projection names its depth range, and the caller passes it on.
@@ -155,9 +154,17 @@ public:
         auto const x = ndc_xy.data[0];
         auto const y = ndc_xy.data[1];
         auto const origin = this->unproject(pos<3, T>(x, y, this->near_depth()));
-        // halfway in depth is finite even when the far plane is not
-        auto const further = this->unproject(pos<3, T>(x, y, (this->near_depth() + this->far_depth()) / T(2)));
-        return ray<3, T>(origin, (further - origin).normalized());
+        // The direction comes from the far end, so its two points are as far apart as the view volume allows.
+        // An infinite far plane's end is a point at infinity, w = 0, whose xyz is the direction itself.
+        auto const far_end = view_projection::apply(_clip_to_world, vec<4, T>(x, y, this->far_depth(), T(1)));
+        if (!tg::traits::is_zero(far_end.data[3]))
+            return ray<3, T>(origin, (view_projection::divide(far_end) - origin).normalized());
+
+        auto dir = vec<3, T>(far_end.data[0], far_end.data[1], far_end.data[2]);
+        // a point at infinity has no sign, so point it the way that moves away from the camera
+        if (view_projection::apply(_world_to_clip, vec<4, T>(dir.data[0], dir.data[1], dir.data[2], T(0))).data[3] < T(0))
+            dir = -dir;
+        return ray<3, T>(origin, dir.normalized());
     }
 
     /// The world segment `ndc` comes from; neither endpoint may be at an infinite far plane's depth.
@@ -199,30 +206,31 @@ private:
     [[nodiscard]] constexpr cc::fixed_array<vec<4, T>, 6> clip_planes() const
     {
         auto const one = T(1);
-        auto planes = cc::fixed_array<vec<4, T>, 6>{
-            vec<4, T>(one, T(0), T(0), one),
-            vec<4, T>(-one, T(0), T(0), one),
-            vec<4, T>(T(0), one, T(0), one),
-            vec<4, T>(T(0), -one, T(0), one),
-            vec<4, T>(),
-            vec<4, T>(),
+        auto const zero = T(0);
+        auto const depth = [&](vec<4, T> const& near_a, vec<4, T> const& far_a)
+        {
+            return cc::fixed_array<vec<4, T>, 6>{
+                vec<4, T>(one, zero, zero, one),
+                vec<4, T>(-one, zero, zero, one),
+                vec<4, T>(zero, one, zero, one),
+                vec<4, T>(zero, -one, zero, one),
+                near_a,
+                far_a,
+            };
         };
         switch (_depth)
         {
+        // z <= w and z >= 0
         case clip_depth::reverse_zero_to_one:
-            planes[4] = vec<4, T>(T(0), T(0), -one, one); // z <= w
-            planes[5] = vec<4, T>(T(0), T(0), one, T(0)); // z >= 0
-            break;
+            return depth(vec<4, T>(zero, zero, -one, one), vec<4, T>(zero, zero, one, zero));
+        // z >= 0 and z <= w
         case clip_depth::zero_to_one:
-            planes[4] = vec<4, T>(T(0), T(0), one, T(0));
-            planes[5] = vec<4, T>(T(0), T(0), -one, one);
-            break;
+            return depth(vec<4, T>(zero, zero, one, zero), vec<4, T>(zero, zero, -one, one));
+        // z >= -w and z <= w
         case clip_depth::minus_one_to_one:
-            planes[4] = vec<4, T>(T(0), T(0), one, one); // z >= -w
-            planes[5] = vec<4, T>(T(0), T(0), -one, one);
-            break;
+            return depth(vec<4, T>(zero, zero, one, one), vec<4, T>(zero, zero, -one, one));
         }
-        return planes;
+        CC_UNREACHABLE("unknown clip_depth");
     }
 
     /// The part of { a + t b : t in range } inside the view volume, as an NDC segment.

@@ -73,6 +73,23 @@ TEST("tg camera - an orthographic projection maps its box onto the clip volume")
         }
 }
 
+TEST("tg camera - an orthographic projection of a view-space box, in every convention")
+{
+    for (auto const& fam : tgtest::k_projection_families)
+        SECTION("{}", fam.name)
+        {
+            // the box's near face is k_near along the view axis, whichever way that points
+            auto const a = fam.ahead(-1, -2, k_near);
+            auto const b = fam.ahead(3, 1, k_far);
+            auto const box = tg::aabb3d(tg::pos3d(-1, -2, fam.right_handed ? -k_far : k_near),
+                                        tg::pos3d(3, 1, fam.right_handed ? -k_near : k_far));
+            auto const o = fam.orthographic_box(box);
+            CHECK(o == fam.orthographic_off_center(-1, 3, -2, 1, k_near, k_far));
+            CHECK(tgtest::approx(o(a), tg::pos3d(-1, -1, fam.near_depth())));
+            CHECK(tgtest::approx(o(b), tg::pos3d(1, 1, fam.far_depth())));
+        }
+}
+
 TEST("tg camera - an orthographic projection's type says whether it flips depth")
 {
     // a convention keeps the depth axis's direction when its near depth is below its far depth along the view axis

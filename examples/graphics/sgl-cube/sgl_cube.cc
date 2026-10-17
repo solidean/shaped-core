@@ -58,7 +58,6 @@ constexpr int cube_index_count = 36;
 /// tg's `cross` is the wedge and returns a bivector, so the vector form is its Hodge dual.
 [[nodiscard]] tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
 
-
 /// The camera: it orbits a fixed target, and that is all the state this example keeps.
 struct orbit_camera
 {

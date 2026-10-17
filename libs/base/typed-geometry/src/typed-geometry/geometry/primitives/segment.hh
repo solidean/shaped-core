@@ -54,8 +54,9 @@ public:
         {
             auto const p = tg::projective_transform<D, T>(t);
             // a segment crossing w = 0 passes through infinity, and the segment between its mapped endpoints is the wrong half
-            CC_ASSERT(tg::impl::projective_w(p, pos0) > T(0) && tg::impl::projective_w(p, pos1) > T(0),
-                      "a projected segment must lie in front of the projection; tg::view_projection::project clips it");
+            CC_ASSERT(
+                tg::impl::one_side_of_projection(tg::impl::projective_w(p, pos0), tg::impl::projective_w(p, pos1)),
+                "a projected segment must lie on one side of the projection; tg::view_projection::project clips it");
             return segment(pos0.transformed(p), pos1.transformed(p));
         }
         else

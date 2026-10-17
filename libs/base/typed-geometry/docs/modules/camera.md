@@ -72,6 +72,6 @@ The alternative was a projection type tagged with its convention, which rules ou
 It also wraps every projection, including the orthographic ones whose type is meant to be informative, so it waits until a mismatch bites.
 
 **A raw projective transform does not clip.**
-`segment::transformed` and `triangle::transformed` under a projective map assert that every vertex is in front of the projection.
+`segment::transformed` and `triangle::transformed` under a projective map assert that every vertex is on one side of the projection, one sign of w.
 A segment crossing w = 0 passes through infinity, and the segment between its mapped endpoints is the wrong half.
 `view_projection::project` is the spelling that clips first.

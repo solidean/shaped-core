@@ -22,6 +22,7 @@ struct tgtest::projection_family
     tg::projective_transform3d (*perspective_off_center)(f64, f64, f64, f64, f64, f64);
     tg::projective_transform3d (*orthographic)(f64, f64, f64, f64);
     tg::projective_transform3d (*orthographic_off_center)(f64, f64, f64, f64, f64, f64);
+    tg::projective_transform3d (*orthographic_box)(tg::aabb3d const&);
 
     /// the depth the near and the far plane map to
     [[nodiscard]] f64 near_depth() const
@@ -55,6 +56,8 @@ namespace tgtest
         { return tg::projective_transform3d(tg::orthographic_##SUFFIX(w, h, n, f)); },                               \
         .orthographic_off_center = [](f64 l, f64 r, f64 b, f64 t, f64 n, f64 f)                                      \
         { return tg::projective_transform3d(tg::orthographic_off_center_##SUFFIX(l, r, b, t, n, f)); },              \
+        .orthographic_box                                                                                            \
+            = [](tg::aabb3d const& box) { return tg::projective_transform3d(tg::orthographic_##SUFFIX(box)); },      \
     }
 
 inline cc::fixed_array<projection_family, 6> const k_projection_families = {

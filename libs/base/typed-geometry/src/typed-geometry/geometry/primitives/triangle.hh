@@ -64,9 +64,9 @@ public:
         else if constexpr (requires { tg::projective_transform<D, T>(t); })
         {
             auto const p = tg::projective_transform<D, T>(t);
-            CC_ASSERT(tg::impl::projective_w(p, pos0) > T(0) && tg::impl::projective_w(p, pos1) > T(0)
-                          && tg::impl::projective_w(p, pos2) > T(0),
-                      "a projected triangle must lie in front of the projection");
+            CC_ASSERT(tg::impl::one_side_of_projection(tg::impl::projective_w(p, pos0), tg::impl::projective_w(p, pos1),
+                                                       tg::impl::projective_w(p, pos2)),
+                      "a projected triangle must lie on one side of the projection");
             return triangle(pos0.transformed(p), pos1.transformed(p), pos2.transformed(p));
         }
         else
