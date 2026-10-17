@@ -7,6 +7,7 @@
 #include <rules/cpp-style/default-init-assignment/default_init_assignment.hh>
 #include <rules/cpp-style/qualified-primitive/qualified_primitive.hh>
 #include <rules/cpp-style/qualified-type-definition/qualified_type_definition.hh>
+#include <rules/prose/no-bare-todo/no_bare_todo.hh>
 #include <rules/prose/no-flow-prose/no_flow_prose.hh>
 #include <rules/prose/no-long-prose-line/no_long_prose_line.hh>
 
@@ -22,6 +23,7 @@ cc::span<rule const> all_rules()
         v.push_back(default_init_assignment_rule());
         v.push_back(qualified_primitive_rule());
         v.push_back(qualified_type_definition_rule());
+        v.push_back(no_bare_todo_rule());
         v.push_back(no_flow_prose_rule());
         v.push_back(no_long_prose_line_rule());
 
