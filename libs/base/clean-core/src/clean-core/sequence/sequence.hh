@@ -604,9 +604,8 @@ public:
         static_assert(!is_infinite || !impl::seq_is_infinite<decltype(b)>, "compare() of two infinite sequences may "
                                                                            "never end");
         using other_element_t = typename impl::seq_element_of<typename decltype(b)::item_t>::type;
-        static_assert(requires(element_t const& a, other_element_t const& b) { a <=> b; }, "compare() orders by <=>, "
-                                                                                           "which these element types "
-                                                                                           "do not have");
+        constexpr bool is_ordered = requires(element_t const& x, other_element_t const& y) { x <=> y; };
+        static_assert(is_ordered, "compare() orders by <=>, which these element types do not have");
         using order_t = decltype(std::declval<element_t const&>() <=> std::declval<other_element_t const&>());
         auto result = order_t(isize(0) <=> isize(0));
         bool const stopped = impl::seq_try_fold(_source,
