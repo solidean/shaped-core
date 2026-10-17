@@ -1,0 +1,93 @@
+// `texel[F]` is what an image of format F loads and stores (CHK-390), and `as texel[F]` reaches it from another width (CHK-391)
+
+@option const target_format: pixel_format = .r32_float
+
+// the component follows the format's family, and the width its channels; one channel is the scalar
+test:
+    let color: texel[.rgba8_unorm] = float4(1.0, 0.5, 0.25, 0.0)
+    let depth: texel[.r16_float] = 0.5
+    let ids: texel[.rg32_uint] = uint2(3u, 4u)
+    let offsets: texel[.rgba16_sint] = int4(-1, 0, 1, 2)
+    let packed: texel[.rg11b10_float] = float3(1.0, 2.0, 3.0)
+    let swapped: texel[.bgra8_unorm] = color
+    color.y == 0.5 and depth == 0.5 and ids.y == 4u and offsets.x == -1 and packed.z == 3.0 and swapped.x == 1.0
+
+// a format may name an option, so the type is the one the compile gave it
+test:
+    let value: texel[target_format] = 2.0
+    value == 2.0
+
+// a wider value keeps its leading components
+test:
+    let v = float4(1.0, 2.0, 3.0, 4.0)
+    v as texel[.rg16_float] == float2(1.0, 2.0)
+    v as texel[.r32_float] == 1.0
+    v as texel[.rg11b10_float] == float3(1.0, 2.0, 3.0)
+    v as texel[target_format] == 1.0
+    int4(-1, -2, -3, -4) as texel[.rg8_sint] == int2(-1, -2)
+
+// a narrower one takes the components it lacks from (0, 0, 0, 1), in the texel's component type
+test:
+    float2(1.0, 2.0) as texel[.rgba8_unorm] == float4(1.0, 2.0, 0.0, 1.0)
+    5.0 as texel[.rgba16_float] == float4(5.0, 0.0, 0.0, 1.0)
+    float3(1.0, 2.0, 3.0) as texel[.rgba32_float] == float4(1.0, 2.0, 3.0, 1.0)
+    7u as texel[.rg32_uint] == uint2(7u, 0u)
+    uint2(7u, 8u) as texel[.rgba32_uint] == uint4(7u, 8u, 0u, 1u)
+    -3 as texel[.rgba8_sint] == int4(-3, 0, 0, 1)
+
+// a value of the texel's own width is itself
+test:
+    let v = float4(1.0, 2.0, 3.0, 4.0)
+    v as texel[.rgba8_unorm] == v
+
+// the converted value is evaluated once, however many of its components the texel takes
+fun next(n: mut int) -> float2:
+    n += 1
+    return float2(n as float, 0.5)
+
+test:
+    let mut n = 0
+    let t = next(mut n) as texel[.rgba16_float]
+    n == 1 and t == float4(1.0, 0.5, 0.0, 1.0)
+
+// a kind is converted first, by CHK-197, and then the width
+test (uint4(1u, 2u, 3u, 4u) as float4) as texel[.rg8_unorm] == float2(1.0, 2.0)
+
+@expect(error = "type-mismatch")
+test float4(1.0) as texel[.rgba8_uint] == uint4(1u)
+
+@expect(error = "type-mismatch")
+test 1 as texel[.rg32_uint] == uint2(1u, 0u)
+
+// the width changes through a texel and nothing else
+@expect(error = "no-matching-overload")
+test float4(1.0) as float2 == float2(1.0)
+
+// a texel is converted to from a scalar or a plain vector alone
+@expect(error = "no-matching-overload")
+test vec3(1.0, 2.0, 3.0) as texel[.rgba8_unorm] == float4(1.0)
+
+@expect(error = "wrong-kind-of-name")
+test:
+    let v: texel[float4] = float4(1.0)
+    v.x == 1.0
+
+@expect(error = "wrong-kind-of-name")
+test:
+    let v: texel[.rgb8_unorm] = float3(1.0)
+    v.x == 1.0
+
+@expect(error = "wrong-kind-of-name")
+test:
+    let v: texel[.r8_unorm, .rg8_unorm] = 1.0
+    v == 1.0
+
+// a store into the format the host picks says where its value narrows
+binding mip:
+    source: texture_2d[float4]
+    target: out image_2d[target_format]
+
+@compute(8, 8) fun downsample(@thread_id id: int3){mip}:
+    let a = mip.source.load(id.xy * 2)
+    let b = mip.source.load(id.xy * 2 + int2(1, 0))
+    mip.target[id.xy] = ((a + b) * 0.5) as texel[target_format]

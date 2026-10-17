@@ -155,6 +155,35 @@ binding outputs:
     upscaled: out image_2d[output_format]
 ```
 
+### A format's texel
+
+**What an image loads and stores is its format's texel, and `texel[F]` names that type** ([CHK-390](semantics/checking.md#bindings)).
+Its component is `float` for a float, unorm or snorm format, `uint` for a uint one and `int` for a sint one, and it has as many components as the format has channels.
+So `texel[.rgba8_unorm]` is `float4`, `texel[.r16_float]` is `float`, and `texel[.rg32_uint]` is `uint2`.
+
+**A value reaches another format's texel only through `as`**, which keeps its leading components and fills the ones it lacks from (0, 0, 0, 1) ([CHK-391](semantics/checking.md#bindings)).
+That is what every target does with a four-wide store into a narrower format, and what a sampled texture's load does for the channels its format lacks.
+The conversion is written where it happens, so a store that drops a channel always says so.
+
+```sgl
+// .r16_float and .rg16_float are outside the portable image formats, which every target writes without asking
+require extended_image_formats
+
+@option const target_format: pixel_format = .rgba16_float
+
+binding mip:
+    source: texture_2d[float4]
+    target: out image_2d[target_format]
+
+@compute(8, 8) fun downsample(@thread_id id: int3){mip}:
+    let a = mip.source.load(id.xy * 2)
+    let b = mip.source.load(id.xy * 2 + int2(1, 0))
+    // A float4 into whatever the host picked: .x for .r16_float, .xy for .rg16_float, all four for .rgba16_float.
+    mip.target[id.xy] = ((a + b) * 0.5) as texel[target_format]
+```
+
+Only the component's family is fixed: a `uint4` reaches `texel[.rgba8_unorm]` through `as float4` first, so a conversion of kind and a change of width are never one step.
+
 ## Samplers
 
 Three forms, and each lands in a different place of sg's layout model.

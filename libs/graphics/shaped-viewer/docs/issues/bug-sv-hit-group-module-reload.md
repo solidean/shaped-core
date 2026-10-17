@@ -12,3 +12,5 @@ It is compiled once per permutation key, which hashes the resolution and the geo
 So an edit to module `tracer` reaches the raygen and not the hit groups.
 What is needed is for `slib::compile_hit_group` to report the modules it read, so the cache can hash their contents and rebuild precisely what moved.
 slib's `shader_library.hh` documents the same gap from its side: `outcome.dependencies` is not returned from that seam.
+
+This is the megakernel's alone: the wavefront dispatches a generated shade kernel per permutation instead, one compute entry point compiled again on every reload.

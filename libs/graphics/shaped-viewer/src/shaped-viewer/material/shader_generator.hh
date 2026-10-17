@@ -50,6 +50,51 @@ struct sv::material_parameter_layout
     i32 size_bytes = 0;
 };
 
+/// How an instance's cutout opacity is read — `scene.opacity_*` in shaders/sgl/scene_items.sgl.
+enum class sv::material_opacity_kind : sv::u32
+{
+    none = 0,      ///< never cuts out
+    constant = 1,  ///< a value of the parameter block
+    attribute = 2, ///< a mesh attribute, through the block's descriptor of it
+    texture = 3,   ///< a texture channel, sampled through the block's uv descriptor
+};
+
+/// Where a permutation's cutout opacity lives in its parameter block, and how `tracer.instance_opacity` reads it.
+///
+/// **Cutout is data, not code**: one reader serves every material, so a kernel that traces never recompiles for one.
+/// The price is that opacity is the type's declared attribute, thresholded by its declared cutoff, and nothing a fragment computes.
+/// It is per permutation, since every offset comes from the layout; `view_renderer` copies it into each instance record.
+struct sv::material_opacity
+{
+    /// What an offset holds when it names no slot.
+    static constexpr u32 no_offset = 0xffffffffu;
+
+    material_opacity_kind kind = material_opacity_kind::none;
+
+    /// The opacity's own slot: the constant, the attribute descriptor, or the texture index.
+    u32 offset = no_offset;
+
+    /// A texture's uv descriptor slot.
+    u32 uv_offset = no_offset;
+
+    /// The frequency an attribute, or a texture's uv, is numbered at — module `material`'s `frequency_*`.
+    u32 frequency = 0;
+
+    /// The texel channel a texture serves opacity from, `x` to `w` as 0 to 3; 4 reads 0 and 5 reads 1.
+    u32 channel = 0;
+
+    /// The palette sampler a texture is sampled through — `palette_index`.
+    u32 sampler = 0;
+
+    /// A remapped texture's scale-and-bias slot.
+    u32 transform = no_offset;
+
+    /// The cutoff's constant slot, where the type declares one; a cutoff above 0 thresholds, and 0 leaves coverage.
+    u32 cutoff = no_offset;
+
+    [[nodiscard]] bool can_cut_out() const { return kind != material_opacity_kind::none; }
+};
+
 /// A material permutation as an SGL hit group, plus the parameter layout it reads.
 struct sv::generated_material_shader
 {
@@ -57,18 +102,25 @@ struct sv::generated_material_shader
     /// `generate_material_shader` says what it holds.
     cc::string source;
 
+    /// The wavefront tracer's shade kernel, `@compute fun sv_shade`: the same material over the hits of this permutation's
+    /// range of the sorted queue, shaded through `tracer.shade_stored_triangle` or `tracer.shade_stored_quadric`.
+    cc::string shade_source;
+
+    /// The raster path's pixel stage, `@pixel fun sv_raster`: the same material over the triangle module `raster`'s vertex stage drew, lit without tracing.
+    /// It writes `raster.targets` through `raster.shade`, and cuts out where the hit group's any-hit would.
+    /// Empty for a quadric permutation, which the raster path does not draw yet.
+    cc::string raster_source;
+
     material_parameter_layout layout;
 
-    /// Whether a cutout is possible on THIS permutation: its type declares an `opacity_attribute`, and something other
-    /// than the signature's own default supplied it.
+    /// Where this permutation's cutout opacity lives, and `none` where it cannot cut out.
     ///
-    /// Both halves are load-bearing.
-    /// A type that never writes `geometry_opacity` leaves the default 1, and a permutation that left its opacity
-    /// attribute unbound writes a compile-time constant — an any-hit in either case runs at every intersection to reject
-    /// nothing, and costs the instance the hardware's opaque fast path to do it.
-    /// This is what `view_renderer` turns into `sg::tlas_instance::opaque_override`, so it decides whether the any-hit
-    /// can be invoked at all rather than only whether one is compiled.
-    bool can_cut_out = false;
+    /// It can cut out where its type declares an `opacity_attribute` and something other than the signature's own default supplied it.
+    /// Both halves are load-bearing: an any-hit otherwise runs at every intersection to reject nothing, and costs the instance
+    /// the hardware's opaque fast path to do it.
+    /// `view_renderer` turns `opacity.can_cut_out()` into `sg::tlas_instance::opaque_override`, so it decides whether the
+    /// any-hit can be invoked at all rather than only whether one is compiled.
+    material_opacity opacity;
 
     /// What the compile is cached on: the resolution's shape and the geometry it is spelled for (see `material_shader_key`).
     cc::hash128 key;
@@ -102,6 +154,8 @@ namespace sv
 /// A procedural group is `tracer.intersect_quadric`'s intersection, shared by both records, and `tracer.shade_quadric`'s closest hit.
 /// A texture is sampled through the palette sampler `sgl_palette_sampler` names for its state, at level 0.
 ///
+/// The raster pixel stage is the same body over the same palette, sampling at the level the pixel's derivatives pick.
+///
 /// The generated text depends on `r.permutation_key` AND on `opts`, so `key` covers both — two calls agreeing on the pair
 /// generate the same source, byte for byte, and nothing else may share their cache entry.
 ///
@@ -110,7 +164,7 @@ namespace sv
 [[nodiscard]] generated_material_shader generate_material_shader(resolved_material const& r,
                                                                  material_shader_options const& opts = {});
 
-/// The sampler of module `tracer`'s palette (shaders/sgl/tracer_bindings.sgl) that the tracer samples `s`'s texture through.
+/// The sampler of the palette in module `tracer`'s `binding bindless` (shaders/sgl/tracer_bindings.sgl) that `s`'s texture is sampled through.
 ///
 /// The palette has one sampler per magnification filter and address mode of `u` and of `v`, which is everything a hit's sample can tell apart.
 /// A hit samples level 0 explicitly, and at level 0 only the magnification filter applies, so `min_filter` and `mip_filter` are dropped.
@@ -118,6 +172,10 @@ namespace sv
 /// What does approximate is a state that moves the level off 0: a `mip_lod_bias`, a `min_lod` above 0 or a `max_lod` below it.
 /// Anisotropy and a comparison are dropped too, and sv's importers produce none of the four.
 [[nodiscard]] cc::string sgl_palette_sampler(sg::sampler const& s);
+
+/// The same palette sampler as a number, which `tracer.sample_palette` takes: `filter * 9 + address_u * 3 + address_v`.
+/// Nearest comes before linear, and repeat, mirror, clamp in that order, which is the palette's declaration order.
+[[nodiscard]] u32 palette_index(sg::sampler const& s);
 
 /// The SGL type `format` maps to — `float`, `float3`, `uint2`, ...
 /// Empty for a format the generator does not support, which is what `generate_material_shader` asserts on.

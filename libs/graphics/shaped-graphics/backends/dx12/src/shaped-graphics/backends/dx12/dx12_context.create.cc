@@ -42,6 +42,17 @@ struct adapter_search_result
     HRESULT device_loss_hr = S_OK;
 };
 
+constexpr UINT k_microsoft_vendor_id = 0x1414;
+
+/// Whether an adapter is WARP rather than a GPU — which DXGI's software flag alone does not say.
+/// Microsoft ships no GPU, and a GPU-less Windows on ARM host enumerates the Basic Render Driver (0x1414:0x008c)
+/// twice, once WITHOUT the flag: taken for hardware, it runs every "hardware" test on a WARP that fastfails there.
+/// docs/bugs-external/warp-arm64-pac-fastfail/readme.md has the evidence.
+[[nodiscard]] bool is_software_adapter(DXGI_ADAPTER_DESC1 const& desc)
+{
+    return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id;
+}
+
 /// The first hardware adapter that supports D3D12, into `out`.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
 ///
@@ -55,7 +66,7 @@ adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGI
     {
         DXGI_ADAPTER_DESC1 ad = {};
         out->GetDesc1(&ad);
-        if (ad.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+        if (is_software_adapter(ad))
             continue;
 
         // A null out-param probes D3D12 support (FL 11_0) without creating a device.
@@ -126,7 +137,7 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
 
     info.vendor_id = u32(desc.VendorId);
     info.device_id = u32(desc.DeviceId);
-    info.is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+    info.is_software = is_software_adapter(desc);
 
     // What the board has, which is NOT the budget this process gets — see adapter_info.
     // Zero is a real answer for an integrated GPU, so it is reported rather than treated as absent.

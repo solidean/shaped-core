@@ -72,6 +72,7 @@ struct background;
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
+enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;
@@ -140,6 +141,8 @@ struct resolved_material;           // a type + material + mesh resolved down th
 enum class material_slot_kind : u8; // what one field of a per-instance parameter block holds
 struct material_slot;
 struct material_parameter_layout; // the parameter block one permutation reads
+enum class material_opacity_kind : u32;
+struct material_opacity;          // where a permutation's cutout opacity lives, for the one generic reader
 struct generated_material_shader; // that permutation as an SGL hit group, plus its layout
 struct material_shader_options;
 class material_library;
@@ -215,6 +218,7 @@ class attribute_manager;
 // mismatch here links a TU that only saw this declaration against a symbol nobody defines.
 class gpu_resource_manager;
 class bound_resources; // the manager's tables, snapshotted and locked for one recording
+class declared_tables; // every table declared on one bind point, in force while it lives
 
 // render plan
 enum class draw_kind : u8;
@@ -253,7 +257,17 @@ struct material_permutation; // one permutation generated + compiled (resources/
 class material_shader_cache;
 struct pt_light_table; // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
+struct stand_in_report; // what a frame bound in place of permutations not compiled (rendering/stand_in_report.hh)
 class pathtrace_routine;
+struct wavefront_state;          // the wavefront tracer's path state for one view (rendering/traced_group.hh)
+struct wavefront_trace_desc;     // one wavefront frame (rendering/wavefront_routine.hh)
+enum class wavefront_stage : u8; // what a wavefront frame's timestamps divide it into (rendering/wavefront_routine.hh)
+struct wavefront_timing;         // one wavefront frame's stage timestamps (rendering/wavefront_routine.hh)
+class wavefront_routine;
+struct raster_gbuffer; // what a raster frame writes: the image and the primary hit's G-buffer (rendering/raster_routine.hh)
+struct raster_draw;       // one draw of a raster frame (rendering/raster_routine.hh)
+struct raster_frame_desc; // one raster frame (rendering/raster_routine.hh)
+class raster_routine;
 class view_renderer;
 class viewer_renderer;
 

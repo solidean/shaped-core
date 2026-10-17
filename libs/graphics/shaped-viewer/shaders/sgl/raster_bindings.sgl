@@ -1,0 +1,86 @@
+// What the raster path's stages share: the frame block, the scene's binding group, what a vertex hands a pixel, and the targets.
+//
+// A module rather than the pipeline file's own, because a material's pixel shader, generated and compiled at run time, lists the same groups and writes the same targets.
+// libs/graphics/shaped-viewer/docs/raster.md is the design.
+module raster
+
+use tracer
+
+/// The per-frame constants of a raster frame, which `sv::raster_routine` fills.
+///
+/// The records it holds are the tracer's, so a camera, a light or an instance reaches both paths as the same bytes.
+struct frame_constants:
+    /// the pinhole camera the image is projected through, as the tracer's primary rays leave it
+    camera: tracer.camera_record
+    /// the camera of this layer's previous frame, which the motion target reprojects into
+    previous_camera: tracer.camera_record
+    /// where the projection's depth starts: a point at view depth `d` tests at `near_plane / d`, reversed, and writes `1 - near_plane / d` as its primary depth
+    near_plane: float
+    /// how many lights `drawn.lights` holds
+    light_count: uint
+    /// how many decals `drawn.decals` holds
+    decal_count: uint
+    /// The angle one pixel spans at the image's center, in radians: a point's footprint is this times its distance.
+    pixel_spread: float
+    /// the image's size in pixels
+    size: float2
+    pad0: float2
+
+/// The scene a raster frame draws — group 0, before the manager's bindless tables at 1 and `slug.tables` at 2.
+///
+/// Every buffer is the tracer's member of the same name byte for byte, so a layer switching between the two uploads the same records.
+binding drawn:
+    /// One element, the frame constants.
+    frame: buffer[frame_constants]
+
+    /// The per-item table; one draw is one row of it, `draw.instance`.
+    instances: buffer[tracer.instance_record]
+
+    /// Every light of the layer, `light_count` of them.
+    lights: buffer[tracer.light_record]
+
+    /// The environment's 16 SH coefficients, `sv::background_gpu` byte for byte.
+    background: buffer[float4]
+
+    /// The decals every pixel is painted with, `decal_count` of them, and the shapes they cover in the atlas bound as `slug.tables`.
+    decals: buffer[tracer.decal_record]
+    decal_shapes: buffer[tracer.decal_shape]
+
+/// Which row of `drawn.instances` one draw is, the only thing that changes between the draws of a frame.
+@inline binding draw:
+    instance: uint
+    pad0: uint3
+
+/// What the vertex stage hands the pixel stage: which triangle, where in it, and where in the world.
+///
+/// The triangle and its barycentrics are what a traced hit reports, so a pixel builds the same `material.shading_context` a hit does.
+struct varyings:
+    @position position: hpos4
+    /// the row of `drawn.instances`, flat so a pixel indexes by it as a hit indexes by its instance id
+    @interpolate(.flat) instance: uint
+    @interpolate(.flat) primitive: uint
+    /// `(1 - b.x - b.y, b.x, b.y)` of a traced hit at the same point: the weight of each corner, in order
+    barycentrics: float3
+    world: float3
+
+/// What a raster frame writes per pixel: the lit image and the primary hit's G-buffer.
+///
+/// Each target is the layer's slot of the same meaning (`sv::impl::raster_slots`, view/view_data.hh), in the format the tracer writes it in.
+/// A pixel no surface covers holds the environment in `color`, its reprojection in `motion`, 1 in `primary_depth`, and zero in every other target.
+@pixel struct targets:
+    /// radiance, alpha 1
+    @format(.rgba32_float) color: float4
+    /// the geometric normal turned toward the viewer, in world space
+    @format(.rgba16_float) normal: float4
+    /// the linear view depth along the camera's forward axis
+    @format(.r32_float) depth: float
+    /// diffuse reflectance, `openpbr.pt_diffuse_albedo`
+    @format(.rgba16_float) albedo: float4
+    /// specular reflectance at normal incidence, `openpbr.pt_specular_albedo`
+    @format(.rgba16_float) specular_albedo: float4
+    /// the sharpest specular lobe's perceptual roughness, `openpbr.pt_roughness`
+    @format(.r16_float) roughness: float
+    /// this pixel minus where its surface sat on the previous frame's image, in pixels
+    @format(.rg32_float) motion: float2
+    /// the clip depth, `1 - near_plane / depth`, which a layer's drawings are occluded by
+    @format(.r32_float) primary_depth: float

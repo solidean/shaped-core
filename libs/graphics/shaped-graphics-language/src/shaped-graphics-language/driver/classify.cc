@@ -377,6 +377,7 @@ struct classifier
                 set(t, token_class::field, is_declaration);
                 break;
             case check::target_kind::array_filled:
+            case check::target_kind::texel_conversion:
                 break;
             }
         }

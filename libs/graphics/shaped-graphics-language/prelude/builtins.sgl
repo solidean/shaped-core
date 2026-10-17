@@ -369,6 +369,8 @@
 @builtin @pure fun clamp(x: float2, low: float2, high: float2) -> float2
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: float2, b: float2, t: float) -> float2
+/// `mix` with a weight per component: `a` where a component of `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: float2, b: float2, t: float2) -> float2
 @builtin @pure fun saturate(x: float3) -> float3
 @builtin @pure fun abs(x: float3) -> float3
 @builtin @pure fun min(a: float3, b: float3) -> float3
@@ -376,6 +378,8 @@
 @builtin @pure fun clamp(x: float3, low: float3, high: float3) -> float3
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: float3, b: float3, t: float) -> float3
+/// `mix` with a weight per component: `a` where a component of `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: float3, b: float3, t: float3) -> float3
 @builtin @pure fun saturate(x: float4) -> float4
 @builtin @pure fun abs(x: float4) -> float4
 @builtin @pure fun min(a: float4, b: float4) -> float4
@@ -383,6 +387,8 @@
 @builtin @pure fun clamp(x: float4, low: float4, high: float4) -> float4
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: float4, b: float4, t: float) -> float4
+/// `mix` with a weight per component: `a` where a component of `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: float4, b: float4, t: float4) -> float4
 @builtin @pure fun saturate(x: half) -> half
 @builtin @pure fun abs(x: half) -> half
 @builtin @pure fun min(a: half, b: half) -> half
@@ -397,6 +403,8 @@
 @builtin @pure fun clamp(x: half2, low: half2, high: half2) -> half2
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: half2, b: half2, t: half) -> half2
+/// `mix` with a weight per component: `a` where a component of `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: half2, b: half2, t: half2) -> half2
 @builtin @pure fun saturate(x: half3) -> half3
 @builtin @pure fun abs(x: half3) -> half3
 @builtin @pure fun min(a: half3, b: half3) -> half3
@@ -404,6 +412,8 @@
 @builtin @pure fun clamp(x: half3, low: half3, high: half3) -> half3
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: half3, b: half3, t: half) -> half3
+/// `mix` with a weight per component: `a` where a component of `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: half3, b: half3, t: half3) -> half3
 @builtin @pure fun saturate(x: half4) -> half4
 @builtin @pure fun abs(x: half4) -> half4
 @builtin @pure fun min(a: half4, b: half4) -> half4
@@ -411,6 +421,8 @@
 @builtin @pure fun clamp(x: half4, low: half4, high: half4) -> half4
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: half4, b: half4, t: half) -> half4
+/// `mix` with a weight per component: `a` where a component of `t` is 0 and `b` where it is 1.
+@builtin @pure fun mix(a: half4, b: half4, t: half4) -> half4
 
 // float3 and float4 are plain numbers, so all of their arithmetic is componentwise
 @builtin @pure @operator("+") fun add_float2(a: float2, b: float2) -> float2
@@ -1463,6 +1475,42 @@
 @builtin @pure fun step(edge: half4, x: half4) -> half4
 /// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.
 @builtin @pure fun smoothstep(low: half4, high: half4, x: half4) -> half4
+
+// whether a float or a half is a NaN or an infinity, per component; read from its bits on every
+// target, a half's as the float it widens to, so no target's assumption that neither arises can
+// fold the test away
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: float) -> bool
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: float) -> bool
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: float2) -> bool2
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: float2) -> bool2
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: float3) -> bool3
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: float3) -> bool3
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: float4) -> bool4
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: float4) -> bool4
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: half) -> bool
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: half) -> bool
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: half2) -> bool2
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: half2) -> bool2
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: half3) -> bool3
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: half3) -> bool3
+/// Whether each component is a NaN.
+@builtin @pure fun is_nan(x: half4) -> bool4
+/// Whether each component is an infinity, of either sign.
+@builtin @pure fun is_inf(x: half4) -> bool4
 
 // derivatives across the 2x2 quad of pixels, which only a pixel stage has;
 // a run of one invocation has no neighbours, and reads 0; WGSL takes the derivative of no half

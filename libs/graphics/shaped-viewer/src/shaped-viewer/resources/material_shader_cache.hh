@@ -27,9 +27,9 @@ struct sv::material_permutation
     /// BLAS by one that does not.
     geometry_kind kind = geometry_kind::triangles;
 
-    /// Whether this permutation's material ever writes `geometry_opacity` — see `generated_material_shader::can_cut_out`.
-    /// Only a triangle group carries the cutout any-hits, so this is false for every quadric one.
-    bool can_cut_out = false;
+    /// Where this permutation's cutout opacity lives, which every instance shading with it copies into its record.
+    /// Only a triangle group carries the cutout any-hits, so this is `none` for every quadric one.
+    material_opacity opacity;
 
     /// The hit group, a hit shader per ray type of the tracer's ray set, as a cold async node.
     ///
@@ -42,6 +42,14 @@ struct sv::material_permutation
 
     /// kept for diagnostics: a compile error names a line in this text, and nothing else can reproduce it
     cc::string source;
+
+    /// The wavefront tracer's shade kernel of this permutation, `generated_material_shader::shade_source`.
+    /// Compiled by `wavefront_routine` the first time a trace names the permutation, and cached there.
+    cc::string shade_source;
+
+    /// The raster path's pixel stage of this permutation, `generated_material_shader::raster_source`, and empty for a quadric one.
+    /// Compiled by `raster_routine` the first time a raster frame draws the permutation, and cached there.
+    cc::string raster_source;
 
     /// What a compile error calls this permutation: the material type's name, and whether it is the quadric form.
     cc::string label;

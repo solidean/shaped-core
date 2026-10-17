@@ -6,7 +6,7 @@
 #include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/fsr_backend.hh>
-#include <sr_shaders.hh>
+#include <sr_sgl_shaders.hh>
 
 namespace sr
 {
@@ -15,22 +15,6 @@ using impl::is_set;
 
 namespace
 {
-/// Where one of sr's own passes comes from, and the layout it binds through.
-struct pass_request
-{
-    sg::async_compiled_shader shader;
-    sg::binding_group_layout_handle group_layout;
-};
-
-/// The constants binding a compiled compute shader reflects, or null when it declares none.
-[[nodiscard]] sg::binding const* constants_binding_of(sg::compiled_shader const& compiled)
-{
-    for (auto const& b : compiled.bindings)
-        if (b.type == sg::binding_type::constants_buffer)
-            return &b;
-    return nullptr;
-}
-
 /// Whether `ctx` renders through WARP, whose shader compiler crashes on FSR's shading-change pyramid pass.
 /// issue: bug-warp-fsr-shading-change-pyramid-crash records what bisecting it established.
 ///
@@ -82,8 +66,8 @@ bool fsr_upscale_routine::is_available(sg::context const& ctx)
         return false;
     if (!impl::fsr_passes_available(ctx))
         return false;
-    for (auto const& asset : {shaders::fsr_prepare_depth.compute.main_cs, shaders::fsr_clear_float.compute.main_cs,
-                              shaders::fsr_clear_uint.compute.main_cs})
+    for (auto const& asset : {sgl_shaders::fsr_prepare_depth.main_cs.asset, sgl_shaders::fsr_clear_float.main_cs.asset,
+                              sgl_shaders::fsr_clear_uint.main_cs.asset})
         if (asset == nullptr || !asset->can_acquire(ctx))
             return false;
     return true;
@@ -106,54 +90,56 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
     // AMD's passes compile while ours do.
     auto const fsr = impl::fsr_build_passes(ctx);
 
-    pass_request requests[] = {
-        {.shader = shaders::fsr_prepare_depth.compute.main_cs->acquire(ctx),
-         .group_layout = ctx.cached.acquire_binding_group_layout<shaders::fsr_prepare_depth_bindings>()},
-        {.shader = shaders::fsr_clear_float.compute.main_cs->acquire(ctx),
-         .group_layout = ctx.cached.acquire_binding_group_layout<shaders::fsr_clear_float_bindings>()},
-        {.shader = shaders::fsr_clear_uint.compute.main_cs->acquire(ctx),
-         .group_layout = ctx.cached.acquire_binding_group_layout<shaders::fsr_clear_uint_bindings>()},
-    };
+    // The depth conversion is SGL, and states its own layout.
+    auto const prepare_depth = sgl_shaders::fsr_prepare_depth.main_cs.acquire_pipeline(ctx);
 
-    for (auto const& r : requests)
-        co_await cc::async_settled(r.shader);
-
-    char const* const names[] = {"fsr_prepare_depth", "fsr_clear_float", "fsr_clear_uint"};
+    // FSR's clear job writes images of every channel count, so each format it clears is a compile of its own.
+    auto clears = cc::vector<programs::clear_pass>();
     auto pipelines = cc::vector<sg::async_compute_pipeline>();
-    for (auto i = isize(0); i < 3; ++i)
+    for (auto const& cleared : impl::k_cleared_formats)
     {
-        auto const& r = requests[i];
-        auto const* const compiled = r.shader->try_value();
-        auto const* const constants = compiled == nullptr ? nullptr : constants_binding_of(*compiled);
-        if (constants == nullptr)
+        clears.push_back({.format = cleared.format});
+        if (cleared.is_uint)
         {
-            // A shader that did not build, or reflects no constants block to drive it by.
-            auto const* const why = r.shader->try_error();
-            CC_LOG_ERROR("fsr: {}.hlsl did not build: {}", names[i],
-                         why != nullptr ? why->underlying().to_string() : cc::string("it reflects no constants block"));
-            fail_init();
-            co_return;
+            auto const values = sgl_shaders::fsr_clear_uint_options{.target_format = cleared.format};
+            clears.back().program.layout
+                = ctx.cached.acquire_binding_group_layout(sgl_shaders::fsr_clear_uint_target::declared_bindings(values));
+            pipelines.push_back(sgl_shaders::fsr_clear_uint.main_cs.acquire_pipeline(ctx, values));
         }
-        auto const layout
-            = ctx.cached.acquire_pipeline_layout({.groups = {r.group_layout}, .inline_constants = *constants});
-        pipelines.push_back(ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = layout}));
+        else
+        {
+            auto const values = sgl_shaders::fsr_clear_float_options{.target_format = cleared.format};
+            clears.back().program.layout
+                = ctx.cached.acquire_binding_group_layout(sgl_shaders::fsr_clear_float_target::declared_bindings(values));
+            pipelines.push_back(sgl_shaders::fsr_clear_float.main_cs.acquire_pipeline(ctx, values));
+        }
     }
 
     auto built = std::make_shared<programs>();
-    programs::pass* const passes[] = {&built->prepare_depth, &built->clear_float, &built->clear_uint};
+    co_await cc::async_settled(prepare_depth);
+    auto const* const depth_pipeline = prepare_depth->try_value();
+    if (depth_pipeline == nullptr)
+    {
+        CC_LOG_ERROR("fsr: the fsr_prepare_depth pipeline did not build");
+        fail_init();
+        co_return;
+    }
+    built->prepare_depth = {.layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::fsr_prepare_depth_io>(),
+                            .pipeline = *depth_pipeline};
+
     for (auto i = isize(0); i < pipelines.size(); ++i)
     {
         co_await cc::async_settled(pipelines[i]);
         auto const* const pipeline = pipelines[i]->try_value();
         if (pipeline == nullptr)
         {
-            CC_LOG_ERROR("fsr: the {} pipeline did not build", names[i]);
+            CC_LOG_ERROR("fsr: the clear of pixel_format {} did not build", int(clears[i].format));
             fail_init();
             co_return;
         }
-        passes[i]->layout = requests[i].group_layout;
-        passes[i]->pipeline = *pipeline;
+        clears[i].program.pipeline = *pipeline;
     }
+    built->clears = cc::move(clears);
 
     co_await cc::async_settled(fsr);
     auto const* const fsr_passes = fsr->try_value();

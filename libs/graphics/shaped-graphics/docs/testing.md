@@ -34,6 +34,7 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   A hardware driver skips only when there is no hardware adapter; one that exists and still fails to create a device fails the test.
   `SC_DX12_ADAPTER=warp` hides every hardware adapter from a whole process, which is how to reproduce a GPU-less run locally: the hardware drivers skip and the WARP ones run.
   `hardware` hides WARP instead, and `none` both, which is how a Windows CI job other than Windows Clang runs: no dx12 test at all, and every one skips rather than fails.
+  WARP means every adapter of Microsoft's vendor id, whatever DXGI's software flag says, since the Windows ARM image enumerates one without it.
   So a test that creates a context of its own SKIPs when creation fails, never `REQUIRE`s it.
   WARP runs on the Windows Clang job alone, and the binaries that bring it up declare a 180 s timeout (`SG_WARP_TEST_BINARY_ARGS`).
   `SC_SG_COLD=all` adds the other half of a CI runner, a first build of every shader and pipeline: the persistent tiers are neither read nor written.

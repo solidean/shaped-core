@@ -121,6 +121,16 @@ inline constexpr access_flags unordered_write_accesses
     return a.has_any(unordered_write_accesses);
 }
 
+/// Every access that changes the resource's contents: the unordered writes, and the color and depth target writes.
+inline constexpr access_flags write_accesses
+    = unordered_write_accesses | access_flag::color_write | access_flag::depth_write;
+
+/// True if `a` changes the resource's contents, ordered or not.
+[[nodiscard]] constexpr bool has_write_access(access_flags a)
+{
+    return a.has_any(write_accesses);
+}
+
 /// Every access that only observes the resource.
 /// An op can carry both halves at once — a copy whose source and destination are the same resource does.
 inline constexpr access_flags read_accesses

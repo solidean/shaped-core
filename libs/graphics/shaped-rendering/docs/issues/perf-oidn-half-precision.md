@@ -2,7 +2,7 @@
 created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-rendering/src/shaped-rendering/impl/oidn_network.cc
-  - file: libs/graphics/shaped-rendering/shaders/nn_conv.hlsl
+  - file: libs/graphics/shaped-rendering/shaders/nn_conv.sgl
   - symbol: sr::oidn_denoise_routine
   - symbol: sg::feature::shader_f16
   - file: libs/graphics/shaped-rendering/docs/reconstruction.md
@@ -16,11 +16,10 @@ Optional on all four rather than guaranteed, so it wants a feature level rather 
 
 What exists:
 - The gate: `sg::feature::shader_f16`, which every backend answers.
-- The flag for SGL: slib's SGL edge adds `-enable-16bit-types` through `shader_source_description::dxc_args`, so a network written in SGL takes `half` as it stands.
+- The flag: slib's SGL edge adds `-enable-16bit-types` through `shader_source_description::dxc_args`, and the network is SGL, so it takes `half` as it stands.
 - The weights already arrive as fp16, and `tg::f16` widens them on load.
 
 What is missing:
-- An HLSL package still has no way to set `dxc_args`, so a port that stays in HLSL needs that plumbed first.
 - The C++ mirror problem in [binding-preprocessor.md](../../../shaped-shader-library/docs/binding-preprocessor.md) is about constant blocks, which this network does not use.
 
 **Expect memory rather than speed.**

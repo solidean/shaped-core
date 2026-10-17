@@ -9,9 +9,8 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/shaders.hh>
-#include <shaped-shader-library/compiler/dxc_compiler.hh>
 #include <shaped-shader-library/shader_library.hh>
-#include <sr_shaders.hh>
+#include <sr_sgl_shaders.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 using namespace cc::primitive_defines;
@@ -32,7 +31,7 @@ namespace
 {
 constexpr int k_height = 5;
 
-/// How many texels one shader thread produces along x; must match NN_CONV_TEXELS in nn_conv.hlsl.
+/// How many texels one shader thread produces along x; must match `conv_texels` in nn_conv.sgl.
 constexpr int k_texels_per_thread = 8;
 
 /// One shape to convolve.
@@ -105,27 +104,13 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    auto const shader = sr::shaders::nn_conv.compute.main_cs->acquire(ctx);
+    auto const shader = sr::sgl_shaders::nn_conv.main_cs->acquire(ctx);
     co_await cc::async_settled(shader);
     if (shader->has_error())
         FAIL(cc::format("nn_conv did not compile:\n{}", shader->try_error()->underlying().to_string()));
-    auto const* const compiled = shader->try_value();
-    REQUIRE(compiled != nullptr);
 
-    auto const* const constants_binding = [&]() -> sg::binding const*
-    {
-        for (auto const& b : compiled->bindings)
-            if (b.type == sg::binding_type::constants_buffer)
-                return &b;
-        return nullptr;
-    }();
-    REQUIRE(constants_binding != nullptr);
-
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sr::shaders::nn_conv_bindings>();
-    auto const pipeline_layout
-        = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}, .inline_constants = *constants_binding});
-    auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
-    auto const built = co_await pipeline;
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv_buffers>();
+    auto const built = co_await sr::sgl_shaders::nn_conv.main_cs.acquire_pipeline(ctx);
     REQUIRE(built != nullptr);
 
     // The third case has more output channels than one 64-thread group, so the second group is checked too.
@@ -188,12 +173,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
 
         auto const group = ctx.transient.create_binding_group(
             *cmd, group_layout,
-            sr::shaders::nn_conv_bindings{.gSourceA = a4.value().as_readonly_buffer(),
-                                          .gSourceB = b4.value().as_readonly_buffer(),
-                                          .gWeights = weight_buffer.as_readonly_buffer(),
-                                          .gTarget = target_buffer.as_readwrite_buffer()});
+            sr::sgl_shaders::nn_conv_buffers{.source_a = a4.value().as_readonly_buffer(),
+                                             .source_b = b4.value().as_readonly_buffer(),
+                                             .weights = weight_buffer.as_readonly_buffer(),
+                                             .target = target_buffer.as_readwrite_buffer()});
 
-        auto const constants = sr::shaders::nn_conv_constants{
+        auto const constants = sr::sgl_shaders::nn_conv_constants{
             .width = u32(c.width),
             .height = u32(k_height),
             .in_channels = u32(in),
@@ -201,13 +186,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
             .weight_offset = 0,
             .bias_offset = u32(weights.size()),
             .in_channels_a = u32(c.in_a),
-            ._pad = 0,
         };
 
         // Dispatched as the network dispatches it: one thread per output channel per run of texels.
         cmd->compute.bind_pipeline(*built);
-        cmd->compute.bind<sr::shaders::nn_conv_bindings>(*group);
-        cmd->compute.set_inline_constants(constants);
+        cmd->compute.bind_group(0, *group);
+        cmd->compute.set_inline_constants(constants.to_block());
         cmd->compute.dispatch_threads(c.out, (c.width + k_texels_per_thread - 1) / k_texels_per_thread, k_height);
 
         auto const readback = sg::data_future<f32>(cmd->download.data_from_buffer(target_buffer));

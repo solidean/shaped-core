@@ -2,7 +2,7 @@
 created: 2026-10-17
 refs:
   - symbol: sr::atrous_denoise_routine
-  - file: libs/graphics/shaped-rendering/shaders/atrous_denoise.hlsl
+  - file: libs/graphics/shaped-rendering/shaders/atrous_denoise.sgl
 ---
 
 # à-trous from a measured per-pixel variance

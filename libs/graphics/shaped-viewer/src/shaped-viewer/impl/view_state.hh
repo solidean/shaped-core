@@ -7,6 +7,8 @@
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
+#include <shaped-viewer/rendering/traced_group.hh>
+#include <shaped-viewer/rendering/wavefront_routine.hh> // wavefront_timing, held by value
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/camera_controller.hh>
 #include <typed-geometry/linalg/pos.hh>
@@ -14,6 +16,22 @@
 
 namespace sv::impl
 {
+/// How a still wavefront frame fits its time budget: a smoothed estimate of one round's GPU time, and the frames whose
+/// timestamps have not landed yet.
+struct wavefront_pacing
+{
+    /// GPU seconds per round, or 0 before any frame has been measured.
+    f64 seconds_per_round = 0.0;
+
+    /// One traced frame, kept until its timestamps land.
+    struct pending
+    {
+        wavefront_timing timing;
+        i32 rounds = 0;
+    };
+    cc::vector<pending> in_flight;
+};
+
 /// One temporal resource a view keeps across frames, and how far whatever writes it has run.
 ///
 /// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
@@ -41,16 +59,58 @@ struct temporal_slot
 
     u32 accum_frame = 0;
 
+    /// What the last frame of this accumulation slot's layer bound in place of permutations not compiled, as `stand_in_report::hash`.
+    /// The next frame's image hash folds it in, which is what restarts the image when the set changes, and only then.
+    u64 stand_in_hash = 0;
+
     /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
     ///
     /// Here rather than on a routine because a routine cannot know which layer a call belongs to, and here rather than
     /// beside the view because it lives and dies with the image it produces.
     sr::reconstruct_history denoise;
 
+    /// The temporal member's state for the frames traced at the upscaler's smaller extent, held only by a
+    /// `temporal_id::frame_samples` slot.
+    /// Apart from `denoise` because the two streams run at different extents: one history would be rebuilt on every
+    /// switch between moving and still.
+    sr::reconstruct_history scaled_denoise;
+
     /// The camera this slot's layer was last traced from, held only by a `temporal_id::motion_guide` slot.
     /// The next frame's motion vectors reproject into it.
     shaders::tracer::camera_record last_camera = {};
     bool has_last_camera = false;
+
+    /// The wavefront tracer's paths, held only by a `temporal_id::accumulation` slot whose layer it traces.
+    ///
+    /// Here because `texture` is the mean of exactly these paths' tallies: the two restart together, and one without the other is a mean of nothing.
+    /// Unset until the layer's first wavefront frame, and replaced whenever the extent or the permutation count outgrows it.
+    cc::optional<wavefront_state> paths;
+
+    /// The wavefront paths of a frame traced at the upscaler's input extent, held beside `paths` for the same reason
+    /// `scaled_denoise` is beside `denoise`.
+    cc::optional<wavefront_state> scaled_paths;
+
+    /// Whether the last frame of this accumulation slot's layer was traced at the upscaler's input extent.
+    /// The next frame is full-size and restarts whenever the image did not change since, so this is what ends a move.
+    bool traced_scaled = false;
+
+    /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
+    u32 scaled_frame = 0;
+
+    /// How many full-size frames of this accumulation slot's layer restarted its mean, which keeps each restart's random sequence apart.
+    u32 restarts = 0;
+
+    /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's.
+    tg::vec2f last_jitter = tg::vec2f(0, 0);
+
+    /// What a round of those paths costs, as the frames' own timestamps measured it; a frame budget picks rounds from it.
+    wavefront_pacing pacing;
+
+    /// Whether this accumulation slot's raster layer has said that it skips the quadric batches it holds, which it says once.
+    bool raster_skip_reported = false;
+
+    /// Whether this accumulation slot's traced layer has said that the device cannot trace it, which it says once.
+    bool untraceable_reported = false;
 };
 
 /// Everything a view keeps across frames, keyed by its view_id — held by `sv::view_store`.
@@ -155,6 +215,22 @@ struct view_state
 // `temporal_id::accumulation(0)` by hand while the capture path read the layer its plan named, so a view whose trace
 // was not layer 0 reported zero forever and nothing waiting on it ever finished.
 // Every caller asking "how far has this view got" goes through these two.
+
+// -- Pacing a still wavefront frame.
+
+/// The GPU milliseconds the still wavefront layers of a frame under `config` share: none in a headless viewer.
+/// A headless run is a capture or a test, whose image must not depend on how fast the machine is.
+[[nodiscard]] f32 wavefront_budget_of(viewer_config const& config);
+
+/// One still wavefront layer's share of `budget_ms`, split evenly among `still_layers` of them; 0 for no budget.
+[[nodiscard]] f32 wavefront_budget_share(f32 budget_ms, isize still_layers);
+
+/// The most rounds a budget gives a still frame, however cheap a round measured.
+inline constexpr i32 max_budgeted_rounds = 64;
+
+/// How many rounds a still frame runs: `rounds_per_frame`, or as many as fit `budget_ms` at `seconds_per_round`, between 1 and `max_budgeted_rounds`.
+/// `rounds_per_frame` stands until a round is measured, and always where the budget is 0.
+[[nodiscard]] i32 still_rounds_for(i32 rounds_per_frame, f32 budget_ms, f64 seconds_per_round);
 
 /// The lowest accumulated-frame count across every traced layer of `state`, and 0 when it has none.
 ///

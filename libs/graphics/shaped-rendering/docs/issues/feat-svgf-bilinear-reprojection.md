@@ -2,7 +2,7 @@
 created: 2026-10-17
 refs:
   - symbol: sr::svgf_denoise_routine
-  - file: libs/graphics/shaped-rendering/shaders/svgf_temporal.hlsl
+  - file: libs/graphics/shaped-rendering/shaders/svgf.sgl
   - test: sr - svgf*
 ---
 

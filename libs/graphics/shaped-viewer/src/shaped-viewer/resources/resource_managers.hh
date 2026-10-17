@@ -59,10 +59,11 @@ enum class sv::residency : sv::u8
     failed,
 };
 
-/// One uploaded mesh: its geometry buffers and the BLAS built from them.
+/// One uploaded mesh: its geometry buffers, and the BLAS built from them once something traces it.
 ///
-/// The BLAS is built once, when the mesh is acquired — a scene item then just references the mesh, and the
-/// renderer rebuilds only the (cheap) TLAS each frame.
+/// **The BLAS is built on demand**, by the first trace that reaches the mesh through `mesh_manager::acquire_blas`.
+/// A mesh only ever rasterized never gets one, which is what lets a raster layer draw on a device without ray tracing.
+/// Once built it stays, so a trace then rebuilds only the (cheap) TLAS each frame.
 ///
 /// Indexed and non-indexed geometry stay distinct all the way down.
 /// An `indexed_triangle_data` acquire uploads the caller's index buffer and builds an indexed BLAS, while a `triangle_data` acquire uploads nothing extra and builds a non-indexed one.
@@ -71,8 +72,8 @@ enum class sv::residency : sv::u8
 /// It is also the only thing that makes `indices` meaningful.
 struct sv::mesh_record
 {
-    /// How much of this mesh has reached the GPU: `complete` once its buffers are uploaded and its BLAS is built.
-    /// While `pending` there is no BLAS to trace, so a placeholder stands in for it — see `mesh_manager::placeholder_blas`.
+    /// How much of this mesh has reached the GPU: `complete` once its buffers are uploaded, whether or not a BLAS was built.
+    /// While `pending` there is nothing to draw, so a placeholder box stands in for it — see `mesh_manager::placeholder_vertices`.
     residency state = residency::pending;
 
     sg::buffer<tg::pos3f> vertices;
@@ -83,6 +84,8 @@ struct sv::mesh_record
     bool is_indexed = false;
 
     isize triangle_count = 0;
+
+    /// Null until a trace asks `mesh_manager::acquire_blas` for it.
     sg::blas_handle blas;
 
     /// The object-space box, when the payload declared one — the summary half of the record.
@@ -94,7 +97,7 @@ struct sv::mesh_record
 
 /// Hands out `mesh_id`s and owns the geometry + BLAS behind each, with LRU budgeting (see resource_budget).
 /// This is where the one-time BLAS build lives (a BLAS build is setup, not a per-frame pass, so it stays
-/// here rather than in a routine).
+/// here rather than in a routine), and it runs only for a mesh something traces.
 class sv::mesh_manager : public impl::lru_pool<mesh_id, mesh_record>
 {
 public:
@@ -105,9 +108,9 @@ public:
     ///
     /// On a miss the buffers are created and the geometry is handed to `ctx.stream`, which carries it on the copy
     /// queue at its own pace — so an acquire costs an allocation and a hash lookup rather than a transfer.
-    /// The id is usable at once and the mesh is `pending` until `record_settled` builds its BLAS; until then it is
-    /// traced as `placeholder_blas`.
-    /// Ray tracing must be supported on the context.
+    /// The id is usable at once and the mesh is `pending` until `collect_settled` sees its geometry land; until then it
+    /// is drawn as the placeholder box.
+    /// Ray tracing need not be supported: nothing here builds an acceleration structure.
     ///
     /// Non-indexed: `positions` is a triangle list, 3 vertices per triangle, count a multiple of 3.
     [[nodiscard]] mesh_id acquire(triangle_data const& mesh);
@@ -115,33 +118,37 @@ public:
     /// the BLAS is built from the index buffer and the closest-hit reads through it.
     [[nodiscard]] mesh_id acquire(indexed_triangle_data const& mesh);
 
-    /// The unit cube every pending mesh is drawn as, built on first use.
+    /// The unit cube every pending mesh is traced as, built on first use; ray tracing must be supported on the context.
     ///
     /// ONE BLAS for every placeholder in a scene: it spans `[0,1]^3`, and the extent a particular mesh should occupy
     /// is folded into its TLAS transform instead — so a hundred meshes still arriving cost one acceleration structure
     /// and a hundred 3x4 matrices.
     [[nodiscard]] sg::blas_handle const& placeholder_blas();
 
-    /// The cube's own vertices, which an instance record must name alongside its BLAS.
+    /// The cube's own vertices, which an instance record must name in place of the mesh's, built on first use.
     ///
-    /// A hit reads positions back out of the instance to recompute the geometric normal, so pointing at the real
-    /// mesh's buffer while tracing the cube would shade it from a triangle it never hit.
-    /// Built by the same first call `placeholder_blas` is.
+    /// A hit reads positions back out of the instance to recompute the geometric normal, and a raster draw pulls its
+    /// corners from it, so pointing at the real mesh's buffer while drawing the cube would read triangles it never had.
     [[nodiscard]] sg::buffer<tg::pos3f> const& placeholder_vertices();
 
     /// The stand-in index buffer a non-indexed record binds; the placeholder is non-indexed, so it binds this too.
     [[nodiscard]] sg::buffer<u32> const& index_stand_in();
 
-    /// Builds the BLAS for every mesh whose geometry has finished streaming, recording onto `cmd`.
+    /// Marks every mesh whose geometry has finished streaming `complete`; returns how many.
     ///
-    /// The build is what makes a mesh `complete`, and it may only be recorded once the transfer is observed done —
-    /// which is exactly the contract `sg::stream_upload_handle` states: a list touching a streamed extent must be
-    /// SUBMITTED after completion is observed, and `cmd` is submitted by the caller after this returns.
-    ///
+    /// Nothing is recorded: a mesh is drawable the moment its transfer is done, and its BLAS waits for a trace.
     /// A transfer that settled without delivering — cancelled, or failed — leaves its mesh `failed` rather than
     /// pending, so nothing waits on it forever.
-    /// Returns how many meshes it finished.
-    isize record_settled(sg::command_list& cmd);
+    isize collect_settled();
+
+    /// `id`'s BLAS, recorded onto `cmd` the first time a caller asks and held from then on.
+    ///
+    /// `id` must be `complete`, and ray tracing must be supported on the context.
+    /// The build may only be recorded once the transfer is observed done, which `complete` is — the contract
+    /// `sg::stream_upload_handle` states: a list touching a streamed extent must be SUBMITTED after completion is
+    /// observed, and `cmd` is submitted by the caller after this returns.
+    /// The first call charges the BLAS's size to the budget.
+    [[nodiscard]] sg::blas_handle const& acquire_blas(sg::command_list& cmd, mesh_id id);
 
     /// Blocks until every queued transfer has landed, then finishes them all.
     ///
@@ -169,7 +176,7 @@ private:
     };
 
     /// Finishes `id` if its transfers have settled; returns whether it did.
-    [[nodiscard]] bool _try_settle(sg::command_list& cmd, mesh_id id, pending_mesh& p);
+    [[nodiscard]] bool _try_settle(mesh_id id, pending_mesh& p);
 
     /// The stand-in a non-indexed record binds as `Indices`, created on first use and recorded onto `cmd`.
     /// Its contents are never read — it exists only so the trace's binding group is complete.
@@ -182,19 +189,19 @@ private:
     cc::map<mesh_id, pending_mesh> _settling;
 };
 
-/// One uploaded quadric batch: its two buffers and the procedural BLAS built over them.
+/// One uploaded quadric batch: its two buffers, and the procedural BLAS built over them once something traces it.
 ///
 /// Two buffers rather than one, because the hardware and the shader want different things.
 /// `aabbs` is the acceleration structure's build input and nothing reads it afterwards — an intersection shader cannot reach the
 /// boxes the BLAS was built from.
 /// `primitives` is what the intersection shader reads by the primitive index, through the bindless table.
 ///
-/// The BLAS is built once, when the batch settles, exactly as a mesh's is: a scene item then references the batch and only the
-/// (cheap) TLAS is rebuilt per frame.
+/// The BLAS is built once, by the first trace that reaches the batch, exactly as a mesh's is: from then on only the (cheap) TLAS is
+/// rebuilt per frame.
 struct sv::quadric_set_record
 {
-    /// `complete` once both buffers are uploaded and the BLAS is built.
-    /// While `pending` there is no BLAS to trace, so the batch is drawn as the shared placeholder box scaled onto `bounds`.
+    /// `complete` once both buffers are uploaded, whether or not a BLAS was built.
+    /// While `pending` there is nothing to trace, so the batch is drawn as the shared placeholder box scaled onto `bounds`.
     residency state = residency::pending;
 
     /// the intersection shader's own data, read by the primitive index
@@ -204,6 +211,8 @@ struct sv::quadric_set_record
     sg::buffer<tg::aabb3f> aabbs;
 
     isize primitive_count = 0;
+
+    /// Null until a trace asks `quadric_manager::acquire_blas` for it.
     sg::blas_handle blas;
 
     /// The extent in the batch's own frame, when the payload declared one — the summary half of the record.
@@ -215,7 +224,8 @@ struct sv::quadric_set_record
 /// Hands out `quadric_set_id`s and owns the two buffers + procedural BLAS behind each, with LRU budgeting.
 ///
 /// The quadric counterpart of `mesh_manager`, and deliberately the same shape: acquire queues transfers and returns at once,
-/// `record_settled` builds the acceleration structure behind them, and residency says how far along a batch is.
+/// `collect_settled` sees them land, `acquire_blas` builds the acceleration structure behind them, and residency says how far
+/// along a batch is.
 /// What differs is only that the BLAS is built over AABBs rather than triangles, and that the payload has to be SPLIT on the way
 /// out — the authored form carries each primitive's box beside it, and the two go to different buffers.
 class sv::quadric_manager : public impl::lru_pool<quadric_set_id, quadric_set_record>
@@ -230,17 +240,17 @@ public:
     /// — so an acquire costs two allocations and a hash lookup rather than a transfer.
     /// **The split happens only on a miss**, which is why `quadric_data` borrows its span instead of pinning it: a batch
     /// re-acquired every frame touches none of its bytes.
-    /// The id is usable at once and the batch is `pending` until `record_settled` builds its BLAS.
-    /// Ray tracing must be supported on the context.
+    /// The id is usable at once and the batch is `pending` until `collect_settled` sees its buffers land.
+    /// Ray tracing need not be supported: nothing here builds an acceleration structure.
     [[nodiscard]] quadric_set_id acquire(quadric_data const& set);
 
-    /// Builds the procedural BLAS for every batch whose buffers have finished streaming, recording onto `cmd`.
-    ///
-    /// Same contract as `mesh_manager::record_settled`: the build may only be recorded once the transfers are observed done, and
-    /// `cmd` is submitted by the caller after this returns.
+    /// Marks every batch whose buffers have finished streaming `complete`; returns how many.
     /// A transfer that settled without delivering leaves its batch `failed` rather than pending.
-    /// Returns how many batches it finished.
-    isize record_settled(sg::command_list& cmd);
+    isize collect_settled();
+
+    /// `id`'s procedural BLAS, recorded onto `cmd` the first time a caller asks and held from then on.
+    /// Same contract as `mesh_manager::acquire_blas`: `id` must be `complete`, and ray tracing supported on the context.
+    [[nodiscard]] sg::blas_handle const& acquire_blas(sg::command_list& cmd, quadric_set_id id);
 
     /// Blocks until every queued transfer has landed, then finishes them all.
     /// For a caller with no frame loop to drain the queue — a test tracing what it just built, or a one-pass tool.
@@ -263,7 +273,7 @@ private:
     };
 
     /// Finishes `id` if its transfers have settled; returns whether it did.
-    [[nodiscard]] bool _try_settle(sg::command_list& cmd, quadric_set_id id, pending_set& p);
+    [[nodiscard]] bool _try_settle(quadric_set_id id, pending_set& p);
 
     sg::context& _ctx;
     cc::map<quadric_set_id, pending_set> _settling;
@@ -339,6 +349,9 @@ struct sv::texture_record
     /// How many mip levels the pixels carried, and how many the texture has room for.
     i32 uploaded_mips = 0;
     i32 total_mips = 1;
+
+    /// Whether `texture` is the BC7 encoding that replaced what was uploaded.
+    bool compressed = false;
 };
 
 /// Hands out `texture_id`s and owns the texture behind each, with LRU budgeting (see resource_budget).
@@ -376,6 +389,10 @@ public:
     /// Marks `id`'s chain filled — what the manager calls once it has recorded the mip generation.
     /// A no-op for an id that has been evicted since.
     void mark_mips_complete(texture_id id);
+
+    /// Puts `compressed` behind `id` in place of what was uploaded, and charges the budget what it costs instead.
+    /// `compressed` holds the same chain, encoded; a no-op for an id that has been evicted since.
+    void replace_with_compressed(texture_id id, sg::texture_2d compressed);
 
 private:
     explicit texture_manager(sg::context& ctx) : _ctx(ctx) {}

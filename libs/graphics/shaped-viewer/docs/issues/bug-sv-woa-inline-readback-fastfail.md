@@ -8,35 +8,27 @@ refs:
   - file: libs/graphics/shaped-viewer/tests/decal-trace-test.cc
   - file: libs/graphics/shaped-viewer/tests/pt-support-probe-test.cc
   - file: libs/graphics/shaped-viewer/tests/runtime-probe-test.cc
+  - file: docs/bugs-external/warp-arm64-pac-fastfail/readme.md
   - test: shaped-viewer-test
 ---
 
-# The inline readback path fastfails on Windows on ARM
+# sv's Windows-on-ARM skips are very likely WARP's fastfail, not the inline readback path
 
-Every sv test that reads back through `cmd.download` is skipped there, under `CC_ARCH_ARM64 && _WIN32`.
-That is `openpbr-bsdf-test` and `volumetric-furnace-test` first, then the probes, the quadric and decal traces and the light tests.
-[structure.md](../structure.md) had already noted that path was never exercised here, so this was the first time sv asked for an inline readback at all.
+Every sv test that reads back through `cmd.download` is skipped on Windows on ARM, under `CC_ARCH_ARM64 && _WIN32`.
+They name the inline readback path, which is what bisecting with flushed markers pointed at, before anyone had a stack.
 
-## What happens
+## What it turned out to be
 
-`shaped-viewer-test` exits `0xC0000409` with no output whatsoever, roughly seven seconds in.
-Bisected with flushed markers to the advance-and-drain (now a blocking get on `ctx.idle_completion()`), on the probe's ECHO dispatch.
-That dispatch is 32 threads reading one struct and writing four floats, and its command list also recorded a `cmd.download`.
-The workload is therefore not the cause, and neither is the closure.
+The Windows ARM CI image has no GPU, and its Basic Render Driver enumerates once without DXGI's software flag.
+sg took it for hardware until it learned that Microsoft's vendor id is always WARP, so sv's "hardware" tests ran on WARP there.
+That WARP fastfails out of its pixel JIT: `0xC0000409` with no output, past every handler, a few seconds in.
+[warp-arm64-pac-fastfail](../../../../../docs/bugs-external/warp-arm64-pac-fastfail/readme.md) has the stack and what does not trigger it.
+The Windows ARM job runs no dx12 test since, as every Windows job but Windows Clang already did.
 
-## What it is not
+The skips are very likely that fault: the same silent exit, on the same adapter, with no vendor driver in the process.
+They stay until a run on Windows on ARM with a real GPU says otherwise, since CI can no longer reach them.
 
-Not an assertion: nexus installs clean-core's crash handler, which hooks an SEH filter and `SIGABRT` and prints the running test, and `abort()` raises `SIGABRT`.
-An earlier failure in the same binary proved that path works, arriving as a clean message.
-Not a lost device: the wait was wrapped in a `catch (sg::device_lost_exception const&)` that never fired.
-A `__fastfail` bypasses both handlers and loses buffered output, which is why this reads as a silent exit — and `/GS` uses exactly that for a genuine stack-cookie failure.
+## Re-checking
 
-## Where to look, with hardware
-
-The obvious first move is `ctx.download` instead of `cmd.download`.
-sg documents the context-level one for a bulk, off-the-frame-path read, which is what both tests actually want.
-It would say whether the inline staging ring is the part that breaks.
-
-`libs/base/clean-core/tests/record/record-async-scope-test.cc` records a separate MSVC ARM64 defect around coroutine resume.
-The completion machinery the epoch advance waits on is that same `cc::async`, so it is worth reading before assuming the two are unrelated.
-sg's own `transfer/download-async-test.cc` passes on that leg, so whatever this is, it needs the combination rather than the download alone.
+On a Windows on ARM machine with a GPU, drop the skips and run sv's tests: that answers whether the readback path ever had a fault of its own.
+With `SC_DX12_ADAPTER=warp` the same run says whether WARP is fixed.

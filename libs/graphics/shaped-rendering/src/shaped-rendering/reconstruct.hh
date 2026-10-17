@@ -473,7 +473,8 @@ namespace sr
 /// Which members `ctx` can run: compiled in, buildable by the shader library this process registered, and present
 /// on its device.
 /// Cheap.
-/// The native members are HLSL, so their answer depends on the compilers the library has — adding one can change it.
+/// The native members' answer depends on the compilers the library has, since their shaders build through them.
+/// Adding one can change it.
 ///
 /// A supported member can still be `pending` for its first frames, and `failed` if its shader does not build.
 [[nodiscard]] reconstruct_support query_reconstruct_support(sg::context const& ctx);
@@ -547,7 +548,10 @@ namespace sr
 /// Members are acquired when the call runs rather than through dependency tokens, so a member this machine cannot
 /// initialize never holds the front pending.
 /// Prewarming the front prewarms every supported member, so their shaders compile before the first call.
-class sr::reconstruct_routine : public sg::render_routine<reconstruct_routine>
+///
+/// A render routine **parametrized on the output's format**, since the native members compile their last pass for it:
+/// `prewarm(ctx, format)` with the format of the outputs a caller will hand `execute`.
+class sr::reconstruct_routine : public sg::render_routine<reconstruct_routine, sg::pixel_format>
 {
 public:
     /// Denoises `in.color` and upscales it into `in.output`, carrying `history` from call to call.
