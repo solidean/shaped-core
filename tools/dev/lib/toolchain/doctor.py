@@ -230,6 +230,44 @@ def _compiler_check(root: Path, preset: Preset, cxx: str | None, error: str | No
     return ("compiler", ok, detail)
 
 
+def _available_compilers_checks() -> list[tuple[str, bool | None, str]]:
+    """Every C++ compiler this machine offers, one advisory row per family: MSVC toolsets per VS install, clang, gcc.
+
+    The `compiler` row above answers for the preset; these answer what else `--preset` or `--toolset` could reach.
+    A family that is absent is advisory rather than a failure, since no single machine is expected to carry all three.
+    """
+    from . import toolset as ts
+
+    try:
+        data = ts.list_toolsets()
+    except Exception as e:  # noqa: BLE001 - discovery is best-effort, and doctor must not crash on it
+        return [("compilers", None, f"could not enumerate ({e})")]
+
+    rows: list[tuple[str, bool | None, str]] = []
+    if platform.system() == "Windows":
+        installs = [i for i in data.get("msvc", []) if i.get("toolsets")]
+        if installs:
+            detail = "; ".join(
+                f"{i['name']}{' (prerelease)' if i.get('prerelease') else ''}: {', '.join(i['toolsets'])}"
+                for i in installs
+            )
+            rows.append(("msvc toolsets", True, detail))
+        else:
+            rows.append(("msvc toolsets", None, "none found (Visual Studio with the C++ workload)"))
+
+    for family in ("clang", "gcc"):
+        entries = data.get(family, [])
+        if not entries:
+            rows.append((f"{family} compilers", None, "none found on PATH"))
+            continue
+        versions = []
+        for e in entries:
+            m = re.search(r"version\s+(\S+)", e.get("version") or "")
+            versions.append(f"{e['name']} {m.group(1)}" if m else e["name"])
+        rows.append((f"{family} compilers", True, ", ".join(versions)))
+    return rows
+
+
 def _coverage_tool_check(
     label: str, name: str, env_var: str, build_dir: Path | None
 ) -> tuple[str, bool, str]:
@@ -371,6 +409,8 @@ def doctor(
     else:
         cxx = shutil.which("clang++") or shutil.which("g++")
         checks.append(("compiler", cxx is not None, cxx or "no clang++/g++ on PATH"))
+
+    checks.extend(_available_compilers_checks())
 
     cov_build_dir: Path | None = None
     try:
