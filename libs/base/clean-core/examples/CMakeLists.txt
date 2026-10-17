@@ -9,6 +9,7 @@ sc_add_single_file_examples(clean-core
     sequence-basics.cc
     sequence-non-empty.cc
     sequence-pipelines.cc
+    sequence-sources.cc
     system-info.cc
     system-monitor.cc
     LINK clean-core

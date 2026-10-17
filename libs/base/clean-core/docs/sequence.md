@@ -27,19 +27,31 @@ It is also the views `span`, `fixed_span` and `strided_span`, and the ringbuffer
 A ringbuffer is the exception: its elements wrap, so a temporary one has no `values()` rather than a hidden `linearize()`.
 `fixed_array<T, N>` and `fixed_span<T, N>` with `N > 0` hand out sequences that are non-empty at compile time.
 The bitsets have no entry points yet.
-`cc::iota(begin, end)` and `cc::zip(a, b, ...)` are the free factories.
+
+**Factories.** `cc::iota(begin, end)`, `cc::repeat(x)` and `cc::repeat(x, n)`, `cc::single(x)`, `cc::empty_sequence<T>()`, `cc::generate(f)`, `cc::iterate(init, f)` and `cc::zip(a, b, ...)`.
+`cc::values_of(r)` is any range as a sequence, and `cc::indices_of(r)` the index sequence of any sized one.
+A container's own `values()` passes straight through, contiguous storage becomes a span, and anything else is walked by begin/end.
+A temporary is owned; a non-contiguous one moves to the heap once, since its iterators may point into the range object itself.
+A C array is borrowed, and non-empty at compile time when its extent is.
 
 **Reductions.** `count`, `count_if`, `any`, `all`, `none`, `contains`, `index_of` (→ `cc::optional<isize>`), `each`, `consume`.
 `find` returns a pointer, so it takes borrowed elements only, and `try_fold` is the general early-out fold.
+From the back: `find_last` and `last_index_of`, a predicate's index still counted from the front.
 Over a first element: `sum`, `min`, `max`, `average`, `first`, `last`, `min_by`, `max_by` (non-empty only).
 Their counterparts for any sequence: `sum_from`, `min_or`, `max_or`, `average_or`, `first_or`, `try_min`, `try_max`, `try_average`, `try_first`, `try_last`.
 `sum(f)`, `min(f)`, `max(f)` and `average(f)` reduce a projection: `ps.values().assert_non_empty().sum(&particle::mass)`.
+To an element's identity: `min_ptr`, `max_ptr`, `min_ptr_by`, `max_ptr_by`, nullptr when empty.
+Into an existing accumulator, so several sequences fold into one answer: `sum_into`, and `min_into` / `max_into` over a `T&` or a `cc::optional<T>&`.
+Their pointer forms are `min_ptr_into`, `max_ptr_into`, `min_ptr_by_into` and `max_ptr_by_into`.
 
-**Transformations.** `map`, `filter`, `take`, `skip`, `take_while`, `skip_while`, `chain`, `zip`, `enumerate`, `flatten`, `flat_map`, `indices`.
+**Transformations.** `map`, `filter`, `take`, `skip`, `take_while`, `skip_while`, `chain`, `zip`, `enumerate`, `flatten`, `flat_map`, `indices`, `reversed`.
 
 **Non-emptiness.** `assert_non_empty()` and `try_as_non_empty()`.
 
-**Materialization.** `to_container<C>()`, `to_vector()`, `push_to(existing)`.
+**Materialization.** `to_container<C>()`, `to_vector()`, `to_array()`, `to_fixed_array<N>()`, `push_to(existing)`.
+`to_sorted_vector(compare?)` and `to_sorted_vector_by(key)` sort through `cc::sort`, which is not stable.
+`to_grouped_map(key)` is a `cc::map` from each key to the elements with it, in sequence order.
+Each needs the header of the container it makes, and the sorted ones `<clean-core/algorithm/sort.hh>`, reached by argument-dependent lookup.
 `to_vector()` needs `<clean-core/container/vector.hh>`, which the sequence header cannot include.
 Materializing a zip makes `cc::tuple` elements, which need `<clean-core/container/tuple.hh>`: the sequence header leaves it out of every container's closure.
 
@@ -49,14 +61,19 @@ Materializing a zip makes `cc::tuple` elements, which need `<clean-core/containe
 `count()` over a sized `map` returns the size without calling `f`, and so do `indices()`, `take` and `skip` over a source that knows its positions.
 `consume()` is the terminal operation that evaluates every element, for a chain kept for what its callbacks do.
 
+**Infinite sequences.** `repeat(x)`, `generate` and `iterate` never run out, and `is_infinite` propagates through map, filter, skip, the while forms and chain.
+A reduction that traverses every element static-asserts on one; `take(n)` makes it finite, and with a known size.
+An infinite sequence is non-empty, since it never runs out, so `first()` needs no check.
+
 **The headers.** [sequence/source.hh](../src/clean-core/sequence/source.hh) holds the source protocol and the built-in sources: span, iota, strided, owning and non-empty.
+[sequence/impl/factories.hh](../src/clean-core/sequence/impl/factories.hh) holds the factories' sources and the foreign-range dispatch.
 [sequence/impl/call.hh](../src/clean-core/sequence/impl/call.hh) is how a callback is called: the optional index, and a zip's items spread.
 [sequence/impl/adaptors.hh](../src/clean-core/sequence/impl/adaptors.hh) holds the single-input adaptors.
 [sequence/impl/combinators.hh](../src/clean-core/sequence/impl/combinators.hh) holds chain, zip and flatten.
 [sequence/sequence.hh](../src/clean-core/sequence/sequence.hh) is `cc::sequence` itself.
 The map's sources live in [map.hh](../src/clean-core/container/map.hh), since its nodes are private.
 
-**Examples**, from basic to complex: `clean-core/sequence-basics`, `clean-core/sequence-non-empty` and `clean-core/sequence-pipelines`, in [examples/](../examples/).
+**Examples**, from basic to complex: `clean-core/sequence-basics`, `clean-core/sequence-non-empty`, `clean-core/sequence-pipelines` and `clean-core/sequence-sources`, in [examples/](../examples/).
 
 ## The design
 
@@ -81,11 +98,11 @@ A transformation wraps the source in exactly one adaptor source and rewraps that
   It must spell its return type `bool`, because detection reads the declaration and never instantiates the body.
 * **The capabilities** are a small, closed list, each with a fallback the sequence layer provides: `size` (counting), `is_empty`, `contains` (`any(==)`), `begin`/`end` (`next()`).
   Three more come with `size`, for a source that knows its positions: `at(i)`, `advance(n)` and `truncate(n)`.
-  They are what let `take` and `skip` reshape a contiguous source instead of wrapping it, `last()` answer without a traversal, and a zip run as one index loop.
-  Later perhaps reverse iteration.
+  They are what let `take` and `skip` reshape a contiguous source instead of wrapping it, and a zip run as one index loop.
+  Two more walk from the back: `next_back()` and `try_rfold(step)`, which is what `reversed()`, `last()` and the `last_*` forms stand on.
   An adaptor forwards a capability wherever it can: `filter(p).contains(x)` is `inner.contains(x) && p(x)`, and `map(f).at(i)` is `f(inner.at(i))`.
 
-The calling contract: `next()` any number of times, then `try_fold` at most once, after which the source is spent.
+The calling contract: `next()` and `next_back()` any number of times in any mix, then `try_fold` or `try_rfold` at most once, after which the source is spent.
 A source therefore need not leave a resume point behind `try_fold`, which is what lets a tree simply recurse inside it.
 
 ### Internal iteration
@@ -131,6 +148,8 @@ All reductions are written in terms of `try_fold`, and only the sequence layer c
 * **A sized zip is one index loop.** Every side's `at(i)` under one counter, so a dot product over two spans is the naive loop, register allocation aside.
   `enumerate` is a zip with an unbounded index range and compiles to the hand-indexed loop.
 * **A map's own fold beats its iterator.** Summing `m.values()` walks bucket and chain as a plain double loop, a third the size of iterating the map by hand.
+* **From the back is the same loop.** A reversed fold and `find_last` over a span are byte-identical to the descending hand loop.
+  `values_of` over a `std::vector` is a span, and sums in fewer instructions than its own range-for.
 * **Range-for over a filter is the one shape without parity.** It is a tight scalar loop, since external iteration through a filter is a nested loop, while the naive `if` inside a loop vectorizes.
   `.filter(p).each(body)` is the spelling with parity, and the one a hot loop wants.
 
@@ -178,10 +197,9 @@ Adaptors propagate it:
 | `chain(a, b)`       | `a` or `b` is        |
 | `zip(a, b)`         | `a` and `b` are      |
 | `take`, `skip`      | never                |
-| `fixed_span<T, N>`  | `N > 0`              |
-| iota, repeat        | always               |
-
-`repeat` is not built; the rest of the table is what the adaptors do.
+| `fixed_span<T, N>`, a C array | `N > 0`    |
+| `single`            | always               |
+| anything infinite   | always               |
 A non-empty source hides `advance` and `truncate`, since either may empty it, so `take` over one wraps it rather than reshaping it.
 
 The trait describes the source before it is consumed, and the `&&` rule is what keeps it true: nothing can call into a sequence after its first consuming call.
@@ -230,13 +248,23 @@ It propagates conservatively: filter preserves it, map-by-value breaks it.
 
 `has_borrowed_elements` is the `borrowed_range` analogue: references and pointers stay valid even if the sequence object is a temporary.
 It is what keeps a pointer from escaping a sequence that owns its container.
-Pointer-returning APIs (`find` today) require it.
+Pointer-returning APIs (`find`, `find_last`, the `*_ptr` family) require it.
 
 **`min()` and `max()` return by value.**
 A reference result would track the best element by pointer, and a pointer-tracking minimum does not vectorize where the naive `m = x < m ? x : m` does.
-Element identity belongs to pointer-returning variants (`min_ptr`, `min_ptr_by`), gated on `has_borrowed_elements` like `find`; they are not built yet.
+Element identity belongs to the pointer variants, which return nullptr for an empty sequence rather than needing a non-empty one.
+The `_by` forms compute each key once, and keep the best key beside the pointer.
 
-Into-style variants — `min_into(T&)`, `min_into(optional<T>&)`, `min_ptr_by_into(T*&)` — update an existing accumulator and compose across several ranges; also not built yet.
+The `_into` forms update an accumulator the caller owns, so several sequences fold into one result without a chain.
+An optional accumulator starts empty and takes the first element it sees; a null pointer accumulator does the same.
+
+### From the back
+
+A source that can step from the back offers `next_back()`, and `reversed()` swaps the two ends and mirrors every positional capability.
+So `reversed().take(n)` over a span is still a pointer range, and `last()` is one `next_back()`.
+Map, filter, chain and zip reverse when their inputs do; take and skip need a sized input, to know where they end.
+A callback taking an index keeps the position from the front, which needs the size, so without one such a map does not reverse.
+A map's keys do not reverse, since its iteration order is arbitrary and its chains singly linked; neither do flatten and the while forms.
 
 The sharp edges stay explicit: underlying container invalidation still applies, trait propagation must stay conservative, and a `materialize()` exists for users who want ownership and safety.
 
@@ -260,8 +288,7 @@ Like the callback index, it numbers *this* sequence: `v.values().filter(p).indic
 
 Operations fall into three groups: transformative / sub-sequence, into-container-like (`to_array` / `to_vector`, sorted, grouped, …), and statistical (sum, average, min, max, find, count, …).
 
-Properties propagate along a chain: fixed or bounded size, compile-time size, non-emptiness, indexability.
-Sequences *can* be infinite.
+Properties propagate along a chain: size, positions, non-emptiness, infiniteness, reversibility.
 
 Not copyable and not cloneable for now, and multi-pass needs a second `cc::sequence` rather than a rewind.
 That is what makes the performance predictable.
@@ -281,10 +308,7 @@ Known costs, accepted:
 * **A gated member still exists.** `sum()` static-asserts rather than being constrained, so `requires { s.sum(); }` is true on a sequence that may be empty.
   The error message is worth more than the detection.
 
-Ideas not yet decided:
-
-* a "reversible" range trait — every `.last_xyz` is then just `.reversed().xyz()`;
-* factories: one for an arbitrary begin/end range, one for an initializer list, one for a single element, one for a generator, and a coroutine adapter.
+Not built yet: a coroutine adapter, the bitset entry points, and an owning `values()` for a temporary ringbuffer.
 
 ## Editing the headers
 

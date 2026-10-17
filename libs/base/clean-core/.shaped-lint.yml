@@ -405,6 +405,11 @@ rules:
     files: tests/**
 
   - kind: allow-include
+    value: [<vector>, <list>]
+    reason: the foreign ranges this example turns into sequences with cc::values_of
+    files: examples/sequence-sources.cc
+
+  - kind: allow-include
     value: [<filesystem>, <fstream>]
     reason: fixture files for the stream tests, written and cleaned up outside the API under test
     files: tests/**

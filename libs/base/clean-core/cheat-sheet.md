@@ -777,13 +777,19 @@ m.keys();  m.values();            // map (keys().contains(k) is the map's lookup
 make_vec().values();              // owns the vector: safe to name, to_vector() moves the elements out
 cc::iota(n);  cc::iota(a, b);     // integers; .contains(i) is a range check
 cc::zip(a, b, ...);               // containers or sequences, in step until the shortest ends
+cc::values_of(r);  cc::indices_of(r);   // ANY range: std containers, C arrays, begin/end; temporaries owned
+cc::repeat(x, n);  cc::single(x);  cc::empty_sequence<T>();
+cc::repeat(x);  cc::generate(f);  cc::iterate(init, f);   // INFINITE: count/sum/to_* static-assert, .take(n) first
 
 // terminal ops are &&-qualified: chain on the temporary, or cc::move(s).count() for a named one. single pass.
 .count();  .count_if(p);  .any(p);  .all(p);  .none(p);  .contains(x);  .each(f);  .consume();
 .index_of(p);                     // -> cc::optional<isize>
+.find_last(p);  .last_index_of(p);   // from the back; a predicate's index still counts from the front
+.min_ptr();  .max_ptr_by(key);    // -> pointer or nullptr when empty; borrowed elements only
+.sum_into(acc);  .min_into(acc);  .max_into(opt);  .min_ptr_into(p);  .max_ptr_by_into(p, key);  // fold several sequences
 .find(p);                         // -> pointer or nullptr; static-asserts borrowed elements (not on owning / by-value map)
 .try_fold(f);                     // f -> bool|void, true stops; -> whether it stopped
-.to_vector();  .to_container<C>();  .push_to(c);   // needs vector.hh; a zip -> cc::tuple (needs tuple.hh)
+.to_vector();  .to_array();  .to_fixed_array<N>();  .to_container<C>();  .push_to(c);   // needs vector.hh; a zip -> cc::tuple (needs tuple.hh)
 // a callback may take a leading isize: its item's position in the sequence it is applied to
 // count() over a sized map does NOT call the map; .consume() runs every element for its side effects
 
@@ -795,6 +801,9 @@ cc::zip(a, b, ...);               // containers or sequences, in step until the 
 .zip(others...);                  // callbacks take items SPREAD: .map([](int a, float b) { ... })
 .enumerate();                     // callbacks take (isize i, item)
 for (auto&& [a, b] : cc::zip(x, y)) ...   // range-for binds a zip's pack
+.reversed();                      // contiguous, iota, and map/filter/chain/zip over them; take/skip need a size
+.to_sorted_vector(cmp?);  .to_sorted_vector_by(key);   // cc::sort, NOT stable; include algorithm/sort.hh
+.to_grouped_map(key);             // cc::map<key, cc::vector<element>>, in sequence order
 
 // needing a first element: x() only compiles on a NON-EMPTY sequence
 .assert_non_empty().sum();        // .sum() .min() .max() .average() .first() .last() .min_by(key) .max_by(key)
