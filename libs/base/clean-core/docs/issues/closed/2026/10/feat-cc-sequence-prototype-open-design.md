@@ -5,8 +5,8 @@ refs:
   - file: libs/base/clean-core/docs/sequence.md
   - symbol: cc::sequence
   - issue: bug-cc-sequence-sum-and-to-array-unimplemented
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-10-17T15:43Z
+closed: 2026-10-17
+resolution: fixed
 ---
 
 # `cc::sequence`: the prototype's open design points
