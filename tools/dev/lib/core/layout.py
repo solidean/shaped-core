@@ -18,6 +18,39 @@ from pathlib import Path
 # tools/dev/lib/core/layout.py -> the repository the driver is part of.
 DRIVER_ROOT = Path(__file__).resolve().parents[4]
 
+# What an extra root can opt into.
+# shaped-linter selects no rule family per run, so `prose` and `code` split by file kind instead:
+# markdown carries prose rules alone, while C++ and Python get every rule, the prose rules over their comments included.
+EXTRA_ROOT_CHECKS = ("crossrefs", "prose", "code")
+
+
+@dataclass(frozen=True)
+class ExtraRoot:
+    """A directory outside the first-party roots that some checks still own — typically a submodule we write docs in.
+
+    `include` and `exclude` are gitignore-style globs relative to `path`: an empty `include` takes every file, and `exclude` wins.
+    A glob without a `/` matches a name at any depth, and one naming a directory takes everything below it.
+    """
+
+    # Relative to the project root.
+    path: str
+
+    # A submodule is listed and diffed through its own git, since the superproject sees only its gitlink.
+    submodule: bool = False
+
+    # A subset of EXTRA_ROOT_CHECKS.
+    checks: tuple[str, ...] = EXTRA_ROOT_CHECKS
+
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        unknown = [c for c in self.checks if c not in EXTRA_ROOT_CHECKS]
+        if unknown:
+            raise ValueError(f"extra root {self.path!r}: unknown check(s) {unknown}; expected some of {EXTRA_ROOT_CHECKS}")
+        if self.path.startswith("/") or self.path.endswith("/") or not self.path:
+            raise ValueError(f"extra root {self.path!r}: the path must be relative, without a trailing slash")
+
 
 @dataclass(frozen=True)
 class Layout:
@@ -41,6 +74,14 @@ class Layout:
 
     # The directory libraries live under, as `<library_dir>/<category>/<lib>/`; coverage reports per library on that key.
     library_dir: str
+
+    # Directories some checks own beyond the roots above, each with its own checks and globs.
+    # A link inside one resolves against the extra root rather than the project, which is how its own readme reads it.
+    extra_roots: tuple[ExtraRoot, ...] = ()
+
+    def extra_roots_with(self, check: str) -> tuple[ExtraRoot, ...]:
+        """The extra roots that opted into `check`."""
+        return tuple(r for r in self.extra_roots if check in r.checks)
 
 
 SHAPED_CORE_LAYOUT = Layout(
