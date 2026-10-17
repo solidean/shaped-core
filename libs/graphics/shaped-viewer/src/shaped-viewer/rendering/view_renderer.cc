@@ -608,13 +608,19 @@ constexpr u32 wavefront_roulette_after = 3;
 /// Both tracers need the ray-tracing pipeline: the megakernel is one, and the structure the wavefront's group binds is declared for it.
 /// The wavefront traces inline too, so it needs `ray_query` beside it.
 /// A layer that cannot trace is declined rather than drawn blank, since nothing it could draw is its image.
+/// The feature a traced `mode` needs that `ctx` lacks, or none when it can trace.
+[[nodiscard]] cc::optional<sg::feature> missing_trace_feature(sg::context const& ctx, render_mode mode)
+{
+    if (!ctx.supports(sg::feature::raytracing_pipeline))
+        return sg::feature::raytracing_pipeline;
+    if (mode == render_mode::wavefront && !ctx.supports(sg::feature::ray_query))
+        return sg::feature::ray_query;
+    return {};
+}
+
 [[nodiscard]] bool can_trace(sg::context const& ctx, render_mode mode, impl::view_state const& rec, impl::temporal_slot& slot)
 {
-    auto missing = cc::optional<sg::feature>();
-    if (!ctx.supports(sg::feature::raytracing_pipeline))
-        missing = sg::feature::raytracing_pipeline;
-    else if (mode == render_mode::wavefront && !ctx.supports(sg::feature::ray_query))
-        missing = sg::feature::ray_query;
+    auto const missing = missing_trace_feature(ctx, mode);
     if (!missing.has_value())
         return true;
 
@@ -915,7 +921,11 @@ void view_renderer::acquire_trace(sg::command_list& cmd,
     // The same walk trace() takes, for its acquires alone: residency only moves at the frame's settle pass, so both
     // resolve the same items to the same indices — under the same mode, which decides what a walk acquires.
     auto const& l = v.layers[tr.layer];
-    auto const is_traced = planned_mode(l.settings.mode) != render_mode::raster;
+    auto const mode = planned_mode(l.settings.mode);
+    auto const is_traced = mode != render_mode::raster;
+    // trace() declines a layer this device cannot trace, and says so; a walk for it would build BLASes nothing can.
+    if (is_traced && missing_trace_feature(cmd.context(), mode).has_value())
+        return;
     (void)resolve_scene(cmd, l, resources, is_traced);
 }
 
