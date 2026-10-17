@@ -128,9 +128,9 @@ cc::mutex<cc::map<cc::hash128, slib::preprocessed_source>>& memory_tier()
 /// The store answers on its own thread, which is what lets a wait alone see the answer arrive.
 /// Nothing within `patience_secs` is a miss, and nullopt waits for the answer however long it takes.
 ///
-/// TEMPORARY: a hand-rolled poll, standing in for a passive timed wait on a `cc::async` node, which clean-core lacks.
+/// TEMPORARY(debt-slib-sgl-emit-passive-poll): a hand-rolled poll, standing in for a passive timed wait on a `cc::async` node, which clean-core lacks.
 /// `cc::try_async_blocking_get_for` is the timed wait it has, and that one drives the ambient scheduler, which this must not.
-/// Replace the loop with that wait once it lands, as libs/base/clean-core/docs/TODO.md records under async.
+/// Replace the loop with that wait once it lands; issue: feat-cc-async-passive-timed-wait
 cc::optional<bcache::cache_hit> passive_get(bcache::blob_cache& store, cc::hash128 key, cc::optional<double> patience_secs)
 {
     auto const node = store.get(slib::impl::sgl_emit_persistent_key(key));
