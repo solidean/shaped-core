@@ -35,3 +35,9 @@ TEST("tg scalar_t - a sequence of vectors averages through it")
     static_assert(std::is_same_v<decltype(mean), tg::vec3f const>);
     CHECK(mean == tg::vec3f(1, 2, 1));
 }
+
+TEST("tg scalar_t - a sequence of points averages to their centroid")
+{
+    auto const ps = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(3, 0, 0), tg::pos3f(0, 3, 6)};
+    CHECK(ps.values().assert_non_empty().average() == tg::pos3f(1, 1, 2));
+}
