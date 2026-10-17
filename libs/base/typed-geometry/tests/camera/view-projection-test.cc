@@ -3,8 +3,10 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
+#include <clean-core/string/string.hh>
 #include <nexus/test.hh>
 #include <typed-geometry/camera/camera.hh>
+#include <typed-geometry/geometry/query/query.hh>
 
 // The round trip is view_projection's contract, so it is checked as a property over random inputs, for every
 // convention and for a perspective with a finite far plane, one with an infinite far plane, and an orthographic one.

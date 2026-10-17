@@ -12,7 +12,7 @@
 ///
 /// View space is the camera's frame: +x right, +y up, and +z forward for a left-handed function (`_lh`), -z forward for a right-handed one (`_rh`).
 /// Clip space is normalized device coordinates after the divide: x and y in [-1, 1] with +y up, depth as the `tg::clip_depth` the name states.
-/// docs/modules/camera.md is the convention, and why the unsuffixed default is left-handed reverse-Z.
+/// libs/base/typed-geometry/docs/modules/camera.md is the convention, and why the unsuffixed default is left-handed reverse-Z.
 ///
 /// Every function names its handedness and depth range; the unsuffixed ones are `_lh_reverse_z`.
 /// A perspective function without a `far_distance` puts the far plane at infinity.
