@@ -264,6 +264,37 @@ t(obj);               // the call spelling of t.transform(obj) — application, 
 // `composed` is opt-in per transform type and IS probeable: requires { a.composed(b); }
 ```
 
+## camera — projections, views, project / unproject
+
+```cpp
+#include <typed-geometry/camera/camera.hh>
+// DEFAULT: left-handed, +y up, +z forward, D3D clip (x,y in [-1,1], +y up), REVERSE-Z (near -> 1, far -> 0)
+tg::perspective(fov, aspect, near);               // -> projective_transform3; no far = far plane at INFINITY
+tg::perspective(fov, aspect, near, far);          // fov is the full VERTICAL angle, aspect = width / height
+tg::perspective_off_center(l, r, b, t, near[, far]); // l..t are the extents ON THE NEAR PLANE
+tg::orthographic(w, h, near, far);                // -> signed_scaling_translation_transform3 (reverse-Z flips depth)
+tg::orthographic(view_space_aabb);                // the box becomes the clip volume
+// the zoo: <kind>_<lh|rh>_<reverse_z|zero_to_one|minus_one_to_one>, same overloads, e.g.
+tg::perspective_lh_zero_to_one(fov, aspect, near, far);  // classic D3D / Vulkan / Metal / WebGPU
+tg::perspective_rh_minus_one_to_one(fov, aspect, near, far); // classic OpenGL
+// an orthographic one is scaling_translation when depth keeps its direction, signed_ when it flips
+
+tg::look_at(eye, target, up = +y);                // -> rigid_transform3, world -> camera frame; LH: target on +z
+tg::look_to(eye, forward, up);  tg::look_at_rh(...); tg::look_to_rh(...); // RH: the camera looks down -z
+
+auto vp = tg::view_projection_f::make(view, projection, tg::clip_depth::zero_to_one); // depth defaults to reverse-Z
+vp.project(p);          // world pos -> NDC pos (p must be in front: w > 0)
+vp.project(seg / ray / line); // -> optional<segment3> in NDC: the VISIBLE part, clipped in homogeneous space
+vp.unproject(ndc_pos3); // -> world pos (not at an infinite far plane's depth)
+vp.unproject(ndc_xy);   // -> ray3, the PICK RAY: starts on the near plane, unit dir
+vp.unproject(ndc_seg);  // -> world segment
+vp.frustum();  vp.world_to_clip();  vp.clip_to_world();  vp.near_depth();  vp.far_depth();
+tg::ndc_from_pixel(pixel, size);  tg::pixel_from_ndc(ndc, size); // pixels: top-left origin, +y down; centers at +0.5
+```
+
+- **The depth convention is passed, not read off the matrix** — a zoo projection's caller passes the `clip_depth` its name states.
+- **`segment` / `triangle` `.transformed(projective)` assert every vertex has w > 0**; `vp.project` is the spelling that clips.
+
 ## geometry primitives (each denotes a set of points)
 
 ```cpp
@@ -287,6 +318,7 @@ tg::inf_cone<D,T> {pos apex; vec dir; angle opening_angle}  // single nappe, dir
 tg::frustum<3,T>  {plane planes[6]}           // left right bottom top near far, normals OUTWARD (inside: <= dist);
                                               //   .vertices() 8 corners (bit0 right, bit1 top, bit2 far); _boundary
 tg::frustum3d::make_from_view_projection(vp); // REVERSE-Z [0,1] (near -> 1); infinite far -> absent far plane
+                                              //   _zero_to_one / _minus_one_to_one twins; vp.frustum() picks
 f.has_far_plane();                            // false: planes[5] is {0, 0}; plane-only queries still work
                                               //   (contains, may_intersect vs a support object, ray intervals);
                                               //   vertices / volume / bounds / sampling and every support-based
@@ -508,6 +540,7 @@ cc::format("{}", h);                               // shortest digits for f16: "
 #include <typed-geometry/transform/transform.hh> // curated: the transform type + its operations
 #include <typed-geometry/geometry/geometry.hh>   // curated: object_traits + primitives
 #include <typed-geometry/geometry/all.hh>        // everything in geometry
+#include <typed-geometry/camera/camera.hh>       // projections, views, view_projection
 #include <typed-geometry/all.hh>                 // everything; expensive
 ```
 

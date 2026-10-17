@@ -667,3 +667,18 @@ inline homogeneous_transform<DSource, DTarget, T, Flags> const homogeneous_trans
     = homogeneous_transform<DSource, DTarget, T, Flags>{};
 
 } // namespace tg
+
+namespace tg::impl
+{
+/// The homogeneous w a projective transform gives `p`: positive in front of the projection, zero at infinity.
+/// A primitive that has to stay convex under a projection asserts it at its vertices.
+template <int D, class T, transform_flags Flags>
+[[nodiscard]] constexpr T projective_w(homogeneous_transform<D, D, T, Flags> const& t, pos<D, T> const& p)
+{
+    auto const m = t.to_mat();
+    T w = m[D, D];
+    for (int c = 0; c < D; ++c)
+        w += m[c, D] * p.data[c];
+    return w;
+}
+} // namespace tg::impl

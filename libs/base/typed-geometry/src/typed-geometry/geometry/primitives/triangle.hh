@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/container/fixed_array.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
@@ -63,6 +64,9 @@ public:
         else if constexpr (requires { tg::projective_transform<D, T>(t); })
         {
             auto const p = tg::projective_transform<D, T>(t);
+            CC_ASSERT(tg::impl::projective_w(p, pos0) > T(0) && tg::impl::projective_w(p, pos1) > T(0)
+                          && tg::impl::projective_w(p, pos2) > T(0),
+                      "a projected triangle must lie in front of the projection");
             return triangle(pos0.transformed(p), pos1.transformed(p), pos2.transformed(p));
         }
         else
