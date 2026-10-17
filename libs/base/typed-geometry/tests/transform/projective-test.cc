@@ -1,25 +1,16 @@
 #include "../approx.hh"
 
 #include <nexus/test.hh>
+#include <typed-geometry/camera/projection.hh>
 #include <typed-geometry/geometry/primitives/primitives.hh>
 #include <typed-geometry/transform/compose.hh>
 
 namespace
 {
-/// A left-handed perspective projection in tg's column-vector convention, with z mapped into [0, 1].
-/// Written out here rather than in the library: the handedness and depth range are a rendering
-/// convention, and tg has not adopted one.
+/// The classic left-handed [0, 1] projection: these tests read its depths directly.
 tg::projective_transform3f perspective(tg::angle_f vertical_fov, float aspect, float z_near, float z_far)
 {
-    auto const t = 1.0f / tg::tan(vertical_fov / 2.0f);
-
-    auto m = tg::mat4f::zero;
-    m[0, 0] = t / aspect;
-    m[1, 1] = t;
-    m[2, 2] = z_far / (z_far - z_near);
-    m[3, 2] = -z_near * z_far / (z_far - z_near);
-    m[2, 3] = 1.0f;
-    return tg::projective_transform3f::make_from_mat(m);
+    return tg::perspective_lh_zero_to_one(vertical_fov, aspect, z_near, z_far);
 }
 } // namespace
 
