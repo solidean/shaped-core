@@ -24,6 +24,8 @@
 template <int C, int R, class T>
 struct tg::mat
 {
+    using scalar_t = T;
+
     static_assert(C > 0 && R > 0, "mat requires positive dimensions");
 
     vec<R, T> cols[C] = {};

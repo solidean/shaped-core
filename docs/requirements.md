@@ -214,6 +214,7 @@ Checks, in order:
 - **cmake** — present, *and* at least the declared minimum
 - **ninja**
 - a usable **compiler** — the MSVC environment or `clang-cl` on Windows, `clang++` / `g++` elsewhere
+- every **compiler** this machine offers beyond that one, advisory: the MSVC toolsets per Visual Studio install, and the clang and gcc found on PATH — what `--preset` and `--toolset` could reach
 - that **presets parse**, and that the platform **default preset** exists
 - the **coverage** tools, `llvm-cov` and `llvm-profdata`, which coverage and PGO both need
 - the **emscripten** toolchain

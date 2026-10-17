@@ -6,7 +6,6 @@
 // issue: feat-cc-container-equality-and-order
 // issue: feat-cc-container-search-family
 // issue: feat-cc-container-retyping
-// Also not yet: sequence entry points.
 
 
 /// Dynamically allocated vector of T elements with move-only semantics.
@@ -33,6 +32,11 @@ public:
 public:
     using base::begin; // get pointer to first element
     using base::end;   // get pointer to one past last element
+
+    // sequences
+public:
+    using base::indices; // index sequence 0 .. size()
+    using base::values;  // the elements as a cc::sequence (owns the container when called on a temporary)
 
     // queries
 public:

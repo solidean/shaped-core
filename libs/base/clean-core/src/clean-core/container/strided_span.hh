@@ -203,6 +203,17 @@ public:
     /// The iterator compares against this sentinel by checking if remaining_count == 0.
     [[nodiscard]] constexpr sentinel end() const { return {}; }
 
+    // sequences
+public:
+    /// The viewed elements as a cc::sequence; it references the storage, not this span.
+    [[nodiscard]] constexpr auto values() const
+    {
+        return cc::impl::seq_make<false>(cc::impl::strided_source<T>(start_ptr(), _stride_bytes, _size));
+    }
+
+    /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
+    [[nodiscard]] constexpr auto indices() const { return cc::impl::seq_index_values<false>(*this); }
+
     // queries
 public:
     /// Returns the number of elements in the strided_span.

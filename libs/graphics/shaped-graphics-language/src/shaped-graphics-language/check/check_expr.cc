@@ -1632,8 +1632,7 @@ type_id checker::check_lambda(function_scope& scope, ast::expr_id expr, type_id 
         collect_type_parameters(m.type, named);
         auto is_in_scope = true;
         for (auto const q : named)
-            is_in_scope
-                = is_in_scope && cc::sequence{type_parameter_names}.any([&](auto const& n) { return n.second == q; });
+            is_in_scope = is_in_scope && type_parameter_names.values().any([&](auto const& n) { return n.second == q; });
         if (!is_in_scope)
         {
             report(diagnostic_kind::no_matching_overload, file, where,
@@ -2267,7 +2266,7 @@ type_id checker::deduce_result(function_scope const& scope, ast::expr_id id, sym
             auto is_bound = false;
             for (auto i = isize(0); i + 1 < bindings.size(); i += 2)
                 is_bound = is_bound || bindings[i] == q;
-            if (!is_bound && cc::sequence{expected}.any([&](type_id e) { return e == q; }))
+            if (!is_bound && expected.values().any([&](type_id e) { return e == q; }))
             {
                 bindings.push_back(q);
                 bindings.push_back(q);

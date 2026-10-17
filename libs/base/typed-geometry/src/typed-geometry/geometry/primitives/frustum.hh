@@ -29,6 +29,8 @@
 template <int D, class T>
 struct tg::frustum
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a frustum is 3D");
 
     plane<D, T> planes[6] = {};
@@ -269,6 +271,8 @@ private:
 template <int D, class T>
 struct tg::frustum_boundary
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a frustum is 3D");
 
     plane<D, T> planes[6] = {};
