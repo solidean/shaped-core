@@ -1,6 +1,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/sequence/sequence.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
@@ -81,6 +82,25 @@ EXAMPLE("clean-core/sequence-pipelines")
     for (auto&& [customer, revenue] : cc::zip(revenue_by_customer.keys(), revenue_by_customer.values()))
         if (revenue > 5.0f)
             cc::println("  customer {}: {}", customer, revenue);
+
+    // pairwise walks neighbours, spread into the callback like a zip: the day-over-day change.
+    auto const daily = cc::vector<int>{12, 15, 11, 18, 21, 19};
+    cc::println("day-over-day: {}", daily.values().pairwise().map([](int a, int b) { return b - a; }));
+    cc::println("best gain: {}",
+                daily.values().pairwise().map([](int a, int b) { return b - a; }).assert_non_empty().max());
+
+    // chunks groups without overlap: the orders as (customer, item) records packed flat.
+    auto const flat = cc::vector<int>{7, 0, 3, 1, 7, 3, 9, 2};
+    flat.values().chunks<2>().each([&](int customer, int id)
+                                   { cc::println("  customer {} took a {}", customer, catalog[id].name); });
+
+    // count_by is a histogram, partition splits in two, and min_max finds both ends in one pass.
+    auto const per_customer = flat.values().step_by(2).count_by([](int customer) { return customer; });
+    cc::println("customer 7 placed {} orders", per_customer.get(7));
+    auto const [cheap, dear] = catalog.values().partition([](item const& it) { return it.price < 1.0f; });
+    cc::println("{} cheap items, {} dear ones", cheap.size(), dear.size());
+    auto const [low, high] = catalog.values().map(&item::price).assert_non_empty().min_max();
+    cc::println("prices span {} to {}", low, high);
 
     // take_while / skip_while cut at the first element that fails, rather than filtering every one.
     auto const daily_counts = cc::vector<int>{0, 0, 0, 4, 9, 2, 0, 7};

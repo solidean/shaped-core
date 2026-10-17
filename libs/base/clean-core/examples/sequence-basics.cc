@@ -1,5 +1,6 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/sequence/sequence.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/test.hh>
 
@@ -35,12 +36,11 @@ EXAMPLE("clean-core/sequence-basics")
     cc::println("day 6 recorded: {}", temperatures.indices().contains(6));
     cc::println("day 7 recorded: {}", temperatures.indices().contains(7));
 
-    // map and filter are lazy: nothing runs until a terminal operation such as to_vector pulls the elements through.
-    auto const fahrenheit_of_warm_days
-        = temperatures.values().filter([](int t) { return t >= 18; }).map([](int t) { return t * 9 / 5 + 32; }).to_vector();
-    cc::println("warm days in F:");
-    for (int f : fahrenheit_of_warm_days)
-        cc::println("  {}", f);
+    // map and filter are lazy: nothing runs until a terminal operation pulls the elements through.
+    // cc::format is one: it prints a sequence as a list, the spec applying to each element.
+    auto const fahrenheit = [](int t) { return t * 9 / 5 + 32; };
+    cc::println("warm days in F: {}", temperatures.values().filter([](int t) { return t >= 18; }).map(fahrenheit));
+    cc::println("as a line: {}", temperatures.values().join(" / "));
 
     // A sequence is single-pass, and a terminal operation consumes it.
     // That is why a named one is spent with cc::move, which keeps the second pass from compiling by accident.

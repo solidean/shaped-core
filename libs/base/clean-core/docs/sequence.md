@@ -37,6 +37,8 @@ A C array is borrowed, and non-empty at compile time when its extent is.
 **Reductions.** `count`, `count_if`, `any`, `all`, `none`, `contains`, `index_of` (→ `cc::optional<isize>`), `each`, `consume`.
 `find` returns a pointer, so it takes borrowed elements only, and `try_fold` is the general early-out fold.
 From the back: `find_last` and `last_index_of`, a predicate's index still counted from the front.
+`min_max()` is both in one pass, as a `cc::min_and_max<T>` that structured bindings take apart, with `try_min_max()` beside it.
+`index_of_min()` and `index_of_max()` are the positions, and `nth(i)` / `try_nth(i)` the element at one, O(1) where the source knows positions.
 Over a first element: `sum`, `min`, `max`, `average`, `first`, `last`, `min_by`, `max_by` (non-empty only).
 Their counterparts for any sequence: `sum_from`, `min_or`, `max_or`, `average_or`, `first_or`, `try_min`, `try_max`, `try_average`, `try_first`, `try_last`.
 `sum(f)`, `min(f)`, `max(f)` and `average(f)` reduce a projection: `ps.values().assert_non_empty().sum(&particle::mass)`.
@@ -45,17 +47,28 @@ Into an existing accumulator, so several sequences fold into one answer: `sum_in
 Their pointer forms are `min_ptr_into`, `max_ptr_into`, `min_ptr_by_into` and `max_ptr_by_into`.
 
 **Transformations.** `map`, `filter`, `take`, `skip`, `take_while`, `skip_while`, `chain`, `zip`, `enumerate`, `flatten`, `flat_map`, `indices`, `reversed`.
+Neighbourhoods: `pairwise()`, `windows<N>()`, `chunks<N>()`, `step_by(k)`.
+And `filter_map(f)`, `scan(init, f)`, `dedup()`, `dedup_by(key)`, `inspect(f)`, `take_last(n)`, `skip_last(n)`.
+
+**Comparing with another sequence**, which may be any range: `equals`, `starts_with`, `mismatch` (→ the first differing position), `compare` (lexicographic, as `<=>`).
+`is_sorted()` and `is_sorted_by(key)` compare each element with the one before it.
 
 **Non-emptiness.** `assert_non_empty()` and `try_as_non_empty()`.
 
 **Materialization.** `to_container<C>()`, `to_vector()`, `to_array()`, `to_fixed_array<N>()`, `push_to(existing)`.
 `to_sorted_vector(compare?)` and `to_sorted_vector_by(key)` sort through `cc::sort`, which is not stable.
 `to_grouped_map(key)` is a `cc::map` from each key to the elements with it, in sequence order.
+`count_by(key)` is a histogram into a `cc::map<K, isize>`, `partition(p)` a `cc::partition_result` of two vectors, `to_map(key, value)` and `to_set()` what they say.
+`join(separator)` formats each element with `{}` into a `cc::string`.
 Each needs the header of the container it makes, and the sorted ones `<clean-core/algorithm/sort.hh>`, reached by argument-dependent lookup.
 `to_vector()` needs `<clean-core/container/vector.hh>`, which the sequence header cannot include.
 Materializing a zip makes `cc::tuple` elements, which need `<clean-core/container/tuple.hh>`: the sequence header leaves it out of every container's closure.
 
 **Range-for** works on every sequence and consumes it; over a zip it binds `auto&& [a, b]`.
+
+**`cc::format`** takes a sequence: `cc::println("{}", v.values())` prints `[1, 2, 3]`, and a spec applies to each element, `{:.2f}`.
+A zip's or a window's items print as tuples, `[(1, 4), (2, 5)]`.
+Formatting consumes the sequence like any terminal operation, and since `cc::format` takes its arguments by const reference, a const sequence object must not be formatted.
 
 **Laziness skips work, and that includes side effects.**
 `count()` over a sized `map` returns the size without calling `f`, and so do `indices()`, `take` and `skip` over a source that knows its positions.
@@ -148,10 +161,22 @@ All reductions are written in terms of `try_fold`, and only the sequence layer c
 * **A sized zip is one index loop.** Every side's `at(i)` under one counter, so a dot product over two spans is the naive loop, register allocation aside.
   `enumerate` is a zip with an unbounded index range and compiles to the hand-indexed loop.
 * **A map's own fold beats its iterator.** Summing `m.values()` walks bucket and chain as a plain double loop, a third the size of iterating the map by hand.
+* **Neighbourhoods reach parity too.** `pairwise` deltas vectorize like the hand loop, `chunks<3>` and `step_by(2)` match their strided loops.
+  `equals` over two spans is the naive comparison loop, instruction for instruction, through an index path both sides offer.
 * **From the back is the same loop.** A reversed fold and `find_last` over a span are byte-identical to the descending hand loop.
   `values_of` over a `std::vector` is a span, and sums in fewer instructions than its own range-for.
 * **Range-for over a filter is the one shape without parity.** It is a tight scalar loop, since external iteration through a filter is a nested loop, while the naive `if` inside a loop vectorizes.
   `.filter(p).each(body)` is the spelling with parity, and the one a hot loop wants.
+
+### Neighbourhoods: windows, chunks and step_by
+
+A window or chunk yields a pack of N items, like a zip, so callbacks take them spread: `pairwise().map([](pos a, pos b) { ... })`.
+N is a template argument because the pack's arity is part of its type, and it is what keeps the loop free of a runtime-sized buffer.
+
+Over a source that knows its positions each is an index loop over `at()`, which also gives it a size, positions of its own and reversal.
+Otherwise it buffers: a window keeps the last N `next()` results and a chunk the next N, as pointers for reference items.
+A prvalue input is held by value in that buffer, so its window is a pack of const references into it, valid until the next step.
+`to_vector` copies them out into tuples, which is the usual way such a window escapes.
 
 ### Callbacks: the optional index and spread elements
 

@@ -785,6 +785,10 @@ cc::repeat(x);  cc::generate(f);  cc::iterate(init, f);   // INFINITE: count/sum
 .count();  .count_if(p);  .any(p);  .all(p);  .none(p);  .contains(x);  .each(f);  .consume();
 .index_of(p);                     // -> cc::optional<isize>
 .find_last(p);  .last_index_of(p);   // from the back; a predicate's index still counts from the front
+.equals(r);  .starts_with(r);  .mismatch(r);  .compare(r);   // r: any range; compare is lexicographic <=>
+.is_sorted();  .is_sorted_by(key);
+.min_max();  .try_min_max();      // cc::min_and_max<T>: auto [lo, hi] = ...
+.index_of_min();  .index_of_max();  .nth(i);  .try_nth(i);
 .min_ptr();  .max_ptr_by(key);    // -> pointer or nullptr when empty; borrowed elements only
 .sum_into(acc);  .min_into(acc);  .max_into(opt);  .min_ptr_into(p);  .max_ptr_by_into(p, key);  // fold several sequences
 .find(p);                         // -> pointer or nullptr; static-asserts borrowed elements (not on owning / by-value map)
@@ -800,10 +804,17 @@ cc::repeat(x);  cc::generate(f);  cc::iterate(init, f);   // INFINITE: count/sum
 .chain(other);                    // other: sequence or container; same element type, T& + T const& -> T const&
 .zip(others...);                  // callbacks take items SPREAD: .map([](int a, float b) { ... })
 .enumerate();                     // callbacks take (isize i, item)
+.pairwise();  .windows<N>();  .chunks<N>();   // packs, spread into callbacks: .pairwise().map([](int a, int b) {...})
+.step_by(k);  .take_last(n);  .skip_last(n);
+.filter_map(f);                   // f returns cc::optional<U> or U*: kept when engaged / non-null
+.scan(init, f);  .dedup();  .dedup_by(key);  .inspect(f);
 for (auto&& [a, b] : cc::zip(x, y)) ...   // range-for binds a zip's pack
 .reversed();                      // contiguous, iota, and map/filter/chain/zip over them; take/skip need a size
 .to_sorted_vector(cmp?);  .to_sorted_vector_by(key);   // cc::sort, NOT stable; include algorithm/sort.hh
 .to_grouped_map(key);             // cc::map<key, cc::vector<element>>, in sequence order
+.count_by(key);  .partition(p);  .to_map(key, value);  .to_set();
+.join(", ");                      // cc::string; needs string/format.hh
+cc::println("{:.2f}", v.values()); // [1.00, 2.50]: cc::format takes a sequence (and consumes it)
 
 // needing a first element: x() only compiles on a NON-EMPTY sequence
 .assert_non_empty().sum();        // .sum() .min() .max() .average() .first() .last() .min_by(key) .max_by(key)
