@@ -6,6 +6,7 @@
 #include <typed-geometry/geometry/primitives/triangle.hh>
 #include <typed-geometry/geometry/query/query.hh>
 #include <typed-geometry/scalar/fixed_int/fixed_int.hh>
+#include <typed-geometry/scalar/half_float.hh>
 #include <typed-geometry/transform/homogeneous_transform.hh>
 
 #include <type_traits>
@@ -21,11 +22,8 @@ TEST("tg aabb - construction")
         tg::aabb3f b;
         CHECK(b.is_empty());
         CHECK(b == tg::aabb3f::empty);
-        CHECK(b.min
-              == tg::pos3f(tg::traits::highest<f32>(), tg::traits::highest<f32>(),
-                           tg::traits::highest<f32>()));
-        CHECK(b.max
-              == tg::pos3f(tg::traits::lowest<f32>(), tg::traits::lowest<f32>(), tg::traits::lowest<f32>()));
+        CHECK(b.min == tg::pos3f(tg::traits::highest<f32>(), tg::traits::highest<f32>(), tg::traits::highest<f32>()));
+        CHECK(b.max == tg::pos3f(tg::traits::lowest<f32>(), tg::traits::lowest<f32>(), tg::traits::lowest<f32>()));
     }
 
     SECTION("explicit ctor stores min/max")
