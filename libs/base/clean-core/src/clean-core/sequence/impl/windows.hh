@@ -16,7 +16,7 @@ using seq_repeat_type = T;
 /// How a window or chunk over S holds its items, and the pack of N it yields.
 /// Indexed, it reads them through at() and never steps S: a reference stays one, a prvalue is held in the pack by value.
 /// Buffered, it keeps the last next() results, and an item holding references (a reference, or a zip's pack of them)
-/// is kept as it is only from a step-stable source: a reference into the source itself may die at the next step,
+/// is kept as it is only from a borrowed source: a reference into the source itself may die at the next step,
 /// as flatten's owned inner containers do, so it is copied otherwise.
 /// A buffered value's pack then holds const references into the buffer, valid until the next step.
 template <class S, bool IsIndexed, class Is>
@@ -25,7 +25,7 @@ template <class S, bool IsIndexed, std::size_t... Is>
 struct seq_group<S, IsIndexed, std::index_sequence<Is...>>
 {
     using inner_item_t = typename S::item_t;
-    static constexpr bool keeps_item = IsIndexed || !seq_holds_references<inner_item_t> || seq_is_step_stable<S>;
+    static constexpr bool keeps_item = IsIndexed || !seq_holds_references<inner_item_t> || seq_is_borrowed<S>;
 
     // what the buffer holds per item, and how the pack names it
     using buffered_t = std::conditional_t<keeps_item, inner_item_t, typename seq_owned<inner_item_t>::type>;
@@ -299,7 +299,6 @@ struct step_source
     static constexpr bool is_indexed = seq_has_at<S>;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
     static constexpr bool has_pure_at = seq_has_pure_at<S>;

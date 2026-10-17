@@ -148,7 +148,7 @@ struct seq_owned
         static_assert(!std::is_reference_v<T> || std::is_copy_constructible_v<type>
                           || (Move && std::is_move_constructible_v<type>),
                       "a window or chunk copies what an item references where the source may replace it at the "
-                      "next step, and this element type cannot be copied: window an indexed or step-stable source");
+                      "next step, and this element type cannot be copied: window an indexed or borrowed source");
         if constexpr (Move && std::is_reference_v<T>)
             return type(cc::move(x));
         else

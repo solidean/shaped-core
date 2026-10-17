@@ -1,4 +1,5 @@
 #include <clean-core/container/vector.hh>
+#include <clean-core/sequence/iterator_ranges.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <nexus/test.hh>
 

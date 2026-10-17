@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/sequence/impl/call.hh>
 #include <clean-core/sequence/source.hh>
 
 #include <initializer_list>
@@ -17,7 +18,6 @@ struct repeat_source
     static constexpr bool is_infinite = IsInfinite;
     static constexpr bool is_non_empty = IsInfinite;
     static constexpr bool has_pure_at = !IsInfinite;
-    static constexpr bool is_step_stable = true;
 
     T _value;
     isize _n = 0;
@@ -157,109 +157,10 @@ struct iterate_source
     }
 };
 
-/// A foreign begin/end range: whatever *it yields, a reference or a prvalue.
-template <class It, class End>
-struct iterator_source
-{
-    using deref_t = decltype(*std::declval<It&>());
-    using item_t = std::conditional_t<std::is_lvalue_reference_v<deref_t>, deref_t, std::remove_cvref_t<deref_t>>;
-    static constexpr bool is_borrowed = true;
-    static constexpr bool is_random_access = requires(It a, End b, isize i) {
-        { b - a };
-        a[i];
-        a += i;
-    };
-    static constexpr bool has_pure_at = is_random_access && std::is_lvalue_reference_v<deref_t>;
-
-    It _it;
-    End _end;
-
-    constexpr iterator_source(It it, End end) : _it(cc::move(it)), _end(cc::move(end)) {}
-
-    [[nodiscard]] constexpr seq_next_t<item_t> next()
-    {
-        if (_it == _end)
-            return {};
-        if constexpr (std::is_lvalue_reference_v<item_t>)
-        {
-            auto* const p = &*_it;
-            ++_it;
-            return p;
-        }
-        else
-        {
-            auto r = seq_next_t<item_t>(seq_emplace, [&] { return item_t(*_it); });
-            ++_it;
-            return r;
-        }
-    }
-
-    [[nodiscard]] constexpr bool try_fold(auto&& step)
-    {
-        for (; _it != _end; ++_it)
-            if (step(static_cast<item_t>(*_it)))
-                return true;
-        return false;
-    }
-
-    [[nodiscard]] constexpr auto begin() const { return _it; }
-    [[nodiscard]] constexpr auto end() const { return _end; }
-
-    [[nodiscard]] constexpr isize size() const
-        requires is_random_access
-    {
-        return isize(_end - _it);
-    }
-    [[nodiscard]] constexpr bool is_empty() const { return _it == _end; }
-    [[nodiscard]] constexpr item_t at(isize i) const
-        requires is_random_access
-    {
-        return _it[i];
-    }
-    constexpr void advance(isize n)
-        requires is_random_access
-    {
-        _it += impl::seq_min(n, this->size());
-    }
-};
-
-/// A temporary foreign range that is not contiguous, owned through one heap allocation.
-/// Its iterators may point into the range object itself (std::list keeps its end sentinel there), so the range must not
-/// move once they exist; the allocation is what lets the source move instead.
+/// The source over a begin/end range that is not contiguous, which <clean-core/sequence/iterator_ranges.hh> defines.
+/// Telling a forward iterator from an input one needs <iterator>, too expensive for every container to include.
 template <class R>
-struct owning_range_source
-{
-    using it_t = decltype(std::declval<R&>().begin());
-    using end_t = decltype(std::declval<R&>().end());
-    using inner_t = iterator_source<it_t, end_t>;
-    using item_t = typename inner_t::item_t;
-    static constexpr bool is_expiring = std::is_lvalue_reference_v<item_t>;
-
-    R* _range;
-    inner_t _inner;
-
-    constexpr explicit owning_range_source(R&& r) : _range(new R(cc::move(r))), _inner(_range->begin(), _range->end())
-    {
-    }
-
-    constexpr owning_range_source(owning_range_source&& rhs) noexcept : _range(rhs._range), _inner(cc::move(rhs._inner))
-    {
-        rhs._range = nullptr;
-    }
-    owning_range_source(owning_range_source const&) = delete;
-    owning_range_source& operator=(owning_range_source const&) = delete;
-    owning_range_source& operator=(owning_range_source&&) = delete;
-    constexpr ~owning_range_source() { delete _range; }
-
-    [[nodiscard]] constexpr auto next() { return _inner.next(); }
-    [[nodiscard]] constexpr bool try_fold(auto&& step) { return _inner.try_fold(step); }
-    [[nodiscard]] constexpr bool is_empty() const { return _inner.is_empty(); }
-    [[nodiscard]] constexpr isize size() const
-        requires inner_t::is_random_access
-    {
-        return _inner.size();
-    }
-};
+struct seq_iterator_range;
 
 template <class R>
 concept seq_is_contiguous_range = requires(R& r) {
@@ -270,7 +171,7 @@ concept seq_is_contiguous_range = requires(R& r) {
 
 /// The source behind values_of(r) for a range that has no values() of its own.
 /// Contiguous storage is a span, borrowed from an lvalue and owned, by index, from a temporary; a C array is borrowed.
-/// Anything else is its begin/end, and a temporary is owned through one allocation.
+/// Anything else is its begin/end, through <clean-core/sequence/iterator_ranges.hh>.
 template <class R>
 [[nodiscard]] constexpr auto seq_range_source(R&& r)
 {
@@ -296,10 +197,13 @@ template <class R>
         else
             return span_source<std::remove_pointer_t<decltype(r.data())>>(r.data(), r.data() + r.size());
     }
-    else if constexpr (is_owned)
-        return owning_range_source<range_t>(cc::move(r));
     else
-        return iterator_source<decltype(r.begin()), decltype(r.end())>(r.begin(), r.end());
+    {
+        static_assert(seq_is_complete<seq_iterator_range<range_t>>,
+                      "a sequence over a begin/end range that is not contiguous (std::list, std::map, ...) needs "
+                      "<clean-core/sequence/iterator_ranges.hh>");
+        return seq_iterator_range<range_t>::make(cc::forward<R>(r));
+    }
 }
 
 /// The source over an initializer list's backing array, which lives only until the end of the full expression:

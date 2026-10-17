@@ -555,7 +555,7 @@ private:
         return cc::min(size(), _self().capacity() - isize(_start));
     }
 
-    /// Whether `slot` held a live element in a layout of `count` elements starting at `start`.
+    /// The two segments, chained, as the sequence values() hands out.
     template <class U, class SegmentsT>
     [[nodiscard]] static auto _segments_sequence(SegmentsT const& segs)
     {
@@ -566,6 +566,7 @@ private:
             chain_t(source_t(a.data(), a.data() + a.size()), source_t(b.data(), b.data() + b.size())));
     }
 
+    /// Whether `slot` held a live element in a layout of `count` elements starting at `start`.
     /// Only linearize needs this: it walks all `cap` slots, live or not.
     [[nodiscard]] static constexpr bool _slot_was_live(isize slot, isize start, isize count, isize cap)
     {

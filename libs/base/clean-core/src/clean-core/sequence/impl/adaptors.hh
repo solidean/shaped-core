@@ -21,8 +21,6 @@ struct map_source
     using item_t = typename seq_item_of<seq_call_result_t<F, inner_item_t>>::type;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S> && (!seq_holds_references<item_t> || seq_returns_borrowed<F>);
-    // a reference into the function's captures lives as long as this source does
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
     static constexpr bool takes_idx = seq_call_takes_idx<F, inner_item_t>;
 
@@ -117,7 +115,6 @@ struct filter_source
 {
     using item_t = typename S::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
     static constexpr bool takes_idx = seq_call_takes_idx<P, item_t&>;
@@ -205,7 +202,6 @@ struct peeked_source
     using item_t = typename S::item_t;
     static constexpr bool is_non_empty = true;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
 
@@ -282,7 +278,6 @@ struct take_source
 {
     using item_t = typename S::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
 
     S _inner;
@@ -357,7 +352,6 @@ struct skip_source
 {
     using item_t = typename S::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
 
     S _inner;
@@ -417,7 +411,6 @@ struct take_while_source
 {
     using item_t = typename S::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
 
     S _inner;
@@ -467,7 +460,6 @@ struct skip_while_source
 {
     using item_t = typename S::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
 
     S _inner;
@@ -514,7 +506,6 @@ struct reverse_source
     using item_t = typename S::item_t;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool has_pure_at = seq_has_pure_at<S>;
 
@@ -571,7 +562,6 @@ struct inspect_source
     using item_t = typename S::item_t;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
 
@@ -629,7 +619,6 @@ struct filter_map_source
     using item_t = typename seq_filter_map_item<result_t>::type;
     // a pointer result may point into the input's elements or the callback's state, see seq_returns_borrowed
     static constexpr bool is_borrowed = std::is_reference_v<item_t> && seq_is_borrowed<S> && seq_returns_borrowed<F>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
 
     S _inner;
@@ -747,7 +736,7 @@ struct seq_identity_key
 };
 
 /// Each run of consecutive elements with equal key(idx?, item), as its first element.
-/// Over step-stable references with the identity key it remembers the last element by pointer;
+/// Over borrowed references with the identity key it remembers the last element by pointer;
 /// otherwise it keeps a copy of the key, since a reference into the source may die at the next step.
 template <class S, class KeyF>
 struct dedup_source
@@ -757,9 +746,8 @@ struct dedup_source
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool keeps_pointer
-        = std::is_same_v<KeyF, seq_identity_key> && std::is_reference_v<item_t> && seq_is_step_stable<S>;
+        = std::is_same_v<KeyF, seq_identity_key> && std::is_reference_v<item_t> && seq_is_borrowed<S>;
     using key_t = std::remove_cvref_t<seq_call_result_t<KeyF, seq_view_t<item_t>>>;
     using last_t = std::conditional_t<keeps_pointer, std::remove_reference_t<item_t>*, seq_slot<key_t>>;
 
@@ -822,7 +810,6 @@ struct enumerate_source
     using item_t = seq_pack<isize, inner_item_t>;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    static constexpr bool is_step_stable = seq_is_step_stable<S>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
     static constexpr bool has_pure_at = seq_has_pure_at<S>;
 

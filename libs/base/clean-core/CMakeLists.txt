@@ -204,6 +204,7 @@ target_sources(clean-core
     src/clean-core/container/impl/bitset_container.hh
 
     src/clean-core/sequence/sequence.hh
+    src/clean-core/sequence/iterator_ranges.hh
     src/clean-core/sequence/source.hh
     src/clean-core/sequence/impl/adaptors.hh
     src/clean-core/sequence/impl/call.hh

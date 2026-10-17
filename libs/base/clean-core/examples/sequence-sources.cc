@@ -1,6 +1,7 @@
 #include <clean-core/algorithm/sort.hh>
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/sequence/iterator_ranges.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <clean-core/string/print.hh>
 #include <nexus/test.hh>

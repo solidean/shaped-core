@@ -26,8 +26,6 @@
 //   bool try_rfold(auto&& step)          // optional, with next_back(): try_fold from the back
 //   static constexpr bool is_non_empty   // optional, default false: at least one element before the first next()
 //   static constexpr bool is_borrowed    // optional, default false: references stay valid after the source dies
-//   static constexpr bool is_step_stable // optional, default is_borrowed: references stay valid across steps while the
-//                                        // source lives, which is what a window's buffer needs
 //   static constexpr bool is_expiring    // optional, default false: the source owns its elements, so they may be moved out
 //   static constexpr bool is_infinite    // optional, default false: next() never runs out
 //
@@ -179,8 +177,6 @@ template <class S>
 inline constexpr bool seq_is_non_empty = requires { requires S::is_non_empty; };
 template <class S>
 inline constexpr bool seq_is_borrowed = requires { requires S::is_borrowed; };
-template <class S>
-inline constexpr bool seq_is_step_stable = seq_is_borrowed<S> || requires { requires S::is_step_stable; };
 template <class S>
 inline constexpr bool seq_is_expiring = requires { requires S::is_expiring; };
 template <class S>
@@ -412,7 +408,6 @@ struct owning_source
 {
     using item_t = std::remove_pointer_t<decltype(std::declval<ContainerT&>().data())>&;
     static constexpr bool is_expiring = true;
-    static constexpr bool is_step_stable = true;
     static constexpr bool has_pure_at = true;
 
     ContainerT _container;

@@ -365,7 +365,7 @@ public:
         bool const has_first = bool(r);
         CC_ASSERT(has_first, "a sequence typed non-empty was empty");
         [[assume(has_first)]];
-        return element_t(impl::seq_as_element(impl::seq_get(r)));
+        return sequence::_take(impl::seq_get(r));
     }
 
     template <class U>
@@ -374,7 +374,7 @@ public:
         auto r = _source.next();
         if (!r)
             return element_t(cc::forward<U>(fallback));
-        return element_t(impl::seq_as_element(impl::seq_get(r)));
+        return sequence::_take(impl::seq_get(r));
     }
 
     [[nodiscard]] constexpr cc::optional<element_t> try_first() &&
@@ -382,7 +382,7 @@ public:
         auto r = _source.next();
         if (!r)
             return {};
-        return cc::optional<element_t>(element_t(impl::seq_as_element(impl::seq_get(r))));
+        return cc::optional<element_t>(sequence::_take(impl::seq_get(r)));
     }
 
     /// The last element, by value; a source that steps from the back answers without a traversal.
@@ -396,7 +396,7 @@ public:
             bool const has_last = bool(r);
             CC_ASSERT(has_last, "a sequence typed non-empty was empty");
             [[assume(has_last)]];
-            return element_t(impl::seq_as_element(impl::seq_get(r)));
+            return sequence::_take(impl::seq_get(r));
         }
         else
             return this->_fold_from_first(_init_element(), _last_step());
@@ -409,7 +409,7 @@ public:
             auto r = _source.next_back();
             if (!r)
                 return {};
-            return cc::optional<element_t>(element_t(impl::seq_as_element(impl::seq_get(r))));
+            return cc::optional<element_t>(sequence::_take(impl::seq_get(r)));
         }
         else
             return this->_fold_from_first_or(
@@ -500,7 +500,7 @@ public:
         {
             if (i >= _source.size())
                 return {};
-            return cc::optional<element_t>(element_t(impl::seq_as_element(_source.at(i))));
+            return cc::optional<element_t>(sequence::_take(_source.at(i)));
         }
         else
             return cc::move(*this).skip(i).try_first();
@@ -726,14 +726,14 @@ public:
     //
 public:
     /// This sequence, known to be non-empty; asserts that it is.
-    /// Free where the source can tell it is empty, and otherwise buffers the one element it had to pull to find out.
+    /// Free where the source can tell it is empty or knows its size, and otherwise buffers the one element it had to pull.
     [[nodiscard]] constexpr auto assert_non_empty() &&
     {
         if constexpr (is_non_empty)
             return cc::move(*this);
-        else if constexpr (impl::seq_has_is_empty<SourceT>)
+        else if constexpr (impl::seq_has_is_empty<SourceT> || impl::seq_has_size<SourceT>)
         {
-            CC_ASSERT(!_source.is_empty(), "assert_non_empty() on an empty sequence");
+            CC_ASSERT(!this->_is_empty(), "assert_non_empty() on an empty sequence");
             return sequence<impl::non_empty_source<SourceT>>(impl::non_empty_source<SourceT>(cc::move(_source)));
         }
         else
@@ -753,10 +753,10 @@ public:
     {
         if constexpr (is_non_empty)
             return cc::optional<sequence>(cc::move(*this));
-        else if constexpr (impl::seq_has_is_empty<SourceT>)
+        else if constexpr (impl::seq_has_is_empty<SourceT> || impl::seq_has_size<SourceT>)
         {
             using result_t = sequence<impl::non_empty_source<SourceT>>;
-            if (_source.is_empty())
+            if (this->_is_empty())
                 return cc::optional<result_t>();
             return cc::optional<result_t>(result_t(impl::non_empty_source<SourceT>(cc::move(_source))));
         }
@@ -1032,7 +1032,7 @@ public:
                                  [&]<class X>(X&& x)
                                  {
                                      CC_ASSERT(i < N, "to_fixed_array<N>() got more than N elements");
-                                     result[i++] = impl::seq_as_element(cc::forward<X>(x));
+                                     result[i++] = sequence::_take(cc::forward<X>(x));
                                      return false;
                                  });
         CC_ASSERT(i == N, "to_fixed_array<N>() got fewer than N elements");
@@ -1073,7 +1073,7 @@ public:
                                  [&]<class X>(X&& x)
                                  {
                                      auto k = key_t(call(impl::seq_view(x)));
-                                     groups[k].push_back(element_t(impl::seq_as_element(cc::forward<X>(x))));
+                                     groups[k].push_back(sequence::_take(cc::forward<X>(x)));
                                      return false;
                                  });
         return groups;
@@ -1112,7 +1112,7 @@ public:
             [&]<class X>(X&& x)
             {
                 bool const passes = bool(call(impl::seq_view(x)));
-                (passes ? result.passed : result.failed).push_back(impl::seq_as_element(cc::forward<X>(x)));
+                (passes ? result.passed : result.failed).push_back(sequence::_take(cc::forward<X>(x)));
                 return false;
             });
         return result;
@@ -1149,9 +1149,9 @@ public:
         static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
         set_t result;
         (void)impl::seq_try_fold(_source,
-                                 [&](auto const& x)
+                                 [&]<class X>(X&& x)
                                  {
-                                     result.insert(x);
+                                     result.insert(sequence::_take(cc::forward<X>(x)));
                                      return false;
                                  });
         return result;
@@ -1244,6 +1244,25 @@ public:
     //
 private:
     SourceT _source;
+
+    // an item as the element it materializes as, moved out where this sequence owns its elements
+    template <class X>
+    static constexpr element_t _take(X&& x)
+    {
+        if constexpr (impl::seq_is_expiring<SourceT> && std::is_lvalue_reference_v<X>)
+            return element_t(impl::seq_as_element(cc::move(x)));
+        else
+            return element_t(impl::seq_as_element(cc::forward<X>(x)));
+    }
+
+    // whether the source is empty, asked without evaluating an element
+    [[nodiscard]] constexpr bool _is_empty() const
+    {
+        if constexpr (impl::seq_has_is_empty<SourceT>)
+            return _source.is_empty();
+        else
+            return _source.size() == 0;
+    }
 
     // this sequence, no longer typed non-empty, after take or skip reshaped its source
     constexpr auto _as_maybe_empty() &&
@@ -1351,7 +1370,7 @@ private:
     {
         return []<class X>(X&& x)
         {
-            auto e = element_t(impl::seq_as_element(cc::forward<X>(x)));
+            auto e = sequence::_take(cc::forward<X>(x));
             return cc::min_and_max<element_t>{e, e};
         };
     }
@@ -1374,7 +1393,7 @@ private:
         auto first = _source.next();
         if (!first)
             return {};
-        auto best = element_t(impl::seq_as_element(impl::seq_get(first)));
+        auto best = sequence::_take(impl::seq_get(first));
         isize best_idx = 0;
         isize idx = 0;
         (void)impl::seq_try_fold(_source,
@@ -1383,7 +1402,7 @@ private:
                                      ++idx;
                                      if (IsMin ? x < best : best < x)
                                      {
-                                         best = impl::seq_as_element(cc::forward<X>(x));
+                                         best = sequence::_take(cc::forward<X>(x));
                                          best_idx = idx;
                                      }
                                      return false;
@@ -1447,10 +1466,10 @@ private:
                                      if constexpr (requires { acc.has_value(); })
                                      {
                                          if (!acc.has_value() || (IsMin ? x < acc.value() : acc.value() < x))
-                                             acc.emplace_value(impl::seq_as_element(cc::forward<X>(x)));
+                                             acc.emplace_value(sequence::_take(cc::forward<X>(x)));
                                      }
                                      else if (IsMin ? x < acc : acc < x)
-                                         acc = impl::seq_as_element(cc::forward<X>(x));
+                                         acc = sequence::_take(cc::forward<X>(x));
                                      return false;
                                  });
     }
@@ -1472,7 +1491,7 @@ private:
         auto const make = [&]<class X>(X&& x)
         {
             auto k = key_t(call(impl::seq_view(x)));
-            return best{element_t(impl::seq_as_element(cc::forward<X>(x))), cc::move(k)};
+            return best{sequence::_take(cc::forward<X>(x)), cc::move(k)};
         };
         return this
             ->_fold_from_first(make,
@@ -1487,14 +1506,14 @@ private:
 
     static constexpr auto _init_element()
     {
-        return []<class X>(X&& x) { return element_t(impl::seq_as_element(cc::forward<X>(x))); };
+        return []<class X>(X&& x) { return sequence::_take(cc::forward<X>(x)); };
     }
     static constexpr auto _min_step()
     {
         return []<class X>(element_t& m, X&& x)
         {
             if (x < m)
-                m = cc::forward<X>(x);
+                m = sequence::_take(cc::forward<X>(x));
         };
     }
     static constexpr auto _max_step()
@@ -1502,12 +1521,12 @@ private:
         return []<class X>(element_t& m, X&& x)
         {
             if (m < x)
-                m = cc::forward<X>(x);
+                m = sequence::_take(cc::forward<X>(x));
         };
     }
     static constexpr auto _last_step()
     {
-        return []<class X>(element_t& m, X&& x) { m = impl::seq_as_element(cc::forward<X>(x)); };
+        return []<class X>(element_t& m, X&& x) { m = sequence::_take(cc::forward<X>(x)); };
     }
 
     template <class>

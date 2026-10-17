@@ -774,10 +774,11 @@ cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -
 // entry points: every container. values() references an lvalue and OWNS a temporary (never store a sequence)
 v.values();  v.indices();         // vector, array, small/fixed_vector, fixed_array, spans, ringbuffers
 m.keys();  m.values();            // map (keys().contains(k) is the map's lookup); set: s.values()
-make_vec().values();              // owns the vector: safe to name, to_vector() moves the elements out
+make_vec().values();              // owns the vector: safe to name, first / to_vector / partition ... move elements out
 cc::iota(n);  cc::iota(a, b);     // integers; .contains(i) is a range check
 cc::zip(a, b, ...);               // containers or sequences, in step until the shortest ends
-cc::values_of(r);  cc::indices_of(r);   // ANY range: std containers, C arrays, begin/end; temporaries owned
+cc::values_of(r);  cc::indices_of(r);   // contiguous ranges, C arrays; temporaries owned
+#include <clean-core/sequence/iterator_ranges.hh>  // opt-in (<iterator>): begin/end ranges, std::list, std::map, ...
 cc::repeat(x, n);  cc::single(x);  cc::empty_sequence<T>();
 cc::repeat(x);  cc::generate(f);  cc::iterate(init, f);   // INFINITE: count/sum/to_* static-assert, .take(n) first
 

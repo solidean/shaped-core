@@ -61,7 +61,6 @@ struct chain_source
     using item_t = typename seq_chain_item<typename A::item_t, typename B::item_t>::type;
     static constexpr bool is_non_empty = seq_never_empty<A> || seq_never_empty<B>;
     static constexpr bool is_borrowed = seq_is_borrowed<A> && seq_is_borrowed<B>;
-    static constexpr bool is_step_stable = seq_is_step_stable<A> && seq_is_step_stable<B>;
     static constexpr bool is_expiring = seq_is_expiring<A> && seq_is_expiring<B>;
     static constexpr bool is_infinite = seq_is_infinite<A> || seq_is_infinite<B>;
 
@@ -188,7 +187,6 @@ struct zip_source
     using item_t = seq_pack<typename S0::item_t, typename Ss::item_t...>;
     static constexpr bool is_non_empty = seq_never_empty<S0> && (seq_never_empty<Ss> && ...);
     static constexpr bool is_borrowed = seq_is_borrowed<S0> && (seq_is_borrowed<Ss> && ...);
-    static constexpr bool is_step_stable = seq_is_step_stable<S0> && (seq_is_step_stable<Ss> && ...);
     static constexpr bool is_indexed = seq_has_at<S0> && (seq_has_at<Ss> && ...);
     static constexpr bool has_pure_at = seq_has_pure_at<S0> && (seq_has_pure_at<Ss> && ...);
     static constexpr bool is_sized = seq_has_size<S0> && (seq_has_size<Ss> && ...);

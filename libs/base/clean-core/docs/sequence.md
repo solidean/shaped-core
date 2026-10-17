@@ -32,7 +32,10 @@ The bitsets have no entry points yet.
 
 **Factories.** `cc::iota(begin, end)`, `cc::repeat(x)` and `cc::repeat(x, n)`, `cc::single(x)`, `cc::empty_sequence<T>()`, `cc::generate(f)`, `cc::iterate(init, f)` and `cc::zip(a, b, ...)`.
 `cc::values_of(r)` is any range as a sequence, and `cc::indices_of(r)` the index sequence of any sized one.
-A container's own `values()` passes straight through, contiguous storage becomes a span, and anything else is walked by begin/end.
+A container's own `values()` passes straight through, and contiguous storage, a `std::vector` say, becomes a span.
+Anything else is walked by begin/end once [sequence/iterator_ranges.hh](../src/clean-core/sequence/iterator_ranges.hh) is included, and refused with a message naming it otherwise.
+That header is opt-in because it needs `<iterator>`, which costs every includer 100 ms or more, to tell a forward iterator from an input one.
+An input iterator's references are not borrowed, since one may point into the iterator itself, as `std::istream_iterator`'s does.
 A temporary is owned; a non-contiguous one moves to the heap once, since its iterators may point into the range object itself.
 A C array is borrowed, and non-empty at compile time when its extent is.
 
@@ -67,7 +70,7 @@ Each needs the header of the container it makes, and the sorted ones `<clean-cor
 Materializing a zip makes `cc::tuple` elements, which need `<clean-core/container/tuple.hh>`: the sequence header leaves it out of every container's closure.
 
 **Range-for** works on every sequence and spends it; over a zip it binds `auto&& [a, b]`.
-What a `break` leaves behind is unspecified: a source that is itself a range is iterated directly, which does not advance it.
+A sequence a loop broke out of must not be used again: a source that is itself a range is iterated directly, which does not advance it, and any other may hold references its last step left behind.
 
 **`cc::format`** takes a sequence: `cc::println("{}", v.values())` prints `[1, 2, 3]`, and a spec applies to each element, `{:.2f}`.
 A zip's or a window's items print as tuples, `[(1, 4), (2, 5)]`.
@@ -134,10 +137,10 @@ A source therefore need not leave a resume point behind `try_fold`, which is wha
 **A reference may point into the source itself**: repeat's one value, a temporary `fixed_vector` an owning source holds inline, a flatten's current inner container, a window's buffer.
 It is valid while that source object lives, and the next step may end it, as a flatten opening its next inner container does.
 An item *holds references* when it is one, or is a zip's, enumerate's or window's pack with one anywhere inside.
-So whatever keeps such an item across steps, a buffered window or chunk, keeps it only from a *step-stable* source, and otherwise copies what it references.
-`is_step_stable` says a source's references stay valid across steps while the source lives; it defaults to `is_borrowed`.
-An owning source, repeat, and a map whose function captures are step-stable without being borrowed.
-A buffered window or chunk copies an element only where it has to, and a move-only one there is a compile error that says so.
+So whatever keeps such an item across steps, a buffered window or chunk, or dedup's last element, keeps it only from a borrowed source, and otherwise copies what it references.
+Borrowed is the one property that makes this safe: the referenced storage neither moves with the source nor changes under it.
+A reference into the source's own storage moves when the source does, and one into a callback's captures may be overwritten by the next call.
+A move-only element there is a compile error that says so; windowing a borrowed or an indexed source keeps references.
 A view held by value is invisible to this: a map returning a `cc::span` into storage the source owns is a prvalue, and a window keeps it as it is.
 The one place a source moves after handing out such an item is the element a runtime non-empty check pulls.
 That wrapper carries every reference in it to the same offset in the moved-to source, which constant evaluation cannot do, so that path is not `constexpr`.
@@ -247,7 +250,9 @@ A derived and a base class would meet at the base, and slice when materialized.
 * **An lvalue container's `values()` references it.** Like `span`, the sequence must not outlive the container and is never stored.
 * **An rvalue container's `values() &&` owns it**, moving the container into an owning source.
   A container returned by a function needs no variable: `make_vec().values().filter(p).to_vector()` is safe, and so is naming the result.
-  Its elements are stable but not borrowed, so `find()` refuses it, and materializing moves them out rather than copying.
+  Its elements are stable but not borrowed, so `find()` refuses it.
+  Every terminal operation that keeps an element moves it out rather than copying: `first`, `try_nth`, `min`, `partition`, `to_set` and the materializers.
+  `min_max` copies, since one element may be both.
 
 ### Non-emptiness
 
@@ -281,7 +286,7 @@ if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value())
     use(cc::move(s.value()).sum());
 ```
 
-A source with a cheap `is_empty()` costs nothing here: the wrapper checks it and flips the trait.
+A source with a cheap `is_empty()` or a size costs nothing here: the wrapper checks it and flips the trait.
 A source without one (filter, flatten) can only find out by evaluating, so the wrapper pulls the first element and buffers *exactly one*.
 When that element references the source's own storage, the wrapper carries the references along whenever it moves.
 That preserves eval-at-most-once and keeps the fold-from-first path a branch-free, hand-written-loop-equivalent hot loop.
@@ -335,9 +340,11 @@ A source that can step from the back offers `next_back()`, and `reversed()` swap
 So `reversed().take(n)` over a span is still a pointer range, and `last()` is one `next_back()`.
 Map, filter, chain and zip reverse when their inputs do; take and skip need a sized input, to know where they end.
 A callback taking an index keeps the position from the front, which needs the size, so without one such a map does not reverse.
-A map's keys do not reverse, since its iteration order is arbitrary and its chains singly linked; neither do flatten and the while forms.
+A map's keys do not reverse, since its iteration order is arbitrary and its chains singly linked; neither do the while forms.
+A flatten reverses where its outer and inner sequences do, keeping an inner source for the back of its own.
 
-The sharp edges stay explicit: underlying container invalidation still applies, trait propagation must stay conservative, and a `materialize()` exists for users who want ownership and safety.
+The sharp edges stay explicit: underlying container invalidation still applies, and trait propagation must stay conservative.
+`to_vector()` and the other materializers are the way to ownership.
 
 ### Containers: values(), indices(), keys()
 

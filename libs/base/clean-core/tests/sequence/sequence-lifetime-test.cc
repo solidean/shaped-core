@@ -4,8 +4,11 @@
 #include <clean-core/container/ringbuffer.hh>
 #include <clean-core/container/tuple.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/sequence/iterator_ranges.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <nexus/test.hh>
+
+#include <iterator>
 
 using namespace cc::primitive_defines;
 
@@ -42,6 +45,8 @@ struct marked
         return *this;
     }
     ~marked() { v = -999; }
+
+    friend bool operator==(marked const& a, marked const& b) { return a.v == b.v; }
 };
 
 auto const positive = [](marked const& m) { return m.v > 0; };
@@ -62,6 +67,33 @@ int const& mass_of(particle const& p)
 {
     return p.mass;
 }
+
+// 1 .. n, each the iterator's own member, so a reference to it is overwritten by the next step
+struct stashing_range
+{
+    struct iterator
+    {
+        using iterator_category = std::input_iterator_tag;
+        using value_type = int;
+        using difference_type = long long;
+
+        int current;
+
+        int const& operator*() const { return current; }
+        iterator& operator++()
+        {
+            ++current;
+            return *this;
+        }
+        void operator++(int) { ++current; }
+        bool operator==(iterator const& rhs) const { return current == rhs.current; }
+    };
+
+    int n;
+
+    [[nodiscard]] iterator begin() const { return {1}; }
+    [[nodiscard]] iterator end() const { return {n + 1}; }
+};
 
 struct move_only
 {
@@ -472,27 +504,115 @@ TEST("sequence lifetime - a negative skip skips nothing")
     CHECK(v.values().step_by(3).skip(-1).take(2).count() == 2);
 }
 
-TEST("sequence lifetime - a map with captures is step-stable, so a window keeps its references")
+TEST("sequence lifetime - a buffer keeps references only where they are borrowed")
 {
-    auto ps = cc::vector<particle>{{1}, {2}, {3}};
-    auto const offset = 0;
-    auto const field = [offset](particle& p) -> int& { return (&p.mass)[offset]; };
+    auto const v = cc::vector<int>{1, 2, 3, 4};
 
-    static_assert(!decltype(ps.values().map(field))::has_borrowed_elements);
-    ps.values().map(field).filter([](int) { return true; }).pairwise().each([](int& a, int& b) { b += a; });
+    // a capturing callback may hand out a reference into scratch it overwrites, so a window copies
+    auto scratch = [buf = 0](int x) mutable -> int const&
+    {
+        buf = x * 10;
+        return buf;
+    };
+    auto const pairs = v.values().map(scratch).pairwise().map([](int a, int b) { return a + b; }).to_vector();
+    CHECK(equals(pairs, {30, 50, 70}));
+    CHECK(v.values().map(scratch).dedup().count() == 4);
+
+    // a stateless projection is borrowed: the window references the elements and writes through them
+    auto ps = cc::vector<particle>{{1}, {2}, {3}};
+    ps.values().map(&particle::mass).filter([](int) { return true; }).pairwise().each([](int& a, int& b) { b += a; });
     CHECK(ps[2].mass == 6);
 
-    // move-only elements through a buffered window over a capturing map: references, no copies
+    // and so a move-only element can be windowed there
     auto ms = cc::vector<move_only>();
     ms.push_back(move_only(1));
     ms.push_back(move_only(2));
     auto const sum = ms.values()
-                         .map([offset](move_only& m) -> move_only& { return (&m)[offset]; })
                          .filter([](move_only const&) { return true; })
                          .pairwise()
                          .map([](move_only const& a, move_only const& b) { return a.v + b.v; })
                          .sum_from(0);
     CHECK(sum == 3);
+}
+
+TEST("sequence lifetime - a buffer over the source's own storage survives the source's move")
+{
+    using marked_array = cc::fixed_array<marked, 3>;
+    auto const digits = [](marked const& a, marked const& b) { return a.v * 10 + b.v; };
+
+    // the window keeps copies, so moving the sequence moves nothing it points into
+    if (auto s = marked_array{marked(1), marked(2), marked(3)}.values().filter(positive).pairwise().try_as_non_empty();
+        s.has_value())
+        CHECK(cc::move(s.value()).map(digits).sum() == 12 + 23);
+    else
+        CHECK(false);
+    if (auto s = cc::repeat(marked(7), 3).filter(positive).pairwise().try_as_non_empty(); s.has_value())
+        CHECK(cc::move(s.value()).map(digits).sum() == 77 + 77);
+    else
+        CHECK(false);
+
+    auto const deduped = cc::fixed_array<marked, 4>{marked(1), marked(1), marked(2), marked(2)}
+                             .values()
+                             .filter(positive)
+                             .dedup()
+                             .assert_non_empty()
+                             .map([](marked const& m) { return m.v; })
+                             .to_vector();
+    CHECK(equals(deduped, {1, 2}));
+}
+
+TEST("sequence lifetime - dedup over an owning source compares before it moves")
+{
+    auto const deduped = cc::vector<marked>{marked(1), marked(1), marked(2)}.values().dedup().to_vector();
+    CHECK(deduped.size() == 2);
+    CHECK(deduped[0].v == 1);
+    CHECK(deduped[1].v == 2);
+}
+
+TEST("sequence lifetime - an owning sequence moves its elements out of every terminal that keeps one")
+{
+    auto const make = []
+    {
+        auto ms = cc::vector<move_only>();
+        ms.push_back(move_only(3));
+        ms.push_back(move_only(1));
+        ms.push_back(move_only(2));
+        return ms;
+    };
+
+    CHECK(make().values().assert_non_empty().first().v == 3);
+    CHECK(make().values().try_first().value().v == 3);
+    CHECK(make().values().first_or(move_only(-1)).v == 3);
+    CHECK(make().values().try_nth(2).value().v == 2);
+    auto const [small, large] = make().values().partition([](move_only const& m) { return m.v < 2; });
+    CHECK(small.size() == 1);
+    CHECK(large.size() == 2);
+}
+
+TEST("sequence lifetime - a sized source answers non-emptiness without evaluating")
+{
+    auto const v = cc::vector<int>{1, 2, 3};
+    int calls = 0;
+    auto const counted = [&](int x)
+    {
+        ++calls;
+        return x;
+    };
+
+    auto s = cc::zip(v.values().map(counted), v).assert_non_empty();
+    static_assert(decltype(s)::has_known_size);
+    CHECK(calls == 0);
+    CHECK(cc::move(s).count() == 3);
+    CHECK(v.values().map(counted).step_by(2).try_as_non_empty().has_value());
+    CHECK(calls == 0);
+}
+
+TEST("sequence lifetime - an input iterator's references are not borrowed")
+{
+    static_assert(!decltype(cc::values_of(stashing_range{3}))::has_borrowed_elements);
+    auto const pairs
+        = cc::values_of(stashing_range{4}).pairwise().map([](int a, int b) { return a * 10 + b; }).to_vector();
+    CHECK(equals(pairs, {12, 23, 34}));
 }
 
 TEST("sequence lifetime - a function pointer returns borrowed references")
