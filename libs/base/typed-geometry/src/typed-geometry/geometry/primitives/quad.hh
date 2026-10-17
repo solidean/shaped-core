@@ -19,6 +19,8 @@
 template <int D, class T>
 struct tg::quad
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "quad requires a positive dimension");
 
     pos<D, T> pos00;

@@ -23,6 +23,8 @@
 template <int D, class T>
 struct tg::tetrahedron
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a tetrahedron is 3D");
 
     pos<D, T> pos0;
@@ -179,6 +181,8 @@ public:
 template <int D, class T>
 struct tg::tetrahedron_boundary
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a tetrahedron is 3D");
 
     pos<D, T> pos0;

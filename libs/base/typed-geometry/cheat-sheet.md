@@ -454,6 +454,7 @@ tg::traits::is_finite<ObjT>;               // bool — is the point set bounded?
 ```cpp
 #include <typed-geometry/scalar/scalar.hh>   // pulls in scalar/traits.hh + constants.hh
 tg::scalar_traits<T>;                     // specialize this to teach tg about a new scalar type
+tg::vec3f::scalar_t;                      // f32 — every value type (linalg, primitives, transforms) names its scalar
 tg::traits::has_sqrt<T>;  tg::traits::has_trigonometry<T>;   // inline constexpr bool flags
 tg::traits::has_abs<T>;  tg::traits::has_exponential<T>;  tg::traits::has_rounding<T>;
 tg::traits::has_pow2<T>;                  // the exact base-two family; f32/f64 only

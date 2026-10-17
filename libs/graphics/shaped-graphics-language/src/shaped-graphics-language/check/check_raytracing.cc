@@ -335,7 +335,7 @@ void checker::compile_hit_group(symbol_id id)
         }
         auto const name = text_of(file, n->where);
         auto const& value = ast.at(s.value).node;
-        if (cc::sequence{seen}.any([&](cc::string_view line) { return line == name; }))
+        if (seen.values().any([&](cc::string_view line) { return line == name; }))
         {
             fail(where, cc::format("{} is set twice", name));
             continue;
@@ -470,7 +470,7 @@ void checker::compile_raytracing_pipeline(symbol_id id)
     auto seen = cc::vector<cc::string_view>();
     auto const is_first = [&](cc::string_view setting, source_span where)
     {
-        if (cc::sequence{seen}.any([&](cc::string_view s) { return s == setting; }))
+        if (seen.values().any([&](cc::string_view s) { return s == setting; }))
         {
             fail(where, cc::format("{} is set twice", setting));
             return false;
@@ -775,7 +775,7 @@ void checker::judge_trace_graphs()
             if (!is_valid(entry))
                 return;
             for (auto const& t : traced_by(entry))
-                if (!cc::sequence{next[from]}.any([&](i32 r) { return r == t.ray; }))
+                if (!next[from].values().any([&](i32 r) { return r == t.ray; }))
                     next[from].push_back(t.ray);
         };
         for (auto r = isize(0); r < count; ++r)

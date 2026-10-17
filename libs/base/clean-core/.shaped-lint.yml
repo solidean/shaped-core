@@ -381,6 +381,11 @@ rules:
     reason: the allocator cc::mimalloc_resource wraps
     files: src/clean-core/memory/mimalloc_resource.cc
 
+  - kind: allow-include
+    value: <iterator>
+    reason: "std::forward_iterator tells which begin/end ranges hand out references that outlive a step; the header is opt-in because <iterator> costs every includer 100 ms or more"
+    files: src/clean-core/sequence/iterator_ranges.hh
+
   # =========================================================================================================
   # Waiting on a cc:: replacement
   # =========================================================================================================
@@ -400,9 +405,14 @@ rules:
   # naming a std:: container is the point rather than a lapse.
 
   - kind: allow-include
-    value: [<vector>, <string>, <string_view>, <array>, <list>, <memory>]
+    value: [<vector>, <string>, <string_view>, <array>, <list>, <memory>, <iterator>]
     reason: the std:: counterparts these tests compare cc:: types against, and convert to and from
     files: tests/**
+
+  - kind: allow-include
+    value: [<vector>, <list>]
+    reason: the foreign ranges this example turns into sequences with cc::values_of
+    files: examples/sequence-sources.cc
 
   - kind: allow-include
     value: [<filesystem>, <fstream>]

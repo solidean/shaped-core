@@ -134,6 +134,7 @@ pos - pos -> vec          // [done]
 pos + vec -> pos          // [done]
 vec + vec -> vec          // [done]
 pos + pos -> pos          // [done]  translation of the singleton point set
+pos * T, pos / T -> pos   // [done]  scaling of the singleton point set about the origin
 
 cross(vec3, vec3) -> bivec3   // [done]
 dual(bivec3)      -> vec3     // [done]  explicit Euclidean 3D escape hatch

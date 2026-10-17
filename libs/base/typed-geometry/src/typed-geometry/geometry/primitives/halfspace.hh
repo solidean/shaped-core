@@ -16,6 +16,8 @@
 template <int D, class T>
 struct tg::halfspace
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "halfspace requires a positive dimension");
 
     vec<D, T> normal;

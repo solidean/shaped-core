@@ -5,6 +5,7 @@
 #include <clean-core/container/span.hh> // the insertion family returns a span over the inserted elements
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/allocation.hh>
+#include <clean-core/sequence/sequence.hh>
 
 #include <initializer_list>
 #include <new> // std::hardware_destructive_interference_size
@@ -173,6 +174,16 @@ public:
     [[nodiscard]] constexpr T* end() { return _data.obj_end; }
     [[nodiscard]] constexpr T const* begin() const { return _data.obj_start; }
     [[nodiscard]] constexpr T const* end() const { return _data.obj_end; }
+
+    // sequences
+public:
+    /// The elements as a cc::sequence, referencing this container, or owning it when called on a temporary.
+    [[nodiscard]] constexpr auto values(this auto&& self)
+    {
+        return cc::impl::seq_contiguous_values<false>(cc::forward<decltype(self)>(self));
+    }
+    /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
+    [[nodiscard]] constexpr auto indices() const { return cc::impl::seq_index_values<false>(*this); }
 
     // queries
 public:

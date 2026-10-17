@@ -5,8 +5,8 @@ refs:
   - file: libs/base/clean-core/docs/sequence.md
   - symbol: cc::sequence::sum
   - symbol: cc::sequence::to_array
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-10-17T15:42Z
+closed: 2026-10-17
+resolution: fixed
 ---
 
 # `cc::sequence::sum()` and `to_array()` are declared but not implemented
@@ -18,4 +18,4 @@ It needs the "special emptiness handling" the reductions section names: what an 
 It also wants a static assert that the range has a known size.
 
 Both compile today because nothing instantiates them.
-[sequence.md](../sequence.md) is where the design for both belongs; until they exist, the declarations are traps.
+[sequence.md](../../../../sequence.md) is where the design for both belongs; until they exist, the declarations are traps.

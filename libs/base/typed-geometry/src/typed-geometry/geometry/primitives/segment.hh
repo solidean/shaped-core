@@ -23,6 +23,8 @@
 template <int D, class T>
 struct tg::segment
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "segment requires a positive dimension");
 
     pos<D, T> pos0;
