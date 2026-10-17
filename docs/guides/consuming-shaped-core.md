@@ -42,6 +42,7 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
 
 | The submodule is | sync |
 |---|---|
+| declared but not checked out, as after a pull that adds it | initializes it at the recorded commit, then goes on as for a detached one |
 | on its tracked branch, clean, nothing unpushed | fast-forwards it |
 | detached at a commit the branch contains, as `git submodule update` leaves it | checks the branch out, then fast-forwards it |
 | carrying uncommitted changes to tracked files | refuses |

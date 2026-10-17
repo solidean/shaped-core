@@ -40,10 +40,12 @@
 #include <shaped-rendering/window.hh>
 #include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <typed-geometry/camera/camera.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/scalar.hh>
+#include <typed-geometry/transform/compose.hh>
 
 #if DENOISE_PLAYGROUND_BACKEND_DX12
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -163,10 +165,6 @@ void resize_images(sg::context& ctx, view_images& v, tg::vec2i extent, tg::vec2i
     return tg::dual(tg::cross(a, b));
 }
 
-// perspective / look_at belong in tg's transform module, which does not carry them yet; issue: question-tg-camera-projection-helpers.
-// The convention is pinned here, as it is in examples/vdoc/cube-editor/camera.hh: left-handed, z into [0, 1].
-// tg::mat is COLUMN-major and subscripts m[col, row], which is what the row gather below is about.
-
 /// An orbiting pinhole camera, plus the view-projection that says where its world points were last frame.
 struct camera
 {
@@ -187,38 +185,15 @@ struct camera
     [[nodiscard]] tg::vec3f right() const { return tg::normalize(cross3(tg::vec3f(0, 1, 0), this->forward())); }
     [[nodiscard]] tg::vec3f up() const { return cross3(this->forward(), this->right()); }
 
-    [[nodiscard]] tg::mat4f projection(float aspect) const
+    /// Left-handed, with a forward [0, 1] depth range.
+    [[nodiscard]] tg::projective_transform3f projection(float aspect) const
     {
-        auto const z_near = 0.1f;
-        auto const z_far = 500.0f;
-        auto const t = 1.0f / tg::tan(vertical_fov / 2.0f);
-        auto proj = tg::mat4f::zero;
-        proj[0, 0] = t / aspect;
-        proj[1, 1] = t;
-        proj[2, 2] = z_far / (z_far - z_near);
-        proj[3, 2] = -z_near * z_far / (z_far - z_near);
-        proj[2, 3] = 1.0f;
-        return proj;
+        return tg::perspective_lh_zero_to_one(vertical_fov, aspect, 0.1f, 500.0f);
     }
 
     [[nodiscard]] tg::mat4f view_projection(float aspect) const
     {
-        auto const f = this->forward();
-        auto const r = this->right();
-        auto const u = this->up();
-        auto const to_eye = this->eye() - tg::pos3f::zero;
-
-        auto view = tg::mat4f::identity;
-        for (auto i = 0; i < 3; ++i)
-        {
-            view[i, 0] = r[i];
-            view[i, 1] = u[i];
-            view[i, 2] = f[i];
-        }
-        view[3, 0] = -tg::dot(r, to_eye);
-        view[3, 1] = -tg::dot(u, to_eye);
-        view[3, 2] = -tg::dot(f, to_eye);
-        return this->projection(aspect) * view;
+        return tg::compose(this->projection(aspect), tg::look_at(this->eye(), target)).to_mat();
     }
 };
 
@@ -659,7 +634,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
                 inputs.guides.depth = images.depth;
             inputs.guides.motion = images.motion; // always written by the tracer; svgf and the upscalers require it
             inputs.guides.jitter = jitter;
-            inputs.guides.view_to_clip = cam.projection(float(traced[0]) / float(traced[1]));
+            inputs.guides.view_to_clip = cam.projection(float(traced[0]) / float(traced[1])).to_mat();
 
             // The specular pair rides with albedo rather than getting checkboxes of its own: it is what the vendor
             // members require on top of the three the panel toggles, and a scene with no specular lobe has nothing

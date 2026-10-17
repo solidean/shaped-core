@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/container/fixed_array.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
@@ -54,6 +55,10 @@ public:
         else if constexpr (requires { tg::projective_transform<D, T>(t); })
         {
             auto const p = tg::projective_transform<D, T>(t);
+            // a segment crossing w = 0 passes through infinity, and the segment between its mapped endpoints is the wrong half
+            CC_ASSERT(
+                tg::impl::one_side_of_projection(tg::impl::projective_w(p, pos0), tg::impl::projective_w(p, pos1)),
+                "a projected segment must lie on one side of the projection; tg::view_projection::project clips it");
             return segment(pos0.transformed(p), pos1.transformed(p));
         }
         else
