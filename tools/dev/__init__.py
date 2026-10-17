@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from .lib.core import console, profile, report, ui
 from .lib.core.archive import archive_diag, archive_logs
-from .lib.core.layout import DRIVER_ROOT, SHAPED_CORE_LAYOUT, Layout
+from .lib.core.layout import DRIVER_ROOT, SHAPED_CORE_LAYOUT, ExtraRoot, Layout
 from .lib.core.logs import merge_junit, ninja_built_count
 from .lib.core.models import CompileGroup, Preset, StepResult, Target, TargetFlags, TestSummary
 from .lib.core.process import (
@@ -63,6 +63,7 @@ from .lib.quality.format import (
     discover_lint_files,
     expand_lint_paths,
     find_clang_format,
+    lint_changed_line_ranges,
     format_sources,
     required_major,
     run_format,
@@ -95,6 +96,7 @@ from .lib.perf.pgo import (
 
 __all__ = [
     "DRIVER_ROOT",
+    "ExtraRoot",
     "Layout",
     "SHAPED_CORE_LAYOUT",
     "archive_diag",
@@ -145,6 +147,7 @@ __all__ = [
     "discover_lint_files",
     "expand_lint_paths",
     "find_clang_format",
+    "lint_changed_line_ranges",
     "format_sources",
     "required_major",
     "run_format",

@@ -43,7 +43,7 @@ So each entry carries the answer as something runnable.
 | [d3d12-cached-pso-static-sampler-mixup](d3d12-cached-pso-static-sampler-mixup/readme.md) | NVIDIA D3D12 driver 32.0.15.9186, RTX 5070 Ti | not yet filed, worked around in shaped-graphics |
 | [vulkan-syncval-wait-before-signal-false-race](vulkan-syncval-wait-before-signal-false-race/readme.md) | Khronos validation layer, SDK 1.4.304–1.4.341 | fixed upstream in 1.4.350, flagged by `dev.py doctor` |
 | [webgpu-timestamp-write-index-sentinel](webgpu-timestamp-write-index-sentinel/readme.md) | emdawnwebgpu + Dawn, against wgpu | not yet filed, worked around in shaped-graphics |
-| [deno-code-cache-stale-same-length-source](deno-code-cache-stale-same-length-source/readme.md) | Deno 2.9.6 | not yet filed, worked around in dev.py |
+| [deno-code-cache-stale-same-length-source](deno-code-cache-stale-same-length-source/readme.md) | Deno 2.9.6 | gone in 2.9.7, worked around in dev.py below it |
 | [warp-arm64-pac-fastfail](warp-arm64-pac-fastfail/readme.md) | WARP on Windows 11 arm64 | trigger not yet isolated, worked around in shaped-graphics |
 
 ## Retiring one
