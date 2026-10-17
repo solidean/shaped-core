@@ -195,7 +195,7 @@ public:
     /// Only on an lvalue: a temporary's elements wrap, so owning it would mean a linearize() nobody asked for.
     [[nodiscard]] auto values() & { return _segments_sequence<T>(segments()); }
     [[nodiscard]] auto values() const& { return _segments_sequence<T const>(segments()); }
-    auto values() && = delete;
+    auto values() && = delete; // issue: feat-ringbuffer-owning-values
 
     /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
     [[nodiscard]] constexpr auto indices() const { return cc::impl::seq_index_values<false>(*this); }
