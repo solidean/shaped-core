@@ -255,7 +255,7 @@ public:
 
     /// Removes and returns the last element.
     /// Precondition: !empty().
-    [[nodiscard]] T pop_back()
+    [[nodiscard("use remove_back() if you don't need the return value")]] T pop_back()
     {
         CC_ASSERT(!empty(), "pop_back() on empty small_vector");
         T value = cc::move(back());
