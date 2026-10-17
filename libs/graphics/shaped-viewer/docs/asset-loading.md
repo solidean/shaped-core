@@ -476,7 +476,7 @@ Per the repo's living-libraries rule, what belongs lower than sv:
   They are written here as free functions over spans, so the eventual move down is a file move rather than a rewrite.
   This is also what unblocks babel's own `load_mesh`.
 - **`tg::aabb3f` from glTF accessor bounds.**
-  Already recorded in babel's [lower-library-gaps.md](../../../data/babel-serializer/docs/lower-library-gaps.md).
+  Already filed as [feat-tg-aabb-factories](../../../base/typed-geometry/docs/issues/feat-tg-aabb-factories.md).
   `min_of` / `max_of` hand back untyped spans today, and this design makes the typed box load-bearing.
 - **A virtual filesystem in clean-core.** Our resolver hook is a deliberate intermediate for it.
 - **An mmap-backed `cc::pinned_data`.**
