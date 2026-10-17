@@ -72,9 +72,22 @@ TEST("sequence - chain")
     auto a = cc::vector<int>{1, 2};
     auto const b = cc::vector<int>{3, 4, 5};
 
-    // items must match exactly, so a mutable and a const vector chain through their const views
+    // a mutable and a const side chain as const references, so nothing is copied
+    CHECK(equals(a.values().chain(b).to_vector(), {1, 2, 3, 4, 5}));
+    static_assert(std::is_same_v<decltype(a.values().chain(b))::item_t, int const&>);
+    static_assert(decltype(a.values().chain(b))::has_borrowed_elements);
+    static_assert(std::is_same_v<decltype(a.values().chain(a))::item_t, int&>);
+
+    // a prvalue side makes the chain yield prvalues, copying the reference side's elements
+    auto twice = [](int x) { return x * 2; };
+    static_assert(std::is_same_v<decltype(a.values().chain(b.values().map(twice)))::item_t, int>);
+    CHECK(equals(a.values().chain(b.values().map(twice)).to_vector(), {1, 2, 6, 8, 10}));
+    int ext = 0;
+    for (int x : a.values().chain(b.values().map(twice)))
+        ext += x;
+    CHECK(ext == 27);
+
     auto const ca = cc::vector<int>{1, 2};
-    CHECK(equals(ca.values().chain(b).to_vector(), {1, 2, 3, 4, 5}));
     CHECK(equals(a.values().chain(cc::vector<int>{7}).map([](int x) { return x; }).to_vector(), {1, 2, 7}));
     CHECK(ca.values().chain(b.values()).count() == 5);
     CHECK(ca.values().chain(b).assert_non_empty().max() == 5);

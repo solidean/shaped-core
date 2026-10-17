@@ -89,7 +89,7 @@ EXAMPLE("clean-core/sequence-pipelines")
                 from_first_active().sum_from(0));
     cc::println("opening streak: {}", daily_counts.values().skip(3).take_while([](int c) { return c > 0; }).count());
 
-    // chain appends one sequence to another; the item types must match, so both sides are const views here.
+    // chain appends one sequence to another of the same element type.
     auto const backorders = cc::vector<int>{2, 3};
     cc::println("ids to restock: {}",
                 orders.values().flat_map([](order const& o) { return o.item_ids.values(); }).chain(backorders).count());

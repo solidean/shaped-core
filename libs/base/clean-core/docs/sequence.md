@@ -149,8 +149,11 @@ Variadic and defaulted lambdas are the known exception, documented rather than d
 The forms are tried in order: spread, index then spread, the pack whole, index then the pack.
 So a callback taking `(auto&& p)` over a zip gets the pack, which has the tuple protocol.
 
-`chain` needs both sides to yield the same item type, and says so in its static assert.
-A mutable and a const vector do not chain directly: their items are `int&` and `int const&`, and a common type would silently copy or drop the constness.
+`chain` needs both sides to share an element type, and merges how they yield it.
+`T&` with `T const&` chains as `T const&`, so nothing is copied and pointers still escape.
+A prvalue on either side makes the chain yield prvalues, which copies every element of the reference side.
+Different element types refuse rather than meet in a common type, since that converts silently: `int` with `unsigned` would be `unsigned`, and a negative `int` a huge one.
+A derived and a base class would meet at the base, and slice when materialized.
 
 ### Consumption, ownership and lifetime
 
@@ -211,9 +214,11 @@ The non-empty-only form static-asserts with a message naming both ways out, `ass
 Its `init` picks the accumulator type, `bytes.values().sum_from(i64(0))`, and there is no default-constructed variant: the zero stays explicit.
 `acc + x` must have `init`'s type, so `sum_from(0)` over floats does not compile rather than truncating every step.
 `sum()` returns `decltype(x + x)`, so `u8` elements sum as `int`.
-The case for non-empty-only `sum()` is typed-geometry: `average()` of `tg::pos3` is meaningful, while a `pos3` has no zero and `pos + pos` does not exist.
-That `average()` is an affine combination, `first + Σ(x - first) / n`, and is not built: it needs a scalar type to divide by, which only typed-geometry knows.
-A "`T{}` is the identity" design gets exactly that wrong.
+`sum()` follows `min()` and `max()`, which have no identity at all, rather than special-casing one.
+`T{}` is not an identity every type promises: a type may not default-construct, or may default to something other than its additive zero.
+`sum_from(init)` makes the zero explicit, at the one call site that chose it.
+`average()` over a non-arithmetic type would be the affine combination `first + Σ(x - first) / n`, which `tg::pos` supports through `pos - pos -> vec` and `vec / T`.
+It is not built, because it needs the scalar to divide by, and nothing in clean-core can ask a `tg::vec` for it.
 
 ### Pointers, references and the traits that guard them
 

@@ -791,7 +791,7 @@ cc::zip(a, b, ...);               // containers or sequences, in step until the 
 .map(f);  .filter(p);  .flat_map(f);  .flatten();   // map keeps a reference result a reference (member projection)
 .take(n);  .skip(n);              // on a contiguous source: no new layer, skipped elements never evaluated
 .take_while(p);  .skip_while(p);
-.chain(other);                    // other: sequence or container; item types must match exactly (int& vs int const& do not)
+.chain(other);                    // other: sequence or container; same element type, T& + T const& -> T const&
 .zip(others...);                  // callbacks take items SPREAD: .map([](int a, float b) { ... })
 .enumerate();                     // callbacks take (isize i, item)
 for (auto&& [a, b] : cc::zip(x, y)) ...   // range-for binds a zip's pack

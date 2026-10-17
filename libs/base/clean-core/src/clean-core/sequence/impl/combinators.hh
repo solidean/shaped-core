@@ -27,14 +27,28 @@ template <class X>
         return seq_dependent<X, seq_access>::type::source(cc::forward<X>(x).values());
 }
 
+/// The item two chained sequences share: the same element type, as a reference where both are one.
+/// T& with T const& is T const&; a prvalue on either side makes it a prvalue, copying the other side's elements.
+/// Different element types do not chain, since a common type would convert silently: int with unsigned is unsigned.
+template <class A, class B>
+struct seq_chain_item
+{
+    static_assert(std::is_same_v<std::remove_cvref_t<A>, std::remove_cvref_t<B>>,
+                  "chain() needs both sequences to yield the same element type; map one of them to match first");
+
+    using element_t = std::remove_cvref_t<A>;
+    static constexpr bool is_ref = std::is_lvalue_reference_v<A> && std::is_lvalue_reference_v<B>;
+    static constexpr bool is_const
+        = std::is_const_v<std::remove_reference_t<A>> || std::is_const_v<std::remove_reference_t<B>>;
+
+    using type = std::conditional_t<is_ref, std::conditional_t<is_const, element_t const&, element_t&>, element_t>;
+};
+
 /// a, then b.
 template <class A, class B>
 struct chain_source
 {
-    static_assert(std::is_same_v<typename A::item_t, typename B::item_t>,
-                  "chain() needs both sequences to yield the same item type; map one of them to match first");
-
-    using item_t = typename A::item_t;
+    using item_t = typename seq_chain_item<typename A::item_t, typename B::item_t>::type;
     static constexpr bool is_non_empty = seq_is_non_empty<A> || seq_is_non_empty<B>;
     static constexpr bool is_borrowed = seq_is_borrowed<A> && seq_is_borrowed<B>;
     static constexpr bool is_expiring = seq_is_expiring<A> && seq_is_expiring<B>;
@@ -45,23 +59,48 @@ struct chain_source
 
     constexpr chain_source(A&& a, B&& b) : _a(cc::move(a)), _b(cc::move(b)) {}
 
+    // one side's next() result as this chain's
+    template <class S>
+    static constexpr seq_next_t<item_t> _convert(seq_next_t<typename S::item_t>&& r)
+    {
+        if constexpr (std::is_same_v<typename S::item_t, item_t>)
+            return cc::move(r);
+        else if constexpr (std::is_reference_v<item_t>)
+            return r; // T* to T const*
+        else if (!r)
+            return {};
+        else
+            return seq_next_t<item_t>(seq_emplace, [&]() -> item_t { return item_t(impl::seq_get(r)); });
+    }
+
+    // one side's step, handing on this chain's item type
+    template <class S, class StepF>
+    static constexpr bool _fold(S& side, StepF& step)
+    {
+        if constexpr (std::is_same_v<typename S::item_t, item_t>)
+            return impl::seq_try_fold(side, step);
+        else
+            return impl::seq_try_fold(
+                side, [&]<class X>(X&& x) -> bool { return step(static_cast<item_t>(cc::forward<X>(x))); });
+    }
+
     [[nodiscard]] constexpr seq_next_t<item_t> next()
     {
         if (!_in_b)
         {
             auto r = _a.next();
             if (r)
-                return r;
+                return chain_source::_convert<A>(cc::move(r));
             _in_b = true;
         }
-        return _b.next();
+        return chain_source::_convert<B>(_b.next());
     }
 
     [[nodiscard]] constexpr bool try_fold(auto&& step)
     {
-        if (!_in_b && impl::seq_try_fold(_a, step))
+        if (!_in_b && chain_source::_fold(_a, step))
             return true;
-        return impl::seq_try_fold(_b, step);
+        return chain_source::_fold(_b, step);
     }
 
     [[nodiscard]] constexpr isize size() const
