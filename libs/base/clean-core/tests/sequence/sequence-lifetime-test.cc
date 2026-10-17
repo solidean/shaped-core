@@ -57,6 +57,23 @@ struct particle
 {
     int mass;
 };
+
+int const& mass_of(particle const& p)
+{
+    return p.mass;
+}
+
+struct move_only
+{
+    int v;
+
+    explicit move_only(int x) : v(x) {}
+    move_only(move_only&&) = default;
+    move_only& operator=(move_only&&) = default;
+    move_only(move_only const&) = delete;
+    move_only& operator=(move_only const&) = delete;
+    ~move_only() = default;
+};
 } // namespace
 
 TEST("sequence lifetime - windows over prvalues hold them by value")
@@ -417,4 +434,78 @@ TEST("sequence lifetime - a buffered window knows its size")
     auto w = v.values().map(counted).pairwise();
     (void)w.begin(); // range-for's first step: the first window is pulled
     CHECK(cc::move(w).count() == 2);
+}
+
+TEST("sequence lifetime - a nested pack materializes as nested tuples of values")
+{
+    auto a = cc::vector<int>{1, 2, 3};
+    auto const b = cc::vector<int>{4, 5, 6};
+
+    auto const pairs = cc::zip(a, b).pairwise().to_vector();
+    static_assert(std::is_same_v<std::remove_cvref_t<decltype(pairs[0].get<0>())>, cc::tuple<int, int>>);
+    auto const indexed = cc::zip(a, b).enumerate().to_vector();
+    a[0] = 100;
+    CHECK(pairs[0].get<0>().get<0>() == 1);
+    CHECK(indexed[0].get<1>().get<0>() == 1);
+
+    // over owned temporaries the materialized copy is all that is left
+    using marked_vector = cc::fixed_vector<marked, 4>;
+    auto const owned
+        = cc::zip(marked_vector{marked(1), marked(2)}, marked_vector{marked(3), marked(4)}).pairwise().to_vector();
+    CHECK(owned[0].get<1>().get<1>().v == 4);
+    auto const first = cc::zip(marked_vector{marked(5)}, marked_vector{marked(6)}).enumerate().assert_non_empty().first();
+    CHECK(first.get<1>().get<0>().v == 5);
+}
+
+TEST("sequence lifetime - a negative skip skips nothing")
+{
+    auto const v = cc::vector<int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
+
+    // scan has no advance, so this is the skip_source path, then truncate through it
+    CHECK(v.values().scan(0, [](int, int x) { return x; }).skip(-2).count() == 10);
+    CHECK(cc::repeat(7, 4).filter([](int) { return true; }).skip(-2).to_vector().size() == 4);
+    CHECK(cc::repeat(7, 10).map([](int x) { return x; }).take(4).skip(-2).take(3).count() == 3);
+
+    auto const chunks = v.values().chunks<2>().skip(-3).take(1).to_vector();
+    CHECK(chunks.size() == 1);
+    CHECK(v.values().chunks<2>().skip(-3).take(1).count() == 1);
+    CHECK(v.values().step_by(3).skip(-1).take(2).count() == 2);
+}
+
+TEST("sequence lifetime - a map with captures is step-stable, so a window keeps its references")
+{
+    auto ps = cc::vector<particle>{{1}, {2}, {3}};
+    auto const offset = 0;
+    auto const field = [offset](particle& p) -> int& { return (&p.mass)[offset]; };
+
+    static_assert(!decltype(ps.values().map(field))::has_borrowed_elements);
+    ps.values().map(field).filter([](int) { return true; }).pairwise().each([](int& a, int& b) { b += a; });
+    CHECK(ps[2].mass == 6);
+
+    // move-only elements through a buffered window over a capturing map: references, no copies
+    auto ms = cc::vector<move_only>();
+    ms.push_back(move_only(1));
+    ms.push_back(move_only(2));
+    auto const sum = ms.values()
+                         .map([offset](move_only& m) -> move_only& { return (&m)[offset]; })
+                         .filter([](move_only const&) { return true; })
+                         .pairwise()
+                         .map([](move_only const& a, move_only const& b) { return a.v + b.v; })
+                         .sum_from(0);
+    CHECK(sum == 3);
+}
+
+TEST("sequence lifetime - a function pointer returns borrowed references")
+{
+    auto const ps = cc::vector<particle>{{1}, {2}};
+    static_assert(decltype(ps.values().map(&mass_of))::has_borrowed_elements);
+    CHECK(ps.values().map(&mass_of).find([](int m) { return m == 2; }) == &ps[1].mass);
+}
+
+TEST("sequence lifetime - a key may take the tuple by rvalue")
+{
+    auto const a = cc::vector<int>{3, 1, 2};
+    auto const b = cc::vector<int>{4, 5, 6};
+    auto const smallest = cc::zip(a, b).assert_non_empty().min_by([](cc::tuple<int, int>&& t) { return t.get<0>(); });
+    CHECK(smallest.get<1>() == 5);
 }

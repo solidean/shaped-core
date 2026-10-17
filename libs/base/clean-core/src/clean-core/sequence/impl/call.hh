@@ -29,18 +29,24 @@ struct seq_type_at<0, T, Ts...>
 template <class IndexSeqT, class... Ts>
 struct seq_pack_storage;
 
+template <class ItemT>
+struct seq_element_of;
+template <class X>
+[[nodiscard]] constexpr decltype(auto) seq_as_element(X&& x);
+
 template <std::size_t... Is, class... Ts>
 struct seq_pack_storage<std::index_sequence<Is...>, Ts...> : seq_pack_leaf<Is, Ts>...
 {
 };
 
 /// A zip's item: one item of each zipped sequence, references kept, prvalues held by value.
-/// A callback receives it spread, f(a, b), where it accepts that; materialized, it becomes a cc::tuple.
+/// A callback receives it spread, f(a, b), where it accepts that; materialized, it becomes a cc::tuple of values,
+/// a nested pack (a window of a zip) a nested tuple, so nothing materialized references the source.
 /// cc::tuple is only named here, so materializing needs <clean-core/container/tuple.hh>.
 template <class... Ts>
 struct seq_pack : seq_pack_storage<std::index_sequence_for<Ts...>, Ts...>
 {
-    using tuple_t = cc::tuple<std::remove_cvref_t<Ts>...>;
+    using tuple_t = cc::tuple<typename seq_element_of<Ts>::type...>;
 
     // the I-th item with the pack's value category: a reference stays one, a held value moves out of an rvalue pack
     template <std::size_t I, class Self>
@@ -76,12 +82,14 @@ struct seq_pack : seq_pack_storage<std::index_sequence_for<Ts...>, Ts...>
     [[nodiscard]] constexpr tuple_t to_tuple() const&
     {
         return [&]<std::size_t... Is>(std::index_sequence<Is...>)
-        { return tuple_t(seq_pack::item<Is>(*this)...); }(std::index_sequence_for<Ts...>{});
+        { return tuple_t(impl::seq_as_element(seq_pack::item<Is>(*this))...); }(std::index_sequence_for<Ts...>{});
     }
     [[nodiscard]] constexpr tuple_t to_tuple() &&
     {
         return [&]<std::size_t... Is>(std::index_sequence<Is...>)
-        { return tuple_t(seq_pack::item<Is>(cc::move(*this))...); }(std::index_sequence_for<Ts...>{});
+        {
+            return tuple_t(impl::seq_as_element(seq_pack::item<Is>(cc::move(*this)))...);
+        }(std::index_sequence_for<Ts...>{});
     }
 };
 
@@ -137,6 +145,10 @@ struct seq_owned
     template <bool Move, class X>
     [[nodiscard]] static constexpr type make(X&& x)
     {
+        static_assert(!std::is_reference_v<T> || std::is_copy_constructible_v<type>
+                          || (Move && std::is_move_constructible_v<type>),
+                      "a window or chunk copies what an item references where the source may replace it at the "
+                      "next step, and this element type cannot be copied: window an indexed or step-stable source");
         if constexpr (Move && std::is_reference_v<T>)
             return type(cc::move(x));
         else
@@ -260,11 +272,11 @@ template <class F, class X>
         else
         {
             using tuple_t = typename std::remove_cvref_t<X>::tuple_t;
-            if constexpr (seq_is_complete<tuple_t> && cc::is_invocable<F&, tuple_t const&>)
+            if constexpr (cc::is_invocable<F&, tuple_t>)
                 return seq_call_form::element;
             else
             {
-                static_assert(seq_is_complete<tuple_t> && cc::is_invocable<F&, isize, tuple_t const&>,
+                static_assert(cc::is_invocable<F&, isize, tuple_t>,
                               "a callback over a zip or window takes (a, b, ...), (isize idx, a, b, ...), (item), "
                               "(isize idx, item), or the materialized cc::tuple, with or without an index first");
                 return seq_call_form::idx_element;

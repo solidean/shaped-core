@@ -17,6 +17,7 @@ struct repeat_source
     static constexpr bool is_infinite = IsInfinite;
     static constexpr bool is_non_empty = IsInfinite;
     static constexpr bool has_pure_at = !IsInfinite;
+    static constexpr bool is_step_stable = true;
 
     T _value;
     isize _n = 0;

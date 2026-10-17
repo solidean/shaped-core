@@ -66,7 +66,8 @@ Each needs the header of the container it makes, and the sorted ones `<clean-cor
 `to_vector()` needs `<clean-core/container/vector.hh>`, which the sequence header cannot include.
 Materializing a zip makes `cc::tuple` elements, which need `<clean-core/container/tuple.hh>`: the sequence header leaves it out of every container's closure.
 
-**Range-for** works on every sequence and consumes it; over a zip it binds `auto&& [a, b]`.
+**Range-for** works on every sequence and spends it; over a zip it binds `auto&& [a, b]`.
+What a `break` leaves behind is unspecified: a source that is itself a range is iterated directly, which does not advance it.
 
 **`cc::format`** takes a sequence: `cc::println("{}", v.values())` prints `[1, 2, 3]`, and a spec applies to each element, `{:.2f}`.
 A zip's or a window's items print as tuples, `[(1, 4), (2, 5)]`.
@@ -122,7 +123,8 @@ A transformation wraps the source in exactly one adaptor source and rewraps that
 * **`has_pure_at`** says `at(i)` evaluates nothing, so asking for one position twice repeats no work and no side effect.
   Spans, iota, strided and owning sources have it, and a map does not, since its `at` calls `f`.
 * **`truncate`** is what lets a zip walked from the back cut its longer sides without evaluating them.
-  Window, chunk, step, chain, take and skip offer it wherever their input lets them; a side without it is stepped back, evaluating what it drops.
+  An indexed window, chunk or step, and chain, take and skip, offer it wherever their input lets them.
+  A buffered window or chunk does not, and a side without it is stepped back, evaluating what it drops.
   A window asks each position up to N times, so it indexes only a pure source and buffers otherwise.
 
 The calling contract: `next()` and `next_back()` any number of times in any mix, then `try_fold` or `try_rfold` at most once, after which the source is spent.
@@ -132,11 +134,16 @@ A source therefore need not leave a resume point behind `try_fold`, which is wha
 **A reference may point into the source itself**: repeat's one value, a temporary `fixed_vector` an owning source holds inline, a flatten's current inner container, a window's buffer.
 It is valid while that source object lives, and the next step may end it, as a flatten opening its next inner container does.
 An item *holds references* when it is one, or is a zip's, enumerate's or window's pack with one anywhere inside.
-So whatever keeps such an item across steps, a buffered window or chunk, keeps it only from a borrowed source, and otherwise copies what it references.
+So whatever keeps such an item across steps, a buffered window or chunk, keeps it only from a *step-stable* source, and otherwise copies what it references.
+`is_step_stable` says a source's references stay valid across steps while the source lives; it defaults to `is_borrowed`.
+An owning source, repeat, and a map whose function captures are step-stable without being borrowed.
+A buffered window or chunk copies an element only where it has to, and a move-only one there is a compile error that says so.
+A view held by value is invisible to this: a map returning a `cc::span` into storage the source owns is a prvalue, and a window keeps it as it is.
 The one place a source moves after handing out such an item is the element a runtime non-empty check pulls.
 That wrapper carries every reference in it to the same offset in the moved-to source, which constant evaluation cannot do, so that path is not `constexpr`.
 A callback with captures may return a reference into them, so a `map` or `filter_map` whose function holds state yields references that are not borrowed.
-A stateless lambda or a member pointer, `map(&particle::mass)`, keeps them borrowed.
+A stateless lambda, a function pointer or a member pointer, `map(&particle::mass)`, keeps them borrowed.
+A zip's, enumerate's or window's pack, nested or not, materializes as tuples of values, so nothing materialized references the source.
 
 ### Internal iteration
 
