@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import clangd, graphics, known_issues, network
+from . import clangd, graphics, jsruntime, known_issues, network
 from .llvm_tools import find_tool, resolve_tool
 from ..core.models import Preset
 from ..core.process import (
@@ -304,6 +304,22 @@ def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, s
     return checks
 
 
+def _deno_check() -> tuple[str, bool | None, str]:
+    """Report the deno `--runtime deno` would launch, and whether it is the pinned one.
+
+    Advisory either way: node is the default runtime, and a deno on PATH at another version still runs artifacts.
+    """
+    label = "deno (--runtime deno)"
+    pinned = jsruntime.pinned_deno_version()
+    rt = jsruntime.resolve(kind="deno")
+    if rt is None:
+        return (label, None, f"not installed (optional) - `uv run dev.py install deno` for {pinned}")
+    found = jsruntime.deno_version_number(rt.version)
+    if found == pinned:
+        return (label, True, f"{found} at {rt.exe}")
+    return (label, None, f"{found or 'unknown version'} at {rt.exe}, tools/deno.version pins {pinned} - run: uv run dev.py install deno")
+
+
 def _windows_pmu_check() -> tuple[str, bool | None, str]:
     """Report whether non-admin PMU profiling (nexus/bench hardware counters) is set up on Windows.
 
@@ -391,6 +407,7 @@ def doctor(
 
     # Emscripten/WASM toolchain (optional; advisory unless emsdk is signalled).
     checks.extend(_emscripten_checks(emsdk_path))
+    checks.append(_deno_check())
 
     # The graphics environment the sg backends, sr::window and the shader library need — advisory throughout.
     checks.extend(graphics.checks(root, cxx))

@@ -4,21 +4,29 @@ Two kinds.
 An editor extension is a link into the checkout, so a `git pull` or a rebuild updates what is installed.
 `--uninstall` removes only links into this checkout: never a folder of the user's, and never another checkout's link.
 emsdk, the Emscripten SDK the WASM presets build with, is a checkout of its own outside this one, at the version `tools/emsdk.version` pins.
-It is a folder rather than a link, so `--uninstall` names it and leaves deleting it to the user.
+deno, the second runtime for WASM artifacts, is the release binary at the version `tools/deno.version` pins, in ~/tools/deno.
+Both are folders rather than links, so `--uninstall` names them and leaves deleting them to the user.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import os
+import platform
+import re
 import shutil
 import subprocess
 import sys
+import urllib.request
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from tools import dev
 from tools.dev import console
+from tools.dev.lib.toolchain import jsruntime as jsr
 
 from . import args as a
 from .context import Context
@@ -61,6 +69,18 @@ _INSTALLABLES = [
 
 _EMSDK = "emsdk"
 _EMSDK_REPO = "https://github.com/emscripten-core/emsdk.git"
+
+_DENO = "deno"
+_DENO_RELEASES = "https://github.com/denoland/deno/releases/download"
+# deno's release asset per (system, machine), as platform reports them.
+_DENO_TARGETS = {
+    ("Windows", "AMD64"): "x86_64-pc-windows-msvc",
+    ("Windows", "x86_64"): "x86_64-pc-windows-msvc",
+    ("Linux", "x86_64"): "x86_64-unknown-linux-gnu",
+    ("Linux", "aarch64"): "aarch64-unknown-linux-gnu",
+    ("Darwin", "x86_64"): "x86_64-apple-darwin",
+    ("Darwin", "arm64"): "aarch64-apple-darwin",
+}
 
 
 def _editors() -> list[_editor]:
@@ -149,6 +169,7 @@ def _list(ctx: Context) -> None:
                 state = console.dim("not installed")
             print(f"  {editor.name:<9} {state}")
     _list_emsdk(ctx)
+    _list_deno()
     print(console.dim(f"\n  uv run dev.py {NAME} <name> [--editor <e>] [--emsdk-path <dir>] [--uninstall]"))
 
 
@@ -223,12 +244,84 @@ def _install_emsdk(args: argparse.Namespace, ctx: Context) -> None:
         print(console.dim(f"  dev.py does not look there by itself: pass --emsdk-path {target}, or set SC_EMSDK_PATH to it"))
 
 
+def _installed_deno_version(exe: Path) -> str | None:
+    try:
+        out = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return jsr.deno_version_number(out.strip().splitlines()[0] if out.strip() else None)
+
+
+def _list_deno() -> None:
+    pinned = jsr.pinned_deno_version()
+    print(f"{console.bold(_DENO)}  the second JS runtime for WASM artifacts (--runtime deno), pinned to {pinned} in tools/deno.version")
+    exe = next((p for p in (jsr.default_deno_dir() / n for n in ("deno.exe", "deno")) if p.is_file()), None)
+    if exe is None:
+        print(f"  {console.dim('not installed')}")
+        return
+    installed = _installed_deno_version(exe)
+    state = console.green(f"{installed} at {exe}") if installed == pinned \
+        else console.yellow(f"{installed or 'unknown version'} at {exe}, not the pinned {pinned}")
+    print(f"  {state}")
+
+
+def _fetch(url: str) -> bytes:
+    print(console.dim(f"  download {url}"), flush=True)
+    request = urllib.request.Request(url, headers={"User-Agent": "shaped-core-dev"})
+    with urllib.request.urlopen(request, timeout=300) as response:  # noqa: S310 (fixed github.com release host)
+        return response.read()
+
+
+def _install_deno(args: argparse.Namespace, ctx: Context) -> None:
+    target_dir = jsr.default_deno_dir()
+    if args.uninstall:
+        print(f"  deno is a folder rather than a link, so nothing here deletes it; remove {target_dir} to uninstall it")
+        return
+
+    pinned = jsr.pinned_deno_version()
+    target = _DENO_TARGETS.get((platform.system(), platform.machine()))
+    if target is None:
+        ctx.die(f"deno publishes no release for {platform.system()} {platform.machine()}")
+
+    asset = f"deno-{target}.zip"
+    base = f"{_DENO_RELEASES}/v{pinned}/{asset}"
+    try:
+        payload = _fetch(base)
+        # The Windows checksum is Get-FileHash's table and the others sha256sum's line; both hold one 64-hex digest.
+        digest = re.search(r"\b[0-9a-fA-F]{64}\b", _fetch(f"{base}.sha256sum").decode("utf-8", "replace"))
+    except OSError as e:
+        ctx.die(f"downloading deno {pinned} failed: {e}")
+    if digest is None:
+        ctx.die(f"{asset}.sha256sum holds no SHA-256 digest")
+    if hashlib.sha256(payload).hexdigest() != digest.group(0).lower():
+        ctx.die(f"{asset} does not match its published SHA-256; nothing was installed")
+
+    exe_name = "deno.exe" if platform.system() == "Windows" else "deno"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    exe = target_dir / exe_name
+    with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+        # Written beside the old binary and swapped in, so a failed write leaves the old one working.
+        staged = target_dir / f"{exe_name}.new"
+        staged.write_bytes(zf.read(exe_name))
+    staged.chmod(0o755)
+    os.replace(staged, exe)
+
+    installed = _installed_deno_version(exe)
+    if installed != pinned:
+        ctx.die(f"{exe} reports {installed} after installing {pinned}")
+    print(f"  {console.green('installed')} deno {pinned} at {exe}")
+    print(console.dim("  dev.py finds it there by itself: --runtime deno needs nothing else"))
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     if not args.name:
         _list(ctx)
         return
     if args.name == _EMSDK:
         _install_emsdk(args, ctx)
+        return
+    if args.name == _DENO:
+        _install_deno(args, ctx)
         return
     item = next((i for i in _INSTALLABLES if i.name == args.name), None)
     if item is None:

@@ -261,8 +261,20 @@ On a wasm preset the default node is emsdk's own pinned build rather than whatev
 A native preset has no emsdk environment and falls back to `PATH` as before.
 
 `--node-path` and `--deno-path` name a specific install, and selecting one of them selects that runtime.
+Without one, deno is the one `uv run dev.py install deno` put in `~/tools/deno`, then whatever is on `PATH`.
 `SC_JS_RUNTIME`, `SC_NODE_PATH` and `SC_DENO_PATH` are the environment-variable equivalents.
-The same three flags are on `run`, `example` and `benchmark`.
+
+`--v8-flag` hands a flag to the runtime's V8, repeatable, for a wasm proposal still behind one:
+
+```bash
+uv run dev.py test --preset emscripten-relwithdebinfo --runtime deno --v8-flag=--experimental-wasm-wide_arithmetic
+```
+
+node takes it as its own option and refuses one its V8 does not know; deno gets it inside `--v8-flags`.
+The `=` is needed, since a value starting with `--` would otherwise read as the next option.
+`SC_V8_FLAGS` is the fallback, whitespace-separated.
+
+The same flags are on `run`, `example` and `benchmark`.
 
 **Browser test runner.** Under Emscripten each `*-test` target also builds a MODULARIZE wasm module (`*-test-web.js` + `.wasm`).
 CMake generates HTML pages at the build root: one per library (`<library>-web.html`), plus an aggregate **`tests-web.html`**.

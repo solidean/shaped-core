@@ -106,23 +106,17 @@ Node's binding is Google's Dawn, which is what Chrome ships; Deno's is wgpu, whi
 Running both from the CLI therefore covers the quirks of both browser engines, which is the class of bug that otherwise appears only after deploying.
 
 **Deno** has WebGPU built in, with no native module to compile.
+`dev.py` installs it, like emsdk:
 
 ```bash
-winget install DenoLand.Deno                    # Windows
-curl -fsSL https://deno.land/install.sh | sh    # Linux / macOS
-deno --version
+uv run dev.py install deno    # into ~/tools/deno, at the version tools/deno.version pins
 ```
 
-On SteamOS, or any Linux where writing outside `$HOME` is unwanted, skip the installer and take the release zip — it is a single self-contained binary with no unmet dependencies:
+That downloads the release zip, a single self-contained binary, checks it against its published SHA-256, and puts it in `~/tools/deno`.
+It needs nothing from the system and writes nothing outside `$HOME`, so it suits SteamOS as it is.
+The runtime lookup finds it there ahead of `PATH`, and `dev.py doctor` says when the deno it would launch is at another version.
 
-```bash
-curl -fL -o /tmp/deno.zip \
-    https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-unknown-linux-gnu.zip
-unzip -o /tmp/deno.zip -d ~/tools/deno-2.9.6
-ln -sfn ~/tools/deno-2.9.6/deno ~/.local/bin/deno
-```
-
-WebGPU is on by default as of Deno 2.9.6, which is what this was verified against; `--unstable-webgpu` is still accepted but no longer required.
+WebGPU is on by default as of Deno 2.9.6; `--unstable-webgpu` is still accepted but no longer required.
 It needs no permission flag either, which is worth knowing because Deno gates most of its capabilities by default: a plain `deno run` on a WebGPU script works.
 Deno can also present to a real OS window through `Deno.UnsafeWindowSurface`, which binds a surface to a window handle an FFI windowing library supplies rather than opening one itself.
 
