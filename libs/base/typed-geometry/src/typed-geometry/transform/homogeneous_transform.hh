@@ -281,7 +281,7 @@ public:
     }
 
     /// translation, rotation and scale, applied scale first: the order glTF, USD and every engine store a node's transform in.
-    /// A scale factor may be negative, which mirrors; it must not be zero.
+    /// A scale factor may be negative, which mirrors, or zero, which flattens: glTF hides a node that way.
     [[nodiscard]] static constexpr homogeneous_transform make_trs(vec<3, T> const& translation,
                                                                   quat<T> const& rotation,
                                                                   vec<3, T> const& scale)

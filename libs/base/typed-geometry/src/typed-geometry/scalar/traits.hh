@@ -6,6 +6,7 @@
 #include <typed-geometry/scalar/fwd.hh>
 
 #include <cmath>
+#include <limits>
 #include <type_traits>
 
 /// Scalar trait seam for typed-geometry.
@@ -76,8 +77,8 @@ struct tg::scalar_traits<cc::f32>
     static constexpr bool has_non_finite = true;
 
     [[nodiscard]] static constexpr f32 one() { return 1.0f; }
-    [[nodiscard]] static constexpr f32 lowest() { return -HUGE_VALF; }
-    [[nodiscard]] static constexpr f32 highest() { return HUGE_VALF; }
+    [[nodiscard]] static constexpr f32 lowest() { return -std::numeric_limits<f32>::infinity(); }
+    [[nodiscard]] static constexpr f32 highest() { return std::numeric_limits<f32>::infinity(); }
     [[nodiscard]] static constexpr bool is_zero(f32 x) { return x == 0.0f; }
     [[nodiscard]] static constexpr bool is_one(f32 x) { return x == 1.0f; }
     [[nodiscard]] static f32 sqrt(f32 x) { return std::sqrt(x); }
@@ -126,8 +127,8 @@ struct tg::scalar_traits<cc::f64>
     static constexpr bool has_non_finite = true;
 
     [[nodiscard]] static constexpr f64 one() { return 1.0; }
-    [[nodiscard]] static constexpr f64 lowest() { return -HUGE_VAL; }
-    [[nodiscard]] static constexpr f64 highest() { return HUGE_VAL; }
+    [[nodiscard]] static constexpr f64 lowest() { return -std::numeric_limits<f64>::infinity(); }
+    [[nodiscard]] static constexpr f64 highest() { return std::numeric_limits<f64>::infinity(); }
     [[nodiscard]] static constexpr bool is_zero(f64 x) { return x == 0.0; }
     [[nodiscard]] static constexpr bool is_one(f64 x) { return x == 1.0; }
     [[nodiscard]] static f64 sqrt(f64 x) { return std::sqrt(x); }

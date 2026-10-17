@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/container/pair.hh>
 #include <typed-geometry/geometry/query/impl/gjk.hh>
 #include <typed-geometry/geometry/query/impl/kernels.hh>
@@ -14,6 +15,7 @@ template <class A, class B>
 [[nodiscard]] constexpr auto closest_points_to(A const& a, B const& b)
 {
     static_assert(written_once<closest_points_op, A, B>, "tg: a closest_points kernel is written in both orders");
+    CC_ASSERT(!impl::is_empty_set(a) && !impl::is_empty_set(b), "the empty set has no closest points");
 
     if constexpr (has_op<closest_points_op, A, B>)
         return closest_points_op<A, B>::apply(a, b);

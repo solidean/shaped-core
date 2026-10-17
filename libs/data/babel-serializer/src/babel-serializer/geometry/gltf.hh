@@ -382,10 +382,11 @@ struct babel::gltf::node
 
     /// The local transform as one map, from whichever form the file used: `matrix`, or translation * rotation * scale.
     /// Composing it down the scene graph, parent after child, places the node in the scene.
+    /// The rotation is normalized here, since exporters drift off unit length; `rotation` itself stays as the file had it.
     [[nodiscard]] tg::affine_transform3f local_transform() const
     {
         return has_matrix ? tg::affine_transform3f::make_from_mat(matrix)
-                          : tg::affine_transform3f::make_trs(translation, rotation, scale);
+                          : tg::affine_transform3f::make_trs(translation, rotation.normalized(), scale);
     }
 
     /// KHR_lights_punctual: the light this node places, pointing down the node's -Z.
@@ -710,10 +711,11 @@ public:
     }
 
     /// A vec3 accessor's stated bounds as a box: for `POSITION`, the mesh's bounds without touching a buffer byte.
-    /// Nothing when the file stated no bounds, or when the accessor is not a vec3.
+    /// Nothing when the file stated no bounds, when the accessor is not a vec3, or when it is normalized.
+    /// A normalized accessor states its bounds as the stored integers, not the positions they decode to (KHR_mesh_quantization).
     [[nodiscard]] cc::optional<tg::aabb3f> bounds_of(accessor const& a) const
     {
-        if (a.type != accessor_type::vec3 || a.bound_count != 6)
+        if (a.type != accessor_type::vec3 || a.bound_count != 6 || a.normalized)
             return {};
         auto const lo = this->min_of(a);
         auto const hi = this->max_of(a);

@@ -92,8 +92,9 @@ void set_paragraph(babel::font::face const& face, cc::span<char32_t const> text,
 
 text_layout layout_text(babel::font::face const& face, cc::string_view text, text_style const& style)
 {
+    // a zero box rather than the empty one: callers read box.max as the laid-out extent
     if (style.size <= 0.0f)
-        return {};
+        return {.box = tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(0, 0))};
 
     auto const& m = face.metrics();
     auto const scale = style.size / f32(face.units_per_em());

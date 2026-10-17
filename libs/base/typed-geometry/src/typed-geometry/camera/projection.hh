@@ -147,6 +147,7 @@ make_orthographic(handedness hand, clip_depth depth, T left, T right, T bottom, 
 template <class ResultT, class T>
 [[nodiscard]] constexpr ResultT make_orthographic_of_box(handedness hand, clip_depth depth, aabb<3, T> const& box)
 {
+    CC_ASSERT(!box.is_empty(), "the empty aabb has no orthographic projection");
     auto const n = hand == handedness::right ? -box.max.data[2] : box.min.data[2];
     auto const f = hand == handedness::right ? -box.min.data[2] : box.max.data[2];
     return make_orthographic<ResultT>(hand, depth, box.min.data[0], box.max.data[0], box.min.data[1], box.max.data[1],

@@ -24,8 +24,9 @@
 /// **Default construction yields the empty box**, tg::aabb::empty: min at the scalar's highest value and max at its lowest.
 /// For a float those are the infinities.
 /// It is the empty set, and so the identity of union: accumulating bounds starts from it, and tg::aabb_of over nothing returns it.
-/// min > max on any axis is empty, and is_empty() says so.
-/// Union, intersection, contains and intersects take an empty box in stride; the measures and readings, which have no answer for it, refuse it.
+/// min > max on any axis is empty, and is_empty() says so; `==` is no emptiness test, since many boxes are empty.
+/// Every query verb answers for it once, in its dispatcher: it meets nothing, holds nothing but the empty set, and has no distance.
+/// The measures and readings have no answer for it and refuse it, as does a rotating transform, which has no tg::box to give.
 /// libs/base/typed-geometry/docs/modules/geometry.md has the decision.
 ///
 /// tg::aabb_boundary shares the encoding and denotes the faces only; `.boundary()` and `.solid()` convert.
@@ -270,7 +271,7 @@ constexpr tg::aabb<D, T> tg::aabb<D, T>::of(Args const&... args)
 namespace tg
 {
 /// The smallest box holding everything given: points, objects with bounds(), and ranges of either, all of one dimension and scalar.
-/// Nothing at all, an empty range included, gives the empty box; tg::aabb<D, T>::of is the spelling that names the box type.
+/// An empty range gives the empty box; tg::aabb<D, T>::of names the box type, and takes no argument at all too.
 template <class First, class... Rest>
 [[nodiscard]] constexpr auto aabb_of(First const& first, Rest const&... rest)
 {
@@ -322,11 +323,24 @@ public:
             return this->solid().transformed(t).boundary();
     }
 
+    // readings
+public:
+    /// whether this is the boundary of the empty box, which holds no point either.
+    [[nodiscard]] constexpr bool is_empty() const { return this->solid().is_empty(); }
+
     // measures and readings
 public:
-    [[nodiscard]] constexpr pos<D, T> centroid() const { return min + (max - min) / T(2); }
+    [[nodiscard]] constexpr pos<D, T> centroid() const
+    {
+        CC_ASSERT(!this->is_empty(), "the empty aabb_boundary has no centroid");
+        return min + (max - min) / T(2);
+    }
     [[nodiscard]] constexpr aabb<D, T> bounds() const { return aabb<D, T>(min, max); }
-    [[nodiscard]] constexpr pos<D, T> any_point() const { return min; }
+    [[nodiscard]] constexpr pos<D, T> any_point() const
+    {
+        CC_ASSERT(!this->is_empty(), "the empty aabb_boundary has no point");
+        return min;
+    }
     /// the faces of a 2D box are its outline.
     [[nodiscard]] constexpr T length() const
         requires(D == 2)

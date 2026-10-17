@@ -7,7 +7,7 @@
 
 /// Kernels against an axis-aligned box, which need nothing but comparisons and so serve every scalar.
 
-/// Inside per axis; the empty box holds nothing, which these comparisons answer without a branch of their own.
+/// Inside per axis.
 template <int D, class T>
 struct tg::impl::contains_op<tg::aabb<D, T>, tg::pos<D, T>>
 {
@@ -20,14 +20,12 @@ struct tg::impl::contains_op<tg::aabb<D, T>, tg::pos<D, T>>
     }
 };
 
-/// The empty box is inside every box, itself included, and only the empty box is inside the empty box.
+/// Inside per axis; the dispatcher has already answered for an empty box on either side.
 template <int D, class T>
 struct tg::impl::contains_op<tg::aabb<D, T>, tg::aabb<D, T>>
 {
     [[nodiscard]] static constexpr bool apply(aabb<D, T> const& a, aabb<D, T> const& b)
     {
-        if (b.is_empty())
-            return true;
         for (int i = 0; i < D; ++i)
             if (b.min.data[i] < a.min.data[i] || a.max.data[i] < b.max.data[i])
                 return false;
@@ -36,7 +34,6 @@ struct tg::impl::contains_op<tg::aabb<D, T>, tg::aabb<D, T>>
 };
 
 /// Clamping each coordinate is the nearest point of the box, and the point itself when it is inside.
-/// The empty box has no nearest point, so every distance and closest-point query refuses it here.
 template <int D, class T>
 struct tg::impl::project_op<tg::pos<D, T>, tg::aabb<D, T>>
 {

@@ -467,6 +467,23 @@ TEST("gltf - node transforms keep the form the file used")
     CHECK(doc.nodes[2].local_transform()(tg::pos3f(4, 5, 6)) == tg::pos3f(4, 5, 6));
 }
 
+TEST("gltf - local_transform takes a drifted rotation and a zero scale")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "nodes": [
+            {"rotation": [0, 0, 1.02, 0]},
+            {"scale": [0, 1, 1], "translation": [3, 0, 0]}
+        ]})"))
+                         .value();
+
+    // a half turn about z, read as if the quaternion were unit length
+    auto const turned = doc.nodes[0].local_transform()(tg::pos3f(1, 0, 0));
+    CHECK((turned - tg::pos3f(-1, 0, 0)).length() < 1e-5f);
+    CHECK(doc.nodes[0].rotation == tg::quat_f(0, 0, 1.02f, 0)); // the stored value is the file's
+    // a zero scale flattens, which glTF uses to hide a node
+    CHECK(doc.nodes[1].local_transform()(tg::pos3f(7, 2, 0)) == tg::pos3f(3, 2, 0));
+}
+
 TEST("gltf - a node matrix that is not affine is malformed, and keeps its affine part")
 {
     auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
@@ -484,11 +501,13 @@ TEST("gltf - a vec3 accessor's stated bounds come back as a box")
         "accessors": [
             {"componentType": 5126, "count": 3, "type": "VEC3", "min": [-1, 0, 2], "max": [3, 4, 5]},
             {"componentType": 5126, "count": 3, "type": "VEC3"},
-            {"componentType": 5126, "count": 3, "type": "VEC2", "min": [0, 0], "max": [1, 1]}
+            {"componentType": 5126, "count": 3, "type": "VEC2", "min": [0, 0], "max": [1, 1]},
+            {"componentType": 5122, "normalized": true, "count": 3, "type": "VEC3", "min": [-32767, 0, 0], "max": [32767, 100, 5]}
         ]})"))
                          .value();
 
-    REQUIRE(doc.accessors.size() == 3);
+    REQUIRE(doc.accessors.size() == 4);
+    CHECK(!doc.bounds_of(doc.accessors[3]).has_value()); // stated in stored integers, not in positions
     auto const b = doc.bounds_of(doc.accessors[0]);
     REQUIRE(b.has_value());
     CHECK(b.value() == tg::aabb3f(tg::pos3f(-1, 0, 2), tg::pos3f(3, 4, 5)));

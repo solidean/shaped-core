@@ -96,6 +96,8 @@ constexpr void grow_bounds(aabb<D, T>& box, Arg const& arg)
     {
         // the empty box is the identity here: its +inf / -inf extremes never win a comparison
         auto const b = arg.bounds();
+        static_assert(pos_shape<std::remove_cvref_t<decltype(b.min)>>::dim == D,
+                      "tg::aabb::of needs objects whose bounds() is an aabb of the box's dimension");
         for (auto i = 0; i < D; ++i)
         {
             auto const lo = T(b.min.data[i]);

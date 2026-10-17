@@ -93,10 +93,19 @@ It departs from two things that hold elsewhere: an aabb's otherwise solid `min <
 The reason is that it is the identity of union, so accumulating bounds needs no first-element special case and no optional.
 `tg::aabb_of` over nothing, an empty range included, is simply the empty box, and merging it changes nothing.
 
-Union, intersection, `contains` and `intersects` take it in stride, because their comparisons already answer correctly against infinities.
-What has no answer for the empty set refuses it with an assert: the measures, the corners, sampling, the nearest point and the support point.
-Every transform keeps it empty explicitly, since a negative scale would otherwise turn (+inf, -inf) into all of space.
-A flat box, min == max on an axis, is a box like any other and not empty.
+**Every query verb answers for it once, in its dispatcher, not in the kernels.**
+It meets nothing, so `intersects` and `may_intersect` are false and a ray's `intersection_parameter_with` finds no crossing.
+Every set contains it, and it contains nothing but itself.
+`distance`, `closest_points`, `separation` and `project_to` have no answer and assert.
+Left to the kernels, the slab test would turn (+inf, -inf) into (-inf, +inf) and report a hit, and the hot pairs would compute with infinities.
+`impl::is_empty_set` is the one test, and for a type with no `is_empty()` it compiles away.
+
+The measures, the corners and sampling refuse it as well.
+A scaling or translating transform keeps it empty explicitly, since a negative scale would otherwise turn (+inf, -inf) into all of space; a rotating one asserts, having no `tg::box` to give.
+A flat box, min == max on an axis, is a box like any other and not empty, and `==` is no emptiness test, since many boxes are empty: `is_empty()` is.
+
+The price is a few comparisons at the start of every aabb query.
+That is accepted: a query that has to be as fast as possible over many boxes belongs to a bespoke layout with SIMD, not to the single-object verbs.
 
 ### Named vertex members
 

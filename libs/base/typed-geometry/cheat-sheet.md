@@ -308,8 +308,10 @@ tg::ndc_from_pixel(pixel, size);  tg::pixel_from_ndc(ndc, size); // pixels: top-
 tg::aabb<D,T>     {pos min, max}              // solid box {x : min <= x <= max}              — finite
 tg::aabb3f();  tg::aabb3f::empty;             // DEFAULT IS THE EMPTY BOX: min = +inf, max = -inf (highest/lowest for ints)
 b.is_empty();                                 //   min > max on some axis; a flat or point box is NOT empty
-                                              //   union / intersection / contains / intersects handle it; measures,
-                                              //   readings, distance & support ASSERT; transformed keeps it empty
+                                              //   EVERY VERB answers for it in its dispatcher: meets nothing, holds
+                                              //   nothing, contained by all; distance / closest / separation ASSERT.
+                                              //   Measures assert; scaling transforms keep it empty, a rotating one asserts.
+                                              //   Test with is_empty(), never == (many boxes are empty)
 tg::aabb_of(p, tri, points, sphere, ...);     // the box around pos, anything with .bounds(), and ranges of either
 tg::aabb3f::of(...);                          //   same, naming the box type (converts scalars); nothing -> empty
 tg::aabb_boundary<D,T>                        // its faces; aabb3f_surface

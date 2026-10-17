@@ -1,6 +1,9 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
+#include <typed-geometry/geometry/primitives/frustum.hh>
+#include <typed-geometry/geometry/primitives/line.hh>
+#include <typed-geometry/geometry/primitives/ray.hh>
 #include <typed-geometry/geometry/primitives/segment.hh>
 #include <typed-geometry/geometry/primitives/sphere.hh>
 #include <typed-geometry/geometry/primitives/triangle.hh>
@@ -84,13 +87,72 @@ TEST("tg aabb - the empty box is the identity of union, and holds nothing")
                   .is_empty());
         CHECK(tg::aabb3f::empty.transformed(tg::signed_scaling_transform3f::make_scaling(tg::vec3f(-1, 2, -3))).is_empty());
     }
-    SECTION("the measures and readings refuse it")
+    SECTION("the measures and readings refuse it, and so does a rotating transform")
     {
         CHECK_ASSERTS(tg::aabb3f::empty.volume());
         CHECK_ASSERTS(tg::aabb3f::empty.centroid());
         CHECK_ASSERTS(tg::aabb3f::empty.vertices());
         CHECK_ASSERTS(tg::aabb3f::empty.distance_to(tg::pos3f(0, 0, 0)));
+        CHECK_ASSERTS(tg::aabb3f::empty.transformed(
+            tg::rigid_transform3f::make_rotation(tg::quat_f::make_rotation_z(tg::angle_f::make_from_degree(30)))));
+        CHECK_ASSERTS(tg::aabb3f::empty.boundary().centroid());
     }
+}
+
+TEST("tg aabb - every verb answers for the empty box in its dispatcher")
+{
+    auto const empty = tg::aabb3f();
+    auto const surface = empty.boundary();
+    auto const ray = tg::ray3f(tg::pos3f(0, 0, 0), tg::vec3f(1, 1, 1).normalized());
+    auto const seg = tg::segment3f(tg::pos3f(-5, -5, -5), tg::pos3f(5, 5, 5));
+    auto const line = tg::line3f(tg::pos3f(0, 0, 0), tg::vec3f(0.3f, 0.5f, 0.8f).normalized());
+    auto const ball = tg::sphere3f(tg::pos3f(0, 0, 0), 2);
+
+    SECTION("a ray, a segment or a line meets neither the empty box nor its boundary")
+    {
+        // the slab test alone would turn (+inf, -inf) into (-inf, +inf) and report a hit
+        CHECK(!ray.intersects(empty));
+        CHECK(!seg.intersects(empty));
+        CHECK(!line.intersects(empty));
+        CHECK(!ray.intersection_parameter_with(empty).has_value());
+        CHECK(!ray.intersection_parameter_with(surface).has_any());
+        CHECK(!ray.intersects(surface));
+    }
+    SECTION("nothing meets it, and culling it is a certain no")
+    {
+        CHECK(!ball.intersects(empty));
+        CHECK(!empty.intersects(ball));
+        CHECK(!ball.may_intersect(empty));
+        CHECK(!tg::frustum3f::make_from_view_projection(tg::projective_transform3f::identity).may_intersect(empty));
+    }
+    SECTION("every set holds it, and it holds nothing")
+    {
+        CHECK(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1)).contains(empty));
+        CHECK(!empty.contains(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1))));
+        CHECK(!empty.contains(tg::pos3f(0, 0, 0)));
+    }
+    SECTION("it has no distance, closest points or separation")
+    {
+        CHECK_ASSERTS(ball.closest_points_to(empty));
+        CHECK_ASSERTS(empty.distance_sqr_to(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1))));
+        CHECK_ASSERTS(tg::pos3f(0, 0, 0).project_to(empty));
+    }
+}
+
+TEST("tg aabb - the scalar extremes behind the empty box")
+{
+    static_assert(tg::traits::highest<i8>() == 127 && tg::traits::lowest<i8>() == -128);
+    static_assert(tg::traits::highest<u8>() == 255 && tg::traits::lowest<u8>() == 0);
+    static_assert(tg::traits::highest<i32>() == 2147483647 && tg::traits::lowest<i32>() == -2147483647 - 1);
+    static_assert(tg::traits::highest<u64>() == ~u64(0) && tg::traits::lowest<u64>() == 0);
+    static_assert(tg::traits::highest<i64>() == 9223372036854775807
+                  && tg::traits::lowest<i64>() == -9223372036854775807 - 1);
+    CHECK(tg::traits::highest<tg::f16>().is_inf());
+    CHECK(tg::traits::lowest<tg::f16>().is_inf());
+    CHECK(tg::traits::lowest<tg::f16>() < tg::f16(0.0f));
+    CHECK(tg::traits::highest<tg::fi128>() == tg::fi128::max());
+    CHECK(tg::traits::lowest<tg::fi128>() == tg::fi128::min());
+    static_assert(tg::traits::highest<f32>() > 3.4e38f && tg::traits::lowest<f32>() < -3.4e38f);
 }
 
 TEST("tg aabb - aabb_of accumulates points, objects and ranges")
