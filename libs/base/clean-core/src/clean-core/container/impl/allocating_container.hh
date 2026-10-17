@@ -5,6 +5,7 @@
 #include <clean-core/container/span.hh> // the insertion family returns a span over the inserted elements
 #include <clean-core/error/optional.hh>
 #include <clean-core/memory/allocation.hh>
+#include <clean-core/sequence/sequence.hh>
 
 #include <initializer_list>
 #include <new> // std::hardware_destructive_interference_size
@@ -173,6 +174,32 @@ public:
     [[nodiscard]] constexpr T* end() { return _data.obj_end; }
     [[nodiscard]] constexpr T const* begin() const { return _data.obj_start; }
     [[nodiscard]] constexpr T const* end() const { return _data.obj_end; }
+
+    // sequences
+public:
+    /// The elements as a cc::sequence, referencing this container, which must outlive it.
+    [[nodiscard]] constexpr auto values() &
+    {
+        return cc::sequence<cc::impl::span_source<T>>(cc::impl::span_source<T>(_data.obj_start, _data.obj_end));
+    }
+    [[nodiscard]] constexpr auto values() const&
+    {
+        return cc::sequence<cc::impl::span_source<T const>>(
+            cc::impl::span_source<T const>(_data.obj_start, _data.obj_end));
+    }
+    /// On a temporary, the sequence takes the container over, so one returned by a function needs no variable.
+    [[nodiscard]] constexpr auto values() &&
+    {
+        using source = cc::impl::owning_source<ContainerT>;
+        return cc::sequence<source>(source(static_cast<ContainerT&&>(*this)));
+    }
+
+    /// The index sequence 0 .. size(), whose contains(i) is a bounds check.
+    [[nodiscard]] constexpr auto indices() const
+    {
+        using source = typename cc::impl::seq_dependent<T, cc::impl::iota_source>::type;
+        return cc::sequence<source>(source(0, size()));
+    }
 
     // queries
 public:

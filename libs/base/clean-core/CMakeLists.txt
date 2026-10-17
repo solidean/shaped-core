@@ -204,6 +204,8 @@ target_sources(clean-core
     src/clean-core/container/impl/bitset_container.hh
 
     src/clean-core/sequence/sequence.hh
+    src/clean-core/sequence/source.hh
+    src/clean-core/sequence/impl/adaptors.hh
 
     src/clean-core/algorithm/index_swap_range.hh
     src/clean-core/algorithm/permutation.hh
@@ -581,6 +583,9 @@ if(SC_BUILD_TESTS)
         tests/container/set-test.cc
         tests/container/byte_stream_builder-test.cc
         tests/container/key_value_cache-test.cc
+
+        tests/sequence/sequence-test.cc
+        tests/sequence/sequence-codegen-test.cc
 
         tests/string/conversion-test.cc
         tests/string/format-test.cc

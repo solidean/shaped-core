@@ -1,133 +1,225 @@
 # cc::sequence
 
-`cc::sequence<RangeT>` is a lazy, eval-at-most-once forward cursor over a range, with functional compositions on top.
+`cc::sequence<Source>` is a lazy, single-pass, eval-at-most-once sequence over a *source*, with functional compositions on top.
+Every contiguous container hands one out through `values()` and `indices()`.
 
-**It is an early prototype.**
-A small set of reductions and materializers works; the transformations that would make it a ranges API — `map`, `filter`, `take`, `zip`, `flatten` — do not exist yet, and neither do the factories.
-Nothing in the repo uses it, and it has no tests.
+```cpp
+auto const n = v.values().filter([](int x) { return x > 0; }).count();
+auto const s = v.values().assert_non_empty().sum();
+auto const m = v.values().min_or(0);
+if (v.indices().contains(i)) { ... }
+```
 
-This doc is in two halves, and the split is the point.
-[What exists today](#what-exists-today) is checked against the header.
-[The intended design](#the-intended-design) is design intent — a record of decisions already taken, not a description of code.
-Do not read the second half as a list of things you can call.
+**Its contract is codegen parity.** A simple use must compile to what the hand-written loop does, beyond inherent noise, or nobody should prefer it.
+[tests/sequence/sequence-codegen-test.cc](../tests/sequence/sequence-codegen-test.cc) pins each shape beside its naive loop, for `dev.py assembly show` on a release preset.
+
+This doc is in two halves.
+[What exists today](#what-exists-today) is checked against the headers.
+[The design](#the-design) records the decisions, including the parts not built yet, and says which those are.
 
 ## What exists today
 
-```cpp
-#include <clean-core/sequence/sequence.hh>
+**Entry points.** `values()` and `indices()` on `vector`, `array`, `unique_vector`, `span` and `fixed_span`.
+`values()` on a temporary container moves it into the sequence; on an lvalue it references it.
+`fixed_span<T, N>` with `N > 0` hands out sequences that are non-empty at compile time.
+`unique_array` is left out: its base names `array<T>` as the derived container, so an owning `values() &&` would move from the wrong type.
+The other containers (maps, sets, ringbuffers, small and fixed vectors) do not have entry points yet.
 
-auto const n = cc::sequence{v}.count_if([](auto x) { return x > 0; });
+**Reductions.** `count`, `count_if`, `any`, `all`, `none`, `contains`, `index_of` (→ `cc::optional<isize>`), `each`.
+`find` returns a pointer, so it takes borrowed elements only, and `try_fold` is the general early-out fold.
+Over a first element: `sum`, `min`, `max` (non-empty only), `min_or`, `max_or`, `try_min`, `try_max`, `sum_from`.
 
-// Careful: that spelling COPIES v.
-// The only deduction guide is the implicit one from the by-value constructor parameter, so RangeT decays to cc::vector<int>.
-// Spell cc::sequence<cc::vector<int>&>{v} to wrap the range by reference instead.
-```
+**Transformations.** `map`, `filter`, `indices`.
+`take`, `zip`, `chain`, `flatten` and the map-like reduction overloads (`sum(f)`) are not built.
 
-The wrapper is constructed explicitly from a range and consumed in place.
-It is neither copyable nor movable *for now*, so it lives as a temporary or a named local and terminal operations consume the underlying range.
+**Non-emptiness.** `assert_non_empty()` and `try_as_non_empty()`.
 
-**Traits.** `element_t` is the element value type, `element_ptr_t` the pointer to it with constness preserved.
-`has_stable_elements` is true when the range's iterator hands out references rather than values, which is what makes pointers into it meaningful.
+**Materialization.** `to_container<C>()`, `to_vector()`, `push_to(existing)`.
+`to_vector()` needs `<clean-core/container/vector.hh>`, which the sequence header cannot include.
 
-**Reductions.** `count`, `count_if`, `any`, `all`, `index_of` (→ `cc::optional<isize>`), `find` (→ `element_ptr_t`), `accumulate`, `each`.
-`find` static-asserts on `has_stable_elements`, which is not sufficient.
-It builds its result in an `element_t*`, so over a `const` range it fails to compile on the `element_t const*` it actually has.
-Every predicate and callback may take a leading `isize` index or omit it.
-`count_if`, `any`, `all`, `index_of` and `find` dispatch through `cc::regular_invoke_with_optional_idx`.
-That one maps a `void` step to `cc::unit`, which is how the fold tells "no early-out" from a `bool`.
-`accumulate` and `each` use plain `cc::invoke_with_optional_idx`, which does not.
+**Range-for** works on every sequence and consumes it.
 
-**Materialization.** `to_container<C>()`, `to_container<C>(map)`, `to_vector()`, `push_to(existing)`.
-The header forward-declares `cc::vector` and no more, so a caller of `to_vector()` must include `<clean-core/container/vector.hh>` itself.
+**The headers.** [sequence/source.hh](../src/clean-core/sequence/source.hh) holds the source protocol and the built-in sources: `span_source`, `iota_source`, `owning_source`, `non_empty_source`.
+[sequence/impl/adaptors.hh](../src/clean-core/sequence/impl/adaptors.hh) holds `map_source`, `filter_source` and `peeked_source`.
+[sequence/sequence.hh](../src/clean-core/sequence/sequence.hh) is `cc::sequence` itself.
 
-**The operational basis.** `try_fold_first(init, step)` and `try_fold(step)`, both returning `sequence_fold_result`.
-Every reduction above is written in terms of `try_fold`; `try_fold_first` has no callers at all today.
-Both use external iteration only: the dispatch to a range's own fold, which is the whole reason the protocol is shaped this way, is not implemented.
+## The design
 
-Two members are declared but not implemented:
+`cc::sequence` borrows ideas from std ranges and Rust iterators, but takes none of their decisions on trust.
+Each choice below is argued from what it buys here, and std or Rust doing it differently is not a reason to reopen one.
 
-* `sum()` returns `isize` with no return statement at all, so calling it is UB.
-* `to_array()` deduces `void` from a bare `return;`, so calling it is well-defined and does nothing.
+### Two layers: sources and the sequence
 
-`sequence_fold_result` is declared at global scope rather than in `cc`, unlike everything else the header defines.
+A *source* is the minimal protocol a container or adaptor implements.
+`cc::sequence<Source>` is the rich API on top of it, and holds nothing but the source.
+A transformation wraps the source in exactly one adaptor source and rewraps that in `sequence`, which is the single-template-layer rule below.
+[source.hh](../src/clean-core/sequence/source.hh) states the protocol in full; `span_source` there is the reference implementation.
 
-## The intended design
+* **`item_t`** is what one step yields: `T&`, `T const&`, or a prvalue `T`.
+  It, not the decayed element type, is the type the fold path forwards.
+* **`next()`** is required, and returns `T*` for reference items and `impl::seq_slot<T>` for prvalues, empty at the end.
+  External iteration is `next()` rather than an iterator pair because an iterator can be dereferenced twice, and `next()` yields each element once by construction.
+  That is what eval-at-most-once rests on: map-then-filter evaluates the map once per element without any discipline.
+  The slot is our own rather than `cc::optional`, whose checked `value()` would sit in every step, and whose header the containers cannot include early enough.
+* **`try_fold(step)`** is optional, and is the only internal-iteration hook.
+  `step(item) -> bool` returns true to stop; `try_fold` returns whether it was stopped.
+  It must spell its return type `bool`, because detection reads the declaration and never instantiates the body.
+* **The capabilities** are a small, closed list, each with a fallback the sequence layer provides: `size` (counting), `is_empty`, `contains` (`any(==)`), `begin`/`end` (`next()`).
+  Later perhaps `nth` and reverse iteration.
+  An adaptor forwards a capability wherever it can: `filter(p).contains(x)` is `inner.contains(x) && p(x)`.
 
-### Reduction and lifetime model
+The calling contract: `next()` any number of times, then `try_fold` at most once, after which the source is spent.
+A source therefore need not leave a resume point behind `try_fold`, which is what lets a tree simply recurse inside it.
 
-External iteration (range-for / cursor-next) is the universal fallback.
-It is needed for composition like zip, and is always available.
+### Internal iteration
 
-Internal iteration is an *optional optimization protocol*.
-Reductions dispatch to it when supported; otherwise they fall back to external.
+External iteration chains indefinitely across arbitrary adaptors, which is why every source must support it.
+But for trees, concatenations, flattened views and adaptor stacks, the iterator model is awkward and often inhibits inlining.
+Internal iteration flips control: the source owns the loop and calls back, which matches how such structures are naturally written and maps much more directly to optimal codegen.
 
-The core internal primitive is an early-outable fold.
-No wrapper types; control flow is expressed directly in C++.
+Every adaptor composes internally except one side of a zip:
 
-`fold(init, step)` returns a fold outcome.
-`init(idx, first_elem)` initializes state from the first element; `step(idx, state, elem) -> bool` advances it, returning true to stop early.
+| adaptor           | its `try_fold`                                                                |
+|-------------------|-------------------------------------------------------------------------------|
+| map, filter, take | wraps `step`                                                                  |
+| chain             | `a.try_fold(s) \|\| b.try_fold(s)`                                            |
+| flatten           | `outer.try_fold([&](auto&& in) { return in.values().try_fold(s); })`          |
+| zip               | `a.try_fold([&](auto&& x) { auto y = b.next(); return !y \|\| s(x, *y); })`   |
 
-`fold_from_first(state, step)` assumes state is already initialized from the first element.
-Non-empty adaptors use it to avoid heterogeneous loops.
+Zip drives its first side internally and its second externally, which is the composition that keeps external iteration the universal base.
 
-The outcome separates three concerns: `empty` (no elements), `stopped` (step returned true), `completed` (full traversal, no early-out).
-
-`step` may or may not accept an index.
-The index is always available, and unused indices are optimized away.
-
-`step` may return void (unit) or bool: void never early-outs, bool stops on true.
-Dispatch is `if constexpr` on the return type — `regular_invoke_with_optional_idx`, then unit-vs-bool.
-
-All reductions (min/max/sum/find/any/all/…) are implemented in terms of fold.
-Only fold itself needs to choose internal vs external iteration.
-
-Non-empty sequences created at runtime must buffer *exactly one* element.
-This preserves eval-at-most-once and enables the `fold_from_first` fast paths, which keep hot loops branch-free and hand-written-loop-equivalent.
-
-### Pointers, references and the traits that guard them
-
-`min`/`max`/`sum` come in two styles: value-returning (generic, safe-ish) and into-style, which updates an existing accumulator.
-The `*_into` APIs — `min_into(T&)`, `min_into(optional<T>&)`, `min_ptr_by_into(T*&)` — compose well across multiple ranges.
-
-Pointer-based `*_ptr` / `*_ptr_by` APIs expose element identity, so they are only available when elements have stable addresses.
-
-`has_stable_elements` means the sequence yields references to address-stable storage.
-It propagates conservatively: filter preserves it, map-by-value breaks it.
-
-`borrowed_elements` is the `borrowed_range` analogue: references and pointers stay valid even if the sequence object is a temporary.
-It is what prevents pointers escaping from views over temporary owners.
-
-Pointer-returning APIs require both `has_stable_elements && borrowed_elements` — a strong guard against dangling pointers.
-
-Reference-returning `min()` may be allowed with only `has_stable_elements`.
-That is safe for immediate use and may dangle if the reference escapes the full-expression, which matches how sharp `span` and `string_view` already are.
-
-Return-type shape-shifting is intentional: `min()` returns `T&` for stable elements and `T` for non-stable.
-`auto` / `auto&&` always works; `auto&` only when the result is truly a mutable reference.
-
-The sharp edges stay explicit: underlying container invalidation still applies, trait propagation must stay conservative, and a `materialize()` exists for users who want ownership and safety.
-
-### Internal vs external iteration, in full
-
-Every wrapped range must support *external* iteration (begin/end).
-This is the universal composition model: it chains indefinitely and works across arbitrary adaptors (zip, filter, map, …).
-
-However, for many non-trivial ranges — trees, concatenations, flattened views, adaptor stacks — the iterator model becomes awkward and often inhibits inlining and optimization.
-
-*Internal* iteration flips control flow: the range owns the loop and invokes a callback instead of yielding iterators.
-This matches how such data structures are naturally implemented, and typically maps much more directly to optimal codegen.
-
-Most sequence operations are meant to be implemented in terms of internal iteration (fold-style).
-These internal layers compose well and are easier for the compiler to inline and collapse than deeply nested iterator machinery.
-
-Rule of thumb: if an "internal iteration" is just
+Rule of thumb: an internal iteration that is just
 
 ```cpp
 for (auto&& v : *this) callback(v);
 ```
 
-then it buys nothing, because it is equivalent to external iteration.
-Internal iteration is only worthwhile if the range can do something structurally simpler or more direct than the iterator model.
+buys nothing, because it is external iteration.
+It is only worth writing when the source can do something structurally simpler than the iterator model.
+
+Folding from the first element is not part of the protocol.
+The sequence layer calls `next()` once, initializes the state from that element, then hands the rest to `try_fold`.
+For a span that first step is a pointer bump; for a flatten or a tree it is one external step ahead of the fast internal loop.
+So no source tracks whether it saw anything: `empty` comes from that one `next()`.
+
+All reductions are written in terms of `try_fold`, and only the sequence layer chooses between it and the `next()` fallback.
+
+### What the codegen probes established
+
+* **A contiguous source folds by index, not by stepping a pointer.** A callback's index counter then fuses with the loop's own; stepping a pointer left two induction variables in `index_of`.
+* **`next()` signals the end with null, which LLVM cannot see through.** It cannot prove a pointer from `_p++` non-null, so a loop over `next()` loses its trip count and does not vectorize.
+  Rust escapes this with `NonNull` slice pointers; an empty span's null data pointer rules that out here.
+  So a source that is itself a pointer range offers `begin()`/`end()`, and range-for uses them directly.
+* **A prvalue slot does not have the problem.** Range-for over `map` vectorizes like the naive loop, since its emptiness is a flag the optimizer tracks.
+* **Range-for over a filter is the one shape without parity.** It is a tight scalar loop, since external iteration through a filter is a nested loop, while the naive `if` inside a loop vectorizes.
+  `.filter(p).each(body)` is the spelling with parity, and the one a hot loop wants.
+
+### Callbacks: the optional index and spread elements
+
+A callback may take a leading `isize` index or omit it; the no-index form is tried first.
+The index is the position in the sequence the callback is applied to: a filter's predicate counts its input, and a map after the filter counts the elements that passed.
+The sequence layer adds the counter only when `if constexpr` sees the callback take one, so an unused index costs nothing without relying on the optimizer.
+A `try_fold` step may return void or bool: void never stops, bool stops on true.
+`each` ignores whatever its callback returns, so it never stops early.
+
+A zip spreads its elements into separate arguments, `[](auto& a, auto& b)`, because a lambda cannot destructure a tuple parameter and the spread form inlines best.
+Its element type is still a tuple for materialization.
+The optional index stays unambiguous, since the indexed form has exactly one parameter more.
+Variadic and defaulted lambdas are the known exception, documented rather than designed around.
+
+### Consumption, ownership and lifetime
+
+* **Sequences are move-only.** Non-copyable keeps single-pass honest; movable is what `try_as_non_empty()`, zip's by-value arguments and lambda captures need.
+* **Terminal operations are `&&`-qualified.** `v.values().sum()` compiles, `s.sum()` on a named local does not, and `cc::move(s).sum()` makes the consumption visible.
+  This turns "never reuse a spent sequence" from a convention into a compile error, and a second pass needs a second sequence.
+  Range-for is the exception, since the language calls `begin()` on an lvalue; the loop consumes the sequence all the same.
+* **An lvalue container's `values()` references it.** Like `span`, the sequence must not outlive the container and is never stored.
+* **An rvalue container's `values() &&` owns it**, moving the container into an owning source.
+  A container returned by a function needs no variable: `make_vec().values().filter(p).to_vector()` is safe, and so is naming the result.
+  Its elements are stable but not borrowed, so `find()` refuses it, and materializing moves them out rather than copying.
+
+### Non-emptiness
+
+Non-emptiness is a compile-time trait of the source, `is_non_empty`, and the API shape depends on it.
+Adaptors propagate it:
+
+| source              | non-empty when       |
+|---------------------|----------------------|
+| map                 | its input is         |
+| filter              | never                |
+| `chain(a, b)`       | `a` or `b` is        |
+| `zip(a, b)`         | `a` and `b` are      |
+| `take<N>`           | `N > 0` and input is |
+| `fixed_span<T, N>`  | `N > 0`              |
+| iota, repeat        | always               |
+
+Map, filter and `fixed_span` exist; the rest of the table is the rule they will follow.
+
+The trait describes the source before it is consumed, and the `&&` rule is what keeps it true: nothing can call into a sequence after its first consuming call.
+
+Two wrappers establish it at runtime:
+
+```cpp
+v.values().assert_non_empty().sum();
+
+if (auto s = v.values().filter(p).try_as_non_empty())
+    use(cc::move(s.value()).sum());
+```
+
+A source with a cheap `is_empty()` costs nothing here: the wrapper checks it and flips the trait.
+A source without one (filter, flatten) can only find out by evaluating, so the wrapper pulls the first element and buffers *exactly one*.
+That preserves eval-at-most-once and keeps the fold-from-first path a branch-free, hand-written-loop-equivalent hot loop.
+
+A reduction that needs a first element comes in a fixed grammar:
+
+| form                                   | valid on       | on empty          |
+|----------------------------------------|----------------|-------------------|
+| `min()`, `max()`, `sum()`, `average()` | non-empty only | does not compile  |
+| `min_or(x)`                            | any            | returns `x`       |
+| `try_min()`                            | any            | `cc::optional`    |
+| `sum_from(init)`                       | any            | returns `init`    |
+
+`average()` is not built yet.
+The non-empty-only form static-asserts with a message naming both ways out, `assert_non_empty()` and the `_or` / `_from` / `try_` variants.
+`sum_from` is a name rather than a `sum(init)` overload because `sum(f)` is the map-like overload (`sum(&particle::mass)`).
+Its `init` picks the accumulator type, `bytes.values().sum_from(i64(0))`, and there is no default-constructed variant: the zero stays explicit.
+`acc + x` must have `init`'s type, so `sum_from(0)` over floats does not compile rather than truncating every step.
+`sum()` returns `decltype(x + x)`, so `u8` elements sum as `int`.
+The case for non-empty-only `sum()` is typed-geometry: `average()` of `tg::pos3` is meaningful, while a `pos3` has no zero and `pos + pos` does not exist.
+A "`T{}` is the identity" design gets exactly that wrong.
+
+### Pointers, references and the traits that guard them
+
+`has_stable_elements` means the sequence yields references to address-stable storage.
+It propagates conservatively: filter preserves it, map-by-value breaks it.
+
+`has_borrowed_elements` is the `borrowed_range` analogue: references and pointers stay valid even if the sequence object is a temporary.
+It is what keeps a pointer from escaping a sequence that owns its container.
+Pointer-returning APIs (`find` today) require it.
+
+**`min()` and `max()` return by value.**
+A reference result would track the best element by pointer, and a pointer-tracking minimum does not vectorize where the naive `m = x < m ? x : m` does.
+Element identity belongs to pointer-returning variants (`min_ptr`, `min_ptr_by`), gated on `has_borrowed_elements` like `find`; they are not built yet.
+
+Into-style variants — `min_into(T&)`, `min_into(optional<T>&)`, `min_ptr_by_into(T*&)` — update an existing accumulator and compose across several ranges; also not built yet.
+
+The sharp edges stay explicit: underlying container invalidation still applies, trait propagation must stay conservative, and a `materialize()` exists for users who want ownership and safety.
+
+### Containers: values(), indices(), keys()
+
+Every cc container and container view offers its contents as a sequence, and which entry points it has follows from how it is addressed:
+
+| container                         | entry points            |
+|-----------------------------------|-------------------------|
+| indexed (vector, span, array, …)  | `values()`, `indices()` |
+| keyed (maps)                      | `keys()`, `values()`    |
+| neither (sets, …)                 | `values()`              |
+
+`indices().contains(i)` is the O(1) range check and `keys().contains(k)` is the container's own lookup, both through the `contains` capability.
+
+`values().indices()` is the index sequence of the value sequence, so it exists on every container through `values()`.
+Over a sized source it is `iota(0, size)` and evaluates nothing; otherwise it counts while consuming, evaluating the source as it goes.
+Like the callback index, it numbers *this* sequence: `v.values().filter(p).indices()` is `0..k`, and the original positions are `v.indices().filter(…)`.
 
 ### Shape of the API
 
@@ -138,22 +230,32 @@ Sequences *can* be infinite.
 
 Not copyable and not cloneable for now, and multi-pass needs a second `cc::sequence` rather than a rewind.
 That is what makes the performance predictable.
+A chain wanted twice is a lambda returning it, `auto evens = [&] { return v.values().filter(even); };`.
 
 Design decisions that constrain any future work here:
 
 * each transformation must add only a single template "layer";
-* `sequence` is the rich-API layer on top of a simple underlying range;
+* `sequence` is the rich-API layer on top of a simple underlying source;
 * it must stay lightweight enough as a header that every container can offer sequence members;
-* the compiler must easily desugar everything into basically-optimal assembly;
+* the compiler must easily desugar everything into basically-optimal assembly, and a new shape gets a probe in the codegen test;
 * map-like overloads are included where appropriate, to reduce chaining count.
 
-For authors: `RangeT` can be a reference, and that is encouraged.
+Known costs, accepted:
+
+* **Layered lambdas are slow at `-O0`.** The relwithdebinfo default optimizes them away; a debug build pays for every layer.
+* **A gated member still exists.** `sum()` static-asserts rather than being constrained, so `requires { s.sum(); }` is true on a sequence that may be empty.
+  The error message is worth more than the detection.
 
 Ideas not yet decided:
 
 * a "reversible" range trait — every `.last_xyz` is then just `.reversed().xyz()`;
-* factories: `make_sequence(container)`, `make_sequence(init-list)`, one for a single element, one for a generator, and a coroutine adapter.
+* factories: one for an arbitrary begin/end range, one for an initializer list, one for a single element, one for a generator, and a coroutine adapter.
 
-## Editing the header
+## Editing the headers
 
-`sequence.hh` is included by all containers and a lot of other headers, so be careful about what it depends on.
+Every container reaches these headers, so be careful about what they depend on.
+The include order is a cycle that only works one way round.
+`source.hh` is included before the containers are defined and must not reach `optional` or `span`.
+`sequence.hh` needs `optional`, and `span.hh` pulls it in at its bottom, beside `optional.hh`.
+So a container member body naming a type that is complete only later (`cc::sequence`, `cc::optional<isize>`) spells it through `impl::seq_dependent`.
+That defers the lookup to instantiation.

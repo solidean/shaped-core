@@ -1115,7 +1115,7 @@ struct flattener
             payload,
         };
         auto const traced_ray = flat_traced_ray{.set = t.set, .ray = t.ray};
-        if (!cc::sequence{entry.traced_rays}.any([&](flat_traced_ray const& r) { return r == traced_ray; }))
+        if (!entry.traced_rays.values().any([&](flat_traced_ray const& r) { return r == traced_ray; }))
             entry.traced_rays.push_back(traced_ray);
         auto const traced = builtin_call(id, callee, values);
         if (is_local)

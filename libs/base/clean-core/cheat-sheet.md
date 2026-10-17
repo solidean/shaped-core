@@ -768,15 +768,33 @@ cc::dedup_sorted_ex(start, size, range, cmp);   // -> isize surviving count; com
 cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -> bool prunes subranges (=> sort_at)
 ```
 
-## Sequence (lazy ranges — early prototype, see [sequence](docs/sequence.md))
+## Sequence (lazy ranges — see [sequence](docs/sequence.md))
 
 ```cpp
-#include <clean-core/sequence/sequence.hh>   // cc::sequence<RangeT> — single-pass; non-copy/non-move
-cc::sequence{some_range}.count();            // use as a temporary; terminal ops consume the range
-cc::sequence{v}.count_if(pred);  .any(pred);  .all(pred);  .index_of(pred);  .find(pred);  // find needs stable elements
-cc::sequence{v}.accumulate(init, fn);  .each(fn);
-cc::sequence{v}.to_vector();  .to_container<C>();  .push_to(existing);
-// NOT implemented despite being declared: .sum() and .to_array(). map/filter/take/zip and the factories do not exist yet.
+// comes with every contiguous container: vector, array, unique_vector, span, fixed_span
+v.values();                       // cc::sequence over the elements; references v, so never store it
+make_vec().values();              // on a temporary it OWNS the container: safe to name, moves elements out on to_vector()
+v.indices();                      // 0 .. size(); .contains(i) is a bounds check
+v.values().indices();             // index sequence of ANY sequence; counts while consuming if the size is unknown
+
+// terminal ops are &&-qualified: chain on the temporary, or cc::move(s).count() for a named one. single pass.
+.count();  .count_if(p);  .any(p);  .all(p);  .none(p);  .contains(x);  .each(f);
+.index_of(p);                     // -> cc::optional<isize>
+.find(p);                         // -> pointer or nullptr; static-asserts borrowed elements (not on owning / by-value map)
+.try_fold(f);                     // f -> bool|void, true stops; -> whether it stopped
+.map(f);  .filter(p);             // lazy; map keeps a reference result a reference (member projection)
+.to_vector();  .to_container<C>();  .push_to(c);   // to_vector needs <clean-core/container/vector.hh>
+// a callback may take a leading isize: its item's position in the sequence it is applied to
+
+// needing a first element: x() only compiles on a NON-EMPTY sequence
+.assert_non_empty().sum();        // .sum() .min() .max(); sum is decltype(x + x), so u8 sums as int
+if (auto s = v.values().filter(p).try_as_non_empty()) use(cc::move(s.value()).min());
+.sum_from(i64(0));                // any sequence; init's type is the accumulator, acc + x must keep it (no float->int)
+.min_or(x);  .max_or(x);  .try_min();  .try_max();   // any sequence; min/max always return BY VALUE
+// fixed_span<T, N> with N > 0 is non-empty at compile time: fs.values().sum() needs no check
+
+for (auto& x : v.values()) ...    // a pointer loop, same as `for (auto& x : v)`
+// range-for over a filter is external iteration and does not vectorize: a hot loop wants .filter(p).each(f)
 ```
 
 ## Threading
