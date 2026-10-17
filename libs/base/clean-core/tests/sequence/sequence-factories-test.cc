@@ -72,7 +72,8 @@ TEST("sequence - generate and iterate are lazy and infinite")
     static_assert(!decltype(cc::repeat(1).take(3))::is_infinite);
 
     // and never runs out, so it is non-empty, filtered or not
-    static_assert(decltype(cc::iterate(1, [](int x) { return x + 1; }).skip_while([](int x) { return x < 5; }))::is_non_empty);
+    static_assert(
+        decltype(cc::iterate(1, [](int x) { return x + 1; }).skip_while([](int x) { return x < 5; }))::is_non_empty);
     CHECK(cc::iterate(1, [](int x) { return x + 1; }).filter([](int x) { return x % 7 == 0; }).first() == 7);
     static_assert(decltype(cc::repeat(1).map([](int x) { return x; }))::is_infinite);
     static_assert(decltype(cc::repeat(1).chain(cc::repeat(2, 1)))::is_infinite);
