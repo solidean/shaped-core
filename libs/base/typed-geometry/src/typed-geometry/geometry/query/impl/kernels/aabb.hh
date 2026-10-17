@@ -1,17 +1,48 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/geometry/query/impl/ops.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 
 /// Kernels against an axis-aligned box, which need nothing but comparisons and so serve every scalar.
 
+/// Inside per axis; the empty box holds nothing, which these comparisons answer without a branch of their own.
+template <int D, class T>
+struct tg::impl::contains_op<tg::aabb<D, T>, tg::pos<D, T>>
+{
+    [[nodiscard]] static constexpr bool apply(aabb<D, T> const& b, pos<D, T> const& p)
+    {
+        for (int i = 0; i < D; ++i)
+            if (p.data[i] < b.min.data[i] || b.max.data[i] < p.data[i])
+                return false;
+        return true;
+    }
+};
+
+/// The empty box is inside every box, itself included, and only the empty box is inside the empty box.
+template <int D, class T>
+struct tg::impl::contains_op<tg::aabb<D, T>, tg::aabb<D, T>>
+{
+    [[nodiscard]] static constexpr bool apply(aabb<D, T> const& a, aabb<D, T> const& b)
+    {
+        if (b.is_empty())
+            return true;
+        for (int i = 0; i < D; ++i)
+            if (b.min.data[i] < a.min.data[i] || a.max.data[i] < b.max.data[i])
+                return false;
+        return true;
+    }
+};
+
 /// Clamping each coordinate is the nearest point of the box, and the point itself when it is inside.
+/// The empty box has no nearest point, so every distance and closest-point query refuses it here.
 template <int D, class T>
 struct tg::impl::project_op<tg::pos<D, T>, tg::aabb<D, T>>
 {
     [[nodiscard]] static constexpr pos<D, T> apply(pos<D, T> const& p, aabb<D, T> const& b)
     {
+        CC_ASSERT(!b.is_empty(), "the empty aabb has no nearest point");
         auto r = p;
         for (int i = 0; i < D; ++i)
         {
@@ -30,6 +61,7 @@ struct tg::impl::support_op<tg::aabb<D, T>>
 {
     [[nodiscard]] static constexpr pos<D, T> apply(aabb<D, T> const& b, vec<D, T> const& dir)
     {
+        CC_ASSERT(!b.is_empty(), "the empty aabb has no support point");
         pos<D, T> r;
         for (int i = 0; i < D; ++i)
             r.data[i] = dir.data[i] > T(0) ? b.max.data[i] : b.min.data[i];

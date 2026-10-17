@@ -86,6 +86,18 @@ A `sphere`'s `{center, radius}` does not say which plane the circle lies in, so 
 Its primary template is therefore left undefined and each supported pair is a specialization: `sphere<D, D, T>` is `{center, radius}`, and `sphere<2, 3, T>` adds the plane's normal.
 A pair with no specialization is an incomplete type, which is the same "opt in per case, never a silent default" stance `object_traits` takes.
 
+### The default `aabb` is the empty box
+
+`aabb()` is the empty set, min at the scalar's highest value and max at its lowest — the infinities for a float.
+It departs from two things that hold elsewhere: an aabb's otherwise solid `min <= max`, and `mat`'s precedent of defaulting to zero.
+The reason is that it is the identity of union, so accumulating bounds needs no first-element special case and no optional.
+`tg::aabb_of` over nothing, an empty range included, is simply the empty box, and merging it changes nothing.
+
+Union, intersection, `contains` and `intersects` take it in stride, because their comparisons already answer correctly against infinities.
+What has no answer for the empty set refuses it with an assert: the measures, the corners, sampling, the nearest point and the support point.
+Every transform keeps it empty explicitly, since a negative scale would otherwise turn (+inf, -inf) into all of space.
+A flat box, min == max on an axis, is a box like any other and not empty.
+
 ### Named vertex members
 
 Named vertex members (`pos0`/`pos1`/`pos2`) are used instead of the `data[]`/`operator[]` storage of the linalg types.
