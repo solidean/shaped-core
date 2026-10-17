@@ -102,5 +102,5 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 - [babel-data](../babel-data/readme.md) — the base64 / JSON / markdown base this library sits on.
 - [docs/_index.md](docs/_index.md) — babel-serializer's documentation hub.
 - [docs/structure.md](docs/structure.md) — the format roadmap (`[done]` / `[planned]`).
-- [docs/lower-library-gaps.md](docs/lower-library-gaps.md) — what babel wants from clean-core / typed-geometry that isn't there yet.
+- [docs/issues/](docs/issues/) — open issues; what babel wants from clean-core / typed-geometry is filed in their `docs/issues/`.
 - [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code follows.

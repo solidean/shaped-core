@@ -697,7 +697,7 @@ struct raster_scene
             {.instance = u32(i), .triangle_count = resolved.triangle_counts[i], .permutation = permutation_of[group]});
     }
 
-    // TODO: draw quadric batches, ray-cast over each primitive's box in a pixel stage; see libs/graphics/shaped-viewer/docs/raster.md.
+    // Quadric batches are not drawn yet; issue: feat-sv-raster-quadric-batches
     if (skipped_quadrics && !slot.raster_skip_reported)
     {
         CC_LOG_WARNING("a raster layer of view '{}' holds quadric batches, which the raster path does not draw yet",
@@ -784,6 +784,7 @@ render_mode resolve_render_mode(sg::context const& ctx, render_mode mode)
     return traces ? render_mode::wavefront : render_mode::raster;
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param) — by value because it is a coroutine, see sg's init_once
 cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();

@@ -218,8 +218,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - traces the megakernel's image of t
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -330,8 +330,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -405,8 +405,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a still frame of one round keeps t
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -497,8 +497,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -587,8 +587,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
 ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a cutout cuts where its opacity says", (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -650,8 +650,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a coverage cutout tosses a coin pe
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -713,8 +713,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - an image past one row of groups is
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {

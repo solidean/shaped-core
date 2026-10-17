@@ -95,10 +95,8 @@ static_assert(sizeof(tg::mat4f) == sizeof(shaders::cube_constants),
 constexpr int cube_vertex_count = 24; // four per face: a shared corner carries three different normals
 constexpr int cube_index_count = 36;
 
-// TODO(typed-geometry): perspective / look_at belong in tg's transform module — see its docs/modules/transform.md.
-// Until tg pins a handedness and a depth range there is nothing to call, so the convention lives here: left-handed,
-// z into [0, 1]. examples/vdoc/cube-editor/camera.hh carries the same pair for the same reason, which is the second
-// caller that says it should move.
+// tg picks no camera convention, so this one is pinned here: left-handed, z into [0, 1].
+// issue: question-tg-camera-projection-helpers
 // tg::mat is COLUMN-major and subscripts m[col, row] — that part is worth copying rather than re-deriving.
 
 /// The classic 3-vector cross product.

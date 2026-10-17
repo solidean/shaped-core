@@ -272,7 +272,7 @@ TEST("unique_function - return type preservation")
         // A confirmed compiler codegen bug, reproduced with a dependency-free repro — not a lifetime issue here.
         // clang-cl, clang/gcc and cl < 19.51 are all correct.
         // Only the runtime value-check is quarantined; the type assertion above still runs everywhere.
-        // TODO(msvc-19.51): drop this guard once the compiler fix ships.
+        // TEMPORARY(debt-cc-msvc-const-ref-type-erased-call-guard): drop this guard once the compiler fix ships.
         // Filed upstream: https://developercommunity.visualstudio.com/t/MSVC-O2-miscompiles-returned-const-loca/11114080
 #if !(defined(_MSC_VER) && !defined(__clang__) && _MSC_VER >= 1951)
         CHECK(f() == 42);

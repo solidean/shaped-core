@@ -98,7 +98,7 @@ enum class sg::texture_layout : sg::u32
 /// ignored.
 /// It is kept because a direction-specific layout is postponed rather than ruled out: vulkan would keep more
 /// compression with one, the shape extends to that easily, and it would be hard to add back once dropped.
-/// libs/graphics/shaped-graphics/docs/TODO.md carries what taking it up costs.
+/// issue: perf-sg-direction-specific-async-layout carries what taking it up costs.
 enum class sg::async_direction : sg::u32
 {
     upload,   ///< host -> texture

@@ -34,7 +34,7 @@ exposes thin wrappers (`tg::sqrt`, the `tg::traits::has_*` flags, …). Adding a
 specializing one trait; no geometric code changes.
 
 `<cmath>` is allowed in this module, but only inside the `scalar_traits` specializations, and it never leaks into the geometric types.
-The current `std::sqrt` routing is a placeholder we intend to drop, since it honors `errno` and costs codegen for nothing — [TODO.md](../TODO.md) tracks it.
+The current `std::sqrt` routing is a placeholder we intend to drop, since it honors `errno` and costs codegen for nothing — [perf-tg-std-math-routing](../issues/perf-tg-std-math-routing.md) tracks it.
 
 ### `one()` is a function, and `is_zero`/`is_one` are trait operations
 

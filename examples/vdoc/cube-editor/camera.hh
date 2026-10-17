@@ -8,11 +8,9 @@
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/linalg/pos.hh>
 
-// TODO(typed-geometry): perspective / look_at belong in tg's transform module.
-// docs/modules/transform.md lists "camera / projection conventions" as planned, and until tg adopts a handedness
-// and a depth range there is nothing to call — so the convention is pinned here instead: left-handed, z into [0, 1].
-// The matrix layout is the part worth copying rather than re-deriving: tg::mat is COLUMN-major and subscripts m[col, row].
-// libs/base/typed-geometry/tests/transform/projective-test.cc holds the same perspective matrix, for the same reason.
+// tg picks no camera convention, so this one is pinned here: left-handed, z into [0, 1].
+// issue: question-tg-camera-projection-helpers
+// tg::mat is COLUMN-major and subscripts m[col, row] — that part is worth copying rather than re-deriving.
 
 namespace cube_editor
 {

@@ -892,7 +892,7 @@ sg::texture_2d const& gpu_resource_manager::_placeholder_texture(tg::vec4f texel
     // Every format the importer produces is that shape, and a caller reaching `acquire_texture` with another one gets
     // an assert rather than a subresource filled with the wrong number of bytes — which neither the upload scope nor
     // the backend checks.
-    // Encoding per format is the real fix and is deferred; see libs/graphics/shaped-viewer/docs/TODO.md.
+    // Encoding per format is the real fix and is deferred: TEMPORARY(debt-sv-placeholder-texture-format).
     CC_ASSERT(sg::format_block_extent(format) == 1 && sg::format_block_size(format) == 4,
               "a 1x1 placeholder is written as four 8-bit channels");
 

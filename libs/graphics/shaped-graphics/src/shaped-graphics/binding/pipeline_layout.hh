@@ -26,7 +26,7 @@ struct sg::pipeline_layout_description
     // Ordered; index = bind slot.
     // Owning, and inline-capped at max_binding_groups so the common case never heap-allocates.
     // Slot sg::reserved_binding_group sits above this range and belongs to sg, so a description cannot reach it.
-    // TODO: cc::fixed_vector<binding_group_layout_handle, max_binding_groups> is the better match once it lands.
+    // issue: chore-sg-pipeline-layout-fixed-vector
     cc::small_vector<binding_group_layout_handle, max_binding_groups> groups;
 
     // Extra static samplers bound directly to shader registers, not tied to any group's bindings.

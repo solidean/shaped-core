@@ -3,12 +3,10 @@
 #include <clean-core/container/impl/allocating_container.hh>
 
 
-// TODO:
-// - sequence entry points
-// - retyping APIs
-// - equality, order, hashing
-// - contains/contains_where/find/find_where/count/count_where
-// - sort
+// issue: feat-cc-container-equality-and-order
+// issue: feat-cc-container-search-family
+// issue: feat-cc-container-retyping
+// Also not yet: sequence entry points.
 
 
 /// Dynamically allocated vector of T elements with value semantics.

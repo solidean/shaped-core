@@ -763,7 +763,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
 
     auto source = generate_hit_group(r, layout, opts.kind, opacity.can_cut_out());
     auto shade_source = generate_shade_kernel(r, layout, opts.kind);
-    // TODO: a quadric's raster stage, ray-cast over its box in a pixel shader; see libs/graphics/shaped-viewer/docs/raster.md.
+    // A quadric has no raster stage yet; issue: feat-sv-raster-quadric-batches
     auto raster_source = opts.kind == geometry_kind::triangles ? generate_raster_pixel(r, layout, opacity) : cc::string();
     return {.source = cc::move(source),
             .shade_source = cc::move(shade_source),

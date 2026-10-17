@@ -394,11 +394,7 @@ The geometric fallback gives a normal but an arbitrary tangent, so anisotropy an
 tangents.
 That stays off by default and is enabled per material by the importer when an asset actually carries a normal map.
 
-**TODO, to be written into [TODO.md](TODO.md) when this lands:** our tangents will not match MikkTSpace.
-Nearly every DCC tool bakes normal maps against it, so an asset only reproduces exactly if the runtime basis matches the baker's.
-Per-corner area- and angle-weighted accumulation is close but not identical, and diverges visibly on high-frequency normal maps and
-mirrored uv shells.
-Fixing it means porting MikkTSpace's algorithm into the same mesh-processing helpers.
+**Our generated tangents will not match MikkTSpace**, which [feat-sv-mikktspace-tangents](issues/feat-sv-mikktspace-tangents.md) carries.
 
 ## No filesystem
 
@@ -483,7 +479,7 @@ Per the repo's living-libraries rule, what belongs lower than sv:
   They are written here as free functions over spans, so the eventual move down is a file move rather than a rewrite.
   This is also what unblocks babel's own `load_mesh`.
 - **`tg::aabb3f` from glTF accessor bounds.**
-  Already recorded in babel's [lower-library-gaps.md](../../../data/babel-serializer/docs/lower-library-gaps.md).
+  Already filed as [feat-tg-aabb-factories](../../../base/typed-geometry/docs/issues/feat-tg-aabb-factories.md).
   `min_of` / `max_of` hand back untyped spans today, and this design makes the typed box load-bearing.
 - **A virtual filesystem in clean-core.** Our resolver hook is a deliberate intermediate for it.
 - **An mmap-backed `cc::pinned_data`.**

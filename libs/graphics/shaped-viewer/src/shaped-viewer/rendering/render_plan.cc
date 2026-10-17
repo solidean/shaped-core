@@ -308,7 +308,7 @@ struct builder
                 emit_drawings(view, layer_index, l, res, u32(-1), local);
                 break;
             case layer_kind::ui:
-                // Not drawn yet; see libs/graphics/shaped-viewer/docs/TODO.md for what it still needs.
+                // Not drawn yet; issue: feat-sv-ui-layer-imgui.
                 break;
             }
         }

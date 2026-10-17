@@ -30,8 +30,8 @@ constexpr float sphere_radius = 0.5f;
 
 /// An indexed UV sphere of `radius` with a tangent frame per vertex, wound so every face's normal points outward.
 ///
-/// TEMPORARY: the third caller hand-rolling a sphere, after `openpbr-spheres`; a `tg::` sphere tessellation is the library
-/// extension that replaces all of them — see the viewer TODO.
+/// TEMPORARY(debt-sv-examples-hand-rolled-primitive-meshes): the third caller hand-rolling a sphere, after
+/// `openpbr-spheres`; a `tg::` sphere tessellation is the library extension that replaces all of them.
 struct sphere_mesh
 {
     cc::vector<tg::pos3f> positions;

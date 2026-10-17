@@ -354,8 +354,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - the Cornell box's raster image is the
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!can_run(ctx))
@@ -422,8 +422,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout thresholds at its cutoff, an
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!can_raster())
@@ -492,8 +492,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a minified textured cutout cuts again
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!can_raster())
@@ -590,8 +590,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a baked occlusion of one half halves 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!can_raster())
@@ -641,8 +641,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a surface one unit in front of anothe
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!can_raster())

@@ -358,7 +358,7 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
-    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
     sr::box_filter_mipmap_routine::prewarm(
         ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     (void)co_await ctx.routines.idle_completion();
@@ -399,7 +399,7 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
-    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
     sr::box_filter_mipmap_routine::prewarm(
         ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     (void)co_await ctx.routines.idle_completion();
@@ -525,9 +525,9 @@ ASYNC_INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", 
 
 namespace
 {
-[[nodiscard]] sv::mesh_attribute scalar_attribute(cc::string name, sv::attribute_frequency f, f32 a, f32 b, f32 c)
+[[nodiscard]] sv::mesh_attribute scalar_attribute(cc::string_view name, sv::attribute_frequency f, f32 a, f32 b, f32 c)
 {
-    return sv::mesh_attribute::create(cc::move(name), f, cc::vector<f32>{a, b, c});
+    return sv::mesh_attribute::create(cc::string(name), f, cc::vector<f32>{a, b, c});
 }
 
 /// The u32 at `offset` of a parameter block, which is how every non-constant slot is read back.

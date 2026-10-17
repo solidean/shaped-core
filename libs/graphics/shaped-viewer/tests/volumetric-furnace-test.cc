@@ -193,7 +193,7 @@ image_stats trace_furnace(sg::context& ctx,
         // Read here but asserted AFTER the list is submitted, which is not a style preference: a `REQUIRE` throws, and
         // unwinding past a recorded-but-unsubmitted command list asserts inside its destructor.
         // A second assertion while the first is unwinding is an immediate `abort`, which loses the message that would have
-        // said what went wrong — see the viewer TODO's entry on exactly this.
+        // said what went wrong — issue: bug-sv-assert-in-frame-loop-terminates.
         auto const ready = traced == sg::routine_outcome::executed;
 
         // Only the last frame is read: the target holds the running mean of every frame folded in so far, so the
@@ -249,7 +249,7 @@ image_stats trace_furnace(sg::context& ctx,
 ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform environment",
                      (sg::context_handle const& ctx_h))
 {
-    // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
+    // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — bug-sv-woa-inline-readback-fastfail carries the evidence.
     //
     // The binary dies through `__fastfail` inside the idle drain, after a trivial dispatch whose
     // command list also recorded an inline readback.
@@ -258,8 +258,8 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     // These two are the only tests in sv that use `cmd.download`, and sv's own ../docs/structure.md already noted that path had
     // never been exercised here.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
 

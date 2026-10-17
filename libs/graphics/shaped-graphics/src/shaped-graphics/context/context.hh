@@ -223,7 +223,7 @@ public:
     /// of its own.
     /// `general` on both backends today, whichever way the transfer goes — dx12 because its copy queue cannot run a
     /// layout barrier at all, vulkan because one layout for both directions is what needs no extra machinery.
-    /// libs/graphics/shaped-graphics/docs/TODO.md carries what honouring the direction would take.
+    /// issue: perf-sg-direction-specific-async-layout carries what honouring the direction would take.
     /// `cmd.prepare_for_async` is what a caller writes; this is the seam it resolves through.
     [[nodiscard]] virtual texture_layout async_ready_layout(async_direction direction) const = 0;
 

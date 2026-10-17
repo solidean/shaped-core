@@ -409,19 +409,6 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
-// A frame loop lands its streamed payloads rather than ending on a frame count.
-//
-// What this pins is that residency is reached at all: five payloads go in flight and the loop ends on
-// `streaming_resources() == 0`.
-//
-// It does NOT pin the `cc::thread_pump_all()` sweep in `viewer::finish_frame` — it passes under
-// `singlethreaded-clang` with that line removed.
-// The reason is structural: a frame ends on `epochs_in_flight_completion(buffer_count)`, which blocks only once the
-// CPU is that many epochs ahead of the GPU, and a test loop running flat out always is.
-// A blocking wait sweeps the pump registry itself, so it does the copy actor's turn and the sweep is redundant here.
-// The case the sweep exists for is a loop paced slowly enough that the GPU is never behind — a real display's vsync,
-// or a frame limiter — and no test reaches it yet.
-// libs/graphics/shaped-viewer/docs/TODO.md carries it.
 // A frames() loop opens no `sv.frame` scope, so tearing its viewer down must close none.
 // An unmatched close pops whatever scope the caller has open on its thread, and a coroutine step around the loop then
 // fails as a profiling scope crossing a co_await.
@@ -442,6 +429,19 @@ INVOCABLE_TEST("sv - a viewer closes no profiling scope it did not open", (sg::c
     CHECK(cc::rec::impl::t_writer.scope_depth == depth);
 }
 
+// A frame loop lands its streamed payloads rather than ending on a frame count.
+//
+// What this pins is that residency is reached at all: five payloads go in flight and the loop ends on
+// `streaming_resources() == 0`.
+//
+// It does NOT pin the `cc::thread_pump_all()` sweep in `viewer::finish_frame` — it passes under
+// `singlethreaded-clang` with that line removed.
+// The reason is structural: a frame ends on `epochs_in_flight_completion(buffer_count)`, which blocks only once the
+// CPU is that many epochs ahead of the GPU, and a test loop running flat out always is.
+// A blocking wait sweeps the pump registry itself, so it does the copy actor's turn and the sweep is redundant here.
+// The case the sweep exists for is a loop paced slowly enough that the GPU is never behind — a real display's vsync,
+// or a frame limiter — and no test reaches it yet.
+// issue: debt-sv-pump-sweep-untested
 INVOCABLE_TEST("sv - a frame loop lands its streamed payloads", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;

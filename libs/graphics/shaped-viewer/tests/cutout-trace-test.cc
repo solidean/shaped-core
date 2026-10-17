@@ -190,8 +190,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a cutout cuts where its opacity sa
 {
     // The inline readback path, which volumetric-furnace-test documents as fastfailing on Windows on ARM.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {

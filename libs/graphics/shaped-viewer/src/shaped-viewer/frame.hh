@@ -113,7 +113,7 @@ public:
     [[nodiscard]] window_ref window();
 
     /// A window by name.
-    /// Only the default window is presented today; see libs/graphics/shaped-viewer/docs/TODO.md for what a second one still needs.
+    /// Only the default window is presented today; issue: feat-sv-multi-window.
     [[nodiscard]] window_ref window(cc::string_view id);
 
     template <class Arg0, class... Args>

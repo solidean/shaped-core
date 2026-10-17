@@ -124,7 +124,7 @@ public:
         return result;
     }
 
-    // TODO: name?
+    // issue: feat-cc-sequence-prototype-open-design (the name)
     // apply : (idx?, accum&, elem&)
     [[nodiscard]] auto accumulate(auto init, auto&& apply)
     {
@@ -135,7 +135,7 @@ public:
     // Calls fun on each element, with the index passed first if it accepts one.
     void each(auto&& fun)
     {
-        // TODO: preserve value category of elem, aka forward!
+        // Does not forward elem's value category yet; issue: feat-cc-sequence-prototype-open-design
         this->try_fold([&](isize idx, auto& elem) { cc::invoke_with_optional_idx(idx, fun, elem); });
     }
 
@@ -145,7 +145,8 @@ public:
 
     [[nodiscard]] isize sum()
     {
-        // TODO: not implemented — needs non-empty handling, and calling this today falls off the end of a non-void function.
+        // Not implemented — calling this today falls off the end of a non-void function.
+        // issue: bug-cc-sequence-sum-and-to-array-unimplemented
     }
 
 
@@ -167,9 +168,7 @@ public:
         static_assert(sizeof(ContainerT) > 0, "ContainerT must be complete (did you forget to include its header?)");
 
         ContainerT container;
-        // TODO: use a container protocol to make "push_back" more generic
-        //       and try to reserve
-        // TODO: ensure we move if we have an expiring range
+        // Pushes with push_back alone, and never reserves or moves; issue: feat-cc-sequence-prototype-open-design
         this->each([&]<class T>(T&& elem) { container.push_back(cc::forward<T>(elem)); });
         return container;
     }
@@ -180,9 +179,7 @@ public:
         static_assert(sizeof(ContainerT) > 0, "ContainerT must be complete (did you forget to include its header?)");
 
         ContainerT container;
-        // TODO: use a container protocol to make "push_back" more generic
-        //       and try to reserve
-        // TODO: ensure we move if we have an expiring range
+        // Pushes with push_back alone, and never reserves or moves; issue: feat-cc-sequence-prototype-open-design
         this->each([&]<class T>(isize idx, T&& elem)
                    { container.push_back(cc::invoke_with_optional_idx(idx, map, cc::forward<T>(elem))); });
         return container;
@@ -190,18 +187,13 @@ public:
 
     [[nodiscard]] auto to_vector() { return this->to_container<cc::vector<element_t>>(); }
 
-    /// TODO: not implemented — returns nothing today.
-    [[nodiscard]] auto to_array()
-    {
-        // TODO: static assert has_known_size
-        return;
-    }
+    /// Not implemented — returns nothing today.
+    // issue: bug-cc-sequence-sum-and-to-array-unimplemented
+    [[nodiscard]] auto to_array() { return; }
 
     void push_to(auto& container)
     {
-        // TODO: use a container protocol to make "push_back" more generic
-        //       and try to reserve
-        // TODO: ensure we move if we have an expiring range
+        // Pushes with push_back alone, and never reserves or moves; issue: feat-cc-sequence-prototype-open-design
         this->each([&]<class T>(T&& elem) { container.push_back(cc::forward<T>(elem)); });
     }
 
@@ -217,8 +209,7 @@ public:
     // Meant to delegate to the range's own try_fold_first where it has one; today it always uses external iteration.
     sequence_fold_result try_fold_first(auto&& init, auto&& step)
     {
-        // TODO:
-        // if range supports try_fold_first, use that directly
+        // Always external iteration, even where the range has its own try_fold_first; issue: feat-cc-sequence-prototype-open-design
 
         // fallback based on external iteration
         auto it = cc::begin(_range);
@@ -227,8 +218,7 @@ public:
         if (it == end)
             return sequence_fold_result::empty;
 
-        // TODO:
-        // do we really want state here?
+        // Whether this state is wanted is open; issue: feat-cc-sequence-prototype-open-design
         // if init & step return bool/void, we avoid weird out params or pair returns
         // I dunno about the codegen quality in every case ...
 
@@ -258,8 +248,7 @@ public:
     // step returning true early-outs of the fold.
     sequence_fold_result try_fold(auto&& step)
     {
-        // TODO:
-        // if range supports try_fold, use that directly
+        // Always external iteration, even where the range has its own try_fold; issue: feat-cc-sequence-prototype-open-design
 
         // fallback based on external iteration
         auto it = cc::begin(_range);

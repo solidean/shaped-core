@@ -122,7 +122,8 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
   Deliberately not in v1: retaining the whole JSON document alongside the parsed structure doubles memory against read-once-into-a-native-structure.
   A stored `json::ref` would also dangle across a `cc::move(data)`.
 - `[planned]` **a node's composed local transform** — blocked on typed-geometry, which has no TRS composition yet.
-  The reader stores `matrix` or TRS in whichever form the file used and composes nothing; [lower-library-gaps.md](lower-library-gaps.md) has that gap and the rest.
+  The reader stores `matrix` or TRS in whichever form the file used and composes nothing.
+  [feat-tg-transform-builders](../../../base/typed-geometry/docs/issues/feat-tg-transform-builders.md) is that gap.
 - `[planned]` **writer**.
 
 ### stl [done]

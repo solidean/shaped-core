@@ -37,10 +37,9 @@ enum class sg::vertex_attribute_format
 /// It names which shader input it feeds: `semantic` + `semantic_index`, matched via reflection.
 /// Plus its component format, its byte offset within the vertex, and the bound buffer (`slot`) it comes from.
 ///
-/// TODO: identify inputs by a backend-neutral numeric `location` rather than an HLSL `semantic` string.
+/// Inputs should be identified by a backend-neutral numeric `location` rather than an HLSL `semantic` string.
 /// Location is the only cross-language identity: SPIR-V, WGSL and Metal all match by it.
-/// The semantic then moves into compiled_shader's reflected I/O signature, and only the dx12 backend resolves location -> semantic.
-/// See libs/graphics/shaped-graphics/docs/TODO.md.
+/// issue: feat-sg-vertex-attribute-location
 struct sg::vertex_attribute
 {
     cc::string semantic;    ///< HLSL semantic (e.g. "POSITION") the input is matched by

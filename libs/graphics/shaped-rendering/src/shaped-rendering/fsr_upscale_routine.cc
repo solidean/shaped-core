@@ -16,9 +16,9 @@ using impl::is_set;
 namespace
 {
 /// Whether `ctx` renders through WARP, whose shader compiler crashes on FSR's shading-change pyramid pass.
-/// libs/graphics/shaped-rendering/docs/TODO.md records what bisecting it established.
+/// issue: bug-warp-fsr-shading-change-pyramid-crash records what bisecting it established.
 ///
-/// TEMPORARY: a Microsoft-vendor adapter that DXGI does not flag as software, which a GPU-less CI runner exposes, renders
+/// TEMPORARY(debt-fsr-microsoft-vendor-warp-check): a Microsoft-vendor adapter that DXGI does not flag as software, which a GPU-less CI runner exposes, renders
 /// through WARP too, and sg's `is_software` misses it.
 /// sg's adapter_info reporting such an adapter is what replaces the vendor check.
 [[nodiscard]] bool renders_through_warp(sg::context const& ctx)

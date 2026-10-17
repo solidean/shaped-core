@@ -67,7 +67,7 @@ The [readme](../readme.md#file-organization) has the full per-folder table.
 
 Add further deep-dive docs here as kebab-case `.md` files and link them from this list.
 
-Known follow-ups are collected in [TODO](TODO.md).
+Known follow-ups are issues in [issues/](issues/), listed by `uv run dev.py issues list --in libs/base/clean-core`.
 
 ## Systems
 

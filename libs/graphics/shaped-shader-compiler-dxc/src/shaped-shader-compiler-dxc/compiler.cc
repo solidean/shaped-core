@@ -92,7 +92,7 @@ struct dxc_invocation
 /// One reference held forever keeps the data loaded, and it is also what stops ThreadSanitizer reporting those
 /// cross-thread load/free pairs as races.
 ///
-/// TEMPORARY: the fix belongs upstream, where ScopedLocale should cache a locale rather than rebuild one per call.
+/// TEMPORARY(debt-ssc-dxc-pinned-utf8-locale): the fix belongs upstream, where ScopedLocale should cache a locale rather than rebuild one per call.
 void pin_utf8_locale()
 {
     // ScopedLocale's own candidates in its own order, so the reference held is the one it goes on to find.

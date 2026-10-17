@@ -9,11 +9,7 @@
 
 #include <limits> // no cc:: numeric limits yet
 
-// TODO(typed-geometry): ray-aabb intersection belongs in tg, as the first occupant of geometry/query/.
-// tg has aabb3f and ray3f but no query module at all — docs/plans/geometry-query-matrix.md is a proposal with no code —
-// so the slab test lives here. The shape it should take there is
-//   intersection_parameter(ray3<T>, aabb3<T>) -> cc::optional<hit_interval<T>>, plus an `intersects` predicate,
-// which is roughly 50 lines of header and 90 of test. Picking is the reason it is worth having.
+// The slab test below predates tg's geometry/query/, which now answers this pair; issue: chore-cube-editor-tg-ray-aabb-query
 
 namespace cube_editor
 {

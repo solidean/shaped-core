@@ -64,9 +64,8 @@ constexpr float ground_half_size = 200.0f;
 
 /// An indexed UV sphere of `radius`, centered on the origin, wound so every face's geometric normal points outward.
 ///
-/// TEMPORARY: primitive meshing belongs in typed-geometry rather than in an example, and this is the second caller that
-/// would want it (`hello-cube` hand-rolls a cube). A `tg::` sphere/box tessellation is the library extension that replaces
-/// this — see the viewer TODO.
+/// TEMPORARY(debt-sv-examples-hand-rolled-primitive-meshes): primitive meshing belongs in typed-geometry rather than in an example.
+/// A `tg::` sphere/box tessellation is the library extension that replaces this.
 struct sphere_mesh
 {
     cc::vector<tg::pos3f> positions;

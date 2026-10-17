@@ -164,14 +164,14 @@ private:
 /// `pin_texture` / `pin_buffer` are still here for an index that must outlive its epoch, and the type system is what keeps the
 /// two apart: a `sg::bindless_index` cannot be written where a `sg::bindless_element_handle` is wanted.
 ///
-/// TODO: the lock is sound but conservative, and it is not what makes an index valid.
+/// The lock is sound but conservative, and it is not what makes an index valid.
 /// What keeps a live index from being reassigned is sg's reclaim rule — a full array reclaims only indices *not
 /// acquired this epoch*, and never a pinned one — which is structural and needs no lock.
 /// The lock covers one narrower hazard: binding a snapshot taken before your mint.
-/// Two things are known-open, and [docs/TODO.md](../../../docs/TODO.md) carries them:
-/// the lock *prohibits* where a mint-generation stamp recorded in `bound_resources` would *verify*;
+/// Two things are known-open:
+/// the lock *prohibits* where a mint-generation stamp recorded in `bound_resources` would *verify* (issue: debt-sv-bindless-lock-generation-stamp);
 /// and it is global where the hazard is per-recording, so a routine acquiring mid-recording is refused rather
-/// than told to re-snapshot and rebind (which is nearly free, since a clean `snapshot()` is cached).
+/// than told to re-snapshot and rebind (issue: debt-sv-bindless-lock-per-recording).
 class sv::gpu_resource_manager
 {
 public:
@@ -303,6 +303,8 @@ public:
     /// traces with it and before `freeze()` — every index it returns is minted here.
     /// The buffer it is uploaded into is the record's own and persistent, which is what lets an unchanged working set leave
     /// the staging group clean and its snapshot cached.
+    /// That persistence is load-bearing: a fresh transient buffer per frame re-minted the whole bindless table on every
+    /// trace, and exhausted the descriptor heap within a second of `interactive-showcase-manual-test`.
     [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,
                                                                      mesh_id mesh,
                                                                      instance_id instance);

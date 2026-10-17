@@ -1343,7 +1343,7 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
                                 f"declare the file as '{file.path}:*'")
         refuse_option_layouts(package, f"`@raytracing pipeline {p['name']}` of '{file.path}'", groups, entries)
         if any(not m for m in p["misses"]):
-            # TODO: a ray type without a miss wants an empty miss record, which sg's table has no spelling for yet
+            # issue: feat-slib-raytracing-ray-type-without-miss
             raise HostCodeError(f"{where} leaves a ray type without a miss, which slib cannot table yet")
 
         def handle(entry: str) -> str:
