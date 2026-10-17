@@ -32,7 +32,7 @@ The bitsets have no entry points yet.
 **Reductions.** `count`, `count_if`, `any`, `all`, `none`, `contains`, `index_of` (→ `cc::optional<isize>`), `each`, `consume`.
 `find` returns a pointer, so it takes borrowed elements only, and `try_fold` is the general early-out fold.
 Over a first element: `sum`, `min`, `max`, `average`, `first`, `last`, `min_by`, `max_by` (non-empty only).
-Their counterparts for any sequence: `sum_from`, `min_or`, `max_or`, `first_or`, `try_min`, `try_max`, `try_first`, `try_last`.
+Their counterparts for any sequence: `sum_from`, `min_or`, `max_or`, `average_or`, `first_or`, `try_min`, `try_max`, `try_average`, `try_first`, `try_last`.
 `sum(f)`, `min(f)`, `max(f)` and `average(f)` reduce a projection: `ps.values().assert_non_empty().sum(&particle::mass)`.
 
 **Transformations.** `map`, `filter`, `take`, `skip`, `take_while`, `skip_while`, `chain`, `zip`, `enumerate`, `flatten`, `flat_map`, `indices`.
@@ -208,7 +208,6 @@ A reduction that needs a first element comes in a fixed grammar:
 | `try_min()`                            | any            | `cc::optional`    |
 | `sum_from(init)`                       | any            | returns `init`    |
 
-`average()` takes arithmetic elements only: it returns `f64` for integers, summed in 64 bits, and the element type for floating point.
 The non-empty-only form static-asserts with a message naming both ways out, `assert_non_empty()` and the `_or` / `_from` / `try_` variants.
 `sum_from` is a name rather than a `sum(init)` overload because `sum(f)` is the map-like overload (`sum(&particle::mass)`).
 Its `init` picks the accumulator type, `bytes.values().sum_from(i64(0))`, and there is no default-constructed variant: the zero stays explicit.
@@ -217,8 +216,11 @@ Its `init` picks the accumulator type, `bytes.values().sum_from(i64(0))`, and th
 `sum()` follows `min()` and `max()`, which have no identity at all, rather than special-casing one.
 `T{}` is not an identity every type promises: a type may not default-construct, or may default to something other than its additive zero.
 `sum_from(init)` makes the zero explicit, at the one call site that chose it.
-`average()` over a non-arithmetic type would be the affine combination `first + Σ(x - first) / n`, which `tg::pos` supports through `pos - pos -> vec` and `vec / T`.
-It is not built, because it needs the scalar to divide by, and nothing in clean-core can ask a `tg::vec` for it.
+`average()` is `sum / count` and nothing cleverer, since that is what the hand-written loop does.
+Integers sum in 64 bits and divide as `f64`, floating point stays in its own type.
+Any other type divides its sum by its `scalar_t`, which every typed-geometry value type names, so `tg::vec3f` averages to a `vec3f`.
+`tg::pos` does not average: `pos + pos` is a translation, but a pos does not divide by a scalar.
+An empty average has no answer, `0 / 0`, so `average()` is non-empty-only like `min()`, with `average_or` and `try_average` beside it.
 
 ### Pointers, references and the traits that guard them
 

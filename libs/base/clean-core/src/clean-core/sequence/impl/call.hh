@@ -254,6 +254,39 @@ constexpr void seq_add_to(AccT& acc, X const& x)
         acc = acc + x;
 }
 
+/// How average() sums and divides an element type E; is_defined is false where it cannot, so its assert can say why.
+template <class E>
+struct seq_average
+{
+    static constexpr bool is_defined = false;
+    using acc_t = E;
+    using result_t = E;
+    static constexpr E divide(E acc, isize) { return acc; }
+};
+/// The sum in decltype(x + x), divided by E::scalar_t.
+template <class E>
+    requires(!std::is_arithmetic_v<E>) && requires(E const& x, isize n) { (x + x) / typename E::scalar_t(n); }
+struct seq_average<E>
+{
+    static constexpr bool is_defined = true;
+    using acc_t = std::remove_cvref_t<decltype(std::declval<E const&>() + std::declval<E const&>())>;
+    using result_t = std::remove_cvref_t<decltype(std::declval<acc_t>() / std::declval<typename E::scalar_t>())>;
+
+    static constexpr result_t divide(acc_t acc, isize n) { return acc / typename E::scalar_t(n); }
+};
+/// Arithmetic elements: integers sum in 64 bits and divide as f64; floating point stays in its own type.
+template <class E>
+    requires std::is_arithmetic_v<E>
+struct seq_average<E>
+{
+    static constexpr bool is_defined = true;
+    static constexpr bool is_float = std::is_floating_point_v<E>;
+    using acc_t = std::conditional_t<is_float, E, std::conditional_t<std::is_signed_v<E>, i64, u64>>;
+    using result_t = std::conditional_t<is_float, E, f64>;
+
+    static constexpr result_t divide(acc_t acc, isize n) { return result_t(acc) / result_t(n); }
+};
+
 /// A callback result as a sequence item: an lvalue reference is kept, anything else is a prvalue.
 /// An rvalue reference decays too, since a pointer could not carry its value category through next().
 template <class R>

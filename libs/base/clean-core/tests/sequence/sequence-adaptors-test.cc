@@ -226,6 +226,25 @@ TEST("sequence - average, projections, by-key and ends")
     CHECK(ps.values().assert_non_empty().max_by([](particle const& p) { return p.mass; }).id == 1);
     CHECK(ps.values().assert_non_empty().average(&particle::mass) == 6.5f / 3.0f);
 
+    // the _or and try_ forms take any sequence
+    CHECK(cc::vector<int>().values().average_or(-1.0) == -1.0);
+    CHECK(!cc::vector<int>().values().try_average().has_value());
+    CHECK(v.values().filter([](int x) { return x > 4; }).try_average().value() == 20.0 / 3.0);
+    CHECK(v.values().filter([](int x) { return x > 4; }).assert_non_empty().average() == 20.0 / 3.0);
+
+    // any other type divides its sum by its scalar_t
+    struct meters
+    {
+        using scalar_t = float;
+        float value;
+        meters operator+(meters const& rhs) const { return {value + rhs.value}; }
+        meters operator/(float s) const { return {value / s}; }
+    };
+    auto const ms = cc::vector<meters>{{1.0f}, {2.0f}, {6.0f}};
+    static_assert(std::is_same_v<decltype(ms.values().assert_non_empty().average()), meters>);
+    CHECK(ms.values().assert_non_empty().average().value == 3.0f);
+    CHECK(ms.values().try_average().value().value == 3.0f);
+
     CHECK(v.values().assert_non_empty().first() == 3);
     CHECK(v.values().assert_non_empty().last() == 6);
     CHECK(v.values().first_or(-1) == 3);

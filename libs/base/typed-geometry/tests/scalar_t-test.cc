@@ -1,3 +1,4 @@
+#include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <typed-geometry/all.hh>
 
@@ -26,3 +27,11 @@ static_assert(std::is_same_v<tg::rigid_transform3f::scalar_t, f32>);
 
 // and it agrees with the shape-reading trait the query layer uses
 static_assert(std::is_same_v<tg::triangle3f::scalar_t, tg::traits::scalar_t<tg::triangle3f>>);
+
+TEST("tg scalar_t - a sequence of vectors averages through it")
+{
+    auto const vs = cc::vector<tg::vec3f>{tg::vec3f(1, 0, 0), tg::vec3f(0, 2, 0), tg::vec3f(2, 4, 3)};
+    auto const mean = vs.values().assert_non_empty().average();
+    static_assert(std::is_same_v<decltype(mean), tg::vec3f const>);
+    CHECK(mean == tg::vec3f(1, 2, 1));
+}

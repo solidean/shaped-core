@@ -217,40 +217,30 @@ public:
         return acc;
     }
 
-    /// The arithmetic mean: f64 for integer elements (summed in 64 bits), the element type for floating point.
+    /// The mean, sum / count.
+    /// Integers sum in 64 bits and divide as f64, floating point stays in its own type, and any other type divides its
+    /// sum by its scalar_t: a sequence of tg::vec3f averages to a vec3f.
     [[nodiscard]] constexpr auto average() &&
     {
         static_assert(is_non_empty, "average() needs a non-empty sequence: spell .assert_non_empty().average(), "
-                                    "or branch on .try_as_non_empty()");
-        static_assert(std::is_arithmetic_v<element_t>, "average() takes arithmetic elements; project with average(f)");
-        using result_t = std::conditional_t<std::is_floating_point_v<element_t>, element_t, f64>;
-        using acc_t = std::conditional_t<std::is_floating_point_v<element_t>, element_t,
-                                         std::conditional_t<std::is_signed_v<element_t>, i64, u64>>;
-        acc_t acc = 0;
-        if constexpr (has_known_size)
-        {
-            auto const n = _source.size();
-            (void)impl::seq_try_fold(_source,
-                                     [&](auto const& x)
-                                     {
-                                         acc += acc_t(x);
-                                         return false;
-                                     });
-            return result_t(acc) / result_t(n);
-        }
-        else
-        {
-            isize n = 0;
-            (void)impl::seq_try_fold(_source,
-                                     [&](auto const& x)
-                                     {
-                                         acc += acc_t(x);
-                                         ++n;
-                                         return false;
-                                     });
-            return result_t(acc) / result_t(n);
-        }
+                                    "branch on .try_as_non_empty(), or use .average_or(fallback) / .try_average()");
+        return this->_average([](auto r) { return r; }, [] { return typename impl::seq_average<element_t>::result_t(); });
     }
+
+    template <class U>
+    [[nodiscard]] constexpr auto average_or(U&& fallback) &&
+    {
+        using result_t = typename impl::seq_average<element_t>::result_t;
+        return this->_average([](result_t r) { return r; }, [&] { return result_t(cc::forward<U>(fallback)); });
+    }
+
+    [[nodiscard]] constexpr auto try_average() &&
+    {
+        using result_t = typename impl::seq_average<element_t>::result_t;
+        return this->_average([](result_t r) { return cc::optional<result_t>(cc::move(r)); },
+                              [] { return cc::optional<result_t>(); });
+    }
+
     template <class F>
     [[nodiscard]] constexpr auto average(F&& f) &&
     {
@@ -686,6 +676,33 @@ private:
                                      });
             return on_done(cc::move(state));
         }
+    }
+
+    // the sum and the count in one pass, then on_done(sum / count); on_empty() for an empty sequence
+    template <class DoneF, class EmptyF>
+    constexpr auto _average(DoneF&& on_done, EmptyF&& on_empty)
+    {
+        using avg = impl::seq_average<element_t>;
+        static_assert(avg::is_defined,
+                      "average() divides the sum by the count: it needs element + element, and a sum that divides by "
+                      "the element's scalar_t (tg::pos does not divide by a scalar)");
+        isize n = 0;
+        isize known_n = 0;
+        if constexpr (has_known_size)
+            known_n = _source.size();
+        return this->_fold_from_first_or(
+            [&]<class X>(X&& x)
+            {
+                ++n;
+                return typename avg::acc_t(cc::forward<X>(x));
+            },
+            [&](typename avg::acc_t& acc, auto const& x)
+            {
+                impl::seq_add_to(acc, x);
+                ++n;
+            },
+            [&](typename avg::acc_t acc) { return on_done(avg::divide(cc::move(acc), has_known_size ? known_n : n)); },
+            on_empty);
     }
 
     template <bool IsMin, class KeyF>

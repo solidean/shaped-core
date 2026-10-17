@@ -802,7 +802,8 @@ if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value()) use(cc::mov
 .sum_from(i64(0));                // any sequence; init's type is the accumulator, acc + x must keep it (no float->int)
 .min_or(x);  .try_min();  .first_or(x);  .try_first();  .try_last();   // any sequence; all return BY VALUE
 .sum(&particle::mass);            // x(f) is map(f).x(): sum / min / max / average of a projection
-// sum is decltype(x + x), so u8 sums as int; average is f64 for integers
+// sum is decltype(x + x), so u8 sums as int; average is sum / n: f64 for integers, else / T::scalar_t
+.average_or(x);  .try_average();   // any sequence
 // fixed_array / fixed_span with N > 0 are non-empty at compile time: fa.values().sum() needs no check
 
 for (auto& x : v.values()) ...    // a pointer loop, same as `for (auto& x : v)`

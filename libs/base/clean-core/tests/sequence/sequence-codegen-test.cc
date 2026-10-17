@@ -237,6 +237,18 @@ CC_DONT_INLINE float seq_probe_map_values_seq(cc::map<int, float> const& m)
     return m.values().sum_from(0.0f);
 }
 
+CC_DONT_INLINE f64 seq_probe_average_naive(cc::span<int const> s)
+{
+    i64 acc = s[0];
+    for (isize i = 1; i < s.size(); ++i)
+        acc += s[i];
+    return f64(acc) / f64(s.size());
+}
+CC_DONT_INLINE f64 seq_probe_average_seq(cc::span<int const> s)
+{
+    return s.values().assert_non_empty().average();
+}
+
 CC_DONT_INLINE bool seq_probe_indices_contains_seq(cc::vector<int> const& v, isize i)
 {
     return v.indices().contains(i);
@@ -276,6 +288,7 @@ TEST("sequence - codegen probes agree with their naive loops")
     m[4] = 1.5f;
     CHECK(seq_probe_map_values_seq(m) == seq_probe_map_values_naive(m));
 
+    CHECK(seq_probe_average_seq(s) == seq_probe_average_naive(s));
     CHECK(seq_probe_indices_contains_seq(v, 10));
     CHECK(!seq_probe_indices_contains_seq(v, 11));
 }
