@@ -13,6 +13,22 @@
 
 // Every container reaches this header, so be careful what it depends on.
 
+/// The smallest and the largest element, from one pass; structured bindings take it apart: auto [lo, hi] = ...
+template <class T>
+struct cc::min_and_max
+{
+    T min;
+    T max;
+};
+
+/// The elements split by a predicate, each half in sequence order.
+template <class T>
+struct cc::partition_result
+{
+    cc::vector<T> passed;
+    cc::vector<T> failed;
+};
+
 /// A lazy, single-pass, eval-at-most-once sequence over a source, with functional compositions on top.
 /// Containers hand one out through values() and indices(); see libs/base/clean-core/docs/sequence.md.
 ///
@@ -23,25 +39,6 @@
 /// Terminal operations are &&-qualified and consume it, so `cc::move(s).count()` is how a named one is spent.
 /// A callback may take a leading `isize` index, its item's position in the sequence it is applied to.
 /// A zip's items reach a callback spread, f(a, b), where it takes them that way.
-namespace cc
-{
-/// The smallest and the largest element, from one pass; structured bindings take it apart: auto [lo, hi] = ...
-template <class T>
-struct min_and_max
-{
-    T min;
-    T max;
-};
-
-/// The elements split by a predicate, each half in sequence order.
-template <class T>
-struct partition_result
-{
-    cc::vector<T> passed;
-    cc::vector<T> failed;
-};
-} // namespace cc
-
 template <class SourceT>
 struct cc::sequence
 {
