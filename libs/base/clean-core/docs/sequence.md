@@ -25,6 +25,8 @@ It is also the views `span`, `fixed_span` and `strided_span`, and the ringbuffer
 `map` has `keys()` and `values()`, and `set` has `values()`.
 `values()` on a temporary container moves it into the sequence; on an lvalue it references it.
 A ringbuffer is the exception: its elements wrap, so a temporary one has no `values()` rather than a hidden `linearize()`.
+`values_of`, `chain` and `zip` refuse a temporary ringbuffer for the same reason, rather than walking it from the heap.
+A const temporary is refused everywhere, since it can be neither referenced past the expression nor moved from.
 `fixed_array<T, N>` and `fixed_span<T, N>` with `N > 0` hand out sequences that are non-empty at compile time.
 The bitsets have no entry points yet.
 
@@ -68,13 +70,16 @@ Materializing a zip makes `cc::tuple` elements, which need `<clean-core/containe
 
 **`cc::format`** takes a sequence: `cc::println("{}", v.values())` prints `[1, 2, 3]`, and a spec applies to each element, `{:.2f}`.
 A zip's or a window's items print as tuples, `[(1, 4), (2, 5)]`.
-Formatting consumes the sequence like any terminal operation, and since `cc::format` takes its arguments by const reference, a const sequence object must not be formatted.
+Formatting consumes the sequence like any terminal operation, so it takes a temporary or `cc::move(s)`: `cc::println("{}", s)` on a named `s` does not compile.
+The formatter says so with `consumes_argument`, which [formatting.md](formatting.md) describes.
 
 **Laziness skips work, and that includes side effects.**
 `count()` over a sized `map` returns the size without calling `f`, and so do `indices()`, `take` and `skip` over a source that knows its positions.
+`inspect(f)` is the exception: it exists for what `f` does, so it has no size, and `count()` passes every element by `f`.
 `consume()` is the terminal operation that evaluates every element, for a chain kept for what its callbacks do.
 
-**Infinite sequences.** `repeat(x)`, `generate` and `iterate` never run out, and `is_infinite` propagates through map, filter, skip, the while forms and chain.
+**Infinite sequences.** `repeat(x)`, `generate` and `iterate` never run out, and `is_infinite` propagates through map, filter, skip, the while forms, enumerate and chain.
+A flatten is infinite when its outer sequence is, or when the outer one is never empty and its inner ones are infinite.
 A reduction that traverses every element static-asserts on one; `take(n)` makes it finite, and with a known size.
 An infinite sequence is non-empty, since it never runs out, so `first()` needs no check.
 
@@ -114,9 +119,18 @@ A transformation wraps the source in exactly one adaptor source and rewraps that
   They are what let `take` and `skip` reshape a contiguous source instead of wrapping it, and a zip run as one index loop.
   Two more walk from the back: `next_back()` and `try_rfold(step)`, which is what `reversed()`, `last()` and the `last_*` forms stand on.
   An adaptor forwards a capability wherever it can: `filter(p).contains(x)` is `inner.contains(x) && p(x)`, and `map(f).at(i)` is `f(inner.at(i))`.
+* **`has_pure_at`** says `at(i)` evaluates nothing, so asking for one position twice repeats no work and no side effect.
+  Spans, iota, strided and owning sources have it, and a map does not, since its `at` calls `f`.
+  A window asks each position up to N times, so it indexes only a pure source and buffers otherwise.
 
 The calling contract: `next()` and `next_back()` any number of times in any mix, then `try_fold` or `try_rfold` at most once, after which the source is spent.
 A source therefore need not leave a resume point behind `try_fold`, which is what lets a tree simply recurse inside it.
+`at`, `advance` and `truncate` address the elements remaining, so they may follow either.
+
+**A reference may point into the source itself**: repeat's one value, a temporary `fixed_vector` an owning source holds inline, a flatten's current inner container.
+It is valid while that source object lives, and the next step may end it, as a flatten opening its next inner container does.
+So whatever keeps a reference across steps, a buffered window or a dedup, keeps it only from a borrowed source, and copies otherwise.
+The one place a source moves after handing out a reference is the element a runtime non-empty check pulls; that wrapper carries the reference to the same offset in the moved-to source.
 
 ### Internal iteration
 
@@ -159,7 +173,7 @@ All reductions are written in terms of `try_fold`, and only the sequence layer c
   So a source that is itself a pointer range offers `begin()`/`end()`, and range-for uses them directly.
 * **A prvalue slot does not have the problem.** Range-for over `map` vectorizes like the naive loop, since its emptiness is a flag the optimizer tracks.
 * **A sized zip is one index loop.** Every side's `at(i)` under one counter, so a dot product over two spans is the naive loop, register allocation aside.
-  `enumerate` is a zip with an unbounded index range and compiles to the hand-indexed loop.
+  `enumerate` is its own source, the input's position as an offset, and compiles to the hand-indexed loop.
 * **A map's own fold beats its iterator.** Summing `m.values()` walks bucket and chain as a plain double loop, a third the size of iterating the map by hand.
 * **Neighbourhoods reach parity too.** `pairwise` deltas vectorize like the hand loop, `chunks<3>` and `step_by(2)` match their strided loops.
   `equals` over two spans is the naive comparison loop, instruction for instruction, through an index path both sides offer.
@@ -174,13 +188,21 @@ A window or chunk yields a pack of N items, like a zip, so callbacks take them s
 N is a template argument because the pack's arity is part of its type, and it is what keeps the loop free of a runtime-sized buffer.
 
 Over a source that knows its positions each is an index loop over `at()`, which also gives it a size, positions of its own and reversal.
-Otherwise it buffers: a window keeps the last N `next()` results and a chunk the next N, as pointers for reference items.
-A prvalue input is held by value in that buffer, so its window is a pack of const references into it, valid until the next step.
+A window asks every position up to N times, so it takes that path only where `at` is pure, and a window over `map(f)` buffers to call `f` once per element.
+An indexed pack holds a prvalue item by value, so `iota(n).pairwise()` holds its own two integers.
+Otherwise it buffers: a window keeps the last N `next()` results and a chunk the next N.
+A reference item is buffered as a pointer where the source is borrowed and as a copy where it is not, since a reference into the source may die at the next step.
+A buffered value's window is a pack of const references into the buffer, valid until the next step.
 `to_vector` copies them out into tuples, which is the usual way such a window escapes.
 
 ### Callbacks: the optional index and spread elements
 
 A callback may take a leading `isize` index or omit it; the no-index form is tried first.
+That holds for every callback: maps and predicates, and the keys of `min_by`, `count_by`, `to_map`, `partition`, `dedup_by` and the rest.
+A key sees the item as a const view, before it is materialized, so over a zip it takes `(a, b)` rather than a tuple.
+`scan`'s function takes the accumulator first, `f(acc, idx?, item)`.
+`is_sorted_by(key)` is `map(key).is_sorted()`, so each key is computed once.
+`min_ptr_by_into(p, key)` is the one key without an index, since the element `p` already points to has no position in the sequence.
 The index is the position in the sequence the callback is applied to: a filter's predicate counts its input, and a map after the filter counts the elements that passed.
 The sequence layer adds the counter only when `if constexpr` sees the callback take one, so an unused index costs nothing without relying on the optimizer.
 A `try_fold` step may return void or bool: void never stops, bool stops on true.
@@ -192,6 +214,8 @@ The optional index stays unambiguous, since the indexed form has exactly one par
 Variadic and defaulted lambdas are the known exception, documented rather than designed around.
 The forms are tried in order: spread, index then spread, the pack whole, index then the pack.
 So a callback taking `(auto&& p)` over a zip gets the pack, which has the tuple protocol.
+And `(isize i, auto w)` over a zip of ints is spread, `i` the first int, never the index and the pack.
+That case is not diagnosed: asking whether a generic lambda also takes the other form would compile its body with that form's arguments, which is a hard error rather than a no.
 
 `chain` needs both sides to share an element type, and merges how they yield it.
 `T&` with `T const&` chains as `T const&`, so nothing is copied and pointers still escape.
@@ -217,7 +241,7 @@ Adaptors propagate it:
 
 | source              | non-empty when       |
 |---------------------|----------------------|
-| map                 | its input is         |
+| map, enumerate      | its input is         |
 | filter              | never                |
 | `chain(a, b)`       | `a` or `b` is        |
 | `zip(a, b)`         | `a` and `b` are      |
@@ -225,7 +249,10 @@ Adaptors propagate it:
 | `fixed_span<T, N>`, a C array | `N > 0`    |
 | `single`            | always               |
 | anything infinite   | always               |
-A non-empty source hides `advance` and `truncate`, since either may empty it, so `take` over one wraps it rather than reshaping it.
+
+In the chain and zip rows an infinite side counts as non-empty.
+A non-empty source hides `advance` and `truncate`, since either may empty it.
+`take` and `skip` unwrap it to reach the source underneath, so `fixed_array.values().take(3)` is still a pointer range, no longer typed non-empty.
 
 The trait describes the source before it is consumed, and the `&&` rule is what keeps it true: nothing can call into a sequence after its first consuming call.
 
@@ -240,6 +267,7 @@ if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value())
 
 A source with a cheap `is_empty()` costs nothing here: the wrapper checks it and flips the trait.
 A source without one (filter, flatten) can only find out by evaluating, so the wrapper pulls the first element and buffers *exactly one*.
+When that element references the source's own storage, the wrapper carries the reference along whenever it moves.
 That preserves eval-at-most-once and keeps the fold-from-first path a branch-free, hand-written-loop-equivalent hot loop.
 
 A reduction that needs a first element comes in a fixed grammar:
@@ -274,6 +302,8 @@ It propagates conservatively: filter preserves it, map-by-value breaks it.
 `has_borrowed_elements` is the `borrowed_range` analogue: references and pointers stay valid even if the sequence object is a temporary.
 It is what keeps a pointer from escaping a sequence that owns its container.
 Pointer-returning APIs (`find`, `find_last`, the `*_ptr` family) require it.
+`filter_map` keeps it only over a borrowed input, since its pointers may point into the input's elements.
+`values_of({1, 2, 3})` does not have it, since an initializer list's array dies with the full expression.
 
 **`min()` and `max()` return by value.**
 A reference result would track the best element by pointer, and a pointer-tracking minimum does not vectorize where the naive `m = x < m ? x : m` does.

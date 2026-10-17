@@ -794,8 +794,9 @@ cc::repeat(x);  cc::generate(f);  cc::iterate(init, f);   // INFINITE: count/sum
 .find(p);                         // -> pointer or nullptr; static-asserts borrowed elements (not on owning / by-value map)
 .try_fold(f);                     // f -> bool|void, true stops; -> whether it stopped
 .to_vector();  .to_array();  .to_fixed_array<N>();  .to_container<C>();  .push_to(c);   // needs vector.hh; a zip -> cc::tuple (needs tuple.hh)
-// a callback may take a leading isize: its item's position in the sequence it is applied to
-// count() over a sized map does NOT call the map; .consume() runs every element for its side effects
+// EVERY callback, keys and predicates too, may take a leading isize (its position) and gets zip/window items SPREAD
+// spread wins where both fit: (isize i, auto w) over a zip of ints is (a, b); scan's f is f(acc, idx?, item)
+// count() over a sized map does NOT call the map; .consume() runs every element; inspect has no size, so it runs
 
 // lazy transformations
 .map(f);  .filter(p);  .flat_map(f);  .flatten();   // map keeps a reference result a reference (member projection)
@@ -814,7 +815,7 @@ for (auto&& [a, b] : cc::zip(x, y)) ...   // range-for binds a zip's pack
 .to_grouped_map(key);             // cc::map<key, cc::vector<element>>, in sequence order
 .count_by(key);  .partition(p);  .to_map(key, value);  .to_set();
 .join(", ");                      // cc::string; needs string/format.hh
-cc::println("{:.2f}", v.values()); // [1.00, 2.50]: cc::format takes a sequence (and consumes it)
+cc::println("{:.2f}", v.values()); // [1.00, 2.50]: cc::format consumes a sequence, so only a temporary or cc::move(s)
 
 // needing a first element: x() only compiles on a NON-EMPTY sequence
 .assert_non_empty().sum();        // .sum() .min() .max() .average() .first() .last() .min_by(key) .max_by(key)
@@ -825,6 +826,7 @@ if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value()) use(cc::mov
 // sum is decltype(x + x), so u8 sums as int; average is sum / n: f64 for integers, else / T::scalar_t
 .average_or(x);  .try_average();   // any sequence; all three take <AccT>: .average<f64>() sums floats in double
 // fixed_array / fixed_span with N > 0 are non-empty at compile time: fa.values().sum() needs no check
+// take / skip drop that (they may empty it) but keep the pointer range; enumerate / map keep it
 
 for (auto& x : v.values()) ...    // a pointer loop, same as `for (auto& x : v)`
 // range-for over a filter is external iteration and does not vectorize: a hot loop wants .filter(p).each(f)
