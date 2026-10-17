@@ -644,8 +644,9 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
                 auto const speckle = 0.3f + f32((x * 7 + y * 13) % 11) / 11.0f + (fine ? 0.2f : 0.0f);
 
                 albedo_pixels.push_back(a);
+                // Alpha 1, which the output carries through: it is what marks a texel a tile wrote, below.
                 color_pixels.push_back(tg::vec4f(a[0] * speckle * (0.5f + gradient), a[1] * speckle,
-                                                 a[2] * speckle * (1.5f - gradient), 0));
+                                                 a[2] * speckle * (1.5f - gradient), 1));
                 normal_pixels.push_back(tg::vec4f(0, 0, 1, 0));
             }
 

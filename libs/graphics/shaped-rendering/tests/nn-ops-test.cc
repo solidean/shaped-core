@@ -255,6 +255,13 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     auto const three
         = ctx.transient.create_buffer<f32>(width * 4, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
     cmd->upload.data_to_buffer(three, compacted);
+    // The caller's color, whose alpha the output carries through; only the three channels the curve maps are compared.
+    auto const color
+        = ctx.persistent.create_texture_2d({.format = sg::pixel_format::rgba32_float,
+                                            .width = width,
+                                            .height = 1,
+                                            .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
+    cmd->upload.bytes_to_texture(color.raw(), cc::span<tg::vec4f const>(pixels).as_bytes());
     auto const output_layout
         = ctx.cached.acquire_binding_group_layout(sr::sgl_shaders::nn_output_images::declared_bindings(k_values),
                                                   sr::sgl_shaders::nn_output_images::declared_samplers());
@@ -262,6 +269,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
     cmd->compute.bind_group(
         0, *ctx.transient.create_binding_group(*cmd, output_layout,
                                                sr::sgl_shaders::nn_output_images{.source = three.as_readonly_buffer(),
+                                                                                 .color = color.as_texture_view(),
                                                                                  .target = result.as_any_image_view()}));
     cmd->compute.set_inline_constants(sr::sgl_shaders::nn_output_constants{.width = u32(width),
                                                                            .height = 1,
