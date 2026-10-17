@@ -454,9 +454,9 @@ ASYNC_INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", 
 
 namespace
 {
-[[nodiscard]] sv::mesh_attribute scalar_attribute(cc::string name, sv::attribute_frequency f, f32 a, f32 b, f32 c)
+[[nodiscard]] sv::mesh_attribute scalar_attribute(cc::string_view name, sv::attribute_frequency f, f32 a, f32 b, f32 c)
 {
-    return sv::mesh_attribute::create(cc::move(name), f, cc::vector<f32>{a, b, c});
+    return sv::mesh_attribute::create(cc::string(name), f, cc::vector<f32>{a, b, c});
 }
 
 /// The u32 at `offset` of a parameter block, which is how every non-constant slot is read back.

@@ -193,10 +193,7 @@ public:
 
     /// Not implemented — returns nothing today.
     // issue: bug-cc-sequence-sum-and-to-array-unimplemented
-    [[nodiscard]] auto to_array()
-    {
-        return;
-    }
+    [[nodiscard]] auto to_array() { return; }
 
     void push_to(auto& container)
     {
