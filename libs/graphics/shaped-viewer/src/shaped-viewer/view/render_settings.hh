@@ -16,8 +16,8 @@ namespace sv
 /// gets", and a target above the cap would otherwise wait forever.
 /// `view_ref::is_accumulation_converged` is the answer that already applies it.
 ///
-/// Per view rather than per process is the intended shape — see libs/graphics/shaped-viewer/docs/TODO.md, where this becomes
-/// `render_settings::max_accumulated_frames`, excluded from the trace hash.
+/// Per view rather than per process is the intended shape: `render_settings::max_accumulated_frames`, excluded from the trace hash.
+/// issue: feat-sv-max-accumulated-frames
 inline constexpr u32 accumulation_frame_cap = 4096;
 } // namespace sv
 

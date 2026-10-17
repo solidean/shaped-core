@@ -357,7 +357,7 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
-    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
     sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
     (void)co_await ctx.routines.idle_completion();
 
@@ -397,7 +397,7 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
-    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
     sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
     (void)co_await ctx.routines.idle_completion();
 

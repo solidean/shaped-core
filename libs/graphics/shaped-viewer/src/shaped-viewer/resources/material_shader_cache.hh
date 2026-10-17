@@ -59,7 +59,7 @@ struct sv::material_permutation
 /// Compiles go through `sv::acquire_shader_library`, so a generated source resolves its `use`s against the same module
 /// directories the tracer's own package mounts.
 /// **A generated permutation does not hot-reload when a module it uses is edited.**
-/// The key hashes the resolution and the geometry kind rather than the modules' contents — see [docs/TODO.md](../../../docs/TODO.md).
+/// The key hashes the resolution and the geometry kind rather than the modules' contents — issue: bug-sv-hit-group-module-reload.
 ///
 /// **Nothing is evicted.** A permutation is a compiled hit group a live pipeline may hold, and the set is bounded by the
 /// material types a scene uses rather than by its instance count.

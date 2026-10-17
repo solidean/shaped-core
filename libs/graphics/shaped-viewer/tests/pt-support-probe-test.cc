@@ -141,8 +141,8 @@ cc::vector<tg::vec4f> make_sh()
 ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises", (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)

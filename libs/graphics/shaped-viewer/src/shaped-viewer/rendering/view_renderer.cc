@@ -866,7 +866,7 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
         auto copy = settings.reconstruct;
         copy.fresh_samples = fresh;
         // sv traces at the view's own size and does not jitter, so an upscaler here would run 1:1 on a mean it cannot
-        // reconstruct from; sv's TODO item for `render_settings::render_scale` is what lifts this.
+        // reconstruct from; issue: feat-sv-render-scale.
         copy.upscaler = sr::upscale_method::none;
         return copy;
     };
@@ -915,7 +915,7 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
         // The raygen offsets every primary ray by a fresh random amount within its pixel, so the samples are spread
         // over the pixel and their mean is its centre — which is exactly what a zero here says.
         // What `jitter` is for is the per-frame offset shared by every pixel that a temporal upscaler reconstructs
-        // sub-pixel detail from, and sv has none; see the viewer TODO.
+        // sub-pixel detail from, and sv has none; issue: feat-sv-upscaler-halton-jitter.
         .view_to_clip = cameras.current.view_to_clip,
         .previous_view_to_clip = cameras.previous.view_to_clip,
         .world_to_view = cameras.current.world_to_view,

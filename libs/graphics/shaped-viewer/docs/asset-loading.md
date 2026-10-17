@@ -393,11 +393,7 @@ The geometric fallback gives a normal but an arbitrary tangent, so anisotropy an
 tangents.
 That stays off by default and is enabled per material by the importer when an asset actually carries a normal map.
 
-**TODO, to be written into [TODO.md](TODO.md) when this lands:** our tangents will not match MikkTSpace.
-Nearly every DCC tool bakes normal maps against it, so an asset only reproduces exactly if the runtime basis matches the baker's.
-Per-corner area- and angle-weighted accumulation is close but not identical, and diverges visibly on high-frequency normal maps and
-mirrored uv shells.
-Fixing it means porting MikkTSpace's algorithm into the same mesh-processing helpers.
+**Our generated tangents will not match MikkTSpace**, which [feat-sv-mikktspace-tangents](issues/feat-sv-mikktspace-tangents.md) carries.
 
 ## No filesystem
 

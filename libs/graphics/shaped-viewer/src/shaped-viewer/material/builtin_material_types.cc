@@ -15,9 +15,9 @@
 // `openpbr` exposes it directly; `pbr` and `unlit` are projections onto it, the same way glTF's metallic-roughness maps onto
 // OpenPBR.
 //
-// TEMPORARY: these live as string literals because slib has no named-fragment asset kind — a fragment is not a shader, so
-// `sc_add_shader_package` has nothing to declare it as.
-// Moving them into `shaders/` once it does gets editor support and hot reload; see libs/graphics/shaped-viewer/docs/TODO.md.
+// TEMPORARY(debt-sv-builtin-material-fragments-as-strings): these live as string literals because slib has no named-fragment asset kind.
+// A fragment is not a shader, so `sc_add_shader_package` has nothing to declare it as.
+// Moving them into `shaders/` once it does gets editor support and hot reload.
 
 namespace sv
 {

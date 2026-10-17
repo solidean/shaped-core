@@ -708,8 +708,8 @@ ASYNC_INVOCABLE_TEST("sv - every kind of light traces to the sum of each alone",
 {
     // The same inline-readback path volumetric-furnace-test documents as fastfailing on Windows on ARM.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -776,8 +776,8 @@ ASYNC_INVOCABLE_TEST("sv - every kind of light delivers the illuminance its unit
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -840,8 +840,8 @@ ASYNC_INVOCABLE_TEST("sv - a sun delivers its illuminance with its bounce-ray st
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -897,8 +897,8 @@ ASYNC_INVOCABLE_TEST("sv - a surface's emission and an area light's nits are the
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -973,8 +973,8 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -1040,8 +1040,8 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
 ASYNC_INVOCABLE_TEST("sv - a light visible to the camera is seen at its radiance", (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
