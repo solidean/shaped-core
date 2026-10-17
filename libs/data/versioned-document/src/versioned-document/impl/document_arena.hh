@@ -11,7 +11,7 @@
 
 /// A bump allocator behind a cc::memory_resource, so a whole document's storage frees in one release.
 ///
-/// **TEMPORARY, and vdoc-local.**
+/// **TEMPORARY(debt-vdoc-local-document-arena), and vdoc-local.**
 /// This belongs in clean-core as a general bump resource — a `cc::arena_memory_resource` next to
 /// `cc::system_memory_resource` — and this copy goes when that lands; `cc::impl::intern_shard` already hand-rolls the
 /// same thing privately, which is the second copy that makes it worth having once.
