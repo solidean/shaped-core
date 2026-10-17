@@ -375,10 +375,10 @@ TEST("sequence lifetime - zip trims its sides with truncate, evaluating nothing"
 
 TEST("sequence lifetime - a reference a callback returns from its own state is not borrowed")
 {
-    auto const v = cc::vector<int>{0, 1};
+    auto v = cc::vector<int>{0, 1};
     auto const table = cc::fixed_array<int, 2>{5, 6};
 
-    static_assert(decltype(v.values().map([](int const& x) -> int const& { return x; }))::has_borrowed_elements);
+    static_assert(decltype(v.values().map([](int& x) -> int& { return x; }))::has_borrowed_elements);
     static_assert(!decltype(v.values().map([table](int i) -> int const& { return table[i]; }))::has_borrowed_elements);
 
     auto const ps = cc::vector<particle>{{1}, {2}};
