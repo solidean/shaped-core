@@ -5,6 +5,8 @@
 #include <clean-core/sequence/sequence.hh>
 #include <nexus/test.hh>
 
+#include <vector>
+
 using namespace cc::primitive_defines;
 
 // Codegen probes: each sequence spelling beside the hand-written loop it must match.
@@ -249,6 +251,44 @@ CC_DONT_INLINE f64 seq_probe_average_seq(cc::span<int const> s)
     return s.values().assert_non_empty().average();
 }
 
+CC_DONT_INLINE int seq_probe_reversed_naive(cc::span<int const> s)
+{
+    int acc = 0;
+    for (isize i = s.size() - 1; i >= 0; --i)
+        acc = acc * 3 + s[i];
+    return acc;
+}
+CC_DONT_INLINE int seq_probe_reversed_seq(cc::span<int const> s)
+{
+    int acc = 0;
+    s.values().reversed().each([&](int x) { acc = acc * 3 + x; });
+    return acc;
+}
+
+CC_DONT_INLINE int const* seq_probe_find_last_naive(cc::span<int const> s, int v)
+{
+    for (isize i = s.size() - 1; i >= 0; --i)
+        if (s[i] == v)
+            return &s[i];
+    return nullptr;
+}
+CC_DONT_INLINE int const* seq_probe_find_last_seq(cc::span<int const> s, int v)
+{
+    return s.values().find_last([v](int x) { return x == v; });
+}
+
+CC_DONT_INLINE int seq_probe_values_of_naive(std::vector<int> const& v)
+{
+    int acc = 0;
+    for (int x : v)
+        acc += x;
+    return acc;
+}
+CC_DONT_INLINE int seq_probe_values_of_seq(std::vector<int> const& v)
+{
+    return cc::values_of(v).sum_from(0);
+}
+
 CC_DONT_INLINE bool seq_probe_indices_contains_seq(cc::vector<int> const& v, isize i)
 {
     return v.indices().contains(i);
@@ -289,6 +329,11 @@ TEST("sequence - codegen probes agree with their naive loops")
     CHECK(seq_probe_map_values_seq(m) == seq_probe_map_values_naive(m));
 
     CHECK(seq_probe_average_seq(s) == seq_probe_average_naive(s));
+    CHECK(seq_probe_reversed_seq(s) == seq_probe_reversed_naive(s));
+    CHECK(seq_probe_find_last_seq(s, 5) == seq_probe_find_last_naive(s, 5));
+    CHECK(seq_probe_find_last_seq(s, 7) == seq_probe_find_last_naive(s, 7));
+    auto const sv = std::vector<int>{1, 2, 3, 4, 5};
+    CHECK(seq_probe_values_of_seq(sv) == seq_probe_values_of_naive(sv));
     CHECK(seq_probe_indices_contains_seq(v, 10));
     CHECK(!seq_probe_indices_contains_seq(v, 11));
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/sequence/impl/call.hh>
+#include <clean-core/sequence/impl/factories.hh>
 #include <clean-core/sequence/source.hh>
 
 #include <utility>
@@ -14,7 +15,8 @@ inline constexpr bool seq_is_sequence = false;
 template <class S>
 inline constexpr bool seq_is_sequence<cc::sequence<S>> = true;
 
-/// The source behind x: a sequence's own, or the one x.values() hands out, owning x when it is a temporary.
+/// The source behind x: a sequence's own, the one x.values() hands out, or one over x as a foreign range.
+/// A temporary container is owned either way.
 template <class X>
 [[nodiscard]] constexpr auto seq_source_of(X&& x)
 {
@@ -23,8 +25,10 @@ template <class X>
         static_assert(!std::is_lvalue_reference_v<X>, "a sequence is consumed, so it must be passed as an rvalue");
         return seq_dependent<X, seq_access>::type::source(cc::move(x));
     }
-    else
+    else if constexpr (requires { cc::forward<X>(x).values(); })
         return seq_dependent<X, seq_access>::type::source(cc::forward<X>(x).values());
+    else
+        return impl::seq_range_source(cc::forward<X>(x));
 }
 
 /// The item two chained sequences share: the same element type, as a reference where both are one.
@@ -52,10 +56,12 @@ struct chain_source
     static constexpr bool is_non_empty = seq_is_non_empty<A> || seq_is_non_empty<B>;
     static constexpr bool is_borrowed = seq_is_borrowed<A> && seq_is_borrowed<B>;
     static constexpr bool is_expiring = seq_is_expiring<A> && seq_is_expiring<B>;
+    static constexpr bool is_infinite = seq_is_infinite<A> || seq_is_infinite<B>;
 
     A _a;
     B _b;
-    bool _in_b = false;
+    bool _in_b = false;      // the front has moved past a
+    bool _back_in_a = false; // the back has moved past b
 
     constexpr chain_source(A&& a, B&& b) : _a(cc::move(a)), _b(cc::move(b)) {}
 
@@ -103,6 +109,37 @@ struct chain_source
         return chain_source::_fold(_b, step);
     }
 
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back()
+        requires seq_has_next_back<A> && seq_has_next_back<B>
+    {
+        if (!_back_in_a)
+        {
+            auto r = _b.next_back();
+            if (r)
+                return chain_source::_convert<B>(cc::move(r));
+            _back_in_a = true;
+        }
+        return chain_source::_convert<A>(_a.next_back());
+    }
+
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+        requires seq_has_next_back<A> && seq_has_next_back<B>
+    {
+        if (!_back_in_a && chain_source::_rfold(_b, step))
+            return true;
+        return chain_source::_rfold(_a, step);
+    }
+
+    template <class S, class StepF>
+    static constexpr bool _rfold(S& side, StepF& step)
+    {
+        if constexpr (std::is_same_v<typename S::item_t, item_t>)
+            return impl::seq_try_rfold(side, step);
+        else
+            return impl::seq_try_rfold(
+                side, [&]<class X>(X&& x) -> bool { return step(static_cast<item_t>(cc::forward<X>(x))); });
+    }
+
     [[nodiscard]] constexpr isize size() const
         requires seq_has_size<A> && seq_has_size<B>
     {
@@ -133,6 +170,8 @@ struct zip_source
     static constexpr bool is_borrowed = seq_is_borrowed<S0> && (seq_is_borrowed<Ss> && ...);
     static constexpr bool is_indexed = seq_has_at<S0> && (seq_has_at<Ss> && ...);
     static constexpr bool is_sized = seq_has_size<S0> && (seq_has_size<Ss> && ...);
+    static constexpr bool is_infinite = seq_is_infinite<S0> && (seq_is_infinite<Ss> && ...);
+    static constexpr bool is_reversible = is_sized && seq_has_next_back<S0> && (seq_has_next_back<Ss> && ...);
 
     using rest_index_t = std::index_sequence_for<Ss...>;
 
@@ -221,6 +260,35 @@ struct zip_source
         }(rest_index_t{});
     }
 
+    // from the back, every side first drops what reaches past the shortest
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back()
+        requires is_reversible
+    {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> seq_next_t<item_t>
+        {
+            auto const n = this->size();
+            while (_first.size() > n)
+                (void)_first.next_back();
+            ((
+                 [&]
+                 {
+                     while (this->template _r<Is>().size() > n)
+                         (void)this->template _r<Is>().next_back();
+                 }()),
+             ...);
+            if (n == 0)
+                return {};
+            auto r0 = _first.next_back();
+            auto rs = impl::seq_make_pack<seq_next_t<typename Ss::item_t>...>(this->template _r<Is>().next_back()...);
+            return seq_next_t<item_t>(seq_emplace,
+                                      [&]
+                                      {
+                                          return impl::seq_make_pack<typename S0::item_t, typename Ss::item_t...>(
+                                              impl::seq_get(r0), impl::seq_get(rs.template get<Is>())...);
+                                      });
+        }(rest_index_t{});
+    }
+
     [[nodiscard]] constexpr item_t at(isize i)
         requires is_indexed
     {
@@ -258,6 +326,7 @@ struct flatten_source
     using inner_source_t = decltype(impl::seq_source_of(std::declval<outer_item_t>()));
     using item_t = typename inner_source_t::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S> && seq_is_borrowed<inner_source_t>;
+    static constexpr bool is_infinite = seq_is_infinite<S>;
 
     S _outer;
     seq_slot<inner_source_t> _current;

@@ -301,6 +301,19 @@ struct seq_average<E, AccT>
     static constexpr result_t divide(AccT acc, isize n) { return acc / typename AccT::scalar_t(n); }
 };
 
+/// cc::sort and cc::sort_by, reached through argument-dependent lookup so this header need not include sort.hh.
+/// The caller of a sorted materializer includes <clean-core/algorithm/sort.hh>, which is what makes the name visible.
+template <class V, class... Args>
+constexpr void seq_sort_adl(V& v, Args&&... args)
+{
+    sort(v, cc::forward<Args>(args)...);
+}
+template <class V, class KeyF>
+constexpr void seq_sort_by_adl(V& v, KeyF&& key)
+{
+    sort_by(v, cc::forward<KeyF>(key));
+}
+
 /// A callback result as a sequence item: an lvalue reference is kept, anything else is a prvalue.
 /// An rvalue reference decays too, since a pointer could not carry its value category through next().
 template <class R>

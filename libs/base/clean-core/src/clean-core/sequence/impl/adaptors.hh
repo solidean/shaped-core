@@ -14,6 +14,11 @@ struct map_source
     using item_t = typename seq_item_of<seq_call_result_t<F, inner_item_t>>::type;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
+    static constexpr bool is_infinite = seq_is_infinite<S>;
+    static constexpr bool takes_idx = seq_call_takes_idx<F, inner_item_t>;
+
+    // from the back, the index of the last element is only known with the size
+    static constexpr bool is_reversible = seq_has_next_back<S> && (!takes_idx || seq_has_size<S>);
 
     S _inner;
     F _f;
@@ -70,6 +75,32 @@ struct map_source
     {
         _inner.truncate(n);
     }
+
+    template <class X>
+    constexpr item_t _call_back(X&& x, isize idx)
+    {
+        return impl::seq_call(_f, idx, cc::forward<X>(x));
+    }
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back()
+        requires is_reversible
+    {
+        isize idx = 0;
+        if constexpr (takes_idx)
+            idx = _idx + _inner.size() - 1;
+        auto r = _inner.next_back();
+        if (!r)
+            return {};
+        return impl::seq_make_next<item_t>([&]() -> item_t { return this->_call_back(impl::seq_get(r), idx); });
+    }
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+        requires is_reversible
+    {
+        isize idx = 0;
+        if constexpr (takes_idx)
+            idx = _idx + _inner.size() - 1;
+        return impl::seq_try_rfold(
+            _inner, [&]<class X>(X&& x) -> bool { return step(this->_call_back(cc::forward<X>(x), idx--)); });
+    }
 };
 
 template <class S, class P>
@@ -78,6 +109,9 @@ struct filter_source
     using item_t = typename S::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
+    static constexpr bool is_infinite = seq_is_infinite<S>;
+    static constexpr bool takes_idx = seq_call_takes_idx<P, item_t&>;
+    static constexpr bool is_reversible = seq_has_next_back<S> && (!takes_idx || seq_has_size<S>);
 
     S _inner;
     P _pred;
@@ -119,6 +153,35 @@ struct filter_source
     {
         return _inner.contains(v) && bool(cc::invoke(_pred, v));
     }
+
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back()
+        requires is_reversible
+    {
+        while (true)
+        {
+            isize idx = 0;
+            if constexpr (takes_idx)
+                idx = _idx + _inner.size() - 1;
+            auto r = _inner.next_back();
+            if (!r || bool(impl::seq_call(_pred, idx, impl::seq_peek(r))))
+                return r;
+        }
+    }
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+        requires is_reversible
+    {
+        isize idx = 0;
+        if constexpr (takes_idx)
+            idx = _idx + _inner.size() - 1;
+        return impl::seq_try_rfold(_inner,
+                                   [&]<class X>(X&& x) -> bool
+                                   {
+                                       isize i = idx--;
+                                       if (!bool(impl::seq_call(_pred, i, x)))
+                                           return false;
+                                       return step(cc::forward<X>(x));
+                                   });
+    }
 };
 
 /// A source whose first element was pulled to learn it exists, and is held until asked for.
@@ -130,6 +193,7 @@ struct peeked_source
     static constexpr bool is_non_empty = true;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
     static constexpr bool is_expiring = seq_is_expiring<S>;
+    static constexpr bool is_infinite = seq_is_infinite<S>;
 
     seq_next_t<item_t> _first;
     S _rest;
@@ -160,6 +224,17 @@ struct peeked_source
     {
         return _rest.size() + (_first ? 1 : 0);
     }
+
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back()
+        requires seq_has_next_back<S>
+    {
+        auto r = _rest.next_back();
+        if (r || !_first)
+            return r;
+        auto f = cc::move(_first);
+        _first = seq_next_t<item_t>();
+        return f;
+    }
 };
 
 /// The first n elements of a source that cannot truncate itself.
@@ -173,7 +248,7 @@ struct take_source
     S _inner;
     isize _n;
 
-    constexpr take_source(S&& inner, isize n) : _inner(cc::move(inner)), _n(n) {}
+    constexpr take_source(S&& inner, isize n) : _inner(cc::move(inner)), _n(n < 0 ? 0 : n) {}
 
     [[nodiscard]] constexpr seq_next_t<item_t> next()
     {
@@ -201,10 +276,31 @@ struct take_source
         return stopped;
     }
 
+    // an infinite input has no size, and the first n of it have exactly n
     [[nodiscard]] constexpr isize size() const
-        requires seq_has_size<S>
+        requires seq_has_size<S> || seq_is_infinite<S>
     {
-        return impl::seq_min(_n < 0 ? 0 : _n, _inner.size());
+        if constexpr (seq_is_infinite<S>)
+            return _n;
+        else
+            return impl::seq_min(_n, _inner.size());
+    }
+    [[nodiscard]] constexpr bool is_empty() const
+        requires seq_has_size<S> || seq_is_infinite<S>
+    {
+        return this->size() == 0;
+    }
+
+    // from the back, the input's elements past the first n are dropped first
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back()
+        requires seq_has_next_back<S> && seq_has_size<S>
+    {
+        while (_inner.size() > _n)
+            (void)_inner.next_back();
+        if (_n <= 0)
+            return {};
+        --_n;
+        return _inner.next_back();
     }
 };
 
@@ -218,6 +314,8 @@ struct skip_source
 
     S _inner;
     isize _n;
+
+    static constexpr bool is_infinite = seq_is_infinite<S>;
 
     constexpr skip_source(S&& inner, isize n) : _inner(cc::move(inner)), _n(n) {}
 
@@ -241,6 +339,22 @@ struct skip_source
     {
         this->_skip();
         return impl::seq_try_fold(_inner, step);
+    }
+
+    [[nodiscard]] constexpr isize size() const
+        requires seq_has_size<S>
+    {
+        auto const n = _inner.size() - _n;
+        return n < 0 ? 0 : n;
+    }
+
+    // from the back, the skipped front is simply never reached
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back()
+        requires seq_has_next_back<S> && seq_has_size<S>
+    {
+        if (_inner.size() <= _n)
+            return {};
+        return _inner.next_back();
     }
 };
 
@@ -306,6 +420,8 @@ struct skip_while_source
     isize _idx = 0;
     bool _skipping = true;
 
+    static constexpr bool is_infinite = seq_is_infinite<S>;
+
     constexpr skip_while_source(S&& inner, P&& pred) : _inner(cc::move(inner)), _pred(cc::move(pred)) {}
 
     [[nodiscard]] constexpr seq_next_t<item_t> next()
@@ -334,6 +450,59 @@ struct skip_while_source
                                       }
                                       return step(cc::forward<X>(x));
                                   });
+    }
+};
+/// A source walked from the back: next() is the input's next_back(), and every positional capability is mirrored.
+template <class S>
+struct reverse_source
+{
+    using item_t = typename S::item_t;
+    static constexpr bool is_non_empty = seq_is_non_empty<S>;
+    static constexpr bool is_borrowed = seq_is_borrowed<S>;
+    static constexpr bool is_expiring = seq_is_expiring<S>;
+
+    S _inner;
+
+    constexpr explicit reverse_source(S&& inner) : _inner(cc::move(inner)) {}
+
+    [[nodiscard]] constexpr seq_next_t<item_t> next() { return _inner.next_back(); }
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back() { return _inner.next(); }
+    [[nodiscard]] constexpr bool try_fold(auto&& step) { return impl::seq_try_rfold(_inner, step); }
+    [[nodiscard]] constexpr bool try_rfold(auto&& step) { return impl::seq_try_fold(_inner, step); }
+
+    [[nodiscard]] constexpr isize size() const
+        requires seq_has_size<S>
+    {
+        return _inner.size();
+    }
+    [[nodiscard]] constexpr bool is_empty() const
+        requires seq_has_is_empty<S>
+    {
+        return _inner.is_empty();
+    }
+    template <class V>
+        requires seq_has_contains<S, V>
+    [[nodiscard]] constexpr bool contains(V const& v) const
+    {
+        return _inner.contains(v);
+    }
+
+    [[nodiscard]] constexpr item_t at(isize i)
+        requires seq_has_at<S>
+    {
+        return _inner.at(_inner.size() - 1 - i);
+    }
+    constexpr void advance(isize n)
+        requires seq_has_truncate<S>
+    {
+        auto const size = _inner.size();
+        _inner.truncate(size - impl::seq_min(n, size));
+    }
+    constexpr void truncate(isize n)
+        requires seq_has_advance<S>
+    {
+        auto const size = _inner.size();
+        _inner.advance(size - impl::seq_min(n, size));
     }
 };
 } // namespace cc::impl

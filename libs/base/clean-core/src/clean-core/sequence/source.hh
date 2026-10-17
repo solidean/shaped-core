@@ -21,11 +21,15 @@
 //   item_t at(isize i)                   // optional, with size(): the i-th remaining element, 0 <= i < size()
 //   void advance(isize n)                // optional, with size(): drop the first min(n, size()) elements unevaluated
 //   void truncate(isize n)               // optional, with size(): keep only the first min(n, size()) elements
+//   next_back()                          // optional: the last remaining element, as next() returns the first
+//   bool try_rfold(auto&& step)          // optional, with next_back(): try_fold from the back
 //   static constexpr bool is_non_empty   // optional, default false: at least one element before the first next()
 //   static constexpr bool is_borrowed    // optional, default false: references stay valid after the source dies
 //   static constexpr bool is_expiring    // optional, default false: the source owns its elements, so they may be moved out
+//   static constexpr bool is_infinite    // optional, default false: next() never runs out
 //
-// next() may be called any number of times, then try_fold at most once, after which the source is spent.
+// next() and next_back() may be called any number of times in any mix, then try_fold or try_rfold at most once,
+// after which the source is spent.
 // at, advance and truncate are for the sequence layer before any next(), never interleaved with it.
 // try_fold must spell its return type `bool`: detection checks the declaration, never the body.
 // See libs/base/clean-core/docs/sequence.md.
@@ -172,6 +176,8 @@ template <class S>
 inline constexpr bool seq_is_borrowed = requires { requires S::is_borrowed; };
 template <class S>
 inline constexpr bool seq_is_expiring = requires { requires S::is_expiring; };
+template <class S>
+inline constexpr bool seq_is_infinite = requires { requires S::is_infinite; };
 
 template <class S>
 concept seq_has_size = requires(S const& s) { requires std::is_convertible_v<decltype(s.size()), isize>; };
@@ -199,6 +205,10 @@ struct seq_probe_step
 };
 template <class S>
 concept seq_has_try_fold = requires(S& s) { requires std::is_same_v<decltype(s.try_fold(seq_probe_step{})), bool>; };
+template <class S>
+concept seq_has_next_back = requires(S& s) { s.next_back(); };
+template <class S>
+concept seq_has_try_rfold = requires(S& s) { requires std::is_same_v<decltype(s.try_rfold(seq_probe_step{})), bool>; };
 
 /// The internal fold where the source has one, the next() loop where it does not.
 /// step(item) -> bool, true stops; returns whether it stopped, and leaves the source spent.
@@ -212,6 +222,25 @@ template <class S, class StepF>
         while (true)
         {
             auto r = source.next();
+            if (!r)
+                return false;
+            if (step(impl::seq_get(r)))
+                return true;
+        }
+    }
+}
+
+/// try_fold from the back: the internal rfold where the source has one, the next_back() loop where it does not.
+template <class S, class StepF>
+[[nodiscard]] constexpr bool seq_try_rfold(S& source, StepF&& step)
+{
+    if constexpr (seq_has_try_rfold<S>)
+        return source.try_rfold(step);
+    else
+    {
+        while (true)
+        {
+            auto r = source.next_back();
             if (!r)
                 return false;
             if (step(impl::seq_get(r)))
@@ -273,6 +302,23 @@ struct span_source
     [[nodiscard]] constexpr T& at(isize i) const { return _p[i]; }
     constexpr void advance(isize n) { _p += impl::seq_min(n, size()); }
     constexpr void truncate(isize n) { _end = _p + impl::seq_min(n, size()); }
+
+    [[nodiscard]] constexpr T* next_back()
+    {
+        if (_p == _end)
+            return nullptr;
+        T* const p = --_end;
+        [[assume(p != nullptr)]];
+        return p;
+    }
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+    {
+        auto const p = _p;
+        for (isize i = _end - _p - 1; i >= 0; --i)
+            if (step(p[i]))
+                return true;
+        return false;
+    }
 };
 
 /// The half-open integer range [begin, end), an index sequence.
@@ -311,6 +357,20 @@ struct iota_source
     [[nodiscard]] constexpr isize at(isize i) const { return _i + i; }
     constexpr void advance(isize n) { _i += impl::seq_min(n, size()); }
     constexpr void truncate(isize n) { _end = _i + impl::seq_min(n, size()); }
+
+    [[nodiscard]] constexpr seq_slot<isize> next_back()
+    {
+        if (_i == _end)
+            return {};
+        return seq_slot<isize>(seq_emplace, [&] { return --_end; });
+    }
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+    {
+        for (auto i = _end, b = _i; i != b; --i)
+            if (step(isize(i - 1)))
+                return true;
+        return false;
+    }
 };
 
 /// A source that owns its container, which is what values() on an rvalue container hands out.
@@ -355,6 +415,23 @@ struct owning_source
     [[nodiscard]] constexpr item_t at(isize i) { return _container.data()[_i + i]; }
     constexpr void advance(isize n) { _i += impl::seq_min(n, size()); }
     constexpr void truncate(isize n) { _end = _i + impl::seq_min(n, size()); }
+
+    [[nodiscard]] constexpr auto* next_back()
+    {
+        if (_i == _end)
+            return decltype(_container.data())(nullptr);
+        auto* const p = _container.data() + --_end;
+        [[assume(p != nullptr)]];
+        return p;
+    }
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+    {
+        auto* const p = _container.data();
+        for (isize i = _end - 1; i >= _i; --i)
+            if (step(p[i]))
+                return true;
+        return false;
+    }
 };
 
 /// The source over elements a fixed byte stride apart, which strided_span hands out.
@@ -403,6 +480,16 @@ struct strided_source
     [[nodiscard]] constexpr bool is_empty() const { return _i == _end; }
     constexpr void advance(isize n) { _i += impl::seq_min(n, size()); }
     constexpr void truncate(isize n) { _end = _i + impl::seq_min(n, size()); }
+
+    [[nodiscard]] constexpr T* next_back()
+    {
+        if (_i == _end)
+            return nullptr;
+        --_end;
+        T* const p = reinterpret_cast<T*>(_start + _end * _stride); // NOLINT
+        [[assume(p != nullptr)]];
+        return p;
+    }
 };
 
 /// A source known to be non-empty, by construction or by a check already made.
