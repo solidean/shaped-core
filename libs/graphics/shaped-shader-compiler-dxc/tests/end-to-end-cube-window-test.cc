@@ -5,10 +5,10 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-shader-compiler-dxc/all.hh>
+#include <typed-geometry/camera/projection.hh>
 #include <typed-geometry/geometry/primitives/triangle.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/scalar/angle.hh>
-#include <typed-geometry/scalar/scalar.hh> // tg::tan
 
 using namespace cc::primitive_defines;
 
@@ -79,19 +79,6 @@ cc::vector<vertex> make_cube()
     quad(mpp, ppp, ppm, mpm, tg::vec4f(0.85f, 0.30f, 0.85f, 1)); // +Y top    — magenta
     quad(mmm, pmm, pmp, mmp, tg::vec4f(0.20f, 0.80f, 0.85f, 1)); // -Y bottom — cyan
     return out;
-}
-
-// A left-handed perspective projection in tg's column-vector convention (clip = P * view_pos), z in [0, 1].
-tg::mat4f perspective_lh(tg::angle_f fovy, float aspect, float z_near, float z_far)
-{
-    float const f = 1.0f / tg::tan(fovy * 0.5f);
-    tg::mat4f p = tg::mat4f::zero;
-    p[0, 0] = f / aspect;
-    p[1, 1] = f;
-    p[2, 2] = z_far / (z_far - z_near);
-    p[3, 2] = -z_near * z_far / (z_far - z_near);
-    p[2, 3] = 1.0f;
-    return p;
 }
 
 // Window state — a manual test runs one at a time, so a file-scope close flag is fine.
@@ -289,7 +276,8 @@ TEST("ssc::dxc + dx12 - spinning cube in a window", nx::config::manual)
         view[3, 2] = 3.0f; // move the cube +3 along +Z (camera at origin looking down +Z)
 
         float const aspect = float(size[0]) / float(size[1]);
-        tg::mat4f const proj = perspective_lh(tg::angle_f::make_from_degree(60.0f), aspect, 0.1f, 100.0f);
+        auto const proj
+            = tg::perspective_lh_zero_to_one(tg::angle_f::make_from_degree(60.0f), aspect, 0.1f, 100.0f).to_mat();
         tg::mat4f const mvp = proj * view * model;
 
         auto cmd = ctx.create_command_list();
