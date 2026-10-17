@@ -300,7 +300,7 @@ private:
             return &_data.obj_end;
 
         // otherwise we need a full new allocation
-        // TODO: think about re-center logic if a double-ended container ever lands
+        // Re-centering only matters once a double-ended container exists.
         new_allocation = cc::allocation<T>::create_empty_bytes(new_size_request_min, new_size_request_max,
                                                                alloc_alignment(), _data.custom_resource);
 
@@ -572,7 +572,7 @@ public:
     void clear_resize_to_filled(isize new_size, T const& value)
     {
         static_assert(std::is_copy_constructible_v<T>, "clear_resize_to_filled requires T to be copy constructible");
-        // TODO: could be split into a copy-assign prefix, then copy-constructed tail
+        // Could be split into a copy-assigned prefix and a copy-constructed tail.
         this->clear_resize_to_constructed(new_size, value);
     }
 
@@ -901,7 +901,7 @@ public:
         }
     }
 
-    // TODO:
+    // Not yet:
     // - emplace_front
     // - push_front
     // - push_front_range
@@ -1414,8 +1414,7 @@ public:
         return removed_count;
     }
 
-    // TODO:
-    // special for SoA use cases
+    // Not yet, for SoA use cases:
     // - remove_all_where_zipped(pred, containers&...) -> isize count
 
     // other mutations
