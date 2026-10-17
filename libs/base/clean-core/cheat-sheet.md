@@ -768,30 +768,42 @@ cc::dedup_sorted_ex(start, size, range, cmp);   // -> isize surviving count; com
 cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -> bool prunes subranges (=> sort_at)
 ```
 
-## Sequence (lazy ranges — see [sequence](docs/sequence.md))
+## Sequence (lazy ranges — see [sequence](docs/sequence.md), examples `clean-core/sequence-*`)
 
 ```cpp
-// comes with every contiguous container: vector, array, unique_vector, span, fixed_span
-v.values();                       // cc::sequence over the elements; references v, so never store it
-make_vec().values();              // on a temporary it OWNS the container: safe to name, moves elements out on to_vector()
-v.indices();                      // 0 .. size(); .contains(i) is a bounds check
-v.values().indices();             // index sequence of ANY sequence; counts while consuming if the size is unknown
+// entry points: every container. values() references an lvalue and OWNS a temporary (never store a sequence)
+v.values();  v.indices();         // vector, array, small/fixed_vector, fixed_array, spans, ringbuffers
+m.keys();  m.values();            // map (keys().contains(k) is the map's lookup); set: s.values()
+make_vec().values();              // owns the vector: safe to name, to_vector() moves the elements out
+cc::iota(n);  cc::iota(a, b);     // integers; .contains(i) is a range check
+cc::zip(a, b, ...);               // containers or sequences, in step until the shortest ends
 
 // terminal ops are &&-qualified: chain on the temporary, or cc::move(s).count() for a named one. single pass.
-.count();  .count_if(p);  .any(p);  .all(p);  .none(p);  .contains(x);  .each(f);
+.count();  .count_if(p);  .any(p);  .all(p);  .none(p);  .contains(x);  .each(f);  .consume();
 .index_of(p);                     // -> cc::optional<isize>
 .find(p);                         // -> pointer or nullptr; static-asserts borrowed elements (not on owning / by-value map)
 .try_fold(f);                     // f -> bool|void, true stops; -> whether it stopped
-.map(f);  .filter(p);             // lazy; map keeps a reference result a reference (member projection)
-.to_vector();  .to_container<C>();  .push_to(c);   // to_vector needs <clean-core/container/vector.hh>
+.to_vector();  .to_container<C>();  .push_to(c);   // to_vector needs <clean-core/container/vector.hh>; a zip -> cc::tuple
 // a callback may take a leading isize: its item's position in the sequence it is applied to
+// count() over a sized map does NOT call the map; .consume() runs every element for its side effects
+
+// lazy transformations
+.map(f);  .filter(p);  .flat_map(f);  .flatten();   // map keeps a reference result a reference (member projection)
+.take(n);  .skip(n);              // on a contiguous source: no new layer, skipped elements never evaluated
+.take_while(p);  .skip_while(p);
+.chain(other);                    // other: sequence or container; item types must match exactly (int& vs int const& do not)
+.zip(others...);                  // callbacks take items SPREAD: .map([](int a, float b) { ... })
+.enumerate();                     // callbacks take (isize i, item)
+for (auto&& [a, b] : cc::zip(x, y)) ...   // range-for binds a zip's pack
 
 // needing a first element: x() only compiles on a NON-EMPTY sequence
-.assert_non_empty().sum();        // .sum() .min() .max(); sum is decltype(x + x), so u8 sums as int
-if (auto s = v.values().filter(p).try_as_non_empty()) use(cc::move(s.value()).min());
+.assert_non_empty().sum();        // .sum() .min() .max() .average() .first() .last() .min_by(key) .max_by(key)
+if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value()) use(cc::move(s.value()).min());
 .sum_from(i64(0));                // any sequence; init's type is the accumulator, acc + x must keep it (no float->int)
-.min_or(x);  .max_or(x);  .try_min();  .try_max();   // any sequence; min/max always return BY VALUE
-// fixed_span<T, N> with N > 0 is non-empty at compile time: fs.values().sum() needs no check
+.min_or(x);  .try_min();  .first_or(x);  .try_first();  .try_last();   // any sequence; all return BY VALUE
+.sum(&particle::mass);            // x(f) is map(f).x(): sum / min / max / average of a projection
+// sum is decltype(x + x), so u8 sums as int; average is f64 for integers
+// fixed_array / fixed_span with N > 0 are non-empty at compile time: fa.values().sum() needs no check
 
 for (auto& x : v.values()) ...    // a pointer loop, same as `for (auto& x : v)`
 // range-for over a filter is external iteration and does not vectorize: a hot loop wants .filter(p).each(f)

@@ -1,7 +1,7 @@
 # cc::sequence
 
 `cc::sequence<Source>` is a lazy, single-pass, eval-at-most-once sequence over a *source*, with functional compositions on top.
-Every contiguous container hands one out through `values()` and `indices()`.
+Containers hand one out through `values()`, and indexed ones `indices()` too.
 
 ```cpp
 auto const n = v.values().filter([](int x) { return x > 0; }).count();
@@ -19,28 +19,43 @@ This doc is in two halves.
 
 ## What exists today
 
-**Entry points.** `values()` and `indices()` on `vector`, `array`, `unique_vector`, `unique_array`, `span` and `fixed_span`.
+**Entry points.** `values()` and `indices()` on every indexed container.
+That is `vector`, `array`, `unique_vector`, `unique_array`, `small_vector`, `fixed_vector` and `fixed_array`.
+It is also the views `span`, `fixed_span` and `strided_span`, and the ringbuffers.
+`map` has `keys()` and `values()`, and `set` has `values()`.
 `values()` on a temporary container moves it into the sequence; on an lvalue it references it.
-`fixed_span<T, N>` with `N > 0` hands out sequences that are non-empty at compile time.
-The other containers (maps, sets, ringbuffers, small and fixed vectors) do not have entry points yet.
+A ringbuffer is the exception: its elements wrap, so a temporary one has no `values()` rather than a hidden `linearize()`.
+`fixed_array<T, N>` and `fixed_span<T, N>` with `N > 0` hand out sequences that are non-empty at compile time.
+The bitsets have no entry points yet.
+`cc::iota(begin, end)` and `cc::zip(a, b, ...)` are the free factories.
 
-**Reductions.** `count`, `count_if`, `any`, `all`, `none`, `contains`, `index_of` (→ `cc::optional<isize>`), `each`.
+**Reductions.** `count`, `count_if`, `any`, `all`, `none`, `contains`, `index_of` (→ `cc::optional<isize>`), `each`, `consume`.
 `find` returns a pointer, so it takes borrowed elements only, and `try_fold` is the general early-out fold.
-Over a first element: `sum`, `min`, `max` (non-empty only), `min_or`, `max_or`, `try_min`, `try_max`, `sum_from`.
+Over a first element: `sum`, `min`, `max`, `average`, `first`, `last`, `min_by`, `max_by` (non-empty only).
+Their counterparts for any sequence: `sum_from`, `min_or`, `max_or`, `first_or`, `try_min`, `try_max`, `try_first`, `try_last`.
+`sum(f)`, `min(f)`, `max(f)` and `average(f)` reduce a projection: `ps.values().assert_non_empty().sum(&particle::mass)`.
 
-**Transformations.** `map`, `filter`, `indices`.
-`take`, `zip`, `chain`, `flatten` and the map-like reduction overloads (`sum(f)`) are not built.
+**Transformations.** `map`, `filter`, `take`, `skip`, `take_while`, `skip_while`, `chain`, `zip`, `enumerate`, `flatten`, `flat_map`, `indices`.
 
 **Non-emptiness.** `assert_non_empty()` and `try_as_non_empty()`.
 
 **Materialization.** `to_container<C>()`, `to_vector()`, `push_to(existing)`.
 `to_vector()` needs `<clean-core/container/vector.hh>`, which the sequence header cannot include.
 
-**Range-for** works on every sequence and consumes it.
+**Range-for** works on every sequence and consumes it; over a zip it binds `auto&& [a, b]`.
 
-**The headers.** [sequence/source.hh](../src/clean-core/sequence/source.hh) holds the source protocol and the built-in sources: `span_source`, `iota_source`, `owning_source`, `non_empty_source`.
-[sequence/impl/adaptors.hh](../src/clean-core/sequence/impl/adaptors.hh) holds `map_source`, `filter_source` and `peeked_source`.
+**Laziness skips work, and that includes side effects.**
+`count()` over a sized `map` returns the size without calling `f`, and so do `indices()`, `take` and `skip` over a source that knows its positions.
+`consume()` is the terminal operation that evaluates every element, for a chain kept for what its callbacks do.
+
+**The headers.** [sequence/source.hh](../src/clean-core/sequence/source.hh) holds the source protocol and the built-in sources: span, iota, strided, owning and non-empty.
+[sequence/impl/call.hh](../src/clean-core/sequence/impl/call.hh) is how a callback is called: the optional index, and a zip's items spread.
+[sequence/impl/adaptors.hh](../src/clean-core/sequence/impl/adaptors.hh) holds the single-input adaptors.
+[sequence/impl/combinators.hh](../src/clean-core/sequence/impl/combinators.hh) holds chain, zip and flatten.
 [sequence/sequence.hh](../src/clean-core/sequence/sequence.hh) is `cc::sequence` itself.
+The map's sources live in [map.hh](../src/clean-core/container/map.hh), since its nodes are private.
+
+**Examples**, from basic to complex: `clean-core/sequence-basics`, `clean-core/sequence-non-empty` and `clean-core/sequence-pipelines`, in [examples/](../examples/).
 
 ## The design
 
@@ -64,8 +79,10 @@ A transformation wraps the source in exactly one adaptor source and rewraps that
   `step(item) -> bool` returns true to stop; `try_fold` returns whether it was stopped.
   It must spell its return type `bool`, because detection reads the declaration and never instantiates the body.
 * **The capabilities** are a small, closed list, each with a fallback the sequence layer provides: `size` (counting), `is_empty`, `contains` (`any(==)`), `begin`/`end` (`next()`).
-  Later perhaps `nth` and reverse iteration.
-  An adaptor forwards a capability wherever it can: `filter(p).contains(x)` is `inner.contains(x) && p(x)`.
+  Three more come with `size`, for a source that knows its positions: `at(i)`, `advance(n)` and `truncate(n)`.
+  They are what let `take` and `skip` reshape a contiguous source instead of wrapping it, `last()` answer without a traversal, and a zip run as one index loop.
+  Later perhaps reverse iteration.
+  An adaptor forwards a capability wherever it can: `filter(p).contains(x)` is `inner.contains(x) && p(x)`, and `map(f).at(i)` is `f(inner.at(i))`.
 
 The calling contract: `next()` any number of times, then `try_fold` at most once, after which the source is spent.
 A source therefore need not leave a resume point behind `try_fold`, which is what lets a tree simply recurse inside it.
@@ -110,6 +127,9 @@ All reductions are written in terms of `try_fold`, and only the sequence layer c
   Rust escapes this with `NonNull` slice pointers; an empty span's null data pointer rules that out here.
   So a source that is itself a pointer range offers `begin()`/`end()`, and range-for uses them directly.
 * **A prvalue slot does not have the problem.** Range-for over `map` vectorizes like the naive loop, since its emptiness is a flag the optimizer tracks.
+* **A sized zip is one index loop.** Every side's `at(i)` under one counter, so a dot product over two spans is the naive loop, register allocation aside.
+  `enumerate` is a zip with an unbounded index range and compiles to the hand-indexed loop.
+* **A map's own fold beats its iterator.** Summing `m.values()` walks bucket and chain as a plain double loop, a third the size of iterating the map by hand.
 * **Range-for over a filter is the one shape without parity.** It is a tight scalar loop, since external iteration through a filter is a nested loop, while the naive `if` inside a loop vectorizes.
   `.filter(p).each(body)` is the spelling with parity, and the one a hot loop wants.
 
@@ -125,6 +145,11 @@ A zip spreads its elements into separate arguments, `[](auto& a, auto& b)`, beca
 Its element type is still a tuple for materialization.
 The optional index stays unambiguous, since the indexed form has exactly one parameter more.
 Variadic and defaulted lambdas are the known exception, documented rather than designed around.
+The forms are tried in order: spread, index then spread, the pack whole, index then the pack.
+So a callback taking `(auto&& p)` over a zip gets the pack, which has the tuple protocol.
+
+`chain` needs both sides to yield the same item type, and says so in its static assert.
+A mutable and a const vector do not chain directly: their items are `int&` and `int const&`, and a common type would silently copy or drop the constness.
 
 ### Consumption, ownership and lifetime
 
@@ -148,11 +173,12 @@ Adaptors propagate it:
 | filter              | never                |
 | `chain(a, b)`       | `a` or `b` is        |
 | `zip(a, b)`         | `a` and `b` are      |
-| `take<N>`           | `N > 0` and input is |
+| `take`, `skip`      | never                |
 | `fixed_span<T, N>`  | `N > 0`              |
 | iota, repeat        | always               |
 
-Map, filter and `fixed_span` exist; the rest of the table is the rule they will follow.
+`repeat` is not built; the rest of the table is what the adaptors do.
+A non-empty source hides `advance` and `truncate`, since either may empty it, so `take` over one wraps it rather than reshaping it.
 
 The trait describes the source before it is consumed, and the `&&` rule is what keeps it true: nothing can call into a sequence after its first consuming call.
 
@@ -161,7 +187,7 @@ Two wrappers establish it at runtime:
 ```cpp
 v.values().assert_non_empty().sum();
 
-if (auto s = v.values().filter(p).try_as_non_empty())
+if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value())
     use(cc::move(s.value()).sum());
 ```
 
@@ -178,13 +204,14 @@ A reduction that needs a first element comes in a fixed grammar:
 | `try_min()`                            | any            | `cc::optional`    |
 | `sum_from(init)`                       | any            | returns `init`    |
 
-`average()` is not built yet.
+`average()` takes arithmetic elements only: it returns `f64` for integers, summed in 64 bits, and the element type for floating point.
 The non-empty-only form static-asserts with a message naming both ways out, `assert_non_empty()` and the `_or` / `_from` / `try_` variants.
 `sum_from` is a name rather than a `sum(init)` overload because `sum(f)` is the map-like overload (`sum(&particle::mass)`).
 Its `init` picks the accumulator type, `bytes.values().sum_from(i64(0))`, and there is no default-constructed variant: the zero stays explicit.
 `acc + x` must have `init`'s type, so `sum_from(0)` over floats does not compile rather than truncating every step.
 `sum()` returns `decltype(x + x)`, so `u8` elements sum as `int`.
 The case for non-empty-only `sum()` is typed-geometry: `average()` of `tg::pos3` is meaningful, while a `pos3` has no zero and `pos + pos` does not exist.
+That `average()` is an affine combination, `first + Σ(x - first) / n`, and is not built: it needs a scalar type to divide by, which only typed-geometry knows.
 A "`T{}` is the identity" design gets exactly that wrong.
 
 ### Pointers, references and the traits that guard them
