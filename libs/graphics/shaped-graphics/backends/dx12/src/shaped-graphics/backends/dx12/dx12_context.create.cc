@@ -50,7 +50,7 @@ constexpr UINT k_microsoft_vendor_id = 0x1414;
 /// docs/bugs-external/warp-arm64-pac-fastfail/readme.md has the evidence.
 [[nodiscard]] bool is_software_adapter(DXGI_ADAPTER_DESC1 const& desc)
 {
-    return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id;
+    return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0; // PROBE: the flag alone, as before
 }
 
 /// The first hardware adapter that supports D3D12, into `out`.
