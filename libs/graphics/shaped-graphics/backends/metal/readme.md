@@ -83,7 +83,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `cached_pipeline_data()` returns empty and `used_cached_pipeline()` is always false, so every pipeline build is cold.
   Metal 4's `MTL4Archive` is one store per *compiler* where sg's surface is one blob per *pipeline*, so the mapping
   vulkan found — a `VkPipelineCache` per pipeline — has no counterpart here.
-  Recorded as open in [docs/TODO.md](../../docs/TODO.md), and pinned by a test so it reads as deliberate.
+  Recorded as open in [question-sg-metal-pipeline-blob](../../docs/issues/question-sg-metal-pipeline-blob.md), and pinned by a test so it reads as deliberate.
 - **Vertex buffers and inline constants are argument-table addresses, because Metal has neither of the usual forms.**
   MTL4's render encoder has no `setVertexBuffer`, and Metal has no root constants and no push constants — so both arrive the way a binding group does, as an address in the one `MTL4ArgumentTable`.
   That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
@@ -265,7 +265,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
 - **Metal orders the async tier against in-flight streams, where dx12 does not.**
   The per-resource streaming timeline is what makes it cheap: an async transfer waits on the same value a command list would.
   `promote_to_async` is then purely the statement of intent it is documented to be — it suppresses the warning, and adds no wait, because the wait is already there.
-  docs/TODO.md records the gap on the backend that still has it.
+  [bug-sg-dx12-async-transfer-ignores-stream](../../docs/issues/bug-sg-dx12-async-transfer-ignores-stream.md) records the gap on the backend that still has it.
 - **An acceleration structure is not a buffer.**
   DXR names one by the GPU virtual address of the buffer the driver built it into, and Vulkan wraps an object around such a buffer.
   `MTL::AccelerationStructure` derives from `MTL::Resource` and there is no `MTLBuffer` in the caller's hands at any point.
@@ -455,7 +455,7 @@ It is what makes the two execution tests the only thing anywhere that traces a r
 The agreed shape is HLSL run through SPIRV-Cross with all three artifacts checked in.
 The argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a hand-written kernel can agree with the backend and still disagree with every real shader.
 Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why it exists in the meantime.
-`raytrace.metal`'s own comment says so, and [docs/TODO.md](../../docs/TODO.md) carries the gap.
+`raytrace.metal`'s own comment says so, and [debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries the gap.
 So the fixture is reproducible by hand, and the binary needs neither the shader library nor the Metal toolchain.
 Its reflection is written out by hand next to it, so the test states the binding shape it means rather than inheriting whatever a reflector produced.
 Every test builds its own context, because the context is its subject.

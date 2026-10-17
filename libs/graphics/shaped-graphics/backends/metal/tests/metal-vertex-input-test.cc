@@ -296,7 +296,7 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
     // this passing on an M4, because a four-thread dispatch finishes well before the pass it precedes.
     // So read a failure here as the dispatch-to-draw path being broken, not as the ordering being unprotected — what
     // would catch that needs a dispatch long enough to lose the race, which is a slow test rather than a sharp one.
-    // libs/graphics/shaped-graphics/docs/TODO.md carries it.
+    // issue: question-sg-metal-encoder-barrier-unproven
     auto emit = mtl::test::mesh_kernel("emit_quad_main");
     emit.bindings.push_back({
         .name = "vertices",
