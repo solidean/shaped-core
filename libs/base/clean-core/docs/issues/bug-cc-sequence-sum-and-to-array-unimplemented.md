@@ -5,6 +5,8 @@ refs:
   - file: libs/base/clean-core/docs/sequence.md
   - symbol: cc::sequence::sum
   - symbol: cc::sequence::to_array
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-17T15:42Z
 ---
 
 # `cc::sequence::sum()` and `to_array()` are declared but not implemented
