@@ -556,6 +556,8 @@ public:
     [[nodiscard]] constexpr ContainerT to_container() &&
     {
         static_assert(sizeof(ContainerT) > 0, "ContainerT must be complete (did you forget to include its header?)");
+        static_assert(!impl::seq_is_pack<std::remove_cvref_t<item_t>> || impl::seq_is_complete<element_t>,
+                      "a zip materializes as cc::tuple elements: include <clean-core/container/tuple.hh>");
 
         ContainerT container;
         if constexpr (has_known_size && requires { container.reserve(isize(0)); })

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/container/tuple.hh>
 #include <clean-core/sequence/source.hh>
 
 #include <utility>
@@ -37,6 +36,7 @@ struct seq_pack_storage<std::index_sequence<Is...>, Ts...> : seq_pack_leaf<Is, T
 
 /// A zip's item: one item of each zipped sequence, references kept, prvalues held by value.
 /// A callback receives it spread, f(a, b), where it accepts that; materialized, it becomes a cc::tuple.
+/// cc::tuple is only named here, so materializing needs <clean-core/container/tuple.hh>.
 template <class... Ts>
 struct seq_pack : seq_pack_storage<std::index_sequence_for<Ts...>, Ts...>
 {
@@ -98,6 +98,9 @@ template <class... Ts, class... Args>
     static_assert(sizeof...(Ts) == sizeof...(Args));
     return impl::seq_make_pack_impl<Ts...>(std::index_sequence_for<Ts...>{}, cc::forward<Args>(args)...);
 }
+
+template <class T>
+inline constexpr bool seq_is_complete = requires { sizeof(T); };
 
 template <class T>
 inline constexpr bool seq_is_pack = false;

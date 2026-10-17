@@ -1,3 +1,4 @@
+#include <clean-core/container/tuple.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <nexus/test.hh>

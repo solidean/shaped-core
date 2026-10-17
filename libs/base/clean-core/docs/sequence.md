@@ -41,6 +41,7 @@ Their counterparts for any sequence: `sum_from`, `min_or`, `max_or`, `first_or`,
 
 **Materialization.** `to_container<C>()`, `to_vector()`, `push_to(existing)`.
 `to_vector()` needs `<clean-core/container/vector.hh>`, which the sequence header cannot include.
+Materializing a zip makes `cc::tuple` elements, which need `<clean-core/container/tuple.hh>`: the sequence header leaves it out of every container's closure.
 
 **Range-for** works on every sequence and consumes it; over a zip it binds `auto&& [a, b]`.
 

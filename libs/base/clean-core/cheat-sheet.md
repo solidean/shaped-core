@@ -783,7 +783,7 @@ cc::zip(a, b, ...);               // containers or sequences, in step until the 
 .index_of(p);                     // -> cc::optional<isize>
 .find(p);                         // -> pointer or nullptr; static-asserts borrowed elements (not on owning / by-value map)
 .try_fold(f);                     // f -> bool|void, true stops; -> whether it stopped
-.to_vector();  .to_container<C>();  .push_to(c);   // to_vector needs <clean-core/container/vector.hh>; a zip -> cc::tuple
+.to_vector();  .to_container<C>();  .push_to(c);   // needs vector.hh; a zip -> cc::tuple (needs tuple.hh)
 // a callback may take a leading isize: its item's position in the sequence it is applied to
 // count() over a sized map does NOT call the map; .consume() runs every element for its side effects
 

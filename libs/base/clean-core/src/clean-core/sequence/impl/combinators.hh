@@ -1,6 +1,5 @@
 #pragma once
 
-#include <clean-core/container/tuple.hh>
 #include <clean-core/sequence/impl/call.hh>
 #include <clean-core/sequence/source.hh>
 
@@ -99,9 +98,12 @@ struct zip_source
     using rest_index_t = std::index_sequence_for<Ss...>;
 
     S0 _first;
-    cc::tuple<Ss...> _rest;
+    seq_pack<Ss...> _rest;
 
-    constexpr zip_source(S0&& first, Ss&&... rest) : _first(cc::move(first)), _rest(cc::move(rest)...) {}
+    constexpr zip_source(S0&& first, Ss&&... rest)
+      : _first(cc::move(first)), _rest(impl::seq_make_pack<Ss...>(cc::move(rest)...))
+    {
+    }
 
     template <std::size_t I>
     constexpr auto& _r()
@@ -121,7 +123,7 @@ struct zip_source
             auto r0 = _first.next();
             if (!r0)
                 return {};
-            auto rs = cc::tuple<seq_next_t<typename Ss::item_t>...>(this->template _r<Is>().next()...);
+            auto rs = impl::seq_make_pack<seq_next_t<typename Ss::item_t>...>(this->template _r<Is>().next()...);
             if (!(bool(rs.template get<Is>()) && ...))
                 return {};
             return seq_next_t<item_t>(seq_emplace,
@@ -154,7 +156,8 @@ struct zip_source
                     _first,
                     [&]<class X>(X&& x) -> bool
                     {
-                        auto rs = cc::tuple<seq_next_t<typename Ss::item_t>...>(this->template _r<Is>().next()...);
+                        auto rs
+                            = impl::seq_make_pack<seq_next_t<typename Ss::item_t>...>(this->template _r<Is>().next()...);
                         if (!(bool(rs.template get<Is>()) && ...))
                         {
                             exhausted = true;

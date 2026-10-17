@@ -5,6 +5,7 @@
 #include <clean-core/container/set.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/container/strided_span.hh>
+#include <clean-core/container/tuple.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/sequence/sequence.hh>
 #include <nexus/test.hh>
