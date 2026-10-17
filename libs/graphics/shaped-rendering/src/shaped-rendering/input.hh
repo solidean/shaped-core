@@ -12,6 +12,7 @@
 ///
 /// Names describe the US-QWERTY legend, which is only a naming convention — the value is the position.
 /// Our own vocabulary of positions, not a platform scancode number: the underlying values mean nothing outside sr.
+/// It deliberately stops at F12 and skips the media, `AC_*` and `INTERNATIONAL*` keys; they read as `scancode::unknown`.
 enum class sr::scancode : sr::u16
 {
     unknown = 0,

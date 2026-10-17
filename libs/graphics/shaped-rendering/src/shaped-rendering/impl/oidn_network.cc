@@ -17,7 +17,7 @@ namespace sr::impl
 namespace
 {
 /// Where the weights blob sits, baked in at configure time.
-/// A shipped binary wants the weights staged beside it instead; libs/graphics/shaped-rendering/docs/TODO.md has it.
+/// TEMPORARY(debt-oidn-weights-source-tree-path): a shipped binary wants the weights staged beside it instead.
 constexpr char const* k_weights_dir = SR_OIDN_WEIGHTS_DIR;
 
 /// The tensors the network runs through, in the order they are produced.
