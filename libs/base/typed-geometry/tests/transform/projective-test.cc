@@ -64,13 +64,13 @@ TEST("tg projective - a triangle transforms vertex by vertex")
         CHECK(tgtest::approx(r.pos2, tri.pos2.transformed(p), 1e-4f));
     }
 
-    SECTION("a vertex behind the projection is not diagnosed")
+    SECTION("a vertex behind the projection is refused")
     {
-        // w is negative there, so the vertex lands on its mirror image and the triangle is no longer the image of the source hull.
-        // Nothing checks that — a caller who cares must clip first.
+        // w is negative there, so the vertex would land on its mirror image and the triangle would not be the image of
+        // the source hull; tg::view_projection::project is the spelling that clips first
         auto const behind = tg::triangle3f(tg::pos3f(-1, -1, 3), tg::pos3f(1, -1, 5), tg::pos3f(0, 1, -4));
-        auto const r = behind.transformed(p);
-        CHECK(tgtest::approx(r.pos2, behind.pos2.transformed(p), 1e-4f));
+        CHECK_ASSERTS(behind.transformed(p));
+        CHECK_ASSERTS(tg::segment3f(tg::pos3f(0, 0, 2), tg::pos3f(0, 0, -4)).transformed(p));
     }
 
     SECTION("a segment behaves the same way")
