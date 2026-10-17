@@ -207,3 +207,6 @@ void string::appendf(format_string<std::type_identity_t<Args>...> fmt, Args&&...
     cc::format_append(*this, fmt, cc::forward<Args>(args)...);
 }
 } // namespace cc
+
+// Deferred include: cc::format for sequences, and sequence::join, which need everything above.
+#include <clean-core/sequence/impl/format.hh>

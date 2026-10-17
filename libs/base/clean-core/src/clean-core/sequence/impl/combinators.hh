@@ -260,6 +260,20 @@ struct zip_source
         }(rest_index_t{});
     }
 
+    // from the back over positions: one descending index loop
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+        requires is_indexed
+    {
+        return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> bool
+        {
+            for (isize i = this->size() - 1; i >= 0; --i)
+                if (step(impl::seq_make_pack<typename S0::item_t, typename Ss::item_t...>(
+                        _first.at(i), this->template _r<Is>().at(i)...)))
+                    return true;
+            return false;
+        }(rest_index_t{});
+    }
+
     // from the back, every side first drops what reaches past the shortest
     [[nodiscard]] constexpr seq_next_t<item_t> next_back()
         requires is_reversible
@@ -319,6 +333,7 @@ struct zip_source
 };
 
 /// The elements of each element: each item is a sequence, or a container whose values() is taken.
+/// It reverses when the outer sequence and the inner ones do: the back keeps an inner source of its own.
 template <class S>
 struct flatten_source
 {
@@ -327,11 +342,19 @@ struct flatten_source
     using item_t = typename inner_source_t::item_t;
     static constexpr bool is_borrowed = seq_is_borrowed<S> && seq_is_borrowed<inner_source_t>;
     static constexpr bool is_infinite = seq_is_infinite<S>;
+    static constexpr bool is_reversible = seq_has_next_back<S> && seq_has_next_back<inner_source_t>;
 
     S _outer;
-    seq_slot<inner_source_t> _current;
+    seq_slot<inner_source_t> _current; // the inner source the front is in
+    seq_slot<inner_source_t> _back;    // the inner source the back is in
 
     constexpr explicit flatten_source(S&& outer) : _outer(cc::move(outer)) {}
+
+    template <class O>
+    static constexpr seq_slot<inner_source_t> _open(O& o)
+    {
+        return seq_slot<inner_source_t>(seq_emplace, [&] { return impl::seq_source_of(impl::seq_get(o)); });
+    }
 
     [[nodiscard]] constexpr seq_next_t<item_t> next()
     {
@@ -345,8 +368,13 @@ struct flatten_source
             }
             auto o = _outer.next();
             if (!o)
+            {
+                // the outer sequence is used up, so whatever the back opened is all that is left
+                if (_back)
+                    return (*_back).next();
                 return {};
-            _current = seq_slot<inner_source_t>(seq_emplace, [&] { return impl::seq_source_of(impl::seq_get(o)); });
+            }
+            _current = flatten_source::_open(o);
         }
     }
 
@@ -354,12 +382,51 @@ struct flatten_source
     {
         if (_current && impl::seq_try_fold(*_current, step))
             return true;
-        return impl::seq_try_fold(_outer,
-                                  [&]<class X>(X&& x) -> bool
-                                  {
-                                      auto inner = impl::seq_source_of(cc::forward<X>(x));
-                                      return impl::seq_try_fold(inner, step);
-                                  });
+        if (impl::seq_try_fold(_outer,
+                               [&]<class X>(X&& x) -> bool
+                               {
+                                   auto inner = impl::seq_source_of(cc::forward<X>(x));
+                                   return impl::seq_try_fold(inner, step);
+                               }))
+            return true;
+        return _back && impl::seq_try_fold(*_back, step);
+    }
+
+    [[nodiscard]] constexpr seq_next_t<item_t> next_back()
+        requires is_reversible
+    {
+        while (true)
+        {
+            if (_back)
+            {
+                auto r = (*_back).next_back();
+                if (r)
+                    return r;
+            }
+            auto o = _outer.next_back();
+            if (!o)
+            {
+                if (_current)
+                    return (*_current).next_back();
+                return {};
+            }
+            _back = flatten_source::_open(o);
+        }
+    }
+
+    [[nodiscard]] constexpr bool try_rfold(auto&& step)
+        requires is_reversible
+    {
+        if (_back && impl::seq_try_rfold(*_back, step))
+            return true;
+        if (impl::seq_try_rfold(_outer,
+                                [&]<class X>(X&& x) -> bool
+                                {
+                                    auto inner = impl::seq_source_of(cc::forward<X>(x));
+                                    return impl::seq_try_rfold(inner, step);
+                                }))
+            return true;
+        return _current && impl::seq_try_rfold(*_current, step);
     }
 };
 } // namespace cc::impl

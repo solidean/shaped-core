@@ -314,6 +314,10 @@ constexpr void seq_sort_by_adl(V& v, KeyF&& key)
     sort_by(v, cc::forward<KeyF>(key));
 }
 
+/// join() and the cc::format formatter for sequences, defined in sequence/impl/format.hh, which string/format.hh includes.
+template <class S>
+struct seq_format_support;
+
 /// A callback result as a sequence item: an lvalue reference is kept, anything else is a prvalue.
 /// An rvalue reference decays too, since a pointer could not carry its value category through next().
 template <class R>

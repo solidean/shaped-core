@@ -8,6 +8,7 @@
 #include <clean-core/sequence/impl/call.hh>
 #include <clean-core/sequence/impl/combinators.hh>
 #include <clean-core/sequence/impl/factories.hh>
+#include <clean-core/sequence/impl/windows.hh>
 #include <clean-core/sequence/source.hh>
 
 // Every container reaches this header, so be careful what it depends on.
@@ -22,6 +23,25 @@
 /// Terminal operations are &&-qualified and consume it, so `cc::move(s).count()` is how a named one is spent.
 /// A callback may take a leading `isize` index, its item's position in the sequence it is applied to.
 /// A zip's items reach a callback spread, f(a, b), where it takes them that way.
+namespace cc
+{
+/// The smallest and the largest element, from one pass; structured bindings take it apart: auto [lo, hi] = ...
+template <class T>
+struct min_and_max
+{
+    T min;
+    T max;
+};
+
+/// The elements split by a predicate, each half in sequence order.
+template <class T>
+struct partition_result
+{
+    cc::vector<T> passed;
+    cc::vector<T> failed;
+};
+} // namespace cc
+
 template <class SourceT>
 struct cc::sequence
 {
@@ -438,6 +458,185 @@ public:
         return {};
     }
 
+    /// The smallest and the largest element, in one pass, by value.
+    [[nodiscard]] constexpr cc::min_and_max<element_t> min_max() &&
+    {
+        static_assert(is_non_empty, "min_max() needs a non-empty sequence: spell .assert_non_empty().min_max(), or "
+                                    "use .try_min_max()");
+        return this->_fold_from_first(_init_min_max(), _min_max_step());
+    }
+
+    [[nodiscard]] constexpr cc::optional<cc::min_and_max<element_t>> try_min_max() &&
+    {
+        using result_t = cc::min_and_max<element_t>;
+        return this->_fold_from_first_or(
+            _init_min_max(), _min_max_step(), [](result_t r) { return cc::optional<result_t>(cc::move(r)); },
+            [] { return cc::optional<result_t>(); });
+    }
+
+    /// The position of the smallest element, the first of equal ones; empty for an empty sequence.
+    [[nodiscard]] constexpr cc::optional<typename impl::seq_dependent<SourceT, isize>::type> index_of_min() &&
+    {
+        return this->template _index_of_best<true>();
+    }
+    /// The position of the largest element, the first of equal ones; empty for an empty sequence.
+    [[nodiscard]] constexpr cc::optional<typename impl::seq_dependent<SourceT, isize>::type> index_of_max() &&
+    {
+        return this->template _index_of_best<false>();
+    }
+
+    /// The element at position i, by value; 0 <= i < count() must hold.
+    /// O(1) where the source knows positions, a walk of i elements otherwise.
+    [[nodiscard]] constexpr element_t nth(isize i) &&
+    {
+        auto r = cc::move(*this).try_nth(i);
+        CC_ASSERT(r.has_value(), "nth(i) past the end of the sequence");
+        return cc::move(r).value();
+    }
+
+    [[nodiscard]] constexpr cc::optional<element_t> try_nth(isize i) &&
+    {
+        if (i < 0)
+            return {};
+        if constexpr (impl::seq_has_at<SourceT>)
+        {
+            if (i >= _source.size())
+                return {};
+            return cc::optional<element_t>(element_t(impl::seq_as_element(_source.at(i))));
+        }
+        else
+            return cc::move(*this).skip(i).try_first();
+    }
+
+    //
+    // comparing with another sequence
+    // (other is a sequence, a container whose values() is taken, or any range)
+    //
+public:
+    /// Whether both have the same elements in the same order.
+    template <class OtherT>
+    [[nodiscard]] constexpr bool equals(OtherT&& other) &&
+    {
+        auto b = impl::seq_source_of(cc::forward<OtherT>(other));
+        if constexpr (has_known_size && impl::seq_has_size<decltype(b)>)
+            if (_source.size() != b.size())
+                return false;
+        if constexpr (impl::seq_has_at<SourceT> && impl::seq_has_at<decltype(b)>)
+        {
+            auto const n = _source.size();
+            for (isize i = 0; i < n; ++i)
+                if (!bool(_source.at(i) == b.at(i)))
+                    return false;
+            return true;
+        }
+        bool const differs = impl::seq_try_fold(_source,
+                                                [&](auto const& x)
+                                                {
+                                                    auto y = b.next();
+                                                    return !y || !bool(x == impl::seq_peek(y));
+                                                });
+        return !differs && !bool(b.next());
+    }
+
+    /// Whether this begins with every element of prefix, in order.
+    template <class PrefixT>
+    [[nodiscard]] constexpr bool starts_with(PrefixT&& prefix) &&
+    {
+        auto p = impl::seq_source_of(cc::forward<PrefixT>(prefix));
+        if constexpr (impl::seq_has_at<SourceT> && impl::seq_has_at<decltype(p)>)
+        {
+            auto const n = p.size();
+            if (n > _source.size())
+                return false;
+            for (isize i = 0; i < n; ++i)
+                if (!bool(_source.at(i) == p.at(i)))
+                    return false;
+            return true;
+        }
+        return !impl::seq_try_fold(p,
+                                   [&](auto const& y)
+                                   {
+                                       auto x = _source.next();
+                                       return !x || !bool(impl::seq_peek(x) == y);
+                                   });
+    }
+
+    /// The position of the first element that differs from other's, or where the shorter ends; empty when equal.
+    template <class OtherT>
+    [[nodiscard]] constexpr cc::optional<typename impl::seq_dependent<SourceT, isize>::type> mismatch(OtherT&& other) &&
+    {
+        auto b = impl::seq_source_of(cc::forward<OtherT>(other));
+        if constexpr (impl::seq_has_at<SourceT> && impl::seq_has_at<decltype(b)>)
+        {
+            auto const na = _source.size();
+            auto const nb = b.size();
+            auto const n = na < nb ? na : nb;
+            for (isize i = 0; i < n; ++i)
+                if (!bool(_source.at(i) == b.at(i)))
+                    return i;
+            if (na != nb)
+                return n;
+            return {};
+        }
+        isize idx = 0;
+        bool const stopped = impl::seq_try_fold(_source,
+                                                [&](auto const& x)
+                                                {
+                                                    auto y = b.next();
+                                                    if (!y || !bool(x == impl::seq_peek(y)))
+                                                        return true;
+                                                    ++idx;
+                                                    return false;
+                                                });
+        if (stopped || bool(b.next()))
+            return idx;
+        return {};
+    }
+
+    /// The lexicographic order against other, as element <=> element yields it; a proper prefix orders first.
+    template <class OtherT>
+    [[nodiscard]] constexpr auto compare(OtherT&& other) &&
+    {
+        auto b = impl::seq_source_of(cc::forward<OtherT>(other));
+        using other_element_t = typename impl::seq_element_of<typename decltype(b)::item_t>::type;
+        using order_t = decltype(std::declval<element_t const&>() <=> std::declval<other_element_t const&>());
+        auto result = order_t(isize(0) <=> isize(0));
+        bool const stopped = impl::seq_try_fold(_source,
+                                                [&](auto const& x)
+                                                {
+                                                    auto y = b.next();
+                                                    if (!y)
+                                                    {
+                                                        result = order_t(isize(1) <=> isize(0));
+                                                        return true;
+                                                    }
+                                                    auto const c = order_t(x <=> impl::seq_peek(y));
+                                                    if (c != 0)
+                                                    {
+                                                        result = c;
+                                                        return true;
+                                                    }
+                                                    return false;
+                                                });
+        if (!stopped && bool(b.next()))
+            result = order_t(isize(0) <=> isize(1));
+        return result;
+    }
+
+    /// Whether no element is smaller than the one before it.
+    [[nodiscard]] constexpr bool is_sorted() &&
+    {
+        return cc::move(*this).pairwise().all([](auto const& a, auto const& b) { return !bool(b < a); });
+    }
+
+    /// Whether no element's key is smaller than the key before it.
+    template <class KeyF>
+    [[nodiscard]] constexpr bool is_sorted_by(KeyF&& key) &&
+    {
+        return cc::move(*this).pairwise().all([&](auto const& a, auto const& b)
+                                              { return !bool(cc::invoke(key, b) < cc::invoke(key, a)); });
+    }
+
     //
     // reductions to an element's identity
     // (pointers into the elements, nullptr when empty, so they take any sequence with borrowed elements)
@@ -670,6 +869,90 @@ public:
         return cc::move(*this).map(cc::forward<F>(f)).flatten();
     }
 
+    /// Each pair of neighbours, as (a, b): n elements give n - 1 pairs.
+    [[nodiscard]] constexpr auto pairwise() && { return cc::move(*this).template windows<2>(); }
+
+    /// Every N consecutive elements, overlapping, as (a, b, ...): n elements give n - N + 1 windows.
+    /// Over positions it is an index loop; otherwise it buffers N, and a prvalue window references that buffer.
+    template <std::size_t N>
+    [[nodiscard]] constexpr auto windows() &&
+    {
+        using source = impl::window_source<SourceT, N>;
+        return sequence<source>(source(cc::move(_source)));
+    }
+
+    /// Consecutive groups of N, as (a, b, ...); a trailing group of fewer than N is dropped.
+    template <std::size_t N>
+    [[nodiscard]] constexpr auto chunks() &&
+    {
+        using source = impl::chunk_source<SourceT, N>;
+        return sequence<source>(source(cc::move(_source)));
+    }
+
+    /// Every k-th element, starting with the first; k must be at least 1.
+    [[nodiscard]] constexpr auto step_by(isize k) &&
+    {
+        using source = impl::step_source<SourceT>;
+        return sequence<source>(source(cc::move(_source), k));
+    }
+
+    /// The elements unchanged, with f(idx?, item) called on each as it passes, for a look into a chain.
+    template <class F>
+    [[nodiscard]] constexpr auto inspect(F&& f) &&
+    {
+        using source = impl::inspect_source<SourceT, std::decay_t<F>>;
+        return sequence<source>(source(cc::move(_source), std::decay_t<F>(cc::forward<F>(f))));
+    }
+
+    /// f(idx?, item) per element, keeping the values it returns: an engaged cc::optional, or a non-null pointer.
+    template <class F>
+    [[nodiscard]] constexpr auto filter_map(F&& f) &&
+    {
+        using source = impl::filter_map_source<SourceT, std::decay_t<F>>;
+        return sequence<source>(source(cc::move(_source), std::decay_t<F>(cc::forward<F>(f))));
+    }
+
+    /// The running fold: acc = f(acc, item) per element, each acc an element; scan(0, plus) is the prefix sums.
+    template <class InitT, class F>
+    [[nodiscard]] constexpr auto scan(InitT&& init, F&& f) &&
+    {
+        using acc_t = std::remove_cvref_t<InitT>;
+        using source = impl::scan_source<SourceT, acc_t, std::decay_t<F>>;
+        return sequence<source>(
+            source(cc::move(_source), acc_t(cc::forward<InitT>(init)), std::decay_t<F>(cc::forward<F>(f))));
+    }
+
+    /// Each run of equal consecutive elements, as its first: sorted, it is the distinct elements.
+    [[nodiscard]] constexpr auto dedup() &&
+    {
+        using source = impl::dedup_source<SourceT, impl::seq_identity_key>;
+        return sequence<source>(source(cc::move(_source), impl::seq_identity_key{}));
+    }
+
+    /// Each run of consecutive elements with equal key(element), as its first.
+    template <class KeyF>
+    [[nodiscard]] constexpr auto dedup_by(KeyF&& key) &&
+    {
+        using source = impl::dedup_source<SourceT, std::decay_t<KeyF>>;
+        return sequence<source>(source(cc::move(_source), std::decay_t<KeyF>(cc::forward<KeyF>(key))));
+    }
+
+    /// The last n elements; needs a known size.
+    [[nodiscard]] constexpr auto take_last(isize n) &&
+    {
+        static_assert(has_known_size, "take_last() needs a known size to find where the last n begin");
+        auto const size = _source.size();
+        return cc::move(*this).skip(size - (n < size ? (n < 0 ? 0 : n) : size));
+    }
+
+    /// All but the last n elements; needs a known size.
+    [[nodiscard]] constexpr auto skip_last(isize n) &&
+    {
+        static_assert(has_known_size, "skip_last() needs a known size to find where the last n begin");
+        auto const size = _source.size();
+        return cc::move(*this).take(size - (n < size ? (n < 0 ? 0 : n) : size));
+    }
+
     /// The elements from the last to the first.
     /// Every positional capability mirrors, so reversed().take(n) over a contiguous source is still a pointer range.
     [[nodiscard]] constexpr auto reversed() &&
@@ -789,6 +1072,91 @@ public:
                                      return false;
                                  });
         return groups;
+    }
+
+    /// How many elements each key(element) has, as a cc::map from key to count.
+    /// Include <clean-core/container/map.hh> to call it.
+    template <class KeyF>
+    [[nodiscard]] constexpr auto count_by(KeyF&& key) &&
+    {
+        using key_t = std::remove_cvref_t<decltype(cc::invoke(key, std::declval<element_t const&>()))>;
+        using map_t = cc::map<key_t, typename impl::seq_dependent<SourceT, isize>::type>;
+        static_assert(impl::seq_is_complete<map_t>, "count_by() needs <clean-core/container/map.hh>");
+        static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
+        map_t counts;
+        (void)impl::seq_try_fold(_source,
+                                 [&](auto const& x)
+                                 {
+                                     ++counts[key_t(cc::invoke(key, x))];
+                                     return false;
+                                 });
+        return counts;
+    }
+
+    /// The elements that satisfy pred(item) and those that do not, each in sequence order.
+    /// Include <clean-core/container/vector.hh> to call it.
+    template <class P>
+    [[nodiscard]] constexpr cc::partition_result<element_t> partition(P&& pred) &&
+    {
+        static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
+        auto result = cc::partition_result<element_t>();
+        (void)impl::seq_try_fold(
+            _source,
+            [&]<class X>(X&& x)
+            {
+                bool const passes = bool(cc::invoke(pred, static_cast<X const&>(x)));
+                (passes ? result.passed : result.failed).push_back(impl::seq_as_element(cc::forward<X>(x)));
+                return false;
+            });
+        return result;
+    }
+
+    /// A cc::map from key(element) to value(element); a later element replaces an earlier one with the same key.
+    /// Include <clean-core/container/map.hh> to call it.
+    template <class KeyF, class ValueF>
+    [[nodiscard]] constexpr auto to_map(KeyF&& key, ValueF&& value) &&
+    {
+        using key_t = std::remove_cvref_t<decltype(cc::invoke(key, std::declval<element_t const&>()))>;
+        using value_t = std::remove_cvref_t<decltype(cc::invoke(value, std::declval<element_t const&>()))>;
+        using map_t = cc::map<key_t, value_t>;
+        static_assert(impl::seq_is_complete<map_t>, "to_map() needs <clean-core/container/map.hh>");
+        static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
+        map_t m;
+        (void)impl::seq_try_fold(_source,
+                                 [&](auto const& x)
+                                 {
+                                     m[key_t(cc::invoke(key, x))] = value_t(cc::invoke(value, x));
+                                     return false;
+                                 });
+        return m;
+    }
+
+    /// The distinct elements as a cc::set; include <clean-core/container/set.hh> to call it.
+    [[nodiscard]] constexpr auto to_set() &&
+    {
+        using set_t = cc::set<typename impl::seq_dependent<SourceT, element_t>::type>;
+        static_assert(impl::seq_is_complete<set_t>, "to_set() needs <clean-core/container/set.hh>");
+        static_assert(!is_infinite, "materializing an infinite sequence never ends: .take(n) first");
+        set_t result;
+        (void)impl::seq_try_fold(_source,
+                                 [&](auto const& x)
+                                 {
+                                     result.insert(x);
+                                     return false;
+                                 });
+        return result;
+    }
+
+    /// The elements formatted with "{}" and joined by separator, as a cc::string.
+    /// Include <clean-core/string/format.hh> to call it.
+    template <class SeparatorT>
+    [[nodiscard]] constexpr auto join(SeparatorT const& separator) &&
+    {
+        using support = impl::seq_format_support<SourceT>;
+        static_assert(impl::seq_is_complete<support>, "join() formats its elements: include "
+                                                      "<clean-core/string/format.hh>");
+        static_assert(!is_infinite, "joining an infinite sequence never ends: .take(n) first");
+        return support::join(cc::move(*this), separator);
     }
 
     /// Appends the elements to an existing container through push_back.
@@ -957,6 +1325,50 @@ private:
                           "a callback taking an index from the back needs a sequence of known size");
             return 0;
         }
+    }
+
+    static constexpr auto _init_min_max()
+    {
+        return []<class X>(X&& x)
+        {
+            auto e = element_t(impl::seq_as_element(cc::forward<X>(x)));
+            return cc::min_and_max<element_t>{e, e};
+        };
+    }
+    static constexpr auto _min_max_step()
+    {
+        return [](cc::min_and_max<element_t>& r, auto const& x)
+        {
+            if (x < r.min)
+                r.min = x;
+            else if (r.max < x)
+                r.max = x;
+        };
+    }
+
+    template <bool IsMin>
+    constexpr cc::optional<typename impl::seq_dependent<SourceT, isize>::type> _index_of_best()
+    {
+        static_assert(!is_infinite, "this reduction traverses every element, and the sequence is infinite: .take(n) "
+                                    "first");
+        auto first = _source.next();
+        if (!first)
+            return {};
+        auto best = element_t(impl::seq_as_element(impl::seq_get(first)));
+        isize best_idx = 0;
+        isize idx = 0;
+        (void)impl::seq_try_fold(_source,
+                                 [&]<class X>(X&& x)
+                                 {
+                                     ++idx;
+                                     if (IsMin ? x < best : best < x)
+                                     {
+                                         best = impl::seq_as_element(cc::forward<X>(x));
+                                         best_idx = idx;
+                                     }
+                                     return false;
+                                 });
+        return best_idx;
     }
 
     // a pointer to the best of *start (when not null) and every element

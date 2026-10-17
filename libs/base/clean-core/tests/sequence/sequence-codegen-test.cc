@@ -289,6 +289,75 @@ CC_DONT_INLINE int seq_probe_values_of_seq(std::vector<int> const& v)
     return cc::values_of(v).sum_from(0);
 }
 
+CC_DONT_INLINE int seq_probe_pairwise_naive(cc::span<int const> s)
+{
+    int acc = 0;
+    for (isize i = 0; i + 1 < s.size(); ++i)
+        acc += s[i + 1] - s[i];
+    return acc;
+}
+CC_DONT_INLINE int seq_probe_pairwise_seq(cc::span<int const> s)
+{
+    return s.values().pairwise().map([](int a, int b) { return b - a; }).sum_from(0);
+}
+
+CC_DONT_INLINE int seq_probe_chunks_naive(cc::span<int const> s)
+{
+    int acc = 0;
+    for (isize i = 0; i + 3 <= s.size(); i += 3)
+        acc += s[i] * s[i + 1] + s[i + 2];
+    return acc;
+}
+CC_DONT_INLINE int seq_probe_chunks_seq(cc::span<int const> s)
+{
+    return s.values().chunks<3>().map([](int a, int b, int c) { return a * b + c; }).sum_from(0);
+}
+
+CC_DONT_INLINE int seq_probe_step_naive(cc::span<int const> s)
+{
+    int acc = 0;
+    for (isize i = 0; i < s.size(); i += 2)
+        acc += s[i];
+    return acc;
+}
+CC_DONT_INLINE int seq_probe_step_seq(cc::span<int const> s)
+{
+    return s.values().step_by(2).sum_from(0);
+}
+
+CC_DONT_INLINE int seq_probe_min_max_naive(cc::span<int const> s)
+{
+    int lo = s[0];
+    int hi = s[0];
+    for (isize i = 1; i < s.size(); ++i)
+    {
+        if (s[i] < lo)
+            lo = s[i];
+        else if (hi < s[i])
+            hi = s[i];
+    }
+    return hi - lo;
+}
+CC_DONT_INLINE int seq_probe_min_max_seq(cc::span<int const> s)
+{
+    auto const [lo, hi] = s.values().assert_non_empty().min_max();
+    return hi - lo;
+}
+
+CC_DONT_INLINE bool seq_probe_equals_naive(cc::span<int const> a, cc::span<int const> b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (isize i = 0; i < a.size(); ++i)
+        if (a[i] != b[i])
+            return false;
+    return true;
+}
+CC_DONT_INLINE bool seq_probe_equals_seq(cc::span<int const> a, cc::span<int const> b)
+{
+    return a.values().equals(b);
+}
+
 CC_DONT_INLINE bool seq_probe_indices_contains_seq(cc::vector<int> const& v, isize i)
 {
     return v.indices().contains(i);
@@ -334,6 +403,11 @@ TEST("sequence - codegen probes agree with their naive loops")
     CHECK(seq_probe_find_last_seq(s, 7) == seq_probe_find_last_naive(s, 7));
     auto const sv = std::vector<int>{1, 2, 3, 4, 5};
     CHECK(seq_probe_values_of_seq(sv) == seq_probe_values_of_naive(sv));
+    CHECK(seq_probe_pairwise_seq(s) == seq_probe_pairwise_naive(s));
+    CHECK(seq_probe_chunks_seq(s) == seq_probe_chunks_naive(s));
+    CHECK(seq_probe_step_seq(s) == seq_probe_step_naive(s));
+    CHECK(seq_probe_min_max_seq(s) == seq_probe_min_max_naive(s));
+    CHECK(seq_probe_equals_seq(s, s) == seq_probe_equals_naive(s, s));
     CHECK(seq_probe_indices_contains_seq(v, 10));
     CHECK(!seq_probe_indices_contains_seq(v, 11));
 }

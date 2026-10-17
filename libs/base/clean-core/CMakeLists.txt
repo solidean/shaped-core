@@ -209,6 +209,8 @@ target_sources(clean-core
     src/clean-core/sequence/impl/call.hh
     src/clean-core/sequence/impl/combinators.hh
     src/clean-core/sequence/impl/factories.hh
+    src/clean-core/sequence/impl/format.hh
+    src/clean-core/sequence/impl/windows.hh
 
     src/clean-core/algorithm/index_swap_range.hh
     src/clean-core/algorithm/permutation.hh
@@ -595,6 +597,8 @@ if(SC_BUILD_TESTS)
         tests/sequence/sequence-reverse-test.cc
         tests/sequence/sequence-factories-test.cc
         tests/sequence/sequence-reductions-test.cc
+        tests/sequence/sequence-groups-test.cc
+        tests/sequence/sequence-compare-test.cc
 
         tests/string/conversion-test.cc
         tests/string/format-test.cc
