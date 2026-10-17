@@ -206,6 +206,8 @@ target_sources(clean-core
     src/clean-core/sequence/sequence.hh
     src/clean-core/sequence/source.hh
     src/clean-core/sequence/impl/adaptors.hh
+    src/clean-core/sequence/impl/call.hh
+    src/clean-core/sequence/impl/combinators.hh
 
     src/clean-core/algorithm/index_swap_range.hh
     src/clean-core/algorithm/permutation.hh
@@ -587,6 +589,8 @@ if(SC_BUILD_TESTS)
 
         tests/sequence/sequence-test.cc
         tests/sequence/sequence-codegen-test.cc
+        tests/sequence/sequence-adaptors-test.cc
+        tests/sequence/sequence-containers-test.cc
 
         tests/string/conversion-test.cc
         tests/string/format-test.cc

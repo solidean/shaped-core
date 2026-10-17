@@ -16,13 +16,17 @@
 //   bool try_fold(auto&& step)           // optional: step(item) -> bool, true stops; returns whether it stopped
 //   isize size() const                   // optional: the elements left
 //   bool is_empty() const                // optional
-//   bool contains(auto const& v) const   // optional: membership without a scan
+//   bool contains(auto const& v) const   // optional: membership without a scan, answered for the untouched source
 //   begin(), end()                       // optional: the remaining elements as a range, which range-for then uses directly
+//   item_t at(isize i)                   // optional, with size(): the i-th remaining element, 0 <= i < size()
+//   void advance(isize n)                // optional, with size(): drop the first min(n, size()) elements unevaluated
+//   void truncate(isize n)               // optional, with size(): keep only the first min(n, size()) elements
 //   static constexpr bool is_non_empty   // optional, default false: at least one element before the first next()
 //   static constexpr bool is_borrowed    // optional, default false: references stay valid after the source dies
 //   static constexpr bool is_expiring    // optional, default false: the source owns its elements, so they may be moved out
 //
 // next() may be called any number of times, then try_fold at most once, after which the source is spent.
+// at, advance and truncate are for the sequence layer before any next(), never interleaved with it.
 // try_fold must spell its return type `bool`: detection checks the declaration, never the body.
 // See libs/base/clean-core/docs/sequence.md.
 
@@ -35,10 +39,13 @@ inline constexpr seq_emplace_t seq_emplace = {};
 
 /// The next() result of a source yielding prvalues: empty, or one T.
 /// Built from a callable so a prvalue result lands in place without a move.
+/// Assignment destroys and reconstructs, so it works for T that cannot be assigned, a source holding a lambda say.
 template <class T>
 struct seq_slot
 {
     static_assert(std::is_object_v<T> && !std::is_const_v<T>, "a prvalue item must be a non-const object type");
+
+    static constexpr bool is_trivial = std::is_trivially_copyable_v<T> && std::is_trivially_move_assignable_v<T>;
 
 public:
     constexpr seq_slot() {}
@@ -52,29 +59,28 @@ public:
     [[nodiscard]] constexpr T& operator*() & { return _value; }
 
     constexpr seq_slot(seq_slot&&)
-        requires std::is_trivially_copyable_v<T>
+        requires is_trivial
     = default;
     constexpr seq_slot& operator=(seq_slot&&)
-        requires std::is_trivially_copyable_v<T>
+        requires is_trivial
     = default;
     constexpr ~seq_slot()
         requires std::is_trivially_destructible_v<T>
     = default;
 
     constexpr seq_slot(seq_slot&& rhs) noexcept
-        requires(!std::is_trivially_copyable_v<T>)
+        requires(!is_trivial)
       : _has_value(rhs._has_value)
     {
         if (_has_value)
             new (cc::placement_new, &_value) T(cc::move(rhs._value));
     }
     constexpr seq_slot& operator=(seq_slot&& rhs) noexcept
-        requires(!std::is_trivially_copyable_v<T>)
+        requires(!is_trivial)
     {
         if (this != &rhs)
         {
-            if (_has_value)
-                _value.~T();
+            this->reset();
             _has_value = rhs._has_value;
             if (_has_value)
                 new (cc::placement_new, &_value) T(cc::move(rhs._value));
@@ -84,12 +90,19 @@ public:
     constexpr ~seq_slot()
         requires(!std::is_trivially_destructible_v<T>)
     {
-        if (_has_value)
-            _value.~T();
+        this->reset();
     }
 
     seq_slot(seq_slot const&) = delete;
     seq_slot& operator=(seq_slot const&) = delete;
+
+    constexpr void reset()
+    {
+        if constexpr (!std::is_trivially_destructible_v<T>)
+            if (_has_value)
+                _value.~T();
+        _has_value = false;
+    }
 
 private:
     union
@@ -127,6 +140,28 @@ template <class T>
     return *s;
 }
 
+/// A next() result holding item, built in place.
+template <class ItemT, class F>
+[[nodiscard]] constexpr seq_next_t<ItemT> seq_make_next(F&& make)
+{
+    if constexpr (std::is_reference_v<ItemT>)
+        return &make();
+    else
+        return seq_next_t<ItemT>(seq_emplace, cc::forward<F>(make));
+}
+
+/// T, spelled so the name depends on D.
+/// A template naming a type that is complete only later in an include cycle (cc::optional, cc::sequence) uses it
+/// to defer the lookup to instantiation.
+template <class D, class T>
+struct seq_dependent
+{
+    using type = T;
+};
+
+/// The one door from a sequence to its source, for the adaptors that consume a sequence (chain, zip, flatten).
+struct seq_access;
+
 //
 // source traits
 //
@@ -145,12 +180,17 @@ concept seq_has_is_empty = requires(S const& s) { requires std::is_convertible_v
 template <class S, class V>
 concept seq_has_contains
     = requires(S const& s, V const& v) { requires std::is_convertible_v<decltype(s.contains(v)), bool>; };
-
 template <class S>
 concept seq_has_range = requires(S& s) {
     s.begin();
     s.end();
 };
+template <class S>
+concept seq_has_at = seq_has_size<S> && requires(S& s) { s.at(isize(0)); };
+template <class S>
+concept seq_has_advance = seq_has_size<S> && requires(S& s) { s.advance(isize(0)); };
+template <class S>
+concept seq_has_truncate = seq_has_size<S> && requires(S& s) { s.truncate(isize(0)); };
 
 struct seq_probe_step
 {
@@ -179,6 +219,14 @@ template <class S, class StepF>
         }
     }
 }
+
+[[nodiscard]] constexpr isize seq_min(isize a, isize b)
+{
+    return a < b ? a : b;
+}
+
+/// The end of an index range that does not end, for enumerate's positions: far past any real count.
+inline constexpr isize seq_unbounded = isize(1) << 62;
 
 //
 // built-in sources
@@ -221,6 +269,10 @@ struct span_source
 
     [[nodiscard]] constexpr T* begin() const { return _p; }
     [[nodiscard]] constexpr T* end() const { return _end; }
+
+    [[nodiscard]] constexpr T& at(isize i) const { return _p[i]; }
+    constexpr void advance(isize n) { _p += impl::seq_min(n, size()); }
+    constexpr void truncate(isize n) { _end = _p + impl::seq_min(n, size()); }
 };
 
 /// The half-open integer range [begin, end), an index sequence.
@@ -255,6 +307,10 @@ struct iota_source
     [[nodiscard]] constexpr isize size() const { return _end - _i; }
     [[nodiscard]] constexpr bool is_empty() const { return _i == _end; }
     [[nodiscard]] constexpr bool contains(isize i) const { return _i <= i && i < _end; }
+
+    [[nodiscard]] constexpr isize at(isize i) const { return _i + i; }
+    constexpr void advance(isize n) { _i += impl::seq_min(n, size()); }
+    constexpr void truncate(isize n) { _end = _i + impl::seq_min(n, size()); }
 };
 
 /// A source that owns its container, which is what values() on an rvalue container hands out.
@@ -267,12 +323,13 @@ struct owning_source
 
     ContainerT _container;
     isize _i = 0;
+    isize _end;
 
-    constexpr explicit owning_source(ContainerT&& c) : _container(cc::move(c)) {}
+    constexpr explicit owning_source(ContainerT&& c) : _container(cc::move(c)), _end(_container.size()) {}
 
     [[nodiscard]] constexpr auto* next()
     {
-        if (_i == _container.size())
+        if (_i == _end)
             return decltype(_container.data())(nullptr);
         auto* const p = _container.data() + _i++;
         [[assume(p != nullptr)]];
@@ -282,36 +339,115 @@ struct owning_source
     [[nodiscard]] constexpr bool try_fold(auto&& step)
     {
         auto* const p = _container.data() + _i;
-        auto const n = _container.size() - _i;
+        auto const n = _end - _i;
         for (isize i = 0; i < n; ++i)
             if (step(p[i]))
                 return true;
         return false;
     }
 
-    [[nodiscard]] constexpr isize size() const { return _container.size() - _i; }
-    [[nodiscard]] constexpr bool is_empty() const { return _i == _container.size(); }
+    [[nodiscard]] constexpr isize size() const { return _end - _i; }
+    [[nodiscard]] constexpr bool is_empty() const { return _i == _end; }
 
     [[nodiscard]] constexpr auto* begin() { return _container.data() + _i; }
-    [[nodiscard]] constexpr auto* end() { return _container.data() + _container.size(); }
+    [[nodiscard]] constexpr auto* end() { return _container.data() + _end; }
+
+    [[nodiscard]] constexpr item_t at(isize i) { return _container.data()[_i + i]; }
+    constexpr void advance(isize n) { _i += impl::seq_min(n, size()); }
+    constexpr void truncate(isize n) { _end = _i + impl::seq_min(n, size()); }
+};
+
+/// The source over elements a fixed byte stride apart, which strided_span hands out.
+template <class T>
+struct strided_source
+{
+    using item_t = T&;
+    using byte_ptr = std::conditional_t<std::is_const_v<T>, unsigned char const*, unsigned char*>;
+    static constexpr bool is_borrowed = true;
+
+    byte_ptr _start;
+    isize _stride;
+    isize _i = 0;
+    isize _end;
+
+    constexpr strided_source(T* start, isize stride_bytes, isize size)
+      : _start(reinterpret_cast<byte_ptr>(start)), _stride(stride_bytes), _end(size) // NOLINT
+    {
+    }
+
+    [[nodiscard]] constexpr T& at(isize i) const
+    {
+        return *reinterpret_cast<T*>(_start + (_i + i) * _stride);
+    } // NOLINT
+
+    [[nodiscard]] constexpr T* next()
+    {
+        if (_i == _end)
+            return nullptr;
+        T* const p = &this->at(0);
+        ++_i;
+        [[assume(p != nullptr)]];
+        return p;
+    }
+
+    [[nodiscard]] constexpr bool try_fold(auto&& step)
+    {
+        auto const n = _end - _i;
+        for (isize i = 0; i < n; ++i)
+            if (step(this->at(i)))
+                return true;
+        return false;
+    }
+
+    [[nodiscard]] constexpr isize size() const { return _end - _i; }
+    [[nodiscard]] constexpr bool is_empty() const { return _i == _end; }
+    constexpr void advance(isize n) { _i += impl::seq_min(n, size()); }
+    constexpr void truncate(isize n) { _end = _i + impl::seq_min(n, size()); }
 };
 
 /// A source known to be non-empty, by construction or by a check already made.
 /// It is the source itself with the trait flipped, so it forwards every capability for free.
+/// advance and truncate are hidden, since either may empty it.
 template <class S>
 struct non_empty_source : S
 {
     static constexpr bool is_non_empty = true;
 
     constexpr explicit non_empty_source(S&& s) : S(cc::move(s)) {}
+
+    void advance(isize) = delete;
+    void truncate(isize) = delete;
 };
 
-/// T, spelled so the name depends on D.
-/// A template naming a type that is complete only later in an include cycle (cc::optional, cc::sequence) uses it
-/// to defer the lookup to instantiation.
-template <class D, class T>
-struct seq_dependent
+/// A sequence over source, non-empty at compile time when IsNonEmpty.
+template <bool IsNonEmpty, class S>
+[[nodiscard]] constexpr auto seq_make(S&& source)
 {
-    using type = T;
-};
+    using source_t = std::remove_cvref_t<S>;
+    if constexpr (IsNonEmpty)
+        return cc::sequence<non_empty_source<source_t>>(non_empty_source<source_t>(cc::move(source)));
+    else
+        return cc::sequence<source_t>(cc::move(source));
+}
+
+/// values() of a contiguous container: borrowing over an lvalue, owning over a non-const temporary.
+template <bool IsNonEmpty, class C>
+[[nodiscard]] constexpr auto seq_contiguous_values(C&& c)
+{
+    if constexpr (std::is_lvalue_reference_v<C> || std::is_const_v<std::remove_reference_t<C>>)
+    {
+        using element_t = std::remove_pointer_t<decltype(c.data())>;
+        return impl::seq_make<IsNonEmpty>(span_source<element_t>(c.data(), c.data() + c.size()));
+    }
+    else
+        return impl::seq_make<IsNonEmpty>(owning_source<std::remove_cvref_t<C>>(cc::move(c)));
+}
+
+/// indices() of an indexed container.
+template <bool IsNonEmpty, class C>
+[[nodiscard]] constexpr auto seq_index_values(C const& c)
+{
+    using source_t = typename seq_dependent<C, iota_source>::type;
+    return impl::seq_make<IsNonEmpty>(source_t(0, isize(c.size())));
+}
 } // namespace cc::impl

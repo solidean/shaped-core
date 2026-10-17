@@ -1,82 +1,17 @@
 #pragma once
 
+#include <clean-core/sequence/impl/call.hh>
 #include <clean-core/sequence/source.hh>
 
-// The adaptor sources behind cc::sequence's transformations: each wraps exactly one source.
+// The single-input adaptor sources behind cc::sequence's transformations: each wraps exactly one source.
 
 namespace cc::impl
 {
-/// Calls f(item) or f(idx, item), counting positions only when f takes the index.
-/// The index is the item's position in the sequence f is applied to.
-template <class F>
-struct seq_indexed_call
-{
-    F& f;
-    isize idx = 0;
-
-    template <class X>
-    constexpr decltype(auto) operator()(X&& x)
-    {
-        if constexpr (cc::is_invocable<F&, X&&>)
-            return cc::invoke(f, cc::forward<X>(x));
-        else
-        {
-            static_assert(cc::is_invocable<F&, isize, X&&>, "the callback takes neither (item) nor (isize idx, item)");
-            return cc::invoke(f, idx++, cc::forward<X>(x));
-        }
-    }
-};
-
-/// Whether a step result stops the fold: void never stops, anything else stops when true.
-template <class F, class... Args>
-[[nodiscard]] constexpr bool seq_stops(F&& f, Args&&... args)
-{
-    if constexpr (std::is_void_v<decltype(cc::forward<F>(f)(cc::forward<Args>(args)...))>)
-    {
-        cc::forward<F>(f)(cc::forward<Args>(args)...);
-        return false;
-    }
-    else
-        return bool(cc::forward<F>(f)(cc::forward<Args>(args)...));
-}
-
-/// acc += x where the type has it, acc = acc + x where it has only +.
-template <class AccT, class X>
-constexpr void seq_add_to(AccT& acc, X const& x)
-{
-    if constexpr (requires { acc += x; })
-        acc += x;
-    else
-        acc = acc + x;
-}
-
-/// A callback result as a sequence item: an lvalue reference is kept, anything else is a prvalue.
-/// An rvalue reference decays too, since a pointer could not carry its value category through next().
-template <class R>
-struct seq_item_of
-{
-    using type = std::remove_cv_t<R>;
-};
-template <class R>
-struct seq_item_of<R&>
-{
-    using type = R&;
-};
-template <class R>
-struct seq_item_of<R&&>
-{
-    using type = std::remove_cv_t<R>;
-};
-
-template <class F, class ItemT>
-using seq_mapped_item_t =
-    typename seq_item_of<decltype(cc::invoke_with_optional_idx(isize(0), std::declval<F&>(), std::declval<ItemT>()))>::type;
-
 template <class S, class F>
 struct map_source
 {
     using inner_item_t = typename S::item_t;
-    using item_t = seq_mapped_item_t<F, inner_item_t>;
+    using item_t = typename seq_item_of<seq_call_result_t<F, inner_item_t>>::type;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
 
@@ -89,10 +24,7 @@ struct map_source
     template <class X>
     constexpr item_t _call(X&& x)
     {
-        if constexpr (cc::is_invocable<F&, X&&>)
-            return cc::invoke(_f, cc::forward<X>(x));
-        else
-            return cc::invoke(_f, _idx++, cc::forward<X>(x));
+        return impl::seq_call(_f, _idx, cc::forward<X>(x));
     }
 
     [[nodiscard]] constexpr seq_next_t<item_t> next()
@@ -100,10 +32,7 @@ struct map_source
         auto r = _inner.next();
         if (!r)
             return {};
-        if constexpr (std::is_reference_v<item_t>)
-            return &this->_call(impl::seq_get(r));
-        else
-            return seq_next_t<item_t>(seq_emplace, [&]() -> item_t { return this->_call(impl::seq_get(r)); });
+        return impl::seq_make_next<item_t>([&]() -> item_t { return this->_call(impl::seq_get(r)); });
     }
 
     [[nodiscard]] constexpr bool try_fold(auto&& step)
@@ -120,6 +49,26 @@ struct map_source
         requires seq_has_is_empty<S>
     {
         return _inner.is_empty();
+    }
+
+    // the callback's index is the position in the input, so it stays _idx + i
+    [[nodiscard]] constexpr item_t at(isize i)
+        requires seq_has_at<S>
+    {
+        isize idx = _idx + i;
+        return impl::seq_call(_f, idx, _inner.at(i));
+    }
+    constexpr void advance(isize n)
+        requires seq_has_advance<S>
+    {
+        auto const k = impl::seq_min(n, _inner.size());
+        _inner.advance(k);
+        _idx += k;
+    }
+    constexpr void truncate(isize n)
+        requires seq_has_truncate<S>
+    {
+        _inner.truncate(n);
     }
 };
 
@@ -139,10 +88,7 @@ struct filter_source
     template <class X>
     constexpr bool _test(X& x)
     {
-        if constexpr (cc::is_invocable<P&, X&>)
-            return bool(cc::invoke(_pred, x));
-        else
-            return bool(cc::invoke(_pred, _idx++, x));
+        return bool(impl::seq_call(_pred, _idx, x));
     }
 
     [[nodiscard]] constexpr seq_next_t<item_t> next()
@@ -213,6 +159,181 @@ struct peeked_source
         requires seq_has_size<S>
     {
         return _rest.size() + (_first ? 1 : 0);
+    }
+};
+
+/// The first n elements of a source that cannot truncate itself.
+template <class S>
+struct take_source
+{
+    using item_t = typename S::item_t;
+    static constexpr bool is_borrowed = seq_is_borrowed<S>;
+    static constexpr bool is_expiring = seq_is_expiring<S>;
+
+    S _inner;
+    isize _n;
+
+    constexpr take_source(S&& inner, isize n) : _inner(cc::move(inner)), _n(n) {}
+
+    [[nodiscard]] constexpr seq_next_t<item_t> next()
+    {
+        if (_n <= 0)
+            return {};
+        --_n;
+        return _inner.next();
+    }
+
+    [[nodiscard]] constexpr bool try_fold(auto&& step)
+    {
+        if (_n <= 0)
+            return false;
+        bool stopped = false;
+        (void)impl::seq_try_fold(_inner,
+                                 [&]<class X>(X&& x) -> bool
+                                 {
+                                     if (step(cc::forward<X>(x)))
+                                     {
+                                         stopped = true;
+                                         return true;
+                                     }
+                                     return --_n == 0;
+                                 });
+        return stopped;
+    }
+
+    [[nodiscard]] constexpr isize size() const
+        requires seq_has_size<S>
+    {
+        return impl::seq_min(_n < 0 ? 0 : _n, _inner.size());
+    }
+};
+
+/// A source past its first n elements, for one that cannot advance itself: the skipped ones are still evaluated.
+template <class S>
+struct skip_source
+{
+    using item_t = typename S::item_t;
+    static constexpr bool is_borrowed = seq_is_borrowed<S>;
+    static constexpr bool is_expiring = seq_is_expiring<S>;
+
+    S _inner;
+    isize _n;
+
+    constexpr skip_source(S&& inner, isize n) : _inner(cc::move(inner)), _n(n) {}
+
+    constexpr void _skip()
+    {
+        for (; _n > 0; --_n)
+            if (!_inner.next())
+            {
+                _n = 0;
+                return;
+            }
+    }
+
+    [[nodiscard]] constexpr seq_next_t<item_t> next()
+    {
+        this->_skip();
+        return _inner.next();
+    }
+
+    [[nodiscard]] constexpr bool try_fold(auto&& step)
+    {
+        this->_skip();
+        return impl::seq_try_fold(_inner, step);
+    }
+};
+
+/// The elements before the first that fails pred.
+template <class S, class P>
+struct take_while_source
+{
+    using item_t = typename S::item_t;
+    static constexpr bool is_borrowed = seq_is_borrowed<S>;
+    static constexpr bool is_expiring = seq_is_expiring<S>;
+
+    S _inner;
+    P _pred;
+    isize _idx = 0;
+    bool _done = false;
+
+    constexpr take_while_source(S&& inner, P&& pred) : _inner(cc::move(inner)), _pred(cc::move(pred)) {}
+
+    [[nodiscard]] constexpr seq_next_t<item_t> next()
+    {
+        if (_done)
+            return {};
+        auto r = _inner.next();
+        if (r && !bool(impl::seq_call(_pred, _idx, impl::seq_peek(r))))
+        {
+            _done = true;
+            return {};
+        }
+        return r;
+    }
+
+    [[nodiscard]] constexpr bool try_fold(auto&& step)
+    {
+        if (_done)
+            return false;
+        bool stopped = false;
+        (void)impl::seq_try_fold(_inner,
+                                 [&]<class X>(X&& x) -> bool
+                                 {
+                                     if (!bool(impl::seq_call(_pred, _idx, x)))
+                                         return true;
+                                     if (step(cc::forward<X>(x)))
+                                     {
+                                         stopped = true;
+                                         return true;
+                                     }
+                                     return false;
+                                 });
+        return stopped;
+    }
+};
+
+/// The elements from the first that fails pred on.
+template <class S, class P>
+struct skip_while_source
+{
+    using item_t = typename S::item_t;
+    static constexpr bool is_borrowed = seq_is_borrowed<S>;
+    static constexpr bool is_expiring = seq_is_expiring<S>;
+
+    S _inner;
+    P _pred;
+    isize _idx = 0;
+    bool _skipping = true;
+
+    constexpr skip_while_source(S&& inner, P&& pred) : _inner(cc::move(inner)), _pred(cc::move(pred)) {}
+
+    [[nodiscard]] constexpr seq_next_t<item_t> next()
+    {
+        while (true)
+        {
+            auto r = _inner.next();
+            if (!r || !_skipping || !bool(impl::seq_call(_pred, _idx, impl::seq_peek(r))))
+            {
+                _skipping = false;
+                return r;
+            }
+        }
+    }
+
+    [[nodiscard]] constexpr bool try_fold(auto&& step)
+    {
+        return impl::seq_try_fold(_inner,
+                                  [&]<class X>(X&& x) -> bool
+                                  {
+                                      if (_skipping)
+                                      {
+                                          if (bool(impl::seq_call(_pred, _idx, x)))
+                                              return false;
+                                          _skipping = false;
+                                      }
+                                      return step(cc::forward<X>(x));
+                                  });
     }
 };
 } // namespace cc::impl
