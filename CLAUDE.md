@@ -47,6 +47,8 @@ One-liner per library:
   So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic correctly rounded once per operation.
   Geometric queries are **members** (`a.intersects(b)`, `p.distance_to(seg)`), and an object type is **maximal** — `aabb3` is the solid box, its surface is `aabb3_surface`.
   [docs/plans/geometry-query-matrix.md](libs/base/typed-geometry/docs/plans/geometry-query-matrix.md) is that layer; curves, symbolic and mesh are planned.
+  `camera/` is projections and views: `tg::perspective` is left-handed reverse-Z, and every other convention has an explicit name.
+  `tg::view_projection`'s `project` / `unproject` pair is specified by its round trip — [docs/modules/camera.md](libs/base/typed-geometry/docs/modules/camera.md).
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/base/clean-net`** — networking: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev server.

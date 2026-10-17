@@ -27,10 +27,12 @@
 #include <shaped-rendering/window.hh>
 #include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <typed-geometry/camera/camera.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/angle.hh>
+#include <typed-geometry/transform/compose.hh>
 #include <sgl_cube_shaders.hh>
 
 #if SGL_CUBE_BACKEND_WEBGPU
@@ -52,46 +54,9 @@ using cube_vertex = shaders::cube_vertex; // generated from cube.sgl's `@vertex 
 constexpr int cube_vertex_count = 24; // four per face: a shared corner carries three different normals
 constexpr int cube_index_count = 36;
 
-// tg picks no camera convention, so this one is pinned here: left-handed, z into [0, 1].
-// issue: question-tg-camera-projection-helpers
-// tg::mat is COLUMN-major and subscripts m[col, row] — that part is worth copying rather than re-deriving.
-
 /// The classic 3-vector cross product.
 /// tg's `cross` is the wedge and returns a bivector, so the vector form is its Hodge dual.
 [[nodiscard]] tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
-
-[[nodiscard]] tg::mat4f perspective(tg::angle_f vertical_fov, float aspect, float z_near, float z_far)
-{
-    auto const t = 1.0f / tg::tan(vertical_fov / 2.0f);
-
-    auto m = tg::mat4f::zero;
-    m[0, 0] = t / aspect;
-    m[1, 1] = t;
-    m[2, 2] = z_far / (z_far - z_near);
-    m[3, 2] = -z_near * z_far / (z_far - z_near);
-    m[2, 3] = 1.0f;
-    return m;
-}
-
-[[nodiscard]] tg::mat4f look_at(tg::pos3f eye, tg::pos3f target, tg::vec3f up)
-{
-    auto const f = tg::normalize(target - eye);
-    auto const r = tg::normalize(cross3(up, f));
-    auto const u = cross3(f, r);
-    auto const e = eye - tg::pos3f::zero;
-
-    auto m = tg::mat4f::identity;
-    for (auto i = 0; i < 3; ++i)
-    {
-        m[i, 0] = r[i];
-        m[i, 1] = u[i];
-        m[i, 2] = f[i];
-    }
-    m[3, 0] = -tg::dot(r, e);
-    m[3, 1] = -tg::dot(u, e);
-    m[3, 2] = -tg::dot(f, e);
-    return m;
-}
 
 /// The camera: it orbits a fixed target, and that is all the state this example keeps.
 struct orbit_camera
@@ -108,8 +73,9 @@ struct orbit_camera
 
     [[nodiscard]] tg::mat4f view_projection(float aspect) const
     {
-        auto const view = look_at(this->eye(), tg::pos3f::zero, tg::vec3f(0, 1, 0));
-        return perspective(tg::angle_f::make_from_degree(45.0f), aspect, 0.1f, 100.0f) * view;
+        // a forward [0, 1] depth range, which this pipeline's depth test and clear are set up for
+        auto const projection = tg::perspective_lh_zero_to_one(tg::angle_f::make_from_degree(45.0f), aspect, 0.1f, 100.0f);
+        return tg::compose(projection, tg::look_at(this->eye(), tg::pos3f::zero)).to_mat();
     }
 
     /// Clamped just short of the poles, where the up vector and the view direction would be parallel.

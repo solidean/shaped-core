@@ -13,23 +13,14 @@
 
 namespace cube_editor
 {
-/// The ray through a pixel, in world space.
-/// Built from the camera basis rather than by inverting the view-projection, so it needs no matrix inverse.
+/// The ray from the eye through a pixel's center, in world space.
 [[nodiscard]] inline tg::ray3f pick_ray(orbit_camera const& cam, tg::angle_f vertical_fov, tg::pos2f pixel, tg::vec2i viewport)
 {
-    auto const eye = cam.eye();
-    auto const f = tg::normalize(cam.target - eye);
-    auto const r = tg::normalize(cross3(tg::vec3f(0, 1, 0), f));
-    auto const u = cross3(f, r);
-
-    auto const aspect = float(viewport[0]) / float(viewport[1]);
-    auto const tan_half = tg::tan(vertical_fov / 2.0f);
-
-    // Pixel centers, then to normalized device coordinates: x right, y UP, which is why y is flipped.
-    auto const ndc_x = 2.0f * (pixel[0] + 0.5f) / float(viewport[0]) - 1.0f;
-    auto const ndc_y = 1.0f - 2.0f * (pixel[1] + 0.5f) / float(viewport[1]);
-
-    return tg::ray3f(eye, tg::normalize(f + r * (ndc_x * aspect * tan_half) + u * (ndc_y * tan_half)));
+    auto const size = tg::vec2f(float(viewport[0]), float(viewport[1]));
+    // the near distance moves where a pick ray starts, never which way it points
+    auto const vp = tg::view_projection_f::make(cam.view(), tg::perspective(vertical_fov, size[0] / size[1], 0.1f));
+    auto const through = vp.unproject(tg::ndc_from_pixel(pixel + tg::vec2f(0.5f, 0.5f), size));
+    return tg::ray3f(cam.eye(), through.dir);
 }
 
 /// Where `ray` enters `box`, or nothing if it misses.
