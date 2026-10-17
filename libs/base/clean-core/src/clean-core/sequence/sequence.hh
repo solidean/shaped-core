@@ -145,7 +145,8 @@ public:
 
     [[nodiscard]] isize sum()
     {
-        // TODO: not implemented — needs non-empty handling, and calling this today falls off the end of a non-void function.
+        // Not implemented — calling this today falls off the end of a non-void function.
+        // issue: bug-cc-sequence-sum-and-to-array-unimplemented
     }
 
 
@@ -190,10 +191,10 @@ public:
 
     [[nodiscard]] auto to_vector() { return this->to_container<cc::vector<element_t>>(); }
 
-    /// TODO: not implemented — returns nothing today.
+    /// Not implemented — returns nothing today.
+    // issue: bug-cc-sequence-sum-and-to-array-unimplemented
     [[nodiscard]] auto to_array()
     {
-        // TODO: static assert has_known_size
         return;
     }
 
