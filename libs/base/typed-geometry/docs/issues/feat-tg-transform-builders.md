@@ -3,6 +3,8 @@ created: 2026-10-17
 refs:
   - file: libs/base/typed-geometry/src/typed-geometry/linalg/mat.hh
   - symbol: babel::gltf::node
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-17T18:52Z
 ---
 
 # Transform builders: quaternion → matrix, translation, scaling, TRS composition
