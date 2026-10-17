@@ -10,6 +10,7 @@
 #include <nexus/test.hh>
 
 #include <iterator>
+#include <memory>
 #include <vector>
 
 using namespace cc::primitive_defines;
@@ -120,6 +121,46 @@ struct stashing_range
 
     [[nodiscard]] iterator begin() const { return {1, increments}; }
     [[nodiscard]] iterator end() const { return {n + 1, nullptr}; }
+};
+
+// an iterator that names none of the standard typedefs, over three ints
+struct bare_range
+{
+    int values[3] = {1, 2, 3};
+
+    struct iterator
+    {
+        int const* p;
+
+        int const& operator*() const { return *p; }
+        iterator& operator++()
+        {
+            ++p;
+            return *this;
+        }
+        bool operator==(iterator const& rhs) const { return p == rhs.p; }
+    };
+    struct value_iterator
+    {
+        int i;
+
+        int operator*() const { return i; }
+        value_iterator& operator++()
+        {
+            ++i;
+            return *this;
+        }
+        bool operator==(value_iterator const& rhs) const { return i == rhs.i; }
+    };
+
+    [[nodiscard]] iterator begin() const { return {values}; }
+    [[nodiscard]] iterator end() const { return {values + 3}; }
+};
+
+struct bare_values
+{
+    [[nodiscard]] bare_range::value_iterator begin() const { return {0}; }
+    [[nodiscard]] bare_range::value_iterator end() const { return {3}; }
 };
 
 struct move_only
@@ -714,4 +755,31 @@ TEST("sequence lifetime - a one-item pack formats as a tuple")
     auto const v = cc::vector<int>{1, 2};
     CHECK(cc::format("{}", v.values().chunks<1>()) == "[(1), (2)]");
     CHECK(v.values().windows<1>().join(" ") == "(1) (2)");
+}
+
+TEST("sequence lifetime - an iterator without typedefs is still a range")
+{
+    auto const r = bare_range();
+    CHECK(cc::values_of(r).sum_from(0) == 6);
+    CHECK(cc::values_of(bare_values()).sum_from(0) == 3);
+}
+
+TEST("sequence lifetime - move-only elements move out wherever they can only move")
+{
+    auto const make = []
+    {
+        auto v = cc::vector<std::unique_ptr<int>>();
+        v.push_back(std::make_unique<int>(1));
+        v.push_back(std::make_unique<int>(1));
+        v.push_back(std::make_unique<int>(2));
+        return v;
+    };
+    auto const deduped = make().values().dedup_by([](std::unique_ptr<int> const& p) { return *p; }).to_vector();
+    CHECK(deduped.size() == 2);
+    CHECK(*deduped[1] == 2);
+
+    auto std_v = std::vector<std::unique_ptr<int>>();
+    std_v.push_back(std::make_unique<int>(5));
+    auto const moved = cc::values_of(cc::move(std_v)).to_vector();
+    CHECK(*moved[0] == 5);
 }

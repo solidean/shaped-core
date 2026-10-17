@@ -162,6 +162,11 @@ struct iterate_source
 template <class R>
 struct seq_iterator_range;
 
+/// Whether a foreign range owns its elements rather than viewing someone else's: std::vector and std::string name an
+/// allocator_type, and std::span, std::string_view and the views do not.
+template <class R>
+inline constexpr bool seq_owns_elements = requires { typename R::allocator_type; };
+
 template <class R>
 concept seq_is_contiguous_range = requires(R& r) {
     { r.data() };
@@ -171,7 +176,7 @@ concept seq_is_contiguous_range = requires(R& r) {
 
 /// The source behind values_of(r) for a range that has no values() of its own.
 /// Contiguous storage is a span, borrowed from an lvalue and owned, by index, from a temporary; a C array is borrowed.
-/// A foreign temporary is never expiring, since it may be a view whose elements belong to someone else.
+/// A foreign temporary is expiring only where it owns its elements, which seq_owns_elements tells by its allocator.
 /// Anything else is its begin/end, through <clean-core/sequence/iterator_ranges.hh>.
 template <class R>
 [[nodiscard]] constexpr auto seq_range_source(R&& r)
@@ -194,16 +199,19 @@ template <class R>
     else if constexpr (seq_is_contiguous_range<std::remove_reference_t<R>>)
     {
         if constexpr (is_owned)
-            return owning_source<range_t, false>(cc::move(r));
+            return owning_source<range_t, seq_owns_elements<range_t>>(cc::move(r));
         else
             return span_source<std::remove_pointer_t<decltype(r.data())>>(r.data(), r.data() + r.size());
     }
     else if constexpr (seq_is_complete<seq_iterator_range<range_t>>)
         return seq_iterator_range<range_t>::make(cc::forward<R>(r));
     else
+    {
         static_assert(seq_is_complete<seq_iterator_range<range_t>>,
                       "a sequence over a begin/end range that is not contiguous (std::list, std::map, ...) needs "
                       "<clean-core/sequence/iterator_ranges.hh>");
+        return span_source<int>(nullptr, nullptr); // only so the refusal above is the one error
+    }
 }
 
 /// The source over an initializer list's backing array, which lives only until the end of the full expression:

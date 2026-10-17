@@ -221,7 +221,8 @@ A callback may take a leading `isize` index or omit it; the no-index form is tri
 That holds for every callback: maps and predicates, and the keys of `min_by`, `count_by`, `to_map`, `partition`, `dedup_by` and the rest.
 A key sees the item as a const view, before it is materialized, so over a zip it takes `(a, b)` rather than a tuple.
 `scan`'s function takes the accumulator first, `f(acc, idx?, item)`.
-A key that only decides, as in `min_by`, `max_by` and `dedup_by`, may view its element.
+A key that only decides, as in `min_by`, `max_by` and `dedup_by`, may view its element where the items are references that stay put: a borrowed source, or a container the sequence owns.
+Over prvalue items, an input range or a flatten of owned containers it must own its value, since the element it views is gone by the next comparison.
 One the result keeps, as in `to_map`, `to_grouped_map` and `count_by`, must own its value.
 A zip's, enumerate's or window's pack has no comparisons, so `min`, `dedup`, `is_sorted` or `equals` over one needs a `map` to something comparable first.
 `is_sorted_by(key)` is `map(key).is_sorted()`, so each key is computed once.
@@ -258,6 +259,7 @@ A derived and a base class would meet at the base, and slice when materialized.
   A container returned by a function needs no variable: `make_vec().values().filter(p).to_vector()` is safe, and so is naming the result.
   Its elements are stable but not borrowed, so `find()` refuses it.
   Every terminal operation that keeps an element moves it out rather than copying: `first`, `try_nth`, `min`, `partition`, `to_set` and the materializers.
+A foreign temporary does so only where it owns its elements, which it tells by having an `allocator_type`: a `std::vector` moves, a `std::span` copies.
   `min_max` copies, since one element may be both.
 
 ### Non-emptiness

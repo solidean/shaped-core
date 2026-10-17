@@ -746,8 +746,11 @@ struct dedup_source
     using item_t = typename S::item_t;
     static constexpr bool is_non_empty = seq_is_non_empty<S>;
     static constexpr bool is_borrowed = seq_is_borrowed<S>;
-    // a key that views an element would see it moved out from under it, so only the identity key, kept as a copy, moves
-    static constexpr bool is_expiring = seq_is_expiring<S> && std::is_same_v<KeyF, seq_identity_key>;
+    // a key that views an element would see it moved out from under it, so only the identity key, kept as a copy, moves;
+    // a move-only element cannot be copied either way, and moves with any key, which must then own its value
+    static constexpr bool is_expiring
+        = seq_is_expiring<S>
+       && (std::is_same_v<KeyF, seq_identity_key> || !std::is_copy_constructible_v<std::remove_cvref_t<item_t>>);
     static constexpr bool is_infinite = seq_is_infinite<S>;
     static constexpr bool keeps_pointer
         = std::is_same_v<KeyF, seq_identity_key> && std::is_reference_v<item_t> && seq_is_borrowed<S>;

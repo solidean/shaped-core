@@ -7,9 +7,25 @@
 // Sequences over begin/end ranges that are not contiguous: std::list, std::map, std::deque, a std::istream_iterator pair.
 // cc::values_of, chain and zip take one once this is included; contiguous ranges and C arrays need nothing.
 // It is opt-in because <iterator>, which tells a forward iterator from an input one, is too expensive for every container.
+// A dereference yielding an rvalue (std::views::as_rvalue) moves each element into its item as it is reached, whatever
+// the chain then does with it, so a filter or count over one empties the elements it passes.
 
 namespace cc::impl
 {
+/// What a dereference that is not an lvalue reference materializes as: the value type where the iterator names one,
+/// so a proxy (std::vector<bool>'s) never outlives its range, and the dereference itself decayed otherwise.
+template <class It, class DerefT>
+struct seq_iterator_value
+{
+    using type = std::remove_cvref_t<DerefT>;
+};
+template <class It, class DerefT>
+    requires requires { typename std::iter_value_t<It>; }
+struct seq_iterator_value<It, DerefT>
+{
+    using type = std::iter_value_t<It>;
+};
+
 /// A begin/end range: whatever *it yields, a reference or a prvalue.
 /// An input iterator's reference may point into the iterator, so next() increments only when the following step comes.
 template <class It, class End>
@@ -17,7 +33,8 @@ struct iterator_source
 {
     using deref_t = decltype(*std::declval<It&>());
     // a prvalue or proxy reference (std::vector<bool>) is the iterator's value type, so no proxy outlives its range
-    using item_t = std::conditional_t<std::is_lvalue_reference_v<deref_t>, deref_t, std::iter_value_t<It>>;
+    using item_t
+        = std::conditional_t<std::is_lvalue_reference_v<deref_t>, deref_t, typename seq_iterator_value<It, deref_t>::type>;
     // an input iterator may hand out a reference into itself (std::istream_iterator), which the next step overwrites;
     // a forward one is taken at its word that it does not, as std::forward_iterator's multipass guarantee requires
     static constexpr bool is_borrowed = std::is_pointer_v<It> || std::forward_iterator<It>;
@@ -118,8 +135,9 @@ struct owning_range_source
     using end_t = decltype(std::declval<R&>().end());
     using inner_t = iterator_source<it_t, end_t>;
     using item_t = typename inner_t::item_t;
-    // a temporary range may be a view over elements it does not own (std::views::reverse(v)), so nothing moves out
-    static constexpr bool is_expiring = false;
+    // a temporary range may be a view over elements it does not own (std::views::reverse(v)): only one with an allocator,
+    // a std::list or std::map, owns them, so only that moves them out
+    static constexpr bool is_expiring = std::is_lvalue_reference_v<item_t> && seq_owns_elements<R>;
 
     R* _range;
     inner_t _inner;
