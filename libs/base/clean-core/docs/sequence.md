@@ -78,7 +78,7 @@ The formatter says so with `consumes_argument`, which [formatting.md](formatting
 `inspect(f)` is the exception: it exists for what `f` does, so it has no size, and `count()` passes every element by `f`.
 `consume()` is the terminal operation that evaluates every element, for a chain kept for what its callbacks do.
 
-**Infinite sequences.** `repeat(x)`, `generate` and `iterate` never run out, and `is_infinite` propagates through map, filter, skip, the while forms, enumerate and chain.
+**Infinite sequences.** `repeat(x)`, `generate` and `iterate` never run out, and `is_infinite` propagates through map, filter, skip, `skip_while`, enumerate and chain.
 A flatten is infinite when its outer sequence is, or when the outer one is never empty and its inner ones are infinite.
 A reduction that traverses every element static-asserts on one; `take(n)` makes it finite, and with a known size.
 An infinite sequence is non-empty, since it never runs out, so `first()` needs no check.
@@ -121,16 +121,22 @@ A transformation wraps the source in exactly one adaptor source and rewraps that
   An adaptor forwards a capability wherever it can: `filter(p).contains(x)` is `inner.contains(x) && p(x)`, and `map(f).at(i)` is `f(inner.at(i))`.
 * **`has_pure_at`** says `at(i)` evaluates nothing, so asking for one position twice repeats no work and no side effect.
   Spans, iota, strided and owning sources have it, and a map does not, since its `at` calls `f`.
+* **`truncate`** is what lets a zip walked from the back cut its longer sides without evaluating them.
+  Window, chunk, step, chain, take and skip offer it wherever their input lets them; a side without it is stepped back, evaluating what it drops.
   A window asks each position up to N times, so it indexes only a pure source and buffers otherwise.
 
 The calling contract: `next()` and `next_back()` any number of times in any mix, then `try_fold` or `try_rfold` at most once, after which the source is spent.
 A source therefore need not leave a resume point behind `try_fold`, which is what lets a tree simply recurse inside it.
 `at`, `advance` and `truncate` address the elements remaining, so they may follow either.
 
-**A reference may point into the source itself**: repeat's one value, a temporary `fixed_vector` an owning source holds inline, a flatten's current inner container.
+**A reference may point into the source itself**: repeat's one value, a temporary `fixed_vector` an owning source holds inline, a flatten's current inner container, a window's buffer.
 It is valid while that source object lives, and the next step may end it, as a flatten opening its next inner container does.
-So whatever keeps a reference across steps, a buffered window or a dedup, keeps it only from a borrowed source, and copies otherwise.
-The one place a source moves after handing out a reference is the element a runtime non-empty check pulls; that wrapper carries the reference to the same offset in the moved-to source.
+An item *holds references* when it is one, or is a zip's, enumerate's or window's pack with one anywhere inside.
+So whatever keeps such an item across steps, a buffered window or chunk, keeps it only from a borrowed source, and otherwise copies what it references.
+The one place a source moves after handing out such an item is the element a runtime non-empty check pulls.
+That wrapper carries every reference in it to the same offset in the moved-to source, which constant evaluation cannot do, so that path is not `constexpr`.
+A callback with captures may return a reference into them, so a `map` or `filter_map` whose function holds state yields references that are not borrowed.
+A stateless lambda or a member pointer, `map(&particle::mass)`, keeps them borrowed.
 
 ### Internal iteration
 
@@ -191,7 +197,8 @@ Over a source that knows its positions each is an index loop over `at()`, which 
 A window asks every position up to N times, so it takes that path only where `at` is pure, and a window over `map(f)` buffers to call `f` once per element.
 An indexed pack holds a prvalue item by value, so `iota(n).pairwise()` holds its own two integers.
 Otherwise it buffers: a window keeps the last N `next()` results and a chunk the next N.
-A reference item is buffered as a pointer where the source is borrowed and as a copy where it is not, since a reference into the source may die at the next step.
+An item holding references is buffered as it is where the source is borrowed and as a copy where it is not, since a reference into the source may die at the next step.
+A buffered window or chunk still knows its size where its input does, so `map(f).pairwise().count()` calls nothing; it does not reverse.
 A buffered value's window is a pack of const references into the buffer, valid until the next step.
 `to_vector` copies them out into tuples, which is the usual way such a window escapes.
 
@@ -212,7 +219,8 @@ A zip spreads its elements into separate arguments, `[](auto& a, auto& b)`, beca
 Its element type is still a tuple for materialization.
 The optional index stays unambiguous, since the indexed form has exactly one parameter more.
 Variadic and defaulted lambdas are the known exception, documented rather than designed around.
-The forms are tried in order: spread, index then spread, the pack whole, index then the pack.
+The forms are tried in order: spread, index then spread, the pack whole, index then the pack, then the materialized `cc::tuple`, with and without an index.
+The last two serve a callback written against the element type, `min_by([](cc::tuple<int, int> const& t) { ... })`.
 So a callback taking `(auto&& p)` over a zip gets the pack, which has the tuple protocol.
 And `(isize i, auto w)` over a zip of ints is spread, `i` the first int, never the index and the pack.
 That case is not diagnosed: asking whether a generic lambda also takes the other form would compile its body with that form's arguments, which is a hard error rather than a no.
@@ -251,8 +259,9 @@ Adaptors propagate it:
 | anything infinite   | always               |
 
 In the chain and zip rows an infinite side counts as non-empty.
-A non-empty source hides `advance` and `truncate`, since either may empty it.
-`take` and `skip` unwrap it to reach the source underneath, so `fixed_array.values().take(3)` is still a pointer range, no longer typed non-empty.
+A non-empty source keeps `advance` and `truncate`, so every adaptor over it keeps them too.
+`take` and `skip`, the operations that use them, drop the trait at whatever depth it came from.
+So `fixed_array.values().map(f).skip(4)` evaluates nothing it skips, and is no longer typed non-empty.
 
 The trait describes the source before it is consumed, and the `&&` rule is what keeps it true: nothing can call into a sequence after its first consuming call.
 
@@ -267,7 +276,7 @@ if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value())
 
 A source with a cheap `is_empty()` costs nothing here: the wrapper checks it and flips the trait.
 A source without one (filter, flatten) can only find out by evaluating, so the wrapper pulls the first element and buffers *exactly one*.
-When that element references the source's own storage, the wrapper carries the reference along whenever it moves.
+When that element references the source's own storage, the wrapper carries the references along whenever it moves.
 That preserves eval-at-most-once and keeps the fold-from-first path a branch-free, hand-written-loop-equivalent hot loop.
 
 A reduction that needs a first element comes in a fixed grammar:
@@ -302,7 +311,7 @@ It propagates conservatively: filter preserves it, map-by-value breaks it.
 `has_borrowed_elements` is the `borrowed_range` analogue: references and pointers stay valid even if the sequence object is a temporary.
 It is what keeps a pointer from escaping a sequence that owns its container.
 Pointer-returning APIs (`find`, `find_last`, the `*_ptr` family) require it.
-`filter_map` keeps it only over a borrowed input, since its pointers may point into the input's elements.
+`filter_map` keeps it only over a borrowed input, since its pointers may point into the input's elements, and `map` and `filter_map` only with a function that holds no state.
 `values_of({1, 2, 3})` does not have it, since an initializer list's array dies with the full expression.
 
 **`min()` and `max()` return by value.**

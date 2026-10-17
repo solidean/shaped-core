@@ -826,7 +826,8 @@ if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value()) use(cc::mov
 // sum is decltype(x + x), so u8 sums as int; average is sum / n: f64 for integers, else / T::scalar_t
 .average_or(x);  .try_average();   // any sequence; all three take <AccT>: .average<f64>() sums floats in double
 // fixed_array / fixed_span with N > 0 are non-empty at compile time: fa.values().sum() needs no check
-// take / skip drop that (they may empty it) but keep the pointer range; enumerate / map keep it
+// take / skip drop that (they may empty it) at any depth, evaluating nothing they drop; enumerate / map keep it
+// a map / filter_map whose lambda CAPTURES returns non-borrowed references: find() refuses; member pointers are fine
 
 for (auto& x : v.values()) ...    // a pointer loop, same as `for (auto& x : v)`
 // range-for over a filter is external iteration and does not vectorize: a hot loop wants .filter(p).each(f)

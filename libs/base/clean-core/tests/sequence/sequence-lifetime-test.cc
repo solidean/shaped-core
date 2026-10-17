@@ -1,6 +1,7 @@
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/fixed_vector.hh>
 #include <clean-core/container/map.hh>
+#include <clean-core/container/ringbuffer.hh>
 #include <clean-core/container/tuple.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/sequence/sequence.hh>
@@ -51,6 +52,11 @@ template <class M>
 concept has_const_temporary_values = requires(M const&& m) { static_cast<M const&&>(m).values(); };
 template <class M>
 concept has_const_lvalue_values = requires(M const& m) { m.values(); };
+
+struct particle
+{
+    int mass;
+};
 } // namespace
 
 TEST("sequence lifetime - windows over prvalues hold them by value")
@@ -145,6 +151,8 @@ TEST("sequence lifetime - borrowed elements need a borrowed input")
     static_assert(!has_const_temporary_keys<cc::map<int, int>>);
     static_assert(!has_const_temporary_values<cc::map<int, int>>);
     static_assert(has_const_lvalue_values<cc::map<int, int>>);
+    static_assert(!has_const_temporary_values<cc::ringbuffer<int>>);
+    static_assert(has_const_lvalue_values<cc::ringbuffer<int>>);
 }
 
 TEST("sequence lifetime - enumerate keeps every trait")
@@ -239,4 +247,174 @@ TEST("sequence lifetime - keys and predicates take an index and spread items")
         }));
     CHECK(keys == 4);
     CHECK(cc::zip(a, b).is_sorted_by([](int, int y) { return y; }));
+}
+
+TEST("sequence lifetime - a pulled pack of references survives the move")
+{
+    using marked_vector = cc::fixed_vector<marked, 4>;
+    auto const both_positive = [](marked const& a, marked const& b) { return a.v > 0 && b.v > 0; };
+    auto const digits = [](marked const& a, marked const& b) { return a.v * 10 + b.v; };
+
+    // each side is a temporary fixed_vector, owned inline, and the zip's pack references both
+    auto const first = cc::zip(marked_vector{marked(1), marked(2)}, marked_vector{marked(3), marked(4)})
+                           .filter(both_positive)
+                           .assert_non_empty()
+                           .map(digits)
+                           .first();
+    CHECK(first == 13);
+
+    if (auto s = cc::zip(marked_vector{marked(1), marked(2)}, marked_vector{marked(3), marked(4)})
+                     .filter(both_positive)
+                     .try_as_non_empty();
+        s.has_value())
+        CHECK(cc::move(s.value()).map(digits).sum() == 13 + 24);
+    else
+        CHECK(false);
+
+    // enumerate's pack, and an indexed window's
+    auto const indexed = marked_vector{marked(5), marked(6)}
+                             .values()
+                             .filter(positive)
+                             .enumerate()
+                             .assert_non_empty()
+                             .map([](isize i, marked const& m) { return m.v + int(i); })
+                             .first();
+    CHECK(indexed == 5);
+    auto const pair = marked_vector{marked(1), marked(2), marked(3)}
+                          .values()
+                          .pairwise()
+                          .filter([](marked const&, marked const&) { return true; })
+                          .assert_non_empty()
+                          .map(digits)
+                          .first();
+    CHECK(pair == 12);
+
+    // a buffered window's pack references the window's own buffer
+    auto const buffered = cc::repeat(marked(7), 3)
+                              .filter(positive)
+                              .pairwise()
+                              .filter([](marked const&, marked const&) { return true; })
+                              .assert_non_empty()
+                              .map(digits)
+                              .first();
+    CHECK(buffered == 77);
+}
+
+TEST("sequence lifetime - a window over packs of owned references copies them")
+{
+    auto const make = [](isize i) { return cc::fixed_array<int, 2>{int(10 * i), int(10 * i + 1)}; };
+    auto const v = cc::vector<int>{1, 2, 3, 4, 5, 6};
+
+    auto const enumerated
+        = cc::iota(3)
+              .map(make)
+              .flatten()
+              .enumerate()
+              .pairwise()
+              .map([](auto const& a, auto const& b) { return a.template get<1>() * 100 + b.template get<1>(); })
+              .to_vector();
+    CHECK(equals(enumerated, {1, 110, 1011, 1120, 2021}));
+
+    auto const zipped
+        = cc::zip(cc::iota(3).map(make).flatten(), v)
+              .pairwise()
+              .map([](auto const& a, auto const& b) { return a.template get<0>() * 100 + b.template get<0>(); })
+              .to_vector();
+    CHECK(equals(zipped, {1, 110, 1011, 1120, 2021}));
+}
+
+TEST("sequence lifetime - an adaptor over a non-empty sequence keeps advance and truncate")
+{
+    auto const a = cc::fixed_array<int, 6>{1, 2, 3, 4, 5, 6};
+    int calls = 0;
+    auto const counted = [&](int x)
+    {
+        ++calls;
+        return x * 10;
+    };
+
+    CHECK(equals(a.values().map(counted).skip(4).to_vector(), {50, 60}));
+    CHECK(calls == 2);
+
+    calls = 0;
+    CHECK(a.values().map(counted).take(2).try_last().value() == 20);
+    CHECK(calls == 1);
+
+    static_assert(decltype(a.values().map(counted))::is_non_empty);
+    static_assert(!decltype(a.values().map(counted).take(2))::is_non_empty);
+    static_assert(!decltype(a.values().enumerate().reversed().skip(1))::is_non_empty);
+    CHECK(a.values().enumerate().reversed().skip(1).map([](isize i, int) { return i; }).first_or(-1) == 4);
+}
+
+TEST("sequence lifetime - zip trims its sides with truncate, evaluating nothing")
+{
+    auto const a = cc::vector<int>{1, 2, 3};
+    auto const b = cc::vector<int>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    int calls = 0;
+    auto const counted = [&](int x)
+    {
+        ++calls;
+        return x;
+    };
+
+    CHECK(cc::zip(a, b.values().map(counted).step_by(1)).try_last().has_value());
+    CHECK(calls == 1);
+
+    calls = 0;
+    CHECK(cc::zip(a, b.values().map(counted).chunks<1>()).try_last().has_value());
+    CHECK(calls == 1);
+
+    calls = 0;
+    CHECK(cc::zip(a, b.values().chain(b).map(counted)).try_last().has_value());
+    CHECK(calls == 1);
+
+    CHECK(
+        cc::zip(a, cc::iota(1'000'000'000'000).step_by(2)).reversed().map([](int x, isize y) { return x + y; }).first_or(-1)
+        == 7);
+}
+
+TEST("sequence lifetime - a reference a callback returns from its own state is not borrowed")
+{
+    auto const v = cc::vector<int>{0, 1};
+    auto const table = cc::fixed_array<int, 2>{5, 6};
+
+    static_assert(decltype(v.values().map([](int const& x) -> int const& { return x; }))::has_borrowed_elements);
+    static_assert(!decltype(v.values().map([table](int i) -> int const& { return table[i]; }))::has_borrowed_elements);
+
+    auto const ps = cc::vector<particle>{{1}, {2}};
+    static_assert(decltype(ps.values().map(&particle::mass))::has_borrowed_elements);
+    CHECK(ps.values().map(&particle::mass).find([](int m) { return m == 2; }) == &ps[1].mass);
+}
+
+TEST("sequence lifetime - a key may take the materialized tuple")
+{
+    auto const a = cc::vector<int>{1, 5, 2};
+    auto const b = cc::vector<int>{3, 4, 6};
+
+    auto const smallest
+        = cc::zip(a, b).assert_non_empty().min_by([](cc::tuple<int, int> const& t) { return t.get<1>(); });
+    CHECK(smallest.get<0>() == 1);
+    auto const groups = cc::zip(a, b).to_grouped_map([](isize i, cc::tuple<int, int> const&) { return i % 2; });
+    CHECK(groups.get(0).size() == 2);
+}
+
+TEST("sequence lifetime - a buffered window knows its size")
+{
+    auto const v = cc::vector<int>{1, 2, 3, 4};
+    int calls = 0;
+    auto const counted = [&](int x)
+    {
+        ++calls;
+        return x;
+    };
+
+    static_assert(decltype(v.values().map(counted).pairwise())::has_known_size);
+    CHECK(v.values().map(counted).pairwise().count() == 3);
+    CHECK(v.values().map(counted).windows<5>().count() == 0);
+    CHECK(v.values().map(counted).chunks<3>().count() == 1);
+    CHECK(calls == 0);
+
+    auto w = v.values().map(counted).pairwise();
+    (void)w.begin(); // range-for's first step: the first window is pulled
+    CHECK(cc::move(w).count() == 2);
 }
