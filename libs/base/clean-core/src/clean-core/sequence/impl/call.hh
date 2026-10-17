@@ -254,37 +254,51 @@ constexpr void seq_add_to(AccT& acc, X const& x)
         acc = acc + x;
 }
 
-/// How average() sums and divides an element type E; is_defined is false where it cannot, so its assert can say why.
+/// The accumulator average() sums E in by default: i64 / u64 for integers, E for floating point, decltype(x + x) otherwise.
 template <class E>
+struct seq_default_average_acc
+{
+    using type = E;
+};
+template <class E>
+    requires std::is_arithmetic_v<E>
+struct seq_default_average_acc<E>
+{
+    using type = std::conditional_t<std::is_floating_point_v<E>, E, std::conditional_t<std::is_signed_v<E>, i64, u64>>;
+};
+template <class E>
+    requires(!std::is_arithmetic_v<E>) && requires(E const& x) { x + x; }
+struct seq_default_average_acc<E>
+{
+    using type = std::remove_cvref_t<decltype(std::declval<E const&>() + std::declval<E const&>())>;
+};
+
+/// How average() divides an accumulator AccT holding a sum of E by the count.
+/// is_defined is false where it cannot, so average's assert can say why.
+template <class E, class AccT>
 struct seq_average
 {
     static constexpr bool is_defined = false;
-    using acc_t = E;
-    using result_t = E;
-    static constexpr E divide(E acc, isize) { return acc; }
+    using result_t = AccT;
+    static constexpr AccT divide(AccT acc, isize) { return acc; }
 };
-/// The sum in decltype(x + x), divided by E::scalar_t.
-template <class E>
-    requires(!std::is_arithmetic_v<E>) && requires(E const& x, isize n) { (x + x) / typename E::scalar_t(n); }
-struct seq_average<E>
+/// An arithmetic accumulator: an integer one divides as f64, a floating-point one in its own type.
+template <class E, class AccT>
+    requires std::is_arithmetic_v<AccT>
+struct seq_average<E, AccT>
 {
-    static constexpr bool is_defined = true;
-    using acc_t = std::remove_cvref_t<decltype(std::declval<E const&>() + std::declval<E const&>())>;
-    using result_t = std::remove_cvref_t<decltype(std::declval<acc_t>() / std::declval<typename E::scalar_t>())>;
-
-    static constexpr result_t divide(acc_t acc, isize n) { return acc / typename E::scalar_t(n); }
+    static constexpr bool is_defined = std::is_convertible_v<E, AccT>;
+    using result_t = std::conditional_t<std::is_floating_point_v<AccT>, AccT, f64>;
+    static constexpr result_t divide(AccT acc, isize n) { return result_t(acc) / result_t(n); }
 };
-/// Arithmetic elements: integers sum in 64 bits and divide as f64; floating point stays in its own type.
-template <class E>
-    requires std::is_arithmetic_v<E>
-struct seq_average<E>
+/// Any other accumulator divides by its own scalar_t.
+template <class E, class AccT>
+    requires(!std::is_arithmetic_v<AccT>) && requires(AccT const& acc, isize n) { acc / typename AccT::scalar_t(n); }
+struct seq_average<E, AccT>
 {
-    static constexpr bool is_defined = true;
-    static constexpr bool is_float = std::is_floating_point_v<E>;
-    using acc_t = std::conditional_t<is_float, E, std::conditional_t<std::is_signed_v<E>, i64, u64>>;
-    using result_t = std::conditional_t<is_float, E, f64>;
-
-    static constexpr result_t divide(acc_t acc, isize n) { return result_t(acc) / result_t(n); }
+    static constexpr bool is_defined = requires(AccT& acc, E const& x) { acc = acc + x; };
+    using result_t = std::remove_cvref_t<decltype(std::declval<AccT const&>() / std::declval<typename AccT::scalar_t>())>;
+    static constexpr result_t divide(AccT acc, isize n) { return acc / typename AccT::scalar_t(n); }
 };
 
 /// A callback result as a sequence item: an lvalue reference is kept, anything else is a prvalue.

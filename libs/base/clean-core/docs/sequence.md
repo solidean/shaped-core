@@ -219,7 +219,8 @@ Its `init` picks the accumulator type, `bytes.values().sum_from(i64(0))`, and th
 `average()` is `sum / count` and nothing cleverer, since that is what the hand-written loop does.
 Integers sum in 64 bits and divide as `f64`, floating point stays in its own type.
 Any other type divides its sum by its `scalar_t`, which every typed-geometry value type names, so `tg::vec3f` averages to a `vec3f`.
-`tg::pos` does not average: `pos + pos` is a translation, but a pos does not divide by a scalar.
+`tg::pos` averages to its centroid through the same rule, since `pos + pos` translates and `pos / T` scales.
+The accumulator is a template argument, `average<f64>()` over floats, defaulting to the above.
 An empty average has no answer, `0 / 0`, so `average()` is non-empty-only like `min()`, with `average_or` and `try_average` beside it.
 
 ### Pointers, references and the traits that guard them

@@ -232,6 +232,14 @@ TEST("sequence - average, projections, by-key and ends")
     CHECK(v.values().filter([](int x) { return x > 4; }).try_average().value() == 20.0 / 3.0);
     CHECK(v.values().filter([](int x) { return x > 4; }).assert_non_empty().average() == 20.0 / 3.0);
 
+    // the accumulator is a template argument
+    auto const big = cc::vector<float>{16777216.0f, 1.0f, 1.0f};
+    CHECK(big.values().assert_non_empty().average() == 16777216.0f / 3.0f); // the ones vanish in float
+    CHECK(big.values().assert_non_empty().average<f64>() == (16777216.0 + 2.0) / 3.0);
+    static_assert(std::is_same_v<decltype(big.values().assert_non_empty().average<f64>()), f64>);
+    CHECK(big.values().try_average<f64>().value() == (16777216.0 + 2.0) / 3.0);
+    CHECK(cc::vector<u8>().values().average_or<i32>(2.5) == 2.5);
+
     // any other type divides its sum by its scalar_t
     struct meters
     {

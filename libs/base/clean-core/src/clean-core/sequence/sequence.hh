@@ -217,28 +217,33 @@ public:
         return acc;
     }
 
-    /// The mean, sum / count.
-    /// Integers sum in 64 bits and divide as f64, floating point stays in its own type, and any other type divides its
-    /// sum by its scalar_t: a sequence of tg::vec3f averages to a vec3f.
+    /// The mean, sum / count, summed in AccT.
+    /// By default integers sum in 64 bits and divide as f64, floating point stays in its own type, and any other type
+    /// sums in decltype(x + x) and divides by its scalar_t: a sequence of tg::vec3f averages to a vec3f.
+    /// average<f64>() sums floats in double precision.
+    template <class AccT = void>
     [[nodiscard]] constexpr auto average() &&
     {
         static_assert(is_non_empty, "average() needs a non-empty sequence: spell .assert_non_empty().average(), "
                                     "branch on .try_as_non_empty(), or use .average_or(fallback) / .try_average()");
-        return this->_average([](auto r) { return r; }, [] { return typename impl::seq_average<element_t>::result_t(); });
+        return this->template _average<AccT>([](auto r) { return r; },
+                                             [] { return typename _average_t<AccT>::result_t(); });
     }
 
-    template <class U>
+    template <class AccT = void, class U>
     [[nodiscard]] constexpr auto average_or(U&& fallback) &&
     {
-        using result_t = typename impl::seq_average<element_t>::result_t;
-        return this->_average([](result_t r) { return r; }, [&] { return result_t(cc::forward<U>(fallback)); });
+        using result_t = typename _average_t<AccT>::result_t;
+        return this->template _average<AccT>([](result_t r) { return r; },
+                                             [&] { return result_t(cc::forward<U>(fallback)); });
     }
 
+    template <class AccT = void>
     [[nodiscard]] constexpr auto try_average() &&
     {
-        using result_t = typename impl::seq_average<element_t>::result_t;
-        return this->_average([](result_t r) { return cc::optional<result_t>(cc::move(r)); },
-                              [] { return cc::optional<result_t>(); });
+        using result_t = typename _average_t<AccT>::result_t;
+        return this->template _average<AccT>([](result_t r) { return cc::optional<result_t>(cc::move(r)); },
+                                             [] { return cc::optional<result_t>(); });
     }
 
     template <class F>
@@ -678,14 +683,21 @@ private:
         }
     }
 
+    template <class AccT>
+    using _average_acc_t
+        = std::conditional_t<std::is_void_v<AccT>, typename impl::seq_default_average_acc<element_t>::type, AccT>;
+    template <class AccT>
+    using _average_t = impl::seq_average<element_t, _average_acc_t<AccT>>;
+
     // the sum and the count in one pass, then on_done(sum / count); on_empty() for an empty sequence
-    template <class DoneF, class EmptyF>
+    template <class AccT, class DoneF, class EmptyF>
     constexpr auto _average(DoneF&& on_done, EmptyF&& on_empty)
     {
-        using avg = impl::seq_average<element_t>;
+        using acc_t = _average_acc_t<AccT>;
+        using avg = _average_t<AccT>;
         static_assert(avg::is_defined,
-                      "average() divides the sum by the count: it needs element + element, and a sum that divides by "
-                      "the element's scalar_t (tg::pos does not divide by a scalar)");
+                      "average() sums the elements and divides by the count: the accumulator must take acc + element, "
+                      "and divide by its scalar_t where it is not arithmetic");
         isize n = 0;
         isize known_n = 0;
         if constexpr (has_known_size)
@@ -694,15 +706,14 @@ private:
             [&]<class X>(X&& x)
             {
                 ++n;
-                return typename avg::acc_t(cc::forward<X>(x));
+                return acc_t(cc::forward<X>(x));
             },
-            [&](typename avg::acc_t& acc, auto const& x)
+            [&](acc_t& acc, auto const& x)
             {
                 impl::seq_add_to(acc, x);
                 ++n;
             },
-            [&](typename avg::acc_t acc) { return on_done(avg::divide(cc::move(acc), has_known_size ? known_n : n)); },
-            on_empty);
+            [&](acc_t acc) { return on_done(avg::divide(cc::move(acc), has_known_size ? known_n : n)); }, on_empty);
     }
 
     template <bool IsMin, class KeyF>
