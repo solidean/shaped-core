@@ -36,7 +36,7 @@ cpu_descriptor_slot dx12_cpu_descriptor_heap::allocate()
             if (!s.recycled.empty())
             {
                 int const slot = s.recycled.back();
-                s.recycled.pop_back();
+                s.recycled.remove_back();
                 return cpu_descriptor_slot(slot);
             }
             if (s.next_free < capacity)

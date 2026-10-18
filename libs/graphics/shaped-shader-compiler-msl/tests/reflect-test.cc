@@ -388,10 +388,18 @@ TEST("ssc::msl reflect - the stages metal does not have are refused by name")
     REQUIRE(raygen.has_value());
     CHECK(raygen.value() == "kernel");
 
-    // The other five ray-tracing stages are visible functions, which is what a shader table links.
+    // A miss, closest hit or callable is a visible function the kernel calls.
     auto const miss = ssc::msl::impl::entry_qualifier_for(sg::shader_stage::miss);
     REQUIRE(miss.has_value());
     CHECK(miss.value() == "visible");
+
+    // An any hit or an intersection runs during traversal, so it is an intersection function.
+    auto const any_hit = ssc::msl::impl::entry_qualifier_for(sg::shader_stage::any_hit);
+    REQUIRE(any_hit.has_value());
+    CHECK(any_hit.value() == "intersection");
+    auto const intersection = ssc::msl::impl::entry_qualifier_for(sg::shader_stage::intersection);
+    REQUIRE(intersection.has_value());
+    CHECK(intersection.value() == "intersection");
 }
 
 TEST("ssc::msl reflect - comments never contribute a binding")

@@ -440,7 +440,7 @@ struct markdown_parser
         if (open.size() > matched)
         {
             while (open.size() > matched)
-                open.pop_back();
+                open.remove_back();
             open_paragraph = -1;
         }
 
@@ -473,7 +473,7 @@ struct markdown_parser
             if (kind_of(open.back()) != markdown::node_kind::list || node_of(open.back()).marker != m.marker)
             {
                 if (kind_of(open.back()) == markdown::node_kind::list)
-                    open.pop_back();
+                    open.remove_back();
                 open.push_back(add_child(
                     open.back(),
                     {.kind = markdown::node_kind::list, .ordered = m.ordered, .line = line_number, .marker = m.marker}));
@@ -487,7 +487,7 @@ struct markdown_parser
 
         // a list with no open item holds no content of its own
         while (open.size() > 1 && kind_of(open.back()) == markdown::node_kind::list)
-            open.pop_back();
+            open.remove_back();
 
         // 7. the leaf
         auto p = i32(0);

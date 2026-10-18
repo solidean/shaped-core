@@ -47,6 +47,8 @@ One-liner per library:
   So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic correctly rounded once per operation.
   Geometric queries are **members** (`a.intersects(b)`, `p.distance_to(seg)`), and an object type is **maximal** — `aabb3` is the solid box, its surface is `aabb3_surface`.
   [docs/plans/geometry-query-matrix.md](libs/base/typed-geometry/docs/plans/geometry-query-matrix.md) is that layer; curves, symbolic and mesh are planned.
+  `camera/` is projections and views: `tg::perspective` is left-handed reverse-Z, and every other convention has an explicit name.
+  `tg::view_projection`'s `project` / `unproject` pair is specified by its round trip — [docs/modules/camera.md](libs/base/typed-geometry/docs/modules/camera.md).
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/base/clean-net`** — networking: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev server.
@@ -163,7 +165,7 @@ One-liner per library:
   A first vertical slice today: path-traced views blitted into a window.
   Every shader is SGL, so the trace runs on dx12 and vulkan; the default context and the examples are dx12's.
   **A material type is an SGL fragment** (`sv::material_type::shader`), generated into one hit group per permutation.
-  **`sv::asset_loader` reads glTF, OBJ, STL and FBX into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
+  **`sv::asset_loader` reads glTF, OBJ and STL into a CPU-side `sv::asset_data`** — it holds no device, opens no file, and resolves every uri through a settable hook.
   A mesh exists in two forms: `sv::mesh` is what a caller holds — pinned payloads plus the resources minted for them, with `is_ready` — and `sv::resident_mesh` is that mesh as ids alone.
   **Drawings are Slug shapes**: flat on a canvas, over a scene, as annotations — and as decals, which the tracer paints into the surfaces they are projected onto.
   [docs/canvas.md](libs/graphics/shaped-viewer/docs/canvas.md) is the design.
@@ -174,7 +176,8 @@ Supporting directories:
 * **`tools/`** — `dev/` (Python build/test machinery behind [dev.py](dev.py);
   see [docs/dev-py-driver.md](docs/dev-py-driver.md)), `bin/` (checked-in binaries, e.g. `diag-launcher.exe`), `cmake/` (repo-wide build config modules), `lint/` (the clang-tidy gate whitelist),
   `shaped-linter/` (our own C++ linter — own lexer + parser, no LLVM; see [its readme](tools/shaped-linter/readme.md) — run via `dev.py lint shaped`),
-  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)), and `instruction-tracer/` (a C++ tool —
+  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)),
+  `issues/` (the in-repo issue tracker behind `dev.py issues` — see [docs/guides/issue-tracking.md](docs/guides/issue-tracking.md)), and `instruction-tracer/` (a C++ tool —
   see [its readme](tools/instruction-tracer/readme.md) — that records what optimized code actually executed; drive it via `dev.py assembly trace`).
 * **`docs/`** — repo-wide docs; start at [docs/_index.md](docs/_index.md).
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry points.
@@ -202,7 +205,8 @@ Each entry above names what it depends on, and the `CMakeLists.txt` files are th
   **Never introduce a new version of one of our file formats** (`.vdoc` above all) — that is a question, not a migration you write unprompted.
   When a change breaks something, **ask whether compatibility must be preserved**; most current work is on unreleased features, so the answer is usually no.
   See [Stability & Evolution](docs/coding-guidelines.md#stability--evolution).
-* **Feature branches are mandatory** (see Git workflow) — don't commit to `main`.
+* **Most work goes straight to `main`; a PR is for big reworks and substantial new API** (see Git workflow).
+* **Never wait for CI.** Push and move on; a red run is fixed after the fact, directly on `main`.
 * **No force-push to `main`.**
 * **Opening a PR requires the `opening-a-pr` skill.** Activate it before any `gh pr create` — do not hand-roll the PR.
 
@@ -249,7 +253,7 @@ Writing several `.md` files before linting any of them turns a habit into a swee
 Linting the first one calibrates the rest.
 [docs/guides/prose.md](docs/guides/prose.md) is the workflow around it, including what `--fix` will and won't do for you.
 
-**Before committing, run `uv run dev.py check --fix`** — the pre-commit gate, and manual rather than a git hook.
+**Before pushing, run `uv run dev.py check --fix`** — the pre-push gate, and manual rather than a git hook.
 It runs the clang-tidy gates, shaped-linter, clang-format, a full-repo cross-reference check, then the test suite; `--no-test` skips that tail and `--list` shows the registry.
 The order is a correctness property rather than a listing convention, and [Pre-commit checks](docs/guides/building-and-testing.md#pre-commit-checks) says why.
 
@@ -405,6 +409,8 @@ Invokable session tooling lives in [.claude/skills/](.claude/skills/). Worth cal
 
 * **`/building-and-testing`** — drive `dev.py` and the `repo_tools` `build_diag` / `test_diag` diagnostics.
   See [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md).
+* **`/issue-tracking`** — file, find, claim and close issues: markdown files in any `docs/issues/` folder, driven by `dev.py issues`.
+  See [docs/guides/issue-tracking.md](docs/guides/issue-tracking.md).
 * **`/reworking-prose`** — rework the comments and docs around a topic wholesale, landing every rewrite in one `dev.py lint prose-apply` pass.
   Use it whenever prose findings pile up, a guideline changes, or a surface needs more documentation than it has.
 
@@ -440,10 +446,22 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 
 ## Git workflow
 
-* **`main` is the integration branch.** Feature branches are **mandatory**, namespaced per contributor: `u/<your-initials>/<feature>` (e.g. `u/pt/...` for Philip Trettner — use your own initials).
+* **`main` is the integration branch, and most changes are committed to it directly.**
+  That covers fixes, internal improvements, tests, CI fixes, docs, and API that was basically expected to be there — the missing overload, the accessor the type obviously lacked.
+* **A PR with a review is for big reworks and anything that adds substantial new API** — a new concept, type family or library, a public shape someone should weigh before it sets.
+  Those go on a feature branch namespaced per contributor, `u/<your-initials>/<feature>` (Philip Trettner is `u/pt/...`), through the `opening-a-pr` skill.
+  When a change could go either way, pick a lane and say which in one line, so the maintainer can redirect.
+* **CI is never waited on**, neither before a push to `main` nor before opening a PR.
+  Red CI is fixed after the fact and opportunistically, as its own commit on `main` — the `debugging-ci` skill reads the failing run.
+  It is usually small: an arm the local machine does not compile, a newer compiler's warning.
 * **`git pull` merges, not rebases** — merge commits preserve the order parallel work landed.
   On conflicts, resolve and commit the merge (default message fine).
-* **Before committing, run `uv run dev.py check --fix`.** Not a git hook — manual.
+  A push to `main` rejected as non-fast-forward is the same case: pull, resolve, push again.
+* **Commits are grouped by topic, and one may be partially broken.** A commit that does not compile on its own is fine.
+* **Before every push, `uv run dev.py check --fix` must pass.** Not a git hook — manual.
+  It is the local gate that makes skipping CI cheap, so it is not skipped.
+  Its default scope is everything since the merge base with `origin/main`, so on `main` it covers exactly the unpushed commits.
+* **An agent never pushes on its own initiative.** A push needs the user's intent: ask, or wait until told to push.
 * **The review workflow is: open the PR, then review it in a fresh session, which lands changes or comments.**
   The review with the tool always comes after the PR is open, never before.
   So "anything to add before the PR?" asks what this session should still do; "a proper review with the tool" is never the answer.
@@ -497,9 +515,12 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | See external dependency pins     | `uv run dev.py deps list` (`--offline` for no network; [dependencies](docs/guides/dependencies.md)) |
 | Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
+| File, find or claim an issue     | `uv run dev.py issues new/list/known/claim` ([issue-tracking](docs/guides/issue-tracking.md); the `issue-tracking` skill) |
+| Browse and triage issues in a browser | `uv run dev.py issues serve` — edits write files only; the page's Commit & push is a separate step |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
-| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK) |
+| Update a consumer's submodules   | `uv run dev.py submodules sync [--bump]` — fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
+| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

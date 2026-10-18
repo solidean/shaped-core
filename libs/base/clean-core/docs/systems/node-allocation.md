@@ -116,9 +116,17 @@ There is deliberately **no mid-life slab migration** between live threads: that 
 Still open:
 
 - **Cheaper ring re-walk** — cache the last-known-full point instead of an O(ring) scan per exhaustion.
+  A candidate that removes the walk entirely: a **per-owner pending stack** of slabs with remote frees.
+  The remote free that takes a slab's `remote` bitmap from empty to non-empty also pushes the slab onto its owner's lock-free stack.
+  The stack is linked through the slab metadata, and a `listed` flag keeps a slab from being pushed twice.
+  On exhaustion the owner takes the whole stack with one `exchange` and drains exactly the slabs that gained frees, so there is no ABA and no scan.
+  The owner's own frees into a full slab go onto a thread-local partial list instead, with no atomics.
+  Orphaned slabs keep collecting on their dead owner's stack, and an adopter takes a bounded batch of them.
+  Adopting a whole stack lets the first adopter hoard what its siblings then take fresh, more with every generation of threads.
+  A downstream index-based store runs this design under a multi-generation stress test; it is not in clean-core yet.
 - **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use.
 - **A leaked node is invisible to a leak checker** — the slab is the allocation, so a dead slot is unused bytes in a live block.
-  A build mode routing every class through the large-node path would fix it; [TODO](../TODO.md) has the shape.
+  A build mode routing every class through the large-node path would fix it; [feat-cc-node-alloc-direct-mode](../issues/feat-cc-node-alloc-direct-mode.md) has the shape.
 
 **Confidence gaps — `TODO`s before the cross-thread guarantee is *proven*, not just *argued*:**
 

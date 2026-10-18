@@ -118,6 +118,14 @@ target_sources(typed-geometry
     src/typed-geometry/geometry/impl/sampling.hh
     src/typed-geometry/geometry/geometry.hh
     src/typed-geometry/geometry/all.hh
+
+    src/typed-geometry/camera/fwd.hh
+    src/typed-geometry/camera/projection.hh
+    src/typed-geometry/camera/view.hh
+    src/typed-geometry/camera/view_projection.hh
+    src/typed-geometry/camera/viewport.hh
+    src/typed-geometry/camera/camera.hh
+    src/typed-geometry/camera/all.hh
 )
 
 # Require at least C++23 for this target; the final -std is chosen by the top-level project.
@@ -180,6 +188,8 @@ if(SC_BUILD_TESTS)
         tests/benchmarks/sampling-benchmark.cc
         tests/benchmarks/query-benchmark.cc
 
+        tests/scalar_t-test.cc
+
         tests/linalg/comp-test.cc
         tests/linalg/vec-test.cc
         tests/linalg/pos-test.cc
@@ -194,6 +204,11 @@ if(SC_BUILD_TESTS)
         tests/transform/transform-ops-test.cc
         tests/transform/dispatch-test.cc
         tests/transform/projective-test.cc
+        tests/transform/trs-test.cc
+
+        tests/camera/projection-test.cc
+        tests/camera/view-test.cc
+        tests/camera/view-projection-test.cc
 
         tests/geometry/aabb-test.cc
         tests/geometry/sphere-test.cc

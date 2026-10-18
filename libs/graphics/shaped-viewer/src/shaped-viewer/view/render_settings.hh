@@ -1,5 +1,6 @@
 #pragma once
 
+#include <shaped-graphics/fwd.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
 
@@ -20,24 +21,35 @@ namespace sv
 /// `samples_per_pixel`, and a wavefront frame whatever its rounds finish.
 /// The wavefront starts no sample past it, and the megakernel traces nothing once its frames reach it, so a still view there costs no trace.
 ///
-/// Per view rather than per process is the intended shape — see libs/graphics/shaped-viewer/docs/TODO.md, where this becomes
-/// `render_settings::max_samples_per_pixel`, excluded from the trace hash.
+/// Per view rather than per process is the intended shape: `render_settings::max_samples_per_pixel`, excluded from the trace hash.
+/// issue: feat-sv-max-samples-per-pixel
 inline constexpr u32 accumulation_sample_cap = 16384;
+
+/// The mode a layer asking for `mode` is drawn in on `ctx`: `mode` itself, unless it is `automatic`.
+[[nodiscard]] render_mode resolve_render_mode(sg::context const& ctx, render_mode mode);
 } // namespace sv
 
 /// How a layer's image is produced from its scene: traced by one of two path tracers, or rasterized.
 ///
 /// The two tracers converge to the same image; they differ in what a frame costs and how a moving image looks.
-/// Neither wins everywhere: the megakernel is about twice as fast on a shallow scene, the wavefront far ahead wherever paths run deep, as in a scattering medium.
-/// libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
+/// Neither wins everywhere: on an RTX laptop GPU the megakernel is about twice as fast on a shallow scene, and the wavefront far ahead wherever paths run deep, as in a scattering medium.
+/// On a Radeon 780M the wavefront wins the shallow scene too; libs/graphics/shaped-viewer/docs/wavefront.md has the measurements.
 enum class sv::render_mode : sv::u8
 {
+    /// The wavefront where the device has `sg::feature::raytracing_pipeline` and `ray_query` both, and `raster` where it has not, which the viewer warns of once.
+    ///
+    /// Resolved where the viewer builds the frame's plan, so the plan declares what the mode it resolved to writes.
+    /// A plan built by hand from a layer still `automatic` traces it with the wavefront.
+    /// It is also where the default can move, to the hybrid once there is one, without a caller changing anything.
+    automatic,
+
     /// One ray-tracing dispatch per frame, every path traced to its end inside it.
     /// A frame costs `render_settings::samples_per_pixel` samples per pixel.
     megakernel,
 
     /// Paths split into stages that each run as their own dispatch, and carried across frames.
-    /// A still frame costs what `render_settings::frame_budget_ms` holds, or `rounds_per_frame` rounds without one.
+    /// A still frame costs what its share of `viewer_config::frame_budget_ms` holds, or `rounds_per_frame` rounds without one.
+    /// Where one full round overruns that share, it runs one round and starts new samples in only a share of the free slots.
     /// A frame that sees the image change starts one sample per pixel and runs each to its end.
     wavefront,
 
@@ -53,12 +65,12 @@ enum class sv::render_mode : sv::u8
 
 /// View-wide render settings — everything that applies to a whole view rather than a single scene item.
 ///
-/// Just the path-tracer integration controls for now.
+/// How the layer is drawn, traced or rasterized, and the controls of each; a field says which mode reads it.
 /// Lighting and the environment live elsewhere on the layer (its lights and its background).
 /// This is the home for the post-process sequence, exposure, ... as they land.
 struct sv::render_settings
 {
-    /// Primary rays integrated per pixel, all in the one path-trace dispatch.
+    /// Primary rays integrated per pixel, all in the one path-trace dispatch: the megakernel's alone, which no other mode reads or restarts on.
     ///
     /// This is what one frame costs, not what the image converges to — a view left alone accumulates without limit,
     /// so this trades how fast a moving camera settles against how smooth it stays while it moves.
@@ -68,22 +80,15 @@ struct sv::render_settings
     i32 max_bounces = 5;
 
     /// Which path tracer traces this layer, or `raster` to draw it instead; switching restarts its image.
-    render_mode mode = render_mode::wavefront;
+    render_mode mode = render_mode::automatic;
 
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///
     /// The wavefront's counterpart to `samples_per_pixel`, which it does not read: this is what a still frame costs, and a path still alive after it carries on next frame.
-    /// A frame that sees the image change ignores it, and runs until every sample it started has finished.
-    /// With a `frame_budget_ms`, it is only where the rounds start, until the frame's own timestamps say what one costs.
+    /// A frame that sees the image change ignores it, and drains: it runs `wavefront_routine::drain_rounds(max_bounces)` rounds.
+    /// Those finish every sample it started but a medium walk deeper than that, which a still frame after it finishes.
+    /// Under the viewer's `viewer_config::frame_budget_ms`, it is only where the rounds start, until the frame's own timestamps say what one costs.
     i32 rounds_per_frame = 8;
-
-    /// How much GPU time a still frame of the wavefront tracer may take, in milliseconds; 0 runs `rounds_per_frame` always.
-    ///
-    /// The rounds a still frame runs follow from what the last ones measured, so the image converges as fast per second
-    /// as the GPU allows while the viewer stays responsive; a frame that sees the image change is not held to it.
-    /// Where one full round overruns it, a still frame runs one round and starts new samples in only a share of the free slots.
-    /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
-    f32 frame_budget_ms = 16.0f;
 
     /// Whether the wavefront's restarting frames that feed a temporal denoiser resample their paths by ReSTIR GI and DI.
     /// The converging mean stays plain path tracing; only what the denoiser is handed changes — libs/graphics/shaped-viewer/docs/plans/restir-gi.md.

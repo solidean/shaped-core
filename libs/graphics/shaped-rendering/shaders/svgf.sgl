@@ -5,6 +5,8 @@
 // `variance_cs` measures how noisy each pixel of that history still is, which is what steers the filter.
 // `atrous_cs` is one filter pass whose luminance edge-stop that variance steers, dispatched once per pass.
 
+require extended_image_formats
+
 // the format of the image a filter pass writes: the routine's scratch between passes, the caller's output on the last
 @option const target_format: pixel_format = .rgba32_float
 
@@ -304,4 +306,4 @@ binding svgf_atrous_images:
             result *= reflectance(albedo, svgf_atrous_images.specular_albedo.load(p).xyz, flags)
         out_alpha = svgf_atrous_images.color.load(p).w
 
-    svgf_atrous_images.target[id.xy] = float4(..result, out_alpha)
+    svgf_atrous_images.target[id.xy] = float4(..result, out_alpha) as texel[target_format]

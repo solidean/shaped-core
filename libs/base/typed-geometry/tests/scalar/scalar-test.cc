@@ -22,6 +22,7 @@ static_assert(tg::traits::has_pow2<float>, "f32 has the exact base-two operation
 static_assert(!tg::traits::has_pow2<int>, "shifting an integer truncates, so it is a different operation");
 static_assert(tg::traits::has_non_finite<float> && tg::traits::has_non_finite<double>, "floats have NaN and infinities");
 static_assert(!tg::traits::has_non_finite<int>, "an integer has no NaN, so asking one is refused rather than answered");
+static_assert(!tg::is_nan(1.0f) && tg::is_finite(1.0) && !tg::is_inf(-2.0f), "float classification is constexpr");
 
 template <class T>
 concept classifies_non_finite = requires(T x) { tg::is_finite(x); };

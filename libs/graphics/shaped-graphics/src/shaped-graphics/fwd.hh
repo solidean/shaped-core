@@ -233,6 +233,8 @@ enum class texture_sample_type;
 enum class sampler_binding_type;
 enum class access_mode;
 struct binding;
+struct buffer_array_binding; // a buffer array by its layout's name, as a shader package generates it (binding/binding.hh)
+struct texture_array_binding; // the texture form
 struct compiler_info;
 struct compute_dimensions;
 struct compiled_shader;
@@ -293,13 +295,14 @@ struct array_plan;                              // how a dispatch tracks one bou
 struct array_declaration_link; // what a live array declaration and its list share (command_list/array_access_declaration.hh)
 using array_declaration_token = std::shared_ptr<array_declaration_link>;
 class array_declaration_book; // one bind point's live array declarations (barrier/array_declarations.hh)
-struct member_track;          // what tracking one declared array element found
+class array_skip_guard; // what an op's skipped arrays leave its barrier flush to check (barrier/array_declarations.hh)
+struct member_track;    // what tracking one declared array element found
 template <class ArrayBinding>
 struct array_site; // one array binding of one bound group, as an op meets it
 // the counts `cmd` recorded, for its backend to fold in at submit; defined in command_list/command_list.cc
 stat_counts const& recorded_stats(command_list const& cmd);
-// asserts that no array declaration made on `cmd` is alive, which every backend's submit calls; command_list/command_list.cc
-void check_no_live_array_declarations(command_list const& cmd);
+// ends every array declaration made on `cmd` that is alive, silently, which every backend's submit calls; command_list/command_list.cc
+void end_array_declarations_at_submit(command_list& cmd);
 void record_stats(sg::stats const& delta); // each non-zero counted stat as one CC_RECORD_ACCUM; context/metrics.cc
 } // namespace impl
 
@@ -401,6 +404,11 @@ inline constexpr int max_color_targets = 8;
 /// Hard cap on vertex-buffer input slots bound for a draw.
 /// 8 is WebGPU's `maxVertexBuffers`; DX12 allows 32 (`D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT`) and Vulkan at least 16.
 inline constexpr int max_vertex_buffers = 8;
+
+/// Hard cap on the workgroups one dispatch runs along each axis, direct or indirect.
+/// 65535 is DX12's `D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION`, Vulkan's guaranteed `maxComputeWorkGroupCount` and WebGPU's default `maxComputeWorkgroupsPerDimension`.
+/// A one-dimensional dispatch of more groups is two-dimensional instead.
+inline constexpr int max_dispatch_groups_per_dimension = 65535;
 
 } // namespace sg
 

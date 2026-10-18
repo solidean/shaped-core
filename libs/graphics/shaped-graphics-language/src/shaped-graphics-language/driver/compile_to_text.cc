@@ -134,6 +134,16 @@ cc::result<emitted_source, cc::string> emit_text(check::checked_module const& m,
     result.preferred_subgroup_size = e.preferred_subgroup_size;
     return result;
 }
+
+/// What `front` says of every entry point's text alike: the library files the source reached, and its warnings.
+void add_source_facts(cc::result<emitted_source, cc::string>& text, driver::impl::front_end const& front)
+{
+    if (!text.has_value())
+        return;
+    for (auto const name : front.library_names)
+        text.value().library_files.push_back(cc::string(name));
+    text.value().warnings = front.warnings;
+}
 } // namespace
 
 cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request const& request)
@@ -180,9 +190,7 @@ cc::result<sgl::emitted_source, cc::string> sgl::compile_to_text(text_request co
                                     request.source_name, e.name, check::stage_name(e.entry_stage),
                                     check::stage_name(request.stage)));
     auto result = emit_text(m, e, request.target, request.source_name);
-    if (result.has_value())
-        for (auto const name : front.library_names)
-            result.value().library_files.push_back(cc::string(name));
+    add_source_facts(result, front);
     return result;
 }
 
@@ -196,9 +204,7 @@ cc::result<cc::vector<sgl::entry_text>, cc::string> sgl::compile_all_to_text(all
         for (auto const t : request.targets)
         {
             auto text = emit_text(front.module, e, t, request.source_name);
-            if (text.has_value())
-                for (auto const name : front.library_names)
-                    text.value().library_files.push_back(cc::string(name));
+            add_source_facts(text, front);
             result.push_back({.entry_point = e.name, .target = t, .text = cc::move(text)});
         }
     return result;

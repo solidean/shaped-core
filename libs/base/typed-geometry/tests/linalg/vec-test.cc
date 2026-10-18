@@ -145,3 +145,28 @@ TEST("tg vec - orthogonal vectors and bases")
     }
     CHECK(tg::abs(tg::dot(tg::any_orthogonal(tg::vec2f(3, 4)), tg::vec2f(3, 4))) <= 1e-6f);
 }
+
+TEST("tg vec - an orthonormal basis with its roll fixed by an up hint")
+{
+    for (auto const v : {tg::vec3f(0, 0, 1), tg::vec3f(1, 2, 3), tg::vec3f(-5, 0.1f, 0), tg::vec3f(0.2f, -0.3f, -1)})
+    {
+        auto const n = v.normalized();
+        // a tilted, unnormalized hint: only the plane it spans with n matters
+        auto const up = tg::vec3f(0.1f, 2.0f, 0.3f);
+        auto const [u, w] = tg::orthonormal_basis(n, up);
+        CHECK(tg::abs(tg::dot(u, w)) < 1e-6f);
+        CHECK(tg::abs(tg::dot(u, n)) < 1e-6f);
+        CHECK(tg::abs(tg::dot(w, n)) < 1e-6f);
+        CHECK(tg::abs(u.length() - 1.0f) < 1e-6f);
+        CHECK(tg::abs(w.length() - 1.0f) < 1e-6f);
+        CHECK(tg::abs(tg::dot(tg::dual(tg::cross(u, w)), n) - 1.0f) < 1e-5f);
+        // w lies in the plane of n and up, on up's side
+        CHECK(tg::abs(tg::dot(u, up)) < 1e-5f);
+        CHECK(tg::dot(w, up) > 0.0f);
+    }
+
+    // looking along +z with +y up, u is +x: a left-handed camera's right
+    auto const [right, up] = tg::orthonormal_basis(tg::vec3f(0, 0, 1), tg::vec3f(0, 1, 0));
+    CHECK(right == tg::vec3f(1, 0, 0));
+    CHECK(up == tg::vec3f(0, 1, 0));
+}

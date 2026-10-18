@@ -270,6 +270,98 @@ void scene_ref::add_arrow(tg::segment3f const& segment, arrow_style const& style
     _frame->_immediate_batch_for(_view, _layer, material).add_arrow(segment, style);
 }
 
+vertices_ref scene_ref::_add_vertices(cc::span<tg::pos3f const> points, vertex_style const& style, material_id material)
+{
+    auto const shape = frame::immediate_shape{.view = _view,
+                                              .layer = _layer,
+                                              .kind = frame::shape_kind::vertices,
+                                              .material = material,
+                                              .vertex = style};
+    return vertices_ref(_frame, _frame->_add_immediate_shape(shape, points, {}, {}));
+}
+
+edges_ref scene_ref::_add_edges(cc::span<tg::segment3f const> edges,
+                                cc::span<tg::pos3f const> vertices,
+                                edge_style const& style,
+                                material_id material)
+{
+    auto const shape = frame::immediate_shape{.view = _view,
+                                              .layer = _layer,
+                                              .kind = frame::shape_kind::edges,
+                                              .material = material,
+                                              .edge = style};
+    return edges_ref(_frame, _frame->_add_immediate_shape(shape, vertices, edges, {}));
+}
+
+faces_ref scene_ref::_add_faces(cc::span<tg::triangle3f const> triangles, material_id material)
+{
+    auto const shape
+        = frame::immediate_shape{.view = _view, .layer = _layer, .kind = frame::shape_kind::faces, .material = material};
+    return faces_ref(_frame, _frame->_add_immediate_shape(shape, {}, {}, triangles));
+}
+
+// ---- vertices_ref / edges_ref / faces_ref ------------------------------------------------------------------
+
+vertices_ref& vertices_ref::style(vertex_style const& s)
+{
+    _frame->_immediate_shapes[_shape].vertex = s;
+    return *this;
+}
+
+vertices_ref& vertices_ref::radius(float r)
+{
+    _frame->_immediate_shapes[_shape].vertex.radius = r;
+    return *this;
+}
+
+vertices_ref& vertices_ref::material(material_id m)
+{
+    _frame->_immediate_shapes[_shape].material = m;
+    return *this;
+}
+
+edges_ref& edges_ref::style(edge_style const& s)
+{
+    _frame->_immediate_shapes[_shape].edge = s;
+    return *this;
+}
+
+edges_ref& edges_ref::radius(float r)
+{
+    _frame->_immediate_shapes[_shape].edge.radius = r;
+    return *this;
+}
+
+edges_ref& edges_ref::vertex_radius(float r)
+{
+    _frame->_immediate_shapes[_shape].edge.vertex_radius = r;
+    return *this;
+}
+
+edges_ref& edges_ref::vertices(bool joined)
+{
+    _frame->_immediate_shapes[_shape].edge.vertices = joined;
+    return *this;
+}
+
+edges_ref& edges_ref::ends(line_ends e)
+{
+    _frame->_immediate_shapes[_shape].edge.ends = e;
+    return *this;
+}
+
+edges_ref& edges_ref::material(material_id m)
+{
+    _frame->_immediate_shapes[_shape].material = m;
+    return *this;
+}
+
+faces_ref& faces_ref::material(material_id m)
+{
+    _frame->_immediate_shapes[_shape].material = m;
+    return *this;
+}
+
 void scene_ref::add_drawing(drawing_set const& set, drawing_id id, instance_3d const& instance)
 {
     CC_ASSERT(u32(id) < u32(set.size()), "a drawing_id names a drawing of the set that minted it");

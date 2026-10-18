@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # dependencies = ["pyyaml>=6"]
 # ///
 """Vendor Mbed TLS in-tree at a pinned commit.

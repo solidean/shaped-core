@@ -207,6 +207,41 @@ cc::shared_async<denoise_run> run_once(sg::context& ctx,
     co_return result;
 }
 
+/// run_once with an albedo guide as well, which OIDN requires: a flat grey.
+cc::shared_async<denoise_run> run_once_with_albedo(sg::context& ctx,
+                                                   cc::span<tg::vec4f const> color,
+                                                   cc::span<tg::vec4f const> normals,
+                                                   sr::reconstruct_settings settings,
+                                                   sr::reconstruct_history& history)
+{
+    auto const color_tex = make_image(ctx);
+    auto const output_tex = make_image(ctx);
+    auto const normal_tex = make_image(ctx);
+    auto const albedo_tex = make_image(ctx);
+    auto const albedo = cc::vector<tg::vec4f>::create_filled(k_size * k_size, tg::vec4f(0.5f, 0.5f, 0.5f, 1));
+
+    auto cmd = ctx.create_command_list();
+    upload(*cmd, color_tex, color);
+    upload(*cmd, normal_tex, normals);
+    upload(*cmd, albedo_tex, albedo);
+    auto const outcome = sr::reconstruct_routine::execute(*cmd,
+                                                          {
+                                                              .color = color_tex,
+                                                              .guides = {.albedo = albedo_tex, .normal = normal_tex},
+                                                              .output = output_tex,
+                                                          },
+                                                          history, settings);
+    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output_tex.raw()));
+    ctx.submit_command_list(cc::move(cmd));
+    ctx.advance_epoch();
+
+    auto const pixels = co_await readback.data();
+    auto result = denoise_run{.outcome = outcome};
+    for (auto i = isize(0); i < pixels.size(); ++i)
+        result.output.push_back(pixels[i]);
+    co_return result;
+}
+
 constexpr auto atrous_settings = sr::reconstruct_settings{.denoiser = sr::denoise_method::atrous};
 } // namespace
 
@@ -339,6 +374,31 @@ ASYNC_INVOCABLE_TEST("sr - denoise refuses a named member it cannot run and writ
     REQUIRE(run.output.size() == k_size * k_size);
     CHECK(run.output[0][0] == -7.0f); // the sentinel survived: nothing else ran in its place
     CHECK(history.denoiser() == sr::denoise_method::none);
+}
+
+// An output in the format of the upscaler's scratch image is still an output the native members must compile for.
+// A context without FSR is the one that tells: there, nothing else asks for that format.
+ASYNC_INVOCABLE_TEST("sr - prewarming the front alone brings atrous up for an rgba32_float output",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+
+    (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
+
+    // Earlier tests brought both up already, and the front's init is what this pins.
+    sr::reconstruct_routine::evict(ctx, sg::pixel_format::rgba32_float);
+    sr::atrous_denoise_routine::evict(ctx, sg::pixel_format::rgba32_float);
+
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
+    (void)co_await ctx.routines.idle_completion();
+    CHECK(sr::atrous_denoise_routine::try_acquire(ctx, sg::pixel_format::rgba32_float).is_ready())
+        .context(cc::format("fsr supported: {}", sr::query_reconstruct_support(ctx).fsr));
+
+    auto history = sr::reconstruct_history();
+    auto const run = co_await run_once(ctx, noisy_halves(0.1f), {}, atrous_settings, 1, history);
+    CHECK(run.outcome.status == sr::reconstruct_status::denoised);
 }
 
 ASYNC_INVOCABLE_TEST("sr - atrous keeps a flat image flat",
@@ -880,6 +940,16 @@ ASYNC_INVOCABLE_TEST("sr - a denoised image keeps the alpha it came in with",
         svgf_alpha_drift = worst_alpha_drift(run.output);
     }
     CHECK(svgf_alpha_drift == 0.0f);
+
+    // OIDN writes its result from the network's tensor, which holds no alpha, so it reads the caller's back.
+    if (sr::query_reconstruct_support(ctx).oidn)
+    {
+        auto oidn_history = sr::reconstruct_history();
+        auto const oidn_run = co_await run_once_with_albedo(ctx, noisy, split_normals(),
+                                                            {.denoiser = sr::denoise_method::oidn}, oidn_history);
+        REQUIRE(oidn_run.outcome.status == sr::reconstruct_status::denoised);
+        CHECK(worst_alpha_drift(oidn_run.output) == 0.0f);
+    }
 }
 
 ASYNC_INVOCABLE_TEST("sr - denoise refuses svgf without a motion guide",

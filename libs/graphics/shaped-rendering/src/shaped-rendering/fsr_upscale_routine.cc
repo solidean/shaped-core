@@ -15,28 +15,10 @@ using impl::is_set;
 
 namespace
 {
-/// The format of every image FSR 3.1's host code clears: its accumulation, luma, scene-luminance and frame-info images,
-/// and the two unsigned ones, its reconstructed depth and its downsampler's atomic counter.
-/// One clear is compiled per format, so a format missing here is one record_clear refuses with an error.
-struct cleared_format
-{
-    sg::pixel_format format = sg::pixel_format::undefined;
-    /// Cleared to the bits of a float, by fsr_clear_uint.sgl rather than fsr_clear_float.sgl.
-    bool is_uint = false;
-};
-
-constexpr cleared_format k_cleared_formats[] = {
-    {.format = sg::pixel_format::r8_unorm},
-    {.format = sg::pixel_format::r16_float},
-    {.format = sg::pixel_format::rg16_float},
-    {.format = sg::pixel_format::rgba32_float},
-    {.format = sg::pixel_format::r32_uint, .is_uint = true},
-};
-
 /// Whether `ctx` renders through WARP, whose shader compiler crashes on FSR's shading-change pyramid pass.
-/// libs/graphics/shaped-rendering/docs/TODO.md records what bisecting it established.
+/// issue: bug-warp-fsr-shading-change-pyramid-crash records what bisecting it established.
 ///
-/// TEMPORARY: a Microsoft-vendor adapter that DXGI does not flag as software, which a GPU-less CI runner exposes, renders
+/// TEMPORARY(debt-fsr-microsoft-vendor-warp-check): a Microsoft-vendor adapter that DXGI does not flag as software, which a GPU-less CI runner exposes, renders
 /// through WARP too, and sg's `is_software` misses it.
 /// sg's adapter_info reporting such an adapter is what replaces the vendor check.
 [[nodiscard]] bool renders_through_warp(sg::context const& ctx)
@@ -114,7 +96,7 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
     // FSR's clear job writes images of every channel count, so each format it clears is a compile of its own.
     auto clears = cc::vector<programs::clear_pass>();
     auto pipelines = cc::vector<sg::async_compute_pipeline>();
-    for (auto const& cleared : k_cleared_formats)
+    for (auto const& cleared : impl::k_cleared_formats)
     {
         clears.push_back({.format = cleared.format});
         if (cleared.is_uint)

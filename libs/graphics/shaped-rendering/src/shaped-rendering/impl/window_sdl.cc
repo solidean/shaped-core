@@ -616,9 +616,11 @@ void window_system::poll_events()
             break;
 
         case SDL_EVENT_MOUSE_MOTION:
-            _events.push_back({.window = window_from_id(event.motion.windowID),
-                               .payload = mouse_move_event{.cursor_pos = tg::pos2f(event.motion.x, event.motion.y),
-                                                           .delta = tg::vec2f(event.motion.xrel, event.motion.yrel)}});
+            _events.push_back(
+                {.window = window_from_id(event.motion.windowID),
+                 .payload = mouse_move_event{.cursor_pos = tg::pos2f(event.motion.x, event.motion.y),
+                                             .delta = tg::vec2f(event.motion.xrel, event.motion.yrel),
+                                             .held_buttons = impl::held_buttons_from_sdl(event.motion.state)}});
             break;
 
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -627,6 +629,7 @@ void window_system::poll_events()
                                .payload = mouse_button_event{.button = impl::mouse_button_from_sdl(event.button.button),
                                                              .modifiers = _modifiers,
                                                              .is_down = event.button.down,
+                                                             .clicks = int(event.button.clicks),
                                                              .cursor_pos = tg::pos2f(event.button.x, event.button.y)}});
             break;
 

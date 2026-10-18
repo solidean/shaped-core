@@ -144,6 +144,10 @@ const route_hit = 3u
 /// The workgroup size of every wavefront kernel over a queue.
 const wavefront_group_size = 64u
 
+/// The most workgroups a dispatch holds on one axis, on every backend.
+/// A dispatch of more is laid out in rows of this many: `groups_for` sizes it, and `thread_index` reads it back.
+const max_groups_per_axis = 65535u
+
 /// What a shade dispatch's thread reads where its permutation's range has no path for it.
 const no_slot = 0xffffffffu
 
@@ -254,9 +258,16 @@ fun push_hit(slot: uint, permutation: uint){traced}:
     traced.counters[counter_permutations + (permutation as int)].add(1u)
 
 /// The workgroups that cover `count` threads, but never more than cover every slot: a corrupt count stays a valid dispatch.
+/// In rows of `max_groups_per_axis`, so an image past 4.19 Mpx stays within every backend's limit; the last row is the only short one.
 fun groups_for(count: uint){wavefront_step} -> dispatch_args:
     let threads = min(count, wavefront_step.width * wavefront_step.height)
-    return dispatch_args((threads + wavefront_group_size - 1u) / wavefront_group_size, 1u, 1u)
+    let groups = (threads + wavefront_group_size - 1u) / wavefront_group_size
+    return dispatch_args(min(groups, max_groups_per_axis), (groups + max_groups_per_axis - 1u) / max_groups_per_axis, 1u)
+
+/// The index thread `id` of a wavefront dispatch covers, in the rows `groups_for` lays its groups out in.
+/// A full row past the count holds threads past it too, so every kernel still returns past the count it reads.
+fun thread_index(id: int3) -> uint:
+    return (id.x as uint) + (id.y as uint) * max_groups_per_axis * wavefront_group_size
 
 // ---- Pixels ---------------------------------------------------------------------------------------------------------
 
@@ -344,6 +355,9 @@ fun fills(slot: uint, count: float, draws: mut uint){traced, wavefront_step} -> 
 /// Clears what this frame tallies, kills every path on a restart, and starts a sample in every slot without one.
 /// A carrying frame starts one only in the share of those slots `fill` asks for, and none where the pixel holds `sample_target` samples.
 /// Every live slot is queued for the first round, whose input is `queue_a`.
+///
+/// The primary depth and the hit distances are cleared by a restart alone, as the estimate's sums are.
+/// A still frame of few rounds starts no sample in most pixels, so a guide cleared every frame would read as escaped there.
 fun wavefront_begin(slot: uint){traced, wavefront_step}:
     if slot >= wavefront_step.width * wavefront_step.height => return
     let f = traced.frame[0]
@@ -401,9 +415,8 @@ fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
 // ---- segment: what the hit's material does not decide ---------------------------------------------------------------
 
 /// Settles the round's path at `index` up to its hit's material: the medium it crossed, the analytic lights it passed, and an escape.
-/// A path that scattered goes on to the next round, one that ended to finalize, and one that reached a surface to shade.
-/// Settles the round's path at `index` up to its hit's material: the medium it crossed, the analytic lights it passed, and an escape.
 /// Returns the slot, its route and, for a hit, the permutation that shades it.
+/// The route is the next round for a path that scattered, finalize for one that ended, and shade for one that reached a surface.
 fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
     if index >= round_count() => return uint3(0u, route_none, 0u)
     let slot = round_slot(index)
@@ -1722,8 +1735,7 @@ fun wavefront_reset(){traced}:
 /// The round's arguments from its input queue's count, and every queue it fills emptied.
 fun wavefront_args_round(){traced, dispatch, wavefront_step}:
     dispatch.args[dispatch_round] = groups_for(round_count())
-    let next = if wavefront_step.parity == 0u => counter_queue_b else counter_queue_a
-    traced.counters[next].store(0u)
+    traced.counters[output_counter()].store(0u)
     traced.counters[counter_hits].store(0u)
     traced.counters[counter_shadow].store(0u)
     traced.counters[counter_finished].store(0u)

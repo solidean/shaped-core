@@ -775,7 +775,7 @@ An emitter landing or leaving changes it, and so does an analytic light that cha
 **So does an emitter that moves, rigidly or not: a moved emitter drops every DI history**, in the routine as in the view.
 A history's point moves with its instance, but its resampling weight against the new frame's candidate would have to be formed with the placement it was drawn under.
 Formed with the current placement instead, even with the weight rescaled by the triangle's change of area, a lamp stretched every other frame read 4.5% low on its stretched frames.
-The proper shift across placements needs last frame's instance transforms, and is in [TODO.md](../TODO.md).
+The proper shift across placements needs last frame's instance transforms, and is `feat-sv-restir-history-across-moved-emitters`.
 What only says how candidates are drawn is left out: every record's selection, and an emitter record's area and emission, which are selection's estimates and follow the placement anyway.
 A camera that moved does not change the key, and neither does an instance that lights nothing.
 The view forgets every history when its scene hash changes too, which it checks where a temporal denoiser runs, the only frames ReSTIR runs on.

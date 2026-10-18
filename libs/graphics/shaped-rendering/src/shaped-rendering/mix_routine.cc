@@ -2,6 +2,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/impl/build_failure.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/mix_routine.hh>
 #include <sr_sgl_shaders.hh>
@@ -24,6 +25,7 @@ cc::shared_async<cc::unit> mix_routine::init(sg::routine_init_scope scope)
     co_await cc::async_settled(pipeline);
     if (pipeline->try_value() == nullptr)
     {
+        impl::log_build_failure(pipeline, "mix", params());
         fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
         co_return;
     }

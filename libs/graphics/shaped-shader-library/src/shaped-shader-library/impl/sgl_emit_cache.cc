@@ -21,7 +21,7 @@ namespace
 {
 /// The layout revision `encode_preprocessed` writes; bump it with any change to what it writes.
 /// sg's codec version rides in the persistent key beside it, since a stated shader and its bindings are written in that codec.
-constexpr u32 k_codec_version = 1;
+constexpr u32 k_codec_version = 2;
 
 /// How many results the in-memory tier holds before it starts over; each is a few dozen kilobytes of text.
 constexpr isize k_memory_capacity = 512;
@@ -59,7 +59,7 @@ struct reader
 
     [[nodiscard]] bool take(isize count)
     {
-        if (!ok || count < 0 || pos + count > data.size())
+        if (!ok || count < 0 || count > data.size() - pos)
             ok = false;
         return ok;
     }
@@ -123,45 +123,22 @@ cc::mutex<cc::map<cc::hash128, slib::preprocessed_source>>& memory_tier()
     return tier;
 }
 
-/// How long a lookup waits for the store before it compiles instead.
-constexpr double k_lookup_patience_secs = 1.0;
-
-/// The persistent tier a lookup uses by default, or nullptr where there is none to use.
-bcache::blob_cache* default_store()
-{
-#if defined(__EMSCRIPTEN__) || !CC_HAS_THREADS
-    // A lookup waits for the store's own thread, which a page must not do and an unthreaded build does not have.
-    return nullptr;
-#else
-    if (sg::cold_caches_from_environment().shaders)
-        return nullptr;
-    return &bcache::default_cache();
-#endif
-}
-
-bcache::cache_key persistent_key(cc::hash128 key)
-{
-    auto& b = cc::byte_stream_builder::thread_local_scratch();
-    b.add_pod(key);
-    b.add_string(sgl::compiler_fingerprint());
-    b.add_string(slib::impl::sgl_edge_fingerprint());
-    return {.space = bcache::cache_namespace("slib.sgl.emit"),
-            .key = bcache::logical_key::create_from_hash(cc::hash256::create(b.written_bytes())),
-            .version = bcache::version(i32(k_codec_version * 1000 + sg::impl::k_shader_codec_version))};
-}
-
 /// The store's answer for `key`, waited for without driving anything else on this thread.
 /// A compile may run where its caller holds a lock or a reference that other work could invalidate, so it only waits.
 /// The store answers on its own thread, which is what lets a wait alone see the answer arrive.
-/// Nothing within `k_lookup_patience_secs` is a miss.
-cc::optional<bcache::cache_hit> passive_get(bcache::blob_cache& store, cc::hash128 key)
+/// Nothing within `patience_secs` is a miss, and nullopt waits for the answer however long it takes.
+///
+/// TEMPORARY(debt-slib-sgl-emit-passive-poll): a hand-rolled poll, standing in for a passive timed wait on a `cc::async` node, which clean-core lacks.
+/// `cc::try_async_blocking_get_for` is the timed wait it has, and that one drives the ambient scheduler, which this must not.
+/// Replace the loop with that wait once it lands; issue: feat-cc-async-passive-timed-wait
+cc::optional<bcache::cache_hit> passive_get(bcache::blob_cache& store, cc::hash128 key, cc::optional<double> patience_secs)
 {
-    auto const node = store.get(persistent_key(key));
-    auto const deadline = cc::current_time_steady_secs() + k_lookup_patience_secs;
+    auto const node = store.get(slib::impl::sgl_emit_persistent_key(key));
+    auto const deadline = cc::current_time_steady_secs() + patience_secs.value_or(0.0);
     auto yields = 0;
     while (!node->is_ready())
     {
-        if (cc::current_time_steady_secs() > deadline)
+        if (patience_secs.has_value() && cc::current_time_steady_secs() > deadline)
             return {};
         // A read is usually answered within a few yields; past those, a short sleep keeps the core free.
         if (yields < 256)
@@ -200,6 +177,10 @@ cc::vector<byte> slib::impl::encode_preprocessed(preprocessed_source const& sour
     put_u64(out, u64(source.used_modules.size()));
     for (auto const& m : source.used_modules)
         put_string(out, m);
+
+    put_u64(out, u64(source.warnings.size()));
+    for (auto const& w : source.warnings)
+        put_string(out, w);
 
     put_u64(out, u64(source.layouts.size()));
     for (auto const& l : source.layouts)
@@ -245,6 +226,10 @@ cc::optional<slib::preprocessed_source> slib::impl::decode_preprocessed(cc::span
     auto const module_count = r.get_count(8);
     for (auto i = isize(0); r.ok && i < module_count; ++i)
         result.used_modules.push_back(r.get_string());
+
+    auto const warning_count = r.get_count(8);
+    for (auto i = isize(0); r.ok && i < warning_count; ++i)
+        result.warnings.push_back(r.get_string());
 
     auto const layout_count = r.get_count(24);
     for (auto i = isize(0); r.ok && i < layout_count; ++i)
@@ -337,22 +322,43 @@ cc::result<sgl::module_description, cc::string> slib::impl::cached_describe(sgl:
     return described;
 }
 
-void slib::impl::clear_sgl_emit_memory()
+bcache::cache_key slib::impl::sgl_emit_persistent_key(cc::hash128 key)
 {
-    memory_tier().lock([](cc::map<cc::hash128, preprocessed_source>& tier) { tier.clear(); });
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_pod(key);
+    b.add_string(sgl::compiler_fingerprint());
+    b.add_string(sgl_edge_fingerprint());
+    return {.space = bcache::cache_namespace("slib.sgl.emit"),
+            .key = bcache::logical_key::create_from_hash(cc::hash256::create(b.written_bytes())),
+            .version = bcache::version(i32(k_codec_version * 1000 + sg::impl::k_shader_codec_version))};
 }
 
-cc::result<slib::preprocessed_source> slib::impl::cached_sgl_preprocess(
-    cc::hash128 key,
-    cc::function_ref<cc::result<preprocessed_source>()> compute)
+void slib::impl::forget_sgl_emit(cc::hash128 key)
 {
-    return cached_sgl_preprocess(key, compute, default_store());
+    memory_tier().lock([&](cc::map<cc::hash128, preprocessed_source>& tier) { (void)tier.erase(key); });
+}
+
+bcache::blob_cache* slib::impl::sgl_emit_store(cc::optional<bcache::blob_cache*> chosen)
+{
+#if defined(__EMSCRIPTEN__) || !CC_HAS_THREADS
+    // A lookup waits for the store's own thread, which a page must not do and an unthreaded build does not have.
+    (void)chosen;
+    return nullptr;
+#else
+    if (chosen.has_value())
+        return chosen.value();
+    // Cold turns off the default store only: one given explicitly is a choice.
+    if (sg::cold_caches_from_environment().shaders)
+        return nullptr;
+    return &bcache::default_cache();
+#endif
 }
 
 cc::result<slib::preprocessed_source> slib::impl::cached_sgl_preprocess(
     cc::hash128 key,
     cc::function_ref<cc::result<preprocessed_source>()> compute,
-    bcache::blob_cache* persistent)
+    bcache::blob_cache* persistent,
+    cc::optional<double> patience_secs)
 {
     CC_RECORD_ACCUM("slib.sgl_emit.requests", cc::rec::unit_count, 1);
 
@@ -369,7 +375,7 @@ cc::result<slib::preprocessed_source> slib::impl::cached_sgl_preprocess(
     if (persistent != nullptr)
     {
         // A miss, an expired entry and a storage failure are one answer, and every one of them falls through to the front end.
-        auto const hit = passive_get(*persistent, key);
+        auto const hit = passive_get(*persistent, key, patience_secs);
         if (hit.has_value())
         {
             if (auto decoded = decode_preprocessed(hit.value().data.span()); decoded.has_value())
@@ -378,17 +384,26 @@ cc::result<slib::preprocessed_source> slib::impl::cached_sgl_preprocess(
                 remember(key, decoded.value());
                 return cc::move(decoded.value());
             }
+            // The first writer wins, so an entry left in place would answer every later run with the same bytes.
+            // The store takes messages in order, so the put below replaces it.
+            (void)persistent->invalidate(sgl_emit_persistent_key(key));
         }
     }
 
     CC_RECORD_ACCUM("slib.sgl_emit.misses", cc::rec::unit_count, 1);
+    auto const started_secs = cc::current_time_steady_secs();
     auto computed = compute();
+    auto const compute_secs = cc::current_time_steady_secs() - started_secs;
     if (computed.has_error())
         return computed;
 
     remember(key, computed.value());
     if (persistent != nullptr)
+    {
         // Fire and forget: a lost write is a later miss, never a wrong answer.
-        (void)persistent->put(persistent_key(key), cc::make_pinned_data(encode_preprocessed(computed.value())));
+        // The cost is what eviction weighs against the entry's size.
+        (void)persistent->put(sgl_emit_persistent_key(key), cc::make_pinned_data(encode_preprocessed(computed.value())),
+                              {.compute_time_secs = compute_secs});
+    }
     return computed;
 }

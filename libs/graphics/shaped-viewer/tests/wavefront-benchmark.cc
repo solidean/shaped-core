@@ -198,15 +198,15 @@ ASYNC_BENCHMARK("sv - wavefront against megakernel, GPU time per path")
             auto const fc = frame_of(7u, 0u, 1);
             auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer);
             auto const last = f == k_frames - 1;
-            return sv::wavefront_routine::execute(cmd, {.trace = trace_of(cmd, frame, bindless),
-                                                        .frame = fc,
-                                                        .state = &states[contender - 1],
-                                                        .rounds = last ? scene.max_bounces + 17 : budgets[contender - 1],
-                                                        .restart = f == 0,
-                                                        .regenerate = !last,
-                                                        .generation = 1,
-                                                        .roulette_after = 3,
-                                                        .timing = timing});
+            return sv::wavefront_routine::execute(
+                cmd, {.trace = trace_of(cmd, frame, bindless),
+                      .frame = fc,
+                      .state = &states[contender - 1],
+                      .rounds = last ? sv::wavefront_routine::drain_rounds(scene.max_bounces) : budgets[contender - 1],
+                      .restart = f == 0,
+                      .regenerate = !last,
+                      .roulette_after = 3,
+                      .timing = timing});
         };
 
         // Untimed until every contender has executed once, which is what its shaders compiling takes.

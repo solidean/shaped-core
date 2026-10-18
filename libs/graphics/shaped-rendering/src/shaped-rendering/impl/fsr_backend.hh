@@ -17,6 +17,25 @@
 
 namespace sr::impl
 {
+/// The format of every image FSR 3.1's host code clears: its accumulation, luma, scene-luminance and frame-info images,
+/// and the two unsigned ones, its reconstructed depth and its downsampler's atomic counter.
+/// One clear is compiled per format, so a format missing here is one record_clear refuses with an error.
+/// The list is every FFX_GPU_JOB_CLEAR_FLOAT target in FSR 3.1's ffx_fsr3upscaler.cpp, at the format its resource description gives; re-read it on an SDK bump.
+struct cleared_format
+{
+    sg::pixel_format format = sg::pixel_format::undefined;
+    /// Cleared to the bits of a float, by fsr_clear_uint.sgl rather than fsr_clear_float.sgl.
+    bool is_uint = false;
+};
+
+inline constexpr cleared_format k_cleared_formats[] = {
+    {.format = sg::pixel_format::r8_unorm},                  // ACCUMULATION_1 and _2
+    {.format = sg::pixel_format::r16_float},                 // LUMA_1 and _2
+    {.format = sg::pixel_format::rg16_float},                // SPD_MIPS, the scene luminance
+    {.format = sg::pixel_format::rgba32_float},              // FRAME_INFO
+    {.format = sg::pixel_format::r32_uint, .is_uint = true}, // RECONSTRUCTED_PREVIOUS_NEAREST_DEPTH, SPD_ATOMIC_COUNT
+};
+
 /// One of FSR's passes, compiled and built, with the bindings its shader reflects.
 /// The reflected names are what AMD's host code matches its resources by.
 struct fsr_pass_program

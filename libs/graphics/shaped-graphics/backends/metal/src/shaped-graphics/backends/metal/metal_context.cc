@@ -160,7 +160,7 @@ bool metal_context::supports(sg::feature f) const
         // Not yet checked against a Metal device, so the portable answer: sg refuses rather than a driver.
         return false;
     case sg::feature::texture_compression_bc:
-        // Every Apple-silicon Mac answers yes; an iPhone or iPad answers no.
+        // Every Apple-silicon Mac answers yes; elsewhere it is the device's own answer.
         return _device != nullptr && _device->supportsBCTextureCompression();
     case sg::feature::shader_f16:
     case sg::feature::shader_int16:
@@ -234,7 +234,7 @@ void metal_context::do_advance_epoch()
 sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
-    sg::impl::check_no_live_array_declarations(*cmd);
+    sg::impl::end_array_declarations_at_submit(*cmd);
     auto& list = static_cast<metal_command_list&>(*cmd);
     CC_ASSERT(list.created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in");

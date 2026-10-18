@@ -401,7 +401,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
 
     // The blit samples the image the trace dispatch wrote just before it, so the barrier is found inside the scope, and
     // vulkan splits the scope for it.
-    // Nothing states a scope's accesses before it opens yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    // Nothing states a scope's accesses before it opens yet; issue: feat-sg-declare-scope-accesses-up-front.
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
     sr::blit_routine::prewarm(*ctx, color_format);

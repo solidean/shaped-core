@@ -98,7 +98,7 @@ enum class sg::texture_layout : sg::u32
 /// ignored.
 /// It is kept because a direction-specific layout is postponed rather than ruled out: vulkan would keep more
 /// compression with one, the shape extends to that easily, and it would be hard to add back once dropped.
-/// libs/graphics/shaped-graphics/docs/TODO.md carries what taking it up costs.
+/// issue: perf-sg-direction-specific-async-layout carries what taking it up costs.
 enum class sg::async_direction : sg::u32
 {
     upload,   ///< host -> texture
@@ -119,6 +119,16 @@ inline constexpr access_flags unordered_write_accesses
 [[nodiscard]] constexpr bool is_unordered_write(access_flags a)
 {
     return a.has_any(unordered_write_accesses);
+}
+
+/// Every access that changes the resource's contents: the unordered writes, and the color and depth target writes.
+inline constexpr access_flags write_accesses
+    = unordered_write_accesses | access_flag::color_write | access_flag::depth_write;
+
+/// True if `a` changes the resource's contents, ordered or not.
+[[nodiscard]] constexpr bool has_write_access(access_flags a)
+{
+    return a.has_any(write_accesses);
 }
 
 /// Every access that only observes the resource.

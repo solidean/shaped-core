@@ -8,6 +8,8 @@
 //
 // Feature maps are HWC: index (y * width + x) * channels + c.
 
+require extended_image_formats
+
 // the format of the image `output_cs` writes, which is the caller's output
 @option const target_format: pixel_format = .rgba32_float
 
@@ -155,6 +157,9 @@ binding nn_input_images:
 binding nn_output_images:
     // HWC, four channels
     source: buffer[float]
+    // The caller's colour, whose alpha the output carries through as `reconstruct_inputs::output` promises.
+    @unfilterable
+    color: texture_2d[float4]
     target: out image_2d[target_format]
 
 @compute(8, 8) fun output_cs(@thread_id id: int3){nn_output_images, nn_output_constants}:
@@ -173,4 +178,5 @@ binding nn_output_images:
 
     // Undoing the scale the input applied, so the result is in the caller's units.
     let scale = if nn_output_constants.input_scale != 0.0 => 1.0 / nn_output_constants.input_scale else 0.0
-    nn_output_images.target[dst] = float4(..(value * scale), 1.0)
+    let alpha = nn_output_images.color.load(dst, 0).w
+    nn_output_images.target[dst] = float4(..(value * scale), alpha) as texel[target_format]

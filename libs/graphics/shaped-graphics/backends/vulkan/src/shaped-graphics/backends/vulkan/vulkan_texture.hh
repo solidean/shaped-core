@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/vector.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
@@ -225,4 +226,23 @@ public:
     // Guarded because concurrent command lists may record against the same texture.
     // Mutable so a const handle can still track access: tracking is bookkeeping about the texture, not a change to it.
     mutable cc::mutex<vulkan_texture_access> _access;
+
+    /// An attachment view a rendering scope used, and the epoch that created it.
+    struct attachment_view
+    {
+        sg::epoch epoch = sg::epoch::invalid;
+        sg::texture_view_dimension dimension = sg::texture_view_dimension::tex_2d;
+        sg::pixel_format format = sg::pixel_format::undefined;
+        sg::subresource_range range;
+        VkImageView view = VK_NULL_HANDLE;
+    };
+
+    /// The attachment views rendering scopes used, matched on the whole view description and appended on a miss.
+    ///
+    /// **An entry is valid only in the epoch it names.**
+    /// Its view is destroyed when that epoch retires, so an entry from an earlier epoch holds a handle that may already
+    /// be gone, and acquire_attachment_view reuses the entry rather than reading it.
+    /// So the vector holds as many entries as the busiest epoch used distinct views.
+    /// Guarded on its own, apart from `_access`, since concurrent lists rendering to one texture take it per scope.
+    mutable cc::mutex<cc::vector<attachment_view>> _attachment_views;
 };

@@ -14,6 +14,7 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/rendering/raster_routine.hh>
+#include <shaped-viewer/resources/impl/mip_layout.hh> // sv::impl::mip_count_of
 #include <typed-geometry/scalar/half_float.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
@@ -310,13 +311,19 @@ cc::shared_async<cc::vector<tg::vec4f>> trace_direct(sg::context& ctx,
     return sum / f64(count);
 }
 
-/// Whether the device can run what these tests drive: the raster path itself, and the tracer it is compared against.
+/// Whether the raster path's shaders build here, which needs an SGL compiler and no ray tracing.
+[[nodiscard]] bool can_raster()
+{
+    return sv_test::shared_env().has_compiler;
+}
+
+/// Whether the device also runs the tracer a raster image is compared against.
 [[nodiscard]] bool can_run(sg::context& ctx)
 {
     auto probe = ctx.create_command_list();
     auto const supported = probe->raytracing.is_supported();
     ctx.drop_command_list(cc::move(probe));
-    return supported && sv_test::shared_env().has_compiler;
+    return supported && can_raster();
 }
 
 /// The Cornell box's enclosure alone, without its two blocks or its lamp: no wall then shadows another, so the tracer's
@@ -347,8 +354,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - the Cornell box's raster image is the
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!can_run(ctx))
@@ -411,16 +418,16 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - the Cornell box's raster image is the
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
-ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout material cuts what the tracer's would",
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout thresholds at its cutoff, and cuts coverage below one half",
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
-    if (!can_run(ctx))
-        SKIP("no ray tracing or no SGL compiler, so the shaders do not build");
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
 
     // A black, unlit quad filling the view in front of a white environment: a kept pixel is 0, and a cut one is 1.
     auto quad = cc::vector<tg::pos3f>();
@@ -481,11 +488,214 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout material cuts what the trace
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a minified textured cutout cuts against level 0",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // A 256 x 256 opacity whose every 2 x 2 block holds exactly two opaque texels, placed by a hash so nothing aliases.
+    // Every mip below it is then exactly the box average, alpha 128, which is under the cutoff of 0.6.
+    // The quad spans about 45 pixels of a 32-pixel view, so about 6 texels a pixel: a derivative-picked level is 2 or 3, and cuts everything.
+    constexpr i32 extent = 256;
+    auto const levels = sv::impl::mip_count_of(extent, extent);
+    auto pixels = cc::vector<byte>();
+    for (auto y = 0; y < extent; ++y)
+        for (auto x = 0; x < extent; ++x)
+        {
+            auto h = u32(x / 2) * 73856093u ^ u32(y / 2) * 19349663u;
+            h ^= h >> 13;
+            h *= 0x5bd1e995u;
+            h ^= h >> 15;
+            // The six ways two of four corners can be opaque, as bit masks over (x % 2, y % 2).
+            constexpr u32 arrangements[] = {0b0011, 0b0101, 0b0110, 0b1001, 0b1010, 0b1100};
+            auto const mask = arrangements[h % 6];
+            auto const opaque = (mask >> u32((y % 2) * 2 + (x % 2))) & 1u;
+            for (auto const c : {byte(0), byte(0), byte(0), byte(opaque != 0 ? 255 : 0)})
+                pixels.push_back(c);
+        }
+    for (auto level = 1; level < levels; ++level)
+    {
+        auto const side = cc::max(extent >> level, 1);
+        for (auto i = 0; i < side * side; ++i)
+            for (auto const c : {byte(0), byte(0), byte(0), byte(128)})
+                pixels.push_back(c);
+    }
+
+    auto uvs = cc::vector<tg::vec2f>();
+    auto quad = cc::vector<tg::pos3f>();
+    for (auto const& p : {tg::pos3f(-2, -2, 0), tg::pos3f(2, -2, 0), tg::pos3f(2, 2, 0), tg::pos3f(-2, -2, 0),
+                          tg::pos3f(2, 2, 0), tg::pos3f(-2, 2, 0)})
+    {
+        quad.push_back(p);
+        uvs.push_back(tg::vec2f((p[0] + 2.0f) / 4.0f, (p[1] + 2.0f) / 4.0f));
+    }
+
+    // Black and reflecting nothing, in front of a white environment: a kept pixel is 0, and a cut one is 1.
+    using binding = sv::material_attribute_binding;
+    auto& lib = sv_test::shared_material_library();
+    auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto const material
+        = lib.acquire(sv::material::create("minified cutout", openpbr,
+                                           {binding::of("base_color", tg::vec3f(0, 0, 0)),
+                                            binding::of("specular_weight", 0.0f), binding::of("alpha_cutoff", 0.6f)}));
+    auto mesh = sv::mesh{.name = "minified cutout",
+                         .geometry = sv::triangle_geometry::create_from_positions(quad),
+                         .material = material};
+    mesh.attributes.push_back(sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, cc::move(uvs)));
+    mesh.textures.push_back({.name = "opacity",
+                             .source = {.texture = sv::texture_data::create(
+                                            cc::move(pixels), sg::pixel_format::rgba8_unorm, extent, extent, levels),
+                                        .uv_attribute = "uv",
+                                        .sampler = {.mag_filter = sg::sampler_filter::nearest,
+                                                    .address_u = sg::sampler_address_mode::clamp_edge,
+                                                    .address_v = sg::sampler_address_mode::clamp_edge},
+                                        .swizzle = sv::channel_swizzle::of_channel(sv::texture_channel::a)}});
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(mesh);
+    resources.wait_for_pending_uploads();
+    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(permutation != nullptr);
+    REQUIRE(permutation->opacity.can_cut_out());
+
+    auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto const drawn = co_await draw_raster(ctx, resources, item, cam, {}, sv::background::uniform(tg::vec3f(1, 1, 1)),
+                                            tg::vec2i(32, 32));
+
+    // Level 0 is half opaque, so about half the view is kept, where the mips would have cut all of it.
+    auto kept = 0;
+    auto other = 0;
+    for (auto const& p : drawn.color)
+    {
+        if (tg::abs(p[0]) < 1e-3f)
+            ++kept;
+        else if (tg::abs(p[0] - 1.0f) > 1e-3f)
+            ++other;
+    }
+    auto const total = isize(drawn.color.size());
+    CHECK(other == 0).context(cc::format("{} pixels neither kept nor cut", other));
+    CHECK(kept > total * 35 / 100).context(cc::format("{} of {} kept", kept, total));
+    CHECK(kept < total * 65 / 100).context(cc::format("{} of {} kept", kept, total));
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a baked occlusion of one half halves the environment's light",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // A white, rough quad filling the view under a uniform environment and no light: all it shows is the ambient term.
+    auto quad = cc::vector<tg::pos3f>();
+    for (auto const& p : {tg::pos3f(-2, -2, 0), tg::pos3f(2, -2, 0), tg::pos3f(2, 2, 0), tg::pos3f(-2, -2, 0),
+                          tg::pos3f(2, 2, 0), tg::pos3f(-2, 2, 0)})
+        quad.push_back(p);
+    using binding = sv::material_attribute_binding;
+    auto& lib = sv_test::shared_material_library();
+    auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto const quad_of = [&](cc::string_view name, f32 occlusion)
+    {
+        auto const material = lib.acquire(
+            sv::material::create(cc::string(name), openpbr,
+                                 {binding::of("base_color", tg::vec3f(1, 1, 1)),
+                                  binding::of("specular_roughness", 1.0f), binding::of("occlusion", occlusion)}));
+        return sv::mesh{.name = cc::string(name),
+                        .geometry = sv::triangle_geometry::create_from_positions(quad),
+                        .material = material};
+    };
+
+    auto cam = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto const environment = sv::background::uniform(tg::vec3f(1, 1, 1));
+    constexpr auto size = tg::vec2i(16, 16);
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const unoccluded = resources.acquire_scene_item(quad_of("unoccluded", 1.0f));
+    auto const occluded = resources.acquire_scene_item(quad_of("half occluded", 0.5f));
+    resources.wait_for_pending_uploads();
+    auto const lit = co_await draw_raster(ctx, resources, unoccluded, cam, {}, environment, size);
+    auto const dimmed = co_await draw_raster(ctx, resources, occluded, cam, {}, environment, size);
+    REQUIRE(lit.color.size() == dimmed.color.size());
+
+    auto const center = isize(size[1] / 2) * isize(size[0]) + isize(size[0] / 2);
+    REQUIRE(lit.color[center][1] > 0.1f);
+    for (auto c = 0; c < 3; ++c)
+        CHECK(tg::abs(dimmed.color[center][c] / lit.color[center][c] - 0.5f) < 1e-3f)
+            .context(cc::format("channel {}: {} occluded, {} not", c, dimmed.color[center][c], lit.color[center][c]));
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a surface one unit in front of another at 2000 wins its depth test",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // Two planes facing the camera at view depths 2000 and 2001, under the default near plane of 0.01.
+    // A standard float depth, `1 - near / depth`, steps by about 6e-8 * 2000^2 / 0.01 = 24 units there, so both planes land on the same value, 0.999995.
+    // The reversed depth, `near / depth`, puts them about 5500 float steps apart.
+    // The farther plane is drawn first, so where the two tie the nearer one fails a strict test and the farther shows.
+    constexpr auto near_depth = 2000.0f;
+    constexpr auto far_depth = 2001.0f;
+    constexpr auto half = 4000.0f; // well past the frustum's half-height of about 830 at that depth
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const z : {far_depth, near_depth})
+        for (auto const& p : {tg::pos3f(-half, -half, z), tg::pos3f(half, -half, z), tg::pos3f(half, half, z),
+                              tg::pos3f(-half, -half, z), tg::pos3f(half, half, z), tg::pos3f(-half, half, z)})
+            positions.push_back(p);
+
+    // Unlit and colored per triangle: the far plane red, the near one green.
+    auto colors = cc::vector<tg::vec3f>();
+    for (auto const& c : {tg::vec3f(1, 0, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 1, 0), tg::vec3f(0, 1, 0)})
+        colors.push_back(c);
+    auto& lib = sv_test::shared_material_library();
+    auto const unlit = lib.acquire_type(sv::builtin_material::unlit).value();
+    auto mesh = sv::mesh{.name = "two far planes",
+                         .geometry = sv::triangle_geometry::create_from_positions(positions),
+                         .material = lib.acquire(sv::material::create("two far planes", unlit, {}))};
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle, cc::move(colors)));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(mesh);
+    resources.wait_for_pending_uploads();
+
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 0, 0), tg::pos3d(0, 0, 1));
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    CHECK(cam.projection.near_plane == 0.01);
+    constexpr auto size = tg::vec2i(32, 32);
+
+    auto const drawn = co_await draw_raster(ctx, resources, item, cam, {}, sv::background{}, size);
+    auto far_shown = 0;
+    for (auto const& p : drawn.color)
+        if (!(p[1] > 0.5f && p[0] < 0.5f))
+            ++far_shown;
+    CHECK(far_shown == 0).context(cc::format("{} of {} pixels show the farther plane", far_shown, drawn.color.size()));
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 ASYNC_INVOCABLE_TEST("sv - a raster layer's capture finishes on its first drawn frame", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
-    if (!can_run(ctx))
-        SKIP("no ray tracing or no SGL compiler, so the viewer's shaders do not build");
+    if (!can_raster())
+        SKIP("no SGL compiler, so the viewer's shaders do not build");
 
     constexpr auto size = tg::vec2i(96, 64);
     auto const path = cc::format("{}/sv-raster-capture.png", cc::temp_directory_path());
@@ -546,14 +756,14 @@ ASYNC_TEST("sv vulkan - the raster path draws what it draws on dx12, to rounding
     auto ctx = sg::create_vulkan_context({.enable_validation_layers = true});
     if (ctx.has_error())
         SKIP("no vulkan device");
-    if (!can_run(*ctx.value()))
-        SKIP("no ray tracing or no SGL compiler on the vulkan device");
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
 
     // The debug layer has to be active before the process's first dx12 device, and this test may race dx12-entry.cc's
     // drivers to it, so the reference asks for the layer exactly as they do.
     auto reference = sg::create_dx12_context(
         {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
-    if (reference.has_error() || !can_run(*reference.value()))
+    if (reference.has_error())
         SKIP("no dx12 hardware device to hold the vulkan image to");
 
     // A draw's bindings and bindless elements fresh from this list's uploads need a barrier the first draw finds, inside

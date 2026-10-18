@@ -1,7 +1,7 @@
 ---
 name: reviewing-a-pr
 description: Review a pull request, a branch or a design together with the maintainer, driving the review tool — pin the range, account for every change, write standalone entries with anticipated answers, and iterate in rounds. Use whenever you're asked to review a PR, look at a PR number or branch, give a second opinion, or think through a design before it is built.
-when_to_use: "review this PR", "look at PR #<n>", "what do you think of <pr url>", "review my branch", "second opinion on this change", "let's design X before building it"
+when_to_use: '"review this PR", "look at PR #<n>", "what do you think of <pr url>", "review my branch", "second opinion on this change", "let''s design X before building it"'
 allowed-tools: Bash Read Write Edit mcp__repo_tools__repo_search mcp__repo_tools__repo_view mcp__repo_tools__repo_structure mcp__repo_tools__file_structure mcp__repo_tools__build_diag mcp__repo_tools__test_diag
 ---
 
@@ -202,6 +202,7 @@ Name it with `title` as usual, and hand it over the same way.
    `uv run review.py generate pr-<n>` writes the generated `015-changes` and `990-coverage` first, and
    `uv run review.py changes pr-<n>` lists the ledger, which is what `discharges:` is written from.
    An entry that accounts for one area takes its ids from `uv run review.py changes pr-<n> --path <prefix> --ids`, which prints them bare for pasting.
+   An entry per commit, for a stack of independent commits, takes them from `--commit <sha> --ids` the same way.
 
    Read [tools/review/docs/entry-types/_index.md](../../../tools/review/docs/entry-types/_index.md) and open the types that apply.
    Six anchor a review with a changeset: **orientation** at `010`, **feature-tour** at `012`, **design-critique** at `014`, **glossary** at `018`, the findings between, and **verdict** at `980`.

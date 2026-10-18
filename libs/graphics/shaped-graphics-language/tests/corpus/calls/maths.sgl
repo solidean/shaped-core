@@ -101,3 +101,8 @@ test not is_inf(float.from_bits(0xff7fffffu))
 test not is_inf(0.0)
 test is_nan(float2(0.0, -2.0)) == bool2(false, false)
 test is_inf(float4(0.0, 1.0, -1.0, 3.0e38)) == bool4(false, false, false, false)
+// a half is tested as the float it widens to, which keeps a NaN and an infinity, and its largest finite value is neither
+test not is_nan(1.0f16)
+test not is_inf(-65504.0f16)
+test is_nan(half3(0.0, -2.0, 65504.0)) == bool3(false, false, false)
+test is_inf(half4(0.0, 1.0, -65504.0, 65504.0)) == bool4(false, false, false, false)

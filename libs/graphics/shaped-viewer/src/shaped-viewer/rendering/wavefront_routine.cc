@@ -1,6 +1,7 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/common/utility.hh> // cc::min
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <sgl_modules/slug.hh>
@@ -24,6 +25,18 @@ constexpr isize dispatch_hits = 1;
 constexpr isize dispatch_shadow = 2;
 constexpr isize dispatch_finished = 3;
 constexpr isize dispatch_shade = 4;
+
+/// `tracer.wavefront_group_size` and `tracer.max_groups_per_axis`, which lay a dispatch over the slots out in rows.
+constexpr u32 group_size = 64;
+constexpr u32 max_groups_per_axis = 65535;
+
+/// Dispatches the bound per-slot kernel over `slots` threads, in the rows `tracer.thread_index` reads its index from.
+void dispatch_slots(sg::command_list& cmd, u32 slots)
+{
+    auto const groups = (slots + group_size - 1) / group_size;
+    cmd.compute.dispatch_groups(int(cc::min(groups, max_groups_per_axis)),
+                                int((groups + max_groups_per_axis - 1) / max_groups_per_axis));
+}
 
 /// `traced.counters`' sample floor, followed by its shortfall (`counter_sample_floor` in shaders/sgl/tracer_wavefront.sgl).
 constexpr isize counter_sample_floor = 5;
@@ -54,24 +67,23 @@ cc::shared_async<cc::unit> wavefront_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
     auto const& w = sv::shaders::wavefront;
-    _kernels = kernels{
-        .begin = co_await w.begin.acquire_pipeline(ctx),
-        .extend = co_await w.extend.acquire_pipeline(ctx),
-        .segment = co_await w.segment.acquire_pipeline(ctx),
-        .sort = co_await w.sort.acquire_pipeline(ctx),
-        .connect = co_await w.connect.acquire_pipeline(ctx),
-        .finalize = co_await w.finalize.acquire_pipeline(ctx),
-        .resolve = co_await w.resolve.acquire_pipeline(ctx),
-        .reset = co_await w.reset.acquire_pipeline(ctx),
-        .restir_gather = co_await w.restir_gather.acquire_pipeline(ctx),
-        .restir_temporal = co_await w.restir_temporal.acquire_pipeline(ctx),
-        .restir_spatial = co_await w.restir_spatial.acquire_pipeline(ctx),
-        .restir_di_temporal = co_await w.restir_di_temporal.acquire_pipeline(ctx),
-        .restir_di_spatial = co_await w.restir_di_spatial.acquire_pipeline(ctx),
-        .args_round = co_await w.args_round.acquire_pipeline(ctx),
-        .args_shade = co_await w.args_shade.acquire_pipeline(ctx),
-        .args_connect = co_await w.args_connect.acquire_pipeline(ctx),
-    };
+    // One statement per co_await: inside a designated initializer they crash MSVC's backend (C1001, 14.44 and 14.51).
+    _kernels.begin = co_await w.begin.acquire_pipeline(ctx);
+    _kernels.extend = co_await w.extend.acquire_pipeline(ctx);
+    _kernels.segment = co_await w.segment.acquire_pipeline(ctx);
+    _kernels.sort = co_await w.sort.acquire_pipeline(ctx);
+    _kernels.connect = co_await w.connect.acquire_pipeline(ctx);
+    _kernels.finalize = co_await w.finalize.acquire_pipeline(ctx);
+    _kernels.resolve = co_await w.resolve.acquire_pipeline(ctx);
+    _kernels.reset = co_await w.reset.acquire_pipeline(ctx);
+    _kernels.restir_gather = co_await w.restir_gather.acquire_pipeline(ctx);
+    _kernels.restir_temporal = co_await w.restir_temporal.acquire_pipeline(ctx);
+    _kernels.restir_spatial = co_await w.restir_spatial.acquire_pipeline(ctx);
+    _kernels.restir_di_temporal = co_await w.restir_di_temporal.acquire_pipeline(ctx);
+    _kernels.restir_di_spatial = co_await w.restir_di_spatial.acquire_pipeline(ctx);
+    _kernels.args_round = co_await w.args_round.acquire_pipeline(ctx);
+    _kernels.args_shade = co_await w.args_shade.acquire_pipeline(ctx);
+    _kernels.args_connect = co_await w.args_connect.acquire_pipeline(ctx);
     // A reload re-generates every shade kernel against modules that may have moved.
     _shade_kernels.clear();
 }
@@ -159,16 +171,17 @@ cc::optional<cc::fixed_array<f64, wavefront_timing::stage_count>> wavefront_timi
     return seconds;
 }
 
-void wavefront_routine::_record_landed_timings()
+void wavefront_routine::_record_landed_timings(u64 now)
 {
-    // A frame whose list was dropped never lands; a handful in flight is the most a healthy queue holds.
-    constexpr isize max_in_flight = 8;
-    while (_timed.size() > max_in_flight)
+    // A frame whose list was dropped never lands, and one a handful of epochs old was.
+    // Aged by epoch rather than counted, since every traced layer of the frame adds one.
+    constexpr u64 max_epochs_in_flight = 16;
+    while (!_timed.empty() && _timed.front().epoch + max_epochs_in_flight < now)
         _timed.remove_at(0);
 
     while (!_timed.empty())
     {
-        auto const landed = _timed.front().try_seconds();
+        auto const landed = _timed.front().timing.try_seconds();
         if (!landed.has_value())
             return;
         auto const& seconds = landed.value();
@@ -225,6 +238,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
               "wavefront_routine: the trace names more permutations than its state has room for");
     CC_ASSERT(t.bindless != nullptr, "wavefront_routine: a trace binds the manager's bindless tables");
     CC_ASSERT(d.rounds > 0, "wavefront_routine: a frame takes at least one round");
+    CC_ASSERT(d.restart || d.state->generation != 0, "wavefront_routine: the first frame through a state must restart");
     CC_ASSERT(!d.restir || (d.restart && !d.regenerate), "wavefront_routine: only a draining frame keeps ReSTIR's "
                                                          "records");
 
@@ -235,19 +249,27 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
 
     auto shade = cc::vector<sg::compute_pipeline_handle>();
     shade.reserve(t.hit_groups.size());
+    auto bound = cc::vector<material_permutation const*>();
+    bound.reserve(t.hit_groups.size());
     auto substituted = false;
+    auto pending = false;
     for (auto const* p : t.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a wavefront trace names a permutation the shader cache does not hold");
         auto kernel = self->_shade_kernel_of(ctx, p, *t.bindless);
         if (kernel == nullptr)
         {
-            kernel = p->kind == geometry_kind::quadrics ? quadric_fallback : fallback;
+            // _shade_kernel_of made the entry, so it is there to ask whether the compile settled.
+            pending = pending || !self->_shade_kernels.get_ptr(p->key)->failed;
+            auto const quadric = p->kind == geometry_kind::quadrics;
+            kernel = quadric ? quadric_fallback : fallback;
+            p = quadric ? t.quadric_fallback : t.fallback;
             substituted = true;
         }
         if (kernel == nullptr)
             return sg::routine_outcome::declined;
         shade.push_back(cc::move(kernel));
+        bound.push_back(p);
     }
 
     auto const tlas = cmd.raytracing.build_tlas(t.instances);
@@ -261,8 +283,12 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         cmd.upload.pod_to_buffer(lights, tracer::light_record{});
     }
 
+    // Past every decline, so a generation is spent only on a frame that runs; 0 stays the fresh state's.
+    if (d.restart && ++d.state->generation == 0)
+        d.state->generation = 1;
+
     auto fc = d.frame;
-    fc.generation = d.generation;
+    fc.generation = d.state->generation;
     if (d.restir)
         d.state->ensure_restir(ctx);
     fc.wavefront_flags = (d.restart ? impl::wavefront_flag_restart : 0u) | (d.restir ? impl::wavefront_flag_restir : 0u);
@@ -329,7 +355,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         cmd.compute.set_inline_constants(step);
     };
 
-    self->_record_landed_timings();
+    self->_record_landed_timings(u64(ctx.current_epoch()));
     auto timing = wavefront_timing{};
     auto const timed = cmd.query.is_supported();
     auto const mark = [&](wavefront_stage s)
@@ -349,7 +375,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     use(*self->_kernels.reset, second_group::none);
     cmd.compute.dispatch_groups(1);
     use(*self->_kernels.begin, second_group::none);
-    cmd.compute.dispatch_threads(int(width * height));
+    dispatch_slots(cmd, width * height);
 
     for (auto round = 0; round < d.rounds; ++round)
     {
@@ -410,28 +436,28 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
         step.permutation = 0;
         // The temporal pass first, then the spatial one over its reservoirs: the last of them is what each pixel's re-shade shades.
         use(*self->_kernels.restir_temporal, second_group::bindless);
-        cmd.compute.dispatch_threads(int(width * height));
+        dispatch_slots(cmd, width * height);
         if (d.restir_spatial)
         {
             use(*self->_kernels.restir_spatial, second_group::bindless);
-            cmd.compute.dispatch_threads(int(width * height));
+            dispatch_slots(cmd, width * height);
         }
         if (d.restir_di)
         {
             // Bindless, since a point on an emissive instance is placed and read through its mesh and its material's tables.
             use(*self->_kernels.restir_di_temporal, second_group::bindless);
-            cmd.compute.dispatch_threads(int(width * height));
+            dispatch_slots(cmd, width * height);
             if (d.restir_spatial)
             {
                 use(*self->_kernels.restir_di_spatial, second_group::bindless);
-                cmd.compute.dispatch_threads(int(width * height));
+                dispatch_slots(cmd, width * height);
             }
         }
         step.mode = restir_shade_mode;
         use(*self->_kernels.reset, second_group::none);
         cmd.compute.dispatch_groups(1);
         use(*self->_kernels.restir_gather, second_group::none);
-        cmd.compute.dispatch_threads(int(width * height));
+        dispatch_slots(cmd, width * height);
         use(*self->_kernels.args_shade, second_group::counting);
         cmd.compute.dispatch_groups(1);
         use(*self->_kernels.sort, second_group::none);
@@ -456,14 +482,14 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
 
     mark(wavefront_stage::resolve);
     use(*self->_kernels.resolve, second_group::none);
-    cmd.compute.dispatch_threads(int(width * height));
+    dispatch_slots(cmd, width * height);
 
     if (timed)
     {
         timing.end = cmd.query.record_gpu_timestamp();
         if (d.timing != nullptr)
             *d.timing = timing;
-        self->_timed.push_back(cc::move(timing));
+        self->_timed.push_back({.timing = cc::move(timing), .epoch = u64(ctx.current_epoch())});
     }
     if (live.raw() != nullptr)
         *d.live_paths = cmd.download.data_from_buffer(live);
@@ -475,8 +501,8 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
             {.src = d.state->counters.raw(), .dst = floor.raw(), .count = 2, .src_offset = counter_sample_floor});
         *d.sample_floor = cmd.download.data_from_buffer(floor);
     }
-    if (t.traced_with_stand_ins != nullptr)
-        *t.traced_with_stand_ins = substituted;
+    if (t.stand_ins != nullptr)
+        *t.stand_ins = stand_in_report::of(bound, substituted, pending);
     return sg::routine_outcome::executed;
 }
 } // namespace sv

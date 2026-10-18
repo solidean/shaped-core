@@ -185,9 +185,10 @@ void webgpu_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch group counts must be non-negative");
     // The device is requested with the default limits, so this is exactly its maxComputeWorkgroupsPerDimension.
-    constexpr int max_groups_per_dimension = 65535;
-    CC_ASSERTF(x <= max_groups_per_dimension && y <= max_groups_per_dimension && z <= max_groups_per_dimension,
-               "dispatch of ({}, {}, {}) groups exceeds webgpu's {} per dimension", x, y, z, max_groups_per_dimension);
+    CC_ASSERTF(x <= sg::max_dispatch_groups_per_dimension && y <= sg::max_dispatch_groups_per_dimension
+                   && z <= sg::max_dispatch_groups_per_dimension,
+               "dispatch of ({}, {}, {}) groups exceeds the {} per dimension every backend allows", x, y, z,
+               sg::max_dispatch_groups_per_dimension);
     CC_ASSERT(!_in_rendering_scope, "dispatch must not be recorded inside a rendering scope; close the scope first");
     bring_pool_writes_forward();
     open_compute_pass();
@@ -202,7 +203,7 @@ void webgpu_command_list::compute_dispatch_indirect(sg::raw_buffer_handle const&
     CC_ASSERT(buffer != nullptr, "indirect dispatch arguments are not a webgpu buffer");
     CC_ASSERT(!buffer->is_expired(), "indirect dispatch arguments are a transient buffer used past its epoch");
 
-    // WebGPU orders the arguments' reads after earlier passes' writes itself; the list only keeps the buffer alive.
+    // WebGPU orders the arguments' reads after earlier writes, including an earlier dispatch in this pass; the list only keeps the buffer alive.
     touch(args);
     bring_pool_writes_forward();
     open_compute_pass();

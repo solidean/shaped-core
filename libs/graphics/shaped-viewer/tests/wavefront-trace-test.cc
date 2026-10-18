@@ -77,6 +77,7 @@ struct wavefront_run
     int frames = 24;
     int rounds = 12;
     int drain_rounds = 48;
+    tg::vec2i size = k_size;
 };
 
 /// Traces `mesh` through the wavefront, every frame but the last regenerating, and reads the drained image back.
@@ -101,8 +102,8 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_wavefront(sg::context& ctx,
     hit_groups.push_back(permutation);
     auto const background = sv::background_gpu::from(run.environment);
 
-    auto const target = make_target(ctx);
-    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+    auto const target = make_target(ctx, run.size);
+    auto state = sv::wavefront_state::create(ctx, run.size, 4);
     co_return co_await trace_frames(
         ctx, target, run.frames,
         [&](sg::command_list& cmd, int f)
@@ -129,8 +130,7 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_wavefront(sg::context& ctx,
                                                         .state = &state,
                                                         .rounds = last ? run.drain_rounds : run.rounds,
                                                         .restart = f == 0,
-                                                        .regenerate = !last,
-                                                        .generation = 1});
+                                                        .regenerate = !last});
         });
 }
 
@@ -176,7 +176,6 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_cornell_at_fill(sg::context& ctx,
                                                         .restart = f == 0,
                                                         .regenerate = !draining,
                                                         .fill = fill,
-                                                        .generation = 1,
                                                         .live_paths = live});
         });
     check_drained(first_drain, "the restart");
@@ -220,7 +219,6 @@ cc::shared_async<cc::vector<tg::vec3f>> drain_cornell(sg::context& ctx,
                                                                       .restart = true,
                                                                       .regenerate = false,
                                                                       .restir = restir,
-                                                                      .generation = 1,
                                                                       .live_paths = &drained});
             if (outcome == sg::routine_outcome::executed)
                 read(cmd);
@@ -259,8 +257,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - traces the megakernel's image of t
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -326,8 +324,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - traces the megakernel's image of t
                                                         .state = &state,
                                                         .rounds = last ? 8 : 6,
                                                         .restart = f == 0,
-                                                        .regenerate = !last,
-                                                        .generation = 1});
+                                                        .regenerate = !last});
         });
 
     REQUIRE(reference.size() == traced.size());
@@ -366,13 +363,14 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - traces the megakernel's image of t
 
 // The pool's two invariants, read off the per-round live-path counts.
 // A carrying frame refills every slot whose path finished, so every round sees every slot; that is what makes a frame's cost its rounds.
-// A draining frame starts nothing, so its count never rises, and a scene with no medium empties well inside `max_bounces` rounds.
+// A draining frame starts nothing, so its count never rises, and a scene with no medium empties within `max_bounces` rounds.
+// A path takes one round per surface bounce, so whatever bounce it carried in at, none enters the drain's round at index `max_bounces` or later.
 ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot busy and a drain empties them",
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -418,7 +416,6 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
                                                         .rounds = carrying ? carry_rounds : drain_rounds,
                                                         .restart = carrying,
                                                         .regenerate = carrying,
-                                                        .generation = 1,
                                                         .live_paths = carrying ? &carried : &drained});
         });
 
@@ -435,7 +432,99 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
     CHECK(drain.value()[0] == slots);
     for (auto r = 1; r < drain_rounds; ++r)
         CHECK(drain.value()[r] <= drain.value()[r - 1]).context(cc::format("draining round {}", r));
-    CHECK(drain.value()[drain_rounds - 1] == 0u);
+    for (auto r = k_max_bounces; r < drain_rounds; ++r)
+        CHECK(drain.value()[r] == 0u).context(cc::format("draining round {}, past every bounce", r));
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+// A still frame of one round starts a new sample in only the slots whose path finished last round, which is few of them.
+// The primary depth is what drawings are depth-tested against, so it holds the estimate's, not the frame's: every covered pixel keeps its depth.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a still frame of one round keeps the primary depth its estimate found",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const scene = make_scene(resources);
+    auto const background = sv::background_gpu::from(sv::background{});
+    auto const target = make_target(ctx);
+    auto const depth = ctx.persistent.create_texture_2d(
+        {.format = sg::pixel_format::r32_float,
+         .width = k_size[0],
+         .height = k_size[1],
+         .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
+    auto state = sv::wavefront_state::create(ctx, k_size, 4);
+
+    // A restart that keeps every slot busy, then a still frame of a single round.
+    auto restarted_depth = sg::data_future<f32>();
+    auto still_depth = sg::data_future<f32>();
+    (void)co_await trace_frames(
+        ctx, target, 2,
+        [&](sg::command_list& cmd, int f)
+        {
+            auto records = cc::vector<sv::shaders::tracer::instance_record>();
+            records.push_back(resources.describe_instance(cmd, scene.item.mesh, scene.item.instance));
+            sv::place_instance_record(records.back(), scene.instances[0], scene.hit_groups[0]->opacity);
+            auto const bindless = resources.freeze();
+            auto const trace = sv::pt_trace_desc{
+                .background = ctx.transient.create_buffer_from_pod(cmd, background, sg::buffer_usage::readonly_buffer),
+                .instances = scene.instances,
+                .output = target,
+                .primary_depth = depth,
+                .instance_table = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer),
+                .lights = sv_test::upload_lights(cmd, scene.lights),
+                .hit_groups = scene.hit_groups,
+                .bindless = &bindless};
+            auto fc = frame_of(scene, 9u, 0u, 1);
+            fc.write_primary_depth = 1;
+            fc.near_plane = f32(scene.camera.projection.near_plane);
+            auto const outcome = sv::wavefront_routine::execute(cmd, {.trace = trace,
+                                                                      .frame = fc,
+                                                                      .state = &state,
+                                                                      .rounds = f == 0 ? 6 : 1,
+                                                                      .restart = f == 0,
+                                                                      .regenerate = true});
+            if (outcome == sg::routine_outcome::executed)
+                (f == 0 ? restarted_depth : still_depth)
+                    = sg::data_future<f32>(cmd.download.bytes_from_texture(depth.raw()));
+            return outcome;
+        });
+
+    auto const restarted = restarted_depth.try_get_data();
+    auto const still = still_depth.try_get_data();
+    REQUIRE(restarted.has_value());
+    REQUIRE(still.has_value());
+    REQUIRE(restarted.value().size() == still.value().size());
+
+    auto covered = isize(0);
+    auto lost = isize(0);
+    auto moved = isize(0);
+    for (auto i = isize(0); i < still.value().size(); ++i)
+    {
+        if (restarted.value()[i] >= 1.0f)
+            continue;
+        ++covered;
+        if (still.value()[i] >= 1.0f)
+            ++lost;
+        else if (still.value()[i] != restarted.value()[i])
+            ++moved;
+    }
+    CHECK(covered > still.value().size() / 2).context(cc::format("{} of {} pixels covered", covered, still.value().size()));
+    CHECK(lost == 0).context(cc::format("{} of {} covered pixels read the far plane", lost, covered));
+    CHECK(moved == 0).context(cc::format("{} of {} covered pixels changed their depth", moved, covered));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
@@ -447,8 +536,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a partial fill starts its share of
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -628,7 +717,6 @@ cc::shared_async<target_run> trace_to_target(sg::context& ctx,
                                                        .restart = restart,
                                                        .regenerate = !draining,
                                                        .fill = draining ? 1.0f : leg.fill,
-                                                       .generation = 1,
                                                        .sample_target = leg.target,
                                                        .sample_floor = last ? &floor : nullptr});
             if (last && outcome == sg::routine_outcome::executed)
@@ -677,8 +765,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a sample target stops every pixel 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -711,8 +799,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a pixel's samples are the same wha
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -767,8 +855,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a primary depth first asked for on
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -826,8 +914,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a primary depth first asked for on
                                                                       .rounds = 2,
                                                                       .restart = f == 0,
                                                                       .regenerate = true,
-                                                                      .fill = 0.25f,
-                                                                      .generation = 1});
+                                                                      .fill = 0.25f});
             if (last && outcome == sg::routine_outcome::executed)
                 depth_back = sg::data_future<f32>(cmd.download.bytes_from_texture(depth.raw()));
             return outcome;
@@ -851,8 +938,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's re-shade of a drained fra
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -943,8 +1030,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a path a ReSTIR frame leaves unfin
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -989,8 +1076,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a path a ReSTIR frame leaves unfin
                                                             .rounds = f == 0 ? 2 : 16,
                                                             .restart = f == 0,
                                                             .regenerate = false,
-                                                            .restir = restir && f == 0,
-                                                            .generation = 1});
+                                                            .restir = restir && f == 0});
             });
     };
     auto const plain = co_await run(false);
@@ -1015,8 +1101,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's temporal reuse keeps the 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1091,8 +1177,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's history follows a panning
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1137,8 +1223,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's reuse keeps the light a g
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1194,8 +1280,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's spatial reuse keeps the b
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1278,8 +1364,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1400,8 +1486,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a dim light near what it lights ke
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1505,8 +1591,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR DI keeps the image of many 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1590,8 +1676,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR's re-shade does not light a
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1675,8 +1761,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - ReSTIR DI keeps the mean of every 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1763,8 +1849,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1877,8 +1963,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
 ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a cutout cuts where its opacity says", (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     {
@@ -1929,6 +2015,140 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a cutout cuts where its opacity sa
     CHECK(total - kept - cut <= isize(k_size[0])).context(cc::format("{} pixels neither kept nor cut", total - kept - cut));
     CHECK(kept > total * 4 / 10).context(cc::format("{} of {} kept", kept, total));
     CHECK(cut > total * 4 / 10).context(cc::format("{} of {} cut", cut, total));
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A coverage cutout through the wavefront: each sample tosses its own coin, even the samples one pixel finishes within one frame.
+// A black unlit quad at half coverage in front of a white environment, one round per sample and every sample of the carrying frame
+// drawn in that frame, so a coin shared by a pixel's samples would leave each pixel black or white rather than gray.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a coverage cutout tosses a coin per sample",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const p : {tg::pos3f(-2, -2, 0), tg::pos3f(2, -2, 0), tg::pos3f(2, 2, 0), tg::pos3f(-2, -2, 0),
+                         tg::pos3f(2, 2, 0), tg::pos3f(-2, 2, 0)})
+        positions.push_back(p);
+    auto& lib = sv_test::shared_material_library();
+    auto const type = lib.acquire_type(sv::builtin_material::unlit).value();
+    auto bindings = cc::vector<sv::material_attribute_binding>();
+    bindings.push_back(sv::material_attribute_binding::of("color", tg::vec3f(0, 0, 0)));
+    bindings.push_back(sv::material_attribute_binding::of("opacity", 0.5f));
+    auto const mesh = sv::mesh{.name = "wavefront coverage",
+                               .geometry = sv::triangle_geometry::create_from_positions(positions),
+                               .material = lib.acquire(sv::material::create("wavefront coverage", type, bindings))};
+
+    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    constexpr int samples = 32;
+    auto const pixels = co_await trace_wavefront(ctx, resources, mesh,
+                                                 {.camera = camera,
+                                                  .environment = sv::background::uniform(tg::vec3f(1, 1, 1)),
+                                                  .max_bounces = 1,
+                                                  .frames = 2,
+                                                  .rounds = samples});
+
+    // At 33 samples a pixel's mean has a deviation near 0.09 about 0.5, so a pixel outside 0.1 to 0.9 is all but impossible.
+    auto mixed = isize(0);
+    auto mean = 0.0f;
+    for (auto const& p : pixels)
+    {
+        auto const l = luminance_of(p);
+        mean += l;
+        if (l > 0.1f && l < 0.9f)
+            ++mixed;
+    }
+    auto const total = isize(pixels.size());
+    mean /= f32(total);
+    CHECK(mixed > total * 95 / 100).context(cc::format("{} of {} pixels mix kept and cut samples", mixed, total));
+    CHECK(tg::abs(mean - 0.5f) < 0.05f).dump("mean luminance", mean);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// An image past 65535 groups of 64 threads, which no backend dispatches on one axis: 4096 x 1040 is 4.26 Mpx.
+// An unlit quad fills the view, so every stage but connect runs over more slots than one row of groups holds.
+// A slot past the first row that no stage reached reads as a pixel that is not the quad's color.
+ASYNC_INVOCABLE_TEST("sv::wavefront_routine - an image past one row of groups is traced to its last pixel",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+
+    constexpr auto size = tg::vec2i(4096, 1040);
+    static_assert(isize(size[0]) * isize(size[1]) > isize(65535) * 64, "the image needs a second row of groups");
+    // 68 MB of rgba32_float is past the inline readback ring, which sg reports once.
+    nx::expect_warning("an inline readback of * did not fit the *-byte readback ring*", nx::exactly(1));
+
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const p : {tg::pos3f(-40, -40, 0), tg::pos3f(40, -40, 0), tg::pos3f(40, 40, 0), tg::pos3f(-40, -40, 0),
+                         tg::pos3f(40, 40, 0), tg::pos3f(-40, 40, 0)})
+        positions.push_back(p);
+    auto& lib = sv_test::shared_material_library();
+    auto const type = lib.acquire_type(sv::builtin_material::unlit).value();
+    auto bindings = cc::vector<sv::material_attribute_binding>();
+    bindings.push_back(sv::material_attribute_binding::of("color", tg::vec3f(0.25f, 0.5f, 0.75f)));
+    auto const mesh = sv::mesh{.name = "wavefront wide quad",
+                               .geometry = sv::triangle_geometry::create_from_positions(positions),
+                               .material = lib.acquire(sv::material::create("wavefront wide quad", type, bindings))};
+
+    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    camera.projection.aspect_ratio = f64(size[0]) / f64(size[1]);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const pixels = co_await trace_wavefront(ctx, resources, mesh,
+                                                 {.camera = camera,
+                                                  .environment = sv::background::uniform(tg::vec3f(0, 0, 0)),
+                                                  .max_bounces = 1,
+                                                  .frames = 2,
+                                                  .rounds = 2,
+                                                  .drain_rounds = 4,
+                                                  .size = size});
+    REQUIRE(pixels.size() == isize(size[0]) * isize(size[1]));
+
+    // The quad's color is whatever the first pixel holds; every other one, the last row's included, must hold it too.
+    auto const expected = pixels[0];
+    auto wrong = isize(0);
+    auto first_wrong = isize(-1);
+    for (auto i = isize(0); i < pixels.size(); ++i)
+    {
+        auto const d = pixels[i] - expected;
+        if (tg::abs(d[0]) + tg::abs(d[1]) + tg::abs(d[2]) <= 1e-3f)
+            continue;
+        if (first_wrong < 0)
+            first_wrong = i;
+        ++wrong;
+    }
+    CHECK(luminance_of(expected) > 0.1f).dump("first pixel's luminance", luminance_of(expected));
+    CHECK(wrong == 0).context(cc::format("{} pixels differ from the first, the first at slot {}", wrong, first_wrong));
 
     co_await cc::async_settled(sv::background_work(ctx));
 }

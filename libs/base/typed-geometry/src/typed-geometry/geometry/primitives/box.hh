@@ -3,6 +3,7 @@
 #include <clean-core/container/fixed_array.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
+#include <typed-geometry/geometry/impl/hexahedron.hh>
 #include <typed-geometry/geometry/impl/sampling.hh>
 #include <typed-geometry/geometry/traits.hh>
 #include <typed-geometry/linalg/comp.hh>
@@ -25,6 +26,8 @@
 template <int D, int DAmbient, class T>
 struct tg::box
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "box requires a positive dimension");
     static_assert(D <= DAmbient, "a box cannot span more dimensions than the space it is embedded in");
 
@@ -122,6 +125,18 @@ public:
         }
         return r;
     }
+    /// every pair of corners that differ on exactly one half-axis.
+    [[nodiscard]] constexpr cc::fixed_array<segment<DAmbient, T>, D * (1 << (D - 1))> edges() const
+    {
+        return tg::impl::corner_edges<D, DAmbient, T>(this->vertices());
+    }
+    /// the six faces, wound counterclockwise seen from outside whichever handedness the half-axes have.
+    /// Face 2a + s lies on the + side of half-axis a if s is 1, on the - side if 0.
+    [[nodiscard]] constexpr cc::fixed_array<quad<3, T>, 6> faces() const
+        requires(D == 3 && DAmbient == 3)
+    {
+        return tg::impl::corner_faces(this->vertices(), half_extents.determinant() < T(0));
+    }
 
     // parameters
 public:
@@ -193,6 +208,8 @@ public:
 template <int D, int DAmbient, class T>
 struct tg::box_boundary
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "box_boundary requires a positive dimension");
     static_assert(D <= DAmbient, "a box cannot span more dimensions than the space it is embedded in");
 

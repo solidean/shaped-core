@@ -241,6 +241,7 @@ void webgpu_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<sg
 u32 webgpu_command_list::raster_declare_array_buffer_access(cc::string_view,
                                                             cc::span<sg::array_buffer_access const> elements)
 {
+    CC_ASSERT(_in_rendering_scope, "declare_array_buffer_access requires an open rendering scope");
     // The compute pair's rule: no layout accepts an array binding here, so only the empty declaration can be right.
     CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
     return next_array_declaration_id();
@@ -249,6 +250,7 @@ u32 webgpu_command_list::raster_declare_array_buffer_access(cc::string_view,
 u32 webgpu_command_list::raster_declare_array_texture_access(cc::string_view,
                                                              cc::span<sg::array_texture_access const> elements)
 {
+    CC_ASSERT(_in_rendering_scope, "declare_array_texture_access requires an open rendering scope");
     CC_ASSERT(elements.empty(), "webgpu has no binding arrays, so there is no array element to declare");
     return next_array_declaration_id();
 }

@@ -384,6 +384,8 @@ ASYNC_INVOCABLE_TEST("sg vulkan - a block-compressed texture stages at its block
     // Getting the staging size or its offset alignment wrong here is a validation error rather than a wrong image,
     // which is what makes this worth pinning separately.
     auto& base = static_cast<sg::context&>(*handle);
+    if (!base.supports(sg::feature::texture_compression_bc))
+        SKIP("this device has no BC textures");
 
     auto texture = base.persistent.create_texture_2d({
         .format = sg::pixel_format::bc1_rgba_unorm,

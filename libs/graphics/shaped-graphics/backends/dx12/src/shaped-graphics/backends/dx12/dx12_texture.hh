@@ -97,17 +97,7 @@ public:
 
     /// Accumulate one declared `stages`/`access`/`layout` over `range` for `slot` into the next-op state, emitting no barrier.
     /// Call once per binding; `flush_texture_access` merges them.
-    /// Thread-safe.
-    void declare_texture_access(sg::command_list_slot slot,
-                                sg::subresource_range range,
-                                sg::pipeline_stage_flags stages,
-                                sg::access_flags access,
-                                sg::texture_layout layout) const
-    {
-        _access.lock([&](dx12_texture_access& t) { t.declare(slot, range, stages, access, layout); });
-    }
-
-    /// `declare_texture_access` plus the per-op and per-list filing, under one lock — see dx12_texture_access::track.
+    /// Also reports whether this was the op's and the list's first access, under the same lock — see dx12_texture_access::track.
     /// Thread-safe.
     [[nodiscard]] dx12_track_result track_texture_access(sg::command_list_slot slot,
                                                          sg::subresource_range range,

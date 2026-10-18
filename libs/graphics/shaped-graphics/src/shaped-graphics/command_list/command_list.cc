@@ -1,4 +1,5 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/assertf.hh>
 #include <clean-core/record/log.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -23,9 +24,26 @@ array_access_declaration command_list::adopt_array_declaration(u32 id, bool rast
     return array_access_declaration(cc::move(link));
 }
 
+buffer_array_binding command_list::named_buffer_array(cc::string_view name)
+{
+    CC_ASSERTF(context().holds_array_binding(name, false),
+               "an array declaration names '{}', and no binding group layout this context holds has a buffer array of "
+               "that name. Is it misspelled, or an array of textures?",
+               name);
+    return {.name = name};
+}
+
+texture_array_binding command_list::named_texture_array(cc::string_view name)
+{
+    CC_ASSERTF(context().holds_array_binding(name, true),
+               "an array declaration names '{}', and no binding group layout this context holds has a texture array of "
+               "that name. Is it misspelled, or an array of buffers?",
+               name);
+    return {.name = name};
+}
+
 void command_list::end_array_declaration(impl::array_declaration_link& link)
 {
-    CC_ASSERT(link.list == this, "an array declaration was ended through a list it was not made on");
     _live_array_declarations.remove_first_where([&](impl::array_declaration_token const& t) { return t.get() == &link; });
     link.list = nullptr;
     withdraw_array_declaration(link.id);
@@ -90,9 +108,8 @@ sg::impl::stat_counts const& sg::impl::recorded_stats(command_list const& cmd)
     return cmd._stats;
 }
 
-void sg::impl::check_no_live_array_declarations(command_list const& cmd)
+void sg::impl::end_array_declarations_at_submit(command_list& cmd)
 {
-    CC_ASSERT(cmd._live_array_declarations.empty(),
-              "a command list was submitted while an array declaration made on it is alive. Withdraw it, or let it go "
-              "out of scope, before the submit");
+    // Silently, as a drop does: no op follows a submit on this list, so a value outliving it has nothing to leak into.
+    cmd.end_array_declarations(false);
 }

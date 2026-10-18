@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh> // sg::async_compiled_shader is a cc::shared_async
 #include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 #include <shaped-graphics/fwd.hh>
@@ -113,7 +115,8 @@ public:
     /// The filesystem notifies where it can, and the watcher is otherwise asleep; where it cannot, it rescans on `interval_ms`.
     ///
     /// A reload is staged, never applied in place: the recompile runs on the watcher and the next acquire promotes it, so a reload costs a consumer only the pointer swap.
-    /// The first acquire of a format is the exception — it reads, preprocesses and dispatches the compile while holding the asset's lock.
+    /// The first acquire of a format and option set is the exception: it reads, preprocesses and dispatches the compile on its caller's thread, off the asset's lock.
+    /// A reload staged while that compile runs skips it, so the install flags the asset and the watcher's next scan stages that reload again.
     void start_hot_reload(reload_config config = {});
 
     /// Drives the watcher on the calling thread.
@@ -148,11 +151,11 @@ public:
 
     // internal — the compile path an asset drives
 public:
-    /// What a compile produced: the async shader, plus every virtual path it was built from.
+    /// What a compile produced: the async shader, plus every file it was built from, at the revision it read.
     struct compile_outcome
     {
         sg::async_compiled_shader shader;
-        cc::vector<cc::string> dependencies; ///< the source itself, each resolved include, each module file reached
+        cc::vector<file_dependency> dependencies; ///< the source itself, each resolved include, each module file reached
     };
 
     /// Reads, preprocesses and compiles one shader for `format`, with `options` given to an SGL source's options.
@@ -172,13 +175,14 @@ public:
     /// **An edit to one of those does NOT move a caller's cache key.** The generated source carries a literal `#include` line
     /// whose bytes never change when the file does, and `outcome.dependencies` — the only thing that knows what was pulled in —
     /// is not returned from here.
-    /// So a generated permutation does not hot-reload on an include edit — see [shaped-viewer's TODO](../../../shaped-viewer/docs/TODO.md).
+    /// So a generated permutation does not hot-reload on an include edit — issue: bug-sv-hit-group-module-reload.
     ///
     /// **slib adds no cache of its own at this seam** — which is not to say the path is uncached.
-    /// The compile goes through the same `ssc::dxc::shader_cache` every other compile does, in-memory tier and lazily-opened
-    /// persistent tier both, so a generated permutation already survives across runs.
-    /// What slib does not add is a second cache keyed on the source text: a caller generating a source already has a better key
-    /// for it — a material permutation, say — so the dedup belongs there.
+    /// A compiler that keeps its own cache still applies it here: DXC's and Metal's `shader_cache`, in-memory tier and
+    /// lazily-opened persistent tier both, so a generated permutation built by either survives across runs.
+    /// An SGL source's front end is cached as well, by the SGL edge's preprocess, which every SGL compile goes through.
+    /// What slib does not add is a cache of the compiled shader keyed on the source text.
+    /// A caller generating a source already has a better key for it — a material permutation, say — so the dedup belongs there.
     ///
     /// A missing compiler, a preprocessing failure, or a compile error all come back as an async error — never a throw.
     [[nodiscard]] sg::async_compiled_shader compile_source(cc::string_view source,
@@ -250,6 +254,10 @@ private:
 
     /// Mutable because compiling is const, and tracking what it handed out changes nothing a caller can observe.
     mutable cc::async_backlog _backlog = cc::async_backlog("slib.shader_library");
+
+    /// The (label, warning) pairs this library has logged, each joined by a newline, which a label never holds.
+    /// Per library rather than per process: tests run in parallel, and whether one sees a warning must not depend on what ran before it.
+    mutable cc::mutex<cc::set<cc::string>> _logged_warnings = cc::mutex<cc::set<cc::string>>(cc::set<cc::string>());
 
     /// The reload watcher's actor, the flag that tells a sleeping poll loop to give up, and the wake a filesystem notification comes in through.
     /// Both are shared because the actor owns the impl and only hands it back once it has stopped.

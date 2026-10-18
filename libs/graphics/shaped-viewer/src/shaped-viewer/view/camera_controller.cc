@@ -1,8 +1,9 @@
 #include <clean-core/common/utility.hh> // cc::clamp
 #include <shaped-rendering/input.hh>
 #include <shaped-viewer/view/camera_controller.hh>
-#include <typed-geometry/linalg/cross.hh>  // tg::cross + tg::dual
-#include <typed-geometry/scalar/scalar.hh> // tg::asin, tg::atan2, tg::sin_cos, tg::pow
+#include <typed-geometry/linalg/cross.hh>   // tg::cross + tg::dual
+#include <typed-geometry/linalg/vec_ops.hh> // tg::dot
+#include <typed-geometry/scalar/scalar.hh>  // tg::asin, tg::atan2, tg::sin_cos, tg::pow
 
 namespace sv
 {
@@ -40,6 +41,10 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
         },
         [&](sr::mouse_move_event const& m)
         {
+            // A release this window never saw still ends the drag, since every motion says what is held.
+            _orbiting = _orbiting && m.is_held(sr::mouse_button::left);
+            _panning = _panning && m.is_held(sr::mouse_button::middle);
+
             // Motion with no button held is just the cursor passing over the view.
             if (!_orbiting && !_panning)
                 return false;
@@ -61,6 +66,9 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
             }
             else
             {
+                // The hand takes the target over, so a focus still gliding toward another one would fight it.
+                _focus = {};
+
                 // Pan across the plane the camera faces, so the target follows the cursor rather than the world axes.
                 // Scaled by distance, so one drag covers the same fraction of the screen at every zoom.
                 auto const b = orbit.to_camera().basis();
@@ -79,11 +87,64 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
             auto const clamped = cc::clamp(scaled, config.min_distance, config.max_distance);
             if (clamped == orbit.distance)
                 return false;
+
+            // A zoom during a focus scales the whole glide, so the camera lands as far in as the wheel asked.
+            if (_focus.has_value())
+            {
+                auto const ratio = clamped / orbit.distance;
+                auto& f = _focus.value();
+                f.from_distance *= ratio;
+                f.to_distance = cc::clamp(f.to_distance * ratio, config.min_distance, config.max_distance);
+            }
             orbit.distance = clamped;
             return true;
         },
         [](sr::key_event const&) { return false; }, // keys and text belong to the fps controller, or to the caller
         [](sr::text_event const&) { return false; });
+}
+
+bool orbit_camera_controller::focus_on(tg::pos3d point)
+{
+    auto const cam = orbit.to_camera();
+    auto const depth = tg::dot(point - cam.position, cam.basis().forward);
+    if (!(depth > 0))
+        return false;
+
+    // The orbit keeps its target on the view axis, so the eye slides across to it and then in along the same direction.
+    _focus = focus_motion{
+        .from_target = orbit.target,
+        .to_target = point,
+        .from_distance = orbit.distance,
+        .to_distance = cc::clamp(depth * config.focus_approach, config.min_distance, config.max_distance)};
+    return true;
+}
+
+bool orbit_camera_controller::update(f64 dt)
+{
+    if (!_focus.has_value())
+        return false;
+
+    auto& f = _focus.value();
+    f.elapsed += dt > 0 ? dt : 0.0;
+    auto const t = config.focus_seconds > 0 ? cc::min(f.elapsed / config.focus_seconds, 1.0) : 1.0;
+
+    // Ease-out: the camera leaves at once and settles gently, which is what reads as moving rather than jumping.
+    auto const rest = 1.0 - t;
+    auto const s = 1.0 - rest * rest * rest;
+
+    // Target and distance interpolate together, so the eye travels in a straight line.
+    // The distance geometrically, the way the wheel zooms, so a glide in from far away does not cover its first half in a blink.
+    orbit.target = f.from_target + (f.to_target - f.from_target) * s;
+    orbit.distance = f.from_distance * tg::pow(f.to_distance / f.from_distance, s);
+
+    if (t >= 1.0)
+    {
+        // Exactly where it was sent, rather than wherever the last step's rounding left it.
+        orbit.target = f.to_target;
+        orbit.distance = f.to_distance;
+        _focus = {};
+    }
+    return true;
 }
 
 tg::vec3d fps_state::forward() const
@@ -176,8 +237,13 @@ bool fps_camera_controller::handle(sr::input_event const& e)
         },
         [&](sr::mouse_move_event const& m)
         {
-            if (config.look_requires_button && !_looking)
-                return false;
+            if (config.look_requires_button)
+            {
+                // A release this window never saw still ends the look, since every motion says what is held.
+                _looking = _looking && m.is_held(sr::mouse_button::right);
+                if (!_looking)
+                    return false;
+            }
             if (m.delta[0] == 0.0f && m.delta[1] == 0.0f)
                 return false;
 

@@ -30,7 +30,7 @@ dx12_texture_footprint compute_texture_footprint(sg::texture_description const& 
     int const sub_w = mip_extent(desc.width, sub.mip_level);
     int const sub_h = desc.dimension == sg::texture_dimension::d1 ? 1 : mip_extent(desc.height, sub.mip_level);
 
-    // The region is already resolved + bounds-checked by the sg API layer: a concrete, in-bounds, non-empty box.
+    // The region is already resolved, bounds-checked and block-aligned by the sg API layer: a concrete, in-bounds, non-empty box.
     // tg::pos / tg::vec are subscript-accessed ([0..2] = x/y/z).
     int const ox = region.offset[0];
     int const oy = region.offset[1];
@@ -43,13 +43,6 @@ dx12_texture_footprint compute_texture_footprint(sg::texture_description const& 
     int const block = sg::format_block_extent(desc.format); // 1 (uncompressed) or 4 (block-compressed)
     isize const block_bytes = sg::format_block_size(desc.format);
     CC_ASSERT(block_bytes > 0, "texture format has no defined block size");
-    if (block > 1)
-    {
-        CC_ASSERT(ox % block == 0 && oy % block == 0, "block-compressed copy offset must be block-aligned");
-        // The size must be block-aligned, except a region that runs to the subresource edge (partial edge block).
-        CC_ASSERT((w % block == 0 || ox + w == sub_w) && (h % block == 0 || oy + h == sub_h),
-                  "block-compressed copy size must be block-aligned (except at the subresource edge)");
-    }
 
     dx12_texture_footprint fp;
     fp.format = to_dxgi_format(desc.format);

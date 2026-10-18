@@ -83,4 +83,31 @@ camera_matrices matrices_of(shaders::tracer::camera_record const& cam, f32 near_
 
     return {.world_to_view = world_to_view, .view_to_clip = view_to_clip};
 }
+
+cc::optional<tg::pos3d> primary_hit_position(shaders::tracer::camera_record const& cam,
+                                             tg::vec2i pixel,
+                                             tg::vec2i resolution,
+                                             f32 depth,
+                                             f32 near_plane)
+{
+    // An escaped ray stays at 1, and a NaN fails the comparison too.
+    if (!(depth < 1.0f) || near_plane <= 0 || resolution[0] <= 0 || resolution[1] <= 0)
+        return {};
+
+    auto const to_d = [](tg::vec3f const& v) { return tg::vec3d(f64(v[0]), f64(v[1]), f64(v[2])); };
+    auto const forward = to_d(cam.forward);
+    auto const forward_length = forward.length();
+    if (forward_length <= 0)
+        return {};
+
+    // The ray `camera_ray_offset` forms through the pixel center, and the view depth that ray reached.
+    auto const ndc_x = (f64(pixel[0]) + 0.5) / f64(resolution[0]) * 2.0 - 1.0;
+    auto const ndc_y = (f64(pixel[1]) + 0.5) / f64(resolution[1]) * 2.0 - 1.0;
+    auto const offset = forward + to_d(cam.right_scaled) * ndc_x - to_d(cam.up_scaled) * ndc_y;
+    auto const view_depth = f64(near_plane) / (1.0 - f64(depth));
+
+    // View depth is measured along the unit forward, so the offset is scaled until its own forward component matches.
+    auto const position = tg::pos3d(f64(cam.position[0]), f64(cam.position[1]), f64(cam.position[2]));
+    return position + offset * (view_depth * forward_length / tg::dot(offset, forward));
+}
 } // namespace sv

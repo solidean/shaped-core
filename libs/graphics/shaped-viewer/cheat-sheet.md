@@ -9,7 +9,8 @@ The authoring surface sits at the root; everything else is one folder down — `
 > **Scope note:** early stage, in three layers.
 > A frame is authored through the fluent handles (`sv::interactive` → `frame` → `window_ref` → `view_ref` → `scene_ref`), flattened into a `render_plan`, and replayed by `viewer_renderer`.
 > A **view is the definition of one texture**, and a view's layer may itself be a whole layout tree — so views nest, at any depth.
-> Rendering needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracer runs on dx12 and vulkan.
+> Tracing needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracers run on dx12 and vulkan.
+> A raster layer needs none, and `render_mode::automatic`, the default, rasterizes where the device cannot trace.
 > The default context and the examples are dx12's.
 > The API is present everywhere; without a backend a routine just draws nothing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
@@ -50,8 +51,15 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 frame_budget_ms; bool restir; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
-sv::render_mode              // wavefront (default) | megakernel | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; bool restir; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+                                 //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
+sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each fits its share with whole rounds, then with a partial fill
+                                 //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
+sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + 1 + medium_roulette_after (16, pt.roulette_after)
+sv::render_mode              // automatic (default) | megakernel | wavefront | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+                                 //   automatic: the wavefront where the device has raytracing_pipeline and ray_query, raster with one warning where not;
+                                 //   the viewer resolves it before planning, and a plan built by hand traces it with the wavefront
+sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
@@ -201,12 +209,13 @@ Gotchas:
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
 
 ```cpp
-sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute;
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute, occlusion_attribute;
                                  //   string emission_color_attribute, emission_scale_attribute; hash128 hash; }
-sv::material_type_description    // { name, signature, shader, opacity_attribute, opacity_cutoff_attribute, emission_color_attribute, emission_scale_attribute; }
+sv::material_type_description    // { name, signature, shader, opacity_attribute, opacity_cutoff_attribute, occlusion_attribute, emission_color_attribute, emission_scale_attribute; }
 sv::material_type::create({.name = ..., .signature = ..., .shader = ..., ...})
-                                 //   -> hashes all seven; asserts a name declared twice, a default that is not its format's size,
-                                 //      an opacity attribute that is not a declared float, and a fragment that writes geometry_opacity
+                                 //   -> hashes all eight; asserts a name declared twice, a default that is not its format's size,
+                                 //      an opacity, cutoff or occlusion attribute that is not a declared float, and a fragment that writes geometry_opacity
+                                 //   occlusion_attribute: baked AO, which darkens the raster path's environment light alone; the tracer ignores it
                                  //   an emission color must be a declared float3 and a scale a float; a declaring type's fragment may not write surface.emission_*
 t.declares_emission()            // -> bool; only such a type's instances light the scene (docs/lights.md#emissive-instances)
                                  //   shader: an SGL FRAGMENT, statements unindented, attributes immutable locals, `surface` the one `let mut`
@@ -231,7 +240,7 @@ sv::builtin_material::openpbr / pbr / unlit          // the names the builtins r
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
                                  //   emission declared by openpbr (emission_color, emission_luminance) and pbr (emissive); unlit's reaches the camera alone
-                                 //   openpbr also declares `alpha_cutoff`, its opacity cutoff (0 = off, glTF's MASK), and `occlusion` (imported, ignored here)
+                                 //   openpbr also declares `alpha_cutoff`, its opacity cutoff (0 = off, glTF's MASK), and `occlusion`, its occlusion attribute (raster's ambient reads it, the tracer does not)
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
 sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
@@ -306,6 +315,9 @@ auto const plaster = lib.register_type(sv::material_type::create({.name = "plast
   `material_shader_cache::acquire_fallback()` is a neutral hit group over an EMPTY signature, so it reads no per-instance block and can stand in for any material whatever that material's layout was.
   `pathtrace_routine` keys its pipeline on the SUBSTITUTED set, so the frame the real permutation lands the key changes and a new variant is built.
   A `pt_trace_desc` with no `fallback` keeps the old all-or-nothing behavior: one material still compiling makes the whole trace a no-op.
+  Every routine reports what it bound through `stand_ins`, a `sv::stand_in_report`: a hash over the bound set, 0 for none, and whether a stood-in compile is still pending.
+  The view folds the hash into its image's, so a material that failed for good converges over the stand-in, and one that lands restarts the image once.
+  One still pending restarts the image every frame, so a mean of it never reads as converged.
 - **A cutout is DATA, not code.** `material_type::opacity_attribute` names the attribute that is the opacity, and `opacity_cutoff_attribute` the optional threshold.
   One generic reader, `tracer.instance_opacity`, takes it straight out of the parameter block through the instance record's opacity fields, whatever the material.
   So a kernel that traces never recompiles for a material, and a fragment cannot compute opacity: writing `geometry_opacity` asserts.
@@ -370,7 +382,8 @@ Gotchas:
 - **A sampled attribute takes TWO slots** — the texture index, and the `sv::attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
 - **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
 - **A sample names its level, 0** — a ray tracing hit shader has no derivatives to pick a mip from.
-  The raster pixel stage is the one spelling that does not: it has derivatives, and samples through `raster.drawn`'s copy of the palette.
+  The raster pixel stage is the one spelling that does not: it has derivatives, so it samples the same palette at the level they pick.
+  Its cutout is not one of its loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0, since a box-filtered mip averages a cutout away.
 - **Every bindless index is `nonuniform`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
 - **Each load is a function of its own**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
@@ -379,7 +392,9 @@ Gotchas:
   So is one naming a module a hit group uses, one starting with `sv_`, and `surface` / `ctx`.
   Rejected rather than sanitized: the type's own fragment is written against the declared name.
 - **A generated permutation does not hot-reload on a module edit** — the key hashes the resolution and the geometry kind, not the modules' contents.
-- **A texture samples through a fixed palette**, never through per-permutation samplers: module `tracer` declares one static sampler per magnification filter and address mode of each axis.
+- **A texture samples through a fixed palette**, never through per-permutation samplers.
+  Module `tracer`'s `binding bindless` declares one static sampler per magnification filter and address mode of each axis.
+  It sits beside the tables because every pipeline that samples a material lists that group, and sg allows no fourth.
   A hit samples level 0, where only the magnification filter applies, so the minification and mip filters are dropped; `sgl_palette_sampler` says what else is.
 
 ## Mesh authoring — geometry + what a material reads
@@ -509,6 +524,25 @@ s.add_line(tg::segment3f(a, b),                     //   ...or with the ends nam
 s.add_cone(tg::segment3f(base, tip), 0.05f, steel); //   base disc at pos0, tip at pos1
 s.add_arrow(tg::segment3f(a, b), steel);            //   sized to its own length
 s.add_arrow(tg::segment3f(a, b), 0.01f, steel);     //   ...or to a fixed shaft, so only LENGTH varies across arrows
+```
+
+### tg objects by their parts (`scene/tg_objects.hh`)
+
+Any tg object takes part by what it has — `vertices()`, `edges()`, `faces()`; a triangle or quad is its own face; any scalar, `aabb3i` included.
+
+```cpp
+sv::vertex_style                 // { float radius = 0.02f; }
+sv::edge_style                   // { radius = 0.01f; optional vertex_radius (unset = radius: exactly round joints); bool vertices = true; line_ends ends = flat; }
+                                 //   vertices: a sphere on each of the OBJECT's vertices, once each, and open tubes; without: `ends` closes each tube
+
+set.add_edges(box, style);       // -> isize primitives appended (aabb: 12 tubes + 8 joints), so a per-primitive attribute can follow in step
+set.add_vertices(tet, style);    // -> isize; also add_edges(span<segment3f>, span<pos3f> joints, style) / add_vertices(span<pos3f>, style)
+sv::triangle_geometry::create_from_faces(obj_or_range)  // the faces as a raw triangle list, wound as tg winds them
+
+s.add_faces(box, surface);                              // -> faces_ref; one mesh per (view, layer, material) when the frame ends
+s.add_edges(box, {.radius = 0.02f}, ink);               // -> edges_ref
+s.add_vertices(box, {.radius = 0.05f}, accent);         // -> vertices_ref
+s.add_edges(frustum).radius(0.04f).material(accent);    // drawn at the flush, so the ref still restyles it this frame
 ```
 
 **`add` is the only mutator** — the named factories all funnel through it, and `add(quadric_primitive)` takes a record the factories do not cover.
@@ -662,12 +696,19 @@ sv::orbit_state                  // { pos3d target; f64 distance; angle_d azimut
 o.to_camera()                    // -> camera (camera::orbiting plus the fov); orbit_state::from_camera(cam, distance) is the lossy inverse
 sv::orbit_camera_controller      // { orbit_state orbit; camera_controller_config config; }
 c.handle(sr::input_event) -> bool  // apply one event ALREADY routed to this view; true if the camera actually moved
+c.focus_on(pos3d) -> bool        // start a glide to orbit this point at config.focus_approach (0.7) of its depth, view direction kept; false behind the eye
+c.update(dt) -> bool             // advance that glide (config.focus_seconds, ease-out); true while moving. A pan cancels it; cancel_focus() too
+c.is_focusing()                  // whether update would still move the camera
 c.camera() / c.is_dragging()     // the resulting camera / whether a drag is in progress
+sv::primary_hit_position(record, pixel, resolution, depth, near) // -> optional<pos3d>: a texel of the trace's primary depth back to world; none = escaped
 sv::camera_controller_config     // { f64 orbit_degrees_per_pixel, pan_units_per_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
 ```
 
 Left drag orbits, middle drag pans the target (scaled by distance, so one drag covers the same screen fraction at every zoom), the wheel scales the distance geometrically.
-It is **event-driven and time-free** — every input carries the motion it caused, so there is no `update(dt)` to schedule and a view that gets no input produces none.
+**A double-click orbits the surface under the cursor**: `sv::viewer` reads one texel of the trace's primary depth back and calls `focus_on`.
+The glide starts a frame or two after the click, and a click on the background moves nothing.
+It is **event-driven** — every input carries the motion it caused, and a view that gets no input produces none.
+The glide is its one motion over time, so a caller running its own pump calls `update(dt)` every frame; `sv::viewer` does that for you.
 `sv::viewer` drives one per view for you; a caller running its own event pump (see `viewer-window-manual-test.cc`) just feeds it `wsys->events()`.
 
 ```cpp
@@ -737,6 +778,7 @@ The drawing manager does: `acquire(set)` hashes the set, and `scene_ref::add_ann
 sv::bindless_table          // enum class : u8 — textures_1d / _1d_array / _2d / _2d_array / cube / cube_array / _3d / buffers (+ count_)
 sv::bindless_bindings()     // -> span<sg::binding const> — `binding bindless` of shaders/sgl/tracer_bindings.sgl, in table order: THE layout
 sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: bindless.textures_2d, bindless.buffers, … — what a footprint resolves by
+sv::texture_array_of(table) / sv::buffer_array()  // -> sg::texture_array_binding / sg::buffer_array_binding — the module's generated handles, which declare_array_*_access takes
 sv::capacity_of(table)      // -> u32 — the module's element count for it; a size is changed in the .sgl, not in a config
 sv::bindless_group          // -> int — 1: the slot the tables bind at in the tracer's pipeline layout
 
@@ -747,6 +789,9 @@ m.pin_buffer(raw_view) -> sg::bindless_element_handle          // the same for t
                                             //   a pin needs no unlock, and is recorded for the access declaration like an acquire
 m.lock() / unlock() / is_locked()           // refuse acquires while a snapshot is bound — the manual pair
 m.freeze() -> sv::bound_resources           // RAII: locks, snapshots, unlocks when it dies. SEVERAL per epoch are fine
+m.try_freeze() -> result<bound_resources>   // the same, failing unlocked where freeze throws (a heap that cannot hold the snapshot); a trace declines on it
+                                            //   a DIRTY snapshot is a whole-table copy in the persistent heap: acquire for every recording first, then freeze
+                                            //   — viewer_renderer runs view_renderer::acquire_trace for each trace before the first, so a frame mints one
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
 bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
 auto const d = bound.declare_raytracing_access(cmd)  // -> sv::declared_tables — EVERY table, empty ones included, for every trace while `d` lives
@@ -871,10 +916,10 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
   Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them, and only on the frames it runs.
 - **`sv::matrices_of(camera_record, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
-  A traced layer rasterizes nothing, so these exist for a denoiser that reprojects in world space.
+  They exist for a denoiser or an upscaler that reprojects in world space, whether the layer was traced or rasterized.
   `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
-  `reconstruct_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
-  The per-frame offset a temporal upscaler reconstructs from is the other kind, and sv has none.
+  `reconstruct_guides::jitter` stays zero at full size: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  The per-frame offset a temporal upscaler reconstructs from is the other kind: a frame traced at the upscaler's extent takes one, and passes it as `.jitter` beside `.previous_jitter`.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.
@@ -883,12 +928,15 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
 
 **Raster layers** (`render_settings::mode = render_mode::raster`, [docs/raster.md](docs/raster.md)) go through the same plan trace, and draw instead.
 - **Every frame is final**: the accumulation slot holds `accumulation_sample_cap` samples the frame it lands, so `is_accumulation_converged` and a capture finish at once.
-  A frame drawn through a stand-in material is not final, and restarts next frame.
+  A frame drawn through a stand-in for a material still compiling is not final, and restarts next frame.
+  One for a material that failed for good is final: the routine reports what it bound as a `stand_in_report`, whose hash the image's folds in.
 - **The G-buffer is written every frame, denoised or not**, into the guide slots of the same meaning.
   Those are `normal_guide`, `depth_guide`, `albedo_guide`, `specular_albedo_guide`, `roughness_guide` and `motion_guide`.
   `reconstruct` is ignored, and nothing denoises.
-- **Quadric batches are skipped**, with one warning per layer; triangle meshes, cutouts, decals and drawings work.
-- **No ray tracing needed**: a raster layer builds no acceleration structure and never waits on the tracer, so it draws on any device.
+- **A landed quadric batch is skipped**, with one warning per layer; triangle meshes, cutouts, decals and drawings work.
+  One still streaming draws as its placeholder box, as a pending mesh does.
+- **No ray tracing needed**: a raster layer builds no acceleration structure and never waits on the tracer.
+  It does need `binding_arrays`, which `tracer.bindless` requires, so it draws on dx12, vulkan and metal and not on webgpu.
   A traced layer on a device without `raytracing_pipeline` is declined, with one logged error; `viewer::try_create` no longer refuses such a device.
 
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.

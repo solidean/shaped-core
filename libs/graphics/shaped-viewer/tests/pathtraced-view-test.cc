@@ -190,7 +190,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
 
     // Records one trace into `cmd` and reports what it decided; the caller owns the frame around it, so the same body
     // serves a one-shot check and a driven one.
-    auto stand_ins = false;
+    auto stand_ins = sv::stand_in_report{};
     auto const trace = [&](sg::command_list& cmd, sv::material_permutation const* fallback)
     {
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
@@ -221,7 +221,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
                                                     .hit_groups = hit_groups,
                                                     .fallback = fallback,
                                                     .bindless = &bindless,
-                                                    .traced_with_stand_ins = &stand_ins});
+                                                    .stand_ins = &stand_ins});
     };
 
     // The permutation genuinely does not build, so it cannot be traced with.
@@ -248,15 +248,17 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     CHECK(sv_test::frames_until_executed(
         ctx, [&](sg::command_list& cmd) { return trace(cmd, &resources.shaders.acquire_fallback()); }));
 
-    // And it says so: a frame shaded by the stand-in is an image of other materials, which a mean must not average in.
-    CHECK(stand_ins);
+    // And it says so: a frame shaded by the stand-in is an image of other materials, which a mean must tell apart.
+    // The compile failed for good, so the substitution is settled and a mean of it may converge.
+    CHECK(stand_ins.hash != 0);
+    CHECK(!stand_ins.pending);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // The same trace, shaded through a texture rather than through per-face colours.
 //
-// A permutation samples only when its material does, through module tracer's palette in the trace's own group.
+// A permutation samples only when its material does, through module tracer's palette in the bindless group.
 // Every other path-traced scene in this suite is untextured, so without this a hit group reaching the palette and the
 // bindless texture table is never traced at all.
 //
@@ -292,7 +294,7 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material samples through the p
     REQUIRE(permutation != nullptr);
 
     // The guard this test rests on: a textured material is what puts a sample in the permutation.
-    REQUIRE(permutation->source.contains("tracer.traced.palette_"));
+    REQUIRE(permutation->source.contains("tracer.bindless.palette_"));
 
     auto instances = cc::vector<sg::tlas_instance>();
     instances.push_back(
@@ -726,8 +728,8 @@ ASYNC_INVOCABLE_TEST("sv - every kind of light traces to the sum of each alone",
 {
     // The same inline-readback path volumetric-furnace-test documents as fastfailing on Windows on ARM.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -794,8 +796,8 @@ ASYNC_INVOCABLE_TEST("sv - every kind of light delivers the illuminance its unit
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -858,8 +860,8 @@ ASYNC_INVOCABLE_TEST("sv - a sun delivers its illuminance with its bounce-ray st
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -915,8 +917,8 @@ ASYNC_INVOCABLE_TEST("sv - a surface's emission and an area light's nits are the
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -991,8 +993,8 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -1061,8 +1063,8 @@ ASYNC_INVOCABLE_TEST("sv - a surface whose authored normal leans off its face is
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -1131,8 +1133,8 @@ ASYNC_INVOCABLE_TEST("sv - a surface lit along its authored normal stays lit fro
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -1192,8 +1194,8 @@ ASYNC_INVOCABLE_TEST("sv - an opaque surface reflects the same from its back fac
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -1241,8 +1243,8 @@ ASYNC_INVOCABLE_TEST("sv - an opaque surface reflects the same from its back fac
 ASYNC_INVOCABLE_TEST("sv - a light visible to the camera is seen at its radiance", (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;

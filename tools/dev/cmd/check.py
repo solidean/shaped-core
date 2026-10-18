@@ -15,6 +15,7 @@ from tools import dev
 from tools.dev import console
 
 from . import args as a
+from . import issues
 from .context import Context
 
 NAME = "check"
@@ -42,20 +43,23 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def _branch_base(ctx: Context) -> str | None:
-    """The merge base with the default branch, or None when there is no sensible one.
+    """The merge base with the integration branch (`Policy.default_branch`), or None when there is none.
 
-    None falls the default back to the working tree, which is what a detached checkout, a shallow clone or a tree
-    already ON the default branch should get — on `main` itself "changed since main" is empty, and a gate that
-    inspects nothing is worse than one that inspects the dirty files.
+    On the local integration branch only its `origin/` counterpart is a base: the unpushed commits plus the working tree, what a push sends.
+    Comparing the local branch with itself would inspect nothing, so it is never a candidate there.
     """
     import subprocess
 
-    for base in ("origin/main", "main"):
+    branch = ctx.policy.default_branch
+    try:
+        head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ctx.root),
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    on_branch = head.returncode == 0 and head.stdout.strip() == branch
+
+    for base in (f"origin/{branch}",) if on_branch else (f"origin/{branch}", branch):
         try:
-            head = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ctx.root),
-                                  capture_output=True, text=True, timeout=30)
-            if head.returncode == 0 and head.stdout.strip() in ("main", "HEAD"):
-                return None
             out = subprocess.run(["git", "merge-base", base, "HEAD"], cwd=str(ctx.root),
                                  capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
@@ -76,6 +80,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                 check=not fix,
                 scope=scope,
                 allow_different_version=False,
+                layout=ctx.policy.layout,
                 mirror=mirror,
                 verbose=verbose,
             )
@@ -97,7 +102,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
 
     def check_crossrefs(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # A moved file breaks links in other, untouched files, so this is always repo-wide: fix and scope are both ignored.
-        return dev.report.summarize_crossrefs(dev.check_crossrefs(ctx.root), ctx.root)
+        return dev.report.summarize_crossrefs(dev.check_crossrefs(ctx.root, layout=ctx.policy.layout), ctx.root)
 
     def check_deps_licenses(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # A dependency's license is a property of the manifest set, not of the next commit's files, so this is repo-wide too.
@@ -118,6 +123,19 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         )
         return result.ok
 
+    def check_issues(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # Not fixable and not scopable: a file deleted anywhere can break a ref in an untouched issue.
+        return issues.gate(ctx, mirror=mirror, verbose=verbose)
+
+    def check_issues_selftest(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
+        # The tracker's own suite: claims against a real bare remote, check, known and close, in throwaway repositories.
+        result = dev.run_step(
+            ["uv", "run", str(ctx.root / "tools" / "issues" / "issues-self-test.py")],
+            step_type="issues", name="issues-self-test",
+            build_dir=ctx.root / "build", cwd=ctx.root, mirror=mirror, verbose=verbose,
+        )
+        return result.ok
+
     def check_dev_selftest(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # dev.py's own machinery, which nothing else exercises: the job profile's layout, the change-scope resolver, and
         # the live progress region.
@@ -132,8 +150,11 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         runners = (
             (Path("tools") / "dev" / "profile-self-test.py", []),
             (Path("tools") / "dev" / "changes-self-test.py", []),
+            (Path("tools") / "dev" / "roots-self-test.py", []),
+            (Path("tools") / "dev" / "jsruntime-self-test.py", []),
             (Path("tools") / "dev" / "ui-self-test.py", []),
             (Path("tools") / "dev" / "symbolize-self-test.py", []),
+            (Path("tools") / "dev" / "submodules-self-test.py", []),
             (Path("extern") / "manifest-self-test.py", []),
             (Path("libs") / "base" / "clean-simd" / "tools" / "check-link-map.py", ["--self-test"]),
         )
@@ -320,7 +341,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         def run(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
             from tools.dev.lib.quality.format import find_clang_format
 
-            clang_format = find_clang_format(root=ctx.root)
+            clang_format = find_clang_format()
             if clang_format is None:
                 dev.ui.write_line(f"{name}: skipped -- clang-format not found")
                 return True
@@ -401,6 +422,10 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.Check("dev-selftest", "dev.py's own self-tests (job profile, change scope, progress region, dependency manifests, "
                                   "clean-simd's link-map check)",
                   False, check_dev_selftest),
+        dev.Check("issues", "every issue file and every issue marker in the code is valid (docs/guides/issue-tracking.md)",
+                  False, check_issues),
+        dev.Check("issues-selftest", "run the issue tracker's own suite (claims against a real remote, check, known, close)",
+                  False, check_issues_selftest),
         dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
                   False, check_review),
         dev.Check("shader-grammar",
@@ -436,13 +461,17 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     else:
         selected = list(checks)
 
-    # --all is the whole tree, --commit is that diff, and the default is the working tree.
-    # Default: everything this branch changed against the default branch, working tree included.
-    #
-    # A gate scoped to the working tree alone empties as you commit, so a run right before pushing — which is when it
-    # matters most — would inspect nothing and report green.
-    # `--dirty-only` is still there for the tight edit loop, and `--all` for the whole tree.
-    scope = a.scope_from_args(args, default_since=_branch_base(ctx))
+    # Default: everything changed against the default branch's merge base, working tree included.
+    # There is no working-tree fallback: a gate scoped to dirty files empties as you commit, so the run right before
+    # pushing would inspect nothing and report green.
+    # Without a base the default has no meaning, and an explicit scope flag is required instead.
+    explicit = args.since is not None or args.commit is not None or args.all or args.dirty_only
+    base = None if explicit else _branch_base(ctx)
+    if not explicit and base is None:
+        ctx.die(f"check found no merge base with origin/{ctx.policy.default_branch} (or {ctx.policy.default_branch}, "
+                "off it) to scope its gates to; "
+                "fetch origin, or pass --since <rev>, --commit <rev>, --dirty-only or --all")
+    scope = a.scope_from_args(args, default_since=base)
     if scope is not None and scope.revision is not None:
         # Fail on a bad revision here, rather than once a gate is already running.
         try:

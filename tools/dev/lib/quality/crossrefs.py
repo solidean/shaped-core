@@ -12,11 +12,14 @@ It scans tracked, and untracked-but-not-ignored, markdown and source files under
     Two forms count — a bare path token ending in `.md`, and a markdown link `[text](target)` whatever the target's extension.
     A markdown link in a comment is only read as one when its target looks like a path, so a C++ comment writing `a[i](b)` is not mistaken for a reference.
 
+The layout's extra roots that ask for `crossrefs` are scanned too, a submodule through its own git.
+A file there resolves root-relative references against its extra root, whose top-level directories are its root segments.
+
 These rot easily: rename or move a file and links in *other*, untouched files silently break.
 The scan is therefore full-repo, so the breakage is caught wherever it lands.
 `/* ... */` block comments are not scanned, since they are discouraged here.
 
-`check_crossrefs(root)` returns a CrossRefResult, and the printing is report.py's.
+`check_crossrefs(root, layout=...)` returns a CrossRefResult, and the printing is report.py's.
 """
 
 from __future__ import annotations
@@ -30,20 +33,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core import profile
+from ..core.layout import Layout
+from . import roots as extra_roots
 
-# Top-level repo dirs a repo-root-relative link or comment token may start with.
-# A token starting with one of these is resolved repo-root-relative.
+# Which top-level dirs are scanned, and which first segments mark a reference as repo-root-relative, are the project's Layout.
+# A token starting with a root segment is resolved repo-root-relative first.
 # Anything else is treated as relative to the referencing file, then to the repo root as a fallback — which is how a bare root file (CLAUDE.md, dev.py) resolves.
-REPO_ROOT_SEGMENTS = (
-    "docs/",
-    "libs/",
-    "tools/",
-    ".claude/",
-)
-
-# Dirs scanned as link *sources*, so their markdown and sources are walked.
-# A link *target* anywhere in the repo is still validated regardless of this list.
-_SCAN_DIRS = ("libs", "docs", "tools", ".claude")
+# Only the scan dirs are walked as link *sources*; a link *target* anywhere in the repo is still validated.
 
 # Source kinds whose comments carry references.
 # Everything here has a line comment marker we can find without a lexer; `.py` additionally has docstrings, which tokenize gives us.
@@ -94,18 +90,44 @@ class CrossRefResult:
         return not self.offenders
 
 
-def list_files(root: Path) -> list[Path]:
+@dataclass(frozen=True)
+class LinkBase:
+    """What a file's root-relative references resolve against: the project, or the extra root the file sits in."""
+
+    root: Path
+    # First path segments that mark a reference as possibly root-relative, each with its trailing slash.
+    segments: tuple[str, ...]
+
+
+def _extra_root_files(root: Path, layout: Layout) -> list[tuple[Path, LinkBase]]:
+    """The link sources each extra root contributes, each with the base its references resolve against.
+
+    An extra root's top-level directories are its root segments, so a submodule readme's link into `docs/` reaches the submodule's own docs.
+    """
+    out: list[tuple[Path, LinkBase]] = []
+    for extra in layout.extra_roots_with("crossrefs"):
+        rels = extra_roots.list_files(root, extra)
+        base_dir = root / extra.path
+        segments = tuple(sorted({f"{rel.split('/', 1)[0]}/" for rel in rels if "/" in rel}))
+        base = LinkBase(base_dir, segments)
+        for rel in rels:
+            if rel.endswith(".md") or rel.endswith(_SOURCE_SUFFIXES) or rel.rsplit("/", 1)[-1] == _CMAKE_NAME:
+                out.append((base_dir / rel, base))
+    return out
+
+
+def list_files(root: Path, layout: Layout) -> list[Path]:
     # Tracked plus untracked-but-not-ignored, so a freshly added doc is seen before it is committed.
     # Scoped to the dirs we own cross-references for, plus the repo-root meta files (CLAUDE.md, README.md, dev.py, CMakeLists.txt).
     # The file pathspecs match at any depth, so anything outside a scan dir is dropped again below and only its root-level matches survive.
     result = subprocess.run(
         ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard",
-         "--", *_SCAN_DIRS, "*.md", "*.py", "*.cmake", _CMAKE_NAME],
+         "--", *layout.crossref_scan_dirs, "*.md", "*.py", "*.cmake", _CMAKE_NAME],
         check=True,
         capture_output=True,
         text=True,
     )
-    scan_prefixes = tuple(f"{d}/" for d in _SCAN_DIRS)
+    scan_prefixes = tuple(f"{d}/" for d in layout.crossref_scan_dirs)
     files: list[Path] = []
     seen: set[str] = set()
     for line in result.stdout.splitlines():
@@ -196,7 +218,7 @@ def is_external(target: str) -> bool:
     return "://" in target or target.startswith(("mailto:", "tel:"))
 
 
-def check_md_links(md_path: Path, root: Path, offenders: list[str]) -> int:
+def check_md_links(md_path: Path, root: Path, base: LinkBase, offenders: list[str]) -> int:
     checked = 0
     rel_md = md_path.relative_to(root).as_posix()
     in_fence = False
@@ -238,8 +260,8 @@ def check_md_links(md_path: Path, root: Path, offenders: list[str]) -> int:
             # A trailing slash means a directory is expected.
             wants_dir = path_part.endswith("/")
             candidates: list[Path] = []
-            if path_part.startswith(REPO_ROOT_SEGMENTS):
-                candidates.append(Path(os.path.normpath(root / path_part)))
+            if path_part.startswith(base.segments):
+                candidates.append(Path(os.path.normpath(base.root / path_part)))
             candidates.append(Path(os.path.normpath(md_path.parent / path_part)))
             resolved = next(
                 (c for c in candidates if (c.is_dir() if wants_dir else c.is_file())), None
@@ -255,14 +277,14 @@ def check_md_links(md_path: Path, root: Path, offenders: list[str]) -> int:
     return checked
 
 
-def resolve_doc_token(token: str, src_path: Path, root: Path, *, wants_dir: bool = False) -> Path | None:
+def resolve_doc_token(token: str, src_path: Path, base: LinkBase, *, wants_dir: bool = False) -> Path | None:
     # Returns the resolved existing path, or None if it does not resolve.
     # A docs/... token may be repo-root-relative or, in a per-library source file, relative to that file's own docs/ subdir.
     # So try repo-root for a segment token, then next to the referencing file, then the repo root.
-    bases = [root] if token.startswith(REPO_ROOT_SEGMENTS) else []
-    bases += [src_path.parent, root]
-    for base in bases:
-        candidate = Path(os.path.normpath(base / token))
+    dirs = [base.root] if token.startswith(base.segments) else []
+    dirs += [src_path.parent, base.root]
+    for d in dirs:
+        candidate = Path(os.path.normpath(d / token))
         if candidate.is_dir() if wants_dir else candidate.is_file():
             return candidate
     return None
@@ -342,7 +364,7 @@ def looks_like_path(target: str) -> bool:
     return "/" in target or target.endswith(_LINKABLE_SUFFIXES)
 
 
-def check_source_refs(src_path: Path, root: Path, offenders: list[str]) -> int:
+def check_source_refs(src_path: Path, root: Path, base: LinkBase, offenders: list[str]) -> int:
     checked = 0
     rel_src = src_path.relative_to(root).as_posix()
     for lineno, comment in source_comments(src_path):
@@ -372,7 +394,7 @@ def check_source_refs(src_path: Path, root: Path, offenders: list[str]) -> int:
             consumed.append((m.start(), m.end()))
             checked += 1
             wants_dir = path_part.endswith("/")
-            resolved = resolve_doc_token(path_part, src_path, root, wants_dir=wants_dir)
+            resolved = resolve_doc_token(path_part, src_path, base, wants_dir=wants_dir)
             if resolved is None:
                 detail = " (directory not found)" if wants_dir else ""
                 offenders.append(f"{loc}: broken link{detail}: {raw}")
@@ -387,12 +409,12 @@ def check_source_refs(src_path: Path, root: Path, offenders: list[str]) -> int:
                 continue
             token = m.group(0)
             checked += 1
-            if resolve_doc_token(token, src_path, root) is None:
+            if resolve_doc_token(token, src_path, base) is None:
                 offenders.append(f"{loc}: broken doc ref: {token}")
     return checked
 
 
-def check_crossrefs(root: Path) -> CrossRefResult:
+def check_crossrefs(root: Path, *, layout: Layout) -> CrossRefResult:
     """Scan the repo's docs and sources and validate every cross-reference.
 
     Markdown links, their line and heading anchors, and the references inside C++, Python and CMake comments are all resolved against the on-disk tree.
@@ -401,25 +423,28 @@ def check_crossrefs(root: Path) -> CrossRefResult:
     """
     _lines_cache.clear()
 
-    md_files: list[Path] = []
-    src_files: list[Path] = []
+    project = LinkBase(root, layout.crossref_root_segments)
+    md_files: dict[Path, LinkBase] = {}
+    src_files: dict[Path, LinkBase] = {}
     with profile.span("git ls-files", type="git"):
-        listed = list_files(root)
-    for path in listed:
+        listed = [(path, project) for path in list_files(root, layout)]
+    # Extra roots last, so a file both lists resolves against the extra root it was opted in from.
+    listed += _extra_root_files(root, layout)
+    for path, base in listed:
         if path.suffix == ".md":
-            md_files.append(path)
+            md_files[path] = base
         elif is_source(path):
-            src_files.append(path)
+            src_files[path] = base
 
     offenders: list[str] = []
     md_refs = 0
     src_refs = 0
     with profile.span("markdown links", type="crossrefs"):
         for md in sorted(md_files):
-            md_refs += check_md_links(md, root, offenders)
+            md_refs += check_md_links(md, root, md_files[md], offenders)
     with profile.span("source references", type="crossrefs"):
         for src in sorted(src_files):
-            src_refs += check_source_refs(src, root, offenders)
+            src_refs += check_source_refs(src, root, src_files[src], offenders)
 
     return CrossRefResult(
         offenders=offenders,

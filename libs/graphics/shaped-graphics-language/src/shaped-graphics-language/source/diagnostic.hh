@@ -217,6 +217,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     nesting_too_deep,
     /// A compile's value for a name no option has, of another type than the option's, or for a name given twice.
     invalid_option,
+    /// An unrolled `for` that would write more copies of its body than the compiler writes, which stays a loop; a warning.
+    unroll_too_long,
 };
 
 namespace sgl

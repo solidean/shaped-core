@@ -1,7 +1,7 @@
 ---
 name: reworking-prose
 description: Rework the comments and documentation around a topic wholesale — decide what each level should say, then land every rewrite in one `prose apply` pass; use it when files violate the prose guidelines, when a guideline changes and the existing prose must follow, or when a surface is under-documented and needs more.
-when_to_use: "these files violate our doc policy", "fix the comments in", "rework the docs around", "no-flow-prose is firing all over", "the guideline changed, update the prose", "document this properly"
+when_to_use: '"these files violate our doc policy", "fix the comments in", "rework the docs around", "no-flow-prose is firing all over", "the guideline changed, update the prose", "document this properly"'
 allowed-tools: Read Edit Write Bash Glob Grep mcp__repo_tools__repo_search mcp__repo_tools__repo_structure mcp__repo_tools__file_structure
 ---
 

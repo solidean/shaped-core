@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.12"
 # dependencies = ["pyyaml>=6"]
 # ///
 """Vendor ufbx in-tree at a pinned commit.
@@ -44,7 +44,7 @@ COPY_MAP = {
 }
 
 # Everything we own under DEST that a re-vendor must wipe first.
-# The script, CMakeLists.txt, dependency.yml and .gitignore stay.
+# The script, CMakeLists.txt and dependency.yml stay.
 WIPE = ["include", "src", "LICENSE"]
 
 

@@ -1,13 +1,15 @@
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/container/set.hh>
-#include <clean-core/string/format.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/barrier/access_inference.hh>
 #include <shaped-graphics/barrier/footprint.hh>
 #include <shaped-graphics/binding/binding.hh>
 #include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/binding/pipeline_layout.hh>
+
+using namespace cc::primitive_defines;
 
 sg::slot_footprint const* sg::shader_footprint::find(cc::string_view name) const
 {
@@ -218,12 +220,27 @@ sg::impl::array_plan sg::impl::plan_array_declarations(void const* pipeline,
     return as_declared({});
 }
 
+namespace
+{
+/// What a mismatch is logged once for, built without formatting anything, since `apply` asks at every op.
+/// A pipeline freed and another built at its address inherits its silence, which costs one log line, and so does a binding-name hash collision.
+struct mismatch_key
+{
+    void const* pipeline = nullptr;
+    u64 binding = 0;
+    void const* message = nullptr;
+
+    [[nodiscard]] bool operator==(mismatch_key const&) const = default;
+
+    [[nodiscard]] friend u64 hash(mismatch_key const& k) { return cc::make_hash(k.pipeline, k.binding, k.message); }
+};
+} // namespace
+
 void sg::impl::log_footprint_mismatch_once(void const* pipeline, cc::string_view binding, cc::string_view message)
 {
-    // Keyed by address: a pipeline freed and another built at its address inherits its silence, which costs one log line.
     // The message is part of the key, so one kind of mismatch never silences another on the same binding.
-    static auto logged = cc::mutex<cc::set<cc::string>>();
-    auto const key = cc::format("{}:{}:{}", reinterpret_cast<u64>(pipeline), binding, message);
-    if (logged.lock([&](cc::set<cc::string>& s) { return s.insert(key); }))
+    static auto logged = cc::mutex<cc::set<mismatch_key>>();
+    auto const key = mismatch_key{.pipeline = pipeline, .binding = cc::make_hash(binding), .message = message.data()};
+    if (logged.lock([&](cc::set<mismatch_key>& s) { return s.insert(key); }))
         CC_LOG_ERROR("'{}': {}", binding, message);
 }

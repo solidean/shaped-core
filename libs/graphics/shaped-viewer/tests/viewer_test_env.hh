@@ -119,8 +119,7 @@ inline void drive_ambient_work()
 /// the machine's rather than the code's.
 ///
 /// The real answer is an `ASYNC_TEST` that simply `co_await`s readiness.
-/// The tests are async now; readiness itself is not yet an async, which libs/graphics/shaped-graphics/docs/TODO.md
-/// records under "Readiness as an async".
+/// The tests are async now; readiness itself is not yet an async — issue: feat-sg-routine-readiness-async.
 /// Every sv test that needs a routine up goes through here until then, so the places to revisit are exactly this
 /// function's callers.
 template <class F>
@@ -150,7 +149,7 @@ template <class F>
 ///
 /// Each iteration ticks, records, submits, advances and drains — a real frame — so whatever the previous one started
 /// has somewhere to land.
-/// Replaced by one await once readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+/// Replaced by one await once readiness is an async; issue: feat-sg-routine-readiness-async.
 template <class F>
 [[nodiscard]] bool frames_until_executed(sg::context& ctx, F&& body, double timeout_secs = 60.0)
 {

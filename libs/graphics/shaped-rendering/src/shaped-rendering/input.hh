@@ -12,6 +12,7 @@
 ///
 /// Names describe the US-QWERTY legend, which is only a naming convention — the value is the position.
 /// Our own vocabulary of positions, not a platform scancode number: the underlying values mean nothing outside sr.
+/// It deliberately stops at F12 and skips the media, `AC_*` and `INTERNATIONAL*` keys; they read as `scancode::unknown`.
 enum class sr::scancode : sr::u16
 {
     unknown = 0,
@@ -162,6 +163,12 @@ enum class sr::key_modifiers : sr::u8
 namespace sr
 {
 
+/// The bit `mouse_move_event::held_buttons` sets for `b`.
+[[nodiscard]] constexpr u8 mouse_button_bit(mouse_button b)
+{
+    return u8(1u << u8(b));
+}
+
 [[nodiscard]] constexpr key_modifiers operator|(key_modifiers a, key_modifiers b)
 {
     return key_modifiers(u8(a) | u8(b));
@@ -227,6 +234,12 @@ struct sr::mouse_move_event
     /// Motion since the previous event, in pixels.
     /// This is the value to drive a camera with: it stays correct when the cursor is captured or hits the screen edge.
     tg::vec2f delta;
+
+    /// The buttons held during this motion, one `mouse_button_bit` each.
+    /// A drag should end on it as well as on the button's release: a release outside an uncaptured window never arrives.
+    u8 held_buttons = 0;
+
+    [[nodiscard]] bool is_held(mouse_button b) const { return (held_buttons & mouse_button_bit(b)) != 0; }
 };
 
 struct sr::mouse_button_event
@@ -240,6 +253,11 @@ struct sr::mouse_button_event
     key_modifiers modifiers = key_modifiers::none;
 
     bool is_down = false;
+
+    /// How many presses in quick succession this one completes: 1 for a single click, 2 for a double-click, and so on.
+    /// The platform decides what counts as quick and close enough, so a double-click honors the user's system setting.
+    /// A release carries the count of the press it ends.
+    int clicks = 1;
 
     /// Cursor position when the button changed, in pixels relative to the window's client area.
     tg::pos2f cursor_pos;

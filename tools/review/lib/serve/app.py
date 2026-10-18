@@ -36,7 +36,7 @@ from ..entry import parse as entry_parse
 from ..entry.parse import Entry
 from ..git.run import Git
 from ..goals.skeleton import describe, groups_for
-from ..render.entryview import change_cards, render_entry
+from ..render.entryview import change_cards, render_entry, since_html
 from ..render.highlight import css as highlight_css, digest as text_digest, highlight_code, highlight_diff
 from ..render.media import BINARY, IMAGE, classify, human_bytes
 from . import timing
@@ -310,14 +310,16 @@ class ReviewApp:
 
         Served rather than embedded because a review's diffs dwarf everything else in an entry, and most of
         them are never opened — see `_change_card`.
-        Keyed on the diff file itself, since only `ingest` ever rewrites one.
+        Keyed on the diff files it is drawn from, its own and those of the hunks it replaced.
         """
         change = self.ledger().resolve(change_id)
         if change is None:
             return 404, {"error": f"{change_id!r} is not in the ledger"}
 
         path = self.paths.change_diff(change.id)
-        slot, key = f"diff:{change_id}", (stat_key(path), change.has_body, change.path)
+        replaced = tuple(stat_key(self.paths.change_diff(i)) for i in change.supersedes)
+        slot = f"diff:{change_id}"
+        key = (stat_key(path), change.has_body, change.path, replaced)
         with self._rendered_guard:
             hit = self._rendered.get(slot)
         if hit is not None and hit[0] == key:
@@ -327,7 +329,8 @@ class ReviewApp:
         if not change.has_body or not path.is_file():
             return 200, self._remember(slot, key, {"id": change_id, "html": ""})
         with timing.span("/api/change", "highlight"):
-            html = highlight_diff(path.read_text(encoding="utf-8", errors="replace"), path=change.path)
+            html = since_html(change, self.paths) + highlight_diff(
+                path.read_text(encoding="utf-8", errors="replace"), path=change.path)
         return 200, self._remember(slot, key, {"id": change_id, "html": html})
 
     def change_list(self, ids: list[str]) -> tuple[int, dict]:

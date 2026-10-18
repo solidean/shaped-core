@@ -27,7 +27,9 @@ r.value().bound_names                      // { emitted, host } per resource: `w
 r.value().color_targets  .target_struct    // a pixel entry point's target count and `@pixel struct`; -1 and empty otherwise
 r.value().footprint                        // check::slot_footprint per TOUCHED slot: host_name, view (constants/read_only/storage), reads, writes
                                            // a member never named is absent — sg skips its barrier; see spec/bindings.md "Footprint"
-r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`
+r.value().warnings                         // cc::vector<cc::string>, one per warning: `cube.sgl:7:14: warning: unroll-too-long: ...`
+                                           // notes on the lines under it, no final line end; the whole source's, so every entry point's alike
+r.error()                                  // one line per diagnostic: `cube.sgl:12:5: error: unknown-name: foo`; errors alone, never a warning
 sgl::compile_all_to_text({.source = text, .source_name = "cube.sgl", .targets = sgl::emit::all_targets()});
                                            // -> cc::result<cc::vector<entry_text>, cc::string>: every entry point on every target
                                            // from ONE check; compile_to_text per entry point and target checks that many times
@@ -398,7 +400,7 @@ sgl::test::diagnostic_of(m, r)             // `test-failed` at the test, one rel
 ## The `sgl` tool (`tools/sgl/`, a nexus binary of COMMANDs; built under `SC_BUILD_TOOLS`)
 
 ```bash
-uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text, or the diagnostics and exit 2
+uv run dev.py run sgl -- emit shader.sgl --entry main_ps --target wgsl   # the text and its warnings on stderr, or the diagnostics and exit 2
 uv run dev.py run sgl -- emit shader.sgl --entry main_cs --option tile=16 # an option set for this compile; `describe` takes it too
 uv run dev.py run sgl -- test a.sgl b.sgl                                # the tests of each file; exit 2 when one fails
 #   emit, test and describe take --module-dir DIR, repeatable: the .sgl files directly in it are modules to `use`
@@ -468,8 +470,11 @@ img[xy] = v as texel[out_format]         // a store into a host-picked format: .
                                          // the ONLY width change: `float4 as float2` is no conversion, and no kind changes (CHK-391, CHK-392)
 if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
 fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
-@unroll                                  // on a `for`: the body once per index, the index a literal in each copy, and no
-for i in 0 ..< taps: ...                 // loop or hint in any text; the bounds are int constants, at most 256 (CHK-389)
+@unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
+for i in 0 ..< taps: ...                 // nothing of it runs as a loop, no text holds a hint, and the bounds are int constants
+                                         // past 256 copies, a nest's counted together, it stays a loop: WARNING unroll-too-long
+                                         // ...and so does an inner one whose bound reads its index, under the same warning
+                                         // a rule judging a constant judges each index: `1u << (i as uint)` past 31 is refused
 
 fun bump(c: mut counter, by: float):     // a mut parameter: the caller's place (CHK-315)
     c.total += by
@@ -601,7 +606,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   `0xff`, `0b1010` are integer literals like decimal ones (CHK-269); `&`, `|`, `^`, `~`, `<<`, `>>` take int, uint and their vectors, a shift's count keeps its low five bits.
   `1 / 3` is `literal-needs-type` (CHK-313): `/` and `%` over integer literals alone say nothing of int or float; an integer literal is held in 64 bits and refused only in a type that cannot hold it.
 - **The maths builtins** are records of `register_math.cc`: trig, `exp`/`log`, `pow`, `sqrt`/`inverse_sqrt`, rounding, `sign`, `step`/`smoothstep`, `is_nan`/`is_inf`.
-  `is_nan` and `is_inf` are a bit test on WGSL and MSL, which may assume neither arises.
+  `is_nan` and `is_inf` are a bit test on every target, since Vulkan, WGSL and MSL may each assume neither arises.
+  They take a half too, tested as the float it widens to.
   Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
@@ -697,7 +703,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
   A 16-bit value packs at 2 bytes, crosses no stage edge and sits in no `@inline` binding (CHK-387), and a buffer's element is whole 4-byte words: `buffer[half2]`, never `buffer[half]`.
   **No layout is guaranteed without an annotation** (EMIT-116): the compiler may reorder members, so the host goes through the generated struct, never through offsets it assumed.
-- **`compile_to_text` drops warnings.** It gives the text or the errors; a caller that wants warnings runs the phases itself.
+- **A warning never fails `compile_to_text`, and only a text carries one.** A failed compile's error holds its errors alone.
+  slib's SGL edge logs each warning under `slib`, and `sgl emit` prints them to stderr beside the text.
 - **`prelude/builtins.sgl` is GENERATED and committed; never edit it.** A hand edit fails `dev.py check` (`sgl-prelude`) and a library test.
   `prelude/core.sgl` is the hand-written half, embedded at CONFIGURE time: editing it re-runs CMake, and a test pins the embedded text to the file.
 - **`*.sgl` is `eol=lf` in `.gitattributes`.** The generated text is compared byte for byte, and a diagnostic is a byte offset.

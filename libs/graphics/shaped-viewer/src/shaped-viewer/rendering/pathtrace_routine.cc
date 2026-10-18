@@ -85,9 +85,9 @@ cc::shared_async<cc::unit> pathtrace_routine::init(sg::routine_init_scope scope)
 
 pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::context& ctx,
                                                                            pt_trace_desc const& d,
-                                                                           bool& substituted)
+                                                                           stand_in_report& stand_ins)
 {
-    substituted = false;
+    stand_ins = {};
     // Started whether or not a substitution ends up needing them, and before any early out.
     auto const* const fallback
         = d.fallback != nullptr && state_of(ctx, d.fallback) == group_state::ready ? d.fallback : nullptr;
@@ -99,18 +99,23 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     // The frame a permutation's group lands, the key changes and a new variant is built with it.
     auto groups = cc::vector<material_permutation const*>();
     groups.reserve(d.hit_groups.size());
+    auto substituted = false;
+    auto pending = false;
     for (auto const* p : d.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
-        if (state_of(ctx, p) != group_state::ready)
+        auto const state = state_of(ctx, p);
+        if (state != group_state::ready)
         {
             p = p->kind == geometry_kind::quadrics ? quadric_fallback : fallback;
             substituted = true;
+            pending = pending || state == group_state::pending;
         }
         if (p == nullptr)
             return nullptr;
         groups.push_back(p);
     }
+    stand_ins = stand_in_report::of(groups, substituted, pending);
 
     auto key_parts = cc::vector<cc::hash128>();
     key_parts.reserve(groups.size());
@@ -250,6 +255,17 @@ shaders::tracer::emitter_record emitter_record_of(u32 instance,
             .scale_transform = scale.transform,
             .pad0 = 0,
             .pad1 = 0};
+}
+
+stand_in_report stand_in_report::of(cc::span<material_permutation const* const> bound, bool substituted, bool pending)
+{
+    if (!substituted)
+        return {};
+    // Never 0, which says nothing was stood in for.
+    auto h = u64(1);
+    for (auto const* const p : bound)
+        h = cc::combine_hash(h, cc::make_hash(p->key.low, p->key.high));
+    return {.hash = h != 0 ? h : 1, .pending = pending};
 }
 
 shaders::tracer::frame_constants default_frame_constants()
@@ -548,12 +564,12 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
               "pathtrace_routine: every target the trace writes beside the accumulator matches its extent");
     CC_ASSERT(!d.hit_groups.empty(), "pathtrace_routine: a trace needs at least one hit group to shade with");
 
-    auto substituted = false;
-    auto const* const variant = self->_variant_for(ctx, d, substituted);
+    auto stand_ins = stand_in_report{};
+    auto const* const variant = self->_variant_for(ctx, d, stand_ins);
     if (variant == nullptr)
         return sg::routine_outcome::declined;
-    if (d.traced_with_stand_ins != nullptr)
-        *d.traced_with_stand_ins = substituted;
+    if (d.stand_ins != nullptr)
+        *d.stand_ins = stand_ins;
 
     // A caller's offset counts two records per permutation, so it names the permutation, whose row it becomes.
     auto instances = cc::vector<sg::tlas_instance>::create_copy_of(d.instances);

@@ -1,3 +1,4 @@
+#include <clean-core/common/macros.hh> // CC_ASSERT_ENABLED
 #include <clean-core/container/vector.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -185,11 +186,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: partial fill, declared a
     sg::array_texture_access const tex_access[] = {
         {.index = 1, .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture},
     };
-    {
-        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
-        auto const texs = disp->compute.declare_array_texture_access("Texs", tex_access);
-        disp->compute.dispatch_groups(1);
-    }
+    auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
+    auto const texs = disp->compute.declare_array_texture_access("Texs", tex_access);
+    disp->compute.dispatch_groups(1);
     ctx.submit_command_list(cc::move(disp));
 
     auto down = ctx.create_command_list();
@@ -281,11 +280,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: an undeclared array logs
         disp->compute.bind_group(0, *g0);
         disp->compute.bind_group(1, *g1);
         disp->compute.bind_group(2, *g2);
-        {
-            auto const bufs = disp->compute.declare_array_buffer_access("Bufs", {});
-            auto const texs = disp->compute.declare_array_texture_access("Texs", {});
-            disp->compute.dispatch_groups(1);
-        }
+        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", {});
+        auto const texs = disp->compute.declare_array_texture_access("Texs", {});
+        disp->compute.dispatch_groups(1);
         ctx.submit_command_list(cc::move(disp));
         ctx.advance_epoch();
         co_await ctx.idle_completion();
@@ -348,11 +345,9 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a declaration for an arr
     sg::array_buffer_access const buf_access[] = {
         {.index = 0, .access = sg::access_flag::shader_read},
     };
-    {
-        auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
-        auto const texs = disp->compute.declare_array_texture_access("Texs", {});
-        disp->compute.dispatch_groups(1);
-    }
+    auto const bufs = disp->compute.declare_array_buffer_access("Bufs", buf_access);
+    auto const texs = disp->compute.declare_array_texture_access("Texs", {});
+    disp->compute.dispatch_groups(1);
     ctx.submit_command_list(cc::move(disp));
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -392,10 +387,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - array bindings: a write the declarations
         sg::array_buffer_access const reads[] = {
             {.index = 1, .access = sg::access_flag::storage_read},
         };
-        {
-            auto const rws = disp->compute.declare_array_buffer_access("Rws", reads);
-            disp->compute.dispatch_groups(1);
-        }
+        auto const rws = disp->compute.declare_array_buffer_access("Rws", reads);
+        disp->compute.dispatch_groups(1);
         ctx.submit_command_list(cc::move(disp));
     }
     ctx.advance_epoch();
@@ -850,11 +843,10 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: a draw resolves o
     // Held past the scope on purpose: still in force, it would meet the next scope's group and assert on the vacant element.
     {
         auto outlived = sg::array_access_declaration();
-        {
-            auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
-            pass.bind_pipeline(*p.pipeline);
-            outlived = pass.declare_array_buffer_access("RasterBufs", vacant_access);
-        }
+        cmd->raster.manual.begin_rendering({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
+        cmd->raster.manual.bind_pipeline(*p.pipeline);
+        outlived = cmd->raster.manual.declare_array_buffer_access("RasterBufs", vacant_access);
+        cmd->raster.manual.end_rendering();
         {
             auto pass = cmd->raster.render_to({.color_targets = {rtv.cleared(tg::vec4f(0, 0, 0, 1))}});
             pass.bind_pipeline(*p.pipeline);
@@ -866,8 +858,8 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: a draw resolves o
         }
     }
 
-    // A compute declaration is never met by a draw, however many draws bind its array.
-    // So it reaches its end never met, and asserts there.
+    // A compute declaration is never met by a draw, however many draws bind its array: meeting this one would assert on
+    // its vacant element.
     {
         auto compute = cmd->compute.declare_array_buffer_access("RasterBufs", vacant_access);
         {
@@ -879,7 +871,7 @@ ASYNC_INVOCABLE_TEST("ssc::dxc + dx12 - raster array bindings: a draw resolves o
             auto const texs = pass.declare_array_texture_access("RasterTexs", {});
             pass.draw({.vertex_range = {.offset = 0, .size = 3}});
         }
-        CHECK_ASSERTS(compute.withdraw());
+        compute.withdraw();
     }
     ctx.drop_command_list(cc::move(cmd));
 }

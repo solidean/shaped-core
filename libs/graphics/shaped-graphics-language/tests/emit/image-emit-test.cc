@@ -83,7 +83,8 @@ cc::string picked_text(cc::string_view format, target t)
 }
 } // namespace
 
-TEST("sgl emit - a coherent member is globallycoherent in HLSL and coherent(device) in MSL")
+TEST("sgl emit - a coherent member is globallycoherent in HLSL, and device-coherent memory or a device-coherent "
+     "texture in MSL")
 {
     // EMIT-150
     auto const dx12 = text_of(k_reduce, target::hlsl_dx12);
@@ -98,7 +99,9 @@ TEST("sgl emit - a coherent member is globallycoherent in HLSL and coherent(devi
     CHECK(vulkan.contains("[[vk::binding(1, 0)]] globallycoherent RWStructuredBuffer<uint> set_counter;\n"));
 
     auto const msl = text_of(k_reduce, target::msl);
-    CHECK(msl.contains("    coherent(device) texture2d<float, access::read_write> set_mip [[id(0)]];\n"));
+    // an argument buffer's field takes no `coherent` qualifier, so a texture says it in its template arguments
+    CHECK(msl.contains("    texture2d<float, access::read_write, memory_coherence_device> set_mip [[id(0)]];\n"));
+    CHECK(!msl.contains("coherent(device) texture"));
     CHECK(msl.contains("    device coherent(device) atomic_uint* set_counter [[id(1)]];\n"));
     CHECK(msl.contains("    texture2d<uint, access::read_write> set_depth [[id(2)]];\n"));
     // the barrier that publishes an image's writes is the texture barrier, device-scoped in both

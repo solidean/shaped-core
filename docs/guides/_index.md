@@ -5,6 +5,7 @@ Task-oriented how-tos for working in shaped-core.
 
 - [building-and-testing.md](building-and-testing.md) — drive `dev.py` (build / test / doctor /
   presets) and diagnose failures with the `repo_tools` `build_diag` / `test_diag` tools.
+- [consuming-shaped-core.md](consuming-shaped-core.md) — using shaped-core from another project as a submodule: the CMake side, and reusing `dev.py`.
 - [examples.md](examples.md) — the `examples/` corpus and `dev.py example`: what an example is for next to a test, how `EXAMPLE` and the CMake helpers work, and what binds one.
 - [prose.md](prose.md) — `dev.py lint`'s prose half: when to run it, why dirty-only is line-exact,
   and when a pile of findings is a rework rather than a run of local edits.
@@ -33,6 +34,8 @@ Task-oriented how-tos for working in shaped-core.
   colocated per-library sheets live (start with clean-core and nexus).
 - [postmortem.md](postmortem.md) — the end-of-session friction review behind the `/postmortem`
   skill: where momentum was lost, not a bug report.
+- [issue-tracking.md](issue-tracking.md) — in-repo issue tracking: one markdown file per issue in any `docs/issues/` folder, claimed by a pushed commit, closed into `closed/<yyyy>/<mm>/`.
+  `dev.py issues` is the CLI over it, and every operation also works by hand.
 - [reviewing-prs.md](reviewing-prs.md) — what we look for when reviewing a PR, ranked by what it costs to get wrong, and the tradeoffs that have no absolute answer.
   The living half of the `reviewing-a-pr` skill, written from actual reviews.
 

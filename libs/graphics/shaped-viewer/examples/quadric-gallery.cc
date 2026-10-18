@@ -37,7 +37,7 @@ using namespace cc::primitive_defines;
 // One call picks it; the viewer routes the events and runs the per-frame integration a held key needs.
 //
 // The sparkle near the shapes' bases is slow to settle, and it is not a defect.
-// It is light the glossy floor reflects off the glossy shapes, which the tracer samples exactly but rarely — libs/graphics/shaped-viewer/docs/TODO.md.
+// It is light the glossy floor reflects off the glossy shapes, which the tracer samples exactly but rarely; issue: feat-sv-glossy-clamp-option
 //
 // Controls
 //   right-drag   look           W/A/S/D   move along the view         E / Q   rise and fall

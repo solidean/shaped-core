@@ -216,8 +216,9 @@ A binding that is not `@inline` is a group.
 * **EMIT-101** A call of a builtin that gives nothing is a statement as it stands, with no `_ =` in WGSL.
 * **EMIT-102** A builtin a target cannot write as one expression declares a helper function ahead of the entry point, once per text, and the call names it.
   HLSL's `GetDimensions` writes through out parameters, so `size` is an overload of `sgl_size` per texture type the entry point passes.
-* **EMIT-103** *Retired:* WGSL text no longer switches Tint's derivative uniformity analysis off wholesale, since the check pass refuses what is unsound (CHK-282).
-  Where Tint refuses a program the pass accepts, the text silences Tint for that program alone; no such program is known yet.
+* **EMIT-103** WGSL text that takes a derivative opens with `diagnostic(off, derivative_uniformity);`, and text that enables `subgroups` with `diagnostic(off, subgroup_uniformity);`.
+  The check pass has judged both already, by rules that reconverge after a loop where Tint's do not (CHK-284), so Tint's verdict would only refuse what the pass accepted.
+  A barrier has no such switch in WGSL, which is why the pass judges a barrier by WGSL's rules.
 * **EMIT-104** A resource at slot i of group N is `register(<class>i, spaceN)` in `hlsl-dx12` and `[[vk::binding(i, N)]]` in `hlsl-vulkan`, which is the address sg's backends give that slot.
   The class is `b` for the constant buffer, `u` for an image and a `mut` buffer, `s` for a sampler, and `t` for every other resource.
 * **EMIT-105** An entry point that lists more than three groups is `too-many-groups` on every target, since sg binds three besides the inline constants.
@@ -282,8 +283,10 @@ binding affine:
   `inverse_sqrt` is `rsqrt` in HLSL and MSL and `inverseSqrt` in WGSL; `fract` is `frac` in HLSL; `round` is `rint` in MSL, whose `round` is ties-away.
   `ddx` and `ddy` are `dpdx` and `dpdy` in WGSL and `dfdx` and `dfdy` in MSL.
   HLSL's `sign`, `countbits`, `firstbithigh` and `firstbitlow` give an int or a uint whatever they take, so the writer converts back, and `reversebits` of an int goes through a uint.
-  `is_nan` and `is_inf` are HLSL's `isnan` and `isinf`, and in WGSL and MSL a test of the float's bits: `(bits & 0x7fffffff)` above `0x7f800000` is a NaN, and equal to it an infinity.
-  WGSL may assume neither arises and Metal compiles fast-math by default, so a test of the value could fold to false there, where a test of its bits cannot.
+  `is_nan` and `is_inf` are a test of the float's bits on every target: `(bits & 0x7fffffff)` above `0x7f800000` is a NaN, and equal to it an infinity.
+  No target may be handed the value, since a test of it could fold to false where a test of its bits cannot.
+  Vulkan may assume neither arises unless a module declares `SignedZeroInfNanPreserve`, which DXC's SPIR-V does not; WGSL may assume it outright; and Metal compiles fast-math by default.
+  A half is tested as the float it widens to, which keeps a NaN and an infinity exactly, since WGSL bitcasts no lone `f16`.
   WGSL writes a reinterpretation as `bitcast<T>`, MSL as `as_type<T>` and HLSL as `asuint`, `asint` or `asfloat`.
   MSL's `first_bit_*` and HLSL's packing functions are helpers the text declares (EMIT-102).
 * **EMIT-127** A stage input is a parameter of the target's entry point, handed over as the target's own type, and converted to SGL's where the body reads it.
@@ -439,7 +442,9 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   sg's vulkan backend asks the pipeline for subgroups of `n` where the device runs that size in a compute stage, and WGSL and MSL have no way to ask.
 * **EMIT-149** `workgroup_uniform_load(m)` is `workgroupUniformLoad(&m)` in WGSL.
   HLSL and MSL write the workgroup barrier of EMIT-131, read `m` into a local, and write the barrier again ([why](why/emitting.md#emit-149)).
-* **EMIT-150** A `@coherent` member is `globallycoherent` in HLSL, which DXC writes as SPIR-V's `Coherent` for vulkan, and its declaration carries `coherent(device)` in MSL, from MSL 3.2.
+* **EMIT-150** A `@coherent` member is `globallycoherent` in HLSL, which DXC writes as SPIR-V's `Coherent` for vulkan.
+  In MSL, from 3.2, a buffer's pointer carries `coherent(device)`, and a texture takes `memory_coherence_device` as its last template argument.
+  An argument buffer's field takes no `coherent` qualifier, which is why the two differ.
   The barrier that publishes its writes is EMIT-131's, which is device-scoped in HLSL; WGSL lacks `device_coherence` (EMIT-109).
   MSL's `threadgroup_barrier` orders memory within the threadgroup alone, so an entry point holding a `@coherent` member follows a `storage_barrier` or a `texture_barrier` with a device-scoped fence.
   That fence is `atomic_thread_fence(mem_flags::mem_device, memory_order_seq_cst, thread_scope_device)`, or `mem_texture` for the texture barrier.

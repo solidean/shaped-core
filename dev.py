@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run
 # /// script
 # requires-python = ">=3.10"
-# dependencies = []
+# dependencies = ["pyyaml>=6"]
 # ///
 
 """shaped-core's build & test entry point: project policy plus CLI wiring.
@@ -42,6 +42,7 @@ from tools.dev.cmd import (  # noqa: E402
     format,
     info,
     install,
+    issues,
     lint,
     list_presets,
     list_targets,
@@ -49,6 +50,7 @@ from tools.dev.cmd import (  # noqa: E402
     pgo,
     profiling,
     run,
+    submodules,
     symbolize,
     test,
     test_web,
@@ -67,6 +69,7 @@ COMMANDS = [
     format,
     lint,
     check,
+    issues,
     coverage,
     pgo,
     compile_time,
@@ -78,6 +81,7 @@ COMMANDS = [
     profiling,
     deps,
     install,
+    submodules,
     doctor,
     list_presets,
     list_targets,
@@ -165,9 +169,16 @@ PGO_BASELINE_PRESETS: dict[str, str] = {
 # Default preset for `test-web` (the browser runner is Emscripten-only, regardless of host platform).
 DEFAULT_WEB_PRESET = "emscripten-relwithdebinfo"
 
+# Where this repo keeps its first-party files: what format, lint, crossrefs and coverage walk.
+# A project reusing the driver declares its own (tools/dev/lib/core/layout.py).
+LAYOUT: dev.Layout = dev.SHAPED_CORE_LAYOUT
+
+# The integration branch `check` scopes itself against.
+DEFAULT_BRANCH = "main"
+
 
 def build_policy() -> cmd.Policy:
-    """Bundle the preset tables above into the Policy commands read through the Context."""
+    """Bundle the preset tables and the layout above into the Policy commands read through the Context."""
     return cmd.Policy(
         default_build=DEFAULT_BUILD_PRESETS,
         default_debug=DEFAULT_DEBUG_PRESETS,
@@ -180,6 +191,8 @@ def build_policy() -> cmd.Policy:
         pgo_use=PGO_USE_PRESETS,
         pgo_baseline=PGO_BASELINE_PRESETS,
         web_preset=DEFAULT_WEB_PRESET,
+        layout=LAYOUT,
+        default_branch=DEFAULT_BRANCH,
     )
 
 

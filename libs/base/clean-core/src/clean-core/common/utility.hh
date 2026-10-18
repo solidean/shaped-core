@@ -74,9 +74,7 @@
 //   begin(c) / end(c)                - get begin/end iterators from container or array
 //
 
-// TODO
-// - is_memcopyable
-// - is/has things
+// Not yet here: is_memcopyable, and the is/has traits.
 
 namespace cc
 {
@@ -531,7 +529,7 @@ struct cc::projection_function
     }
 
 private:
-    // TODO: move to real utility
+    // A general nth-of-pack utility would replace this.
     template <unsigned Idx, class T, class... Ts>
     static constexpr auto&& get_nth(T&& first, Ts&&... rest) noexcept
     {

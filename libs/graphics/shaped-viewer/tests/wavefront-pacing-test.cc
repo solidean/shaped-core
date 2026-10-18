@@ -1,7 +1,10 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/test.hh>
+#include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/impl/wavefront_pacing.hh>
+#include <shaped-viewer/rendering/wavefront_routine.hh>
+#include <shaped-viewer/viewer.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
 using namespace cc::primitive_defines;
@@ -163,4 +166,27 @@ TEST("sv::impl::wavefront_pacing - a budget far past any round runs the most rou
     auto const plan = pacing.next(1e6, 8);
     CHECK(plan.rounds == sv::impl::wavefront_pacing::max_rounds);
     CHECK(plan.fill == 1.0f);
+}
+
+TEST("sv::impl - the frame's budget is split among its still wavefront layers")
+{
+    CHECK(sv::impl::wavefront_budget_share(16.0f, 4) == 4.0f);
+    CHECK(sv::impl::wavefront_budget_share(16.0f, 1) == 16.0f);
+    // No still layer yet takes the whole, which the first still frame is.
+    CHECK(sv::impl::wavefront_budget_share(16.0f, 0) == 16.0f);
+    CHECK(sv::impl::wavefront_budget_share(0.0f, 3) == 0.0f);
+}
+
+TEST("sv::impl - a headless viewer gives its wavefront layers no budget")
+{
+    CHECK(sv::impl::wavefront_budget_of({.frame_budget_ms = 16.0f}) == 16.0f);
+    CHECK(sv::impl::wavefront_budget_of({.headless = true, .frame_budget_ms = 16.0f}) == 0.0f);
+    CHECK(sv::impl::wavefront_budget_of({.frame_budget_ms = -1.0f}) == 0.0f);
+}
+
+TEST("sv::wavefront_routine - a draining frame runs every bounce and a medium walk up to its roulette")
+{
+    CHECK(sv::wavefront_routine::drain_rounds(5) == 5 + 1 + 16);
+    CHECK(sv::wavefront_routine::drain_rounds(0) == 1 + 16);
+    CHECK(sv::wavefront_routine::drain_rounds(-3) == 1 + 16);
 }

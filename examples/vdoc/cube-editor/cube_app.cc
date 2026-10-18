@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <typed-geometry/transform/compose.hh>
 #include <imgui/imgui.h>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
@@ -138,7 +139,8 @@ bool app::begin_frame()
 tg::mat4f app::view_projection(orbit_camera const& cam) const
 {
     auto const aspect = _viewport[1] > 0 ? float(_viewport[0]) / float(_viewport[1]) : 1.0f;
-    return perspective(this->vertical_fov(), aspect, 0.1f, 500.0f) * cam.view();
+    // a forward [0, 1] depth range, which this pipeline's depth test and clear are set up for
+    return tg::compose(tg::perspective_lh_zero_to_one(this->vertical_fov(), aspect, 0.1f, 500.0f), cam.view()).to_mat();
 }
 
 cc::shared_async<cc::unit> app::end_frame(vdoc::document const& doc, orbit_camera const& cam, vdoc::entity_id selected)

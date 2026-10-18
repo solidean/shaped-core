@@ -20,6 +20,8 @@
 template <int D, class T>
 struct tg::ray
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "ray requires a positive dimension");
 
     pos<D, T> origin;

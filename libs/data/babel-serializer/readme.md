@@ -73,7 +73,8 @@ Both are always in-tree and always linked — so no availability probe, unlike s
 `hdr` / `pfm` reach no backend at all: both formats are small enough to own outright, so they are fully native and complete.
 The sample type follows the format — `u8` for JPEG, `u8` or `u16` for PNG, `f32` for Radiance HDR and PFM — and the aggregator's `encode` rejects a mismatch rather than reinterpreting bytes.
 `dds` / `tga` are native readers with no writer.
-A `.dds` is a whole GPU texture — every mip, layer and cube face, still block-compressed — so `dds` hands back the subresources as zero-copy views and decodes one on request, through `bcn`.
+A `.dds` is a whole GPU texture — every mip, layer and cube face, block-compressed or not.
+`dds` hands back the subresources as zero-copy views and decodes one on request, its blocks through `bcn`.
 The aggregator keeps mip 0 of it.
 
 `gltf` deviates on its **input**, for zero copy: every embedded buffer comes back as a subview sharing the input's owner instead of a copy.
@@ -101,5 +102,5 @@ See [building-and-testing](../../../docs/guides/building-and-testing.md) for the
 - [babel-data](../babel-data/readme.md) — the base64 / JSON / markdown base this library sits on.
 - [docs/_index.md](docs/_index.md) — babel-serializer's documentation hub.
 - [docs/structure.md](docs/structure.md) — the format roadmap (`[done]` / `[planned]`).
-- [docs/lower-library-gaps.md](docs/lower-library-gaps.md) — what babel wants from clean-core / typed-geometry that isn't there yet.
+- [docs/issues/](docs/issues/) — open issues; what babel wants from clean-core / typed-geometry is filed in their `docs/issues/`.
 - [coding-guidelines](../../../docs/coding-guidelines.md) — conventions all shaped-core code follows.

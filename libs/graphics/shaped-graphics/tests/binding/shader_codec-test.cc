@@ -195,6 +195,17 @@ TEST("sg shader codec refuses a length larger than the blob holding it")
     // Both must come back as nothing rather than as a reservation the input chose.
     CHECK(!sg::impl::decode_compiled_shader(with_huge_length_at(entry_point_length_offset)).has_value());
     CHECK(!sg::impl::decode_compiled_shader(with_huge_length_at(bytecode_length_offset)).has_value());
+
+    // All ones reads as a negative length; INT64_MAX is positive, and overflows any position it is added to.
+    auto const with_max_length_at = [&](isize offset)
+    {
+        auto corrupt = encoded;
+        for (auto i = isize(0); i < 8; ++i)
+            corrupt[offset + i] = byte(i == 7 ? 0x7F : 0xFF);
+        return corrupt;
+    };
+    CHECK(!sg::impl::decode_compiled_shader(with_max_length_at(entry_point_length_offset)).has_value());
+    CHECK(!sg::impl::decode_compiled_shader(with_max_length_at(bytecode_length_offset)).has_value());
 }
 
 TEST("sg shader codec round-trips a list of bindings alone, and refuses anything it did not write")

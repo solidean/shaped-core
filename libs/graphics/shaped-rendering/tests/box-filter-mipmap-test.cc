@@ -30,7 +30,7 @@ constexpr auto mip_usage = sg::texture_usage::texture | sg::texture_usage::image
 /// An app absorbs that; a test asserting on the first call cannot, so it names the keys up front — which couples
 /// this test to a choice the code under test makes.
 /// It goes away once a routine's readiness is an async, where this becomes a co_await on it;
-/// see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
+/// issue: feat-sg-routine-readiness-async.
 cc::shared_async<cc::unit> prewarm_every_variant(sg::context& ctx, sg::pixel_format format = sg::pixel_format::rgba8_unorm)
 {
     for (auto v = 0; v < int(sr::mipmap_variant::count_); ++v)

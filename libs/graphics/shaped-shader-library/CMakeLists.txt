@@ -92,7 +92,8 @@ target_link_libraries(shaped-shader-library PUBLIC shaped-graphics)
 # It is over clean-core alone, so it costs a consumer no graphics API and no toolchain.
 target_link_libraries(shaped-shader-library PRIVATE shaped-graphics-language)
 
-# The persistent tier of the SGL edge's cache, which no header of slib names either.
+# The persistent tier of the SGL edge's cache.
+# sgl_compiler_options only forward-declares its store, so a caller that hands one over links blob-cache itself.
 target_link_libraries(shaped-shader-library PRIVATE blob-cache)
 
 # What that tier keys on beside SGL's own fingerprint: the edge translates SGL's output, and an edit to it has to miss.

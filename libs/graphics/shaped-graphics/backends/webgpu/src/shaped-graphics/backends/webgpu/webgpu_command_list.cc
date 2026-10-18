@@ -91,7 +91,7 @@ wgpu_command_buffer webgpu_command_list::finish()
 sg::submission_token webgpu_context::submit_webgpu_command_list(std::unique_ptr<webgpu_command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
-    sg::impl::check_no_live_array_declarations(*cmd);
+    sg::impl::end_array_declarations_at_submit(*cmd);
     assert_on_device_thread();
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
@@ -436,8 +436,6 @@ void webgpu_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
 {
     auto const& s = as_webgpu_buffer(src);
     auto const& d = as_webgpu_texture(dst);
-    CC_ASSERT(s.usage().has(sg::buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
-    CC_ASSERT(d.usage().has(sg::texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
 
     // WebGPU counts rows per image in block rows, the same unit sg's pitch is in.
     auto const extent = isize(sg::format_block_extent(d.format()));

@@ -45,7 +45,7 @@ Two properties of the declaration are load-bearing for this compatibility layer:
 | `--pgo-json <file>` | Writes recorded `nx::pgo` metrics to `<file>` (additive). Not a Catch2 flag |
 | `--timings-json <file>` | Writes each test's wall-clock interval (Unix epoch seconds) and thread to `<file>` (additive), plus a `children` count on a test that dispatched some. Not a Catch2 flag |
 | `--thorough` | Sets `test_schedule_config::thorough`, which a test body reads through `nx::is_thorough()`, and runs the `thorough_only` tests a default run skips (see [test-runtime.md](test-runtime.md)). Not a Catch2 flag |
-| `--watchdog <secs>` | After `<secs>` (default 60) with no test starting or finishing, prints a `[nexus watchdog]` report — outstanding work, running and awaiting tests, every thread's stack and open scopes, where the recording went — and exits with code 4. `0` turns it off, and a run under a debugger never arms it. Test runs only. Not a Catch2 flag |
+| `--watchdog <secs>` | After `<secs>` (default 60) with no test starting or finishing, prints a `[nexus watchdog]` report — outstanding work, running and awaiting tests, every thread's stack and open scopes, where the recording went — and exits with code 4. `0` turns it off, and a run under a debugger never arms it. Test runs only: a run holding nothing but examples and benchmarks, PGO benchmarks included, is unwatched whether swept or named exactly. Not a Catch2 flag |
 | `--benchmark-json <file>` | Writes the full benchmark results — every statistic and every sample — to `<file>` (additive). Not a Catch2 flag |
 | `--benchmark-rec <file>` | Writes a `.ccrec` of the whole run to `<file>`; needs the recorder, so `--no-recording` turns it off. Not a Catch2 flag |
 | `--benchmark-verbose` | Prints the full statistics block under every row of a benchmark table. Not a Catch2 flag |
@@ -240,7 +240,7 @@ The same numbers print after the pass/fail line of a test run, and not of an exa
 
 ## Known gaps
 
-The following Catch2 XML features are not yet implemented (tracked in the `export/catch2.cc` TODO comment):
+The following Catch2 XML features are not yet implemented (tracked in [feat-nexus-catch2-xml-fidelity](issues/feat-nexus-catch2-xml-fidelity.md)):
 
 - `<StdOut>` / `<StdErr>` capture inside test cases
 - `INFO` / `CAPTURE` contextual messages

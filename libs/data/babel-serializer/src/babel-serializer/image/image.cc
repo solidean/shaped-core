@@ -18,8 +18,8 @@ namespace
 /// The sample types a container can hold.
 /// This is the one place the mapping lives, so `read` and `encode` cannot disagree about it.
 ///
-/// PNG is the one format that is not a single answer — 8- and 16-bit are both PNG — so its decode carries its own
-/// in `babel::png::data::decoded`, and `read` asserts the result back against this.
+/// A format may hold more than one — a PNG is 8- or 16-bit, a DDS 8-bit or float — so a decode reports the one it made,
+/// and `encode` checks an image against this before writing it.
 bool format_accepts(format fmt, component comp)
 {
     switch (fmt)
@@ -93,7 +93,7 @@ cc::string_view name_of(component comp)
     return "?";
 }
 
-/// What a format can store, for the error below — PNG is the one that names two.
+/// What a format can store, for the error below.
 cc::string_view accepted_of(format fmt)
 {
     switch (fmt)
@@ -126,10 +126,15 @@ cc::result<image> image_of(babel::dds::data const& t, read_options opts)
     auto result = image{.width = top.width, .height = top.height, .channels = 4};
     if (babel::dds::is_float(t.format))
     {
-        auto texels = babel::dds::decode_rgba32f(t, top, {.max_decoded_bytes = opts.max_decoded_bytes});
-        CC_RETURN_IF_ERROR(texels);
+        // Straight into the image's bytes, so the budget bounds the one buffer the decode makes.
+        auto const size = isize(top.width) * top.height * 4 * isize(sizeof(float));
+        if (size > opts.max_decoded_bytes)
+            return cc::error(cc::format("image: a {}x{} float DDS decodes to {} bytes, past the {}-byte budget",
+                                        top.width, top.height, size, opts.max_decoded_bytes));
         result.comp = component::f32;
-        result.pixels = cc::vector<byte>::create_copy_of(cc::span<float const>(texels.value()).as_bytes());
+        result.pixels = cc::vector<byte>::create_uninitialized(size);
+        auto const floats = cc::span<float>(reinterpret_cast<float*>(result.pixels.data()), size / isize(sizeof(float)));
+        CC_RETURN_IF_ERROR(babel::dds::decode_rgba32f_into(t, top, floats, {.max_decoded_bytes = opts.max_decoded_bytes}));
     }
     else
     {
@@ -295,6 +300,7 @@ cc::result<image> read(cc::read_stream& in, read_options opts)
     if (auto const fmt = detect_format(bytes.value()); fmt.has_value() && fmt.value() == format::dds)
     {
         CC_RECORD_SCOPE("image.read");
+        CC_RECORD_ACCUM("image.bytes_decoded", cc::rec::unit_bytes, bytes.value().size());
         auto texture = babel::dds::read(cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(bytes).value())));
         CC_RETURN_IF_ERROR(texture);
         return image_of(texture.value(), opts);

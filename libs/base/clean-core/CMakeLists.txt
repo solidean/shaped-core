@@ -169,6 +169,7 @@ target_sources(clean-core
     src/clean-core/platform/intrinsics.hh
 
     src/clean-core/math/bit.hh
+    src/clean-core/math/float.hh
     src/clean-core/math/random.hh
     src/clean-core/math/wide_arith.hh
 
@@ -203,6 +204,14 @@ target_sources(clean-core
     src/clean-core/container/impl/bitset_container.hh
 
     src/clean-core/sequence/sequence.hh
+    src/clean-core/sequence/iterator_ranges.hh
+    src/clean-core/sequence/source.hh
+    src/clean-core/sequence/impl/adaptors.hh
+    src/clean-core/sequence/impl/call.hh
+    src/clean-core/sequence/impl/combinators.hh
+    src/clean-core/sequence/impl/factories.hh
+    src/clean-core/sequence/impl/format.hh
+    src/clean-core/sequence/impl/windows.hh
 
     src/clean-core/algorithm/index_swap_range.hh
     src/clean-core/algorithm/permutation.hh
@@ -331,6 +340,30 @@ endif()
 # platform threads library on POSIX; a no-op on Windows. PUBLIC so consumers link it transitively.
 find_package(Threads REQUIRED)
 target_link_libraries(clean-core PUBLIC Threads::Threads)
+
+# The repo-wide build configuration — x86-64 level, floating-point contraction, sanitizers, coverage, PGO, wasm threads.
+# PUBLIC because some of it is ABI: CC_X64_LEVEL is read by our headers, so everything including them must agree on it.
+# tools/cmake/BuildConfig.cmake says why it is a target. The root CMakeLists defines it; a consumer adding clean-core alone gets none.
+if(TARGET shaped-core::build-config)
+    target_link_libraries(clean-core PUBLIC shaped-core::build-config)
+endif()
+
+# The CPU feature query is compiled at the x86-64 baseline, so a library can ask it on a CPU below SC_X64_LEVEL and fail cleanly.
+# At the build's level the compiler spends AVX even there, e.g. on zeroing the cc::cpu_features it returns.
+# Its two files define no inline function another TU emits too, so the linker cannot swap in a copy compiled above the baseline.
+# They skip the precompiled header, which is compiled at the build's level.
+# cl.exe has no spelling below its x64 default to override /arch:AVX2 with, so this holds for clang and GCC only.
+if(SC_ARCH_X64 AND NOT EMSCRIPTEN)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
+        set(_cc_baseline "/clang:-march=x86-64")
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        set(_cc_baseline "-march=x86-64")
+    endif()
+    if(DEFINED _cc_baseline)
+        set_source_files_properties(src/clean-core/platform/cpu_features.cc src/clean-core/platform/impl/cpuid.cc
+            TARGET_DIRECTORY clean-core PROPERTIES COMPILE_OPTIONS "${_cc_baseline}" SKIP_PRECOMPILE_HEADERS ON)
+    endif()
+endif()
 
 # timeBeginPeriod / timeEndPeriod (cc::scoped_scheduler_tick) live in winmm, which is not part of the default
 # Windows link set. Private: nothing in our headers names it.
@@ -539,6 +572,7 @@ if(SC_BUILD_TESTS)
         tests/algorithm/sort-async-test.cc
 
         tests/math/bit-test.cc
+        tests/math/float-test.cc
         tests/math/random-test.cc
         tests/math/wide_arith-test.cc
 
@@ -563,6 +597,7 @@ if(SC_BUILD_TESTS)
         tests/container/pinned_data-test.cc
         tests/container/vector-test.cc
         tests/container/unique_vector-test.cc
+        tests/container/unique_array-test.cc
         tests/container/ringbuffer-test.cc
         tests/container/fixed_ringbuffer-test.cc
         tests/container/bitset-test.cc
@@ -572,6 +607,17 @@ if(SC_BUILD_TESTS)
         tests/container/set-test.cc
         tests/container/byte_stream_builder-test.cc
         tests/container/key_value_cache-test.cc
+
+        tests/sequence/sequence-test.cc
+        tests/sequence/sequence-codegen-test.cc
+        tests/sequence/sequence-adaptors-test.cc
+        tests/sequence/sequence-containers-test.cc
+        tests/sequence/sequence-reverse-test.cc
+        tests/sequence/sequence-factories-test.cc
+        tests/sequence/sequence-reductions-test.cc
+        tests/sequence/sequence-groups-test.cc
+        tests/sequence/sequence-compare-test.cc
+        tests/sequence/sequence-lifetime-test.cc
 
         tests/string/conversion-test.cc
         tests/string/format-test.cc

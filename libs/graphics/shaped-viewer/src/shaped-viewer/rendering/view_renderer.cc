@@ -77,7 +77,7 @@ struct resolved_view
     /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
     cc::vector<cc::hash128> permutations;
 
-    /// How many triangles `instances[i]`'s geometry holds — a placeholder's cube included — and 0 for a quadric batch.
+    /// How many triangles `instances[i]`'s geometry holds — a placeholder's cube included — and 0 for a landed quadric batch.
     /// What a raster frame draws per row; no trace reads it.
     cc::vector<u32> triangle_counts;
 
@@ -185,7 +185,8 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.records.push_back(resources.describe_instance(cmd, item.quadrics, item.instance));
             place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
             out.parameter_blocks.push_back(item.instance);
-            out.triangle_counts.push_back(0);
+            // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
+            out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_vertices().element_count() / 3) : 0);
 
             // Set for any batch, pending or not: a pending one is a triangle instance this frame and a procedural one
             // the next, and the stand-in has to already be compiling by then.
@@ -510,6 +511,18 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     return h;
 }
 
+/// The random seed of the frame `slot` traces next, once `restarts` counts a frame that restarts the mean.
+///
+/// Each restart draws a sequence of its own, so moving frames, every one a restart, do not all draw one.
+/// The restart and the frame within its run are mixed rather than spaced apart, since a run counts frames up to
+/// `frame_count_cap`, far past what a u32 could hold between two runs.
+/// Never 0, which the tracer reads as no seed.
+[[nodiscard]] u32 seed_of(impl::temporal_slot const& slot)
+{
+    auto const seed = u32(cc::make_hash(slot.restarts, slot.accum_frame));
+    return seed != 0 ? seed : 1;
+}
+
 /// Bytes a texture of `size` in `format` costs, for the cache's budget.
 [[nodiscard]] isize texture_bytes(tg::vec2i size, sg::pixel_format format)
 {
@@ -547,9 +560,9 @@ struct ensured_slot
     if (resized)
     {
         // UAV-written by whatever fills it, sampled by whatever reads it back — every temporal resource needs both.
-        // A copy source too, so the image `execute` returns can be downloaded.
-        // A slot the renderer mints is a render target too, since a raster frame draws the very slots a trace writes.
-        // A caller's own is not, as its format need not be renderable.
+        // Copyable too, so the host can read one back: a double-click reads a texel of the primary depth.
+        // A slot the renderer mints is a render target too, since a raster frame draws the very slots a trace writes;
+        // a caller's own keeps to these, as its format need not be renderable.
         auto usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src;
         if (temporal_id >= sv::temporal_id::caller_range_end)
             usage |= sg::texture_usage::render_target;
@@ -563,6 +576,12 @@ struct ensured_slot
     }
 
     return {.slot = &slot, .resized = resized};
+}
+
+/// The mode a plan's layer is recorded in: `automatic` is the viewer's to resolve, and one that reaches a plan built by hand is the wavefront.
+[[nodiscard]] render_mode planned_mode(render_mode mode)
+{
+    return mode == render_mode::automatic ? render_mode::wavefront : mode;
 }
 
 /// The bounce after which the wavefront's Russian roulette may end a path, which leaves `max_bounces` a cap.
@@ -658,19 +677,19 @@ void mark_unwritten(impl::temporal_slot* slot)
         slot->accum_frame = 0;
 }
 
-/// What a still frame runs: `rounds_per_frame` at full fill, or what fits `frame_budget_ms` once a frame is measured.
+/// What a still frame runs under `budget_ms`, its layer's share of the frame's: `rounds_per_frame` at full fill, or what fits the budget once a frame is measured.
 ///
 /// Folds in every frame whose timestamps have landed first, so the plan is as fresh as the GPU allows.
-[[nodiscard]] impl::wavefront_plan still_plan(render_settings const& settings, impl::wavefront_pacing& pacing)
+[[nodiscard]] impl::wavefront_plan still_plan(render_settings const& settings, f32 budget_ms, impl::wavefront_pacing& pacing)
 {
     auto const fixed = cc::max(1, settings.rounds_per_frame);
-    if (settings.frame_budget_ms <= 0.0f)
+    if (budget_ms <= 0.0f)
     {
         pacing.reset();
         return {.rounds = fixed, .fill = 1.0f};
     }
 
-    auto const budget = f64(settings.frame_budget_ms) * 1e-3;
+    auto const budget = f64(budget_ms) * 1e-3;
     while (!pacing.in_flight.empty())
     {
         auto const& front = pacing.in_flight.front();
@@ -692,7 +711,24 @@ void mark_unwritten(impl::temporal_slot* slot)
     return pacing.next(budget, fixed);
 }
 
-/// Traces one frame of a layer into `slot` with the layer's integrator, `d.frame` holding `fc`.
+/// How many of `plan`'s traces run a still wavefront frame this frame, as far as is known before any of them traces.
+/// That is every refreshing wavefront layer whose mean has not restarted; one whose image changes this frame still counts, and leaves its share unspent.
+[[nodiscard]] isize still_wavefront_traces(viewer_definition const& def, render_plan const& plan, view_store const& store)
+{
+    auto count = isize(0);
+    for (auto const& tr : plan.traces)
+    {
+        if (!tr.refresh || planned_mode(def[tr.view].layers[tr.layer].settings.mode) != render_mode::wavefront)
+            continue;
+        auto const* const rec = store.peek_ptr(tr.id);
+        auto const* const slot = rec != nullptr ? rec->temporal.get_ptr(temporal_id::accumulation(tr.layer)) : nullptr;
+        if (slot != nullptr && slot->accum_frame > 0)
+            ++count;
+    }
+    return count;
+}
+
+/// Traces one frame of a layer into `slot` with the layer's integrator, `d.frame` holding `fc`, a still wavefront frame under `budget_ms`.
 ///
 /// The wavefront's path state lives on `slot`, so this is where it is sized and where a frame decides between restarting and carrying.
 /// A frame whose mean restarts (`accum_frame == 0`) restarts every path and drains: it starts one sample per pixel and runs them to their end,
@@ -710,6 +746,7 @@ void mark_unwritten(impl::temporal_slot* slot)
                                               shaders::tracer::frame_constants const& fc,
                                               impl::temporal_slot& slot,
                                               bool scaled,
+                                              f32 budget_ms,
                                               u32 sample_target,
                                               u64 lights_key)
 {
@@ -729,19 +766,12 @@ void mark_unwritten(impl::temporal_slot* slot)
 
     auto& paths = held.value();
     auto const restart = scaled || slot.accum_frame == 0;
-    if (restart)
-        ++paths.generation;
-    // A scaled frame's paths are its own, and leave the full-size mean where it was.
-    if (restart && !scaled)
-        impl::restart_accumulation(slot);
 
-    // A path takes one round per surface bounce, capped by `max_bounces`, and one per medium scatter, which only a roulette ends.
-    // Room for every bounce and for a walk up to where that roulette starts (`pt.roulette_after`, 16).
-    // A walk deeper than that is still alive at the frame's end: a still next frame finishes it, and a restart drops it,
+    // A walk deeper than a drain is still alive at the frame's end: a still next frame finishes it, and a restart drops it,
     // which biases a moving image only where a medium scatters that often.
-    auto const drain_rounds = cc::max(0, fc.max_bounces) + 1 + 16;
-    auto const plan
-        = restart ? impl::wavefront_plan{.rounds = drain_rounds, .fill = 1.0f} : still_plan(settings, slot.pacing);
+    auto const plan = restart
+                        ? impl::wavefront_plan{.rounds = wavefront_routine::drain_rounds(fc.max_bounces), .fill = 1.0f}
+                        : still_plan(settings, budget_ms, slot.pacing);
 
     // Only a still frame keeps its rounds as full as its fill, so only its timestamps say what a round costs.
     // A frame whose pixels all held the target never gets here, though `samples` trails the GPU: a frame or two past the
@@ -756,7 +786,7 @@ void mark_unwritten(impl::temporal_slot* slot)
     }
     else
     {
-        if (settings.frame_budget_ms > 0.0f)
+        if (budget_ms > 0.0f)
             timing = &slot.pacing.queue(plan);
         CC_RECORD_STAT("sv.wavefront.still_rounds", cc::rec::unit_count, plan.rounds);
         CC_RECORD_STAT("sv.wavefront.still_fill", cc::rec::unit_ratio, plan.fill);
@@ -775,14 +805,14 @@ void mark_unwritten(impl::temporal_slot* slot)
                                                           .restir_spatial = true,
                                                           .restir_di = true,
                                                           .lights_key = lights_key,
-                                                          .generation = paths.generation,
                                                           .roulette_after = wavefront_roulette_after,
                                                           .sample_target = sample_target,
                                                           .timing = timing,
                                                           .sample_floor = scaled ? nullptr : &floor});
     if (floor.is_valid())
         slot.sample_floors.push_back(cc::move(floor));
-    if (timing != nullptr && outcome == sg::routine_outcome::declined)
+    // A declined frame records no timestamps, so its entry would never land and would hold back every later one.
+    if (timing != nullptr && outcome != sg::routine_outcome::executed)
         slot.pacing.withdraw();
     return outcome;
 }
@@ -792,13 +822,19 @@ void mark_unwritten(impl::temporal_slot* slot)
 /// Both tracers need the ray-tracing pipeline: the megakernel is one, and the structure the wavefront's group binds is declared for it.
 /// The wavefront traces inline too, so it needs `ray_query` beside it.
 /// A layer that cannot trace is declined rather than drawn blank, since nothing it could draw is its image.
+/// The feature a traced `mode` needs that `ctx` lacks, or none when it can trace.
+[[nodiscard]] cc::optional<sg::feature> missing_trace_feature(sg::context const& ctx, render_mode mode)
+{
+    if (!ctx.supports(sg::feature::raytracing_pipeline))
+        return sg::feature::raytracing_pipeline;
+    if (mode == render_mode::wavefront && !ctx.supports(sg::feature::ray_query))
+        return sg::feature::ray_query;
+    return {};
+}
+
 [[nodiscard]] bool can_trace(sg::context const& ctx, render_mode mode, impl::view_state const& rec, impl::temporal_slot& slot)
 {
-    auto missing = cc::optional<sg::feature>();
-    if (!ctx.supports(sg::feature::raytracing_pipeline))
-        missing = sg::feature::raytracing_pipeline;
-    else if (mode == render_mode::wavefront && !ctx.supports(sg::feature::ray_query))
-        missing = sg::feature::ray_query;
+    auto const missing = missing_trace_feature(ctx, mode);
     if (!missing.has_value())
         return true;
 
@@ -812,21 +848,6 @@ void mark_unwritten(impl::temporal_slot* slot)
     return false;
 }
 
-/// The G-buffer slots a raster layer writes beside its image, and their formats — what `temporal_inputs_of` declares for one.
-struct raster_slot
-{
-    u64 (*id)(u8 layer) = nullptr;
-    sg::pixel_format format = sg::pixel_format::undefined;
-};
-constexpr raster_slot raster_slots[] = {
-    {.id = temporal_id::normal_guide, .format = sg::pixel_format::rgba16_float},
-    {.id = temporal_id::depth_guide, .format = sg::pixel_format::r32_float},
-    {.id = temporal_id::albedo_guide, .format = sg::pixel_format::rgba16_float},
-    {.id = temporal_id::specular_albedo_guide, .format = sg::pixel_format::rgba16_float},
-    {.id = temporal_id::roughness_guide, .format = sg::pixel_format::r16_float},
-    {.id = temporal_id::motion_guide, .format = sg::pixel_format::rg32_float},
-};
-
 /// Everything a raster layer's frame is drawn from that a trace of it would upload too.
 struct raster_scene
 {
@@ -835,14 +856,14 @@ struct raster_scene
     traced_decals const* decals = nullptr;
     background_gpu const* background = nullptr;
 
-    /// The trace hash of what is drawn, which a frame drawn through a stand-in must not leave behind as the slot's.
+    /// The trace hash of what is drawn, which a frame drawn through a stand-in still compiling must not leave behind as the slot's.
     u64 hash = 0;
 };
 
 /// Draws one frame of raster layer `l` of `v`, layer index `layer`, into `slot` and the G-buffer slots `rec` keeps beside it.
 ///
 /// The slots must exist at `resolution`: the plan's resolve allocates them, and the single-view path ensures them itself.
-/// A frame that draws is final, so `slot` is left converged; one drawn through a stand-in restarts next frame instead.
+/// A frame that draws is final, so `slot` is left converged; one drawn through a stand-in still compiling restarts next frame instead.
 [[nodiscard]] sg::routine_outcome raster_layer(sg::command_list& cmd,
                                                view_data const& v,
                                                layer const& l,
@@ -890,7 +911,7 @@ struct raster_scene
             {.instance = u32(i), .triangle_count = resolved.triangle_counts[i], .permutation = permutation_of[group]});
     }
 
-    // TODO: draw quadric batches, ray-cast over each primitive's box in a pixel stage; see libs/graphics/shaped-viewer/docs/raster.md.
+    // Quadric batches are not drawn yet; issue: feat-sv-raster-quadric-batches
     if (skipped_quadrics && !slot.raster_skip_reported)
     {
         CC_LOG_WARNING("a raster layer of view '{}' holds quadric batches, which the raster path does not draw yet",
@@ -919,12 +940,19 @@ struct raster_scene
     auto const decal_buffers = upload_decals(cmd, *scene.decals, resources.drawings.decal_atlas());
 
     // Held across the draws: the tables are what a pixel reaches every mesh and texture through.
-    auto const bindless = resources.freeze();
+    // A snapshot that does not fit the descriptor heap declines the layer, as it declines a trace.
+    auto frozen = resources.try_freeze();
+    if (frozen.has_error())
+    {
+        CC_LOG_ERROR("the bindless tables could not be snapshot for a raster layer: {}", frozen.error().to_string());
+        return sg::routine_outcome::declined;
+    }
+    auto const& bindless = frozen.value();
 
-    auto* const primary_depth
-        = l.needs_primary_depth() ? rec.temporal.get_ptr(temporal_id::primary_depth(layer)) : nullptr;
+    // Every layer keeps one, since a double-click picks off it whether or not anything draws over the frame.
+    auto* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
 
-    auto stand_ins = false;
+    auto stand_ins = stand_in_report{};
     auto const outcome = raster_routine::execute(
         cmd, {.frame = frame,
               .background = background,
@@ -945,7 +973,7 @@ struct raster_scene
                           .roughness = slot_of(temporal_id::roughness_guide(layer))->texture,
                           .motion = motion->texture,
                           .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d()},
-              .drawn_with_stand_ins = &stand_ins});
+              .stand_ins = &stand_ins});
     if (outcome == sg::routine_outcome::declined)
         return outcome;
 
@@ -953,14 +981,25 @@ struct raster_scene
     motion->has_last_camera = true;
 
     // Every frame drawn is the image itself, so the layer is converged the moment one lands.
-    // One drawn through a stand-in is an image of other materials, which must not read as finished.
-    slot.reset_hash = stand_ins ? cc::combine_hash(scene.hash, u64(1)) : scene.hash;
+    // One drawn through a stand-in still compiling is an image of other materials, which must not read as finished.
+    // A stand-in for a material that failed for good is the image this layer will keep drawing, so it is final.
+    slot.stand_in_hash = stand_ins.hash;
+    slot.reset_hash = stand_ins.pending ? cc::combine_hash(scene.hash, u64(1)) : scene.hash;
     slot.accum_frame = 1;
-    slot.samples = stand_ins ? 0 : accumulation_sample_cap;
+    slot.samples = stand_ins.pending ? 0 : accumulation_sample_cap;
     return outcome;
 }
 } // namespace
 
+render_mode resolve_render_mode(sg::context const& ctx, render_mode mode)
+{
+    if (mode != render_mode::automatic)
+        return mode;
+    auto const traces = ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query);
+    return traces ? render_mode::wavefront : render_mode::raster;
+}
+
+// NOLINTNEXTLINE(performance-unnecessary-value-param) — by value because it is a coroutine, see sg's init_once
 cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
@@ -970,6 +1009,8 @@ cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
     // A traced layer finds the tracer still initializing on its first frame at most, and declines that frame as it would anyway.
     if (ctx.supports(sg::feature::raytracing_pipeline))
         pathtrace_routine::prewarm(ctx);
+    if (ctx.supports(sg::feature::raytracing_pipeline) && ctx.supports(sg::feature::ray_query))
+        wavefront_routine::prewarm(ctx);
 
     // Warmed rather than declared: a layer that never crossfades must not wait on it, and one that does reaches the
     // fade a good many frames after the first trace — so the compile has long since finished by then.
@@ -1080,6 +1121,30 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
     return out;
 }
 
+void view_renderer::acquire_trace(sg::command_list& cmd,
+                                  viewer_definition const& def,
+                                  render_plan const& plan,
+                                  u32 trace_index,
+                                  plan_resources const& res,
+                                  gpu_resource_manager& resources)
+{
+    auto const& tr = plan.traces[trace_index];
+    CC_ASSERT(isize(u32(tr.view)) < def.views.size(), "a plan trace names a view the definition does not hold");
+    auto const& v = def[tr.view];
+    CC_ASSERT(isize(tr.layer) < v.layers.size(), "a plan trace names a layer the view does not hold");
+    if (res.traces[trace_index].raw() == nullptr)
+        return; // trace() will not run it either
+    // The same walk trace() takes, for its acquires alone: residency only moves at the frame's settle pass, so both
+    // resolve the same items to the same indices — under the same mode, which decides what a walk acquires.
+    auto const& l = v.layers[tr.layer];
+    auto const mode = planned_mode(l.settings.mode);
+    auto const is_traced = mode != render_mode::raster;
+    // trace() declines a layer this device cannot trace, and says so; a walk for it would build BLASes nothing can.
+    if (is_traced && missing_trace_feature(cmd.context(), mode).has_value())
+        return;
+    (void)resolve_scene(cmd, l, resources, is_traced);
+}
+
 sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                                          viewer_definition const& def,
                                          render_plan const& plan,
@@ -1099,7 +1164,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (res.traces[trace_index].raw() == nullptr)
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to trace
 
-    // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
+    // Held for the whole trace because the reload generation is read under it.
     auto self = try_acquire_exclusive(cmd);
     if (!self.is_ready())
         return sg::routine_outcome::declined;
@@ -1109,8 +1174,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (slot == nullptr)
         return sg::routine_outcome::executed; // resolve() refused it; there was nothing to accumulate
 
-    auto const is_traced = l.settings.mode != render_mode::raster;
-    if (is_traced && !can_trace(ctx, l.settings.mode, rec, *slot))
+    auto const mode = planned_mode(l.settings.mode);
+    auto const is_traced = mode != render_mode::raster;
+    if (is_traced && !can_trace(ctx, mode, rec, *slot))
         return sg::routine_outcome::declined;
 
     auto resolved = resolve_scene(cmd, l, resources, is_traced);
@@ -1122,11 +1188,15 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const decals = decals_of(l, resources.drawings.decal_atlas());
     auto fc = make_frame_constants(v, l, lights, tr.resolution);
     fc.decal_count = u32(decals.decals.size());
+    // Only the megakernel reads it, so no other mode restarts on it.
+    if (mode != render_mode::megakernel)
+        fc.samples_per_pixel = 0;
     auto const bg = background_gpu::from(l.background);
     // The integrator is folded in too: both converge to the same image, but a mean must not hold samples of both.
+    // So is what the last frame stood in for a permutation not compiled, which only the routine decides.
     auto const hash
         = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation),
-                           cc::make_hash(u32(l.settings.mode)));
+                           cc::make_hash(u32(mode), slot->stand_in_hash));
 
     // The same, with the camera left out: what a temporal denoiser's history restarts on.
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
@@ -1148,6 +1218,13 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             forget_restir_history(s);
         }
         rec.camera_cut_pending = false;
+    }
+
+    // The path state is the wavefront's alone, and the store's budget counts it for as long as the slot holds it.
+    if (mode != render_mode::wavefront)
+    {
+        slot->paths = {};
+        slot->scaled_paths = {};
     }
 
     // A rasterized layer draws its final image and its G-buffer in one frame, so nothing below — accumulation,
@@ -1218,25 +1295,22 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                          && ds.specular_albedo != nullptr && ds.roughness != nullptr && ds.denoised != nullptr;
     auto const has_temporal = has_guides && ds.frame != nullptr && ds.motion != nullptr;
 
-    // The depth a layer's 3D drawings are occluded by, on every frame that traces it — after the hash, so a drawing
-    // coming or going restarts the image only where it has stopped tracing, below.
-    // Keyed on the same condition `temporal_inputs_of` declares it on, so the slot was sized by this frame's resolve.
-    auto* const depth_slot
-        = l.needs_primary_depth() ? rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer)) : nullptr;
+    // The depth a layer's 3D drawings are occluded by and a pick reads — set after the hash, so a drawing coming or going
+    // never restarts the image.
+    auto* const depth_slot = rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer));
+    auto const draws_over = !l.drawings.empty() || !l.annotations.empty();
 
-    // A guide or depth slot the layer stops asking for stays until the store reclaims it, holding nothing of the means after it.
+    // A guide slot the layer stops asking for stays until the store reclaims it, holding nothing of the means after it.
     // Marked unwritten, so asking for it again is asking for a new one.
     if (!has_guides)
         mark_unwritten(rec.temporal.get_ptr(temporal_id::normal_guide(tr.layer)));
-    if (depth_slot == nullptr)
-        mark_unwritten(rec.temporal.get_ptr(temporal_id::primary_depth(tr.layer)));
 
     // Whether a full-size frame traces at all, which one whose pixels all hold the target does not.
     // Asked before anything is scheduled on it, since a frame that traces nothing has no samples of its own to denoise.
     //
-    // Guides or a primary depth first asked for once the mean holds samples are written by the next frame that traces,
-    // from what that frame or the wavefront's tallies saw of every pixel.
-    // At the target no frame traces, so the mean starts over instead: a denoiser would read blank guides, and a drawing test against blank depth.
+    // Guides first asked for, or a primary depth no full-size frame has written yet, once the mean holds samples are
+    // written by the next frame that traces, from what that frame or the wavefront's tallies saw of every pixel.
+    // At the target no frame traces, so the mean starts over instead: a denoiser would read blank guides, and a drawing test or a pick blank depth.
     auto const target = effective_sample_target(def.sample_target);
     auto const guides_unwritten = has_guides && slot->accum_frame > 0 && ds.normal->accum_frame == 0;
     auto const depth_unwritten = depth_slot != nullptr && slot->accum_frame > 0 && depth_slot->accum_frame == 0;
@@ -1246,9 +1320,11 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const samples = !at_target || slot->accum_frame == 0;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
-    // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
+    // After the target's restart above, so a restart counted there draws a sequence of its own.
     fc.accum_frame = slot->accum_frame;
-    fc.rng_seed = slot->accum_frame + 1;
+    if (slot->accum_frame == 0)
+        ++slot->restarts;
+    fc.rng_seed = seed_of(*slot);
 
     // Set after the hash, like accum_frame, so none of it reaches the hash.
     // The guides count on the normal slot's own frames, since they may have started after the mean did.
@@ -1260,12 +1336,6 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         fc.write_guides = 1;
         fc.guide_frame = ds.normal->accum_frame;
         fc.write_specular_guides = 1;
-    }
-
-    if (depth_slot != nullptr)
-    {
-        fc.write_primary_depth = 1;
-        fc.near_plane = f32(v.camera.projection.near_plane);
     }
 
     // Decided before the frame block is uploaded, so the tracer writes this frame's own samples and motion only on the
@@ -1311,13 +1381,24 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // test reads the primary depth at the view's own size.
     auto upscale_settings = schedule.temporal_settings;
     upscale_settings.upscaler = l.settings.reconstruct.upscaler;
-    auto const may_scale = moving && writes_temporal && depth_slot == nullptr;
+    // A layer that can never trace at the upscaler's extent holds no paths for it.
+    if (!has_temporal || draws_over || upscale_settings.upscaler == sr::upscale_method::none)
+        slot->scaled_paths = {};
+    auto const may_scale = moving && writes_temporal && !draws_over;
     auto const input_extent = may_scale
                                 ? sr::reconstruct_input_extent(ctx, upscale_settings, tr.resolution, traceable_guides())
                                 : tr.resolution;
     auto const scaled = input_extent != tr.resolution;
     // A scaled frame is an image of its own rather than a sample of the mean, so it traces whatever the mean holds.
     auto const traces = samples || scaled;
+
+    // Written only at the slot's own size: a scaled frame leaves it to the next full-size one, and keeps
+    // `accum_frame` at 0, which a pick reads as no depth to take yet.
+    if (depth_slot != nullptr && !scaled)
+    {
+        fc.write_primary_depth = 1;
+        fc.near_plane = f32(v.camera.projection.near_plane);
+    }
 
     auto jitter = tg::vec2f(0, 0);
     if (scaled)
@@ -1345,7 +1426,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Transient, since the tallies hold the counts and the resolve rewrites every pixel each frame.
     // None on a frame that traces nothing, since no resolve writes it then: every pixel holds the target, which one count says.
     auto const sample_counts
-        = traces && has_guides && l.settings.mode == render_mode::wavefront
+        = traces && has_guides && mode == render_mode::wavefront
             ? ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
                                                .width = input_extent[0],
                                                .height = input_extent[1],
@@ -1380,7 +1461,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Everything the dispatch reads beside those, uploaded only by a frame that traces.
     // The scene's resolve and the hash above run on every frame: the hash is what notices a change that restarts the mean,
     // and the resolve is what keeps the scene's working set resident.
-    auto stand_ins = false;
+    auto stand_ins = stand_in_report{};
     auto const dispatch = [&]
     {
         auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
@@ -1398,7 +1479,14 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
 
         // Held across the dispatch: the tables are what the closest-hit reaches every mesh and texture through, and
         // nothing may mint a descriptor the bound snapshot would not contain while it is being recorded against.
-        auto const bindless = resources.freeze();
+        // A snapshot the descriptor heap cannot hold declines this trace and leaves the frame standing.
+        auto frozen = resources.try_freeze();
+        if (frozen.has_error())
+        {
+            CC_LOG_ERROR("the bindless tables could not be snapshot for a trace: {}", frozen.error().to_string());
+            return sg::routine_outcome::declined;
+        }
+        auto const& bindless = frozen.value();
 
         // Acquired as soon as the view holds a quadric batch, rather than when one is caught uncompiled: the trace
         // declines entirely while a quadric permutation is unready and this is not, so a late acquire blanks the view for
@@ -1441,8 +1529,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
              .decals = decal_buffers.decals,
              .decal_shapes = decal_buffers.shapes,
              .decal_atlas = decal_buffers.atlas,
-             .traced_with_stand_ins = &stand_ins},
-            fc, *slot, scaled, target, lights.key(resolved.emitters, resolved.records));
+             .stand_ins = &stand_ins},
+            fc, *slot, scaled,
+            impl::wavefront_budget_share(def.wavefront_budget_ms, still_wavefront_traces(def, plan, store)), target,
+            lights.key(resolved.emitters, resolved.records));
     };
 
     // A frame that traces nothing stands as executed: the mean already is the image.
@@ -1453,9 +1543,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (traced == sg::routine_outcome::declined)
         return sg::routine_outcome::declined;
 
-    // A frame shaded by a stand-in material is an image of a different scene, so the next frame restarts rather than
-    // averaging into it — the trace hash cannot see the substitution, which the routine alone decides.
-    if (traces && (stand_ins || resolved.emitters_pending))
+    // The next frame's hash carries what this one stood in, so a substitution that changes restarts the image once.
+    // One still compiling restarts it every frame instead, since it ends by itself and a mean of it must not read as converged.
+    // So does an emitter whose triangles are still loading, which leaves the scene's light short of what it will be.
+    if (traces)
+        slot->stand_in_hash = stand_ins.hash;
+    if (traces && (stand_ins.pending || resolved.emitters_pending))
         slot->reset_hash = cc::combine_hash(hash, u64(1));
 
     // A scaled frame is no sample of the mean, which the next still frame restarts at full size.
@@ -1616,7 +1709,7 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
         // The raygen offsets every primary ray by a fresh random amount within its pixel, so the samples are spread
         // over the pixel and their mean is its centre — which is exactly what a zero here says.
         // What `jitter` is for is the per-frame offset shared by every pixel that a temporal upscaler reconstructs
-        // sub-pixel detail from, and sv has none; see the viewer TODO.
+        // sub-pixel detail from, which only a frame traced at the upscaler's extent has, and `trace` passes there.
         .view_to_clip = cameras.current.view_to_clip,
         .previous_view_to_clip = cameras.previous.view_to_clip,
         .world_to_view = cameras.current.world_to_view,
@@ -1709,7 +1802,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const* const scene = primary_scene_3d(v);
     CC_ASSERT(scene != nullptr, "a traced view needs a scene_3d layer");
 
-    // Held for the whole trace because the reload generation is read under it; nothing rasters here, so no scope is open across the lock.
+    // Held for the whole trace because the reload generation is read under it.
     auto self = try_acquire_exclusive(cmd);
 
     // The slot is resolved either way, so a view whose renderer is not up yet still has a texture to re-present
@@ -1728,8 +1821,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     // nobody remembers.
     store.get_or_create(v.id).camera_cut_pending = false;
 
-    auto const is_traced = scene->settings.mode != render_mode::raster;
-    if (is_traced && !can_trace(ctx, scene->settings.mode, store.get_or_create(v.id), slot))
+    // Resolved against the device here, since this path ensures a raster layer's slots itself.
+    auto const mode = resolve_render_mode(ctx, scene->settings.mode);
+    auto const is_traced = mode != render_mode::raster;
+    if (is_traced && !can_trace(ctx, mode, store.get_or_create(v.id), slot))
         return slot.texture;
 
     // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
@@ -1741,9 +1836,11 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const decals = decals_of(*scene, resources.drawings.decal_atlas());
     auto fc = make_frame_constants(v, *scene, lights, v.resolution);
     fc.decal_count = u32(decals.decals.size());
+    if (mode != render_mode::megakernel)
+        fc.samples_per_pixel = 0;
     auto const bg = background_gpu::from(scene->background);
     auto const hash = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
-                                       cc::make_hash(u32(scene->settings.mode)));
+                                       cc::make_hash(u32(mode), slot.stand_in_hash));
 
     if (!self.is_ready())
         return slot.texture; // nothing traced this frame; the caller re-presents what the slot already holds
@@ -1751,10 +1848,15 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     if (acc.resized)
         store.set_payload_bytes(v.id, texture_bytes(v.resolution, sg::pixel_format::rgba32_float));
 
+    // As on the plan path, and this path never scales.
+    if (mode != render_mode::wavefront)
+        slot.paths = {};
+    slot.scaled_paths = {};
+
     if (!is_traced)
     {
         // No plan sized the G-buffer either, so this path ensures it beside the image.
-        for (auto const& s : raster_slots)
+        for (auto const& s : impl::raster_slots)
             (void)ensure_temporal(ctx, store, v.id, s.id(layer), v.resolution, s.format);
         (void)raster_layer(cmd, v, *scene, layer, v.resolution,
                            {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash},
@@ -1772,9 +1874,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
         return slot.texture;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
-    // The seed rides one above it so each accumulated frame draws a different sample sequence, and is never 0.
     fc.accum_frame = slot.accum_frame;
-    fc.rng_seed = slot.accum_frame + 1;
+    if (slot.accum_frame == 0)
+        ++slot.restarts;
+    fc.rng_seed = seed_of(slot);
 
     auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
         1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
@@ -1799,7 +1902,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     auto const* const quadric_fallback = resolved.has_quadrics ? &resources.shaders.acquire_quadric_fallback() : nullptr;
 
     // Called under our own guard; the leaf takes its own, which is a different routine and so nests no lock.
-    auto stand_ins = false;
+    auto stand_ins = stand_in_report{};
     auto const traced = trace_layer(
         cmd, scene->settings,
         {.frame = frame,
@@ -1822,12 +1925,22 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
          .decals = decal_buffers.decals,
          .decal_shapes = decal_buffers.shapes,
          .decal_atlas = decal_buffers.atlas,
-         .traced_with_stand_ins = &stand_ins},
-        fc, slot, false, effective_sample_target(0), lights.key(resolved.emitters, resolved.records));
+         .stand_ins = &stand_ins},
+        fc, slot, false, 0.0f, effective_sample_target(0), lights.key(resolved.emitters, resolved.records));
+
+    // The store's budget counts the path state beside the texture, and the trace may just have created or grown it.
+    auto bytes = texture_bytes(v.resolution, sg::pixel_format::rgba32_float);
+    if (slot.paths.has_value())
+        bytes += slot.paths.value().size_in_bytes();
+    if (slot.scaled_paths.has_value())
+        bytes += slot.scaled_paths.value().size_in_bytes();
+    store.set_payload_bytes(v.id, bytes);
 
     // As above: a declined trace recorded nothing, so it must not count as a sample, and a frame shaded by a stand-in
-    // must not be averaged with the next.
-    if (traced == sg::routine_outcome::executed && (stand_ins || resolved.emitters_pending))
+    // still compiling, or lit by emitters still loading, must not be averaged with the next.
+    if (traced == sg::routine_outcome::executed)
+        slot.stand_in_hash = stand_ins.hash;
+    if (traced == sg::routine_outcome::executed && (stand_ins.pending || resolved.emitters_pending))
         slot.reset_hash = cc::combine_hash(hash, u64(1));
     if (traced == sg::routine_outcome::executed)
         count_traced_frame(slot, scene->settings);

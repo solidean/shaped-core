@@ -36,12 +36,7 @@ cc::string_view role_name(struct_role role)
 /// Read from the registry, so a new builtin needs no entry in a target's list of reserved words.
 bool is_called_by_a_builtin(checked_module const& m, emit::target t, cc::string_view name)
 {
-    if (m.builtins == nullptr)
-        return false;
-    for (auto const& f : m.builtins->functions)
-        if (f.writes_name(language_of(t), name))
-            return true;
-    return false;
+    return m.builtins != nullptr && m.builtins->names_written_in(language_of(t)).contains(name);
 }
 
 struct_role input_role(flat_entry_point const& e)
@@ -56,6 +51,9 @@ struct_role input_role(flat_entry_point const& e)
 
 struct_role result_role(flat_entry_point const& e)
 {
+    // an intersection's report is a value its traversal reads back, never a render target
+    if (e.entry_stage >= stage::raygen)
+        return struct_role::plain;
     if (e.entry_stage == stage::tessellation_control)
         return struct_role::patch_constants;
     return e.entry_stage == stage::vertex || e.entry_stage == stage::tessellation_evaluation
@@ -234,10 +232,17 @@ struct planner
         {
             if (is_reserved(p.which, result))
                 return false;
-            // EMIT-138: a member named like the struct type of another hides the type from it in HLSL and MSL
+            // EMIT-138: a member named like the struct type of another hides the type from it in HLSL and MSL.
+            // The type is compared as written, which a reserved name escapes: `ray` is `ray_` on msl, like the member.
             for (auto const& s : siblings)
-                if (is_valid(s.type) && p.m.at(s.type).kind == type_kind::structure && p.m.name_of(s.type) == result)
+            {
+                if (!is_valid(s.type) || p.m.at(s.type).kind != type_kind::structure)
+                    continue;
+                if (p.m.name_of(s.type) == result)
                     return false;
+                if (auto const k = p.struct_of_type[index_of(s.type)]; k >= 0 && p.structs[k].name == result)
+                    return false;
+            }
             if (result == name)
                 return true;
             for (auto const& s : siblings)
@@ -921,18 +926,14 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
 
 sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t)
 {
-    auto result = plan{.m = m, .e = e, .which = t, .names = e.names};
+    auto result = plan{.m = m, .e = e, .which = t};
+    // The tree's names and the builtins' go on being taken where they are, since both outlive the plan.
+    result.names.parent = &e.names;
+    if (m.builtins != nullptr)
+        result.names.also_taken = &m.builtins->names_written_in(language_of(t));
     // Reserved first, so nothing minted below can be one of them.
     for (auto const word : reserved_words(t))
         (void)result.names.reserve(word);
-    if (m.builtins != nullptr)
-        for (auto const& f : m.builtins->functions)
-        {
-            if (f.write.kind == builtins::spelling_kind::call)
-                (void)result.names.reserve(f.called_in(language_of(t)));
-            for (auto const name : f.names_in(language_of(t)))
-                (void)result.names.reserve(name);
-        }
     result.struct_of_type.resize_to_filled(m.types.size(), -1);
     result.enum_of_type.resize_to_filled(m.types.size(), -1);
     result.array_of_type.resize_to_filled(m.types.size(), -1);

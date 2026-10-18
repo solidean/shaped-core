@@ -1,8 +1,8 @@
 #include <babel-serializer/geometry/fbx.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/map.hh>
-#include <clean-core/container/set.hh>
 #include <clean-core/streams/span_stream.hh>
 #include <clean-core/string/format.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -159,6 +159,51 @@ size_t read_from_stream(void* user, void* dst, size_t size)
     return size_t(n.value());
 }
 
+/// ufbx's thread-pool hook, on a `cc::async_scheduler`.
+/// ufbx hands over batches of task indices by group and later waits for a group, so each task becomes a node scheduled at once.
+/// A wait drives the group's nodes to completion with the calling thread taking part, which is also what makes a pool with no workers finish them.
+struct scheduler_pool
+{
+    cc::async_scheduler* scheduler = nullptr;
+    cc::fixed_array<cc::vector<cc::shared_async<cc::unit>>, UFBX_THREAD_GROUP_COUNT> running = {};
+};
+
+void run_on_scheduler(void* user, ufbx_thread_pool_context ctx, u32 group, u32 start_index, u32 count)
+{
+    auto& pool = *static_cast<scheduler_pool*>(user);
+    for (auto index = start_index; index < start_index + count; ++index)
+    {
+        auto task = cc::make_async_lazy(
+            [ctx, index]
+            {
+                ufbx_thread_pool_run_task(ctx, index);
+                return cc::unit{};
+            });
+        task->schedule_on(*pool.scheduler);
+        pool.running[isize(group)].push_back(cc::move(task));
+    }
+}
+
+void wait_on_scheduler(void* user, ufbx_thread_pool_context ctx, u32 group, u32 max_index)
+{
+    CC_UNUSED(ctx);
+    CC_UNUSED(max_index);
+    auto& pool = *static_cast<scheduler_pool*>(user);
+    for (auto const& task : pool.running[isize(group)])
+        pool.scheduler->participate_until_ready(*task);
+    pool.running[isize(group)].clear();
+}
+
+/// One mesh's copy, kept apart until every mesh is done, so issues land in file order whichever mesh finished first.
+struct mesh_result
+{
+    bf::mesh mesh;
+    cc::vector<bf::issue> issues;
+
+    /// set when the mesh cannot be represented, which fails the read
+    cc::string error;
+};
+
 /// Copies one ufbx scene into a babel::fbx::data.
 struct fbx_converter
 {
@@ -172,6 +217,12 @@ struct fbx_converter
 
     /// the embedded blobs already pinned, by the address ufbx holds them at
     cc::map<isize, cc::pinned_data<byte const>> embedded;
+
+    /// the property templates already copied, by the address ufbx holds them at
+    cc::map<isize, cc::pinned_data<bf::property const>> templates;
+
+    /// what the copy of every mesh may take together, in bytes: the read's whole memory limit
+    i64 copy_limit = 0;
 
     void note(bf::issue_kind kind, cc::string message)
     {
@@ -226,9 +277,16 @@ struct fbx_converter
             out.settings.unit_meters = 0.01;
         }
         if (!is_sane_unit(out.settings.original_unit_meters))
+        {
+            note(bf::issue_kind::malformed, cc::format("fbx: the authoring tool's unit is {} meters, outside a "
+                                                       "nanometer "
+                                                       "to a million kilometers, so the scene's unit stands in",
+                                                       out.settings.original_unit_meters));
             out.settings.original_unit_meters = out.settings.unit_meters;
+        }
 
-        // Deduplicated by ufbx: each kind is one warning carrying a count, so the list stays short on a damaged file.
+        // ufbx folds a repeat into the previous warning of the same element, as a count, for some kinds only.
+        // A duplicated connection or a truncated array is one warning each time.
         for (auto i = size_t(0); i < meta.warnings.count; ++i)
         {
             auto const& w = meta.warnings.data[i];
@@ -254,11 +312,22 @@ struct fbx_converter
         skip(scene.nurbs_curves.count + scene.nurbs_surfaces.count + scene.line_curves.count, "curves or surfaces are",
              "");
         skip(scene.procedural_geometries.count, "procedural geometry element(s) are", "");
+        skip(scene.constraints.count, "constraint(s) are", ", so a constrained node stands at its own transform");
+        skip(scene.markers.count, "marker(s) are", "");
 
         auto animated = size_t(0);
         for (auto i = size_t(0); i < scene.anim_layers.count; ++i)
             animated += scene.anim_layers.data[i]->anim_values.count;
         skip(animated, "animated value(s) are", ", so every node stands at its static transform");
+
+        for (auto i = size_t(0); i < scene.lod_groups.count; ++i)
+        {
+            auto const& g = *scene.lod_groups.data[i];
+            note(bf::issue_kind::unsupported, cc::format("fbx: LOD group '{}' is not read, so its {} level(s) come "
+                                                         "back "
+                                                         "as ordinary visible nodes",
+                                                         to_string(g.name), g.lod_levels.count));
+        }
     }
 
     // materials and textures
@@ -304,6 +373,22 @@ struct fbx_converter
         }
     }
 
+    /// A property template's defaults, copied once and shared by every material ufbx points at that template.
+    [[nodiscard]] cc::pinned_data<bf::property const> template_defaults(ufbx_props const& defaults)
+    {
+        auto const key = reinterpret_cast<isize>(&defaults);
+        if (auto const* const shared = templates.get_ptr(key); shared != nullptr)
+            return *shared;
+
+        auto properties = cc::vector<bf::property>();
+        properties.reserve(isize(defaults.props.count));
+        for (auto p = size_t(0); p < defaults.props.count; ++p)
+            properties.push_back(to_property(defaults.props.data[p]));
+        auto pinned = cc::pinned_data<bf::property const>(cc::make_pinned_data(cc::move(properties)));
+        templates[key] = pinned;
+        return pinned;
+    }
+
     void convert_materials()
     {
         out.materials.reserve(isize(scene.materials.count));
@@ -312,23 +397,11 @@ struct fbx_converter
             auto const& m = *scene.materials.data[i];
             auto material = bf::material{.name = to_string(m.name), .shading_model = to_string(m.shading_model_name)};
 
-            // The file's own properties first, then the template defaults it did not override — what the FBX SDK would report.
-            // That is what a reader of `EmissiveFactor` expects when the file left it out.
-            // The names the file wrote, looked up as a set so the merge stays linear in the property count.
-            auto written = cc::set<cc::string_view>();
+            material.properties.reserve(isize(m.props.props.count));
             for (auto p = size_t(0); p < m.props.props.count; ++p)
-            {
-                auto const& own = m.props.props.data[p];
-                material.properties.push_back(to_property(own));
-                written.insert(cc::string_view(own.name.data, isize(own.name.length)));
-            }
+                material.properties.push_back(to_property(m.props.props.data[p]));
             if (m.props.defaults != nullptr)
-                for (auto p = size_t(0); p < m.props.defaults->props.count; ++p)
-                {
-                    auto const& d = m.props.defaults->props.data[p];
-                    if (!written.contains(cc::string_view(d.name.data, isize(d.name.length))))
-                        material.properties.push_back(to_property(d));
-                }
+                material.defaults = template_defaults(*m.props.defaults);
 
             for (auto t = size_t(0); t < m.textures.count; ++t)
             {
@@ -351,7 +424,7 @@ struct fbx_converter
                                                                    Convert&& convert)
     {
         auto out_attr = bf::corner_attribute<T>();
-        if (!a.exists)
+        if (!a.exists || corners.empty())
             return out_attr;
 
         out_attr.values.reserve(isize(a.values.count));
@@ -382,13 +455,43 @@ struct fbx_converter
         return largest <= fbx_max_count;
     }
 
-    void convert_mesh(ufbx_mesh const& m)
+    /// About what copying `m` allocates: every attribute's values, and an index per output corner for each.
+    /// An attribute ufbx stores once for the whole mesh still costs a full index array here, which is why this is budgeted.
+    [[nodiscard]] i64 copy_bytes(ufbx_mesh const& m) const
     {
-        auto mesh = bf::mesh{.name = to_string(m.name)};
+        auto const corners = i64(opts.triangulate ? m.num_triangles * 3 : m.num_indices);
+        auto const faces = i64(opts.triangulate ? m.num_triangles : m.faces.count);
+        auto bytes = corners * i64(sizeof(u32)) + faces * i64(sizeof(bf::face) + sizeof(i32) + sizeof(bool));
+        auto const add = [&](auto const& attribute, i64 value_size)
+        {
+            if (attribute.exists)
+                bytes += i64(attribute.values.count) * value_size + corners * i64(sizeof(i32));
+        };
+        add(m.vertex_position, i64(sizeof(tg::pos3f)));
+        add(m.vertex_normal, i64(sizeof(tg::vec3f)));
+        add(m.vertex_tangent, i64(sizeof(tg::vec3f)));
+        add(m.vertex_bitangent, i64(sizeof(tg::vec3f)));
+        for (auto i = size_t(0); i < m.uv_sets.count; ++i)
+            add(m.uv_sets.data[i].vertex_uv, i64(sizeof(tg::vec2f)));
+        for (auto i = size_t(0); i < m.color_sets.count; ++i)
+            add(m.color_sets.data[i].vertex_color, i64(sizeof(tg::vec4f)));
+        return bytes;
+    }
+
+    /// Reads `scene` and `opts` and writes nothing else, so meshes can be copied in parallel.
+    [[nodiscard]] mesh_result convert_mesh(ufbx_mesh const& m) const
+    {
+        auto result = mesh_result();
+        auto& mesh = result.mesh;
+        mesh.name = to_string(m.name);
+        auto const note = [&](bf::issue_kind kind, cc::string message)
+        { result.issues.push_back({.kind = kind, .message = cc::move(message)}); };
+
         if (!fits_indices(m))
         {
-            error = cc::format("fbx: mesh '{}' has more corners, faces or values than an i32 index reaches", mesh.name);
-            return;
+            result.error
+                = cc::format("fbx: mesh '{}' has more corners, faces or values than an i32 index reaches", mesh.name);
+            return result;
         }
 
         // The source corner of every output corner, and the faces over them.
@@ -411,6 +514,8 @@ struct fbx_converter
             for (auto f = size_t(0); f < m.faces.count; ++f)
             {
                 auto const face = m.faces.data[f];
+                if (f < m.face_hole.count && m.face_hole.data[f])
+                    continue;
                 if (face.num_indices < 3)
                 {
                     ++dropped;
@@ -452,6 +557,17 @@ struct fbx_converter
                 mesh.faces.push_back({.first_corner = i32(face.index_begin), .corner_count = i32(face.num_indices)});
                 face_sources.push_back(u32(f));
             }
+
+            // Kept only when some face is a hole, as `face_materials` is kept only when some slot is not 0.
+            auto any_hole = false;
+            for (auto f = size_t(0); f < m.face_hole.count; ++f)
+                any_hole = any_hole || m.face_hole.data[f];
+            if (any_hole)
+            {
+                mesh.face_holes.reserve(isize(m.faces.count));
+                for (auto f = size_t(0); f < m.faces.count; ++f)
+                    mesh.face_holes.push_back(f < m.face_hole.count && m.face_hole.data[f]);
+            }
         }
 
         auto const pos = [](ufbx_vec3 const& v) { return tg::pos3f(f32(v.x), f32(v.y), f32(v.z)); };
@@ -488,14 +604,74 @@ struct fbx_converter
                 mesh.face_materials.push_back(i32(m.face_material.data[f]));
         }
 
-        out.meshes.push_back(cc::move(mesh));
+        // ufbx resolves the slots against the first instance alone, folding any slot past its count to 0.
+        for (auto i = size_t(1); i < m.instances.count; ++i)
+            if (m.instances.data[i]->materials.count != m.instances.data[0]->materials.count)
+            {
+                note(bf::issue_kind::unsupported,
+                     cc::format("fbx: mesh '{}' is placed by nodes with different numbers of material slots, and its "
+                                "faces follow the first's {}, so another instance's extra slots go unused",
+                                mesh.name, m.instances.data[0]->materials.count));
+                break;
+            }
+
+        return result;
     }
 
+    /// Every mesh, on `opts.scheduler` when there is one, and then in file order into `out`.
     void convert_meshes()
     {
-        out.meshes.reserve(isize(scene.meshes.count));
-        for (auto i = size_t(0); i < scene.meshes.count && error.empty(); ++i)
-            convert_mesh(*scene.meshes.data[i]);
+        auto const count = isize(scene.meshes.count);
+
+        // The whole copy is budgeted before any of it is made, against the same limit ufbx parsed under.
+        auto total = i64(0);
+        for (auto i = isize(0); i < count; ++i)
+        {
+            auto const& m = *scene.meshes.data[i];
+            total += copy_bytes(m);
+            if (total > copy_limit)
+            {
+                error = cc::format("fbx: copying the meshes would take more than the {} bytes this read allows, "
+                                   "{} bytes by mesh '{}'",
+                                   copy_limit, total, to_string(m.name));
+                return;
+            }
+        }
+
+        auto results = cc::vector<mesh_result>::create_defaulted(count);
+        if (opts.scheduler == nullptr)
+        {
+            for (auto i = isize(0); i < count; ++i)
+                results[i] = convert_mesh(*scene.meshes.data[i]);
+        }
+        else
+        {
+            auto tasks = cc::vector<cc::shared_async<cc::unit>>();
+            tasks.reserve(count);
+            for (auto i = isize(0); i < count; ++i)
+            {
+                auto task = cc::make_async_lazy(
+                    [this, &results, i]
+                    {
+                        results[i] = convert_mesh(*scene.meshes.data[i]);
+                        return cc::unit{};
+                    });
+                task->schedule_on(*opts.scheduler);
+                tasks.push_back(cc::move(task));
+            }
+            for (auto const& task : tasks)
+                opts.scheduler->participate_until_ready(*task);
+        }
+
+        out.meshes.reserve(count);
+        for (auto& r : results)
+        {
+            for (auto& i : r.issues)
+                out.issues.push_back(cc::move(i));
+            if (error.empty() && !r.error.empty())
+                error = cc::move(r.error);
+            out.meshes.push_back(cc::move(r.mesh));
+        }
     }
 
     // lights
@@ -674,7 +850,17 @@ property const* material::find_property(cc::string_view property_name) const
     for (auto const& p : properties)
         if (p.name == property_name)
             return &p;
+    for (auto const& p : defaults)
+        if (p.name == property_name)
+            return &p;
     return nullptr;
+}
+
+material_index data::material_of(node const& n, mesh const& m, isize face) const
+{
+    auto const slot = isize(m.material_slot_of(face));
+    auto const slots = materials_of(n);
+    return slot >= 0 && slot < slots.size() ? slots[slot] : material_index::invalid;
 }
 
 texture_index material::find_texture(cc::string_view property_name) const
@@ -720,7 +906,8 @@ cc::string data::issue_report() const
 namespace
 {
 /// The one parse every overload reaches; `input_size` is -1 when the source cannot say how long it is.
-cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_size)
+/// Without `geometry`, ufbx skips every mesh's vertex data and the meshes come back named and empty.
+cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_size, bool geometry)
 {
     CC_RECORD_SCOPE("fbx.read");
 
@@ -736,13 +923,22 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
     load.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_PRESERVE;
     load.inherit_mode_handling = UFBX_INHERIT_MODE_HANDLING_PRESERVE;
     load.node_depth_limit = babel::impl::fbx_node_depth_limit;
+    load.ignore_geometry = !geometry;
+
+    auto pool = babel::impl::scheduler_pool{.scheduler = opts.scheduler};
+    if (opts.scheduler != nullptr)
+        load.thread_opts.pool = ufbx_thread_pool{.run_fn = &babel::impl::run_on_scheduler,
+                                                 .wait_fn = &babel::impl::wait_on_scheduler,
+                                                 .user = &pool};
 
     // ufbx allocates a binary array's stated count before it inflates the array, so the ceiling is what makes a crafted count a read error rather than an allocation of whatever it asked for.
     // The allocation count is bounded alongside, since ufbx counts both.
     // One budget, split evenly between ufbx's working memory and the scene it builds, so the two together never pass it.
     // Both at least 1, since ufbx reads 0 as "unlimited" — a tiny budget must refuse rather than lift the ceiling.
-    auto const halved = babel::impl::memory_limit_of(opts.memory_limit, input_size) / 2;
-    auto const half = size_t(halved > 0 ? halved : 1);
+    // Clamped in u64, so a limit past a 32-bit size_t saturates rather than wrapping to 0.
+    auto const limit = babel::impl::memory_limit_of(opts.memory_limit, input_size);
+    auto const halved = limit / 2;
+    auto const half = size_t(cc::min(u64(cc::max(halved, i64(1))), u64(SIZE_MAX)));
     auto const allocations = half / 64 > 0 ? half / 64 : size_t(1);
     load.temp_allocator.memory_limit = half;
     load.result_allocator.memory_limit = half;
@@ -760,8 +956,12 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
         ufbx_format_error(message, sizeof(message), &error);
         return cc::error(cc::format("fbx: {}", cc::string_view(message)));
     }
+    CC_DEFER
+    {
+        ufbx_free_scene(scene);
+    };
 
-    auto converter = babel::impl::fbx_converter{.scene = *scene, .opts = opts};
+    auto converter = babel::impl::fbx_converter{.scene = *scene, .opts = opts, .copy_limit = limit};
     converter.convert_info();
     converter.note_unsupported();
     converter.convert_textures();
@@ -769,7 +969,6 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
     converter.convert_meshes();
     converter.convert_lights();
     converter.convert_nodes();
-    ufbx_free_scene(scene);
 
     if (!converter.error.empty())
         return cc::error(cc::move(converter.error));
@@ -779,18 +978,51 @@ cc::result<data> read_sized(cc::read_stream& in, read_options opts, i64 input_si
 
 cc::result<data> read(cc::read_stream& in, read_options opts)
 {
-    return read_sized(in, opts, -1);
+    return read_sized(in, opts, -1, true);
 }
 
 cc::result<data> read(cc::span<byte const> bytes, read_options opts)
 {
     auto adapter = cc::span_read_stream_adapter(bytes);
     cc::read_stream stream = adapter;
-    return read_sized(stream, opts, bytes.size());
+    return read_sized(stream, opts, bytes.size(), true);
 }
 
 cc::result<data> read(cc::string_view text, read_options opts)
 {
     return read(text.as_bytes(), opts);
+}
+
+cc::result<data> read_structure(cc::read_stream& in, read_options opts)
+{
+    return read_sized(in, opts, -1, false);
+}
+
+cc::result<data> read_structure(cc::span<byte const> bytes, read_options opts)
+{
+    auto adapter = cc::span_read_stream_adapter(bytes);
+    cc::read_stream stream = adapter;
+    return read_sized(stream, opts, bytes.size(), false);
+}
+
+loading read_async(cc::pinned_data<byte const> bytes, read_options opts)
+{
+    auto& scheduler = opts.scheduler != nullptr ? *opts.scheduler : cc::compute_scheduler();
+    opts.scheduler = &scheduler;
+
+    auto const stage = [&](bool geometry)
+    {
+        auto node = cc::make_async_lazy<data>(
+            [bytes, opts, geometry](cc::async_context<data>& ctx) -> cc::async_step_status
+            {
+                auto read = geometry ? babel::fbx::read(bytes.span(), opts) : read_structure(bytes.span(), opts);
+                if (read.has_error())
+                    return ctx.resolve_to_error(cc::async_error::make_error(cc::move(read).error()));
+                return ctx.resolve_to_value(cc::move(read).value());
+            });
+        node->schedule_on(scheduler);
+        return node;
+    };
+    return {.structure = stage(false), .complete = stage(true)};
 }
 } // namespace babel::fbx

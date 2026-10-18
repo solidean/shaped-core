@@ -13,13 +13,14 @@
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/rendering/stand_in_report.hh>
 #include <shaped-viewer/scene/background.hh>
 
 /// What a raster frame writes: the lit image, and the primary hit's G-buffer beside it.
 ///
 /// **This is the seam the hybrid integrator grows from.**
 /// Every target is the layer's slot of the same meaning, in the format the tracer writes its guides in, so a lighting pass after the raster reads either path's alike.
-/// A pixel no surface covers holds the environment in `color`, zero in every G-buffer target, and 1 in `primary_depth`.
+/// A pixel no surface covers holds the environment in `color`, its reprojection in `motion`, 1 in `primary_depth`, and zero in every other target.
 /// Every texture is at one extent and created with `render_target` usage; `module raster`'s `targets` is the same set in SGL.
 struct sv::raster_gbuffer
 {
@@ -96,8 +97,8 @@ struct sv::raster_frame_desc
     /// Where the frame is written, every target at one extent.
     raster_gbuffer targets;
 
-    /// Where set, receives whether a frame that executed drew any permutation through `fallback`.
-    bool* drawn_with_stand_ins = nullptr;
+    /// Where set, receives what a frame that executed drew through `fallback` in place of `permutations`.
+    stand_in_report* stand_ins = nullptr;
 };
 
 /// The raster path: one draw per scene item, through each material permutation's generated pixel stage, into a G-buffer.
@@ -157,6 +158,6 @@ private:
                                                                   material_permutation const* p,
                                                                   bound_resources const& bindless);
 
-    /// Keyed on the permutation's key; dropped by every reload.
+    /// Keyed on the permutation's key and the bindless layout the pipeline was built against; dropped by every reload.
     cc::map<cc::hash128, surface_pipeline> _surfaces;
 };

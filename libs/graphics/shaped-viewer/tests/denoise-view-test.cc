@@ -170,13 +170,8 @@ cc::shared_async<cc::unit> capture_box(sg::context& ctx,
         // Lit by its lamp alone, at a moderate luminance: nothing tone-maps, and a bright box clips to flat white, where the noise would hide.
         scene.add_mesh(lit.enclosure);
         scene.add_mesh(lit.lamp);
-        // No frame budget: it sizes a still frame by the GPU's own timing, so the frame a wavefront capture settles on,
-        // which picks the denoise phase, would be this machine's.
-        scene.settings({.samples_per_pixel = 1,
-                        .mode = mode,
-                        .frame_budget_ms = 0.0f,
-                        .restir = restir,
-                        .reconstruct = {.denoiser = method}});
+        // A capture runs headless, so no frame budget sizes a still frame by this machine's speed.
+        scene.settings({.samples_per_pixel = 1, .mode = mode, .restir = restir, .reconstruct = {.denoiser = method}});
 
         // The capture ends the loop itself; the deadline only turns a hang into a message.
         // Under dev.py's per-binary timeout, so a stall reports rather than being killed — as is the capture's own above.

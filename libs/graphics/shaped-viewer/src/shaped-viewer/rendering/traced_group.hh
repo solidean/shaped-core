@@ -65,7 +65,8 @@ struct sv::wavefront_state
     /// The camera the records were last written under; a frame reuses them only if its `previous_camera` is this one.
     shaders::tracer::camera_record restir_camera = {};
 
-    /// The camera generation the last restart started its paths under, kept by whoever restarts: the next restart takes the one after.
+    /// The camera generation the last restart started its paths under, which `wavefront_routine::execute` advances on every restart.
+    /// 0 until the first, which is how a fresh state is told from one that has run.
     u32 generation = 0;
 
     /// A state for `extent`, every path dead and every tally empty: the first trace through it has to restart.

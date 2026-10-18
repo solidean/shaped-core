@@ -101,7 +101,7 @@ cc::result<std::unique_ptr<vulkan_command_list>> vulkan_context::create_vulkan_c
 sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
-    sg::impl::check_no_live_array_declarations(*cmd);
+    sg::impl::end_array_declarations_at_submit(*cmd);
     CC_ASSERT(cmd->created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in (it cannot span epochs)");
 
@@ -298,6 +298,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
                 // A wait dst stage creates an execution dependency for that stage and later ones only, and the back
                 // buffer's entry transition runs ahead of every stage in the prepended buffer — so the narrower mask
                 // leaves it unordered against the acquire.
+                // issue: bug-sg-pure-layout-transition-empty-scope
                 wait_stages.push_back(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
             }
             u32 const wait_count = u32(waits.size());
@@ -361,6 +362,7 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     cmd->_touched_buffers.clear();
     cmd->_touched_textures.clear();
     cmd->_tentative_initial_transitions.clear();
+    retire_attachment_views(*cmd);
 
     // The pool is in flight until this epoch retires, so hand it to the current epoch.
     // Null the list's handles so its destructor cannot destroy the pool just handed off.
@@ -407,6 +409,7 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
         texture->discard_slot(cmd.slot());
     cmd._touched_textures.clear();
     cmd._tentative_initial_transitions.clear();
+    retire_attachment_views(cmd);
 
     // The recorded readbacks never run, so their futures are cancelled rather than left unsettled.
     // A future nobody ever settles parks its dependents for the life of the process.
@@ -420,6 +423,15 @@ void vulkan_context::reclaim_unsubmitted_command_list(vulkan_command_list& cmd)
     cmd._pre_buffer = VK_NULL_HANDLE;
     _command_list_slots.release(cmd.slot());
     _open_command_lists.fetch_sub(1, std::memory_order_relaxed);
+}
+
+void vulkan_context::retire_attachment_views(vulkan_command_list& cmd)
+{
+    if (cmd._created_attachment_views.empty())
+        return;
+    auto expiring = vulkan_expiring_resource();
+    expiring.image_views = cc::move(cmd._created_attachment_views);
+    schedule_deferred_deletion(cc::move(expiring));
 }
 
 sg::impl::member_track vulkan_command_list::track_buffer_access(vulkan_buffer const& buffer,
@@ -508,6 +520,8 @@ void vulkan_command_list::transition_texture_layout(sg::raw_texture_handle textu
 
 void vulkan_command_list::flush_barriers()
 {
+    _skip_guard.check(_member_writes);
+
     auto global = make_empty_memory_barrier();
     auto has_global = false;
     for (auto const* buffer : _pending_barrier_buffers)
@@ -825,8 +839,6 @@ void vulkan_command_list::copy_buffer_to_texture(sg::raw_buffer_handle src,
     CC_ASSERT(s != nullptr && d != nullptr, "copy resources are not vulkan resources");
     CC_ASSERT(!s->is_expired(), "copy source is a transient buffer used past its epoch (expired)");
     CC_ASSERT(!d->is_expired(), "copy target is a transient texture used past its epoch (expired)");
-    CC_ASSERT(s->usage().has(sg::buffer_usage::copy_src), "copy source buffer must have buffer_usage::copy_src");
-    CC_ASSERT(d->usage().has(sg::texture_usage::copy_dst), "copy target texture must have texture_usage::copy_dst");
 
     track_buffer_access(*s, sg::pipeline_stage_flag::copy, sg::access_flag::copy_read);
     auto const dst_layout = track_texture_access(*d, sg::subresource_range(subresource), sg::pipeline_stage_flag::copy,

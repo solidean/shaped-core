@@ -47,6 +47,10 @@ struct temporal_slot
     /// How many frames the mean holds, which the denoiser's hand-off and the trace's seed read.
     u32 accum_frame = 0;
 
+    /// What the last frame of this accumulation slot's layer bound in place of permutations not compiled, as `stand_in_report::hash`.
+    /// The next frame's image hash folds it in, which is what restarts the image when the set changes, and only then.
+    u64 stand_in_hash = 0;
+
     /// The fewest samples per pixel the mean is known to hold, which is what convergence is asked of.
     ///
     /// A megakernel layer counts `samples_per_pixel` per frame, and a raster layer `sv::accumulation_sample_cap` once a frame lands.
@@ -95,6 +99,9 @@ struct temporal_slot
 
     /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
     u32 scaled_frame = 0;
+
+    /// How many full-size frames of this accumulation slot's layer restarted its mean, which keeps each restart's random sequence apart.
+    u32 restarts = 0;
 
     /// When the image last changed, on the steady clock; a move lasts `render_settings::motion_hold_ms` past it.
     f64 last_change_seconds = -1e30;
@@ -217,6 +224,15 @@ void restart_accumulation(temporal_slot& slot);
 // `temporal_id::accumulation(0)` by hand while the capture path read the layer its plan named, so a view whose trace
 // was not layer 0 reported zero forever and nothing waiting on it ever finished.
 // Every caller asking "how far has this view got" goes through these two.
+
+// -- Pacing a still wavefront frame.
+
+/// The GPU milliseconds the still wavefront layers of a frame under `config` share: none in a headless viewer.
+/// A headless run is a capture or a test, whose image must not depend on how fast the machine is.
+[[nodiscard]] f32 wavefront_budget_of(viewer_config const& config);
+
+/// One still wavefront layer's share of `budget_ms`, split evenly among `still_layers` of them; 0 for no budget.
+[[nodiscard]] f32 wavefront_budget_share(f32 budget_ms, isize still_layers);
 
 /// The fewest samples per pixel across every traced layer of `state`, and 0 when it has none.
 ///

@@ -156,16 +156,7 @@ cc::string nx::write_catch2_discovery_xml(nx::test_registry const& registry)
 
 cc::string nx::write_catch2_results_xml(nx::test_schedule_execution const& execution)
 {
-    // TODO(catch2-xml):
-    // - Emit captured StdOut / StdErr elements (useful for failure diagnostics and hung tests).
-    // - Emit chained .context()/.note()/.dump() as their own <Info> elements; today they ride along inside
-    //   <Expanded>, which reads fine but does not let an IDE separate them from the expression.
-    // - Model partial test-case runs (SECTION re-entry / partNumber) instead of only a merged section tree.
-    // - Add benchmark result reporting hooks (even if unimplemented for now).
-    // - Include run metadata (run name, RNG seed) for reproducibility/debugging.
-    // - Track and emit expectedFailures properly instead of hardcoding 0.
-    // - Fill discovery <Tags> from declarations (tag filtering is a core Catch2 feature).
-    // - Consider emitting explicit "test/section started" progress lines (stderr) for live IDE feedback.
+    // issue: feat-nexus-catch2-xml-fidelity
 
     cc::string out;
     out += "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";

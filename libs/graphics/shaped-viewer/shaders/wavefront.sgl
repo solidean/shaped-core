@@ -6,50 +6,53 @@
 // Group 0 is `tracer.traced` for every kernel.
 // The ones that trace or read a material's tables list `tracer.bindless` at group 1; the counting kernels list `tracer.dispatch` there instead,
 // since a dispatch may not read its arguments from a buffer it binds writable, and only those kernels write them.
+//
+// A kernel of 64 threads reads its index through `tracer.thread_index`, never `id.x`: past 4.19 Mpx a dispatch has a second row of groups.
 require ray_query
-// `tracer.traced`'s acceleration structure needs the pipeline wherever the device grants one, since either half may trace against it.
+// `tracer.traced`'s acceleration structure takes this from the file declaring it, so every kernel listing the group needs it.
+// docs/wavefront.md says why it is not split off for a device with ray queries alone.
 require raytracing_pipeline
 
 use tracer
 
 @compute(64) fun begin(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
-    tracer.wavefront_begin(id.x as uint)
+    tracer.wavefront_begin(tracer.thread_index(id))
 
 @compute(64) fun extend(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
-    tracer.wavefront_extend(id.x as uint)
+    tracer.wavefront_extend(tracer.thread_index(id))
 
 @compute(64) fun segment(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
-    tracer.wavefront_segment(id.x as uint)
+    tracer.wavefront_segment(tracer.thread_index(id))
 
 @compute(64) fun sort(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
-    tracer.wavefront_sort(id.x as uint)
+    tracer.wavefront_sort(tracer.thread_index(id))
 
 @compute(64) fun connect(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
-    tracer.wavefront_connect(id.x as uint)
+    tracer.wavefront_connect(tracer.thread_index(id))
 
 @compute(64) fun finalize(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
-    tracer.wavefront_finalize(id.x as uint)
+    tracer.wavefront_finalize(tracer.thread_index(id))
 
 @compute(64) fun resolve(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
-    tracer.wavefront_resolve(id.x as uint)
+    tracer.wavefront_resolve(tracer.thread_index(id))
 
 @compute(1) fun reset(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
     tracer.wavefront_reset()
 
 @compute(64) fun restir_gather(@thread_id id: int3){tracer.traced, tracer.wavefront_step}:
-    tracer.wavefront_restir_gather(id.x as uint)
+    tracer.wavefront_restir_gather(tracer.thread_index(id))
 
 @compute(64) fun restir_temporal(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
-    tracer.wavefront_restir_temporal(id.x as uint)
+    tracer.wavefront_restir_temporal(tracer.thread_index(id))
 
 @compute(64) fun restir_spatial(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
-    tracer.wavefront_restir_spatial(id.x as uint)
+    tracer.wavefront_restir_spatial(tracer.thread_index(id))
 
 @compute(64) fun restir_di_temporal(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
-    tracer.wavefront_restir_di_temporal(id.x as uint)
+    tracer.wavefront_restir_di_temporal(tracer.thread_index(id))
 
 @compute(64) fun restir_di_spatial(@thread_id id: int3){tracer.traced, tracer.bindless, tracer.wavefront_step}:
-    tracer.wavefront_restir_di_spatial(id.x as uint)
+    tracer.wavefront_restir_di_spatial(tracer.thread_index(id))
 
 @compute(1) fun args_round(@thread_id id: int3){tracer.traced, tracer.dispatch, tracer.wavefront_step}:
     tracer.wavefront_args_round()

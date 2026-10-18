@@ -125,12 +125,12 @@ inline void check_drained(sg::data_future<u32> const& live_paths, cc::string_vie
     return fc;
 }
 
-[[nodiscard]] inline sg::texture_2d make_target(sg::context& ctx)
+[[nodiscard]] inline sg::texture_2d make_target(sg::context& ctx, tg::vec2i size = k_size)
 {
     return ctx.persistent.create_texture_2d(
         {.format = sg::pixel_format::rgba32_float,
-         .width = k_size[0],
-         .height = k_size[1],
+         .width = size[0],
+         .height = size[1],
          .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_src});
 }
 
@@ -259,7 +259,6 @@ inline cc::shared_async<restir_run> run_restir(sg::context& ctx,
                                                                    .restir_radius = reuse.radius,
                                                                    .restir_di = reuse.di,
                                                                    .lights_key = scene.lights.key(emitters, records),
-                                                                   .generation = u32(f) + 1u,
                                                                    .live_paths = &drained});
         auto results = sg::data_future<sv::shaders::tracer::restir_result>();
         auto tallies = sg::data_future<sv::shaders::tracer::pixel_tally>();

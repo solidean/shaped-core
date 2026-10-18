@@ -16,6 +16,7 @@ struct sv::material_type_description
     cc::string shader = {};
     cc::string opacity_attribute = {};
     cc::string opacity_cutoff_attribute = {};
+    cc::string occlusion_attribute = {};
     cc::string emission_color_attribute = {};
     cc::string emission_scale_attribute = {};
 };
@@ -40,7 +41,7 @@ struct sv::material_type_description
 ///                            .shader = "surface.base_color = saturate(tint)\n"
 ///                                      "surface.specular_roughness = 0.8\n"});
 ///
-/// `hash` is the content key over name, signature, fragment, opacity and emission attributes together.
+/// `hash` is the content key over name, signature, fragment and the opacity, cutoff, occlusion and emission attributes together.
 /// Two types built from equal inputs hash equal, so a library registering the same type twice keeps one.
 struct sv::material_type
 {
@@ -65,6 +66,12 @@ struct sv::material_type
     /// It must resolve to a value per instance; one sourced from a texture or a mesh attribute is ignored with a warning.
     cc::string opacity_cutoff_attribute;
 
+    /// Which declared float attribute is baked ambient occlusion, or empty for none.
+    ///
+    /// The raster path multiplies its environment light by it, and nothing else: an analytic light's direct term is not occluded by it.
+    /// The tracer never reads it, since it computes that occlusion itself and a baked term on top would count it twice.
+    cc::string occlusion_attribute;
+
     /// Which declared float3 attribute is this type's emission color, or empty for a type that lights nothing.
     ///
     /// **Only a type declaring it lights the scene**: an instance of it may be sampled as a light.
@@ -78,9 +85,9 @@ struct sv::material_type
 
     cc::hash128 hash;
 
-    /// Hashes `name`, `signature`, `shader`, both opacity attributes and both emission attributes into the content key.
+    /// Hashes `name`, `signature`, `shader`, the opacity, cutoff and occlusion attributes and both emission attributes into the content key.
     /// A signature declaring one name twice asserts: the resolver would have no way to say which declaration a binding meant.
-    /// So does an opacity attribute naming something the signature does not declare as a float.
+    /// So does an opacity, cutoff or occlusion attribute naming something the signature does not declare as a float.
     /// So do an emission color that is not a declared float3, and a fragment of an emitting type that writes `surface.emission_*`.
     [[nodiscard]] static material_type create(material_type_description description);
 

@@ -1,6 +1,7 @@
 #include <babel-data/data/json.hh>
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::unit, cc::min
+#include <clean-core/math/float.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/string/to_string.hh>
@@ -18,14 +19,6 @@ constexpr char k_hex_digits[] = "0123456789abcdef";
 /// The largest integer a double holds exactly: 2^53.
 /// 2^53 itself round-trips; 2^53 + 1 does not, which is where a JSON number stops being able to carry an id.
 constexpr u64 k_exact_integer_max = u64(1) << 53;
-
-/// Finite means the exponent bits are not all ones, which is exact and needs no <cmath>.
-bool is_finite(double v)
-{
-    u64 bits = 0;
-    cc::memcpy(&bits, &v, sizeof(bits));
-    return (bits & 0x7FF0000000000000ull) != 0x7FF0000000000000ull;
-}
 
 /// Decodes one UTF-8 code point, or reports the byte as un-decodable.
 /// Lenient by design: a malformed sequence yields `ok == false` and a length of 1, so the caller can pass the byte on
@@ -237,7 +230,7 @@ void json::writer::impl_close(i32 depth)
 
     auto const lvl = _stack.back();
     auto const ends_compact = _compact_depth == depth;
-    _stack.pop_back();
+    _stack.remove_back();
     if (lvl.has_any)
         this->impl_indent(); // the closing bracket lines up with what opened it, one level out
     this->impl_emit(lvl.is_object ? "}" : "]");
@@ -302,7 +295,7 @@ void json::writer::impl_integer(cc::string_view digits, u64 magnitude)
 
 void json::writer::impl_double(double v, cc::float_notation notation, int precision)
 {
-    if (!is_finite(v))
+    if (!cc::is_finite(v))
     {
         ++_report.non_finite;
 
@@ -315,7 +308,7 @@ void json::writer::impl_double(double v, cc::float_notation notation, int precis
             this->impl_emit("null");
             return;
         case non_finite_policy::string:
-            this->impl_emit(v != v ? "\"NaN\"" : v > 0 ? "\"Infinity\"" : "\"-Infinity\"");
+            this->impl_emit(cc::is_nan(v) ? "\"NaN\"" : v > 0 ? "\"Infinity\"" : "\"-Infinity\"");
             return;
         }
     }
@@ -325,7 +318,7 @@ void json::writer::impl_double(double v, cc::float_notation notation, int precis
 
 void json::writer::impl_float(float v, cc::float_notation notation, int precision)
 {
-    if (!is_finite(double(v)))
+    if (!cc::is_finite(v))
     {
         this->impl_double(double(v), notation, precision); // one policy, one place, counted there
         return;

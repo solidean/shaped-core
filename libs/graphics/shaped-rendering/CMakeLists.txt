@@ -410,7 +410,7 @@ if(SC_BUILD_TESTS)
     endif()
 
     # The tests held to dx12 and vulkan, which a build with DXC has and no other: NRD's and FSR's HLSL need DXC.
-    # The SGL routines among them are listed here until webgpu and metal are held to them too (docs/TODO.md).
+    # The SGL routines among them are listed here until webgpu and metal are held to them too; issue: chore-sr-sgl-routines-on-webgpu-and-metal
     if(_sr_test_backends AND SC_HAS_DXC_COMPILER)
         target_sources(shaped-rendering-test PRIVATE
             tests/box-filter-mipmap-test.cc
@@ -420,6 +420,7 @@ if(SC_BUILD_TESTS)
             tests/fsr-test.cc
             tests/mix-test.cc
             tests/nrd-test.cc
+            tests/svgf-reference-test.cc
             tests/oidn-test.cc
             tests/nn-conv-test.cc
             tests/nn-ops-test.cc

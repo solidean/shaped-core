@@ -32,6 +32,8 @@ struct sgl::check::flat_builder
     /// What every node added from here on is attributed to.
     origin from;
     ast::range_of<call_site> inlined_through;
+    /// The names of `e.labels`, which are unique among the labels alone.
+    name_mint label_names;
 
     /// An entry point with its parameter as `locals[0]`, a root label, and every module-level name taken in the mint.
     [[nodiscard]] static flat_builder create(checked_module const& m, signature const& s);

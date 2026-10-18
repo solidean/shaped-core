@@ -20,7 +20,7 @@ shaped-viewer is built on [shaped-rendering](../../shaped-rendering/readme.md), 
 - [plans/restir-gi](plans/restir-gi.md) — the interactive mode's traced lighting: ReSTIR GI and ReSTIR DI on the wavefront's stages, with the user's decisions.
   A plan being built: G0 to G2, D0 and D1 have landed.
 - [coding-guidelines](coding-guidelines.md) — sv-specific conventions (thin for now) on top of the repo-wide ones.
-- [TODO](TODO.md) — running list of known follow-ups.
+- [issues](issues/) — what is broken, planned or open, one file each; `uv run dev.py issues list --in libs/graphics/shaped-viewer` lists them.
 
 ## Conventions
 

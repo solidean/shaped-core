@@ -53,6 +53,7 @@ enum class sg::backend::dx12::dx12_message_severity : sg::u8
 enum class sg::backend::dx12::dx12_adapter : sg::u8
 {
     /// A hardware GPU, and an error where the host has none.
+    /// No adapter of Microsoft's vendor id counts, even one DXGI does not flag as software: that is WARP.
     hardware,
 
     /// The WARP software adapter, present on every Windows host, which is what makes a headless run possible.
@@ -107,7 +108,7 @@ struct sg::backend::dx12::dx12_config
     /// Test-only in intent.
     /// It changes nothing about how the backend waits internally.
     /// It makes sg's own internal waits assert, which is how the suite proves sg and its callers get by awaiting.
-    /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
+    /// The inline rings' back-pressure still parks when a ring is full; issue: feat-sg-never-block-backend-waits lists those waits.
     sg::execution_model execution = sg::execution_model::may_block;
 
     /// Whether this context reports no ray tracing whatever the device has: neither `ray_query` nor `raytracing_pipeline`, and `cmd.raytracing.is_supported()` false.
@@ -148,6 +149,8 @@ struct sg::backend::dx12::dx12_config
     int sampler_heap_capacity = 512;
 
     /// Descriptors in the non-shader-visible RTV / DSV heaps render-target / depth-stencil views are created into.
+    /// An open command list holds as many RTVs as the most color targets one of its scopes bound, and one DSV.
+    /// So these bound how many command lists that render can be open at once — 32 lists of eight targets at the default.
     int rtv_heap_capacity = 256;
     int dsv_heap_capacity = 256;
 };

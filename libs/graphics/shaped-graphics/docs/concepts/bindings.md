@@ -163,17 +163,19 @@ Three rules distinguish an array binding from a scalar one:
 - **Access is never inferred.**
   Which elements a shader indexes, and how, cannot be read from the binding, so array bindings skip the automatic hazard tracking scalar bindings get.
   The caller declares the touched elements via `declare_array_buffer_access` / `declare_array_texture_access`.
+  Each takes the array as the handle its shader package generates, `<group>::arrays::<member>`, or by reflection name for a layout no package generates.
+  A name no layout the context holds carries, in that family, asserts at the declare.
   Each returns an `sg::array_access_declaration`, in force for every op of its bind point until the value is withdrawn or destroyed.
   The compute, raytracing and raster scopes each carry the pair.
   An element is tracked at the stages the pipeline's code touches the array in, as a scalar binding is.
   A pipeline with no footprint — only a hand-supplied shader blob — has its elements tracked at every stage of the op; one that wants narrower barriers supplies a footprint.
   A declaration belongs to the bind point it was made on: a draw never meets a compute declaration, and a raster one ends with its rendering scope.
-  Once an op has applied one, a later op that reads the array the same way skips the element work, until something writes an element.
+  Once an op has applied one, a later op that reads the array at stages and access already applied skips the element work.
+  The write counter behind that is per list: a write to any resource any application tracked ends every application, and an op at new stages or access re-applies.
   [barriers](barriers.md) has when.
 - **Every array the pipeline's code indexes must have a live declaration at each dispatch or draw.**
   A missing one logs an error and costs a global barrier over every element, since a hot-reloaded shader can start indexing an array at any frame.
   An empty element span says "unused" for every op it lives through, and an array the code never indexes needs no declaration at all.
-  A declaration that no op ever meets with a bound group holding its array asserts when it ends, which is where a misspelled name is caught.
 
 Element resources are still kept alive by the group, exactly like scalar bindings.
 Arrays of samplers, constants buffers or acceleration structures are not supported.
@@ -237,6 +239,10 @@ There are two ways in, reached through scopes as elsewhere in sg, and **which on
   It is valid **only for the epoch it was acquired in**, so re-acquire the working set every epoch.
   When the array is full, every index not acquired this epoch is reclaimed at once — the mint dirties the group and forces a snapshot anyway, so there is nothing to save by evicting less.
   If every index was acquired this epoch, the working set exceeds the binding's count and it asserts.
+- **`transient.release(view)` frees an element its owner will not acquire again**, and with it the view and the resource it keeps alive — what a scene unload calls.
+  It frees at once if no index from this epoch names the element, otherwise at the first acquire or release of a later epoch.
+  An array that sees neither after that keeps the deferred views until it is destroyed.
+  It mutates the staging group, so it takes the same owner and lock as acquire.
 - **`persistent.acquire(view)` returns a shared `bindless_element_handle`** whose index stays true for as long as any copy of the handle lives.
   That is the only index that may be written into GPU memory outliving the epoch — a material buffer above all.
   The refcount *is* the pin, so acquiring a view already held returns the same handle.

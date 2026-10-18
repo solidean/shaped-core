@@ -67,7 +67,7 @@ public:
     /// Filters `in.color`, a fresh single-frame estimate, into `in.output`, carrying `history` to the next call.
     ///
     /// `in.output` must match `in.color`'s extent, since SVGF does not upscale.
-    /// It carries `image` usage, in a four-channel float or normalized format the device writes as an image.
+    /// It carries `image` usage, in a float or normalized format the device writes as an image.
     /// The normal, depth and motion guides are required, and asserted on.
     /// `pending` while the shaders compile, `failed` after a compile that did not build.
     [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,

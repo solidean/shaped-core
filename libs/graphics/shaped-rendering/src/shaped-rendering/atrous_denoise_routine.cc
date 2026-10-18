@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
+#include <shaped-rendering/impl/build_failure.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <sr_sgl_shaders.hh>
 #include <typed-geometry/scalar/scalar.hh>
@@ -80,6 +81,7 @@ cc::shared_async<cc::unit> atrous_denoise_routine::init(sg::routine_init_scope s
         co_await cc::async_settled(p->pipeline);
         if (p->pipeline->try_value() == nullptr)
         {
+            impl::log_build_failure(p->pipeline, "atrous", p == &scratch ? k_scratch_format : params());
             fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
             co_return;
         }
@@ -108,6 +110,10 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     CC_ASSERT(is_set(in.output), "a denoise call needs an output texture");
     CC_ASSERT(in.output.raw() != in.color.raw(), "à-trous needs an output texture other than its input");
     CC_ASSERT(extent_of(in.output) == extent_of(in.color), "à-trous does not upscale: output and input extents differ");
+    CC_ASSERT(!is_set(in.sample_counts) || extent_of(in.sample_counts) == extent_of(in.color),
+              "per-pixel sample counts must cover the input extent");
+    CC_ASSERT(!is_set(in.sample_counts) || !sg::is_integer_format(in.sample_counts.format()),
+              "per-pixel sample counts must be a float or normalized format, which the shader reads as float4");
     CC_ASSERT(options.iterations >= 1, "à-trous needs at least one pass");
 
     // Read-only: execute touches nothing init did not publish, and the ping-pong images are the caller's.

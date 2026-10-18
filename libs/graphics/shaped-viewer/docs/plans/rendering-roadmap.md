@@ -11,6 +11,16 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
   Its primary-hit G-buffer lands in the guide slots every frame, which is what a later lighting pass reads.
   Left in it: quadric batches, antialiasing, transparency, lights seen by the camera, and a depth prepass.
 
+## The intended default
+
+The wavefront tracer is the default today, and very likely not for good.
+The intended default is the hybrid: rasterized primaries, lit by the megakernel, which is the cheaper tracer on the shallow paths lighting needs.
+The wavefront is meant to become the best-quality mode, the one an image converges in where quality matters more than the frame rate.
+Neither has landed; the items below are the way there, and [wavefront.md](../wavefront.md#which-tracer-is-the-default) keeps the reasoning.
+
+**The raster mode is meant to look good in its own right**, not only to stand in.
+Today it is unshadowed and reflects only the SH environment; a device without ray tracing sees exactly that, and the hybrid builds on it.
+
 ## Decided for the raster path and the hybrid
 
 - **Quality over cost for what is not opaque.**
@@ -20,7 +30,7 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
   Interactively the hybrid is the mode: rasterized primaries, lighting by hardware ray tracing or by the ray-query polyfill where there is none.
   Done for raster: a raster layer draws on a device without ray tracing, building no acceleration structure, and only a traced layer acquires the tracer.
   **The polyfill exists on webgpu alone**, where the wavefront is out of scope, so a dx12 or vulkan device without ray tracing has none.
-  Bringing it there is an sg item ([sg's TODO](../../../shaped-graphics/docs/TODO.md)); until it lands, the hybrid there falls back to the raster path's direct lighting.
+  Bringing it there is an sg item (`feat-sg-ray-query-polyfill-dx12-vulkan`); until it lands, the hybrid there falls back to the raster path's direct lighting.
 - **A G-buffer holding all of OpenPBR is too much.**
   A visibility buffer is the approach to try first — instance and primitive per pixel, the hit rebuilt where it is lit, which is the wavefront's own hit record.
   Its cost is real, so it is the first candidate rather than the decision; the design review weighs it.

@@ -12,7 +12,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-// 0 = the text was printed, 1 = bad usage or an IO error, 2 = the source has errors, which were printed.
+// 0 = the text was printed, its warnings on stderr; 1 = bad usage or an IO error; 2 = the source has errors, which were printed.
 constexpr int exit_ok = 0;
 constexpr int exit_usage = 1;
 constexpr int exit_errors = 2;
@@ -28,8 +28,8 @@ COMMAND("emit")
     auto option_arguments = cc::vector<cc::string>();
     auto module_dirs = cc::vector<cc::string>();
     auto args = nx::args({.name = "sgl emit",
-                          .description = "Compiles one entry point of an SGL file and prints the target text, "
-                                         "or the diagnostics that kept it from being written."});
+                          .description = "Compiles one entry point of an SGL file and prints the target text, with its "
+                                         "warnings on stderr, or the diagnostics that kept it from being written."});
     args.positional("FILE", path, {.desc = "the SGL source"});
     args.arg({"entry"}, entry, {.desc = "the entry point, by name", .metavar = "NAME", .required = true});
     args.arg({"target"}, target_name, {.desc = "hlsl-dx12, hlsl-vulkan, wgsl or msl", .metavar = "TARGET"});
@@ -89,6 +89,8 @@ COMMAND("emit")
         cc::flush();
         return exit_errors;
     }
+    for (auto const& w : text.value().warnings)
+        cc::eprintln("{}", w);
     cc::print(text.value().text);
     cc::flush();
     return exit_ok;

@@ -42,14 +42,16 @@ fun mirroring_of(inst: scene.instance) -> float:
 
 /// Where world point `p` lands through `cam`, as the clip position of the pinhole `scene.camera_ray_offset` traces through.
 ///
-/// `w` is the view depth along the camera's forward axis, and `z / w` is `1 - near / w`, the depth `sv::matrices_of` builds and the tracer writes.
+/// `w` is the view depth along the camera's forward axis, and `z / w` is `near / w`: reversed, 1 at the near plane and 0 at infinity.
+/// A float's spacing shrinks toward 0 as fast as `near / w` does, so the depth test resolves a far surface as finely as a near one.
+/// That is the raster pass's own depth alone; `primary_depth` stays `1 - near / w`, the depth `sv::matrices_of` builds and the tracer writes.
 /// Up is up in clip space, which is the tracer's image read top row first.
 fun project(cam: scene.camera, p: float3, near: float) -> hpos4:
     let offset = p - cam.position
     let depth = dot(offset, normalize(cam.forward))
     let x = dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled)
     let y = dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)
-    return hpos4(x, y, depth - near, depth)
+    return hpos4(x, y, near, depth)
 
 /// Corner `vertex % 3` of triangle `vertex / 3` of the draw's instance, pulled out of the bindless tables.
 ///
@@ -90,13 +92,14 @@ fun pixel_context(p: varyings){drawn, tracer.bindless} -> material.shading_conte
     let indices = inst.indices as int
     return material.make_context(inst, tracer.bindless.buffers[nonuniform indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
 
-/// Whether a cutout material removes this pixel: below `cutoff` where it is above 0, glTF's MASK.
+/// Whether a cutout material removes this pixel, read through `tracer.instance_opacity` as the tracer's any-hit reads it.
 ///
+/// Where the type's cutoff is above 0 that is glTF's MASK, and the pixel is cut exactly where a hit is.
 /// A cutoff of 0 is coverage, which a tracer draws stochastically and converges to a partial surface.
 /// One raster frame cannot, so coverage below one half is cut and the rest kept.
-fun is_cut(opacity: float, cutoff: float) -> bool:
-    let threshold = if cutoff > 0.0 => cutoff else 0.5
-    return opacity < threshold
+fun is_cut(p: varyings, ctx: material.shading_context){drawn, tracer.bindless} -> bool:
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+    return tracer.instance_opacity(inst, ctx) < 0.5
 
 /// Paints every decal reaching `p` into `surface`'s base, as `tracer.apply_decals` paints a hit.
 fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){drawn, slug.tables}:
@@ -159,7 +162,7 @@ fun direct_light(l: scene.light, b: openpbr.bsdf, f: openpbr.frame, n: float3, w
 /// The environment's light at a surface, unoccluded: the SH's irradiance through the diffuse albedo, and its radiance about the mirror direction through the specular one.
 ///
 /// An approximation where the tracer integrates: the diffuse half is exact for a Lambertian base, and the specular half blurs toward the irradiance as the surface roughens.
-/// Nothing shadows it, so a closed room lit by its environment is lit inside as if open.
+/// Nothing shadows it but the occlusion an asset baked, which `shade` multiplies in.
 fun ambient(surface: openpbr.surface, n: float3, v: float3){drawn} -> float3:
     let sh = background_sh()
     let diffuse = scene.background_irradiance(sh, n) / pt.pi
@@ -171,7 +174,8 @@ fun ambient(surface: openpbr.surface, n: float3, v: float3){drawn} -> float3:
 ///
 /// The surface is described as `tracer.shade_triangle` describes a hit: the flat face normal of the triangle's own corners, turned toward the viewer, and the material's authored frame.
 /// `supplied_tangent_frame` is whether that frame was authored rather than defaulted, which the generated material knows.
-fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool){drawn, tracer.bindless, slug.tables} -> targets:
+/// `occlusion` is the material's baked ambient occlusion, 1 for none: it darkens the environment's light and no analytic light's.
+fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){drawn, tracer.bindless, slug.tables} -> targets:
     let f = drawn.frame[0]
     let cam = scene.camera(..f.camera)
     let inst = scene.instance(..drawn.instances[p.instance as int])
@@ -209,7 +213,7 @@ fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surfac
     if wo_local.z > 0.0:
         for i in 0 ..< (f.light_count as int):
             color += direct_light(scene.light(..drawn.lights[i]), b, shading, n, wo_local, p.world)
-        color += ambient(surface, shading.n, v)
+        color += ambient(surface, shading.n, v) * occlusion
 
     let prev = scene.camera(..f.previous_camera)
     let motion = float2(p.position.x, p.position.y) - scene.camera_project(prev, p.world - prev.position, f.size)

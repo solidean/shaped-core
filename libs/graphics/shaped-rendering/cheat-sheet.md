@@ -94,6 +94,12 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
             k.modifiers;   // sr::key_modifiers bit set; has_all(k.modifiers, ctrl | shift)
             k.is_down;  k.is_repeat;
         },
+        [&](sr::mouse_move_event const& m)
+        {
+            m.delta;                              // tg::vec2f — what drives a camera; m.cursor_pos is window-relative
+            m.is_held(sr::mouse_button::right);   // buttons held during the motion: END A DRAG ON IT TOO,
+                                                  // a release outside an uncaptured window never arrives
+        },
         [](auto const&) {});           // catch-all; SPELL ALL FIVE instead and a new event kind fails to compile here
 
     e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel too) — for predicates, and loops that `continue`
@@ -112,6 +118,7 @@ win->start_text_input();              // begin text_events + IME for this window
   next keystroke, and a paste arrives as one `text_event`.
 - **Text input is off until `start_text_input()`**, because while it is on the OS may swallow keystrokes to compose.
 - **Wheel deltas are fractional** on trackpads; the platform's inverted-scroll flag is already applied.
+- **A double-click is `mouse_button_event::clicks == 2`** on the second press, timed and spaced by the OS's own setting — never by a timer of your own.
 - **Positions are `tg::pos2f`, motions `tg::vec2f`** — `pos - pos` gives the `vec` between them.
   tg has no `.x`/`.y`: index with `p[0]` / `p[1]`.
 - **`input_event::payload` is a `cc::variant`**, and the `try_as_*` accessors above are one-liners over its `try_as<T>()`.
@@ -390,10 +397,14 @@ BC1, BC3, BC4, BC5 and BC7 encoded on the GPU, a mip level per call; the target'
 ```cpp
 #include <shaped-rendering/compression/bc_compress_routine.hh>
 sr::bc_compress_routine::execute(cmd, source, target, level);    // encodes `level` of source into the same level of target
+sr::bc_compress_routine::execute(cmd, source, target, level, {.bc1_alpha = sr::bc1_alpha::cut_out}); // BC1 is opaque unless asked
+sr::bc_compress_routine::execute(cmd, normals, bc5, level, {.bc5_range = sr::bc_source_range::minus_one_to_one});
+// a -1..1 source: into bc5_rg_unorm as n * 0.5 + 0.5 (the sampler's caller undoes it), into bc5_rg_snorm as is; bc4_range likewise
 sr::bc_compress_routine::target_for(source_format, family);      // the family (bc1/bc3/bc7) in sRGB where the source is sRGB
 sr::bc_compress_routine::can_compress(ctx, source_format, target); // bool — BC on the device, a supported target, sRGB-ness agreed
 sr::bc_compress_routine::prewarm(ctx, family);                   // keyed by the family's _unorm format: one pipeline each
-// bc1 RGB + 1-bit alpha (under half alpha cuts out) | bc3 RGBA, smooth alpha | bc4 red | bc5 red, green | bc7 RGBA, the best
+// bc1 RGB, opaque by default or 1-bit alpha with cut_out | bc3 RGBA, smooth alpha | bc4 red | bc5 red, green | bc7 RGBA, the best
+// bc4 and bc5 come unsigned or signed (_snorm); no integer or depth source compresses, and can_compress says so
 // measured by the hardware decoder: bc7 ~40 dB, bc1 ~36, bc4 and bc5 ~49 on a smooth gradient
 // a level goes through a TRANSIENT buffer of blocks and cmd.copy.buffer_to_texture: 16 MiB for a 4096^2 BC7 top level
 // an sRGB source is encoded as the bytes it stores; BC4 and BC5 have no sRGB form, so their source must be linear
@@ -444,7 +455,7 @@ sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal,
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::oidn_denoise_routine::execute(cmd, inputs, history, {.network = sr::oidn_network_size::small})  // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP base, small ~1.6x faster; never `automatic`
 sr::fsr_upscale_routine::execute(cmd, {.color, .depth, .motion, .jitter, .output}, upscale_history, {.sharpening = true})  // -> sr::upscale_outcome; a CLEAN image only
-sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = mix(dst, src, w) IN PLACE, w in [0,1]; false while compiling
+sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = mix(dst, src, w) IN PLACE, w in [0,1]; false while compiling, and after a failed compile, which logs why
 sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the destination's format: one compile each
 ```
 
@@ -456,14 +467,14 @@ sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the desti
   One per view or layer, dropped with it.
 - **The front's readiness gates nothing.** Acquiring it registers it, and its init prewarms every supported member.
   `sr::reconstruct_routine::prewarm(ctx, output_format)` at startup starts their compiles before the first call.
-- **The native members are keyed by the output's format**, which their last pass writes: four channels, float or normalized.
+- **The native members are keyed by the output's format**, which their last pass writes: any float or normalized format the device writes as an image.
   A new output format is a compile of its own, so its first call reports `pending`.
 - **`fresh_samples` lives in the settings, not beside the call**, so planning a frame and running it read one answer.
   False (the default) is a converging mean and picks among the spatial members; true is this frame's own samples plus motion vectors.
 - **A denoised image keeps `color`'s alpha.** Every denoise member writes rgb and copies the alpha; an upscaled image's alpha is the upscaler's.
 - **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream, and FSR about 80 MiB for 720p in, 1080p out.
   Drop the history of a view nobody is looking at.
-- **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — see docs/TODO.md.
+- **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — issue: bug-warp-fsr-shading-change-pyramid-crash.
 - **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
   knob live, a scale selector, and the raw image beside the reconstructed one.
 

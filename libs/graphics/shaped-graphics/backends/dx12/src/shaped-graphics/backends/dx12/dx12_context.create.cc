@@ -2,6 +2,7 @@
 
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/string/conversion.hh> // utf16_to_utf8 — DXGI_ADAPTER_DESC1::Description is wide
 #include <clean-core/string/format.hh>
@@ -41,6 +42,17 @@ struct adapter_search_result
     HRESULT device_loss_hr = S_OK;
 };
 
+constexpr UINT k_microsoft_vendor_id = 0x1414;
+
+/// Whether an adapter is WARP rather than a GPU — which DXGI's software flag alone does not say.
+/// Microsoft ships no GPU, and a GPU-less Windows on ARM host enumerates the Basic Render Driver (0x1414:0x008c)
+/// twice, once WITHOUT the flag: taken for hardware, it runs every "hardware" test on a WARP that fastfails there.
+/// docs/bugs-external/warp-arm64-pac-fastfail/readme.md has the evidence.
+[[nodiscard]] bool is_software_adapter(DXGI_ADAPTER_DESC1 const& desc)
+{
+    return (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || desc.VendorId == k_microsoft_vendor_id;
+}
+
 /// The first hardware adapter that supports D3D12, into `out`.
 /// WARP is skipped here, so falling back to it is always the caller's explicit choice.
 ///
@@ -54,7 +66,7 @@ adapter_search_result find_hardware_adapter(IDXGIFactory4* factory, ComPtr<IDXGI
     {
         DXGI_ADAPTER_DESC1 ad = {};
         out->GetDesc1(&ad);
-        if (ad.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+        if (is_software_adapter(ad))
             continue;
 
         // A null out-param probes D3D12 support (FL 11_0) without creating a device.
@@ -125,7 +137,7 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
 
     info.vendor_id = u32(desc.VendorId);
     info.device_id = u32(desc.DeviceId);
-    info.is_software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+    info.is_software = is_software_adapter(desc);
 
     // What the board has, which is NOT the budget this process gets — see adapter_info.
     // Zero is a real answer for an integrated GPU, so it is reported rather than treated as absent.
@@ -137,6 +149,30 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
                                          u16(umd.LowPart >> 16), u16(umd.LowPart & 0xFFFF));
 
     return info;
+}
+
+/// The shader model every shader sg runs is compiled for, which is DXC's default profile and what SGL's HLSL relies on.
+constexpr auto k_required_shader_model = D3D_SHADER_MODEL_6_8;
+
+/// An error naming the adapter and its driver when the device cannot run shaders of `k_required_shader_model`.
+///
+/// Checked at creation because the driver otherwise refuses each pipeline with a bare E_INVALIDARG.
+/// A runtime that does not know the model fails the query itself, which is the same answer.
+cc::optional<cc::string> check_shader_model(ID3D12Device* device, IDXGIAdapter1* adapter)
+{
+    auto data = D3D12_FEATURE_DATA_SHADER_MODEL{.HighestShaderModel = k_required_shader_model};
+    auto const queried = SUCCEEDED(device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &data, sizeof(data)));
+    if (queried && data.HighestShaderModel >= k_required_shader_model)
+        return {};
+
+    auto const info = describe_adapter(adapter);
+    auto const driver = info.driver_version.empty() ? cc::string("unknown") : info.driver_version;
+    auto const reached = queried ? cc::format("supports shader model {}.{} at most", int(data.HighestShaderModel) >> 4,
+                                              int(data.HighestShaderModel) & 0xF)
+                                 : cc::string("does not report shader model support");
+    return cc::format("the dx12 adapter '{}' (driver {}) {}, and sg compiles every shader for shader model {}.{}; "
+                      "updating the GPU driver usually raises it",
+                      info.name, driver, reached, int(k_required_shader_model) >> 4, int(k_required_shader_model) & 0xF);
 }
 
 dx12_message_severity to_sg_severity(D3D12_MESSAGE_SEVERITY severity)
@@ -415,6 +451,9 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
         return dx12_error(hr, "D3D12CreateDevice failed");
     process_has_device() = true;
 
+    if (auto const refusal = check_shader_model(device.Get(), adapter.Get()); refusal.has_value())
+        return cc::error(refusal.value());
+
     D3D12_COMMAND_QUEUE_DESC queue_desc = {};
     queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     ComPtr<ID3D12CommandQueue> queue;
@@ -482,7 +521,8 @@ cc::result<context_handle> create_dx12_context(backend::dx12::dx12_config const&
                                                        .NumArgumentDescs = 1,
                                                        .pArgumentDescs = &argument};
         auto const hr = ctx->_device->CreateCommandSignature(&desc, nullptr, IID_PPV_ARGS(&ctx->_dispatch_signature));
-        CC_ASSERT(SUCCEEDED(hr), "creating the indirect dispatch command signature failed");
+        if (FAILED(hr))
+            return dx12_error(hr, "ID3D12Device::CreateCommandSignature failed (indirect dispatch)");
     }
 
     ctx->_epoch_fence = cc::move(epoch_fence);

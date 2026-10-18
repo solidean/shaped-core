@@ -144,7 +144,6 @@ protected:
                                                                    cc::span<array_texture_access const> elements) = 0;
 
     // Ends declaration `id`, which is live: the token guarantees it.
-    // One that never met its array asserts.
     virtual void withdraw_array_declaration(u32 id) = 0;
 
     // The id a backend's next array declaration takes, unique within this list.
@@ -153,7 +152,7 @@ protected:
     // Raster rendering scope (reached through cmd.raster).
     // begin_rendering transitions each target to its render-target / depth-stencil layout, binds the
     // color/depth targets to the output-merger, and applies each target's clear / discard.
-    // end_rendering closes the scope and releases its RTV/DSV descriptors.
+    // end_rendering closes the scope.
     // Calls must be balanced.
     virtual void raster_begin_rendering(rendering_info const& info) = 0;
     virtual void raster_end_rendering() = 0;
@@ -257,10 +256,17 @@ protected:
     void note_render_pass_split(cc::string_view cause, split_remedy remedy = split_remedy::record_outside_scope);
 
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
-    friend void impl::check_no_live_array_declarations(command_list const& cmd);
+    friend void impl::end_array_declarations_at_submit(command_list& cmd);
 
     /// Wraps declaration `id`, just made on the compute or the raster bind point, in the value that keeps it in force.
     [[nodiscard]] array_access_declaration adopt_array_declaration(u32 id, bool raster);
+
+    /// The array a by-name declaration names, which must be a buffer array of some layout the context holds.
+    /// Where a misspelled name is caught, at the declare, whatever the ops after it bind.
+    [[nodiscard]] buffer_array_binding named_buffer_array(cc::string_view name);
+
+    /// The texture form: `name` must be a texture array of some layout the context holds.
+    [[nodiscard]] texture_array_binding named_texture_array(cc::string_view name);
 
 private:
     friend class array_access_declaration;
@@ -268,7 +274,7 @@ private:
     /// Ends `link`'s declaration from its value's side: withdrawn, or destroyed.
     void end_array_declaration(impl::array_declaration_link& link);
 
-    /// Ends every live declaration from this list's side, silently: the raster ones at a rendering scope's end, or all at a drop.
+    /// Ends every live declaration from this list's side: the raster ones at a rendering scope's end, or all at a submit or a drop.
     void end_array_declarations(bool raster_only);
 
     // Every declaration made on this list and still in force, each shared with its value.

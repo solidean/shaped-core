@@ -3,6 +3,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/impl/build_failure.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
 #include <sr_sgl_shaders.hh>
@@ -100,6 +101,7 @@ cc::shared_async<cc::unit> svgf_denoise_routine::init(sg::routine_init_scope sco
         co_await cc::async_settled(p->pipeline);
         if (p->pipeline->try_value() == nullptr)
         {
+            impl::log_build_failure(p->pipeline, "svgf", p == &atrous_output ? params() : k_history_format);
             fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
             co_return;
         }

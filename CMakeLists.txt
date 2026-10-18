@@ -15,6 +15,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # clang jobs. Turn this back on with the first `import`, and make sure the scanner matches the compiler.
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
+# Repo-wide build configuration helpers live in tools/cmake/.
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
+
+# Every repo-wide flag below goes through sc_build_options(), which also records it on shaped-core::build-config.
+# clean-core links that target PUBLIC, so a project consuming shaped-core via add_subdirectory gets the same flags — see the module.
+include(BuildConfig)
+
 # Build gating. Both default ON for a top-level build (the normal dev flow) and OFF when
 # shaped-core is consumed via add_subdirectory, where a dependent wants the libraries but not
 # our test and tool binaries. Must precede add_subdirectory(extern): the tools' externals gate
@@ -108,9 +115,9 @@ option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one pe
 option(SC_FRAME_POINTERS "Keep frame pointers, so stacks can be captured by chasing the chain" ON)
 if (SC_FRAME_POINTERS)
     if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND MSVC)
-        add_compile_options(/Oy-) # clang-cl spells it the MSVC way and rejects -fno-omit-frame-pointer
+        sc_build_options(COMPILE /Oy-) # clang-cl spells it the MSVC way and rejects -fno-omit-frame-pointer
     elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        add_compile_options(-fno-omit-frame-pointer)
+        sc_build_options(COMPILE -fno-omit-frame-pointer)
     endif()
 endif()
 
@@ -143,8 +150,6 @@ set_property(CACHE SC_X64_LEVEL PROPERTY STRINGS v1 v2 v3 v4)
 # below it are instantiated in the dispatching target itself. See libs/base/clean-simd/src/clean-simd/dispatch.hh.
 set(SC_SIMD_KERNELS "auto" CACHE STRING "clean-simd kernels above SC_X64_LEVEL compiled for dispatch: auto, a list, or empty")
 
-# Repo-wide build configuration helpers live in tools/cmake/.
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 
 # Apply repo-wide build configuration before add_subdirectory so every target is
 # instrumented. Each is a no-op unless its driving option/preset is active.
@@ -173,7 +178,7 @@ include(SourceFingerprint) # sc_add_source_fingerprint — a cache key that move
 # short-key hash path was ~5-11x slower under /Ob1). Promote to /Ob2 so RelWithDebInfo matches Release's
 # inlining; /Zi debug info and our CC_ASSERTs are untouched. Applied to every target (C and C++) defined below.
 if (MSVC)
-    add_compile_options($<$<CONFIG:RelWithDebInfo>:/Ob2>)
+    sc_build_options(COMPILE $<$<CONFIG:RelWithDebInfo>:/Ob2>)
 endif()
 
 # Vendored third-party dependencies (mimalloc, xxHash, ...). Defined before the
@@ -312,17 +317,29 @@ if(SC_BUILD_EXAMPLES AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists
     add_subdirectory(examples)
 endif()
 
-# Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
-# one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
-sc_finalize_web_runners()
+# The end-of-configure registries: each collects what every target declared, so it runs once all of them exist.
+function(sc_finalize_build)
+    # Generate the browser test-runner pages once every *-web module has been registered (Emscripten only):
+    # one page per library plus the aggregate tests-web.html. See cmake/NexusWebRunner.cmake.
+    sc_finalize_web_runners()
 
-# Which executables are nexus binaries and what they carry, for dev.py. See libs/base/nexus/cmake/NexusBinaries.cmake.
-sc_write_nexus_binary_manifest()
+    # Which executables are nexus binaries and what they carry, for dev.py. See libs/base/nexus/cmake/NexusBinaries.cmake.
+    sc_write_nexus_binary_manifest()
 
-# Check that every declared shader package found the shaped-shader-library target. See
-# libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
-sc_finalize_shader_packages()
+    # Check that every declared shader package found the shaped-shader-library target. See
+    # libs/graphics/shaped-shader-library/cmake/ShaderPackage.cmake.
+    sc_finalize_shader_packages()
 
-# Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
-# Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
-sc_finalize_pch()
+    # Apply the recorded sc_target_pch() requests, now that every library has declared the tiers it owns.
+    # Deferred so a target may name a tier from a library added after its own — clean-core-test wants nexus'.
+    sc_finalize_pch()
+endfunction()
+
+# As a subdirectory of another project, "every target" includes the consumer's, which do not exist yet here.
+# So the finalizers run at the end of the top-level CMakeLists instead, and the consumer's tests, PCH requests and shader packages are seen with ours.
+# A consumer calls none of them itself: two writers of nexus-binaries.json would be a generate error.
+if(PROJECT_IS_TOP_LEVEL)
+    sc_finalize_build()
+else()
+    cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL sc_finalize_build)
+endif()

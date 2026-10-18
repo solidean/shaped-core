@@ -234,11 +234,11 @@ private:
 ///   - the read-only scope takes no lock, so whatever it reaches must be immutable after init or self-guarded.
 ///     A routine whose execute touches anything init writes belongs on try_acquire_exclusive, which is nearly all.
 ///
-/// TODO(sg): the lock this wants is a shared/exclusive one, which clean-core does not have yet.
+/// The lock this wants is a shared/exclusive one, which clean-core does not have yet.
 /// The model to reach: init excludes every execute, while executes that only *read* run in parallel with each other.
 /// Today the read-only scope takes no lock where it wants a shared one, and the exclusive one serializes executes
 /// that could overlap.
-/// It needs a cc::shared_mutex<T> (lock_shared(f) / lock_shared_scoped()) — see the sg TODO.
+/// It needs a cc::shared_mutex<T> (lock_shared(f) / lock_shared_scoped()); issue: feat-sg-routine-shared-exclusive-lock.
 ///
 /// Do not clear()/evict() a registry while another thread is still recording against the same context.
 template <class Derived, class Params>

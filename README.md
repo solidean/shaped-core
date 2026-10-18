@@ -102,8 +102,9 @@ CMakePresets.json       # platform/compiler presets
 
 ## Contributing
 
-* `main` is the integration branch.
-  Feature branches are **mandatory** and namespaced per contributor by initials: `u/<your-initials>/<feature>`.
+* `main` is the integration branch, and fixes, internal improvements, tests and CI fixes are committed to it directly.
+  Big reworks and substantial new API go through a pull request from a branch namespaced by initials: `u/<your-initials>/<feature>`.
+  CI is not waited on; a red run is fixed after the fact.
 * Code style is enforced by [.clang-format](.clang-format); design conventions live in [docs/coding-guidelines.md](docs/coding-guidelines.md).
 
 ## License

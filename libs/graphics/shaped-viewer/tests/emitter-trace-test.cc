@@ -125,12 +125,7 @@ struct emitter_scene
 
 [[nodiscard]] sv::render_settings settings_of(sv::render_mode mode, i32 max_bounces)
 {
-    // No frame budget: a budgeted still frame holds however many rounds this GPU fits, so the run's length would be this GPU's.
-    return {.samples_per_pixel = 16,
-            .max_bounces = max_bounces,
-            .mode = mode,
-            .rounds_per_frame = 16,
-            .frame_budget_ms = 0.0f};
+    return {.samples_per_pixel = 16, .max_bounces = max_bounces, .mode = mode, .rounds_per_frame = 16};
 }
 
 /// Traces `scene` through the single-view renderer until its mean holds `samples` per pixel, and reads it back.

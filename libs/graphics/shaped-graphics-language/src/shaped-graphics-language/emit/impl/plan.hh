@@ -210,7 +210,8 @@ struct plan
     cc::vector<cc::string> stage_input_names;
     /// Parallel to `e.stage_inputs`: a second parameter where a target needs one, dx12's `SV_StartInstanceLocation`.
     cc::vector<cc::string> stage_input_bases;
-    /// Holds every name above and every reserved word of the target; a writer mints what it still needs from here.
+    /// Holds every name above and every reserved word of the target, and goes on from the tree's names and the builtins'.
+    /// A writer mints what it still needs from here.
     check::name_mint names;
 };
 

@@ -9,6 +9,8 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/layout/box_style.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
+#include <shaped-viewer/scene/quadric.hh>
+#include <shaped-viewer/scene/tg_objects.hh>
 #include <shaped-viewer/view/view_data.hh>
 #include <typed-geometry/scalar/angle.hh>
 
@@ -68,6 +70,55 @@ private:
     view_index _view = view_index(0);
     u32 _layer = 0;
     u32 _item = 0;
+};
+
+/// An object's vertices, added by `scene_ref::add_vertices`.
+///
+/// **Nothing is drawn until the frame ends**, so until then the setters still change how: the geometry was taken at the
+/// call, the style and the material are read at the flush.
+class sv::vertices_ref
+{
+public:
+    vertices_ref(frame* f, u32 shape) : _frame(f), _shape(shape) {}
+
+    vertices_ref& style(vertex_style const& s);
+    vertices_ref& radius(float r);
+    vertices_ref& material(material_id m);
+
+private:
+    frame* _frame = nullptr;
+    u32 _shape = 0;
+};
+
+/// An object's edges, added by `scene_ref::add_edges` — restylable until the frame ends, as `vertices_ref` is.
+class sv::edges_ref
+{
+public:
+    edges_ref(frame* f, u32 shape) : _frame(f), _shape(shape) {}
+
+    edges_ref& style(edge_style const& s);
+    edges_ref& radius(float r);
+    edges_ref& vertex_radius(float r);
+    edges_ref& vertices(bool joined);
+    edges_ref& ends(line_ends e);
+    edges_ref& material(material_id m);
+
+private:
+    frame* _frame = nullptr;
+    u32 _shape = 0;
+};
+
+/// An object's faces, added by `scene_ref::add_faces` — its material can change until the frame ends.
+class sv::faces_ref
+{
+public:
+    faces_ref(frame* f, u32 shape) : _frame(f), _shape(shape) {}
+
+    faces_ref& material(material_id m);
+
+private:
+    frame* _frame = nullptr;
+    u32 _shape = 0;
 };
 
 /// One light in a scene — the counterpart of `mesh_ref`, handed back by `scene_ref::add_light`.
@@ -175,6 +226,44 @@ public:
     /// The same with all three lengths given — see `sv::arrow_style`.
     void add_arrow(tg::segment3f const& segment, arrow_style const& style, material_id material = material_id::invalid);
 
+    /// Draws a sphere on each of `obj`'s vertices — any tg object with `vertices()`, in any scalar.
+    /// It lands in the frame's implicit batch for its material, as `add_sphere` does, once the frame ends; the ref restyles it until then.
+    template <class Obj>
+        requires has_tg_vertices<Obj>
+    vertices_ref add_vertices(Obj const& obj, vertex_style const& style = {}, material_id material = material_id::invalid)
+    {
+        auto const v = impl::vertices_f32(obj);
+        return _add_vertices(cc::span<tg::pos3f const>(v.data(), v.size()), style, material);
+    }
+
+    /// Draws a tube along each of `obj`'s edges, joined by a sphere on each of its vertices — see `sv::edge_style`.
+    /// Any tg object with `edges()`, in any scalar; restylable until the frame ends.
+    template <class Obj>
+        requires has_tg_edges<Obj>
+    edges_ref add_edges(Obj const& obj, edge_style const& style = {}, material_id material = material_id::invalid)
+    {
+        auto const e = impl::edges_f32(obj);
+        auto const edges = cc::span<tg::segment3f const>(e.data(), e.size());
+        if constexpr (has_tg_vertices<Obj>)
+        {
+            auto const v = impl::vertices_f32(obj);
+            return _add_edges(edges, cc::span<tg::pos3f const>(v.data(), v.size()), style, material);
+        }
+        else
+            return _add_edges(edges, {}, style, material);
+    }
+
+    /// Draws `obj`'s faces as triangles — any tg object with `faces()`, or a triangle or quad itself, in any scalar.
+    /// Every face call of one material in this layer becomes one mesh when the frame ends; the ref can change the material until then.
+    template <class Obj>
+        requires has_tg_faces<Obj>
+    faces_ref add_faces(Obj const& obj, material_id material = material_id::invalid)
+    {
+        auto triangles = cc::vector<tg::triangle3f>();
+        impl::append_faces(obj, triangles);
+        return _add_faces(triangles, material);
+    }
+
     /// Adds a light under `id`, which is what it is known by across frames.
     ///
     /// The id is hashed under the frame's id stack, exactly as a view's is, so a loop of lights is scoped the way a loop
@@ -247,6 +336,13 @@ public:
 private:
     [[nodiscard]] layer& target() const;
 
+    vertices_ref _add_vertices(cc::span<tg::pos3f const> points, vertex_style const& style, material_id material);
+    edges_ref _add_edges(cc::span<tg::segment3f const> edges,
+                         cc::span<tg::pos3f const> vertices,
+                         edge_style const& style,
+                         material_id material);
+    faces_ref _add_faces(cc::span<tg::triangle3f const> triangles, material_id material);
+
     frame* _frame = nullptr;
     view_index _view = view_index(0);
     u32 _layer = 0;
@@ -302,7 +398,7 @@ public:
     /// Appends a 3D scene layer to this view.
     ///
     /// A traced layer writes no alpha, so it is forced to `layer_blend::replace`: a second scene layer overwrites the
-    /// first rather than compositing over it (see libs/graphics/shaped-viewer/docs/TODO.md).
+    /// first rather than compositing over it (issue: feat-sv-traced-layer-alpha).
     /// Until that lands, calling this twice in a frame is legal but only the last layer is visible.
     [[nodiscard]] scene_ref add_scene();
 

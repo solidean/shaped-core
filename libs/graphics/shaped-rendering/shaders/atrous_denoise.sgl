@@ -12,6 +12,8 @@
 // Guides are optional.
 // A missing one is bound to the color texture as a stand-in with its flag clear, so every slot of the binding is filled and the shader never reads what the flag says is not there.
 
+require extended_image_formats
+
 // the format of the image a pass writes: the routine's scratch between passes, the caller's output on the last
 @option const target_format: pixel_format = .rgba32_float
 
@@ -150,4 +152,4 @@ fun source_at(p: int2){atrous_images, atrous_constants} -> float4:
     if is_set(remodulate_out):
         result *= albedo_at(p)
 
-    atrous_images.target[id.xy] = float4(..result, center.w)
+    atrous_images.target[id.xy] = float4(..result, center.w) as texel[target_format]

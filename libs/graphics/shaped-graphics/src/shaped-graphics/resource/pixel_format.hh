@@ -126,6 +126,36 @@ namespace sg
     }
 }
 
+/// True for the integer formats (`_uint` and `_sint`), whose texels a shader loads as integers.
+/// No sampler filters one, and no block-compressed format stores one.
+[[nodiscard]] constexpr bool is_integer_format(pixel_format f)
+{
+    switch (f)
+    {
+    case pixel_format::r8_uint:
+    case pixel_format::r8_sint:
+    case pixel_format::rg8_uint:
+    case pixel_format::rg8_sint:
+    case pixel_format::rgba8_uint:
+    case pixel_format::rgba8_sint:
+    case pixel_format::r16_uint:
+    case pixel_format::r16_sint:
+    case pixel_format::rg16_uint:
+    case pixel_format::rg16_sint:
+    case pixel_format::rgba16_uint:
+    case pixel_format::rgba16_sint:
+    case pixel_format::r32_uint:
+    case pixel_format::r32_sint:
+    case pixel_format::rg32_uint:
+    case pixel_format::rg32_sint:
+    case pixel_format::rgba32_uint:
+    case pixel_format::rgba32_sint:
+        return true;
+    default:
+        return false;
+    }
+}
+
 /// True for the BC block-compressed formats (4x4 texel blocks).
 [[nodiscard]] constexpr bool is_compressed_format(pixel_format f)
 {

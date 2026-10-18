@@ -84,12 +84,12 @@ void dx12_buffer::finalize_slot(sg::command_list_slot slot) const
     _access.lock(
         [&](access_tracking& t)
         {
-            // Only ever called for a buffer this list touched, since declare_access set the slot active — see the command list's submit path.
+            // Only ever called for a buffer this list touched, since track_access set the slot active — see the command list's submit path.
             // A buffer has no layout and no between-lists state, so finalize just frees the slot; its state is discarded, not carried.
             int const i = int(slot);
             CC_ASSERT(i < t.slots.size() && t.slots[i].active, "finalize of a buffer this list never touched");
             CC_ASSERT(!t.slots[i].state.has_pending_declares(), "a declared access was never flushed by a GPU op");
-            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + state
+            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + written + state
         });
 }
 
@@ -101,7 +101,7 @@ void dx12_buffer::discard_slot(sg::command_list_slot slot) const
             // Like finalize, only ever called for a buffer this list touched (its slot is active).
             int const i = int(slot);
             CC_ASSERT(i < t.slots.size() && t.slots[i].active, "discard of a buffer this list never touched");
-            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + state
+            t.slots[i] = access_slot{}; // clears active + recorded + pending_barrier + written + state
         });
 }
 
@@ -165,8 +165,6 @@ cc::result<dx12_buffer_handle> dx12_context::create_dx12_buffer(isize size_in_by
         // Created in COMMON: buffer copies rely on D3D12 implicit state promotion/decay (a buffer is
         // promoted from COMMON to COPY_DEST / COPY_SOURCE on use and decays back at ExecuteCommandLists),
         // so no explicit barriers are recorded for transfers.
-        // TODO: a real per-resource barrier + state-tracking system will replace this (and enable, e.g.,
-        // uploading then downloading the same buffer within one command list).
         // Exception: acceleration-structure storage MUST be created in the RAYTRACING_ACCELERATION_STRUCTURE
         // state and stays there for its whole life (D3D12 forbids transitioning an AS resource); the build's
         // accel_write/accel_read barriers are same-state UAV-style ordering, not layout transitions.

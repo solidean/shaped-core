@@ -1,7 +1,7 @@
 ---
 name: building-and-testing
 description: This skill is for when you need to build and/or run tests for shaped-core. Drives dev.py and the repo_tools build_diag/test_diag diagnostics the way they're meant to be used.
-when_to_use: "build the project", "run the tests", "run a test", "is it green", "build failed", "test failed", "compile error", "dev.py", "release build", "full test sweep"
+when_to_use: '"build the project", "run the tests", "run a test", "is it green", "build failed", "test failed", "compile error", "dev.py", "release build", "full test sweep"'
 allowed-tools: Bash mcp__repo_tools__build_diag mcp__repo_tools__test_diag Read
 ---
 

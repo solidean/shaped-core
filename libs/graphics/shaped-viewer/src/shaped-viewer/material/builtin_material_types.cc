@@ -15,9 +15,9 @@
 // `openpbr` exposes it directly; `pbr` and `unlit` are projections onto it, the same way glTF's metallic-roughness maps onto
 // OpenPBR.
 //
-// TEMPORARY: these live as string literals because slib has no named-fragment asset kind — a fragment is not a shader, so
-// `sc_add_shader_package` has nothing to declare it as.
-// Moving them into `shaders/` once it does gets editor support and hot reload; see libs/graphics/shaped-viewer/docs/TODO.md.
+// TEMPORARY(debt-sv-builtin-material-fragments-as-strings): these live as string literals because slib has no named-fragment asset kind.
+// A fragment is not a shader, so `sc_add_shader_package` has nothing to declare it as.
+// Moving them into `shaders/` once it does gets editor support and hot reload.
 
 namespace sv
 {
@@ -37,7 +37,7 @@ namespace
 // `occlusion` is declared and imported, and deliberately not read here.
 // Baked ambient occlusion in a path tracer is double-counting: the integrator computes that occlusion itself, correctly and
 // per bounce, so applying a baked term on top darkens the surface twice.
-// It is carried anyway because a raster fallback will want it, and an asset that lost its AO map on load cannot get it back.
+// The type declares it as its occlusion attribute instead, which the raster path darkens its environment light by.
 constexpr cc::string_view openpbr_shader = R"sgl(
 surface.base_weight = saturate(base_weight)
 surface.base_color = saturate(base_color)
@@ -182,7 +182,7 @@ surface.emission_color = color
     // 0 disables it, so `OPAQUE` and `BLEND` both bind nothing here and opacity stays continuous.
     signature.push_back(material_signature_entry::of("alpha_cutoff", 0.0f));
 
-    // Baked ambient occlusion, imported but ignored by the path-tracing fragment — see the fragment for why it is carried.
+    // Baked ambient occlusion, which the raster path's environment light reads and the path-tracing fragment ignores — see the fragment.
     signature.push_back(material_signature_entry::of("occlusion", 1.0f));
 
     // Nonzero makes the surface a shell with no interior: it does not refract and encloses no medium.
@@ -207,6 +207,7 @@ surface.emission_color = color
                                   .shader = cc::string(openpbr_shader),
                                   .opacity_attribute = "opacity",
                                   .opacity_cutoff_attribute = "alpha_cutoff",
+                                  .occlusion_attribute = "occlusion",
                                   .emission_color_attribute = "emission_color",
                                   .emission_scale_attribute = "emission_luminance"});
 }

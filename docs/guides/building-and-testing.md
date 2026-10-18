@@ -32,7 +32,7 @@ uv run dev.py <command> [options]
 | `install`      | Install a developer tool of this repo: `install sgl-vscode` builds `sgl` and links the SGL extension into every VS Code-family editor; `install emsdk` installs the Emscripten SDK at the version `tools/emsdk.version` pins, into `~/tools/emsdk` unless `--emsdk-path` says otherwise. No argument lists them and where each stands; `--uninstall` removes only its own links. |
 | `diagnose clangd FILE` | Show clangd's diagnostics for a source file (see below).              |
 | `info`         | Inspect resolved compile/link flags and per-file compile commands (see below). |
-| `doctor`       | Read-only toolchain sanity check: cmake, ninja, compiler, presets, clangd, the LLVM tools coverage and PGO need, the networking environment, the graphics environment (Vulkan, windowing, DXC), and any [known external issue](../bugs-external/_index.md) this machine carries, as a `WARN`. |
+| `doctor`       | Read-only toolchain sanity check: cmake, ninja, compiler (and every other one installed, MSVC toolsets included), presets, clangd, the LLVM tools coverage and PGO need, the networking environment, the graphics environment (Vulkan, windowing, DXC), and any [known external issue](../bugs-external/_index.md) this machine carries, as a `WARN`. |
 | `list-presets` / `list-targets` / `list-toolsets` | What is available: build presets, a preset's CMake targets, the installed compiler toolsets. |
 
 `build` and `test` **auto-configure** when CMake inputs or the source listing change (fingerprinted); pass `--no-configure` to skip.
@@ -261,8 +261,20 @@ On a wasm preset the default node is emsdk's own pinned build rather than whatev
 A native preset has no emsdk environment and falls back to `PATH` as before.
 
 `--node-path` and `--deno-path` name a specific install, and selecting one of them selects that runtime.
+Without one, deno is the one `uv run dev.py install deno` put in `~/tools/deno`, then whatever is on `PATH`.
 `SC_JS_RUNTIME`, `SC_NODE_PATH` and `SC_DENO_PATH` are the environment-variable equivalents.
-The same three flags are on `run`, `example` and `benchmark`.
+
+`--v8-flag` hands a flag to the runtime's V8, repeatable, for a wasm proposal still behind one:
+
+```bash
+uv run dev.py test --preset emscripten-relwithdebinfo --runtime deno --v8-flag=--experimental-wasm-wide_arithmetic
+```
+
+node takes it as its own option and refuses one its V8 does not know; deno gets it inside `--v8-flags`.
+The `=` is needed, since a value starting with `--` would otherwise read as the next option.
+`SC_V8_FLAGS` is the fallback, whitespace-separated.
+
+The same flags are on `run`, `example` and `benchmark`.
 
 **Browser test runner.** Under Emscripten each `*-test` target also builds a MODULARIZE wasm module (`*-test-web.js` + `.wasm`).
 CMake generates HTML pages at the build root: one per library (`<library>-web.html`), plus an aggregate **`tests-web.html`**.
@@ -345,12 +357,13 @@ That is a ~1.5 MB download, once per machine, owned by [tools/bin/fetch-clang-fo
 The fetched binary is gitignored, and it outranks PATH precisely because its version is the one we chose.
 It **errors** only when that fails too, and `--allow-different-version` downgrades the surviving mismatch to a warning; `SC_SKIP_CLANG_FORMAT_FETCH=1` opts out of the fetch entirely.
 Like every other step, the clang-format run is captured under `build/run-logs/`.
-Before committing, prefer `uv run dev.py check --fix`, which runs this check and the others in one shot — see [Pre-commit checks](#pre-commit-checks).
+Before pushing, prefer `uv run dev.py check --fix`, which runs this check and the others in one shot — see [Pre-commit checks](#pre-commit-checks).
 
 ## Pre-commit checks
 
 `uv run dev.py check` runs the project's pre-commit gates and reports a single green/red verdict — the "everything green" gate.
-**`uv run dev.py check --fix` is the recommended move before committing.**
+**`uv run dev.py check --fix` must pass before every push.**
+Commits before that may be partially broken — they are grouped by topic, not by what compiles.
 It auto-applies every unambiguous fix it can (clang-tidy, shaped-linter, then clang-format over what they rewrote), runs the rest, and tells you what is left.
 
 ```bash
@@ -369,6 +382,7 @@ uv run dev.py check --list     # list the registered checks
 
 `lint`, `shaped-lint` and `format` default to **everything this branch changed, including what is not committed yet**.
 That is the merge base with `origin/main`, diffed against the working tree.
+On `main` itself that is the unpushed commits plus the working tree — exactly what the next push sends.
 
 This is not the obvious choice, and the obvious one is wrong.
 A gate scoped to dirty files alone *empties as you work*: commit, and the working tree is clean, so the next `check` inspects nothing and reports green for a branch it never looked at.
@@ -378,7 +392,8 @@ The consequence to know is that `check` re-examines files you committed earlier 
 That is the point, and it is also why the first `check` on an old branch can report more than you expect.
 
 `--dirty-only` is the tight edit loop's scope and is still what `dev.py lint` and `dev.py format` default to; `--all` is the whole tree; `--since <rev>` picks a different base.
-On `main` itself there is no branch to diff, so the default falls back to the working tree.
+**There is no working-tree fallback.**
+With no merge base to find — `main` with no `origin/main`, say — `check` refuses and asks for one of those flags rather than quietly inspecting less.
 
 Registered checks, **in the order they run**:
 

@@ -181,6 +181,7 @@ material_type material_type::create(material_type_description description)
     b.add_string(description.shader);
     b.add_string(description.opacity_attribute);
     b.add_string(description.opacity_cutoff_attribute);
+    b.add_string(description.occlusion_attribute);
     b.add_string(description.emission_color_attribute);
     b.add_string(description.emission_scale_attribute);
     b.add_pod(i64(description.signature.size()));
@@ -198,6 +199,7 @@ material_type material_type::create(material_type_description description)
                               .shader = cc::move(description.shader),
                               .opacity_attribute = cc::move(description.opacity_attribute),
                               .opacity_cutoff_attribute = cc::move(description.opacity_cutoff_attribute),
+                              .occlusion_attribute = cc::move(description.occlusion_attribute),
                               .emission_color_attribute = cc::move(description.emission_color_attribute),
                               .emission_scale_attribute = cc::move(description.emission_scale_attribute),
                               .hash = cc::hash128::create(b.written_bytes(), impl::material_type_hash_seed)};
@@ -242,6 +244,9 @@ material_type material_type::create(material_type_description description)
               "a material type's opacity_cutoff_attribute must name a float attribute its signature declares");
     CC_ASSERT(type.opacity_cutoff_attribute.empty() || !type.opacity_attribute.empty(),
               "a cutoff thresholds the opacity attribute, so a type declaring one declares both");
+    auto const* const occlusion = type.occlusion_attribute.empty() ? nullptr : type.find(type.occlusion_attribute);
+    CC_ASSERT(type.occlusion_attribute.empty() || (occlusion != nullptr && occlusion->format == scalar_float),
+              "a material type's occlusion_attribute must name a float attribute its signature declares");
 
     // Cutout opacity is read from the declared attributes by one generic reader, so a value the fragment computed would
     // shade nothing and cut out nothing — refused rather than silently ignored.

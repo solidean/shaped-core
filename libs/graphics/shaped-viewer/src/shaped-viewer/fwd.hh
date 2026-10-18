@@ -73,7 +73,7 @@ struct background;
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
-enum class render_mode : u8; // how a layer is drawn: one of two path tracers, or raster (render_settings.hh)
+enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;
@@ -83,6 +83,8 @@ struct quadric_hit;          // what a ray hit on one is: how far along, and the
 struct arrow_style;          // the three lengths an arrow is drawn from (scene/quadric.hh)
 enum class line_ends : u8;   // how a drawn segment is closed at its ends (scene/quadric.hh)
 struct line_style;           // how thick a line is drawn, and how its ends are closed
+struct vertex_style;         // how add_vertices draws an object's corners (scene/quadric.hh)
+struct edge_style;           // how add_edges draws an object's edges, and the joints between them
 struct quadric_set;          // a batch of quadrics drawn as one thing (scene/quadric_set.hh)
 struct resident_quadric_set; // that batch as resources
 enum class scalar_type : u8;
@@ -260,6 +262,7 @@ class material_shader_cache;
 struct pt_light_table;           // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
 enum class light_selection : u8; // how next-event estimation picks among a table's lights (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
+struct stand_in_report; // what a frame bound in place of permutations not compiled (rendering/stand_in_report.hh)
 class pathtrace_routine;
 struct wavefront_state;          // the wavefront tracer's path state for one view (rendering/traced_group.hh)
 struct wavefront_trace_desc;     // one wavefront frame (rendering/wavefront_routine.hh)
@@ -293,7 +296,10 @@ class capture_session;
 
 // authoring handles (see refs.hh) — all non-owning {frame*, index} pairs
 class mesh_ref;
-class quadric_ref; // one quadric batch placed in a scene (refs.hh)
+class quadric_ref;  // one quadric batch placed in a scene (refs.hh)
+class vertices_ref; // an object's vertices added to a scene, restylable until the frame ends (refs.hh)
+class edges_ref;    // its edges, the same way
+class faces_ref;    // its faces, the same way
 class light_ref;
 class scene_ref;
 class canvas_ref; // a 2D layer of a view, where drawings are instanced in pixels (refs.hh)

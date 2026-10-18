@@ -43,7 +43,7 @@ The inline-constants block is the exception: it is set on the list rather than b
 **A check a shader edit can flip logs and degrades; it never asserts.**
 Hot reload replaces a shader under a running program, so a declaration that disagreed with the old code may disagree with the new one at any frame.
 Such a mismatch logs an error once per pipeline, binding and kind of mismatch, and falls back to a barrier that covers both sides.
-Only a mistake in the host's own code — a declaration that never meets its array, an element out of range — asserts.
+Only a mistake in the host's own code — a declaration by a name no layout the context holds carries, an element out of range — asserts.
 
 Access is inferred everywhere except where sg cannot see into the code, and there the caller says what it will do.
 
@@ -57,7 +57,7 @@ The compute, raytracing and raster scopes each carry the pair, and an element is
 Compute and raytracing are one bind point, raster the other, and a raster declaration also ends when its rendering scope closes.
 Binding a pipeline or a group ends nothing, and an op where no bound group holds the array leaves the declaration dormant.
 Every live declaration naming an array applies to it, as several declarations before one op always have.
-Submitting the list while one is alive asserts; dropping the list ends them silently.
+Submitting or dropping the list ends every live one silently, and a value outliving that does nothing.
 
 What one declaration meeting many ops changes is the element work, and only that — the rules below still decide per op:
 
@@ -68,9 +68,14 @@ What one declaration meeting many ops changes is the element work, and only that
   A write, declared or widened by the footprint, is applied at every op.
 - **A member write ends every current application.** A resource an application tracked is an array member of the list.
   Any tracked access landing in a member's write bucket — an unordered write or a layout change — counts.
-  That covers every path: a scalar binding, a copy, an upload, a render target, a native scope, and an application's own layout transitions.
+  That covers every path: a scalar binding, a copy, an upload, a native scope, and an application's own layout transitions.
+  A render-target write to a member counts on every backend: through its layout change on dx12 and vulkan, and as a write on metal, where a texture has no layout.
   An application whose op already wrote one of its elements, before it applied, is not current either.
-- **A declaration that never met its array asserts when it ends.** That is where a misspelled name is caught; a list drop skips the check.
+- **Every write of an op is tracked before its arrays are.** A skip is re-checked only for member writes made while the op's arrays apply.
+  Whatever a backend tracks after them and before the op's barriers flush must be a read, and the flush asserts that no member was written in between.
+- **A misspelled array is caught where it is declared.** A shader package generates a handle per binding array, `<group>::arrays::<member>`, so a typo there does not compile.
+  The by-name overload, for a reflected or hand-written layout, asserts at the declare unless a layout the context holds has an array of that name and family.
+  Ending a declaration never asserts, whatever the ops it lived through bound.
 
 `ctx.metrics` counts the element work as `array_element_tracks`, declared or covered, so a skipped application shows as none.
 [plans/sticky-array-declarations.md](../plans/sticky-array-declarations.md) has the design and the reasoning.
@@ -114,6 +119,7 @@ A texture uses `shader_texture` / `shader_image` / `render_target` / `depth_read
 None of it is any one backend's spelling, and each value documents its D3D12 and Vulkan mapping.
 `is_unordered_write` marks the writes that need a hazard barrier — shader, copy and accel writes.
 Color and depth *targets* are ROP-ordered freebies.
+`has_write_access` is every write, those two included.
 
 ## Draws inside one render pass on webgpu
 
@@ -255,7 +261,7 @@ It is an ordinary command list, so its submit waits on the texture's pending-tra
 a job still being enqueued is one nothing will ever signal.
 
 **The async-ready layout is `general` on both backends**, and `sg::async_direction` is accepted and ignored.
-A direction-specific layout on vulkan would keep more compression and cannot be held: see [TODO](../TODO.md) for the
+A direction-specific layout on vulkan would keep more compression and cannot be held: see [perf-sg-direction-specific-async-layout](../issues/perf-sg-direction-specific-async-layout.md) for the
 submit-call-order reason and what would earn it back.
 
 

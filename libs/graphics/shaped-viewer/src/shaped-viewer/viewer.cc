@@ -27,6 +27,7 @@
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/shader_library.hh>
+#include <shaped-viewer/view/render_settings.hh>
 #include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
@@ -201,6 +202,30 @@ struct viewer::impl
     // Last frame's leaves, in window space and with the links that order them.
     // Routing runs before the next frame is authored, so last frame's answer is the only one there is.
     cc::vector<hit_region> last_hit_regions;
+
+    /// Whether a layer left `render_mode::automatic` has been said to fall back to raster, which is said once per viewer.
+    bool raster_fallback_reported = false;
+
+    /// A double-click waiting for its view's next trace, at a point of that view's image in [0, 1).
+    struct pick_request
+    {
+        view_id view;
+        tg::pos2f uv = tg::pos2f(0, 0);
+    };
+    cc::optional<pick_request> pending_pick;
+
+    /// The primary depth under a pick on its way back from the GPU, with the camera and pixel it was traced at.
+    /// Its own camera rather than the view's, since the view may have moved on by the time the texel lands.
+    struct pick_readback
+    {
+        view_id view;
+        sg::data_future<f32> depth;
+        shaders::tracer::camera_record camera = {};
+        f32 near_plane = 0;
+        tg::vec2i pixel = tg::vec2i(0, 0);
+        tg::vec2i resolution = tg::vec2i(0, 0);
+    };
+    cc::optional<pick_readback> pick_in_flight;
 
     /// The views the previous frame authored, so a per-frame controller update can reach each of them exactly once.
     /// `last_hit_regions` cannot serve: one view may own several regions, and a fly controller integrated twice over the
@@ -478,6 +503,104 @@ void viewer::zoom_at(tg::pos2f window_point, float ticks)
                                 cc::clamp(texel_y / f32(resolution[1]), 0.0f, 1.0f));
 }
 
+void viewer::request_pick(tg::pos2f window_point)
+{
+    auto& im = *_impl;
+
+    auto const hit = pick_hit_region(im.last_hit_regions, window_point);
+    if (hit == invalid_hit_region)
+        return;
+
+    auto const& region = im.last_hit_regions[hit];
+    auto const* const st = im.views.get_ptr(region.id);
+    if (st == nullptr || st->composite.raw() == nullptr)
+        return; // a view with no image yet has nothing to pick
+
+    auto const resolution = tg::vec2i(st->composite.width(), st->composite.height());
+    if (resolution[0] <= 0 || resolution[1] <= 0)
+        return;
+
+    // The same inversion zoom_at makes, so a magnified view picks the texel the cursor is actually over.
+    auto const texel_x = (window_point[0] - region.offset[0]) / (region.scale[0] != 0 ? region.scale[0] : 1.0f);
+    auto const texel_y = (window_point[1] - region.offset[1]) / (region.scale[1] != 0 ? region.scale[1] : 1.0f);
+    auto const uv = tg::pos2f(texel_x / f32(resolution[0]), texel_y / f32(resolution[1]));
+    if (uv[0] < 0 || uv[0] >= 1 || uv[1] < 0 || uv[1] >= 1)
+        return; // a letterbox bar around a fitted image shows no surface
+
+    im.pending_pick = impl::pick_request{.view = region.id, .uv = uv};
+}
+
+void viewer::read_back_pick(viewer_definition const& def, render_plan const& plan)
+{
+    auto& im = *_impl;
+    if (!im.pending_pick.has_value())
+        return;
+    auto const request = im.pending_pick.value();
+
+    // Traced layers replace what lies below them, so the one on top is what the click landed on.
+    plan_trace const* trace = nullptr;
+    for (auto const& t : plan.traces)
+        if (t.id == request.view && t.refresh && (trace == nullptr || t.layer > trace->layer))
+            trace = &t;
+    if (trace == nullptr)
+        return; // the view did not trace this frame, and the request waits for one that does
+
+    auto const* const st = im.views.get_ptr(request.view);
+    auto const* const accumulation
+        = st != nullptr ? st->temporal.get_ptr(temporal_id::accumulation(trace->layer)) : nullptr;
+    auto const* const depth = st != nullptr ? st->temporal.get_ptr(temporal_id::primary_depth(trace->layer)) : nullptr;
+
+    // A trace that declined since its last restart wrote no depth, and a fresh texture holds nothing worth reading.
+    if (accumulation == nullptr || accumulation->accum_frame == 0 || depth == nullptr || depth->texture.raw() == nullptr)
+        return;
+
+    auto const resolution = tg::vec2i(depth->texture.width(), depth->texture.height());
+    auto const pixel = tg::vec2i(cc::clamp(i32(request.uv[0] * f32(resolution[0])), 0, resolution[0] - 1),
+                                 cc::clamp(i32(request.uv[1] * f32(resolution[1])), 0, resolution[1] - 1));
+
+    // The camera this frame traced the view from, with the aspect the trace gave it.
+    auto cam = def[trace->view].camera;
+    cam.projection.aspect_ratio = f64(resolution[0]) / f64(resolution[1]);
+
+    auto const region = sg::texture_region{.offset = tg::pos3i(pixel[0], pixel[1], 0), .size = tg::vec3i(1, 1, 1)};
+    im.pick_in_flight = impl::pick_readback{
+        .view = request.view,
+        .depth = sg::data_future<f32>(im.current_cmd->download.bytes_from_texture(depth->texture.raw(), {}, region)),
+        .camera = camera_record_of(cam),
+        .near_plane = f32(cam.projection.near_plane),
+        .pixel = pixel,
+        .resolution = resolution,
+    };
+    im.pending_pick = {};
+}
+
+void viewer::apply_pick()
+{
+    auto& im = *_impl;
+    if (!im.pick_in_flight.has_value() || !im.pick_in_flight.value().depth.is_ready())
+        return;
+
+    auto const readback = im.pick_in_flight.value();
+    im.pick_in_flight = {};
+
+    auto const depth = readback.depth.try_get_data();
+    if (!depth.has_value() || depth.value().size() != 1)
+        return; // cancelled with its command list, which leaves nothing to centre on
+
+    auto const point = primary_hit_position(readback.camera, readback.pixel, readback.resolution, depth.value()[0],
+                                            readback.near_plane);
+    if (!point.has_value())
+        return; // the background
+
+    // Checked again on landing: the caller may have taken the camera, or switched controllers, since the click.
+    auto* const st = im.views.get_ptr(readback.view);
+    if (st == nullptr || st->camera_owned_last_frame || st->style_last_frame != camera_style::orbit)
+        return;
+
+    // Only starts the glide: the per-frame update in acquire_frame moves the camera, beginning this same frame.
+    (void)st->controller.focus_on(point.value());
+}
+
 void viewer::route_input()
 {
     auto& im = *_impl;
@@ -556,6 +679,14 @@ void viewer::route_input()
         }
         else
         {
+            // A double-click re-centres the orbit on the surface under the cursor, which only the trace's depth knows.
+            if (e.is_mouse_button())
+            {
+                auto const& b = e.as_mouse_button();
+                if (b.is_down && b.button == sr::mouse_button::left && b.clicks == 2)
+                    request_pick(im.last_cursor_pos);
+            }
+
             if (st->controller.handle(e))
                 st->camera = st->controller.camera();
 
@@ -589,6 +720,7 @@ frame viewer::acquire_frame()
     // Advanced before authoring, because seeding and the hit-test below read it — and still before anything resolves a
     // texture, which is all its reclaim needs.
     im.views.begin_frame(u64(im.ctx->current_epoch()));
+    apply_pick();
     route_input();
 
     if (im.config.headless)
@@ -633,7 +765,20 @@ frame viewer::acquire_frame()
     for (auto const id : im.last_frame_views)
     {
         auto* const st = im.views.get_ptr(id);
-        if (st == nullptr || st->style_last_frame != camera_style::fly)
+        if (st == nullptr)
+            continue;
+
+        // The orbit controller's one motion over time is a double-click's glide to its new centre.
+        // A caller who took the camera mid-glide owns it from then on, so the glide is dropped rather than resumed later.
+        if (st->style_last_frame == camera_style::orbit)
+        {
+            if (st->camera_owned_last_frame)
+                st->controller.cancel_focus();
+            else if (st->controller.update(delta))
+                st->camera = st->controller.camera();
+            continue;
+        }
+        if (st->style_last_frame != camera_style::fly)
             continue;
 
         // Headless counts as focused: there is no window to lose focus, and a hand-driven loop stepping `delta` forward
@@ -718,8 +863,10 @@ void viewer::finish_frame(frame& f)
     if (!f._open)
         return;
 
-    // Whatever the immediate quadric calls accumulated becomes a scene item now, before anything reads the views.
+    // Whatever the immediate calls accumulated becomes scene items now, before anything reads the views.
     // It has to be here rather than in the sugar: a batch is one item, and it is not placeable until it is complete.
+    // Shapes first, since their vertices and edges land in the quadric batches.
+    f._flush_immediate_shapes();
     f._flush_immediate_quadrics();
 
     // The frame's authored views become the definition verbatim, and the frame's layout tree becomes the one layer of
@@ -769,7 +916,11 @@ void viewer::finish_frame(frame& f)
             if (st.style_this_frame == camera_style::fly)
                 st.fly.pose = fps_state::from_camera(st.camera);
             else
+            {
+                // A glide begun before the switch belongs to the pose the switch threw away.
                 st.controller.orbit = orbit_state::from_camera(st.camera);
+                st.controller.cancel_focus();
+            }
             st.style_seeded = true;
         }
         st.style_last_frame = st.style_this_frame;
@@ -888,6 +1039,24 @@ void viewer::finish_frame(frame& f)
             p.at = p.at + down;
     }
 
+    def.wavefront_budget_ms = sv::impl::wavefront_budget_of(im.config);
+
+    // `automatic` is resolved here, where the plan is built, so the plan declares what the resolved mode writes.
+    for (auto& v : def.views)
+        for (auto& l : v.layers)
+        {
+            if (l.kind != layer_kind::scene_3d || l.settings.mode != render_mode::automatic)
+                continue;
+            l.settings.mode = resolve_render_mode(*im.ctx, l.settings.mode);
+            if (l.settings.mode == render_mode::raster && !im.raster_fallback_reported)
+            {
+                CC_LOG_WARNING("the device has no ray tracing, so every layer left render_mode::automatic is "
+                               "rasterized: "
+                               "lit directly, unshadowed and without bounces");
+                im.raster_fallback_reported = true;
+            }
+        }
+
     // What the store already holds for each view, so the plan can decide what refreshes.
     // Read off the composite texture rather than a field stamped beside it, so "the plan believes this can be
     // re-presented" and "there is something to re-present" cannot drift apart.
@@ -945,6 +1114,9 @@ void viewer::finish_frame(frame& f)
         // what a capture actually needs: a frame where any pass declined is one that would be saved incomplete.
         // A frame with no trace and nothing declined has nothing to be wrong about.
         traces_ran = recorded == sg::routine_outcome::executed;
+
+        // After the traces, so the depth read back is the one this frame wrote.
+        read_back_pick(def, plan);
 
         if (im.config.headless)
         {

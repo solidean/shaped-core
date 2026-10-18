@@ -52,7 +52,7 @@ public:
     /// Filters `in.color` into `in.output`.
     ///
     /// `in.output` must match `in.color`'s extent — à-trous does not upscale.
-    /// It carries `image` usage, in a four-channel float or normalized format the device writes as an image.
+    /// It carries `image` usage, in a float or normalized format the device writes as an image.
     /// `pending` while the shader for that format compiles, `failed` after a compile that did not build.
     [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
                                                      reconstruct_inputs const& in,

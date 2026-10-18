@@ -147,11 +147,18 @@ public:
     // How many accesses this list tracked into the write bucket of an array member, which ends every current application.
     u64 _member_writes = 0;
 
+    // Armed by an op whose arrays were skipped, and checked by the next flush_barriers.
+    sg::impl::array_skip_guard _skip_guard;
+
     // The bound arrays of the op being recorded, kept to reuse their storage.
     cc::vector<sg::impl::array_site<vulkan_array_binding>> _array_sites;
 
     // Set inside a rendering scope; a dispatch inside one is rejected because Vulkan forbids it outright.
     bool _in_render_pass = false;
+
+    // Attachment views this list's scopes created, handed to the epoch's deferred deletion at submit and at drop alike.
+    // A dropped list's views go to the epoch too: a texture caches them, so another list of the epoch may use them.
+    cc::vector<VkImageView> _created_attachment_views;
 
     // The open rendering instance, kept so it can be closed around a barrier and reopened.
     // Vulkan forbids vkCmdPipelineBarrier2 inside a dynamic-rendering instance outright (VUID-...-09553), where

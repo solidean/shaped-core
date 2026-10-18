@@ -3,6 +3,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-rendering/impl/build_failure.hh>
 #include <sr_sgl_shaders.hh>
 
 namespace sr
@@ -44,6 +45,52 @@ struct shape_program
     }
     CC_UNREACHABLE("a mipmap key names one of the five shapes");
 }
+
+/// The group of `shape` reading `source` and writing `target`, filled through that shape's generated binding.
+[[nodiscard]] sg::binding_group_handle group_of(sg::command_list& cmd,
+                                                sg::binding_group_layout_handle const& layout,
+                                                mipmap_variant shape,
+                                                sg::raw_texture_view const& source,
+                                                sg::raw_texture_view const& target)
+{
+    auto& transient = cmd.context().transient;
+    switch (shape)
+    {
+    case mipmap_variant::tex_1d:
+        return transient.create_binding_group(cmd, layout,
+                                              sgl_shaders::mipmap_1d{
+                                                  .source = source.as_texture<sg::tv_1d>(),
+                                                  .target = sg::any_texture_view<sg::tv_1d>(target),
+                                              });
+    case mipmap_variant::tex_1d_array:
+        return transient.create_binding_group(cmd, layout,
+                                              sgl_shaders::mipmap_1d_array{
+                                                  .source = source.as_texture<sg::tv_1d_array>(),
+                                                  .target = sg::any_texture_view<sg::tv_1d_array>(target),
+                                              });
+    case mipmap_variant::tex_2d:
+        return transient.create_binding_group(cmd, layout,
+                                              sgl_shaders::mipmap_2d{
+                                                  .source = source.as_texture<sg::tv_2d>(),
+                                                  .target = sg::any_texture_view<sg::tv_2d>(target),
+                                              });
+    case mipmap_variant::tex_2d_array:
+        return transient.create_binding_group(cmd, layout,
+                                              sgl_shaders::mipmap_2d_array{
+                                                  .source = source.as_texture<sg::tv_2d_array>(),
+                                                  .target = sg::any_texture_view<sg::tv_2d_array>(target),
+                                              });
+    case mipmap_variant::tex_3d:
+        return transient.create_binding_group(cmd, layout,
+                                              sgl_shaders::mipmap_3d{
+                                                  .source = source.as_texture<sg::tv_3d>(),
+                                                  .target = sg::any_texture_view<sg::tv_3d>(target),
+                                              });
+    case mipmap_variant::count_:
+        break;
+    }
+    CC_UNREACHABLE("a mipmap key names one of the five shapes");
+}
 } // namespace
 
 cc::shared_async<cc::unit> box_filter_mipmap_routine::init(sg::routine_init_scope scope)
@@ -59,6 +106,7 @@ cc::shared_async<cc::unit> box_filter_mipmap_routine::init(sg::routine_init_scop
     auto const* const built = program.pipeline->try_value();
     if (built == nullptr)
     {
+        impl::log_build_failure(program.pipeline, "box_filter_mipmap", params().format);
         fail_init(); // the shader did not build, which a format SGL has no image of never does
         co_return;
     }
@@ -78,11 +126,8 @@ void box_filter_mipmap_routine::_dispatch_level(sg::command_list& cmd,
                                                 int z)
 {
     // execute already established that the routine is ready and its program built, once for the whole chain.
-    // Every shape's binding declares its source first and its target second.
-    auto& ctx = cmd.context();
-    sg::slotted_view const views[]
-        = {{.slot = sg::binding_slot(0), .view = source}, {.slot = sg::binding_slot(1), .view = target}};
-    auto const group = ctx.transient.create_binding_group(self._program->layout, views);
+    auto const group = group_of(cmd, self._program->layout, self.params().shape, sg::as_texture_view(source),
+                                sg::as_texture_view(target));
 
     cmd.compute.bind_pipeline(*self._program->pipeline);
     cmd.compute.bind_group(0, *group);

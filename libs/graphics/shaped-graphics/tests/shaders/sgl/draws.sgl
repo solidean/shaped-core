@@ -46,3 +46,19 @@ pipeline tagged_points:
     pixel = tagged_ps
     topology = .point_list
     format = .rgba32_float
+
+// A block that ends short of its 16-byte alignment, which WGSL rounds a uniform's size up to.
+@inline binding tinted_tag:
+    tint: float4
+    tag: float
+
+@pixel fun tinted_ps(p: drawn_indices){tinted_tag} -> index_target:
+    return {
+        indices = float4(p.vertex as float, p.instance as float, tinted_tag.tag, tinted_tag.tint.w)
+    }
+
+pipeline tinted_points:
+    vertex = index_vs
+    pixel = tinted_ps
+    topology = .point_list
+    format = .rgba32_float

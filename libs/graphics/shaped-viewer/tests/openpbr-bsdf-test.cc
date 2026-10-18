@@ -429,7 +429,7 @@ constexpr tg::vec3f probe_directions[] = {
 
 ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const& ctx_h))
 {
-    // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
+    // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — bug-sv-woa-inline-readback-fastfail carries the evidence.
     //
     // The binary dies through `__fastfail` inside the wait for idle, after a trivial dispatch whose
     // command list also recorded an inline readback.
@@ -438,8 +438,8 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
     // These two are the only tests in sv that use `cmd.download`, and sv's own ../docs/structure.md already noted that path had
     // never been exercised here.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
 
@@ -505,7 +505,7 @@ ASYNC_INVOCABLE_TEST("sv - OpenPBR closure, measured", (sg::context_handle const
             // under a percent.
             // Turquin's analytic energy compensation overshoots a white metal by about 3%, and the Conty-Estevez sheen
             // reflects about 6% more at grazing than `sheen_albedo` charges the layers below it for.
-            // Both are the fits the viewer TODO names tabulated albedos as the replacement for, so this bound is what
+            // Both are the fits tabulated albedos replace (issue: feat-sv-openpbr-tabulated-albedo), so this bound is what
             // will tighten when they land.
             // Measured from INSIDE, the bound is in different units, and that is the closure's convention rather than a
             // concession.
@@ -641,8 +641,8 @@ ASYNC_INVOCABLE_TEST("sv - the denoiser guides describe the surface they are rea
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
 
@@ -731,8 +731,8 @@ ASYNC_INVOCABLE_TEST("sv - the diffuse and specular halves each reflect what the
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
 

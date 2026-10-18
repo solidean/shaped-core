@@ -5,6 +5,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/result.hh>
 #include <sgl_modules/tracer.hh> // sv::shaders::tracer::instance_record
 #include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-graphics/fwd.hh>
@@ -104,7 +105,7 @@ public:
     /// as empty — rather than skipped.
     /// So this covers the whole group rather than the tables a caller believes it touched, which is the only version
     /// that cannot silently under-declare.
-    /// Declare where a trace will bind `group()`: a declaration that never meets its tables asserts when it dies.
+    /// A trace binding arrays of a table's family, but never `group()`, leaves its declaration unmet, which asserts when it dies.
     [[nodiscard]] declared_tables declare_raytracing_access(sg::command_list& cmd) const;
 
     /// The same, for **every compute dispatch on `cmd`** while the result lives — what a wavefront's kernels reading the
@@ -163,14 +164,14 @@ private:
 /// `pin_texture` / `pin_buffer` are still here for an index that must outlive its epoch, and the type system is what keeps the
 /// two apart: a `sg::bindless_index` cannot be written where a `sg::bindless_element_handle` is wanted.
 ///
-/// TODO: the lock is sound but conservative, and it is not what makes an index valid.
+/// The lock is sound but conservative, and it is not what makes an index valid.
 /// What keeps a live index from being reassigned is sg's reclaim rule — a full array reclaims only indices *not
 /// acquired this epoch*, and never a pinned one — which is structural and needs no lock.
 /// The lock covers one narrower hazard: binding a snapshot taken before your mint.
-/// Two things are known-open, and [docs/TODO.md](../../../docs/TODO.md) carries them:
-/// the lock *prohibits* where a mint-generation stamp recorded in `bound_resources` would *verify*;
+/// Two things are known-open:
+/// the lock *prohibits* where a mint-generation stamp recorded in `bound_resources` would *verify* (issue: debt-sv-bindless-lock-generation-stamp);
 /// and it is global where the hazard is per-recording, so a routine acquiring mid-recording is refused rather
-/// than told to re-snapshot and rebind (which is nearly free, since a clean `snapshot()` is cached).
+/// than told to re-snapshot and rebind (issue: debt-sv-bindless-lock-per-recording).
 class sv::gpu_resource_manager
 {
 public:
@@ -229,6 +230,10 @@ public:
     /// Locks, snapshots the group, and unlocks when the returned value dies — the form to reach for.
     /// A clean snapshot is the cached handle, so freezing an unchanged working set costs nothing.
     [[nodiscard]] bound_resources freeze();
+
+    /// `freeze`, failing rather than throwing when the snapshot cannot be minted — descriptor-heap exhaustion — and then left unlocked.
+    /// The form for a frame's own traces: a failed snapshot declines that trace instead of tearing the frame down.
+    [[nodiscard]] cc::result<bound_resources> try_freeze();
 
     /// Records whatever follow-up work this epoch's budget allows, oldest request first.
     ///
@@ -299,6 +304,8 @@ public:
     /// traces with it and before `freeze()` — every index it returns is minted here.
     /// The buffer it is uploaded into is the record's own and persistent, which is what lets an unchanged working set leave
     /// the staging group clean and its snapshot cached.
+    /// That persistence is load-bearing: a fresh transient buffer per frame re-minted the whole bindless table on every
+    /// trace, and exhausted the descriptor heap within a second of `interactive-showcase-manual-test`.
     [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,
                                                                      mesh_id mesh,
                                                                      instance_id instance);

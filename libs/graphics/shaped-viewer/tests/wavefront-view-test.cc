@@ -50,8 +50,8 @@ struct parity_scene
         return out;
     }
 
-    /// Places the scene in `view`, traced in `mode` under `frame_budget_ms`.
-    void place(sv::view_ref view, sv::render_mode mode, f32 frame_budget_ms) const
+    /// Places the scene in `view`, traced in `mode`.
+    void place(sv::view_ref view, sv::render_mode mode) const
     {
         view.camera(camera);
         auto scene = view.add_scene();
@@ -66,17 +66,13 @@ struct parity_scene
                                  .y_axis = tg::vec3f(0, -1, 0),
                                  .scale = 1,
                                  .depth = 0.5f});
-        scene.settings({.samples_per_pixel = 4, .mode = mode, .frame_budget_ms = frame_budget_ms});
+        scene.settings({.samples_per_pixel = 4, .mode = mode});
     }
 };
 
 /// Captures the parity scene traced in `mode` at `accumulate` samples per pixel.
 /// PNG, so nothing but the tracer's own noise separates two captures.
-cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
-                                         sv::render_mode mode,
-                                         cc::string const& path,
-                                         int accumulate,
-                                         f32 frame_budget_ms)
+cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode, cc::string const& path, int accumulate)
 {
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
@@ -92,7 +88,7 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
     for (auto f : sv::interactive(ctx, "sv-test/wavefront-parity"))
     {
         f.register_capture("front", [](sv::capture_context const&) {});
-        scene.place(f.window().view(), mode, frame_budget_ms);
+        scene.place(f.window().view(), mode);
 
         REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
     }
@@ -123,18 +119,6 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx,
     return sum / f64(k_block * k_block);
 }
 
-/// The least value of every stat snapshot named `name` in `r`, or 2 when there is none.
-[[nodiscard]] f64 least_stat(cc::rec::recording const& r, cc::string_view name)
-{
-    auto least = 2.0;
-    r.for_each_event(
-        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
-        {
-            if (e.kind() == cc::rec::event_kind::stat_snapshot && cc::string_view(e.name()) == name)
-                least = cc::min(least, e.field_as_double("value").value_or(2.0));
-        });
-    return least;
-}
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and decals", (sg::context_handle const& ctx_h))
@@ -158,8 +142,8 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
     auto const traced_path = cc::format("{}/sv-parity-wavefront.png", cc::temp_directory_path());
 
     // The same samples per pixel for both, so the noise left between them is the same: 48 megakernel frames of 4.
-    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 192, 0.0f);
-    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 192, 0.0f);
+    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 192);
+    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 192);
 
     auto const reference = read_png(reference_path);
     auto const traced = read_png(traced_path);
@@ -182,68 +166,4 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
 
     cc::remove_file(reference_path);
     cc::remove_file(traced_path);
-}
-
-// A still frame whose budget no round fits runs one round, starting samples in only a share of the free slots.
-// wavefront-trace-test.cc pins that a partial fill keeps the image's mean; this pins that the viewer lowers it at all.
-ASYNC_INVOCABLE_TEST("sv - a still wavefront view held to a budget no round fits lowers its fill",
-                     (sg::context_handle const& ctx_h),
-                     nx::config::recorded)
-{
-#if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
-#endif
-    auto& ctx = *ctx_h;
-    {
-        auto probe = ctx.create_command_list();
-        auto const supported = probe->raytracing.is_supported();
-        ctx.drop_command_list(cc::move(probe));
-        if (!supported)
-            SKIP("device reports no ray tracing support");
-    }
-    if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
-    if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
-        SKIP("the wavefront tracer needs inline ray queries");
-    if (!ctx.supports(sg::feature::timestamp_query))
-        SKIP("a frame budget is paced by GPU timestamps, which this device does not take");
-
-    auto rec = nx::test_recording();
-    REQUIRE(rec.is_attached());
-
-    // A loop of its own rather than a capture, which would also wait out the loading under its own clock.
-    // At the fill this budget ends at, the slowest pixel's second sample is hundreds of frames away.
-    auto v_r = sv::viewer::try_create(ctx, "sv-test/starved-wavefront",
-                                      {.width = k_size[0], .height = k_size[1], .headless = true});
-    REQUIRE(v_r.has_value());
-    auto viewer = cc::move(v_r.value());
-
-    // A microsecond: no round of any scene fits, so every measured frame lowers the fill.
-    auto const scene = parity_scene::create();
-    constexpr int still_frames = 48;
-    auto traced_frames = 0;
-    auto samples = u32(0);
-    auto const loop_start = cc::current_time_steady_secs();
-    for (auto f : viewer.frames())
-    {
-        auto view = f.window().view();
-        scene.place(view, sv::render_mode::wavefront, 0.001f);
-
-        // Counted from the first frame whose samples read back, since a trace declines until its kernels compiled.
-        // Past the restart's one sample, so the starved still frames are what raised the floor.
-        samples = view.accumulated_samples();
-        if (samples > 0)
-            ++traced_frames;
-        if (traced_frames >= still_frames && samples >= 2)
-            viewer.request_close();
-        REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
-    }
-    co_await cc::async_settled(sv::background_work(ctx));
-
-    auto const fill = least_stat(rec.sync(), "sv.wavefront.still_fill");
-    CHECK(fill < 0.5).context(cc::format("the least fill a still frame ran at: {}", fill));
-
-    // Fewer samples per frame, but samples: every pixel holds one past the restart's.
-    CHECK(samples >= 2).context(cc::format("the floor at the end: {}", samples));
 }

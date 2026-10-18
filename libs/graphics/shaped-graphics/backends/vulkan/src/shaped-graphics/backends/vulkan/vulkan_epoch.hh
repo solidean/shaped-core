@@ -46,6 +46,7 @@ struct sg::backend::vulkan::vulkan_expiring_resource
     VkBuffer buffer = VK_NULL_HANDLE;
     VkImage image = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
+    cc::vector<VkImageView> image_views; // destroyed ahead of `image`, which they may view
     cc::vector<cc::unique_function<void()>> finalizers;
 
     /// The heap a placed resource lives in, released only after `buffer` is destroyed.
@@ -75,7 +76,7 @@ struct sg::backend::vulkan::vulkan_epoch_data
 /// A never-submitted list returns its pool straight to `free`, since the GPU never saw it.
 /// Guarded by a mutex because create / submit / drop are thread-safe.
 ///
-/// TODO: promote to a standalone object owning its own synchronization, with pools per queue once the epoch system grows multiple queues.
+/// Once the epoch system grows multiple queues, it wants promoting to a standalone object owning its own synchronization, with pools per queue once the epoch system grows multiple queues.
 struct sg::backend::vulkan::vulkan_command_pool_set
 {
     cc::vector<vulkan_command_pool> in_epoch; // captured by submitted lists this epoch
@@ -100,6 +101,9 @@ inline void release_expiring(VkDevice device,
                              vulkan_expiring_resource& r,
                              cc::vector<cc::unique_function<void()>>& out_finalizers)
 {
+    for (auto const view : r.image_views)
+        vkDestroyImageView(device, view, nullptr);
+    r.image_views.clear();
     if (r.buffer != VK_NULL_HANDLE)
         vkDestroyBuffer(device, r.buffer, nullptr);
     if (r.image != VK_NULL_HANDLE)

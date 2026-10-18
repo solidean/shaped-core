@@ -121,8 +121,8 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
 - `[planned]` **extensions / extras raw access** — a `read_options{ bool keep_json_document; }` plus an optional `json::document` member and a per-object `i32 json_node`.
   Deliberately not in v1: retaining the whole JSON document alongside the parsed structure doubles memory against read-once-into-a-native-structure.
   A stored `json::ref` would also dangle across a `cc::move(data)`.
-- `[planned]` **a node's composed local transform** — blocked on typed-geometry, which has no TRS composition yet.
-  The reader stores `matrix` or TRS in whichever form the file used and composes nothing; [lower-library-gaps.md](lower-library-gaps.md) has that gap and the rest.
+- `[done]` **a node's composed local transform** — `node::local_transform()`, matrix or TRS as one `tg::affine_transform3f`.
+  The reader still stores `matrix` or TRS in whichever form the file used; `local_transform()` composes it on demand.
 - `[planned]` **writer**.
 
 ### stl [done]
@@ -153,10 +153,13 @@ A native reader was the alternative, and ufbx won on what a reader of untrusted 
 ufbx is two files with no dependencies, which puts it in libspng's tier of the committed-in-source rule ([coding-guidelines.md](coding-guidelines.md)) rather than SQLite's fetched one.
 
 - `[done]` **triangulation**, as a read option: ufbx's ear clip, which a fan gets wrong on a concave polygon.
+- `[done]` **a read spread over a caller's scheduler**, and **a staged one**: `read_options::scheduler` runs ufbx's parallel decoding and the per-mesh copy on a `cc::async_scheduler`.
+  `read_structure` skips the geometry, and `read_async` runs both, and the structure usually resolves well before the whole scene.
+  Finer stages do not exist to offer: ufbx returns one finished scene per parse, and FBX writes which mesh belongs to which node after every object.
 - `[planned]` **cameras** — a camera's pose is a node like any other; its projection is the missing part.
 - `[planned]` **animation, skinning and blend shapes** — recorded today as `unsupported`, and the static pose is what comes back.
 - `[planned]` **the PBR shader models** ufbx recognizes (3ds Max Physical, Maya StandardSurface, Blender's Principled export), as typed fields beside the raw property bag.
-  Every FBX the importer has met so far is Phong or Lambert, whose meaning is the exporting pipeline's.
+  Every FBX this reader has been tried on so far is Phong or Lambert, whose meaning is the exporting pipeline's.
 
 ### Other geometry formats [planned]
 
@@ -219,7 +222,7 @@ Arrays, cube maps (partial legacy ones included) and volumes are laid out in fil
 
 - `[done]` **decoding** — any subresource to rgba8 (every format but the float ones), or to rgba32f (every format), through `bcn`.
 - `[planned]` **the remaining DXGI formats** — 10:10:10:2, 11:11:10, 16-bit unorm, and the rest of the uncompressed table, each a mapping plus a texel decoder.
-  Legacy files reach most of them already through the bit-mask path.
+  Legacy files reach 10:10:10:2 and the 16-bit one- and two-channel ones already, through the bit-mask path; 11:11:10 is a float format and RGBA16 is 64 bits, which no 32-bit mask describes.
 
 ### tga [done]
 

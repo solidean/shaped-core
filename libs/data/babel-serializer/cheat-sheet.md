@@ -153,6 +153,8 @@ cc::span<node_index const> cs = doc.children_of(doc.nodes[0]);
 cc::span<node_index const> rs = doc.nodes_of(doc.scenes[0]);
 accessor_index pos = doc.find_attribute(ps[0], "POSITION"); // invalid when absent
 cc::span<f32 const> lo = doc.min_of(doc.accessors[1]);      // empty when the file stated no bounds; also max_of
+cc::optional<tg::aabb3f> b = doc.bounds_of(doc.accessors[1]); // a vec3 accessor's stated bounds as a box: POSITION's mesh bounds
+tg::affine_transform3f xf = doc.nodes[0].local_transform();  // matrix or T * R * S, whichever the file used
 ```
 
 ```cpp
@@ -190,7 +192,14 @@ Both encodings, every version from 6100 on; the parse is the vendored ufbx's, co
 #include <babel-serializer/geometry/fbx.hh>
 
 cc::result<babel::fbx::data> read(cc::read_stream& in, read_options = {});   // + span / string_view overloads
-struct read_options { bool triangulate = false; i64 memory_limit = 0; };  // ear clip; 0 = 32x input + 64 MiB, at most 4 GiB
+struct read_options { bool triangulate = false; i64 memory_limit = 0; cc::async_scheduler* scheduler = nullptr; };
+// triangulate: ear clip | memory_limit: 0 = 32x input + 64 MiB, at most 4 GiB | scheduler: ufbx's parallel decoding + the per-mesh copy spread over it
+cc::result<babel::fbx::data> read_structure(cc::read_stream& in, read_options = {});   // + span; no geometry: every mesh named and empty
+babel::fbx::loading read_async(cc::pinned_data<byte const> bytes, read_options = {});   // { structure, complete }: cc::shared_async<data> each, both scheduled at once
+
+auto const loading = babel::fbx::read_async(cc::make_pinned_data(cc::move(file_bytes)), {.scheduler = &cc::compute_scheduler()});
+fetch_textures((co_await loading.structure).textures);   // milliseconds in: nodes, materials, textures, lights
+draw(co_await loading.complete);                          // then everything, the same indices
 
 auto const doc = babel::fbx::read(stream, {.triangulate = true}).value();
 doc.info;       // file_info { version (7500 = FBX 2016), encoding (binary | ascii), creator, application, application_version }
@@ -203,17 +212,19 @@ n.parent;  doc.children_of(n);
 n.local;  n.geometry;                         // transform { translation, rotation, scale } — the pivot chain composed
 n.node_to_world;  n.geometry_to_world;        // tg::affine_transform3f, honoring n.inherit (FBX's scale inheritance)
 n.mesh;  n.light;                             // mesh_index / light_index; several nodes naming one mesh is instancing
-doc.materials_of(n);                          // span<material_index> — the node's material SLOTS
+doc.materials_of(n);                          // span<material_index> — the node's material SLOTS, possibly empty
+doc.material_of(n, m, f);                     // material_index face f draws with on node n; invalid where n has no such slot
 
-doc.meshes;     // mesh { name, faces, positions, normals, tangents, bitangents, uv_sets, color_sets, face_materials }
+doc.meshes;     // mesh { name, faces, face_holes, positions, normals, tangents, bitangents, uv_sets, color_sets, face_materials }
 m.faces[f];                    // face { first_corner, corner_count } — polygons unless read with triangulate
 m.positions.at(corner);        // corner_attribute<T> { values, indices }: one index per face corner, every mapping mode unified
 m.normals.exists();            // false: both arrays empty
 m.uv_sets[0].uvs.at(corner);   // V points UP the image, as FBX writes it
-m.material_slot_of(f);         // index into materials_of(node), NOT into doc.materials
+m.material_slot_of(f);         // index into materials_of(node), NOT into doc.materials — material_of does the lookup
+m.is_hole(f);                  // a face FBX marks hidden; triangulation drops these
 
-doc.materials;  // material { name, shading_model ("phong"), properties, textures }
-mat.find_property("DiffuseColor");   // property const* { name, type, value (vec4f), value_int, text }; template defaults included
+doc.materials;  // material { name, shading_model ("phong"), properties (own), defaults (template, SHARED pin), textures }
+mat.find_property("DiffuseColor");   // property const* { name, type, value (vec4f), value_int, text }; own, then template default
 mat.find_texture("NormalMap");       // texture_index — FBX connects a texture to a PROPERTY by name
 doc.textures;   // texture { name, relative_filename, absolute_filename (as written, backslashes too), content (embedded, SHARED pin), wrap_u/v, uv_set }
 doc.lights;     // light { type, decay, color, intensity (FBX Intensity / 100, no unit), local_direction (-Y), inner/outer_angle_degrees (FULL cone) }
@@ -222,13 +233,18 @@ doc.lights;     // light { type, decay, color, intensity (FBX Intensity / 100, n
 Gotchas:
 
 - **Materials belong to the node, not the mesh.** Two instances of one mesh may draw with different materials, so a face's slot means nothing without the node placing it.
+  The slots follow the FIRST instance's count, and an instance listing more is an `unsupported` issue.
 - **Nothing is converted.** Positions are in the file's axes and unit; `settings` says which, and a Z-up centimeter scene stays one.
   Axes that are not a permutation of X, Y and Z, or a unit outside 1e-9 to 1e9 meters, fall back to FBX's default with a `malformed` issue.
+- **A read spread over a scheduler is the same read**, field for field and issue for issue: only where the work runs changes.
+  Bistro's 114 MB exterior reads about five times faster over a 15-worker pool, and its structure alone in a few tens of milliseconds.
 - **A memory ceiling bounds every read** (`memory_limit`): an array's stated count is allocated before its bytes are, so a crafted file is an error rather than gigabytes.
   A plain stream cannot say how long it is and gets 1 GiB; the span overloads scale it to the input, at most 4 GiB, split evenly between ufbx's working memory and the scene.
+  The copy of the meshes is budgeted against the whole limit before it starts, since it writes per corner what ufbx shares.
 - **A mesh past `i32` counts is an error**, since every index here is an `i32`.
 - **No file is opened.** A texture is its file names and its embedded bytes; resolving a name is the caller's policy, which babel owns none of.
-- **Cameras, animation, skinning, blend shapes and curves are not read**, and each is an `unsupported` issue rather than silence.
+  Both names are untrusted: absolute, drive-lettered, UNC or climbing out with `..`, `relative_filename` included.
+- **Cameras, animation, skinning, blend shapes, constraints, markers, LOD groups and curves are not read**, and each is an `unsupported` issue rather than silence.
 
 ## SQLite (`babel::sqlite`)
 
@@ -398,6 +414,7 @@ t.subresources;                                // file order: layer, then face, 
 t.find(layer, face, mip);                      // -> subresource const*, nullptr where absent
 babel::dds::decode_rgba8(t, sub, {.max_decoded_bytes = 1 << 28}); // -> result<vector<byte>> rgba8; errors for a float format or past the budget
 babel::dds::decode_rgba32f(t, sub);            // -> result<vector<float>>; every format, signed ones in -1..1, BC1-BC5 unrounded
+babel::dds::decode_rgba32f_into(t, sub, out);  // the same into caller memory, four floats per texel
 babel::dds::is_block_compressed(fmt); is_float(fmt); is_srgb(fmt); mip_extent(base, level);
 
 babel::tga::data g = babel::tga::read(bytes, {.max_decoded_bytes = 1 << 28}).value();  // the budget is checked before allocating
@@ -406,8 +423,8 @@ g.type; g.run_length_encoded; g.pixel_depth; g.alpha_bits; g.stored_bottom_up; g
 
 babel::bcn::small_block(ptr); babel::bcn::large_block(ptr);   // fixed_span<byte const, 8 / 16>; the length is the constructor's precondition, unchecked
 babel::bcn::decode_bc1(block) / decode_bc2 / decode_bc3 / decode_bc7 -> rgba8_block;   // .rgba[texel * 4 + c]
-babel::bcn::decode_bc4(block, is_signed) / decode_bc5(block, is_signed) -> rgba8_block; // (r,0,0,1) / (r,g,0,1)
-babel::bcn::decode_bc6h(block, is_signed) -> rgba32f_block;  // half-float results widened, alpha 1
+babel::bcn::decode_bc4(block, is_signed) / decode_bc5(block, is_signed) -> rgba8_block; // (r,0,0,1) / (r,g,0,1); signed: 128 for 0
+babel::bcn::decode_bc6h(block, is_signed) -> rgba32f_block;  // Khronos's half-float results widened, alpha 1
 babel::bcn::decode_bc1_f32(block) ... decode_bc5_f32(block, is_signed);  // exact interpolants, before rounding
 babel::bcn::decode_bc4_channel(block, is_signed);            // the channel as integers: 0..255 or -127..127
 ```
@@ -489,10 +506,11 @@ Only what the signatures above cannot tell you.
   Use `babel::dds` for the rest, or for the blocks themselves.
 - **BC5 decodes to (x, y, 0, 1)**, and a normal's z is the consumer's to reconstruct; BC4 is (r, 0, 0, 1).
   The first BC5 block is red, ATI2 included.
-- **Signed BC4 / BC5 land biased in 8 bits** (-1 -> 0, 0 -> 128, 1 -> 255); `decode_rgba32f` has the signed values.
+- **Signed BC4 / BC5 land biased in 8 bits** (-1 -> 0, 0 -> 128, 1 -> 255), the unused channels as 128; `decode_rgba32f` has the signed values.
 - **The decode budget defaults to 256 MiB**: 8192 x 8192 in rgba8, but only 4096 x 4096 in rgba32f; the largest `isize` disables it.
 - **A DDS's stored pitch is ignored**: rows are read tightly packed, so a DWORD-padded legacy file reads skewed.
-- **A 16-bit TGA with attribute bits takes its alpha from bit 15**, which many writers leave 0, so such a file reads fully transparent.
+- **A TGA has alpha only where its descriptor declares attribute bits**, at 16 and 32 bits alike; otherwise the image is rgb.
+  An alpha that is zero at every pixel reads as opaque, as DirectXTex reads it, and `alpha_was_all_zero` says so.
 - **TGA has no magic.** `detect_format` takes a TGA 2.0 footer or, failing that, a header that parses — a guess, so pass the format to `read` when you know it.
 - **Image rows carry no padding**: `row_stride() == width * channels * bytes_per_component()`.
 - **`babel::png::encode` wants the buffer size exactly.** `width * height * channels * (decoded == u16 ? 2 : 1)`, so a buffer that merely fits is `decoded` disagreeing with it and is an error.

@@ -14,7 +14,7 @@ struct frame_constants:
     camera: tracer.camera_record
     /// the camera of this layer's previous frame, which the motion target reprojects into
     previous_camera: tracer.camera_record
-    /// where the projection's depth starts: a point at view depth `d` lands at `1 - near_plane / d`
+    /// where the projection's depth starts: a point at view depth `d` tests at `near_plane / d`, reversed, and writes `1 - near_plane / d` as its primary depth
     near_plane: float
     /// how many lights `drawn.lights` holds
     light_count: uint
@@ -46,84 +46,6 @@ binding drawn:
     decals: buffer[tracer.decal_record]
     decal_shapes: buffer[tracer.decal_shape]
 
-    // ---- The material sampler palette ----------------------------------------------------------------------------------
-    //
-    // `tracer.traced`'s palette restated, sampler for sampler, since a generated material names its sampler by the group that holds it.
-    // A pixel has derivatives, so here the minification and mip filters a palette entry carries do apply, unlike at a traced hit.
-
-    sampler palette_nearest_repeat_repeat:
-        filter = .nearest
-        address_u = .repeat
-        address_v = .repeat
-    sampler palette_nearest_repeat_mirror:
-        filter = .nearest
-        address_u = .repeat
-        address_v = .mirror_repeat
-    sampler palette_nearest_repeat_clamp:
-        filter = .nearest
-        address_u = .repeat
-        address_v = .clamp_edge
-    sampler palette_nearest_mirror_repeat:
-        filter = .nearest
-        address_u = .mirror_repeat
-        address_v = .repeat
-    sampler palette_nearest_mirror_mirror:
-        filter = .nearest
-        address_u = .mirror_repeat
-        address_v = .mirror_repeat
-    sampler palette_nearest_mirror_clamp:
-        filter = .nearest
-        address_u = .mirror_repeat
-        address_v = .clamp_edge
-    sampler palette_nearest_clamp_repeat:
-        filter = .nearest
-        address_u = .clamp_edge
-        address_v = .repeat
-    sampler palette_nearest_clamp_mirror:
-        filter = .nearest
-        address_u = .clamp_edge
-        address_v = .mirror_repeat
-    sampler palette_nearest_clamp_clamp:
-        filter = .nearest
-        address_u = .clamp_edge
-        address_v = .clamp_edge
-    sampler palette_linear_repeat_repeat:
-        filter = .linear
-        address_u = .repeat
-        address_v = .repeat
-    sampler palette_linear_repeat_mirror:
-        filter = .linear
-        address_u = .repeat
-        address_v = .mirror_repeat
-    sampler palette_linear_repeat_clamp:
-        filter = .linear
-        address_u = .repeat
-        address_v = .clamp_edge
-    sampler palette_linear_mirror_repeat:
-        filter = .linear
-        address_u = .mirror_repeat
-        address_v = .repeat
-    sampler palette_linear_mirror_mirror:
-        filter = .linear
-        address_u = .mirror_repeat
-        address_v = .mirror_repeat
-    sampler palette_linear_mirror_clamp:
-        filter = .linear
-        address_u = .mirror_repeat
-        address_v = .clamp_edge
-    sampler palette_linear_clamp_repeat:
-        filter = .linear
-        address_u = .clamp_edge
-        address_v = .repeat
-    sampler palette_linear_clamp_mirror:
-        filter = .linear
-        address_u = .clamp_edge
-        address_v = .mirror_repeat
-    sampler palette_linear_clamp_clamp:
-        filter = .linear
-        address_u = .clamp_edge
-        address_v = .clamp_edge
-
 /// Which row of `drawn.instances` one draw is, the only thing that changes between the draws of a frame.
 @inline binding draw:
     instance: uint
@@ -143,8 +65,8 @@ struct varyings:
 
 /// What a raster frame writes per pixel: the lit image and the primary hit's G-buffer.
 ///
-/// Each target is the layer's slot of the same meaning (view/view_data.cc), in the format the tracer writes it in.
-/// A pixel no surface covers holds the environment in `color`, and zero in every G-buffer target but `primary_depth`, which holds 1.
+/// Each target is the layer's slot of the same meaning (`sv::impl::raster_slots`, view/view_data.hh), in the format the tracer writes it in.
+/// A pixel no surface covers holds the environment in `color`, its reprojection in `motion`, 1 in `primary_depth`, and zero in every other target.
 @pixel struct targets:
     /// radiance, alpha 1
     @format(.rgba32_float) color: float4

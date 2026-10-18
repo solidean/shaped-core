@@ -1,6 +1,8 @@
 #include "shader_fixtures.hh"
+#include "texel_formats.hh"
 
 #include <clean-core/common/utility.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -21,6 +23,7 @@ using namespace cc::primitive_defines;
 // step, and the check says so instead of pretending otherwise.
 // The middle is checked per channel, because a blend written against luminance rather than colour passes a grey test
 // and tints everything else.
+// Each is checked in every format sr_test sweeps, since the routine writes the destination in that destination's own.
 
 namespace
 {
@@ -29,44 +32,47 @@ constexpr int k_size = 8;
 constexpr auto image_usage
     = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_dst | sg::texture_usage::copy_src;
 
-[[nodiscard]] sg::texture_2d make_image(sg::context& ctx)
+[[nodiscard]] sg::texture_2d make_image(sg::context& ctx, sg::pixel_format format)
 {
-    return ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba32_float, .width = k_size, .height = k_size, .usage = image_usage});
+    return ctx.persistent.create_texture_2d({.format = format, .width = k_size, .height = k_size, .usage = image_usage});
 }
 
-[[nodiscard]] cc::vector<tg::vec4f> filled(tg::vec4f v)
+/// Whether `ctx` can hand the routine a destination of `format` at all.
+[[nodiscard]] bool can_write(sg::context const& ctx, sg::pixel_format format)
 {
-    return cc::vector<tg::vec4f>::create_filled(k_size * k_size, v);
+    return sg::is_portable_image_format(format) || ctx.supports(sg::feature::extended_image_formats);
 }
 
-/// Uploads both images, mixes `source` into `destination` by `weight`, and reads the destination back.
-cc::shared_async<cc::vector<tg::vec4f>> mix_once(sg::context& ctx, tg::vec4f destination, tg::vec4f source, f32 weight)
+/// Uploads both images, mixes `source` into a `format` destination by `weight`, and reads the destination back.
+/// The source stays rgba32_float, since the routine samples it whatever the destination's format.
+cc::shared_async<cc::vector<tg::vec4f>> mix_once(sg::context& ctx,
+                                                 sg::pixel_format format,
+                                                 tg::vec4f destination,
+                                                 tg::vec4f source,
+                                                 f32 weight)
 {
-    sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
+    sr::mix_routine::prewarm(ctx, format);
     (void)co_await ctx.routines.idle_completion();
 
-    auto const dst = make_image(ctx);
-    auto const src = make_image(ctx);
+    auto const dst = make_image(ctx, format);
+    auto const src = make_image(ctx, sg::pixel_format::rgba32_float);
 
     auto cmd = ctx.create_command_list();
-    auto const dst_pixels = filled(destination);
-    auto const src_pixels = filled(source);
-    cmd->upload.bytes_to_texture(dst.raw(), cc::span<tg::vec4f const>(dst_pixels).as_bytes());
-    cmd->upload.bytes_to_texture(src.raw(), cc::span<tg::vec4f const>(src_pixels).as_bytes());
+    auto const dst_bytes = sr_test::packed(format, cc::vector<tg::vec4f>::create_filled(k_size * k_size, destination));
+    auto const src_bytes
+        = sr_test::packed(sg::pixel_format::rgba32_float, cc::vector<tg::vec4f>::create_filled(k_size * k_size, source));
+    cmd->upload.bytes_to_texture(dst.raw(), dst_bytes);
+    cmd->upload.bytes_to_texture(src.raw(), src_bytes);
 
     auto const ran = sr::mix_routine::execute(*cmd, dst, src, weight);
     REQUIRE(ran); // prewarmed above, so a decline here is a compile failure rather than a race
 
-    auto const readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(dst.raw()));
+    auto const readback = cmd->download.bytes_from_texture(dst.raw());
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
 
-    auto const pixels = co_await readback.data();
-    auto out = cc::vector<tg::vec4f>();
-    for (auto i = isize(0); i < pixels.size(); ++i)
-        out.push_back(pixels[i]);
-    co_return out;
+    auto const& bytes = co_await readback.bytes();
+    co_return sr_test::unpacked(format, bytes, k_size * k_size);
 }
 } // namespace
 
@@ -82,17 +88,26 @@ ASYNC_INVOCABLE_TEST("sr - a mix reaches both of its endpoints exactly",
     auto const a = tg::vec4f(0.25f, 0.5f, 0.75f, 1.0f);
     auto const b = tg::vec4f(0.9f, 0.1f, 0.4f, 0.5f);
 
-    // Weight 0 leaves the destination untouched, bit for bit: a fade's first frame is this, and anything else is a
-    // visible step into the fade.
-    auto const kept = co_await mix_once(ctx, a, b, 0.0f);
-    REQUIRE(kept.size() == k_size * k_size);
-    for (auto c = 0; c < 4; ++c)
-        CHECK(kept[0][c] == a[c]);
+    for (auto const format : sr_test::k_swept_formats)
+    {
+        if (!can_write(ctx, format))
+            continue;
+        auto const what = cc::format("pixel_format {}", int(format));
 
-    // And weight 1 arrives at the source, to within the one subtraction `lerp` takes to get there.
-    auto const replaced = co_await mix_once(ctx, a, b, 1.0f);
-    for (auto c = 0; c < 4; ++c)
-        CHECK(tg::abs(replaced[0][c] - b[c]) < 1e-6f);
+        // Weight 0 leaves the destination untouched, bit for bit: a fade's first frame is this, and anything else is a
+        // visible step into the fade.
+        auto const kept = co_await mix_once(ctx, format, a, b, 0.0f);
+        REQUIRE(kept.size() == k_size * k_size);
+        auto const stored = sr_test::quantized(format, a);
+        for (auto c = 0; c < 4; ++c)
+            CHECK(kept[0][c] == stored[c]).context(what);
+
+        // And weight 1 arrives at the source, to within the one subtraction `lerp` takes to get there and the store's
+        // own rounding.
+        auto const replaced = co_await mix_once(ctx, format, a, b, 1.0f);
+        tg::vec4f const wanted[] = {b};
+        CHECK(sr_test::worst_stored(format, cc::span<tg::vec4f const>(replaced).first_n(1), wanted, 4) < 1e-6).context(what);
+    }
 }
 
 ASYNC_INVOCABLE_TEST("sr - a mix interpolates every channel on its own",
@@ -108,22 +123,28 @@ ASYNC_INVOCABLE_TEST("sr - a mix interpolates every channel on its own",
     // scalar — luminance, or the red channel alone — cannot pass.
     auto const a = tg::vec4f(0.0f, 1.0f, 0.25f, 1.0f);
     auto const b = tg::vec4f(1.0f, 0.0f, 0.75f, 0.0f);
-
     auto const w = 0.25f;
-    auto const mixed = co_await mix_once(ctx, a, b, w);
-    REQUIRE(mixed.size() == k_size * k_size);
 
-    for (auto c = 0; c < 4; ++c)
+    for (auto const format : sr_test::k_swept_formats)
     {
-        auto const expected = a[c] + (b[c] - a[c]) * w;
-        CHECK(tg::abs(mixed[0][c] - expected) < 1e-5f);
-    }
+        if (!can_write(ctx, format))
+            continue;
+        auto const what = cc::format("pixel_format {}", int(format));
 
-    // Every pixel, not just the first: the dispatch is per pixel, and a bounds check written against the wrong extent
-    // leaves a band at an edge untouched.
-    auto uniform = true;
-    for (auto const& p : mixed)
-        for (auto c = 0; c < 4; ++c)
-            uniform &= tg::abs(p[c] - mixed[0][c]) < 1e-6f;
-    CHECK(uniform);
+        auto const mixed = co_await mix_once(ctx, format, a, b, w);
+        REQUIRE(mixed.size() == k_size * k_size);
+
+        // The destination holds what was stored of `a`, and the blend of it is stored again.
+        auto const held = sr_test::quantized(format, a);
+        tg::vec4f const expected[] = {held + (b - held) * w};
+        CHECK(sr_test::worst_stored(format, cc::span<tg::vec4f const>(mixed).first_n(1), expected, 4) < 1e-5).context(what);
+
+        // Every pixel, not just the first: the dispatch is per pixel, and a bounds check written against the wrong
+        // extent leaves a band at an edge untouched.
+        auto uniform = true;
+        for (auto const& p : mixed)
+            for (auto c = 0; c < 4; ++c)
+                uniform &= tg::abs(p[c] - mixed[0][c]) < 1e-6f;
+        CHECK(uniform).context(what);
+    }
 }

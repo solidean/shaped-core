@@ -90,25 +90,37 @@ void command_list_compute_scope::dispatch_threads(int x, int y, int z)
 void command_list_compute_scope::dispatch_groups_indirect(buffer<dispatch_args> const& args, isize index)
 {
     CC_ASSERT(index >= 0 && index < args.element_count(), "indirect dispatch arguments index is out of range");
-    dispatch_groups_indirect(args.raw(), index * isize(sizeof(dispatch_args)));
+    dispatch_groups_indirect_bytes(args.raw(), index * isize(sizeof(dispatch_args)));
 }
 
-void command_list_compute_scope::dispatch_groups_indirect(raw_buffer_handle const& args, isize offset_in_bytes)
+void command_list_compute_scope::dispatch_groups_indirect_bytes(raw_buffer_handle const& args, isize offset_in_bytes)
 {
     _cmd._stats.add(stat::dispatches);
     _cmd.dispatch_indirect(args, offset_in_bytes);
 }
 
+array_access_declaration command_list_compute_scope::declare_array_buffer_access(buffer_array_binding array,
+                                                                                 cc::span<array_buffer_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_buffer_access(array.name, elements), false);
+}
+
 array_access_declaration command_list_compute_scope::declare_array_buffer_access(cc::string_view binding_name,
                                                                                  cc::span<array_buffer_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_buffer_access(binding_name, elements), false);
+    return declare_array_buffer_access(_cmd.named_buffer_array(binding_name), elements);
+}
+
+array_access_declaration command_list_compute_scope::declare_array_texture_access(texture_array_binding array,
+                                                                                  cc::span<array_texture_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_texture_access(array.name, elements), false);
 }
 
 array_access_declaration command_list_compute_scope::declare_array_texture_access(cc::string_view binding_name,
                                                                                   cc::span<array_texture_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_texture_access(binding_name, elements), false);
+    return declare_array_texture_access(_cmd.named_texture_array(binding_name), elements);
 }
 
 void command_list_compute_scope::set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)

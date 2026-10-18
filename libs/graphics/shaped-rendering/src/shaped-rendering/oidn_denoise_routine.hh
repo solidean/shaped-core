@@ -57,7 +57,7 @@ class sr::oidn_denoise_routine : public sg::render_routine<oidn_denoise_routine,
 public:
     /// Denoises `in.color` into `in.output`, carrying the network in `history`.
     ///
-    /// Does not upscale: `in.output` must be the input's extent, in a four-channel float or normalized format.
+    /// Does not upscale: `in.output` must be the input's extent, in a float or normalized format.
     /// The image may be any size; the network pads its own tensors up to what four pools need.
     [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
                                                      reconstruct_inputs const& in,

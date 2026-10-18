@@ -34,6 +34,14 @@ struct sv::viewer_config
     /// A headless loop is ended by `request_close` alone, since there is no window to close.
     bool headless = false;
 
+    /// How much GPU time a frame's still wavefront layers may take together, in milliseconds, split evenly among them; 0 runs each layer's `rounds_per_frame`.
+    ///
+    /// A still layer's rounds follow from what its last frames measured, so the image converges as fast per second as the GPU allows while the viewer stays responsive.
+    /// A frame whose image changed is not held to it, since it drains.
+    /// Needs `sg::feature::timestamp_query`; without it the rounds stay at `rounds_per_frame`.
+    /// A headless viewer, which is what a capture runs in, treats it as 0, so its image depends on no machine's speed.
+    f32 frame_budget_ms = 16.0f;
+
     /// Swapchain back buffers, and also the pipelining depth passed to advance_epoch.
     /// Must be >= 2.
     int buffer_count = 3;
@@ -205,6 +213,17 @@ private:
     /// Magnifies the view under `window_point` by `ticks` wheel steps, keeping the point under the cursor fixed.
     /// Writes only the view's persistent zoom — never a camera, and never anything a trace reads.
     void zoom_at(tg::pos2f window_point, float ticks);
+
+    /// Asks for the surface point under `window_point` to become its view's orbit centre.
+    /// Only the trace knows that point, so this records the request, and `read_back_pick` and `apply_pick` finish it frames later.
+    void request_pick(tg::pos2f window_point);
+
+    /// Reads the primary depth under a pending pick back, in this frame's command list, once its view traced in it.
+    void read_back_pick(viewer_definition const& def, render_plan const& plan);
+
+    /// Starts the picked view's glide to its new orbit centre once its depth has landed.
+    /// A click on the background reads an escaped ray, and moves nothing.
+    void apply_pick();
 
     friend class frame;
     friend class frame_iterator;

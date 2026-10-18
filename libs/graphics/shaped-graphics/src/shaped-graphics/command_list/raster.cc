@@ -266,15 +266,25 @@ void rendering_scope::bind_index_buffer(index_buffer_view const& view)
 {
     _cmd.bind_raster_index_buffer(view);
 }
+array_access_declaration rendering_scope::declare_array_buffer_access(buffer_array_binding array,
+                                                                      cc::span<array_buffer_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_buffer_access(array.name, elements), true);
+}
 array_access_declaration rendering_scope::declare_array_buffer_access(cc::string_view binding_name,
                                                                       cc::span<array_buffer_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_buffer_access(binding_name, elements), true);
+    return declare_array_buffer_access(_cmd.named_buffer_array(binding_name), elements);
+}
+array_access_declaration rendering_scope::declare_array_texture_access(texture_array_binding array,
+                                                                       cc::span<array_texture_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_texture_access(array.name, elements), true);
 }
 array_access_declaration rendering_scope::declare_array_texture_access(cc::string_view binding_name,
                                                                        cc::span<array_texture_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_texture_access(binding_name, elements), true);
+    return declare_array_texture_access(_cmd.named_texture_array(binding_name), elements);
 }
 void rendering_scope::set_viewport(viewport const& vp)
 {
@@ -347,15 +357,25 @@ void command_list_raster_scope::bind_index_buffer(index_buffer_view const& view)
 {
     _cmd.bind_raster_index_buffer(view);
 }
+array_access_declaration command_list_raster_scope::declare_array_buffer_access(buffer_array_binding array,
+                                                                                cc::span<array_buffer_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_buffer_access(array.name, elements), true);
+}
 array_access_declaration command_list_raster_scope::declare_array_buffer_access(cc::string_view binding_name,
                                                                                 cc::span<array_buffer_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_buffer_access(binding_name, elements), true);
+    return declare_array_buffer_access(_cmd.named_buffer_array(binding_name), elements);
+}
+array_access_declaration command_list_raster_scope::declare_array_texture_access(texture_array_binding array,
+                                                                                 cc::span<array_texture_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_texture_access(array.name, elements), true);
 }
 array_access_declaration command_list_raster_scope::declare_array_texture_access(cc::string_view binding_name,
                                                                                  cc::span<array_texture_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_texture_access(binding_name, elements), true);
+    return declare_array_texture_access(_cmd.named_texture_array(binding_name), elements);
 }
 void command_list_raster_scope::set_viewport(viewport const& vp)
 {
@@ -411,16 +431,28 @@ void command_list_raster_manual_scope::bind_index_buffer(index_buffer_view const
     _cmd.bind_raster_index_buffer(view);
 }
 array_access_declaration command_list_raster_manual_scope::declare_array_buffer_access(
+    buffer_array_binding array,
+    cc::span<array_buffer_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_buffer_access(array.name, elements), true);
+}
+array_access_declaration command_list_raster_manual_scope::declare_array_buffer_access(
     cc::string_view binding_name,
     cc::span<array_buffer_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_buffer_access(binding_name, elements), true);
+    return declare_array_buffer_access(_cmd.named_buffer_array(binding_name), elements);
+}
+array_access_declaration command_list_raster_manual_scope::declare_array_texture_access(
+    texture_array_binding array,
+    cc::span<array_texture_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_texture_access(array.name, elements), true);
 }
 array_access_declaration command_list_raster_manual_scope::declare_array_texture_access(
     cc::string_view binding_name,
     cc::span<array_texture_access const> elements)
 {
-    return _cmd.adopt_array_declaration(_cmd.raster_declare_array_texture_access(binding_name, elements), true);
+    return declare_array_texture_access(_cmd.named_texture_array(binding_name), elements);
 }
 void command_list_raster_manual_scope::set_viewport(viewport const& vp)
 {

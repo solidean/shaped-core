@@ -232,6 +232,9 @@ What follows from the bucket:
 
 * **A sweep never selects it.** Not `dev.py test`, not `--manual`, not a bulk "run disabled too" request.
   Only `--examples` or its exact name.
+* **It runs as a program rather than as a suite**, whether it was named exactly or swept by `--examples`.
+  It prints no `nexus: run seed` line and no CPU and RAM summary, so its transcript reads the same on every run.
+  No hang watchdog watches it either, so it may sit idle in its window.
 * **No CHECK is required.** A `CHECK` that fails still fails, so assert where asserting is part of the demonstration — but an example with none is a passing example.
 * **`main_thread` and `exclusive()` are baked in**, so the body runs on the thread `nx::run` was entered on, alone — which is what a window or a device context needs.
 * **The run installs an ambient async scheduler**, so an example may use `cc::async` without standing up a pool of its own.
@@ -299,6 +302,7 @@ A binary with several is exactly right when related examples want to share setup
 Such a binary may also carry ordinary `TEST`s, for the machinery it grew along the way.
 `dev.py test` runs them: an example binary joins the sweep exactly when it reports tests of its own, and is skipped when it has none.
 Its `EXAMPLE`s are in another bucket and never run there.
+An example binary that is not built, such as one a consumer excludes from `all`, is skipped too; a test binary that is not built fails its run, and the rest still run.
 
 ## What binds an example, and what does not
 

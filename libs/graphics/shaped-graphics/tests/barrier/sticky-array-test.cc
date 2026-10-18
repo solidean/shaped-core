@@ -11,14 +11,17 @@
 #include <shaped-graphics/context/context.hh>
 #include <shaped-graphics/context/metrics.hh>
 #include <shaped-graphics/raster/raster_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_pipeline.hh>
+#include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 #include <shaped-graphics/resource/raw_texture.hh>
 #include <shaped-graphics/resource/texture.hh>
+#include <shaped-shader-library/raytracing_pipeline.hh>
 
 using namespace cc::primitive_defines;
 
 namespace shaders = sg::test::sgl_shaders;
 
-// Array declarations that outlive one op: tests/shaders/sgl/sticky_arrays.sgl's arrays, met by many dispatches and draws.
+// Array declarations that outlive one op: the arrays of tests/shaders/sgl/sticky_arrays.sgl and sticky_arrays_traced.sgl, met by many dispatches, traces and draws.
 // See libs/graphics/shaped-graphics/docs/concepts/barriers.md, "Array bindings".
 //
 // Most of what these pin is what the list fed the tracker, read off the counts it has recorded so far:
@@ -199,6 +202,7 @@ private:
     sg::context& _ctx;
     bool _was = false;
 };
+
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sg - a current array declaration tracks no element at the next op, across pipeline and group "
@@ -218,21 +222,19 @@ ASYNC_INVOCABLE_TEST("sg - a current array declaration tracks no element at the 
 
     auto cmd = ctx->create_command_list();
     auto const shelf = shelf_of(*cmd, sources);
-    {
-        // The wavefront's shape: declared once, then the pipeline and the shelf bound again before every dispatch.
-        auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
-        gather(*cmd, *kernel, *shelf, first);
-        auto const after_first = tracks(*cmd);
-        CHECK(after_first == 3);
+    // The wavefront's shape: declared once, then the pipeline and the shelf bound again before every dispatch.
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
+    gather(*cmd, *kernel, *shelf, first);
+    auto const after_first = tracks(*cmd);
+    CHECK(after_first == 3);
 
-        gather(*cmd, *kernel, *shelf, second);
-        CHECK(tracks(*cmd) == after_first);
+    gather(*cmd, *kernel, *shelf, second);
+    CHECK(tracks(*cmd) == after_first);
 
-        // A dispatch binding no shelf leaves the declaration dormant, and writes nothing it holds.
-        bump(*cmd, *bumper, unrelated);
-        gather(*cmd, *kernel, *shelf, third);
-        CHECK(tracks(*cmd) == after_first);
-    }
+    // A dispatch binding no shelf leaves the declaration dormant, and writes nothing it holds.
+    bump(*cmd, *bumper, unrelated);
+    gather(*cmd, *kernel, *shelf, third);
+    CHECK(tracks(*cmd) == after_first);
     auto const first_back = cmd->download.data_from_buffer(first);
     auto const third_back = cmd->download.data_from_buffer(third);
     ctx->submit_command_list(cc::move(cmd));
@@ -274,42 +276,40 @@ ASYNC_INVOCABLE_TEST("sg - a write to an array member between two reads re-appli
         auto const shelf = shelf_of(*cmd, sources);
         auto deltas = cc::vector<i64>();
         auto barriers = cc::vector<i64>();
+        auto const declared = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
+        gather(*cmd, *kernel, *shelf, trays[0]); // op 1: applied, current
+
+        auto const before_write = tracks(*cmd);
+        switch (path) // op 2: source 1 written, which ends the application's currency
         {
-            auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
-            gather(*cmd, *kernel, *shelf, trays[0]); // op 1: applied, current
+        case member_write_path::scalar_binding:
+            bump(*cmd, *bumper, sources[1]);
+            break;
+        case member_write_path::copy:
+        {
+            // The spare's words are source 1's plus 0: the same words, written, so the gather reads the same.
+            cmd->copy.buffer_data_region<i32>(
+                {.src = spare.raw(), .dst = sources[1].raw(), .count = k_words, .src_offset = 0, .dst_offset = 0});
+            break;
+        }
+        case member_write_path::upload:
+        {
+            auto words = cc::vector<i32>();
+            for (auto i = 0; i < k_words; ++i)
+                words.push_back(1000 + i + 1000);
+            cmd->upload.data_to_buffer(sources[1].raw(), cc::span<i32 const>(words));
+            break;
+        }
+        }
+        CHECK(tracks(*cmd) == before_write).context(name);
 
-            auto const before_write = tracks(*cmd);
-            switch (path) // op 2: source 1 written, which ends the application's currency
-            {
-            case member_write_path::scalar_binding:
-                bump(*cmd, *bumper, sources[1]);
-                break;
-            case member_write_path::copy:
-            {
-                // The spare's words are source 1's plus 0: the same words, written, so the gather reads the same.
-                cmd->copy.buffer_data_region<i32>(
-                    {.src = spare.raw(), .dst = sources[1].raw(), .count = k_words, .src_offset = 0, .dst_offset = 0});
-                break;
-            }
-            case member_write_path::upload:
-            {
-                auto words = cc::vector<i32>();
-                for (auto i = 0; i < k_words; ++i)
-                    words.push_back(1000 + i + 1000);
-                cmd->upload.data_to_buffer(sources[1].raw(), cc::span<i32 const>(words));
-                break;
-            }
-            }
-            CHECK(tracks(*cmd) == before_write).context(name);
-
-            for (auto op = 3; op <= 4; ++op)
-            {
-                auto const tracked = tracks(*cmd);
-                auto const barriers_before = recorded(*cmd, sg::stat::buffer_barriers);
-                gather(*cmd, *kernel, *shelf, trays[op - 2]);
-                deltas.push_back(tracks(*cmd) - tracked);
-                barriers.push_back(recorded(*cmd, sg::stat::buffer_barriers) - barriers_before);
-            }
+        for (auto op = 3; op <= 4; ++op)
+        {
+            auto const tracked = tracks(*cmd);
+            auto const barriers_before = recorded(*cmd, sg::stat::buffer_barriers);
+            gather(*cmd, *kernel, *shelf, trays[op - 2]);
+            deltas.push_back(tracks(*cmd) - tracked);
+            barriers.push_back(recorded(*cmd, sg::stat::buffer_barriers) - barriers_before);
         }
         auto const back = cmd->download.data_from_buffer(trays[2]);
         ctx->submit_command_list(cc::move(cmd));
@@ -345,19 +345,18 @@ ASYNC_INVOCABLE_TEST("sg - a texture member a download moves to copy_src re-appl
     auto deltas = cc::vector<i64>();
     auto transitions = cc::vector<i64>();
     auto downloaded = sg::bytes_future();
+    auto const declared = cmd->compute.declare_array_texture_access(
+        shaders::gallery::arrays::images,
+        images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
+    look(*cmd, *kernel, *gallery, easels[0]);
+    downloaded = cmd->download.bytes_from_texture(first.raw());
+    for (auto op = 3; op <= 4; ++op)
     {
-        auto const declared = cmd->compute.declare_array_texture_access(
-            "gallery.images", images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
-        look(*cmd, *kernel, *gallery, easels[0]);
-        downloaded = cmd->download.bytes_from_texture(first.raw());
-        for (auto op = 3; op <= 4; ++op)
-        {
-            auto const tracked = tracks(*cmd);
-            auto const before = recorded(*cmd, sg::stat::texture_transitions);
-            look(*cmd, *kernel, *gallery, easels[op - 2]);
-            deltas.push_back(tracks(*cmd) - tracked);
-            transitions.push_back(recorded(*cmd, sg::stat::texture_transitions) - before);
-        }
+        auto const tracked = tracks(*cmd);
+        auto const before = recorded(*cmd, sg::stat::texture_transitions);
+        look(*cmd, *kernel, *gallery, easels[op - 2]);
+        deltas.push_back(tracks(*cmd) - tracked);
+        transitions.push_back(recorded(*cmd, sg::stat::texture_transitions) - before);
     }
     auto const back = cmd->download.data_from_buffer(easels[2]);
     ctx->submit_command_list(cc::move(cmd));
@@ -394,30 +393,28 @@ ASYNC_INVOCABLE_TEST("sg - an op that first applies an array and writes a member
     auto const shelf = shelf_of(*cmd, sources);
     auto deltas = cc::vector<i64>();
     auto barriers = cc::vector<i64>();
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
+
+    // Op 1 writes source 1's upper half through the patch, tracked before the shelf's application in the same op.
+    auto const tray_group
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::tray>(),
+                                              shaders::tray{.merged = trays[0].as_readwrite_buffer()});
+    auto const patch
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::patch>(),
+                                              shaders::patch{.target = sources[1].as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*marking);
+    cmd->compute.bind_group(0, *shelf);
+    cmd->compute.bind_group(1, *tray_group);
+    cmd->compute.bind_group(2, *patch);
+    cmd->compute.dispatch_threads(k_threads);
+
+    for (auto op = 2; op <= 3; ++op)
     {
-        auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
-
-        // Op 1 writes source 1's upper half through the patch, tracked before the shelf's application in the same op.
-        auto const tray_group
-            = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::tray>(),
-                                                  shaders::tray{.merged = trays[0].as_readwrite_buffer()});
-        auto const patch
-            = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::patch>(),
-                                                  shaders::patch{.target = sources[1].as_readwrite_buffer()});
-        cmd->compute.bind_pipeline(*marking);
-        cmd->compute.bind_group(0, *shelf);
-        cmd->compute.bind_group(1, *tray_group);
-        cmd->compute.bind_group(2, *patch);
-        cmd->compute.dispatch_threads(k_threads);
-
-        for (auto op = 2; op <= 3; ++op)
-        {
-            auto const tracked = tracks(*cmd);
-            auto const barriers_before = recorded(*cmd, sg::stat::buffer_barriers);
-            gather(*cmd, *kernel, *shelf, trays[op - 1]);
-            deltas.push_back(tracks(*cmd) - tracked);
-            barriers.push_back(recorded(*cmd, sg::stat::buffer_barriers) - barriers_before);
-        }
+        auto const tracked = tracks(*cmd);
+        auto const barriers_before = recorded(*cmd, sg::stat::buffer_barriers);
+        gather(*cmd, *kernel, *shelf, trays[op - 1]);
+        deltas.push_back(tracks(*cmd) - tracked);
+        barriers.push_back(recorded(*cmd, sg::stat::buffer_barriers) - barriers_before);
     }
     auto const back = cmd->download.data_from_buffer(trays[2]);
     ctx->submit_command_list(cc::move(cmd));
@@ -450,24 +447,23 @@ ASYNC_INVOCABLE_TEST("sg - two declarations holding one texture at different lay
         *cmd, ctx->cached.acquire_binding_group_layout<shaders::annex>(),
         shaders::annex{.images = {first.as_texture_view(), second.as_texture_view()}});
     auto deltas = cc::vector<i64>();
-    {
-        // One bind point, two arrays of other names holding the same textures, each at its own layout.
-        auto const a = cmd->compute.declare_array_texture_access(
-            "gallery.images", images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
-        auto const b = cmd->compute.declare_array_texture_access(
-            "annex.images", images_at(sg::texture_layout::general, sg::texture_layout::general));
+    // One bind point, two arrays of other names holding the same textures, each at its own layout.
+    auto const a = cmd->compute.declare_array_texture_access(
+        shaders::gallery::arrays::images,
+        images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
+    auto const b = cmd->compute.declare_array_texture_access(
+        shaders::annex::arrays::images, images_at(sg::texture_layout::general, sg::texture_layout::general));
 
-        auto const counted_look = [&](sg::compute_pipeline const& kernel, sg::binding_group const& images, int easel)
-        {
-            auto const tracked = tracks(*cmd);
-            look(*cmd, kernel, images, easels[easel]);
-            deltas.push_back(tracks(*cmd) - tracked);
-        };
-        counted_look(*look_gallery, *gallery, 0); // a applies
-        counted_look(*look_annex, *annex, 1);     // b applies, moving both textures to general
-        counted_look(*look_gallery, *gallery, 2); // a must move them back, so it applies again
-        counted_look(*look_gallery, *gallery, 3); // and is current
-    }
+    auto const counted_look = [&](sg::compute_pipeline const& kernel, sg::binding_group const& images, int easel)
+    {
+        auto const tracked = tracks(*cmd);
+        look(*cmd, kernel, images, easels[easel]);
+        deltas.push_back(tracks(*cmd) - tracked);
+    };
+    counted_look(*look_gallery, *gallery, 0); // a applies
+    counted_look(*look_annex, *annex, 1);     // b applies, moving both textures to general
+    counted_look(*look_gallery, *gallery, 2); // a must move them back, so it applies again
+    counted_look(*look_gallery, *gallery, 3); // and is current
     auto const back = cmd->download.data_from_buffer(easels[2]);
     ctx->submit_command_list(cc::move(cmd));
 
@@ -475,6 +471,54 @@ ASYNC_INVOCABLE_TEST("sg - two declarations holding one texture at different lay
     CHECK(deltas[1] == 2);
     CHECK(deltas[2] == reapplied(*ctx));
     CHECK(deltas[3] == 0);
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == isize(k_threads));
+    for (auto i = 0; i < k_threads; ++i)
+        CHECK(got[i] == (i % 2 == 0 ? 0.25f : 0.75f)).context(cc::format("thread {}", i));
+}
+
+ASYNC_INVOCABLE_TEST("sg - a current array declaration applies after all when a later array of its op moves a member",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    require_arrays(*ctx);
+
+    auto const look_gallery = co_await shaders::sticky_arrays.look.acquire_pipeline(*ctx);
+    auto const look_both = co_await shaders::sticky_arrays.look_beside_annex.acquire_pipeline(*ctx);
+    auto const first = make_image(*ctx, 0.25f);
+    auto const second = make_image(*ctx, 0.75f);
+    sg::buffer<float> const easels[] = {make_easel(*ctx), make_easel(*ctx)};
+
+    auto cmd = ctx->create_command_list();
+    auto const gallery = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::gallery>(),
+        shaders::gallery{.images = {first.as_texture_view(), second.as_texture_view()}});
+    auto const annex = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::annex>(),
+        shaders::annex{.images = {first.as_texture_view(), second.as_texture_view()}});
+    auto const easel_group
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::easel>(),
+                                              shaders::easel{.reds = easels[1].as_readwrite_buffer()});
+    auto const a = cmd->compute.declare_array_texture_access(
+        shaders::gallery::arrays::images,
+        images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
+    auto const b = cmd->compute.declare_array_texture_access(
+        shaders::annex::arrays::images, images_at(sg::texture_layout::general, sg::texture_layout::general));
+
+    look(*cmd, *look_gallery, *gallery, easels[0]); // a applies, and is current
+    auto const tracked = tracks(*cmd);
+    cmd->compute.bind_pipeline(*look_both);
+    cmd->compute.bind_group(0, *gallery);
+    cmd->compute.bind_group(1, *annex);
+    cmd->compute.bind_group(2, *easel_group);
+    cmd->compute.dispatch_threads(k_threads);
+    auto const delta = tracks(*cmd) - tracked;
+    auto const back = cmd->download.data_from_buffer(easels[1]);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // a is skipped as current, then b moves both textures to general.
+    // Where that is a layout change, a applies after all, so the op's barrier serves both arrays.
+    CHECK(delta == 2 + reapplied(*ctx));
     auto const got = co_await back.data();
     REQUIRE(got.size() == isize(k_threads));
     for (auto i = 0; i < k_threads; ++i)
@@ -501,21 +545,19 @@ ASYNC_INVOCABLE_TEST("sg - groups alternating A, B, A at one array name re-apply
     auto const group_b = ctx->transient.create_binding_group(
         *cmd, layout, shaders::gallery{.images = {second.as_texture_view(), first.as_texture_view()}});
     auto deltas = cc::vector<i64>();
+    auto const declared = cmd->compute.declare_array_texture_access(
+        shaders::gallery::arrays::images, images_at(sg::texture_layout::shader_texture, sg::texture_layout::general));
+    auto const counted_look = [&](sg::binding_group const& images, int easel)
     {
-        auto const declared = cmd->compute.declare_array_texture_access(
-            "gallery.images", images_at(sg::texture_layout::shader_texture, sg::texture_layout::general));
-        auto const counted_look = [&](sg::binding_group const& images, int easel)
-        {
-            auto const tracked = tracks(*cmd);
-            look(*cmd, *kernel, images, easels[easel]);
-            deltas.push_back(tracks(*cmd) - tracked);
-        };
-        counted_look(*group_a, 0); // A applies
-        counted_look(*group_b, 1); // B is a group of its own, and moves both textures
-        counted_look(*group_a, 2); // A is no longer current
-        counted_look(*group_a, 3); // and now is
-        counted_look(*group_b, 4); // B is not, since A moved them back
-    }
+        auto const tracked = tracks(*cmd);
+        look(*cmd, *kernel, images, easels[easel]);
+        deltas.push_back(tracks(*cmd) - tracked);
+    };
+    counted_look(*group_a, 0); // A applies
+    counted_look(*group_b, 1); // B is a group of its own, and moves both textures
+    counted_look(*group_a, 2); // A is no longer current
+    counted_look(*group_a, 3); // and now is
+    counted_look(*group_b, 4); // B is not, since A moved them back
     auto const back_a = cmd->download.data_from_buffer(easels[3]);
     auto const back_b = cmd->download.data_from_buffer(easels[4]);
     ctx->submit_command_list(cc::move(cmd));
@@ -565,26 +607,25 @@ ASYNC_INVOCABLE_TEST("sg - a compute declaration re-applies after a raster decla
         *cmd, ctx->cached.acquire_binding_group_layout<shaders::annex>(),
         shaders::annex{.images = {first.as_texture_view(), second.as_texture_view()}});
     auto deltas = cc::vector<i64>();
+    auto const computed = cmd->compute.declare_array_texture_access(
+        shaders::annex::arrays::images, images_at(sg::texture_layout::general, sg::texture_layout::general));
+    look(*cmd, *look_annex, *annex, easels[0]);
     {
-        auto const computed = cmd->compute.declare_array_texture_access(
-            "annex.images", images_at(sg::texture_layout::general, sg::texture_layout::general));
-        look(*cmd, *look_annex, *annex, easels[0]);
-        {
-            auto pass
-                = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},
-                                         .target_set = shaders::shelf_target::name});
-            auto const drawn = pass.declare_array_texture_access(
-                "gallery.images", images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
-            pass.bind_pipeline(*draw);
-            pass.bind_group(0, *gallery);
-            pass.draw({.vertex_range = {.offset = 0, .size = 3}});
-        }
-        for (auto op = 1; op <= 2; ++op)
-        {
-            auto const tracked = tracks(*cmd);
-            look(*cmd, *look_annex, *annex, easels[op]);
-            deltas.push_back(tracks(*cmd) - tracked);
-        }
+        auto pass
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},
+                                     .target_set = shaders::shelf_target::name});
+        auto const drawn = pass.declare_array_texture_access(
+            shaders::gallery::arrays::images,
+            images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
+        pass.bind_pipeline(*draw);
+        pass.bind_group(0, *gallery);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+    }
+    for (auto op = 1; op <= 2; ++op)
+    {
+        auto const tracked = tracks(*cmd);
+        look(*cmd, *look_annex, *annex, easels[op]);
+        deltas.push_back(tracks(*cmd) - tracked);
     }
     auto const back = cmd->download.data_from_buffer(easels[1]);
     auto const drawn_back = cmd->download.bytes_from_texture(target.raw());
@@ -619,21 +660,20 @@ ASYNC_INVOCABLE_TEST("sg - a compute declaration alive across a rendering scope 
         *cmd, ctx->cached.acquire_binding_group_layout<shaders::gallery>(),
         shaders::gallery{.images = {first.as_texture_view(), second.as_texture_view()}});
     auto deltas = cc::vector<i64>();
+    auto const declared = cmd->compute.declare_array_texture_access(
+        shaders::gallery::arrays::images,
+        images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
+    look(*cmd, *kernel, *gallery, easels[0]);
     {
-        auto const declared = cmd->compute.declare_array_texture_access(
-            "gallery.images", images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
-        look(*cmd, *kernel, *gallery, easels[0]);
-        {
-            // The scope clears the first image: a render-target write to an array member.
-            auto const pass = cmd->raster.render_to(
-                {.color_targets = {first.as_render_target_view().cleared(tg::vec4f(0.5f, 0, 0, 1))}});
-        }
-        for (auto op = 1; op <= 2; ++op)
-        {
-            auto const tracked = tracks(*cmd);
-            look(*cmd, *kernel, *gallery, easels[op]);
-            deltas.push_back(tracks(*cmd) - tracked);
-        }
+        // The scope clears the first image: a render-target write to an array member.
+        auto const pass
+            = cmd->raster.render_to({.color_targets = {first.as_render_target_view().cleared(tg::vec4f(0.5f, 0, 0, 1))}});
+    }
+    for (auto op = 1; op <= 2; ++op)
+    {
+        auto const tracked = tracks(*cmd);
+        look(*cmd, *kernel, *gallery, easels[op]);
+        deltas.push_back(tracks(*cmd) - tracked);
     }
     auto const back = cmd->download.data_from_buffer(easels[1]);
     ctx->submit_command_list(cc::move(cmd));
@@ -666,18 +706,17 @@ ASYNC_INVOCABLE_TEST("sg - a one-op declaration of another array leaves a sticky
         *cmd, ctx->cached.acquire_binding_group_layout<shaders::gallery>(),
         shaders::gallery{.images = {first.as_texture_view(), second.as_texture_view()}});
     auto delta = i64(-1);
+    auto const sticky = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
+    gather(*cmd, *kernel, *shelf, trays[0]);
     {
-        auto const sticky = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
-        gather(*cmd, *kernel, *shelf, trays[0]);
-        {
-            auto const once = cmd->compute.declare_array_texture_access(
-                "gallery.images", images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
-            look(*cmd, *looker, *gallery, easel);
-        }
-        auto const tracked = tracks(*cmd);
-        gather(*cmd, *kernel, *shelf, trays[1]);
-        delta = tracks(*cmd) - tracked;
+        auto const once = cmd->compute.declare_array_texture_access(
+            shaders::gallery::arrays::images,
+            images_at(sg::texture_layout::shader_texture, sg::texture_layout::shader_texture));
+        look(*cmd, *looker, *gallery, easel);
     }
+    auto const tracked = tracks(*cmd);
+    gather(*cmd, *kernel, *shelf, trays[1]);
+    delta = tracks(*cmd) - tracked;
     auto const back = cmd->download.data_from_buffer(trays[1]);
     ctx->submit_command_list(cc::move(cmd));
 
@@ -704,7 +743,7 @@ ASYNC_INVOCABLE_TEST("sg - two raster pipelines touching an array at different s
         auto pass
             = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},
                                      .target_set = shaders::shelf_target::name});
-        auto const declared = pass.declare_array_buffer_access("shelf.sources", reads_of_three());
+        auto const declared = pass.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
         for (auto const* pipeline : {fragment.get(), both.get(), fragment.get(), both.get()})
         {
             auto const tracked = tracks(*cmd);
@@ -724,6 +763,67 @@ ASYNC_INVOCABLE_TEST("sg - two raster pipelines touching an array at different s
     co_await ctx->idle_completion();
 }
 
+ASYNC_INVOCABLE_TEST("sg - a dispatch and a trace on one bind point each apply an array declaration once, then skip",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    require_arrays(*ctx);
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using traced_t = shaders::sticky_arrays_traced_traced_gather_t;
+    auto const kernel = co_await shaders::sticky_arrays_traced.gather_rack.acquire_pipeline(*ctx);
+    auto const desc = co_await shaders::sticky_arrays_traced.traced_gather.description(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
+    REQUIRE(pipeline != nullptr);
+    auto const table = ctx->uncached.create_raytracing_shader_table(traced_t::table_description(pipeline));
+    REQUIRE(table != nullptr);
+    sg::buffer<i32> const sources[] = {make_source(*ctx, 0), make_source(*ctx, 1), make_source(*ctx, 2)};
+    sg::buffer<i32> const trays[] = {make_tray(*ctx), make_tray(*ctx), make_tray(*ctx), make_tray(*ctx)};
+
+    auto cmd = ctx->create_command_list();
+    auto const rack = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::rack>(),
+        shaders::rack{.sources = {sources[0].as_readonly_buffer(), sources[1].as_readonly_buffer(),
+                                  sources[2].as_readonly_buffer()}});
+    // Made on the compute scope, and in force for the traces too: one bind point.
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::rack::arrays::sources, reads_of_three());
+    auto deltas = cc::vector<i64>();
+    for (auto op = 0; op < 4; ++op)
+    {
+        auto const bin
+            = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::bin>(),
+                                                  shaders::bin{.merged = trays[op].as_readwrite_buffer()});
+        auto const tracked = tracks(*cmd);
+        if (op % 2 == 0)
+        {
+            cmd->compute.bind_pipeline(*kernel);
+            cmd->compute.bind_group(0, *rack);
+            cmd->compute.bind_group(1, *bin);
+            cmd->compute.dispatch_threads(k_threads);
+        }
+        else
+        {
+            cmd->raytracing.bind_pipeline(*pipeline);
+            cmd->raytracing.bind_group(0, *rack);
+            cmd->raytracing.bind_group(1, *bin);
+            cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), k_threads);
+        }
+        deltas.push_back(tracks(*cmd) - tracked);
+    }
+    auto const dispatched_back = cmd->download.data_from_buffer(trays[2]);
+    auto const traced_back = cmd->download.data_from_buffer(trays[3]);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // The trace reads at the raytracing stage, outside what the dispatch applied; after that the union covers both.
+    CHECK(deltas[0] == 3);
+    CHECK(deltas[1] == 3);
+    CHECK(deltas[2] == 0);
+    CHECK(deltas[3] == 0);
+    check_gathered(co_await dispatched_back.data(), 0, "the second dispatch");
+    check_gathered(co_await traced_back.data(), 0, "the second trace");
+}
+
 ASYNC_INVOCABLE_TEST("sg - a withdrawn array declaration leaves its array undeclared, covered and logged",
                      (sg::context_handle const& ctx))
 {
@@ -737,7 +837,7 @@ ASYNC_INVOCABLE_TEST("sg - a withdrawn array declaration leaves its array undecl
     nx::expect_error("declared no access for a bound array", nx::exactly(1));
     auto cmd = ctx->create_command_list();
     auto const shelf = shelf_of(*cmd, sources);
-    auto declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
+    auto declared = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
     gather(*cmd, *kernel, *shelf, trays[0]);
     declared.withdraw();
     auto const tracked = tracks(*cmd);
@@ -749,27 +849,48 @@ ASYNC_INVOCABLE_TEST("sg - a withdrawn array declaration leaves its array undecl
     check_gathered(co_await back.data(), 0, "the covered gather");
 }
 
-ASYNC_INVOCABLE_TEST("sg - an array declaration that never met its array asserts at withdraw, and a drop ends one "
-                     "silently",
+ASYNC_INVOCABLE_TEST("sg - an array declaration by a name no layout holds asserts where it is declared, and a drop "
+                     "ends one silently",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     require_arrays(*ctx);
 
     auto const kernel = co_await shaders::sticky_arrays.gather_shelf.acquire_pipeline(*ctx);
+    auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::sticky_arrays.shelf_in_both);
     sg::buffer<i32> const sources[] = {make_source(*ctx, 0), make_source(*ctx, 1), make_source(*ctx, 2)};
     auto const tray = make_tray(*ctx);
+    auto const target = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
+    auto const color = target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0));
 
     auto cmd = ctx->create_command_list();
     auto const shelf = shelf_of(*cmd, sources);
-    auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
-    // A misspelled name is legal while it lives — a dormant declaration is — and caught where it ends.
-    auto misspelled = cmd->compute.declare_array_buffer_access("shelf.source", {});
+
+    // The shelf's layout is one the context holds, so its name passes the lookup, and is in force like a handle.
+    auto const by_name = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
+    auto const tracked = tracks(*cmd);
     gather(*cmd, *kernel, *shelf, tray);
-    CHECK_ASSERTS(misspelled.withdraw());
+    CHECK(tracks(*cmd) - tracked == 3);
+
+    // A misspelling, or the right name in the wrong family, asserts at the declare, whatever the ops after it bind.
+    CHECK_ASSERTS((void)cmd->compute.declare_array_buffer_access("shelf.source", {}));
+    CHECK_ASSERTS((void)cmd->compute.declare_array_texture_access("shelf.sources", {}));
+    CHECK_ASSERTS((void)cmd->raytracing.declare_array_buffer_access("shelf.source", {}));
+    {
+        auto pass = cmd->raster.render_to({.color_targets = {color}, .target_set = shaders::shelf_target::name});
+        CHECK_ASSERTS((void)pass.declare_array_buffer_access("shelf.source", {}));
+        auto const declared = pass.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
+        pass.bind_pipeline(*draw);
+        pass.bind_group(0, *shelf);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+    }
+    cmd->raster.manual.begin_rendering({.color_targets = {color}, .target_set = shaders::shelf_target::name});
+    CHECK_ASSERTS((void)cmd->raster.manual.declare_array_buffer_access("shelf.source", {}));
+    cmd->raster.manual.end_rendering();
 
     // A list dropped with declarations alive ends them, and their values find nothing to end afterwards.
-    auto dropped = cmd->compute.declare_array_buffer_access("shelf.source", {});
+    auto dropped = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, {});
     ctx->drop_command_list(cc::move(cmd));
     dropped.withdraw();
     co_await ctx->idle_completion();
@@ -793,7 +914,7 @@ ASYNC_INVOCABLE_TEST("sg - a raster array declaration ends with its rendering sc
     auto outlived = sg::array_access_declaration();
     {
         auto pass = cmd->raster.render_to({.color_targets = {color}, .target_set = shaders::shelf_target::name});
-        outlived = pass.declare_array_buffer_access("shelf.sources", reads_of_three());
+        outlived = pass.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
         pass.bind_pipeline(*draw);
         pass.bind_group(0, *shelf);
         pass.draw({.vertex_range = {.offset = 0, .size = 3}});
@@ -815,7 +936,8 @@ ASYNC_INVOCABLE_TEST("sg - a raster array declaration ends with its rendering sc
     co_await ctx->idle_completion();
 }
 
-ASYNC_INVOCABLE_TEST("sg - submitting a list with an array declaration alive asserts", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - submitting a list ends a live array declaration silently, and the value is then inert",
+                     (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     require_arrays(*ctx);
@@ -824,13 +946,38 @@ ASYNC_INVOCABLE_TEST("sg - submitting a list with an array declaration alive ass
     sg::buffer<i32> const sources[] = {make_source(*ctx, 0), make_source(*ctx, 1), make_source(*ctx, 2)};
     auto const tray = make_tray(*ctx);
 
-    // The refused submit unwinds past the list, which auto-drops it; where asserts are compiled out, the test's end does.
-    nx::expect_warning("destroyed without submit or drop", nx::exactly(1));
     auto cmd = ctx->create_command_list();
     auto const shelf = shelf_of(*cmd, sources);
-    auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
+    auto declared = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
     gather(*cmd, *kernel, *shelf, tray);
-    CHECK_ASSERTS(ctx->submit_command_list(cc::move(cmd)));
+    auto const back = cmd->download.data_from_buffer(tray);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // The list is gone, so the value finds nothing to end, withdrawn or destroyed.
+    declared.withdraw();
+    check_gathered(co_await back.data(), 0, "the gather submitted with its declaration alive");
+}
+
+ASYNC_INVOCABLE_TEST("sg - an array declaration whose bind point saw no op ends silently",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+
+    auto const target = ctx->persistent.create_texture_2d(
+        {.format = sg::pixel_format::rgba8_unorm, .width = 1, .height = 1, .usage = sg::texture_usage::render_target});
+
+    // A frame with nothing to dispatch or draw: dormant all its life, withdrawn or ended by its rendering scope's close.
+    // On every backend, webgpu included, where no declaration ever meets an array, and by handle, which no lookup checks.
+    auto cmd = ctx->create_command_list();
+    auto computed = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, {});
+    auto drawn = sg::array_access_declaration();
+    {
+        auto pass
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))}});
+        drawn = pass.declare_array_texture_access(shaders::gallery::arrays::images, {});
+    }
+    computed.withdraw();
+    ctx->drop_command_list(cc::move(cmd));
     co_await ctx->idle_completion();
 }
 
@@ -849,7 +996,7 @@ ASYNC_INVOCABLE_TEST("sg - the first-meeting check of an array declaration compi
     sg::array_buffer_access const out_of_range[] = {{.index = 3, .access = sg::access_flag::shader_read}};
     auto cmd = ctx->create_command_list();
     auto const shelf = shelf_of(*cmd, sources);
-    auto const bad = cmd->compute.declare_array_buffer_access("shelf.sources", out_of_range);
+    auto const bad = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, out_of_range);
     CHECK_ASSERTS(gather(*cmd, *kernel, *shelf, tray));
     // Ended silently by the drop, met or not.
     ctx->drop_command_list(cc::move(cmd));
@@ -872,10 +1019,8 @@ ASYNC_INVOCABLE_TEST("sg - an async upload into an applied array member before t
 
     auto cmd = ctx->create_command_list();
     auto const shelf = shelf_of(*cmd, sources);
-    {
-        auto const declared = cmd->compute.declare_array_buffer_access("shelf.sources", reads_of_three());
-        gather(*cmd, *kernel, *shelf, tray);
-    }
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::shelf::arrays::sources, reads_of_three());
+    gather(*cmd, *kernel, *shelf, tray);
 
     // Enqueued after the application recorded, before the submit: the list must still run after it lands.
     auto words = cc::vector<i32>();

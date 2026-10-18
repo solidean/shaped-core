@@ -638,25 +638,25 @@ fun candidate_context(c: triangle_candidate){traced, bindless} -> material.shadi
 /// Samples bindless texture `image` at level 0 through the palette sampler numbered `palette`, which `sv::palette_index` numbers.
 ///
 /// The number is `filter * 9 + address_u * 3 + address_v`, with nearest before linear and repeat, mirror, clamp in that order — the palette's declaration order.
-fun sample_palette(image: int, uv: float2, palette: uint){traced, bindless} -> float4:
-    if palette == 0u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_repeat_repeat, level = 0.0)
-    if palette == 1u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_repeat_mirror, level = 0.0)
-    if palette == 2u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_repeat_clamp, level = 0.0)
-    if palette == 3u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_mirror_repeat, level = 0.0)
-    if palette == 4u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_mirror_mirror, level = 0.0)
-    if palette == 5u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_mirror_clamp, level = 0.0)
-    if palette == 6u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_clamp_repeat, level = 0.0)
-    if palette == 7u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_clamp_mirror, level = 0.0)
-    if palette == 8u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_nearest_clamp_clamp, level = 0.0)
-    if palette == 9u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_repeat_repeat, level = 0.0)
-    if palette == 10u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_repeat_mirror, level = 0.0)
-    if palette == 11u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_repeat_clamp, level = 0.0)
-    if palette == 12u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_mirror_repeat, level = 0.0)
-    if palette == 13u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_mirror_mirror, level = 0.0)
-    if palette == 14u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_mirror_clamp, level = 0.0)
-    if palette == 15u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_clamp_repeat, level = 0.0)
-    if palette == 16u => return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_clamp_mirror, level = 0.0)
-    return bindless.textures_2d[nonuniform image].sample(uv, traced.palette_linear_clamp_clamp, level = 0.0)
+fun sample_palette(image: int, uv: float2, palette: uint){bindless} -> float4:
+    if palette == 0u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_repeat_repeat, level = 0.0)
+    if palette == 1u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_repeat_mirror, level = 0.0)
+    if palette == 2u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_repeat_clamp, level = 0.0)
+    if palette == 3u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_mirror_repeat, level = 0.0)
+    if palette == 4u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_mirror_mirror, level = 0.0)
+    if palette == 5u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_mirror_clamp, level = 0.0)
+    if palette == 6u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_clamp_repeat, level = 0.0)
+    if palette == 7u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_clamp_mirror, level = 0.0)
+    if palette == 8u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_clamp_clamp, level = 0.0)
+    if palette == 9u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_repeat_repeat, level = 0.0)
+    if palette == 10u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_repeat_mirror, level = 0.0)
+    if palette == 11u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_repeat_clamp, level = 0.0)
+    if palette == 12u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_mirror_repeat, level = 0.0)
+    if palette == 13u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_mirror_mirror, level = 0.0)
+    if palette == 14u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_mirror_clamp, level = 0.0)
+    if palette == 15u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_clamp_repeat, level = 0.0)
+    if palette == 16u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_clamp_mirror, level = 0.0)
+    return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_clamp_clamp, level = 0.0)
 
 /// Component `channel` of `texel`, where 4 reads as 0 and 5 as 1 — a texture swizzle's first selector.
 fun texel_channel(texel: float4, channel: uint) -> float:
@@ -670,8 +670,9 @@ fun texel_channel(texel: float4, channel: uint) -> float:
 /// The cutout opacity of `inst` where `ctx` sits, read through the instance's opacity record rather than through its material's code.
 ///
 /// The same reader for every material, so a kernel that traces is compiled once whatever cutout materials a scene holds.
+/// It lists no group of the trace's, so a raster pixel cuts through it too, `raster.is_cut`.
 /// The value is the declared opacity attribute's, thresholded where the type declares a cutoff above 0, and saturated otherwise.
-fun instance_opacity(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float:
+fun instance_opacity(inst: scene.instance, ctx: material.shading_context){bindless} -> float:
     if inst.opacity_kind == scene.opacity_none => return 1.0
 
     let block = ctx.param_buffer as int

@@ -1,7 +1,9 @@
 # The wavefront path tracer
 
-**Built, and the default.**
+**Built, and the default for now.**
 The megakernel in [tracer_pipeline.sgl](../shaders/tracer_pipeline.sgl), one ray-tracing pipeline whose raygen walks every path to its end in registers, stays as `render_mode::megakernel`.
+The intended direction is a hybrid default — rasterized primaries, lit by the megakernel — with the wavefront as the best-quality mode.
+[Which tracer is the default](#which-tracer-is-the-default) says why.
 This document is the wavefront's shape, the decisions behind it, the alternatives that were weighed and rejected, and what it measured.
 
 ## Why
@@ -18,7 +20,7 @@ What it is for, in order:
 - **A frame paced by its live paths**, with no dispatch bounded by the worst path in it.
 - **Material coherence**: each material's shading runs over only the paths that hit it.
 - **Paths that outlive a frame**, so a still view converges on a fixed per-frame budget.
-- **dx12, vulkan and metal.** Metal has never run the current tracer, and running there is part of done.
+- **dx12, vulkan and metal.** It runs on dx12 and vulkan; metal is open, below.
 
 **webgpu is out of scope.**
 Inline ray queries would reach it, but it has no bindless binding arrays, and sv's material model is built on them.
@@ -26,20 +28,23 @@ Inline ray queries would reach it, but it has no bindless binding arrays, and sv
 ## The shape
 
 ```
-generate ─▶ extend ─▶ sort by permutation ─▶ shade (one dispatch per permutation) ─▶ connect ─▶ resolve
-   ▲                                              │
-   └──────── a slot whose path ended ◀────────────┘
+begin ─▶ extend ─▶ segment ─▶ sort by permutation ─▶ shade (one dispatch per permutation) ─▶ connect ─▶ finalize ─▶ resolve
+           ▲                                                                                               │
+           └─────────── the next round: the paths that go on, and the samples finalize started ◀───────────┘
 ```
 
-- **generate** writes a pixel's next camera ray into a path slot.
+- **begin** clears what the frame tallies, kills every path on a restart, and starts a camera ray in every slot without a live path.
 - **extend** traces each live path's next segment inline and records the nearest hit.
+- **segment** settles what the hit's material does not decide — a medium walked or crossed, the analytic lights passed, an escape — and routes the path to the next round, to finalize, or to shade.
 - **sort** counts hits per material permutation, turns the counts into offsets and indirect-dispatch arguments, and scatters each slot into its permutation's range.
 - **shade** evaluates the material, samples the BSDF for the next direction, and writes the next-event estimation shadow rays with their unoccluded contribution.
 - **connect** traces the shadow rays, any-hit only, and adds the contribution of the ones nothing blocks.
-- **resolve** folds each pixel's finished paths into the image.
+- **finalize** folds each path that ended into its pixel's tally, and starts the pixel's next sample in the slot where the frame still takes samples.
+- **resolve** writes each pixel's mean and its guides out of its tally, once, after the last round.
 
-A **round** is one pass of extend, sort, shade and connect: one segment of every live path.
-A frame runs a fixed budget of rounds.
+Small single-thread kernels between the stages turn each queue's count into the next dispatch's arguments.
+A **round** is one pass of extend, segment, sort, shade, connect and finalize: one segment of every live path.
+A frame runs a set number of rounds, and [Settings](#settings) says where that number comes from.
 
 ## Decisions
 
@@ -52,6 +57,28 @@ It needs no shader table and no pipeline per set of permutations, and every stag
 **The escape, if it is ever needed, is a ray-tracing pipeline per stage**, with SGL allowing atomics in a raygen behind `raytracing_pipeline`.
 The trigger is a cutout-heavy scene where extend measures slower than the pipeline on dx12.
 
+### It requires the ray-tracing pipeline, though it traces inline
+
+Every wavefront kernel needs `raytracing_pipeline` beside `ray_query`, the counting kernels included, and `render_mode::automatic` asks for both.
+**The cause is the group, not the trace.**
+Every kernel lists `tracer.traced`, the group the megakernel binds too.
+Its `world` takes its feature from the file that declares it ([raytracing.md](../../shaped-graphics-language/docs/spec/raytracing.md)).
+That file is module `tracer`'s bindings, which `require raytracing_pipeline` for the megakernel's sake, so the member costs it to every entry point that lists the group.
+Without the `require` in `wavefront.sgl`, `sgl emit` refuses every kernel with `feature-not-declared`.
+
+**Splitting the require was weighed and not taken.**
+It means declaring the member for `ray_query` instead, which the megakernel then needs too, or a second group the wavefront binds alone, which forks `traced_group_of` and its stand-ins.
+What it would buy is a device with ray queries and no pipeline.
+webgpu is one, and is out of scope, since it lacks binding arrays as well.
+The others are mobile Vulkan drivers, where nothing in sv runs today.
+The split is worth taking with the first such device sv targets, and testing on it.
+
+### A dispatch over the slots is laid out in rows
+
+Every backend dispatches at most 65535 groups on one axis, which at 64 threads a group is 4.19 Mpx; a 3840×2160 image needs 129,600 groups.
+So begin and resolve, and every indirect round through `groups_for`, lay their groups out in rows of 65535, and each kernel reads its index through `tracer.thread_index`.
+A row past the count holds threads past it too, so every kernel still returns past the count it reads.
+
 ### Cutout is data, not code
 
 **Landed, in the megakernel too.**
@@ -60,6 +87,8 @@ The opacity is a constant, a mesh attribute, or a texture channel read through a
 One fixed function, `tracer.instance_opacity`, reads it inside traversal, so extend and connect never recompile for a material, and every cutout candidate runs the same code.
 
 - A cutoff of 0 is stochastic coverage, as before; above 0 it is glTF's alpha cutoff.
+- The wavefront's coverage coin is hashed from the path's own random state, so every segment and every sample tosses its own.
+  The megakernel's any-hit cannot advance its payload, so its coin comes from the pixel and the frame's seed, shared by the samples of one frame.
 - A type declares `opacity_attribute` and `opacity_cutoff_attribute`; a fragment that writes `geometry_opacity` asserts.
 - Both built-in types fit unchanged; a type with a procedural mask can no longer cut out.
 - Quadrics cannot cut out today, so cutout stays triangle-only.
@@ -90,8 +119,8 @@ The barrier backends already translate `access_flag::indirect_read`; what is new
 
 ### A path slot belongs to one pixel, and is refilled in place
 
-Slot `(pixel, j)` for `j < k`, with `k` from a memory budget and 1 by default.
-When a slot's path ends, it adds its radiance to the slot's own float sum and count, and generate writes that same pixel's next sample into it in the next round.
+One slot per pixel.
+When a slot's path ends, finalize adds its radiance to the pixel's float sum and count, and starts that pixel's next sample in the same slot, which the next round extends.
 
 - Every accumulation has one writer, so nothing needs float atomics, which SGL does not have.
 - Queues stay full for the whole frame, with no sample-pass boundary to wait at.
@@ -101,17 +130,29 @@ The state is structure-of-arrays, one buffer per field group, so a stage reads o
 **The path state is stored unpacked, behind accessors**, until per-stage timings show the bandwidth worth packing; ray origins stay 32-bit float whatever is packed.
 ReSTIR's records are packed already, which [plans/restir-gi.md](plans/restir-gi.md) describes.
 
-At 1920×1080 with `k = 1`, unpacked, a frame holds roughly 250 MB of path state, 50 MB of hit records, 200 MB of shadow rays and a few index buffers of 8 MB each.
+Unpacked, a slot holds 460 bytes, which is close to 1 GB at 1920×1080 and 3.8 GB at 3840×2160, per traced layer:
+
+| per slot | bytes | 1920×1080 | 3840×2160 |
+|---|---|---|---|
+| path state: `path_ray`, `path_state`, `path_medium`, `path_light` | 24 + 48 + 32 + 24 = 128 | 265 MB | 1062 MB |
+| `hit_record` | 36 | 75 MB | 299 MB |
+| two `shadow_ray`s | 2 × 64 = 128 | 265 MB | 1062 MB |
+| `pixel_tally` | 144 | 299 MB | 1194 MB |
+| six queues of `u32` | 24 | 50 MB | 199 MB |
+| **total** | **460** | **954 MB** | **3815 MB** |
+
+A layer that upscales keeps a second state for its scaled frames, at the upscaler's input extent.
+**If memory matters, the tallies and the shadow rays are the lever**: packed, or one shadow ray per slot, they hold more than half of it.
 
 ### The image is a per-pixel sum and count
 
 The accumulated target holds a float radiance sum and a count of finished paths per pixel, and the displayed image is their quotient.
 
 **That mean is consistent, not exact.**
-The paths still in flight are disproportionately the long ones, so the finished set leans toward short paths by roughly `k / count`: visible in the first frames, gone after a few hundred.
+The paths still in flight are disproportionately the long ones, so the finished set leans toward short paths by roughly `1 / count`: visible in the first frames, gone after a few hundred.
 
 **A drain gives the exact mean**: rounds run without new samples until every queue is empty.
-Tests and captures drain before they read.
+The routine-level tests drain before they read; a capture does not, which [Where it stands](#where-it-stands) lists as open.
 **A frame that sees the camera or the scene change drains too**, so a moving image is always exact; carrying resumes once it is still.
 Every path carries the generation of the camera it started under, and an older one never reaches the image.
 
@@ -120,10 +161,11 @@ The denoiser learns how converged each pixel is from a per-pixel count texture, 
 
 ### Surface paths end by Russian roulette under a cap
 
-After its third bounce, a path survives with its throughput's largest channel as probability, floored at 0.05, and is divided by it — the rule the medium walk already uses.
-`max_bounces` stays a cap, `render_settings`' default of 5, which is what bounds a draining frame.
+Once a path has taken more than three bounces, so from its fourth on, it survives with its throughput's largest channel as probability, floored at 0.05.
+A survivor is divided by that probability, the rule the medium walk already uses.
+`max_bounces` stays a cap, `render_settings`' default of 5 as for the megakernel, which is what bounds a draining frame.
 The last bounce keeps its rule that next-event estimation takes a light's full weight.
-At that default, roulette runs once, after the third bounce, and the cap ends every path it spares.
+At that default, roulette decides once, at the fourth bounce, and the cap ends every path it spares.
 Surface bounces and medium scatters keep separate counters and separate roulettes, so a fog bank cannot exhaust the surface budget.
 
 ### A medium's scatter is a segment like any other
@@ -135,16 +177,23 @@ A walk that outlasts the frame's rounds continues next frame, so no dispatch is 
 
 Shade computes everything about a light sample but its visibility, and connect traces the batch.
 The per-material shade kernels then contain no traversal at all.
-Connect adds into a radiance field of its own per slot, which resolve sums with shade's, so the two never write one value in the same round.
+Connect adds what arrives into the slot's `path_light`, the one shade wrote, in a dispatch of its own and one thread per slot, so the entry has one writer at a time.
 
 ### Settings
 
-`render_settings::samples_per_pixel` is replaced by a round budget per frame, and `k` stays internal.
-`max_bounces` keeps its name and becomes the cap.
+`render_settings::rounds_per_frame` is what a still frame runs; `samples_per_pixel` is the megakernel's, which the wavefront does not read.
+`viewer_config::frame_budget_ms`, 16 by default, turns the rounds into a target: a still frame runs as many as fit, from the smoothed GPU timestamps of the frames before it, between 1 and 64.
+The budget is the frame's, split evenly among its still wavefront layers, so four still views take the frame's 16 ms rather than 64.
+A layer counts as still when its mean held the frame before; one whose image changes this frame drains and leaves its share unspent.
+`rounds_per_frame` is then only where that starts, and stays the count where the device times nothing or the budget is 0.
+A headless viewer, which is what a capture runs in, sets the budget to 0, so a capture's sample count depends on no machine's speed or load.
+So does a plan built by hand, whose `viewer_definition::wavefront_budget_ms` is 0 unless its caller sets it.
+A frame that restarts is held to neither, since it drains.
+`max_bounces` keeps its name and is the cap.
 
 ### A still frame fits its budget by rounds, then by fill
 
-A still frame runs as many rounds as `render_settings::frame_budget_ms` holds, from the GPU time its earlier frames measured.
+A still frame runs as many rounds as its share of `viewer_config::frame_budget_ms` holds, from the GPU time its earlier frames measured.
 A round of a full slot pool can cost more than the whole budget: ~28 ms of Sponza at 1280x720 on a laptop RTX 5070, against 16 ms.
 There the frame runs one round, and a free slot starts a new sample only with probability `fill`, drawn from its own random stream.
 
@@ -204,15 +253,15 @@ They start in sv and move to shaped-rendering once a second caller exists.
 - **Discarding in-flight paths on a camera move.** Bounded moving frames, but only paths short enough to finish in one frame would count, so a moving image is biased dark.
   It stays the fallback if a draining frame's cost ever matters more than that bias.
 - **An inline walk kernel for media.** It confines the deep-path cost to media rather than removing it, and once paths carry across frames a scatter as a segment costs nothing new.
-- **Keeping the megakernel beside the wavefront.** Every estimator change would land twice and drift; the GPU tests' physical expectations are the reference that lasts.
 
 ## Measuring
 
 - GPU timestamps per stage, recorded into `cc::rec`.
-- Per-round live-path counts, read back for a caller that passes `wavefront_trace_desc::live_paths`.
+- Per-round live-path counts, a diagnostic readback a caller asks for through `wavefront_trace_desc::live_paths`.
 - One benchmark, megakernel against wavefront, on `openpbr-spheres`, `lights`, `quadric-gallery`, `mesh-structure-dense` and the furnace test's dense interior.
 
-A wavefront is not faster on every scene: on a shallow, single-material one, the stored state's memory traffic usually loses to the megakernel's registers.
+A wavefront is not faster on every scene: on a shallow, single-material one, the stored state's memory traffic can lose to the megakernel's registers.
+It did on an RTX laptop GPU and did not on a Radeon 780M, whose tables are below.
 
 ### What it measured
 
@@ -286,21 +335,35 @@ On the Radeon 780M, where pixel order always worked, the wavefront measures:
 7. Measurement, the benchmark and a one-off image comparison against the megakernel.
 8. The wavefront becomes the default, and the megakernel stays as a choice — `render_settings::mode`.
 
-The plan ended with deleting the megakernel.
-It stays because neither tracer wins everywhere: the megakernel is about twice as fast on a shallow scene, and the wavefront far ahead on a deep one.
+The plan ended with deleting the megakernel, since every estimator change would land twice and could drift.
+It stays because neither tracer wins everywhere: on the RTX laptop GPU the megakernel is about twice as fast on a shallow scene, and the wavefront far ahead on a deep one.
+The Radeon 780M has the wavefront ahead on both, so which one a shallow scene favors is the GPU's to say.
+The GPU tests' physical expectations, and `wavefront-trace-test.cc`'s comparison of the two, are what keep them from drifting apart.
+
+### Which tracer is the default
+
+The wavefront is the default today, and very likely not for good.
+The intended default is the hybrid: rasterized primaries, lit by the megakernel, the cheaper tracer on the shallow paths that lighting needs.
+The wavefront is meant to become the best-quality mode, the one an image converges in where quality matters more than the frame rate.
+Neither change has landed; [the roadmap](plans/rendering-roadmap.md) orders the work toward them.
 
 ### Where it stands
 
-Every step has landed: the wavefront traces a layer unless `render_settings::mode` asks for the megakernel.
+Every step of the landing order has landed: `render_mode::automatic` traces a layer with the wavefront unless the device cannot trace, or `render_settings::mode` asks for another.
 The path state lives on the layer's accumulator slot, so the two restart together and the store's budget counts both.
-A frame whose image changed restarts and drains, a still one carries for what its frame budget holds, and a layer that denoises hands the spatial member the tallies' per-pixel counts.
-Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the Cornell box, media, glass and cutouts,
-and `wavefront-view-test.cc` through the viewer on quadrics and decals.
+A layer that stops tracing with the wavefront releases it, and one that can never scale releases its scaled state.
+A frame whose image changed restarts and drains, and a still one carries for what its share of `frame_budget_ms` holds, or for `rounds_per_frame` at full fill where that is 0.
+A pixel at the layer's sample target starts no more samples, so its tallies stop growing with it.
+A layer that denoises hands the spatial member the tallies' per-pixel counts.
+Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the Cornell box, and `wavefront-view-test.cc` through the viewer on quadrics and decals.
+`wavefront-trace-test.cc` holds media and glass to the furnace's analytic expectation instead, and cutouts to the fraction they keep.
 
 What is still open:
 
+- **metal.** The tracer has never run there, and running there is part of done.
+
 - **A draining frame is bounded rather than empty.**
-  It runs `max_bounces + 17` rounds, enough for every surface bounce and for a medium walk up to where its roulette starts.
+  It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 17` rounds, enough for every surface bounce and for a medium walk up to where its roulette starts.
   A deeper walk finishes on the next still frame, or is dropped by the next restart.
 - **A moving frame is one sample per pixel**, where the megakernel's is `samples_per_pixel`; starting several per pixel on a draining frame is the fix, if a moving image turns out too noisy.
 - **A still image is an exact mean only once its pixels stop.**

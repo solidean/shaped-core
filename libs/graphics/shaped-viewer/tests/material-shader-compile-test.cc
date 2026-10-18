@@ -22,10 +22,11 @@
 
 using namespace cc::primitive_defines;
 
-// The generated hit groups, put through a real compiler.
+// The generated hit groups, shade kernels and raster pixel stages, put through a real compiler.
 //
 // material-shader-generator-test checks the TEXT; this checks that the text is valid SGL, and that what SGL emits DXC accepts.
 // Every entry point a group declares is compiled on its own: the closest hit, the cutout any hits, the quadric intersection.
+// So are the wavefront's `sv_shade` and, for a triangle permutation, the raster path's `sv_raster`.
 // The tracer compiles them through `slib::compile_hit_group`, which takes a context; this needs none.
 
 namespace
@@ -50,8 +51,8 @@ namespace
     return bind(sv::mesh_attribute::create("uv", f, uvs));
 }
 
-/// One entry point of `source`, compiled; fails the test with the compiler's message and the source.
-void check_source_compiles(cc::string const& source, sg::shader_stage stage, cc::string_view entry)
+/// One entry point of generated `source`, compiled; fails the test with the compiler's message and the source.
+void check_entry_compiles(cc::string_view source, sg::shader_stage stage, cc::string_view entry)
 {
     auto const& lib = *sv_test::shared_env().lib;
     auto const shader = lib.compile_source(source, stage, entry, sg::shader_format::dxil,
@@ -64,28 +65,24 @@ void check_source_compiles(cc::string const& source, sg::shader_stage stage, cc:
     CHECK(shader->try_value()->bytecode.size() > 0);
 }
 
-/// One entry point of `g`'s hit group, compiled.
-void check_entry_compiles(sv::generated_material_shader const& g, sg::shader_stage stage, cc::string_view entry)
-{
-    check_source_compiles(g.source, stage, entry);
-}
-
-/// Every entry point the hit group of `r` declares, for geometry of `kind`.
+/// Every entry point the hit group of `r` declares, for geometry of `kind`, its shade kernel, and its raster pixel stage where it has one.
 void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv::geometry_kind::triangles)
 {
     auto const g = sv::generate_material_shader(r, {.kind = kind});
     REQUIRE(!g.source.empty());
     CHECK(g.source.contains("hit_group sv_material for path_rays"));
-    check_entry_compiles(g, sg::shader_stage::closest_hit, "sv_closest_hit");
-    // The wavefront's shade kernel of the same permutation, which shades through module `tracer`'s stored-hit path.
-    check_source_compiles(g.shade_source, sg::shader_stage::compute, "sv_shade");
+    check_entry_compiles(g.source, sg::shader_stage::closest_hit, "sv_closest_hit");
     if (kind == sv::geometry_kind::quadrics)
-        check_entry_compiles(g, sg::shader_stage::intersection, "sv_intersection");
+        check_entry_compiles(g.source, sg::shader_stage::intersection, "sv_intersection");
     else if (g.opacity.can_cut_out())
     {
-        check_entry_compiles(g, sg::shader_stage::any_hit, "sv_any_hit");
-        check_entry_compiles(g, sg::shader_stage::any_hit, "sv_shadow_any_hit");
+        check_entry_compiles(g.source, sg::shader_stage::any_hit, "sv_any_hit");
+        check_entry_compiles(g.source, sg::shader_stage::any_hit, "sv_shadow_any_hit");
     }
+
+    check_entry_compiles(g.shade_source, sg::shader_stage::compute, "sv_shade");
+    if (kind == sv::geometry_kind::triangles)
+        check_entry_compiles(g.raster_source, sg::shader_stage::fragment, "sv_raster");
 }
 } // namespace
 
@@ -212,8 +209,8 @@ TEST("sv - the wavefront's ReSTIR DI passes compile, emissive instances' points 
     REQUIRE(bytes.has_value());
     auto const source
         = cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.value().data()), bytes.value().size()));
-    check_source_compiles(source, sg::shader_stage::compute, "restir_di_temporal");
-    check_source_compiles(source, sg::shader_stage::compute, "restir_di_spatial");
+    check_entry_compiles(source, sg::shader_stage::compute, "restir_di_temporal");
+    check_entry_compiles(source, sg::shader_stage::compute, "restir_di_spatial");
 }
 
 #endif // SLIB_HAS_DXC

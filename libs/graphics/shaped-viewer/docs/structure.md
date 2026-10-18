@@ -51,7 +51,7 @@ gpu_resource_manager                     [in progress]  where resource managemen
 bindless tables                          [in progress]  module tracer's `binding bindless` is the one declaration (shaders/sgl/tracer_bindings.sgl): one table per view dimension, raw byte buffers.
                                                         The manager's staging group is laid out from its reflection, so the trace's group 1 is the very layout its pipeline was compiled against and sg resolves its footprint by name
 pathtrace_routine                        [in progress]  the GI trace view_renderer drives: shaders/tracer_pipeline.sgl over module tracer, TLAS + dispatch_rays into an image target, one hit group per material permutation
-wavefront tracer                         [done]         one compute dispatch per stage over the live paths, the default integrator; the megakernel stays beside it. docs/wavefront.md is the design
+wavefront tracer                         [in progress]  one compute dispatch per stage over the live paths, the default integrator; the megakernel stays beside it. Runs on dx12 and vulkan, metal is open. docs/wavefront.md is the design
 raster path                              [in progress]  render_mode::raster: one draw per triangle item through each permutation's generated pixel stage, lit directly and unshadowed, final every frame.
                                                         Writes the primary hit's G-buffer into the guide slots, the seam the hybrid mode grows from; quadrics are not drawn yet. docs/raster.md is the design
 sv_shaders package                       [in progress]  one SGL package: the tracer pipeline with module tracer exported, the raster path's raster_pass.sgl with module raster exported, plus layout.sgl (border / view / wipe) and depth_fill.sgl, via slib
@@ -89,7 +89,7 @@ material data on the GPU                 [in progress]  attribute_manager upload
                                                         scene_ref::add_mesh resolves the material and the block; view_renderer builds one instance record per item on its own command list, and pathtrace_routine builds a ray-tracing pipeline with one hit group per permutation, selected per instance by tlas_instance::hit_group_offset.
                                                         The trace binds two groups: its own bindings, and the manager's bindless tables.
                                                         Still to come: several parameter blocks per buffer
-glTF material mapping                    [done]         openpbr declares alpha_cutoff (glTF's MASK, 0 = off) and occlusion (imported, and deliberately ignored by the path-tracing fragment — a baked AO term double-counts what the integrator computes per bounce).
+glTF material mapping                    [done]         openpbr declares alpha_cutoff (glTF's MASK, 0 = off) and occlusion (imported; it darkens the raster path's environment light, and the path-tracing fragment ignores it — a baked AO term double-counts what the integrator computes per bounce).
                                                         texture_sample_source carries a channel_swizzle, so one packed metallic-roughness or ORM map binds several attributes over a single upload.
                                                         The swizzle is generated code rather than a value, so it lives in permutation_key — and only as far as the declaration reads it, which canonicalizes identity swizzles.
                                                         A sample_transform beside it splits the other way: a per-component scale and bias, of which only the EXISTENCE is shape, so a normal map's decode and its scale never fork a permutation
@@ -171,8 +171,8 @@ The whole sv API compiles everywhere: without a backend a routine simply acquire
   If a second library wants it, promoting a generational version into clean-core is the next step.
 - **TLAS is rebuilt every frame**, since refit/update is not implemented in sg yet; `tlas_id` exists for a future prebuilt/persistent TLAS.
 - **Texture download** exists in sg as `cmd.download.bytes_from_texture`, but the trace stays on the proven UAV-write-then-blit path.
-  Two tests read pixels back through it now — `volumetric-furnace-test` and `openpbr-bsdf-test` — and both are skipped on Windows on ARM, where that path fastfails.
-  See the known issue in [TODO.md](TODO.md).
+  Two tests read pixels back through it now — `volumetric-furnace-test` and `openpbr-bsdf-test` — and both are skipped on Windows on ARM.
+  That is very likely a WARP fault rather than this path; see [bug-sv-woa-inline-readback-fastfail](issues/bug-sv-woa-inline-readback-fastfail.md).
 - **Compositing is a raster blit, not a compute copy**, and that is sg's constraint rather than a preference.
   A swapchain backbuffer is created render-target-only (`DXGI_USAGE_RENDER_TARGET_OUTPUT`, no UAV), and there is no GPU texture-to-texture copy.
   A compute compositor would have to write an offscreen UAV and then blit *that* to the backbuffer — one extra full-screen pass.

@@ -98,6 +98,14 @@ MTL4::ComputeCommandEncoder* metal_command_list::compute_encoder()
     // actually rests on, and tests/barrier/cross-list-ordering-test.cc, which fails without it.
     // The pair stays for the visibility half, so a write published by one encoder is readable by the next.
     _encoder->barrierAfterQueueStages(k_compute_encoder_stages, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
+
+    // An encoder starts with no state, while sg's bound pipeline outlives it: a timestamp, a copy or a pass closes
+    // the encoder between two dispatches that never rebind.
+    if (_bound_compute != nullptr)
+    {
+        _encoder->setComputePipelineState(_bound_compute->state());
+        _encoder->setArgumentTable(argument_table());
+    }
     return _encoder;
 }
 
@@ -311,6 +319,8 @@ void metal_command_list::declare_accel(std::shared_ptr<void const> owner,
 
 void metal_command_list::flush_barriers()
 {
+    _skip_guard.check(_member_writes);
+
     if (_pending_buffers.empty() && _pending_textures.empty() && _pending_accels.empty())
         return;
 
@@ -703,8 +713,6 @@ void metal_command_list::copy_buffer_to_texture(raw_buffer_handle src,
 {
     CC_ASSERT(!src->is_expired(), "copy source is a transient buffer used past its epoch");
     CC_ASSERT(!dst->is_expired(), "copy target is a transient texture used past its epoch");
-    CC_ASSERT(src->usage().has(sg::buffer_usage::copy_src), "copy source lacks copy_src usage");
-    CC_ASSERT(dst->usage().has(sg::texture_usage::copy_dst), "copy target lacks copy_dst usage");
 
     suspend_render_encoder("a copy");
 
@@ -780,6 +788,10 @@ void metal_command_list::compute_dispatch(int x, int y, int z)
 {
     CC_ASSERT(_bound_compute != nullptr, "a dispatch needs a bound compute pipeline");
     CC_ASSERT(x >= 0 && y >= 0 && z >= 0, "dispatch dimensions must be non-negative");
+    CC_ASSERTF(x <= sg::max_dispatch_groups_per_dimension && y <= sg::max_dispatch_groups_per_dimension
+                   && z <= sg::max_dispatch_groups_per_dimension,
+               "dispatch of ({}, {}, {}) groups exceeds the {} per dimension every backend allows", x, y, z,
+               sg::max_dispatch_groups_per_dimension);
 
     if (x == 0 || y == 0 || z == 0)
         return;
@@ -940,7 +952,7 @@ void metal_command_list::declare_array_accesses(sg::impl::pipeline_footprint con
     // An MTL4 barrier names stages and never a resource, so covering every element still costs one barrier.
     using array_binding = metal_binding_group::array_binding;
     using array_element = metal_binding_group::array_element;
-    book.apply(
+    auto const skipped = book.apply(
         cc::span<sg::impl::array_site<array_binding> const>(_array_sites), footprint, pipeline, op_stages, _member_writes,
         _stats, [&](array_element const& element, sg::pipeline_stage_flags stages, sg::access_flags access)
         { return declare_buffer(element.buffer, stages, access, true); },
@@ -953,6 +965,7 @@ void metal_command_list::declare_array_accesses(sg::impl::pipeline_footprint con
             else
                 declare_texture(element.texture, plan.stages, plan.cover_access);
         });
+    _skip_guard.arm(skipped, _member_writes);
 }
 
 void metal_command_list::raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views)
@@ -1355,9 +1368,10 @@ void metal_command_list::raster_end_rendering()
     _scope_info = {};
     _scope_stencil_reference = {};
     _scope_blend_constants = {};
+    clear_bound_groups();
+
     // The core ended the values' half already; this is the list's.
     _raster_arrays.end_all();
-    clear_bound_groups();
 }
 
 void metal_command_list::raster_bind_pipeline(raster_pipeline const& pipeline)

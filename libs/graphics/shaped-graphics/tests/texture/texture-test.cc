@@ -28,6 +28,16 @@ TEST("sg - pixel_format classification")
     CHECK(!sg::is_compressed_format(pf::rgba8_unorm));
     CHECK(!sg::is_compressed_format(pf::depth32_float));
 
+    // Integer: both signs, every width; normalized, float, depth and compressed are not.
+    CHECK(sg::is_integer_format(pf::r8_uint));
+    CHECK(sg::is_integer_format(pf::rg16_sint));
+    CHECK(sg::is_integer_format(pf::rgba32_uint));
+    CHECK(!sg::is_integer_format(pf::rgba8_unorm));
+    CHECK(!sg::is_integer_format(pf::r8_snorm));
+    CHECK(!sg::is_integer_format(pf::r32_float));
+    CHECK(!sg::is_integer_format(pf::depth32_float_stencil8));
+    CHECK(!sg::is_integer_format(pf::bc4_r_unorm));
+
     // Render-target validity: color, uncompressed, not `undefined`.
     CHECK(sg::is_render_target_format(pf::rgba8_unorm));
     CHECK(sg::is_render_target_format(pf::rgba16_float));

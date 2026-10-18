@@ -170,8 +170,8 @@ static_assert(
 class sgl_shader_compiler final : public slib::shader_compiler
 {
 public:
-    explicit sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner)
-      : _inner(cc::move(inner)), _target(target_of(_inner->target_format()))
+    sgl_shader_compiler(std::unique_ptr<slib::shader_compiler> inner, cc::optional<bcache::blob_cache*> persistent_cache)
+      : _inner(cc::move(inner)), _target(target_of(_inner->target_format())), _persistent_cache(persistent_cache)
     {
     }
 
@@ -182,7 +182,8 @@ public:
                                                                    slib::include_resolver resolve) const override
     {
         (void)resolve; // SGL has no include directive
-        return slib::impl::cached_sgl_preprocess(key_of(desc), [&] { return preprocess_now(desc); });
+        return slib::impl::cached_sgl_preprocess(
+            key_of(desc), [&] { return preprocess_now(desc); }, slib::impl::sgl_emit_store(_persistent_cache));
     }
 
     [[nodiscard]] sg::async_compiled_shader compile(slib::shader_source_description const& desc) const override
@@ -295,7 +296,8 @@ private:
                                           .entry_point = emitted.entry_point};
         auto result = slib::preprocessed_source{.source = emitted.text,
                                                 .entry_point = emitted.entry_point,
-                                                .used_modules = emitted.library_files};
+                                                .used_modules = emitted.library_files,
+                                                .warnings = emitted.warnings};
         for (auto const& b : emitted.bindings)
         {
             auto binding = binding_of(b, shader.format, shader.stage);
@@ -345,6 +347,8 @@ private:
 
     std::unique_ptr<slib::shader_compiler> _inner;
     sgl::emit::target _target;
+    /// As `sgl_compiler_options` holds it, resolved at each compile so the default follows whatever is installed then.
+    cc::optional<bcache::blob_cache*> _persistent_cache = {};
 };
 } // namespace
 
@@ -366,8 +370,9 @@ slib::shader_option slib::option_of(cc::string_view name, sg::pixel_format value
     CC_UNREACHABLE("every sg::pixel_format has a name");
 }
 
-std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner)
+std::unique_ptr<slib::shader_compiler> slib::create_sgl_compiler(std::unique_ptr<shader_compiler> inner,
+                                                                 sgl_compiler_options const& options)
 {
     CC_ASSERT(inner != nullptr, "an SGL compiler needs the compiler that builds its text");
-    return std::make_unique<sgl_shader_compiler>(cc::move(inner));
+    return std::make_unique<sgl_shader_compiler>(cc::move(inner), options.persistent_cache);
 }

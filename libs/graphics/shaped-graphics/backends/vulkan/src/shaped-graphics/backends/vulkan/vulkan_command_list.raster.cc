@@ -81,16 +81,20 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
     }
     flush_barriers();
 
-    // 2) One attachment per target, each naming a cached image view.
+    // 2) One attachment per target, each naming the image view its texture holds for this epoch.
     //    Kept on the list, because a mid-pass barrier has to close and reopen the instance from them.
+    auto const attachment_view = [&](auto const& view)
+    {
+        return acquire_attachment_view(_ctx, as_vulkan_texture(view.texture()), created_in_epoch(), view.dimension(),
+                                       view.format(), view.range(), _created_attachment_views);
+    };
     auto& color_attachments = _rendering_color_attachments;
     color_attachments.clear();
     for (auto const& ct : info.color_targets)
     {
         auto attachment = VkRenderingAttachmentInfo{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = _ctx._image_views.acquire_attachment(ct.view.texture(), ct.view.dimension(), ct.view.format(),
-                                                              ct.view.range()),
+            .imageView = attachment_view(ct.view),
             .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             .loadOp = to_vk_load_op(ct.op),
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -112,8 +116,7 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
         auto const& dt = info.depth_stencil_target.value();
         depth_attachment = VkRenderingAttachmentInfo{
             .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = _ctx._image_views.acquire_attachment(dt.view.texture(), dt.view.dimension(), dt.view.format(),
-                                                              dt.view.range()),
+            .imageView = attachment_view(dt.view),
             .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
             .loadOp = to_vk_load_op(dt.op),
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
@@ -231,10 +234,11 @@ void vulkan_command_list::raster_end_rendering()
     _bound_raster_groups.clear();
     _bound_raster_footprint = nullptr;
     _bound_raster_footprint_owner = nullptr;
-    // The core ended the values' half already; this is the list's.
-    _raster_arrays.end_all();
     _bound_vertex_buffers.clear();
     _bound_index_buffer = nullptr;
+
+    // The core ended the values' half already; this is the list's.
+    _raster_arrays.end_all();
 }
 
 // --- draw recording (reached through cmd.raster / cmd.raster.manual) -----------------------------------

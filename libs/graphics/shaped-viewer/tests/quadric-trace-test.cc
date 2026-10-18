@@ -63,8 +63,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
     // The same inline-readback path volumetric-furnace-test documents as fastfailing on Windows on ARM.
     // Skipped for the same reason and on the same evidence; the trace itself is not what breaks there.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -398,8 +398,8 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
     // The shapes are the ones with the least other coverage — a capped cylinder, a cone frustum and a hyperboloid — since
     // an agreement test is worth most exactly where neither side has been checked against anything else.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     // Bigger than the other tests on purpose.
@@ -695,8 +695,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
     // What this pins is that it does not vanish.
     // The batch is traced before anything has driven its own permutation, and the silhouette has to be there anyway.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;

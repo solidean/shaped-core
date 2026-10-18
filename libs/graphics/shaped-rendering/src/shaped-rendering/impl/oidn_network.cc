@@ -16,7 +16,7 @@ namespace sr::impl
 namespace
 {
 /// Where the weights blob sits, baked in at configure time.
-/// A shipped binary wants the weights staged beside it instead; libs/graphics/shaped-rendering/docs/TODO.md has it.
+/// TEMPORARY(debt-oidn-weights-source-tree-path): a shipped binary wants the weights staged beside it instead.
 constexpr char const* k_weights_dir = SR_OIDN_WEIGHTS_DIR;
 
 /// The tensors the network runs through, in the order they are produced.
@@ -114,7 +114,7 @@ constexpr resample_step k_upsamples[] = {
 constexpr int k_upsample_count = int(sizeof(k_upsamples) / sizeof(k_upsamples[0]));
 
 /// How many texels along x one convolution thread produces.
-/// Must match `conv_texels` in nn_conv.sgl; the oracle test is what notices if it does not.
+/// Must match `conv_texels` in nn_conv.sgl; only the OIDN oracle test notices if it does not, and it skips without OIDN.
 constexpr int k_conv_texels = 8;
 
 /// `v` rounded up to a multiple of sixteen, and at least sixteen.
@@ -507,7 +507,7 @@ bool oidn_programs::build(sg::context& ctx)
     auto const& pool_cs = sgl_shaders::nn_pool.main_cs;
     auto const& upsample_cs = sgl_shaders::nn_upsample.main_cs;
     one(conv_cs->acquire(ctx), conv_cs.acquire_layout(ctx), conv);
-    one(input_cs.acquire(ctx, output_values), input_cs.acquire_layout(ctx, output_values), input);
+    one(input_cs.acquire(ctx), input_cs.acquire_layout(ctx), input);
     one(output_cs.acquire(ctx, output_values), output_cs.acquire_layout(ctx, output_values), output);
     one(pool_cs->acquire(ctx), pool_cs.acquire_layout(ctx), pool);
     one(upsample_cs->acquire(ctx), upsample_cs.acquire_layout(ctx), upsample);
@@ -528,7 +528,7 @@ cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx, sg::pixel_format
     // The shaders first, because a pipeline cannot be built before its shader exists.
     auto const output_values = sgl_shaders::nn_io_options{.target_format = output_format};
     for (auto const& shader :
-         {sgl_shaders::nn_conv.main_cs->acquire(ctx), sgl_shaders::nn_io.input_cs.acquire(ctx, output_values),
+         {sgl_shaders::nn_conv.main_cs->acquire(ctx), sgl_shaders::nn_io.input_cs.acquire(ctx),
           sgl_shaders::nn_io.output_cs.acquire(ctx, output_values), sgl_shaders::nn_pool.main_cs->acquire(ctx),
           sgl_shaders::nn_upsample.main_cs->acquire(ctx)})
     {
@@ -653,6 +653,7 @@ bool oidn_network::execute(sg::command_list& cmd,
     auto const output_group = ctx.transient.create_binding_group(
         cmd, _programs.output_layout,
         sgl_shaders::nn_output_images{.source = _features[f_out].as_readonly_buffer(),
+                                      .color = color.as_texture_view(),
                                       .target = output.as_any_image_view()});
 
     // One pass per tile, each writing only its interior.

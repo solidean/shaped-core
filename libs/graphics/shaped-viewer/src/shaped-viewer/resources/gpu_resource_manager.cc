@@ -2,6 +2,7 @@
 
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::memcmp
+#include <sgl_modules/tracer.hh>        // the manager's group is module tracer's `binding bindless`
 #include <shaped-graphics/binding/staging_binding_group.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/context/context.hh>
@@ -129,7 +130,7 @@ void declare_tables(Scope& scope, Tables const& tables, cc::vector<sg::array_acc
             buffers.clear();
             for (auto const e : t.acquired)
                 buffers.push_back({.index = i32(e), .access = sg::access_flag::shader_read});
-            declared.push_back(scope.declare_array_buffer_access(name_of(t.table), buffers));
+            declared.push_back(scope.declare_array_buffer_access(buffer_array(), buffers));
             continue;
         }
 
@@ -137,7 +138,7 @@ void declare_tables(Scope& scope, Tables const& tables, cc::vector<sg::array_acc
         for (auto const e : t.acquired)
             textures.push_back(
                 {.index = i32(e), .access = sg::access_flag::shader_read, .layout = sg::texture_layout::shader_texture});
-        declared.push_back(scope.declare_array_texture_access(name_of(t.table), textures));
+        declared.push_back(scope.declare_array_texture_access(texture_array_of(t.table), textures));
     }
 }
 } // namespace
@@ -199,8 +200,9 @@ gpu_resource_manager::gpu_resource_manager(sg::context& ctx,
 gpu_resource_manager gpu_resource_manager::create(sg::context& ctx, gpu_resource_manager_config const& cfg)
 {
     // The tracer's own layout, so the group a trace binds fits its pipeline and sg resolves its footprint by name.
-    auto group
-        = ctx.persistent.create_staging_binding_group(ctx.cached.acquire_binding_group_layout(bindless_bindings()));
+    // It carries the material sampler palette too, as static samplers nothing sets.
+    auto group = ctx.persistent.create_staging_binding_group(
+        ctx.cached.acquire_binding_group_layout<shaders::tracer::bindless>());
 
     // One array per binding, owned here: an array cannot refuse an acquire on behalf of its siblings, so nothing
     // else may hold one over a binding of this group.
@@ -906,7 +908,7 @@ sg::texture_2d const& gpu_resource_manager::_placeholder_texture(tg::vec4f texel
     // Every format the importer produces is that shape, and a caller reaching `acquire_texture` with another one gets
     // an assert rather than a subresource filled with the wrong number of bytes — which neither the upload scope nor
     // the backend checks.
-    // Encoding per format is the real fix and is deferred; see libs/graphics/shaped-viewer/docs/TODO.md.
+    // Encoding per format is the real fix and is deferred: TEMPORARY(debt-sv-placeholder-texture-format).
     CC_ASSERT(sg::format_block_extent(format) == 1 && sg::format_block_size(format) == 4,
               "a 1x1 placeholder is written as four 8-bit channels");
 
@@ -1149,6 +1151,16 @@ bound_resources gpu_resource_manager::freeze()
 {
     lock();
     return bound_resources(*this, _group->snapshot());
+}
+
+cc::result<bound_resources> gpu_resource_manager::try_freeze()
+{
+    lock();
+    auto group = _group->try_snapshot();
+    if (group.has_error())
+        unlock();
+    CC_RETURN_IF_ERROR(group);
+    return bound_resources(*this, cc::move(group.value()));
 }
 
 sg::binding_group_layout_handle const& gpu_resource_manager::bindless_layout() const

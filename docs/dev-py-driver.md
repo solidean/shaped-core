@@ -122,6 +122,32 @@ The `Context` also carries the repo root and the cross-command glue: preset and 
 Every command receives the `Context`, so commands never import `dev.py` and `dev.py` never imports a command's internals.
 The dependency only flows one way.
 
+**The project's shape is policy too.**
+`Policy.layout` is a [Layout](../tools/dev/lib/core/layout.py): the directories clang-format owns, what shaped-linter and the crossref check walk, where libraries live for coverage.
+Every lib/ function that walks the tree takes it as a required argument, so a project reusing the driver cannot silently inherit ours.
+
+`Layout.extra_roots` names directories some checks own beyond those roots — typically a submodule whose docs the project writes — and defaults to none.
+Each is an `ExtraRoot`: a path, whether it is a submodule, which of `crossrefs`, `prose` and `code` apply, and gitignore-style `include` / `exclude` globs relative to it.
+
+```python
+extra_roots=(dev.ExtraRoot("extern/api", submodule=True, checks=("crossrefs", "prose"), exclude=("src/**", "test/**")),)
+```
+
+- **A submodule is read through its own git**, since the superproject sees only its gitlink.
+  A full run lists its tracked and unignored files.
+  A scoped lint run takes the submodule's working tree for `--dirty-only`, and the range between the recorded gitlinks for `--commit`.
+  For `--since` it takes the submodule's unpushed work, measured from its upstream, else from the branch `.gitmodules` records.
+- **Crossrefs resolve against the extra root.** Its top-level directories are its root segments, so its readme's `docs/x.md` reaches its own docs.
+- **`prose` and `code` split by file kind**, because shaped-linter selects no rule family per run.
+  `prose` takes markdown, which carries prose rules alone; `code` takes C++ and Python, which get every rule, the prose rules over their comments included.
+  An extra root bypasses the `extern/` exclusion, while junk directories below it are still pruned.
+- **`.shaped-lint.yml` resolves as anywhere else**: every config from the file up to the filesystem root, so the project's root config governs a submodule unless the submodule carries its own.
+
+`Policy.default_branch` is the branch `check` scopes itself against.
+
+The driver's *own* files are the other kind of path, and they are not policy: the pinned clang-format and its fetcher, the emsdk pin, the vendored TLS stack doctor reports on.
+They belong to shaped-core whichever project runs the driver, so lib/ finds them relative to itself (`DRIVER_ROOT`), never relative to the project root.
+
 ## Extending the driver
 
 **Add a command.** Create `tools/dev/cmd/<name>.py` with `NAME`, `add_parser(sub)` and `run(args, ctx)`, then import it and add it to the `COMMANDS` list in [dev.py](../dev.py).
@@ -148,8 +174,13 @@ If it would force a group to import from a group above it, it belongs lower.
 ## Adapting it downstream
 
 The split exists so another project can reuse the hard part.
-Copy `tools/dev/lib/` wholesale, since it carries no project-specific policy, then write your own `dev.py` with your preset tables and your own `tools/dev/cmd/` with the commands you need.
-The facade and the `Context` / `Policy` seam mean your commands talk to the same machinery this repo does.
+A project that has shaped-core as a submodule imports the driver from it rather than copying it, and writes only what is its own:
+a `dev.py` with its preset tables, its `Layout` and its command list, plus the commands whose shaped-core version is shaped-core's policy — `check`'s gate registry above all.
+Every other command is reused unchanged.
+[guides/consuming-shaped-core.md](guides/consuming-shaped-core.md) is the walkthrough, the CMake side included.
+
+The driver is importable only as the package `tools.dev`, so the consuming `dev.py` puts shaped-core's root on `sys.path` and takes its own root off it.
+Otherwise the project's own `tools/` becomes a second portion of the `tools` namespace package.
 
 ## Design principles, in one place
 

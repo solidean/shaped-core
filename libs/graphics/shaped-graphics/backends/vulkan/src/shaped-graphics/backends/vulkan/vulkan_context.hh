@@ -67,7 +67,7 @@ struct sg::backend::vulkan::vulkan_config
     /// Test-only in intent.
     /// It changes nothing about how the backend waits internally.
     /// It makes sg's own internal waits assert, which is how the suite proves sg and its callers get by awaiting.
-    /// The inline rings' back-pressure still parks when a ring is full; libs/graphics/shaped-graphics/docs/TODO.md lists those waits.
+    /// The inline rings' back-pressure still parks when a ring is full; issue: feat-sg-never-block-backend-waits lists those waits.
     sg::execution_model execution = sg::execution_model::may_block;
 
     /// Capacity of the staging ring behind cmd.upload, in bytes.
@@ -406,6 +406,10 @@ public:
     // The drop cleanup on an unsubmitted list: return its pool, release its slot, drop the open-list count.
     // Shared by drop_vulkan_command_list and the destructor's auto-drop — do not call directly, go through drop_vulkan_command_list.
     void reclaim_unsubmitted_command_list(vulkan_command_list& cmd);
+
+    // Hands the attachment views `cmd` created to the current epoch, which destroys them once it retires.
+    // Submit and drop both call it; see acquire_attachment_view.
+    void retire_attachment_views(vulkan_command_list& cmd);
 
     // sg::context overrides — forward to the backend-typed methods above.
     // The static_cast down is sound: backends never mix.

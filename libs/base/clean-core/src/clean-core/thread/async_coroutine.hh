@@ -345,7 +345,17 @@ struct async_awaiter_value
 
     /// A reference INTO the dependency node's payload, so reading it copies nothing.
     /// It stays valid only while a handle keeps that node alive — binding `auto const&` to the result of awaiting a temporary dangles.
-    [[nodiscard]] U const& await_resume() const { return (*dep)->value(); }
+    [[nodiscard]] U const& await_resume() const
+        requires(!std::is_same_v<std::remove_const_t<U>, cc::unit>)
+    {
+        return (*dep)->value();
+    }
+    /// A unit carries nothing, so `co_await` on one is awaited for its completion alone, and discarding it is the point.
+    U const& await_resume() const
+        requires std::is_same_v<std::remove_const_t<U>, cc::unit>
+    {
+        return (*dep)->value();
+    }
 
 private:
     template <class P>
@@ -577,7 +587,16 @@ struct async_awaiter_run_on
         return inner.await_suspend(h);
     }
 
-    [[nodiscard]] U await_resume() { return child->take_value(); }
+    [[nodiscard]] U await_resume()
+        requires(!std::is_same_v<std::remove_const_t<U>, cc::unit>)
+    {
+        return child->take_value();
+    }
+    U await_resume() // a unit, as async_awaiter_value's
+        requires std::is_same_v<std::remove_const_t<U>, cc::unit>
+    {
+        return child->take_value();
+    }
 };
 
 template <class U>

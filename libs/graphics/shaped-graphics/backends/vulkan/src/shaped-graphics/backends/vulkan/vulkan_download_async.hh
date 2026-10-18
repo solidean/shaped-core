@@ -30,7 +30,7 @@
 /// The destination is the caller's own memory, so there is always somewhere for the bytes to land.
 ///
 /// Dropping the *future* is the other direction and does still cancel, since nothing can observe the result then.
-/// See libs/graphics/shaped-graphics/docs/TODO.md for how far that cancellation could be pushed.
+/// How far that cancellation could be pushed is issue: perf-sg-download-cancel-per-window.
 struct sg::backend::vulkan::vulkan_async_download_job
 {
     std::shared_ptr<vulkan_buffer const> buffer_source;

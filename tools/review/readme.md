@@ -61,6 +61,8 @@ Goals combine: `--goal pr-comment --goal land-changes` is a review of someone el
 | `ingest --dry-run` / `--stats` | what a sweep would create, and the shape of the change set, before committing to it |
 | `coverage <name>` | gate 1 and the discharge progress, with the uncovered runs listed; also names changes only a meta or orientation entry claims |
 | `changes <name>` | the ledger: every change, and which ask accounts for it. `--undischarged`, `--path` (comma-OR'd prefixes or gitignore-style globs, where `*` stays in one folder and `**` crosses them; `!` subtracts), `--ids` |
+| `changes --commit SHA` | only the changes whose atoms that commit contributed, for an entry per commit; a change spanning several commits is listed under each, and the other filters still apply |
+| `changes --interdiff` | under each change that replaced an edited hunk at `sync`, the diff between the two hunk bodies |
 | `list` | the reviews in this repository, and where each one stands |
 | `validate <name> [ENTRY...]` | every entry parses, every change id resolves, and no `## changes` heading or `discharges:` line is empty; run it before serving a round. Entries narrow it to a slug, a number or a range like `200..299`, and only those are parsed, so parallel writers each check their own block |
 | `generate <name>` | write or refresh the overview and coverage entries |
@@ -109,8 +111,12 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
 - **Bulking a merge claims what it brought in, never what its author resolved.**
   Every file the merge changed beyond git's own merge of its parents — per `git show --remerge-diff` — stays out of the bulk, and the command lists them.
   That is what makes "bulk the merge of `main`" safe on a follow-up review, where the resolutions are the only part of the merge that is the branch's work.
-- **A plain `ingest` never re-creates what a bulk claim covers.**
-  It skips a new hunk lying wholly inside one, so re-running it after a head move keeps the decision the bulk recorded.
+- **No sweep re-creates what a bulk claim covers — `ingest` and `sync` alike.**
+  Each skips a new hunk lying wholly inside one, so a head move keeps the decision the bulk recorded.
+  Only `ingest --commits` overrides it, since it names its changes explicitly.
+- **`sync` supersedes a hunk edited in place, and its replacement says so.**
+  The replacement records the superseded id, its card folds the interdiff above its diff, and `changes --interdiff` prints it.
+  A bulk claim is superseded only once nothing it claims is left in the range.
 - **A command's hint names the tool the way it was invoked.**
   `next: uv run C:/work/shaped-core/review.py --dir <dir> ingest <name>` is what `init` prints when run from another repository, so a hint pastes as it stands wherever the tool was run from.
 - **A review is scratch, so nothing outside it may cite an entry.**
@@ -136,6 +142,7 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   Ambiguous is a validation error, and so is unresolved — mark the exceptions `new:` (a file this change will create) or `old:` (one it removes).
   An ambiguous one lists every candidate as a path to paste.
   `context: <folder>` in an entry's front matter, or on one block, is where a short path is looked for first, which is the fix for a tree whose tests mirror its sources.
+  The front matter's may name a folder a fix has since deleted, as long as a finalized round of the entry was read at a head that had it.
   `planned: <folder>` is the design review's counterpart: a path under that folder, or a bare name, that resolves nowhere is drawn as a file the design will create rather than failing.
   **A reference in a finalized round never fails `validate`**, ambiguity included: a finalized ask is immutable, so nothing could fix it there.
   Carrying out what the round decided is what breaks it — a `new:` path now exists and links like any other, and a path that is gone is drawn as removed.
@@ -221,14 +228,14 @@ Named here rather than left to be discovered.
   so ordering is not actually captured.
   Use `radio:` and `check:` until it is.
 - **A review folder is scratch.** It lives under `.tmp/`, the tool changes under it, and there is no migration promise;
-  making a review a durable artifact is in [TODO.md](TODO.md).
+  making a review a durable artifact is [feat-review-export](docs/issues/feat-review-export.md).
 - **Symbol links do not exist.** File, folder and commit references resolve; a `sg::context::download` in prose does not.
 - **The published page has no offline form.** `show --all` is the fallback for reading a review away from the machine,
   and answers come back as chat text.
 
 ## Elsewhere
 
-- [TODO.md](TODO.md) — ideas agreed in a session but not built, as opposed to the known gaps above.
+- [docs/issues/](docs/issues/) — ideas agreed in a session but not built, and small fixes, one file each.
 - [docs/_index.md](docs/_index.md) — the design: the coverage model, the block grammar, the folder format.
 - [docs/guides/reviewing-prs.md](../../docs/guides/reviewing-prs.md) — what we look for in a review, which is the taste this tool carries rather than replaces.
 - [the `reviewing-a-pr` skill](../../.claude/skills/reviewing-a-pr/SKILL.md) — how a session drives all of this.

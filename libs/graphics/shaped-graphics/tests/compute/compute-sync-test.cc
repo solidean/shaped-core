@@ -92,14 +92,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     // sg asks the dispatch which elements of a bound array it touches, since the index is the shader's to pick.
-    // The declaration is in force while it lives, and has to be gone by the submit.
+    // The declaration is in force while it lives, and the submit ends it.
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    {
-        auto const declared = cmd->compute.declare_array_buffer_access("lanes.sources", reads);
-        cmd->compute.dispatch_threads(count);
-    }
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::lanes::arrays::sources, reads);
+    cmd->compute.dispatch_threads(count);
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));
 
@@ -189,10 +187,8 @@ ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    {
-        auto const declared = cmd->compute.declare_array_buffer_access("blocks.tables", reads);
-        cmd->compute.dispatch_threads(count);
-    }
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::blocks::arrays::tables, reads);
+    cmd->compute.dispatch_threads(count);
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));
 
@@ -251,5 +247,47 @@ ASYNC_INVOCABLE_TEST("sg - SGL's quad swap, subgroup sum and uniform load agree 
         for (auto k = first; k < first + 64; ++k)
             expected += u32(k * 3 + 1);
         CHECK(got_sums[i] == expected);
+    }
+}
+
+ASYNC_INVOCABLE_TEST("sg - SGL's subgroup sum after a loop each lane leaves at its own iteration counts every lane",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::subgroups))
+        SKIP("this context has no subgroup operations");
+
+    // CHK-284: a loop left only by `break` reconverges after it, so the sum sees every lane's count
+    auto const pipeline = co_await shaders::subgroups.reduce_after_loop.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::wave_staggered>();
+
+    constexpr auto count = 4 * 128;
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const sums = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count), usage);
+    auto const sizes = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout,
+        shaders::wave_staggered{.sums = sums.as_readwrite_buffer(), .sizes = sizes.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const sums_back = cmd->download.data_from_buffer(sums);
+    auto const sizes_back = cmd->download.data_from_buffer(sizes);
+    ctx->submit_command_list(cc::move(cmd));
+
+    // lane k left after k iterations, so a whole subgroup of size s sums 0 + 1 + ... + (s - 1)
+    auto const got_sums = co_await sums_back.data();
+    auto const got_sizes = co_await sizes_back.data();
+    REQUIRE(got_sums.size() == isize(count));
+    REQUIRE(got_sizes.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const size = got_sizes[i];
+        CHECK(size > 0u);
+        CHECK(got_sums[i] == size * (size - 1u) / 2u);
     }
 }

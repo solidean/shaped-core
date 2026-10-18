@@ -65,6 +65,6 @@ struct emitter_estimate
 [[nodiscard]] f32 world_area_of(f32 object_area, tg::affine_transform3f const& placement);
 
 /// Whether `linear` is a rotation, possibly mirrored, times one uniform scale, under which `world_area_of` is exact.
-/// TEMPORARY until typed-geometry can classify a linear map, which is where this belongs.
+/// TEMPORARY(debt-sv-emitter-similarity-test): typed-geometry classifying a linear map would replace it.
 [[nodiscard]] bool is_similarity(tg::mat3f const& linear);
 } // namespace sv::impl

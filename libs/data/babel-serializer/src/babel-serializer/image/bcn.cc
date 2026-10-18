@@ -247,10 +247,29 @@ int divide_rounded(int numerator, int denominator)
     return -((-numerator + denominator / 2) / denominator);
 }
 
-/// An unsigned 8-bit value from a signed BC4 one, -127 at 0 and 127 at 255.
-u8 bias_signed(int value)
+/// An unsigned 8-bit value from a signed BC4 interpolant `numerator / denominator`, -127 at 0 and 127 at 255.
+/// Biases the exact fraction and rounds once, so the result is the float decode rounded to 8 bits.
+u8 bias_signed(int numerator, int denominator)
 {
-    return u8(((value + 127) * 255 + 127) / 254);
+    auto const biased = (numerator + 127 * denominator) * 255;
+    auto const scale = 254 * denominator;
+    return u8((biased + scale / 2) / scale);
+}
+
+/// What a signed 8-bit decode writes into a channel the format does not store: 0, biased.
+constexpr u8 signed_zero = 128;
+
+/// One channel of a BC4 block as the 8-bit decode stores it, biased when signed.
+cc::fixed_array<u8, 16> decode_bc4_u8(small_block block, bool is_signed)
+{
+    auto const p = read_channel(block, is_signed);
+    auto out = cc::fixed_array<u8, 16>{};
+    for (auto i = 0; i < 16; ++i)
+    {
+        auto const numerator = p.numerators[p.indices[i]];
+        out[i] = is_signed ? bias_signed(numerator, p.denominator) : u8(divide_rounded(numerator, p.denominator));
+    }
+    return out;
 }
 
 /// A sign-extended value of `bits` bits.
@@ -518,11 +537,14 @@ rgba32f_block decode_bc3_f32(large_block block)
 
 rgba8_block decode_bc4(small_block block, bool is_signed)
 {
-    auto const red = decode_bc4_channel(block, is_signed);
+    auto const red = decode_bc4_u8(block, is_signed);
+    auto const unused = is_signed ? signed_zero : u8(0);
     auto out = rgba8_block{};
     for (auto i = 0; i < 16; ++i)
     {
-        out.rgba[i * 4 + 0] = is_signed ? bias_signed(red[i]) : u8(red[i]);
+        out.rgba[i * 4 + 0] = red[i];
+        out.rgba[i * 4 + 1] = unused;
+        out.rgba[i * 4 + 2] = unused;
         out.rgba[i * 4 + 3] = 255;
     }
     return out;
@@ -543,13 +565,15 @@ rgba32f_block decode_bc4_f32(small_block block, bool is_signed)
 
 rgba8_block decode_bc5(large_block block, bool is_signed)
 {
-    auto const red = decode_bc4_channel(small_block(block.data()), is_signed);
-    auto const green = decode_bc4_channel(small_block(block.data() + 8), is_signed);
+    auto const red = decode_bc4_u8(small_block(block.data()), is_signed);
+    auto const green = decode_bc4_u8(small_block(block.data() + 8), is_signed);
+    auto const unused = is_signed ? signed_zero : u8(0);
     auto out = rgba8_block{};
     for (auto i = 0; i < 16; ++i)
     {
-        out.rgba[i * 4 + 0] = is_signed ? bias_signed(red[i]) : u8(red[i]);
-        out.rgba[i * 4 + 1] = is_signed ? bias_signed(green[i]) : u8(green[i]);
+        out.rgba[i * 4 + 0] = red[i];
+        out.rgba[i * 4 + 1] = green[i];
+        out.rgba[i * 4 + 2] = unused;
         out.rgba[i * 4 + 3] = 255;
     }
     return out;

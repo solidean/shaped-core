@@ -697,8 +697,8 @@ TEST("sv - a traced layer implies an accumulation temporal input, sized by the p
     auto const plan = sv::build_render_plan(def, tg::vec2i(128, 64), 0, {});
     REQUIRE(plan.validate());
 
-    // One per traced layer — its accumulator — and none for the layout views, which accumulate nothing.
-    REQUIRE(plan.temporals.size() == 1);
+    // Two per traced layer — its accumulator and its primary depth — and none for the layout views, which trace nothing.
+    REQUIRE(plan.temporals.size() == 2);
     auto const& t = plan.temporals[0];
     CHECK(t.id == sv::view_id::from_string("traced"));
     CHECK(t.temporal_id == sv::temporal_id::accumulation(0));
@@ -710,6 +710,12 @@ TEST("sv - a traced layer implies an accumulation temporal input, sized by the p
 
     // Outside the range a caller may declare in, so an implied id and a declared one cannot collide.
     CHECK(t.temporal_id >= sv::temporal_id::caller_range_end);
+
+    // The depth a double-click picks from, kept whether or not the layer draws anything over its trace.
+    auto const& depth = plan.temporals[1];
+    CHECK(depth.temporal_id == sv::temporal_id::primary_depth(0));
+    CHECK(depth.resolution == tg::vec2i(128, 64));
+    CHECK(depth.format == sg::pixel_format::r32_float);
 }
 
 // A layer inserted *above* a traced one must not hand its accumulator to a different layer.
@@ -734,7 +740,7 @@ TEST("sv - a caller-declared temporal input rides alongside the implied one")
     def.root_view = root;
 
     auto const plan = sv::build_render_plan(def, tg::vec2i(128, 64), 0, {});
-    REQUIRE(plan.temporals.size() == 2); // the caller's, plus the traced layer's accumulator
+    REQUIRE(plan.temporals.size() == 3); // the caller's, plus the traced layer's accumulator and primary depth
 
     // The declaration is carried verbatim — a set resolution is NOT overwritten by the view's.
     auto const& own = plan.temporals[0];
@@ -787,11 +793,13 @@ TEST("sv - a raster layer implies its G-buffer and nothing a denoiser keeps")
     CHECK(format_of(sv::temporal_id::specular_albedo_guide(0)) == sg::pixel_format::rgba16_float);
     CHECK(format_of(sv::temporal_id::roughness_guide(0)) == sg::pixel_format::r16_float);
     CHECK(format_of(sv::temporal_id::motion_guide(0)) == sg::pixel_format::rg32_float);
+    // Every traced layer keeps one, since a double-click picks off it.
+    CHECK(format_of(sv::temporal_id::primary_depth(0)) == sg::pixel_format::r32_float);
 
     // No denoised image, no frame samples: what a parent samples is the raster image itself.
     CHECK(!format_of(sv::temporal_id::denoised(0)).has_value());
     CHECK(!format_of(sv::temporal_id::frame_samples(0)).has_value());
-    CHECK(plan.temporals.size() == 7);
+    CHECK(plan.temporals.size() == 8);
 }
 
 // A layer at its sample target traces nothing, and denoises again only once something restarted its denoised image.

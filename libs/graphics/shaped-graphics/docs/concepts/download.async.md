@@ -38,9 +38,9 @@ That is a clean cross-queue GPU wait, so `submit-upload → async-download` of t
 **Reverse — a later writer waits on the read.** A command list that **writes** the buffer after the download must not overwrite the bytes while the transfer queue is still reading them.
 
 - The download reserves a **completion value** on a monotonic counter and **stamps it onto the buffer** (atomic max) before the actor runs.
-  Any list submitted afterwards therefore sees a value to wait on.
-- A list remembers every buffer it **writes**, and at submit folds those buffers' download values into its required wait — **only writes**, since two reads never conflict.
-  At submit rather than while recording, so a download enqueued after the write was recorded is still waited on.
+  Any writer submitted afterwards therefore sees a value to wait on, whenever it recorded its write.
+- At submit, every buffer the list **writes** folds its download value into the list's required waits — **only writes**, since two reads never conflict.
+  A texture folds it whatever the list did to it, since the list's entry barrier can change the layout the read is using.
 - At **submit**, the main queue is told to **wait on that buffer's download timeline** for the value before executing the list.
   The transfer queue signals it once the window holding the read has completed, so the write lands strictly after the read.
 
@@ -115,7 +115,9 @@ Preserve these; the rest is tuning:
 1. **Sync is automatic in both directions.**
    Forward: the read waits on the last command list that wrote the buffer — submission token stamped at submit, transfer queue waits before the read.
    Reverse: a later command list that *writes* the buffer waits on the read — completion value stamped before enqueue, main queue waits at submit.
-   Only writes fold in the reverse wait; waits point backward in submission order, so the graph is acyclic.
+   A buffer folds in the reverse wait only when the list writes it, since two reads never conflict.
+   A texture folds it in whatever the access, since the list's entry barrier can change the layout the copy queue is reading.
+   Waits point backward in submission order, so the graph is acyclic.
 2. **A download completes with a CPU memcpy on the actor**, deferred until the window's GPU read finishes.
    It never stalls the recording thread and never needs an epoch advance, and every window is drained before its slot is reused and before the actor sleeps.
 3. **The source is held strong across the read**, so no copy gate is needed; the destination is held weak, so dropping the future cancels the copy.
@@ -155,8 +157,8 @@ Not invariants — v1 shortcuts:
   One left in a shader/attachment layout by a direct-queue list must be transitioned back, or read inline instead.
 - The per-resource stamps live on `dx12_buffer`: `_pending_async_download_value` (reverse) and the shared `_last_used_submission_token` (forward).
   The reverse one is a `dx12_download_fence_value`, distinct from the epoch / submission / async-upload fences.
-  `fold_transfer_waits` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) folds the reverse value into `_required_download_waits` at submit.
-  It does so **only for the resources the list wrote** (`sg::is_unordered_write`, collected while recording), since two reads never conflict.
+  `track_buffer_access` in [`dx12_command_list.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc) records a written buffer in the list's written set.
+  At submit, `fold_transfer_waits` folds the reverse value into `_required_download_waits`, for each written buffer (`sg::is_unordered_write`) and each touched texture.
   The reverse wait is one `_queue->Wait(group->fence, value)` per download timeline, at command-list submit.
   The forward wait is `_copy_queue->Wait(_submission_fence, ...)`, issued before a window's reads.
   That path in [`dx12_download_async.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_download_async.cc) also enforces the window-level acyclicity rule.
