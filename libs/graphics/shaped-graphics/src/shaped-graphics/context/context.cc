@@ -44,7 +44,7 @@ std::unique_ptr<command_list> context::create_command_list()
         return cc::move(r.value());
 
     // Command-list creation only fails on device loss (backend already marked it) or an internal bug.
-    if (_device_lost)
+    if (is_device_lost())
         throw device_lost_exception(_device_loss_reason);
 
     CC_UNREACHABLE("create_command_list failed on a healthy device — internal error");
@@ -77,7 +77,7 @@ swapchain_handle context::create_swapchain(swapchain_description const& desc)
     if (r.has_value())
         return cc::move(r.value());
 
-    if (_device_lost)
+    if (is_device_lost())
         throw device_lost_exception(_device_loss_reason);
     throw swapchain_creation_exception(r.error());
 }
@@ -94,10 +94,10 @@ submission_token context::submit_command_list_and_present(swapchain& sc, std::un
 void context::mark_device_lost(cc::string reason)
 {
     // Sticky: the first observed reason wins; later observations don't overwrite it.
-    if (_device_lost)
+    if (_device_loss_claimed.exchange(true, cc::memory_order_acq_rel))
         return;
-    _device_lost = true;
     _device_loss_reason = reason;
+    _device_lost.store(true, cc::memory_order_release);
 
     // And onto the deferred channel, so a frame loop that drains errors sees it without polling is_device_lost().
     // Once, because the flag above is sticky — a caller draining every frame would otherwise get it every frame.
