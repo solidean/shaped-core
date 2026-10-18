@@ -67,7 +67,8 @@ sg's dx12 backend counts every adapter of Microsoft's vendor id, `0x1414`, as so
 So `SC_DX12_ADAPTER=hardware` hides it as it hides WARP anywhere else, and the Windows ARM job runs no dx12 test, as [ci.md](../../guides/ci.md) intends.
 
 sv's own Windows-on-ARM skips predate this and name the inline readback path instead.
-They are very likely this fault as well, met before anyone had a stack; [bug-sv-woa-inline-readback-fastfail](../../../libs/graphics/shaped-viewer/docs/issues/bug-sv-woa-inline-readback-fastfail.md) says so where it lists them.
+They are very likely this fault as well, met before anyone had a stack.
+[bug-sv-woa-inline-readback-fastfail](../../../libs/graphics/shaped-viewer/docs/issues/bug-sv-woa-inline-readback-fastfail.md) says so where it lists them.
 
 ## Re-checking after an update
 

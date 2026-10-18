@@ -332,7 +332,8 @@ Whether a vendor member can honour the rule is open — it may write its own alp
 An SGL image names its format, so the à-trous, SVGF and OIDN members are routines parametrized on the format of the caller's output, and `reconstruct_routine` prewarms them for it.
 The alternative was one compile per member and no format parameter: always write an `rgba32_float` scratch image, then copy it into the caller's format.
 That costs a full-screen pass and a full-resolution image every frame to save one compile per format, so per-format compiles won.
-A format-less storage image, `image_2d[.host]`, planned in [feat-sgl-format-less-storage-image](../../shaped-graphics-language/docs/issues/feat-sgl-format-less-storage-image.md), would allow one compile on dx12, vulkan and metal.
+A format-less storage image, `image_2d[.host]`, would allow one compile on dx12, vulkan and metal.
+[feat-sgl-format-less-storage-image](../../shaped-graphics-language/docs/issues/feat-sgl-format-less-storage-image.md) plans it.
 webgpu keeps compiling per format, since WGSL has no such image.
 
 ## Selection and refusal
