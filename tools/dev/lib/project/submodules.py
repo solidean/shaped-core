@@ -6,10 +6,12 @@ Only two states are moved, and both by a fast-forward alone:
 Everything else is reported and left alone: uncommitted changes, unpushed commits, another branch checked out, a detached commit the branch does not contain.
 So nothing is ever reset, rebased, merged or rewritten, and no commit can be stranded.
 A submodule `.gitmodules` declares but that is not checked out yet, say one a pull just added, is initialized first at the recorded commit, which leaves it detached within its branch.
+So is a missing submodule of a submodule, at any depth; one already checked out there is left where it is.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,6 +86,16 @@ def init(root: Path, sub: Submodule, *, dry_run: bool = False) -> Outcome:
     except _GitError as e:
         return Outcome(sub.path, "refused", str(e))
     return Outcome(sub.path, "initialized", detail, at, at)
+
+
+def init_nested(root: Path, sub: Submodule, *, dry_run: bool = False) -> list[Outcome]:
+    """Initialize the submodules `sub` declares but has not checked out, at any depth; paths in the outcomes are relative to `root`."""
+    repo = root / sub.path
+    outcomes = [dataclasses.replace(init(repo, n, dry_run=dry_run), path=f"{sub.path}/{n.path}")
+                for n in list_submodules(repo, missing=True)]
+    for n in list_submodules(repo):
+        outcomes += init_nested(root, dataclasses.replace(n, path=f"{sub.path}/{n.path}"), dry_run=dry_run)
+    return outcomes
 
 
 def sync(root: Path, sub: Submodule, *, dry_run: bool = False, fetch: bool = True) -> Outcome:

@@ -196,6 +196,32 @@ def test_a_missing_submodule_is_initialized_then_synced(base: Path):
     assert git(w.lib, "symbolic-ref", "--short", "HEAD") == "main"
 
 
+def test_a_missing_nested_submodule_is_initialized(base: Path):
+    w = World(base)
+    # The submodule's remote gains a submodule of its own, which the superproject's checkout does not have yet.
+    git(base, "init", "-q", "--bare", "-b", "main", "deep.git")
+    git(base, "clone", "-q", str(base / "deep.git"), "deep")
+    identity(base / "deep")
+    deep = commit(base / "deep", "d1")
+    git(base / "deep", "push", "-q", "origin", "HEAD:main")
+    git(w.upstream, "submodule", "add", "-q", str(base / "deep.git"), "extern/deep")
+    git(w.upstream, "commit", "-q", "-m", "add deep")
+    git(w.upstream, "push", "-q", "origin", "main")
+    assert w.sync().status == "updated" and not (w.lib / "extern/deep/.git").exists()
+
+    o = lib.init_nested(w.parent, w.sub, dry_run=True)
+    assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "would init")], o
+    os.environ.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="protocol.file.allow", GIT_CONFIG_VALUE_0="always")
+    try:
+        o = lib.init_nested(w.parent, w.sub)
+    finally:
+        for k in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+            os.environ.pop(k)
+    assert [(x.path, x.status) for x in o] == [("extern/lib/extern/deep", "initialized")], o
+    assert git(w.lib / "extern/deep", "rev-parse", "HEAD") == deep
+    assert lib.init_nested(w.parent, w.sub) == [], "one checked out already is left alone"
+
+
 # ---------------------------------------------------------------------------
 
 def main() -> int:

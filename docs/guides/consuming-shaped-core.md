@@ -49,6 +49,8 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
 | carrying commits its remote branch lacks, on the branch or detached | refuses |
 | on another branch | skips it |
 | without a `branch =` | skips it |
+| a submodule of a submodule, not checked out | initializes it at the commit its parent records, at any depth |
+| a submodule of a submodule, checked out | leaves it alone |
 
 Untracked files do not count: a fast-forward never touches one, and git refuses rather than overwrite it.
 Nothing is ever reset, rebased or merged, and a refusal exits non-zero, naming what is in the way.
