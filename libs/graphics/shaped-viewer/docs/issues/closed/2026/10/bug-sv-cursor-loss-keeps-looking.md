@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/view/camera_controller.hh
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-18T05:59Z
+closed: 2026-10-18
+resolution: fixed
 ---
 
 # A view whose cursor leaves the window mid-look keeps looking
