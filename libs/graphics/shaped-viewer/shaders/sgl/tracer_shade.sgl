@@ -23,17 +23,42 @@ fun occluded(origin: float3, dir: float3, dist: float){traced} -> bool:
     trace(traced.world, r, path_rays.occlusion, mut sp, flags = ray_flags.accept_first_hit_and_end_search | ray_flags.skip_closest_hit)
     return sp.visible < 0.5
 
+/// One next-event sample: what it contributes if nothing blocks it, and the shadow ray that decides whether something does.
+///
+/// Sampling and testing are apart so a tracer can test later and in a batch; `visible` is the test done on the spot.
+struct light_sample:
+    diffuse: float3
+    specular: float3
+    origin: float3
+    direction: float3
+    distance: float
+    /// 1 where the ray has to be tested; 0 where the sample contributes nothing, or comes from a light that casts no shadow
+    tested: uint
+
+/// The sample that contributes nothing and tests nothing.
+fun no_light_sample() -> light_sample:
+    return light_sample(float3(0.0), float3(0.0), float3(0.0), float3(0.0, 0.0, 1.0), 0.0, 0u)
+
+/// Whether `s` arrives, tracing its shadow ray here and now where it has one.
+fun visible(s: light_sample){traced} -> bool:
+    if s.tested == 0u => return true
+    return not occluded(s.origin, s.direction, s.distance)
+
 /// Direct light from one of the trace's lights, with the BSDF folded in and weighted against the BSDF sampler.
 ///
 /// One light is picked uniformly and its choice is part of the density, which keeps one shadow ray per hit an unbiased estimate of every light at once.
 /// A point or a parallel light is a delta no sampled ray can reach, so it takes no weighting and is divided by the probability of picking it alone.
 /// A rect and a disc are reachable by the raygen's continuation ray too, and weight against it.
 fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced}:
-    out_diffuse = float3(0.0)
-    out_specular = float3(0.0)
+    let s = sample_light(b, f, wo_local, p, n_geom, last_bounce, mut rng)
+    let arrives = visible(s)
+    out_diffuse = if arrives => s.diffuse else float3(0.0)
+    out_specular = if arrives => s.specular else float3(0.0)
 
+/// `estimate_light` without its visibility test: the sample, and the shadow ray it still owes.
+fun sample_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced} -> light_sample:
     let count = traced.frame[0].light_count
-    if count == 0u => return
+    if count == 0u => return no_light_sample()
 
     // No draw when there is nothing to choose between, so a one-light scene keeps the sample sequence it always had.
     let mut index = 0u
@@ -61,7 +86,7 @@ fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float
         let cos_face = dot(l.normal, -wi)
         let cos_light = if (l.flags & scene.light_flag_two_sided) != 0u => abs(cos_face) else cos_face
         // the light's emitting face is turned away
-        if cos_light <= 0.0 => return
+        if cos_light <= 0.0 => return no_light_sample()
 
         // Stop just short of the light surface, so the light's own geometry does not count as an occluder.
         shadow_dist = dist - 2e-3
@@ -92,37 +117,38 @@ fun estimate_light(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float
         incoming = l.emission
         pdf = pt.disc_pdf(l, count)
 
-    if all(incoming <= float3(0.0)) => return
+    if all(incoming <= float3(0.0)) => return no_light_sample()
 
     let wi_local = openpbr.to_local(f, wi)
     // below the surface, so the BSDF is zero there anyway
-    if wi_local.z <= 0.0 => return
+    if wi_local.z <= 0.0 => return no_light_sample()
 
     // Split at the evaluation rather than after it, since the two halves reach different denoiser signals.
     let mut f_diffuse = float3(0.0)
     let mut f_specular = float3(0.0)
     openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
     let f_sum = f_diffuse + f_specular
-    if all(f_sum <= float3(0.0)) => return
-
-    if scene.light_casts_shadows(l):
-        if occluded(p + n_geom * 1e-3, wi, shadow_dist) => return
+    if all(f_sum <= float3(0.0)) => return no_light_sample()
 
     // The other strategy for this direction is the BSDF sample the raygen may take, so balance the two.
     // A delta light is the exception, which that sample can never reach, and so is the last bounce, where the raygen takes none.
     let w = if delta or last_bounce => 1.0 else pt.mis_weight(pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
 
     let scale = incoming * (wi_local.z / pdf) * w
-    out_diffuse = f_diffuse * scale
-    out_specular = f_specular * scale
+    let tested = if scene.light_casts_shadows(l) => 1u else 0u
+    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, shadow_dist, tested)
 
 /// Direct light from the SH environment, with the BSDF folded in and weighted against the BSDF sampler.
 ///
 /// One uniform-hemisphere sample: the probe has no sharp features, so a radiance-proportional sampler is not worth its cost.
 fun estimate_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint, out_diffuse: mut float3, out_specular: mut float3){traced}:
-    out_diffuse = float3(0.0)
-    out_specular = float3(0.0)
+    let s = sample_environment(b, f, wo_local, p, n_geom, last_bounce, mut rng)
+    let arrives = visible(s)
+    out_diffuse = if arrives => s.diffuse else float3(0.0)
+    out_specular = if arrives => s.specular else float3(0.0)
 
+/// `estimate_environment` without its visibility test.
+fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced} -> light_sample:
     // cos(theta) = u1 uniform in [0, 1] gives a uniform solid-angle pick about the normal.
     let u1 = pt.rand(mut rng)
     let u2 = pt.rand(mut rng)
@@ -135,16 +161,13 @@ fun estimate_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p:
     let mut f_diffuse = float3(0.0)
     let mut f_specular = float3(0.0)
     openpbr.bsdf_eval_split(b, wo_local, wi_local, mut f_diffuse, mut f_specular)
-    if all(f_diffuse + f_specular <= float3(0.0)) => return
-
-    if occluded(p + n_geom * 1e-3, wi, 1e4) => return
+    if all(f_diffuse + f_specular <= float3(0.0)) => return no_light_sample()
 
     // No bounce ray follows the last hit, so there is nothing to balance against there.
     let w = if last_bounce => 1.0 else pt.mis_weight(pt.env_pdf(), openpbr.bsdf_pdf(b, wo_local, wi_local))
 
     let scale = scene.background_radiance(background_sh(), wi) * (wi_local.z / pt.env_pdf()) * w
-    out_diffuse = f_diffuse * scale
-    out_specular = f_specular * scale
+    return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, 1e4, 1u)
 
 // ---- Decals ---------------------------------------------------------------------------------------------------------
 
@@ -170,39 +193,48 @@ fun linear_rgba8(c: uint) -> float4:
 /// `footprint` is the world width one pixel spans at the hit, which the shapes' edges are antialiased over.
 fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){traced, slug.tables}:
     let count = traced.frame[0].decal_count
-    let q = float4(p.x, p.y, p.z, 1.0)
     for i in 0 ..< (count as int):
         let d = traced.decals[i]
-        if abs(dot(d.to_depth, q)) > 1.0 => continue
-        let x = dot(d.to_x, q)
-        let y = dot(d.to_y, q)
-        if x < d.bounds.x or y < d.bounds.y or x > d.bounds.z or y > d.bounds.w => continue
-        let fade = saturate((-dot(n, d.direction) - 0.05) * 4.0)
+        let mut at = float2(0.0)
+        let fade = decal_reach(d, p, n, mut at)
         if fade <= 0.0 => continue
-
-        let tint = linear_rgba8(d.tint)
-        let units = float2(footprint / d.unit_length.x, footprint / d.unit_length.y)
         let first = d.first_shape as int
         for k in 0 ..< (d.shape_count as int):
-            let s = traced.decal_shapes[first + k]
+            paint_decal_shape(mut surface, d, traced.decal_shapes[first + k], at, footprint, fade)
 
-            // The record places em space on the drawing's plane; its inverse takes the hit back into em space.
-            let col0 = float2(s.em_to_object.x, s.em_to_object.y)
-            let col1 = float2(s.em_to_object.z, s.em_to_object.w)
-            let rel = float2(x, y) - s.origin
-            let det = col0.x * col1.y - col1.x * col0.y
-            let em = float2(rel.x * col1.y - rel.y * col1.x, rel.y * col0.x - rel.x * col0.y) / det
-            let em_per_pixel = float2(units.x / length(col0), units.y / length(col1))
+/// How strongly decal `d` paints `p`, a surface whose geometric normal turned toward the viewer is `n`: 0 where it does not reach.
+/// Where it does, `at` is where `p` lands in the drawing's own units.
+fun decal_reach(d: decal_record, p: float3, n: float3, at: mut float2) -> float:
+    let q = float4(p.x, p.y, p.z, 1.0)
+    if abs(dot(d.to_depth, q)) > 1.0 => return 0.0
+    let x = dot(d.to_x, q)
+    let y = dot(d.to_y, q)
+    if x < d.bounds.x or y < d.bounds.y or x > d.bounds.z or y > d.bounds.w => return 0.0
+    at = float2(x, y)
+    return saturate((-dot(n, d.direction) - 0.05) * 4.0)
 
-            // Past the shape's box by more than a pixel, its coverage is 0 without walking a band.
-            if em.x < s.em_bounds.x - em_per_pixel.x or em.y < s.em_bounds.y - em_per_pixel.y => continue
-            if em.x > s.em_bounds.z + em_per_pixel.x or em.y > s.em_bounds.w + em_per_pixel.y => continue
+/// Paints shape `s` of decal `d` into `surface`'s base at `at`, the point `decal_reach` placed and weighted by `fade`.
+/// `footprint` is the world width one pixel spans there.
+fun paint_decal_shape(surface: mut openpbr.surface, d: decal_record, s: decal_shape, at: float2, footprint: float, fade: float){slug.tables}:
+    let units = float2(footprint / d.unit_length.x, footprint / d.unit_length.y)
 
-            let coverage = slug.coverage(em, em_per_pixel, s.banding, slug.glyph_of(s.glyph), false)
-            let color = linear_rgba8(s.color) * tint
-            let a = saturate(coverage) * color.w * fade
-            surface.base_color = mix(surface.base_color, float3(color.x, color.y, color.z), a)
-            surface.base_metalness = mix(surface.base_metalness, 0.0, a)
+    // The record places em space on the drawing's plane; its inverse takes the point back into em space.
+    let col0 = float2(s.em_to_object.x, s.em_to_object.y)
+    let col1 = float2(s.em_to_object.z, s.em_to_object.w)
+    let rel = at - s.origin
+    let det = col0.x * col1.y - col1.x * col0.y
+    let em = float2(rel.x * col1.y - rel.y * col1.x, rel.y * col0.x - rel.x * col0.y) / det
+    let em_per_pixel = float2(units.x / length(col0), units.y / length(col1))
+
+    // Past the shape's box by more than a pixel, its coverage is 0 without walking a band.
+    if em.x < s.em_bounds.x - em_per_pixel.x or em.y < s.em_bounds.y - em_per_pixel.y => return
+    if em.x > s.em_bounds.z + em_per_pixel.x or em.y > s.em_bounds.w + em_per_pixel.y => return
+
+    let coverage = slug.coverage(em, em_per_pixel, s.banding, slug.glyph_of(s.glyph), false)
+    let color = linear_rgba8(s.color) * linear_rgba8(d.tint)
+    let a = saturate(coverage) * color.w * fade
+    surface.base_color = mix(surface.base_color, float3(color.x, color.y, color.z), a)
+    surface.base_metalness = mix(surface.base_metalness, 0.0, a)
 
 /// Shades a located hit and writes the whole payload.
 ///
@@ -211,6 +243,20 @@ fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: 
 /// `ray_origin`, `ray_dir` and `hit_t` are the ray as the hit received it.
 /// `authored` is the material's tangent frame in world space, and means something only where `has_authored` holds.
 fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool){traced, slug.tables}:
+    let mut light = no_light_sample()
+    let mut env = no_light_sample()
+    shade_sampled(mut payload, surface_in, n, v, exiting, ray_origin, ray_dir, hit_t, authored, has_authored, mut light, mut env)
+    let light_arrives = visible(light)
+    let env_arrives = visible(env)
+    payload.direct_diffuse = (if light_arrives => light.diffuse else float3(0.0)) + (if env_arrives => env.diffuse else float3(0.0))
+    payload.direct_specular = (if light_arrives => light.specular else float3(0.0)) + (if env_arrives => env.specular else float3(0.0))
+
+/// `shade` without its two visibility tests: the light and environment samples come back untested, and `direct_*` are left zero.
+fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, v: float3, exiting: bool, ray_origin: float3, ray_dir: float3, hit_t: float, authored: openpbr.frame, has_authored: bool, light: mut light_sample, env: mut light_sample){traced, slug.tables}:
+    light = no_light_sample()
+    env = no_light_sample()
+    payload.direct_diffuse = float3(0.0)
+    payload.direct_specular = float3(0.0)
     payload.normal = n
     payload.hit_t = hit_t
 
@@ -236,27 +282,7 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
         let u = pt.rand(mut rng)
         channel = min((u * 3.0) as uint, 2u)
 
-    // The shading frame, in three steps: the authored one if there is one, faced toward the ray, then the normal map on top.
-    let mut f = openpbr.make_frame(n)
-    if has_authored:
-        f = authored
-        // Two-sided, against the same test the geometric normal took: a ray arriving from behind needs the whole basis turned.
-        if dot(f.n, v) < 0.0 => f = openpbr.flip_frame(f)
-
-    // The frame as authored, which the coat's normal is written in the tangent space of.
-    let authored_frame = f
-
-    // A normal map is a rotation of the frame, not a replacement for it.
-    if surface.geometry_normal != float3(0.0, 0.0, 1.0) => f = openpbr.perturb_frame(f, surface.geometry_normal)
-
-    // The anisotropy direction, applied AFTER the normal map, because it is a rotation about the shading normal the normal map decided.
-    if surface.geometry_tangent != float3(1.0, 0.0, 0.0) => f = openpbr.rotate_frame_to_tangent(f, surface.geometry_tangent)
-
-    // The coat's normal, re-expressed in the frame the closure works in, before the closure reads it.
-    if surface.geometry_coat_normal != float3(0.0, 0.0, 1.0):
-        let coat_world = normalize(openpbr.to_world(authored_frame, normalize(surface.geometry_coat_normal)))
-        surface.geometry_coat_normal = normalize(openpbr.to_local(f, coat_world))
-
+    let f = openpbr.shading_frame(mut surface, n, v, authored, has_authored)
     let b = openpbr.bsdf_prepare(surface, exiting, channel)
 
     let wo_local = openpbr.to_local(f, v)
@@ -271,8 +297,6 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
 
     // A grazing hit whose shading frame turned away has no hemisphere to integrate over.
     if wo_local.z <= 0.0:
-        payload.direct_diffuse = float3(0.0)
-        payload.direct_specular = float3(0.0)
         payload.throughput = float3(0.0)
         payload.direction = float3(0.0)
         payload.lobe = openpbr.bsdf_lobe_diffuse
@@ -285,16 +309,8 @@ fun shade(payload: mut surface_payload, surface_in: openpbr.surface, n: float3, 
 
     let last_bounce = payload.last_bounce != 0u
 
-    let mut light_diffuse = float3(0.0)
-    let mut light_specular = float3(0.0)
-    estimate_light(b, f, wo_local, p, n, last_bounce, mut rng, mut light_diffuse, mut light_specular)
-
-    let mut env_diffuse = float3(0.0)
-    let mut env_specular = float3(0.0)
-    estimate_environment(b, f, wo_local, p, n, last_bounce, mut rng, mut env_diffuse, mut env_specular)
-
-    payload.direct_diffuse = light_diffuse + env_diffuse
-    payload.direct_specular = light_specular + env_specular
+    light = sample_light(b, f, wo_local, p, n, last_bounce, mut rng)
+    env = sample_environment(b, f, wo_local, p, n, last_bounce, mut rng)
 
     // The continuation, importance-sampled from the closure the material just described.
     let u1 = pt.rand(mut rng)
@@ -401,22 +417,96 @@ fun candidate_context(c: triangle_candidate){traced, bindless} -> material.shadi
     let indices = inst.indices as int
     return material.make_context(inst, bindless.buffers[nonuniform indices], c.primitive_index as uint, float2(c.barycentrics.y, c.barycentrics.z))
 
+/// Samples bindless texture `image` at level 0 through the palette sampler numbered `palette`, which `sv::palette_index` numbers.
+///
+/// The number is `filter * 9 + address_u * 3 + address_v`, with nearest before linear and repeat, mirror, clamp in that order — the palette's declaration order.
+fun sample_palette(image: int, uv: float2, palette: uint){bindless} -> float4:
+    if palette == 0u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_repeat_repeat, level = 0.0)
+    if palette == 1u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_repeat_mirror, level = 0.0)
+    if palette == 2u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_repeat_clamp, level = 0.0)
+    if palette == 3u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_mirror_repeat, level = 0.0)
+    if palette == 4u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_mirror_mirror, level = 0.0)
+    if palette == 5u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_mirror_clamp, level = 0.0)
+    if palette == 6u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_clamp_repeat, level = 0.0)
+    if palette == 7u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_clamp_mirror, level = 0.0)
+    if palette == 8u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_nearest_clamp_clamp, level = 0.0)
+    if palette == 9u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_repeat_repeat, level = 0.0)
+    if palette == 10u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_repeat_mirror, level = 0.0)
+    if palette == 11u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_repeat_clamp, level = 0.0)
+    if palette == 12u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_mirror_repeat, level = 0.0)
+    if palette == 13u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_mirror_mirror, level = 0.0)
+    if palette == 14u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_mirror_clamp, level = 0.0)
+    if palette == 15u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_clamp_repeat, level = 0.0)
+    if palette == 16u => return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_clamp_mirror, level = 0.0)
+    return bindless.textures_2d[nonuniform image].sample(uv, bindless.palette_linear_clamp_clamp, level = 0.0)
+
+/// Component `channel` of `texel`, where 4 reads as 0 and 5 as 1 — a texture swizzle's first selector.
+fun texel_channel(texel: float4, channel: uint) -> float:
+    if channel == 0u => return texel.x
+    if channel == 1u => return texel.y
+    if channel == 2u => return texel.z
+    if channel == 3u => return texel.w
+    if channel == 4u => return 0.0
+    return 1.0
+
+/// The cutout opacity of `inst` where `ctx` sits, read through the instance's opacity record rather than through its material's code.
+///
+/// The same reader for every material, so a kernel that traces is compiled once whatever cutout materials a scene holds.
+/// It lists no group of the trace's, so a raster pixel cuts through it too, `raster.is_cut`.
+/// The value is the declared opacity attribute's, thresholded where the type declares a cutoff above 0, and saturated otherwise.
+fun instance_opacity(inst: scene.instance, ctx: material.shading_context){bindless} -> float:
+    if inst.opacity_kind == scene.opacity_none => return 1.0
+
+    let block = ctx.param_buffer as int
+    let mut opacity = 1.0
+    if inst.opacity_kind == scene.opacity_constant:
+        opacity = reinterpret_as_float(bindless.buffers[nonuniform block].load(ctx.param_offset + inst.opacity_offset))
+    else if inst.opacity_kind == scene.opacity_attribute:
+        let desc = material.load_attribute_desc(bindless.buffers[nonuniform block], ctx.param_offset + inst.opacity_offset)
+        let desc_buffer = desc.buffer as int
+        opacity = material.load_f1_at(bindless.buffers[nonuniform desc_buffer], desc, inst.opacity_frequency, ctx)
+    else:
+        let uv_desc = material.load_attribute_desc(bindless.buffers[nonuniform block], ctx.param_offset + inst.opacity_uv_offset)
+        let uv_desc_buffer = uv_desc.buffer as int
+        let uv = material.load_f2_at(bindless.buffers[nonuniform uv_desc_buffer], uv_desc, inst.opacity_frequency, ctx)
+        let image = bindless.buffers[nonuniform block].load(ctx.param_offset + inst.opacity_offset) as int
+        opacity = texel_channel(sample_palette(image, uv, inst.opacity_sampler), inst.opacity_channel)
+        if inst.opacity_transform != scene.no_offset:
+            let scale = reinterpret_as_float(bindless.buffers[nonuniform block].load(ctx.param_offset + inst.opacity_transform))
+            let bias = reinterpret_as_float(bindless.buffers[nonuniform block].load(ctx.param_offset + inst.opacity_transform + 16u))
+            opacity = opacity * scale + bias
+
+    if inst.opacity_cutoff != scene.no_offset:
+        let cutoff = reinterpret_as_float(bindless.buffers[nonuniform block].load(ctx.param_offset + inst.opacity_cutoff))
+        if cutoff > 0.0 => return step(cutoff, opacity)
+    return saturate(opacity)
+
+/// The cutout opacity at a candidate the traversal could not decide alone.
+fun candidate_opacity(c: triangle_candidate){traced, bindless} -> float:
+    let inst = scene.instance(..traced.instances[c.instance_id])
+    return instance_opacity(inst, candidate_context(c))
+
 /// The cutout test, run at every intersection a non-opaque instance reports, for a surface whose material evaluated to `opacity`.
 ///
 /// STOCHASTIC rather than a fixed threshold: `geometry_opacity` is a coverage fraction, so accepting the hit that fraction of the time converges to a partly covered surface.
-/// The draw comes from the pixel, the frame's seed, the primitive and the instance rather than from the payload, which an any hit may not advance.
-/// The instance is in the hash so two instances sharing one geometry cut out independently.
-fun cutout(c: triangle_candidate, launch: int3, opacity: float){traced} -> hit_decision:
+/// The coin is `seed` hashed with the primitive and the instance, so two instances sharing one geometry cut out independently.
+/// `seed` must differ wherever two decisions should be independent: `cutout` and the wavefront's `path_cutout_seed` are what supply it.
+fun cutout_with_seed(c: triangle_candidate, opacity: float, seed: uint) -> hit_decision:
     // fully covered: the common case, and it accepts without drawing anything
     if opacity >= 1.0 => return hit_decision.accept
-    let x = launch.x as uint
-    let y = launch.y as uint
     let primitive = c.primitive_index as uint
     let instance = c.instance_id as uint
-    let h = pt.hash(x + y * 65536u + traced.frame[0].rng_seed * 9781u + primitive * 2654435761u + instance * 2246822519u)
+    let h = pt.hash(seed + primitive * 2654435761u + instance * 2246822519u)
     let u = (h as float) * (1.0 / 4294967296.0)
     if opacity < u => return hit_decision.ignore
     return hit_decision.accept
+
+/// The megakernel's cutout test, seeded by the pixel and the frame rather than by the payload, which an any hit may not advance.
+/// So every sample a pixel traces within one frame meets the same coin at a given primitive.
+fun cutout(c: triangle_candidate, launch: int3, opacity: float){traced} -> hit_decision:
+    let x = launch.x as uint
+    let y = launch.y as uint
+    return cutout_with_seed(c, opacity, x + y * 65536u + traced.frame[0].rng_seed * 9781u)
 
 // ---- Quadrics -------------------------------------------------------------------------------------------------------
 

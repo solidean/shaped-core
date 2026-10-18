@@ -109,6 +109,16 @@
             {}
         ]
     },
+    "shaped-viewer/raster": {
+        "mechanism": "sv",
+        "size": "1440x600",
+        "format": "jpg",
+        "accumulate": 256,
+        "timeout": 600,
+        "captures": [
+            {}
+        ]
+    },
     "shaped-viewer/openpbr-spheres": {
         "mechanism": "sv",
         "size": "1280x720",

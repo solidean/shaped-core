@@ -8,6 +8,7 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
@@ -217,6 +218,40 @@ bool context::claim_render_pass_split_warning(cc::string_view cause)
                     return false;
             warned.push_back(cc::string(cause));
             return true;
+        });
+}
+
+void context::note_array_layout(binding_group_layout_handle const& layout)
+{
+    auto has_array = false;
+    for (auto const& b : layout->bindings())
+        has_array = has_array || is_buffer_array(b) || is_texture_array(b);
+    if (!has_array)
+        return;
+
+    _array_layouts.lock(
+        [&](cc::vector<std::weak_ptr<binding_group_layout const>>& layouts)
+        {
+            layouts.remove_all_where([](std::weak_ptr<binding_group_layout const> const& l) { return l.expired(); });
+            layouts.push_back(layout);
+        });
+}
+
+bool context::holds_array_binding(cc::string_view name, bool is_texture)
+{
+    return _array_layouts.lock(
+        [&](cc::vector<std::weak_ptr<binding_group_layout const>> const& layouts)
+        {
+            for (auto const& weak : layouts)
+            {
+                auto const layout = weak.lock();
+                if (layout == nullptr)
+                    continue;
+                for (auto const& b : layout->bindings())
+                    if (b.name == name && (is_texture ? is_texture_array(b) : is_buffer_array(b)))
+                        return true;
+            }
+            return false;
         });
 }
 

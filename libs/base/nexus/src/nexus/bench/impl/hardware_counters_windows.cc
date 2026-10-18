@@ -167,6 +167,9 @@ constexpr raw_event s_zen5_events[] = {
 // The events this CPU needs registered, or none.
 cc::span<raw_event const> missing_events()
 {
+#if !defined(CC_ARCH_X64) && !defined(CC_ARCH_X86)
+    return {}; // every event above is an x86 vendor's, and cpuid exists only there
+#else
     auto const vendor = cc::impl::cpuid(0);
     auto const amd = vendor.ebx == 0x68747541 && vendor.edx == 0x69746e65 && vendor.ecx == 0x444d4163; // "AuthenticAMD"
     if (!amd)
@@ -177,6 +180,7 @@ cc::span<raw_event const> missing_events()
     if (family == 0x1a)
         return s_zen5_events;
     return {};
+#endif
 }
 
 void register_missing_events()

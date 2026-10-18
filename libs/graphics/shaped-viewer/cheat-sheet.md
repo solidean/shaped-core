@@ -9,7 +9,8 @@ The authoring surface sits at the root; everything else is one folder down — `
 > **Scope note:** early stage, in three layers.
 > A frame is authored through the fluent handles (`sv::interactive` → `frame` → `window_ref` → `view_ref` → `scene_ref`), flattened into a `render_plan`, and replayed by `viewer_renderer`.
 > A **view is the definition of one texture**, and a view's layer may itself be a whole layout tree — so views nest, at any depth.
-> Rendering needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracer runs on dx12 and vulkan.
+> Tracing needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracers run on dx12 and vulkan.
+> A raster layer needs none, and `render_mode::automatic`, the default, rasterizes where the device cannot trace.
 > The default context and the examples are dx12's.
 > The API is present everywhere; without a backend a routine just draws nothing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
@@ -50,7 +51,16 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+                                 //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
+sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each runs as many rounds as fit, measured
+                                 //   0 runs rounds_per_frame; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
+sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + 1 + medium_roulette_after (16, pt.roulette_after)
+sv::render_mode              // automatic (default) | megakernel | wavefront | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
+                                 //   automatic: the wavefront where the device has raytracing_pipeline and ray_query, raster with one warning where not;
+                                 //   the viewer resolves it before planning, and a plan built by hand traces it with the wavefront
+sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
+                                 //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
@@ -162,7 +172,7 @@ sv::instance_slot                      // { material_slot_kind kind; i32 offset,
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
 
 m.create_mesh(sv::mesh)                // -> resident_mesh const&, INTO the mesh's own cache; a repeat placement is a pointer compare, and it refreshes is_ready()
-                                       //   geometry + BLAS, every geometric attribute and every texture acquired, keyed by their hashes
+                                       //   geometry, every geometric attribute and every texture acquired, keyed by their hashes; no BLAS until a trace asks
                                        //   `bounds` comes from the mesh when it declared one (every glTF does), else from a scan of the positions
                                        //   a per_instance attribute uploads nothing — it is a constant, and its bytes ride along on the binding
 m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved against the mesh, its permutation compiled, its block resolved
@@ -198,8 +208,11 @@ Gotchas:
 `material/material_library.hh` is the front door; it pulls in `material.hh` and `material_type.hh`.
 
 ```cpp
-sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute; hash128 hash; }
-sv::material_type::create(name, signature, shader, opacity_attribute = {})  // -> hashes all four; asserts a name declared twice, and a default that is not its format's size
+sv::material_type                // { string name; vector<material_signature_entry> signature; string shader; string opacity_attribute, opacity_cutoff_attribute, occlusion_attribute; hash128 hash; }
+sv::material_type::create(name, signature, shader, opacity_attribute = {}, opacity_cutoff_attribute = {}, occlusion_attribute = {})
+                                 //   -> hashes all six; asserts a name declared twice, a default that is not its format's size,
+                                 //      an opacity, cutoff or occlusion attribute that is not a declared float, and a fragment that writes geometry_opacity
+                                 //   occlusion_attribute: baked AO, which darkens the raster path's environment light alone; the tracer ignores it
                                  //   shader: an SGL FRAGMENT, statements unindented, attributes immutable locals, `surface` the one `let mut`
 t.find("roughness")              // -> material_signature_entry const*, null if the type does not read it
 sv::material_signature_entry      // { string name; attribute_format format; vector<byte> default_value; bool is_final; }
@@ -221,7 +234,7 @@ lib.acquire("gold")              // -> optional<material_id>;  lib.get(id) -> ma
 sv::builtin_material::openpbr / pbr / unlit          // the names the builtins register under
                                  //   openpbr: OpenPBR's whole Surface parameter set — the type to author against
                                  //   pbr: glTF metallic-roughness, projected onto the same surface; unlit: emission only
-                                 //   openpbr also declares `alpha_cutoff` (0 = off, glTF's MASK) and `occlusion` (imported, ignored here)
+                                 //   openpbr also declares `alpha_cutoff`, its opacity cutoff (0 = off, glTF's MASK), and `occlusion`, its occlusion attribute (raster's ambient reads it, the tracer does not)
 sv::default_material(lib)        // -> material_id — an unbound `pbr`; what a mesh naming material_id::invalid draws with
 sv::set_acquire_material_library(provider)           // the context-style hook; {} clears it, the default registers the builtins
 sv::set_acquire_shader_library(provider)             // the same shape for the SHADER library; the default registers sv's + sr's packages + DXC
@@ -269,15 +282,16 @@ signature.push_back(sv::material_signature_entry::of("tint", tg::vec3f(0.9f, 0.9
 signature.push_back(sv::material_signature_entry::of("opacity", 1.0f));
 auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::move(signature),
                                                                  "surface.base_color = saturate(tint)\n"
-                                                                 "surface.specular_roughness = 0.8\n"
-                                                                 "surface.geometry_opacity = saturate(opacity)\n",
-                                                                 "opacity"));
+                                                                 "surface.specular_roughness = 0.8\n",
+                                                                 "opacity")); // the fragment never reads it: the tracer does
 ```
 - **An acquire creates the buffer and hands the payload to `ctx.stream`; it does not upload.**
   `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.
   The buffer exists immediately, so a descriptor naming it is always valid; only its contents are in flight.
 - **A record's state advances where the settle pass runs, never where the transfer finishes.**
-  So `residency` is deterministic under test, and `record_pending_work` is what turns a landed transfer into a built BLAS.
+  So `residency` is deterministic under test, and `record_pending_work` is what turns a landed transfer into a `complete` record.
+- **A BLAS is built by the first trace that reaches its mesh**, through `acquire_blas`, never at upload: a mesh only ever rasterized never gets one.
+  A test placing a mesh in a TLAS by hand builds it with `sv_test::blas_of`.
   A viewer calls it once per frame; anyone else calls `wait_for_pending_uploads`, and a test that traces what it just built must.
 - **Priority is the transfer's, not a drain order**: `set_priority` at acquire — attributes (20) over geometry (10), so an attribute is up before the mesh indexing it draws.
   Dropping a transfer cancels it, which is what makes evicting a still-streaming mesh free.
@@ -292,8 +306,13 @@ auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::
   `material_shader_cache::acquire_fallback()` is a neutral hit group over an EMPTY signature, so it reads no per-instance block and can stand in for any material whatever that material's layout was.
   `pathtrace_routine` keys its pipeline on the SUBSTITUTED set, so the frame the real permutation lands the key changes and a new variant is built.
   A `pt_trace_desc` with no `fallback` keeps the old all-or-nothing behavior: one material still compiling makes the whole trace a no-op.
-- **A cutout is a DECLARATION, not a detection.** `material_type::opacity_attribute` names which attribute the fragment writes `geometry_opacity` from.
-  A permutation can cut out only where something other than the signature's own default supplied that attribute.
+  Every routine reports what it bound through `stand_ins`, a `sv::stand_in_report`: a hash over the bound set, 0 for none, and whether a stood-in compile is still pending.
+  The view folds the hash into its image's, so a material that failed for good converges over the stand-in, and one that lands restarts the image once.
+  One still pending restarts the image every frame, so a mean of it never reads as converged.
+- **A cutout is DATA, not code.** `material_type::opacity_attribute` names the attribute that is the opacity, and `opacity_cutoff_attribute` the optional threshold.
+  One generic reader, `tracer.instance_opacity`, takes it straight out of the parameter block through the instance record's opacity fields, whatever the material.
+  So a kernel that traces never recompiles for a material, and a fragment cannot compute opacity: writing `geometry_opacity` asserts.
+  A permutation can cut out only where something other than the signature's own default supplied that attribute (`material_opacity::can_cut_out`).
   That is what becomes the instance's `opaque_override`, so a type that leaves it empty keeps the hardware's opaque path on every ray.
 - **A sample transform splits the OTHER way from the swizzle.**
   Only *whether* there is one reaches `permutation_key`, since that decides whether the shader carries a multiply-add; the numbers live in the parameter block.
@@ -315,7 +334,12 @@ auto const plaster = lib.register_type(sv::material_type::create("plaster", cc::
 `material/shader_generator.hh`; modules `material`, `openpbr` and `tracer` (shaders/sgl) are the hand-authored half it is written against.
 
 ```cpp
-sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source; layout; bool can_cut_out; hash128 key;}
+sv::generate_material_shader(resolved, opts = {})  // -> generated_material_shader {string source, shade_source, raster_source; layout; material_opacity opacity; hash128 key;}
+                                 //   raster_source: `@pixel fun sv_raster`, the same body over module raster; empty for a quadric permutation
+sv::material_opacity             // { kind (none|constant|attribute|texture); offset, uv_offset, frequency, channel, sampler, transform, cutoff }
+                                 //   where the cutout opacity lives in the parameter block; o.can_cut_out() -> kind != none
+sv::place_instance_record(record, tlas_instance, opacity)  // writes the placement rows and the opacity fields describe_instance leaves to the trace
+sv::palette_index(sampler)       // -> u32, the palette sampler as a number: filter * 9 + address_u * 3 + address_v
                                  //   source: `hit_group sv_material for path_rays`, one SGL file slib::compile_hit_group takes
 sv::sgl_palette_sampler(sampler) // -> "palette_<mag filter>_<u>_<v>", module tracer's static sampler a texture of that state is sampled through
 sv::sgl_type_of(format)          // -> "float" / "float3" / "uint2" / ...; EMPTY for a format the generator does not support
@@ -324,7 +348,7 @@ sv::material_shader_key(permutation_key, opts)  // -> hash128 — what `g.key` i
 
 resources.shaders                // the cache a viewer uses: gpu_resource_manager owns one, compiling for its context
 sv::material_shader_cache::create(&ctx)   // one hit group per permutation; a null ctx makes every permutation's hit group an error
-cache.acquire(resolved, kind = triangles) // -> material_permutation const& {hash128 key; layout; geometry_kind kind; bool can_cut_out; hit_group; string source;}
+cache.acquire(resolved, kind = triangles) // -> material_permutation const& {hash128 key; layout; geometry_kind kind; material_opacity opacity; hit_group; string source;}
 p.hit_group                      // -> shared_async<vector<sg::hit_shader>>, COLD: one hit shader per ray type, which pathtrace_routine starts
 cache.acquire_fallback(kind) / acquire_quadric_fallback()  // the neutral permutation of each kind, over an EMPTY signature
 cache.find(shader_key)           // -> material_permutation const*, null if nothing acquired it;  cache.count()
@@ -346,6 +370,8 @@ Gotchas:
 - **A sampled attribute takes TWO slots** — the texture index, and the `sv::attribute_desc` for the uv set it samples through, named `"<attribute>.uv"`.
 - **The geometric frequency is part of the permutation**, so a descriptor carries one stride and the generated code emits the index math.
 - **A sample names its level, 0** — a ray tracing hit shader has no derivatives to pick a mip from.
+  The raster pixel stage is the one spelling that does not: it has derivatives, so it samples the same palette at the level they pick.
+  Its cutout is not one of its loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0, since a box-filtered mip averages a cutout away.
 - **Every bindless index is `nonuniform`**, because it varies per instance within a wave.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
 - **Each load is a function of its own**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
@@ -354,7 +380,9 @@ Gotchas:
   So is one naming a module a hit group uses, one starting with `sv_`, and `surface` / `ctx`.
   Rejected rather than sanitized: the type's own fragment is written against the declared name.
 - **A generated permutation does not hot-reload on a module edit** — the key hashes the resolution and the geometry kind, not the modules' contents.
-- **A texture samples through a fixed palette**, never through per-permutation samplers: module `tracer` declares one static sampler per magnification filter and address mode of each axis.
+- **A texture samples through a fixed palette**, never through per-permutation samplers.
+  Module `tracer`'s `binding bindless` declares one static sampler per magnification filter and address mode of each axis.
+  It sits beside the tables because every pipeline that samples a material lists that group, and sg allows no fourth.
   A hit samples level 0, where only the magnification filter applies, so the minification and mip filters are dropped; `sgl_palette_sampler` says what else is.
 
 ## Mesh authoring — geometry + what a material reads
@@ -589,7 +617,7 @@ loader.load(babel::obj::data) / loader.load(babel::stl::data)
 loader.load_async(uri)           // -> sv::asset; fetch + parse + import off this thread, the LOADER must outlive it
 sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl
 
-sv::asset                        // a load in flight; move-only, and dropping it drops the load
+sv::asset                        // a load in flight; move-only; dropping it mid-load WAITS for the worker to leave the loader
 a.poll()                         // -> bool; collects a landed load and mints its materials — never blocks, call it per frame
 a.wait()                         // -> bool; drives the load on THIS thread, then collects
 a.is_ready() / a.has_error() / a.error()
@@ -709,9 +737,11 @@ sv::indexed_triangle_data  // { pinned_data<pos3f const> positions; pinned_data<
 T::create(range…)          // pins (moving an owning rvalue in, deep-copying a borrow) + hashes now (XXH3-128); call once at authoring time, not per frame
 sv::hash_bytes_of(span) / sv::combine_hashes(a, b)  // the hashing primitives, if you key content yourself
 
-mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else uploads + builds a non-indexed BLAS
-mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, but an indexed BLAS: primitive order follows the index buffer
-sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas; }
+mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else uploads, and builds nothing — needs no ray tracing
+mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, indexed: a BLAS built later follows the index buffer's primitive order
+mesh_manager::acquire_blas(cmd, id) -> blas_handle const& // built onto cmd the first time, held after; id complete, ray tracing required
+quadric_manager::acquire_blas(cmd, id)                    // the same, a procedural BLAS over the batch's boxes
+sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas (null until a trace); }
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)
 manager.used_bytes() / count() / evict(id)          // current residency; manual drop
@@ -733,6 +763,7 @@ The drawing manager does: `acquire(set)` hashes the set, and `scene_ref::add_ann
 sv::bindless_table          // enum class : u8 — textures_1d / _1d_array / _2d / _2d_array / cube / cube_array / _3d / buffers (+ count_)
 sv::bindless_bindings()     // -> span<sg::binding const> — `binding bindless` of shaders/sgl/tracer_bindings.sgl, in table order: THE layout
 sv::name_of(table)          // -> cc::string_view — the shader-visible binding name: bindless.textures_2d, bindless.buffers, … — what a footprint resolves by
+sv::texture_array_of(table) / sv::buffer_array()  // -> sg::texture_array_binding / sg::buffer_array_binding — the module's generated handles, which declare_array_*_access takes
 sv::capacity_of(table)      // -> u32 — the module's element count for it; a size is changed in the .sgl, not in a config
 sv::bindless_group          // -> int — 1: the slot the tables bind at in the tracer's pipeline layout
 
@@ -748,7 +779,10 @@ m.try_freeze() -> result<bound_resources>   // the same, failing unlocked where 
                                             //   — viewer_renderer runs view_renderer::acquire_trace for each trace before the first, so a frame mints one
 bound.group() / bound.layout()              // -> the group to bind, and the layout a pipeline composes it as one of its groups
 bound.elements(table)                       // -> span<u32 const> — this epoch's acquired indices, for declare_array_*_access (an undeclared array the code indexes LOGS and is barriered whole)
-bound.declare_raytracing_access(cmd)        // declares EVERY table for the next dispatch_rays, empty ones included
+auto const d = bound.declare_raytracing_access(cmd)  // -> sv::declared_tables — EVERY table, empty ones included, for every trace while `d` lives
+bound.declare_compute_access(cmd) / bound.declare_raster_access(cmd)  // the same for every dispatch / every draw of the open scope
+                                            //   declare once per routine, not per op: a later op binding group() skips the element work
+                                            //   GOTCHA: must die before the submit, and must meet group() bound at some op, or it asserts
 m.bindless_layout()                         // -> the same layout, without taking a snapshot
 m.table_capacity(table)                     // -> u32 — capacity_of(table), as the array holds it
 
@@ -760,15 +794,18 @@ m.record_pending_work(cmd) -> i32   // collects whatever transfers landed, then 
 m.wait_for_pending_uploads()       // blocks until every transfer lands, then finishes them — for a caller with no frame loop
 m.settling_count()                 // -> isize, payloads still in flight across the managers
 sv::residency                      // pending | base_resident | complete | failed — on EVERY record, not just textures
-m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as
-m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own
+m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as; ray tracing required
+m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own; no ray tracing needed
+m.context()                        // -> sg::context& every manager records into
 m.pending_work_count()              // -> isize — resources still waiting for their follow-up
-// config: { texture_policy textures_policy = {.generate_mips = true}; work_budget work = {.max_dispatches_per_epoch = 16} }
+// config: { texture_policy textures_policy = {.generate_mips = true, .compress = true, .compress_min_extent = 64}; work_budget work = {.max_dispatches_per_epoch = 16} }
+// compress: a complete RGBA8 texture (mips generated first) is re-encoded to BC7 behind the SAME texture_id, at a quarter
+//   of its memory; queued as follow-up work like the mips, needs sg::feature::texture_compression_bc, and frees the RGBA8 one
 // payload transfers are NOT budgeted here — they ride ctx.stream, paced by its copy actor and ordered by priority
 ```
 
 **The two budgets are different things.** Bytes in flight are sg's to schedule (`ctx.stream.set_upload_ratio`, per-handle priorities, aging).
-What `work_budget` bounds is the work that runs *after* a resource lands — mip generation today — and leaving it unbounded is what produces the microstutter.
+What `work_budget` bounds is the work that runs *after* a resource lands — mip generation and BC7 compression — and leaving it unbounded is what produces the microstutter.
 A chain is never split across epochs: a partially generated one would read as complete while its tail is uninitialized.
 
 The layout is hand-written rather than reflected, so the manager is constructible before any shader compiles — a shader matches the names above.
@@ -812,6 +849,11 @@ sv::pt_trace_desc                                    // the trace's targets and 
                                                      //   bindless       — &resources.freeze()'s value, bound as the pipeline's second group
                                                      //   frame, background and lights need sg::buffer_usage::readonly_buffer (read as storage)
                                                      //   the guide and split targets are typed: rgba16_float / r32_float / r16_float / rg32_float as sv allocates them
+sv::raster_routine::execute(cmd, raster_frame_desc)  // one draw per raster_draw through its permutation's raster pixel stage, into a raster_gbuffer; declines while the vertex stage builds
+sv::raster_frame_desc                                // { raster frame constants; background, instance_table, lights, decals; draws; permutations; fallback; bindless; targets }
+sv::raster_draw                                      // { u32 instance, triangle_count, permutation } — three vertices per triangle, no vertex buffer
+sv::raster_gbuffer                                   // { color rgba32f; normal, albedo, specular_albedo rgba16f; depth r32f; roughness r16f; motion rg32f; primary_depth r32f }
+                                                     //   the layer's slots, every one render_target-capable; THE seam a hybrid lighting pass reads
 sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block
 sv::pt_light_table::grouped(span<light_record>)         // -> { records grouped by path, path_offset[4], path_count[4] } — a counting sort; each run keeps the given order
 table.describe_in(fc)                                // writes light_count + the per-path table into the frame block, so the two cannot disagree
@@ -848,14 +890,28 @@ A layer with no lights falls back to `layer::fallback_light` — `sv::default_fa
   The two radiance halves sum to `frame_samples` exactly, so a member reading them sees the same frame the others do rather than a second trace.
   Declared like the specular pair, but WRITTEN only when the member that actually resolves on this device reads them, and only on the frames it runs.
 - **`sv::matrices_of(camera_record, near_plane)`** turns the raygen's pinhole basis into the `world_to_view` / `view_to_clip` pair `sr::reconstruct_guides` asks for.
-  sv rasterizes nothing, so these exist for a denoiser that reprojects in world space; `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
-  `reconstruct_guides::jitter` stays zero: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
-  The per-frame offset a temporal upscaler reconstructs from is the other kind, and sv has none.
+  They exist for a denoiser or an upscaler that reprojects in world space, whether the layer was traced or rasterized.
+  `right_scaled` and `up_scaled` carry `tan(fov / 2)` in their lengths, which is the projection's diagonal.
+  `reconstruct_guides::jitter` stays zero at full size: the raygen offsets every primary ray randomly WITHIN its pixel, so the samples' mean is the centre.
+  The per-frame offset a temporal upscaler reconstructs from is the other kind: a frame traced at the upscaler's extent takes one, and passes it as `.jitter` beside `.previous_jitter`.
 - **The temporal history restarts on a scene change, never on camera motion** — its signal is the trace hash with the camera left out.
   The raygen blends the guides beside the mean on a count of their own, so turning denoising on mid-estimate restarts nothing.
 - **A denoiser still compiling declines the frame**, so a capture never saves the raw mean where a denoised image was asked for.
   One that cannot run presents the raw mean and logs once.
 - **Only the plan path denoises.** `view_renderer::execute`, the single-view entry point, still returns the raw accumulator.
+
+**Raster layers** (`render_settings::mode = render_mode::raster`, [docs/raster.md](docs/raster.md)) go through the same plan trace, and draw instead.
+- **Every frame is final**: the accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `is_accumulation_converged` and a capture finish at once.
+  A frame drawn through a stand-in for a material still compiling is not final, and restarts next frame.
+  One for a material that failed for good is final: the routine reports what it bound as a `stand_in_report`, whose hash the image's folds in.
+- **The G-buffer is written every frame, denoised or not**, into the guide slots of the same meaning.
+  Those are `normal_guide`, `depth_guide`, `albedo_guide`, `specular_albedo_guide`, `roughness_guide` and `motion_guide`.
+  `reconstruct` is ignored, and nothing denoises.
+- **A landed quadric batch is skipped**, with one warning per layer; triangle meshes, cutouts, decals and drawings work.
+  One still streaming draws as its placeholder box, as a pending mesh does.
+- **No ray tracing needed**: a raster layer builds no acceleration structure and never waits on the tracer.
+  It does need `binding_arrays`, which `tracer.bindless` requires, so it draws on dx12, vulkan and metal and not on webgpu.
+  A traced layer on a device without `raytracing_pipeline` is declined, with one logged error; `viewer::try_create` no longer refuses such a device.
 
 The view's `background` (RGB SH) is packed to `background_gpu` and bound at b1.
 The flat and path-tracer misses both reconstruct from it the environment radiance an escaped ray sees; the shadow miss carries visibility only.
@@ -947,6 +1003,7 @@ view.is_accumulation_converged(frames = {}) -> bool             // ASK THIS, not
                                                                //   so a target above the cap is one `accumulated_frames()` can never reach
                                                                //   unset frames = "finished as far as it can"; false for a view with no traced layer
 frame.register_capture("name", body)                           // a named capture; body runs INLINE here, every frame, only when it is the one taken
+frame.hold_capture("why")                                      // this frame is not the finished image (a load of your own); holds THIS frame only
                                                                //   takes sv::capture_context { first_frame, name, size }
                                                                //   MUST be idempotent after the first frame, or accumulation never settles
                                                                //   the name must also appear in the example's .capture.json; a mismatch fails, never falls back
@@ -1036,7 +1093,7 @@ for (auto f : sv::interactive("simple"))
 ```cpp
 // setup (once): build the scene through the managers
 auto resources = sv::gpu_resource_manager::create(ctx, {.meshes = {.budget = {.max_bytes = 256 << 20}}});
-auto const item = resources.acquire_scene_item(mesh);   // geometry + BLAS, the material resolved, its permutation compiled
+auto const item = resources.acquire_scene_item(mesh);   // geometry, the material resolved, its permutation generated
 
 // per frame: describe -> flatten -> record -> present, in one command list
 auto def = sv::viewer_definition{};

@@ -7,7 +7,7 @@ This document is design intent, not a guarantee of final API.
 shaped-viewer is built around a **recursive view model**: a view is the definition of one texture, and one of a view's
 layers may be a whole layout tree — so views nest, at any depth.
 A frame is authored through fluent handles, flattened into a `render_plan`, and replayed by `viewer_renderer`.
-Raytracing-first — raster is a later fallback / special case.
+Raytracing-first: a layer is path-traced unless it asks to be rasterized, which draws the same materials lit directly (raster.md).
 
 ## Goals
 
@@ -43,7 +43,7 @@ shader library provider                  [done]         the same shape for slib:
 input routing + key-bound zoom           [done]         picks the leaf under the cursor in painter's order through the plan's region links;
                                                         Ctrl+wheel magnifies what a leaf samples without touching a camera or a trace
 mesh / triangle_geometry / attributes    [in progress]  the authoring-side mesh: triangle_geometry (raw or indexed, pinned + hashed) plus named attributes (per element, or per instance for a per-mesh value), a material id, flags and textures
-resource managers (mesh / quadric / texture / attribute)  [in progress]  strongly-typed ids -> GPU resources (BLAS built here); LRU budget + idle eviction
+resource managers (mesh / quadric / texture / attribute)  [in progress]  strongly-typed ids -> GPU resources (BLAS built here, on a trace's first ask); LRU budget + idle eviction
 resource data (triangle / indexed / texture)  [in progress]  what a caller uploads: a pinned_data payload + its cc::hash128 content key
 gpu_resource_manager                     [in progress]  where resource management comes together: the four managers, the staging binding group, and one sg::bindless_array per table.
                                                         Its tick is `advance_to(epoch)` — idempotent, so N windows drawing at N rates each call it and the first one pays.
@@ -51,7 +51,10 @@ gpu_resource_manager                     [in progress]  where resource managemen
 bindless tables                          [in progress]  module tracer's `binding bindless` is the one declaration (shaders/sgl/tracer_bindings.sgl): one table per view dimension, raw byte buffers.
                                                         The manager's staging group is laid out from its reflection, so the trace's group 1 is the very layout its pipeline was compiled against and sg resolves its footprint by name
 pathtrace_routine                        [in progress]  the GI trace view_renderer drives: shaders/tracer_pipeline.sgl over module tracer, TLAS + dispatch_rays into an image target, one hit group per material permutation
-sv_shaders package                       [in progress]  one SGL package: the tracer pipeline with module tracer exported, plus layout.sgl (border / view / wipe) and depth_fill.sgl, via slib
+wavefront tracer                         [in progress]  one compute dispatch per stage over the live paths, the default integrator; the megakernel stays beside it. Runs on dx12 and vulkan, metal is open. docs/wavefront.md is the design
+raster path                              [in progress]  render_mode::raster: one draw per triangle item through each permutation's generated pixel stage, lit directly and unshadowed, final every frame.
+                                                        Writes the primary hit's G-buffer into the guide slots, the seam the hybrid mode grows from; quadrics are not drawn yet. docs/raster.md is the design
+sv_shaders package                       [in progress]  one SGL package: the tracer pipeline with module tracer exported, the raster path's raster_pass.sgl with module raster exported, plus layout.sgl (border / view / wipe) and depth_fill.sgl, via slib
 camera / controls                        [in progress]  dev-friendly pinhole camera, plus sv::orbit_camera_controller (event-driven) and sv::fps_camera_controller (integrated over time).
                                                         BOTH are wired in: `view_ref::camera_style` picks one, the viewer routes that view's events to it and runs the per-frame update, and switching mid-session re-seeds the incoming controller from where the outgoing one left the camera
 persistent per-view state                [in progress]  view_id keys what a view keeps — camera, controller, zoom, display name, last rect, composite target and accumulators — all in one sv::view_store the frame owns
@@ -62,7 +65,7 @@ denoising                                [in progress]  render_settings::reconst
                                                         blends beside it; the parent samples the denoised image. Nothing in it reaches the trace hash.
                                                         While the mean is young SVGF runs on the frame's own samples and camera motion vectors, then à-trous on the mean.
                                                         The hand-off is crossfaded, and view_ref::camera_cut() drops the history on a teleport.
-                                                        The tracer writes specular albedo + roughness too, so DLSS Ray Reconstruction runs where its SDK was fetched. Still to come: render_scale.
+                                                        The tracer writes specular albedo + roughness too, so DLSS Ray Reconstruction runs where its SDK was fetched. A scale below native upscales the frames whose image changed.
                                                         shaped-rendering's docs/reconstruction.md is the design
 textures + post-load work                [in progress]  texture_manager uploads and pins an element per texture; residency says how much has landed.
                                                         Follow-up steps (mip generation through whichever sr mipmap routine the format admits) are QUEUED and drained under a per-epoch dispatch budget, which is the microstutter guard.
@@ -86,7 +89,7 @@ material data on the GPU                 [in progress]  attribute_manager upload
                                                         scene_ref::add_mesh resolves the material and the block; view_renderer builds one instance record per item on its own command list, and pathtrace_routine builds a ray-tracing pipeline with one hit group per permutation, selected per instance by tlas_instance::hit_group_offset.
                                                         The trace binds two groups: its own bindings, and the manager's bindless tables.
                                                         Still to come: several parameter blocks per buffer
-glTF material mapping                    [done]         openpbr declares alpha_cutoff (glTF's MASK, 0 = off) and occlusion (imported, and deliberately ignored by the path-tracing fragment — a baked AO term double-counts what the integrator computes per bounce).
+glTF material mapping                    [done]         openpbr declares alpha_cutoff (glTF's MASK, 0 = off) and occlusion (imported; it darkens the raster path's environment light, and the path-tracing fragment ignores it — a baked AO term double-counts what the integrator computes per bounce).
                                                         texture_sample_source carries a channel_swizzle, so one packed metallic-roughness or ORM map binds several attributes over a single upload.
                                                         The swizzle is generated code rather than a value, so it lives in permutation_key — and only as far as the declaration reads it, which canonicalizes identity swizzles.
                                                         A sample_transform beside it splits the other way: a per-component scale and bias, of which only the EXISTENCE is shape, so a normal map's decode and its scale never fork a permutation
@@ -97,7 +100,7 @@ mesh / resident_mesh type split          [done]         a mesh exists in two for
 streamed uploads + placeholders          [done]         every record carries an sv::residency, and an acquire hands its payload to sg's ctx.stream rather than uploading it.
                                                         That is the point rather than a detail: ctx.upload makes the next command list touching the resource wait on the copy, which is what turns a large asset from slow into a stalled frame.
                                                         Priority is the transfer's own — attributes above the geometry that indexes them, so an attribute is up before its mesh draws real triangles — and dropping a transfer cancels it, so evicting a streaming mesh is free.
-                                                        record_pending_work collects what landed and builds each BLAS behind it; a record's state advances only there, which is what keeps residency deterministic under test.
+                                                        record_pending_work collects what landed, and a record's state advances only there, which keeps residency deterministic under test; the first trace reaching a mesh builds its BLAS.
                                                         A pending mesh is traced as one shared unit-cube BLAS scaled onto its declared bounds and shaded through the fallback hit group; one with no bounds is skipped.
                                                         A pending texture is substituted at the bindless SLOT by a 1x1 seeded from the factor the sample beat — at the slot rather than by losing to a coarser rank, since losing would flip the permutation when it lands.
                                                         The viewer collects once per frame — which nothing did before, so a viewer's textures never grew their mip chains either
@@ -151,7 +154,8 @@ A shader reload is folded into that same hash as a reload generation, since `sg:
 
 ## Platform / backend status
 
-Every sv shader is SGL — the tracer, the generated material hit groups and the two raster passes — so one source compiles for every backend.
+Every sv shader is SGL — the tracer, the generated material hit groups and raster pixel stages, the raster path and the compositing passes — so one source compiles for every backend.
+The raster path runs on dx12 and vulkan, held to each other to rounding by `raster-test.cc`.
 The path tracer runs on **dx12** (hardware or WARP) and on **vulkan**; `cross-backend-trace-test.cc` holds the vulkan image to the dx12 one to rounding, material spelling by material spelling.
 The viewer's default context (`sv::set_acquire_context` unset), the examples and the rest of the GPU tests are dx12's.
 Metal and webgpu are untried: metal has the ray-tracing pipeline sg needs, webgpu has ray queries alone.
@@ -167,8 +171,8 @@ The whole sv API compiles everywhere: without a backend a routine simply acquire
   If a second library wants it, promoting a generational version into clean-core is the next step.
 - **TLAS is rebuilt every frame**, since refit/update is not implemented in sg yet; `tlas_id` exists for a future prebuilt/persistent TLAS.
 - **Texture download** exists in sg as `cmd.download.bytes_from_texture`, but the trace stays on the proven UAV-write-then-blit path.
-  Two tests read pixels back through it now — `volumetric-furnace-test` and `openpbr-bsdf-test` — and both are skipped on Windows on ARM, where that path fastfails.
-  See [bug-sv-woa-inline-readback-fastfail](issues/bug-sv-woa-inline-readback-fastfail.md).
+  Two tests read pixels back through it now — `volumetric-furnace-test` and `openpbr-bsdf-test` — and both are skipped on Windows on ARM.
+  That is very likely a WARP fault rather than this path; see [bug-sv-woa-inline-readback-fastfail](issues/bug-sv-woa-inline-readback-fastfail.md).
 - **Compositing is a raster blit, not a compute copy**, and that is sg's constraint rather than a preference.
   A swapchain backbuffer is created render-target-only (`DXGI_USAGE_RENDER_TARGET_OUTPUT`, no UAV), and there is no GPU texture-to-texture copy.
   A compute compositor would have to write an offscreen UAV and then blit *that* to the backbuffer — one extra full-screen pass.

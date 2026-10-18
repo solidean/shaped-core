@@ -88,8 +88,8 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
     // A cutout on a quadric batch is not merely unimplemented, it is unreachable: the instance is submitted with
     // `opaque_override`, so the hardware skips any-hit entirely and the material's own coverage never runs.
     // Said out loud rather than dropped, because the image is simply wrong and nothing else would explain it.
-    if (procedural && generated.can_cut_out)
-        CC_LOG_WARNING("material '{}' writes geometry_opacity, which a quadric batch cannot cut out with — the batch "
+    if (procedural && generated.opacity.can_cut_out())
+        CC_LOG_WARNING("material '{}' has a cutout opacity, which a quadric batch cannot cut out with — the batch "
                        "is submitted opaque, so it will draw fully opaque",
                        r.type->name);
 
@@ -110,9 +110,11 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
     return entry.get_or_emplace(material_permutation{.key = generated.key,
                                                      .layout = cc::move(generated.layout),
                                                      .kind = kind,
-                                                     .can_cut_out = !procedural && generated.can_cut_out,
+                                                     .opacity = procedural ? material_opacity() : generated.opacity,
                                                      .hit_group = cc::move(hit_group),
                                                      .source = cc::move(generated.source),
+                                                     .shade_source = cc::move(generated.shade_source),
+                                                     .raster_source = cc::move(generated.raster_source),
                                                      .label = cc::move(label)});
 }
 } // namespace sv

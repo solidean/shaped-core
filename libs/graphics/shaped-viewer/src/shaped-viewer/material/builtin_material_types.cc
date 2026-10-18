@@ -25,6 +25,8 @@ namespace
 {
 // The identity fragment: every attribute is already an OpenPBR parameter, so this only clamps what the BSDF requires.
 //
+// `opacity` and `alpha_cutoff` are not read here: the type declares them as its cutout opacity and cutoff, which the
+// tracer reads directly.
 // A cutout is a step rather than a blend: alpha_cutoff at 0 leaves opacity continuous, and any positive value makes the
 // surface either fully present or fully absent at that threshold.
 // Baking the step into the imported alpha instead fails as soon as mips filter it, which is exactly when a cutout matters.
@@ -32,7 +34,7 @@ namespace
 // `occlusion` is declared and imported, and deliberately not read here.
 // Baked ambient occlusion in a path tracer is double-counting: the integrator computes that occlusion itself, correctly and
 // per bounce, so applying a baked term on top darkens the surface twice.
-// It is carried anyway because a raster fallback will want it, and an asset that lost its AO map on load cannot get it back.
+// The type declares it as its occlusion attribute instead, which the raster path darkens its environment light by.
 constexpr cc::string_view openpbr_shader = R"sgl(
 surface.base_weight = saturate(base_weight)
 surface.base_color = saturate(base_color)
@@ -80,7 +82,6 @@ surface.emission_color = max(float3(0.0), emission_color)
 surface.geometry_thin_walled = thin_walled
 surface.geometry_normal = normalize(normal)
 surface.geometry_coat_normal = normalize(coat_normal)
-surface.geometry_opacity = if alpha_cutoff > 0.0 => step(alpha_cutoff, opacity) else saturate(opacity)
 
 surface.geometry_tangent_frame = tangent_frame
 surface.geometry_tangent = tangent
@@ -114,8 +115,6 @@ surface.specular_weight = 0.0
 
 surface.emission_luminance = 1.0
 surface.emission_color = color
-
-surface.geometry_opacity = saturate(opacity)
 )sgl";
 
 [[nodiscard]] material_type make_openpbr()
@@ -184,7 +183,7 @@ surface.geometry_opacity = saturate(opacity)
     // 0 disables it, so `OPAQUE` and `BLEND` both bind nothing here and opacity stays continuous.
     signature.push_back(material_signature_entry::of("alpha_cutoff", 0.0f));
 
-    // Baked ambient occlusion, imported but ignored by the path-tracing fragment — see the fragment for why it is carried.
+    // Baked ambient occlusion, which the raster path's environment light reads and the path-tracing fragment ignores — see the fragment.
     signature.push_back(material_signature_entry::of("occlusion", 1.0f));
 
     // Nonzero makes the surface a shell with no interior: it does not refract and encloses no medium.
@@ -205,7 +204,7 @@ surface.geometry_opacity = saturate(opacity)
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
 
     return material_type::create(cc::string(builtin_material::openpbr), cc::move(signature), cc::string(openpbr_shader),
-                                 "opacity");
+                                 "opacity", "alpha_cutoff", "occlusion");
 }
 
 [[nodiscard]] material_type make_pbr()

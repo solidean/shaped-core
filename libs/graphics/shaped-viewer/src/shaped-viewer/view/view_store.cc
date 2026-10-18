@@ -1,5 +1,7 @@
+#include <clean-core/common/utility.hh> // cc::clamp
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/view/view_store.hh>
+#include <shaped-viewer/viewer.hh>
 
 namespace sv
 {
@@ -136,6 +138,25 @@ bool is_accumulation_converged(view_state const& state, cc::optional<u32> frames
             return false;
     }
     return any;
+}
+
+f32 wavefront_budget_of(viewer_config const& config)
+{
+    return config.headless ? 0.0f : cc::max(0.0f, config.frame_budget_ms);
+}
+
+f32 wavefront_budget_share(f32 budget_ms, isize still_layers)
+{
+    return budget_ms / f32(cc::max(isize(1), still_layers));
+}
+
+i32 still_rounds_for(i32 rounds_per_frame, f32 budget_ms, f64 seconds_per_round)
+{
+    auto const fixed = cc::max(1, rounds_per_frame);
+    if (budget_ms <= 0.0f || seconds_per_round <= 0.0)
+        return fixed;
+    auto const fit = i32(f64(budget_ms) * 1e-3 / seconds_per_round);
+    return cc::clamp(fit, 1, max_budgeted_rounds);
 }
 } // namespace impl
 } // namespace sv

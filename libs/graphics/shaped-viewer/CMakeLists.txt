@@ -8,7 +8,7 @@ project(shaped-viewer LANGUAGES CXX)
 # The library API is present on every platform (the vocabulary, managers, routines and renderer all compile
 # cross-platform), and every shader is SGL, so it compiles for whichever backend a context runs.
 # Tracing needs a backend with ray-tracing pipelines: dx12 and vulkan, where sv's tests run it.
-# Where that is missing, a routine simply acquires no shader and draws nothing — the same graceful path a broken shader edit takes.
+# Where that is missing, a raster layer still draws, and a traced layer is declined with one logged error.
 add_library(shaped-viewer
     src/shaped-viewer/shaped-viewer.cc
     src/shaped-viewer/context.cc
@@ -44,6 +44,9 @@ add_library(shaped-viewer
     src/shaped-viewer/resources/bindless_tables.cc
     src/shaped-viewer/resources/gpu_resource_manager.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
+    src/shaped-viewer/rendering/traced_group.cc
+    src/shaped-viewer/rendering/wavefront_routine.cc
+    src/shaped-viewer/rendering/raster_routine.cc
     src/shaped-viewer/rendering/render_plan.cc
     src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/depth_fill_routine.cc
@@ -122,6 +125,8 @@ target_sources(shaped-viewer
     src/shaped-viewer/resources/gpu_resource_manager.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
+    src/shaped-viewer/rendering/stand_in_report.hh
+    src/shaped-viewer/rendering/raster_routine.hh
     src/shaped-viewer/rendering/render_plan.hh
     src/shaped-viewer/rendering/layout_routine.hh
     src/shaped-viewer/rendering/depth_fill_routine.hh
@@ -162,8 +167,9 @@ target_compile_options(shaped-viewer
     $<$<CXX_COMPILER_ID:MSVC>:/Zc:preprocessor>
 )
 
-# sv's shader package: the path tracer (tracer_pipeline.sgl over module `tracer`, shaders/sgl) and the two raster passes.
+# sv's shader package: the path tracer (tracer_pipeline.sgl over module `tracer`, shaders/sgl), the raster path (raster_pass.sgl over module `raster`) and the compositing passes.
 # Module `tracer` is exported because a material's hit group, generated and compiled at run time, lists its bindings and traces its rays.
+# Module `raster` is exported for the same reason: a material's pixel shader is generated too, and lists its bindings and writes its targets.
 # The fullscreen blit lives in shaped-rendering (sr::blit_routine).
 # Must be declared here, in the CMakeLists that defines the target — the generated sources are added as
 # PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped. Deliberately not gated on a compiler:
@@ -177,7 +183,10 @@ sc_add_shader_package(
     MODULE_DIRS shaders/sgl ${SR_SGL_MODULE_DIR}
     SHADERS
         module:tracer
+        module:raster
         tracer_pipeline.sgl:*
+        wavefront.sgl:*
+        raster_pass.sgl:*
         layout.sgl:*
         depth_fill.sgl:*
 )
@@ -213,8 +222,16 @@ if(SC_BUILD_TESTS)
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
         tests/asset-loading-test.cc
+        tests/wavefront-pacing-test.cc
     )
-    sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    # Over three times sg's WARP allowance: an unoptimized build runs the suite for five to six minutes, nearly all of it
+    # the SGL compiler, unoptimized, compiling each test's material permutations afresh.
+    # TEMPORARY: a process-wide compile cache is what would bring it back; see libs/graphics/shaped-viewer/docs/plans/rendering-roadmap.md.
+    if(WIN32)
+        sc_nexus_binary(shaped-viewer-test KINDS tests TIMEOUT 600)
+    else()
+        sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    endif()
 
     target_link_libraries(shaped-viewer-test
         PRIVATE
@@ -240,6 +257,13 @@ if(SC_BUILD_TESTS)
             tests/pt-support-probe-test.cc
             tests/cross-backend-trace-test.cc
             tests/volumetric-furnace-test.cc
+            tests/accumulated-mean-test.cc
+            tests/cutout-trace-test.cc
+            tests/wavefront-trace-test.cc
+            tests/wavefront-view-test.cc
+            tests/raster-test.cc
+            tests/raster-without-raytracing-test.cc
+            tests/wavefront-benchmark.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc

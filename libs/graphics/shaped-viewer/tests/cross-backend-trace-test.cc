@@ -313,7 +313,7 @@ template <class T>
             auto const* const set = resources.quadrics.get_ptr(item.quadrics);
             if (set == nullptr)
                 return {};
-            blas = set->blas;
+            blas = sv_test::blas_of(resources, item.quadrics);
             scene.has_quadrics = true;
         }
         else
@@ -321,8 +321,8 @@ template <class T>
             auto const* const mesh = resources.meshes.get_ptr(item.mesh);
             if (mesh == nullptr)
                 return {};
-            blas = mesh->blas;
-            opaque = !permutation->can_cut_out;
+            blas = sv_test::blas_of(resources, item.mesh);
+            opaque = !permutation->opacity.can_cut_out();
         }
 
         auto instance = sg::tlas_instance{.blas = blas,
@@ -389,10 +389,15 @@ cc::shared_async<cc::vector<tg::vec4f>> trace_once(sg::context* ctx, sv::gpu_res
 
         auto cmd = ctx->create_command_list();
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
-        for (auto const& item : scene.items)
+        for (auto i = isize(0); i < scene.items.size(); ++i)
+        {
+            auto const& item = scene.items[i];
             records.push_back(item.kind == sv::scene_item_kind::quadric_set
                                   ? resources->describe_instance(*cmd, item.quadrics, item.instance)
                                   : resources->describe_instance(*cmd, item.mesh, item.instance));
+            auto const& instance = scene.instances[i];
+            sv::place_instance_record(records.back(), instance, scene.hit_groups[instance.hit_group_offset / 2]->opacity);
+        }
 
         auto const frame = ctx->transient.create_buffer_from_pod(*cmd, fc, sg::buffer_usage::readonly_buffer);
         auto const background = ctx->transient.create_buffer_from_pod(*cmd, sv::background_gpu::from(scene.environment),

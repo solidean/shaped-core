@@ -2,8 +2,10 @@
 #include <babel-serializer/geometry/obj.hh>
 #include <babel-serializer/geometry/stl.hh>
 #include <clean-core/common/utility.hh> // cc::move
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/atomic.hh>
 #include <shaped-viewer/asset/asset.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
 #include <shaped-viewer/asset/impl/asset_import.hh>
@@ -101,6 +103,9 @@ sv::asset asset_loader::load_async(cc::string_view uri) const
     // Captured by value, so the node needs nothing of this call to survive; the LOADER must, and says so.
     auto owned_uri = cc::string(uri);
 
+    // Raised when the `sv::asset` is dropped, so a load that has not reached the loader yet never does.
+    auto dropped = cc::make_shared<cc::atomic<bool>>(false);
+
     // One frame for the whole worker half — fetch, parse, import — rather than a node per stage.
     //
     // Three nodes would express the stages but buy nothing yet: each stage feeds only the next, so there is no
@@ -108,8 +113,11 @@ sv::asset asset_loader::load_async(cc::string_view uri) const
     // What splitting them WOULD buy is structure-first loading, and that needs a mesh whose geometry has not been read
     // — see the note on `sv::asset`.
     auto node = cc::make_async_scheduled<impl::imported_asset>(
-        [this, owned_uri = cc::move(owned_uri)](cc::async_context<impl::imported_asset>& ctx)
+        [this, owned_uri = cc::move(owned_uri), dropped](cc::async_context<impl::imported_asset>& ctx)
         {
+            if (dropped->load())
+                return ctx.resolve_to_error(cc::async_error::make_cancelled());
+
             auto const format = asset_format_of_uri(owned_uri);
             if (!format.has_value())
                 return ctx.resolve_to_error(cc::async_error::make_error(
@@ -118,6 +126,8 @@ sv::asset asset_loader::load_async(cc::string_view uri) const
             auto bytes = _config.resolve ? _config.resolve(owned_uri) : resolve_uri(owned_uri);
             if (bytes.has_error())
                 return ctx.resolve_to_error(cc::async_error::make_error(cc::move(bytes).error()));
+            if (dropped->load())
+                return ctx.resolve_to_error(cc::async_error::make_cancelled());
 
             auto out = impl::imported_asset();
             auto imported = _import(cc::move(bytes.value()), format.value(), owned_uri, owned_uri, out.definitions);
@@ -128,7 +138,7 @@ sv::asset asset_loader::load_async(cc::string_view uri) const
             return ctx.resolve_to_value(cc::move(out));
         });
 
-    return sv::asset(cc::move(node), this);
+    return sv::asset(cc::move(node), this, cc::move(dropped));
 }
 
 cc::result<asset_data> asset_loader::_finish(cc::result<asset_data> imported,

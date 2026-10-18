@@ -32,6 +32,7 @@
     X(global_barriers, count, "barriers naming stages and no resource")                                     \
     X(barrier_calls, count, "one per API call that submitted a batch of barriers")                          \
     X(render_pass_splits, count, "a rendering scope ended and reopened mid-scope, whatever forced it")      \
+    X(array_element_tracks, count, "array elements fed to the tracker, declared or covered whole")          \
     X(bytes_uploaded_inline, bytes, "cmd.upload bytes, counted on the list")                                \
     X(bytes_uploaded_async, bytes, "async upload bytes, at enqueue")                                        \
     X(bytes_uploaded_stream, bytes, "stream upload bytes, at enqueue, or per chunk for a buffer source")    \

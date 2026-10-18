@@ -62,7 +62,7 @@ cc::shared_async<cc::unit> require_compiled(sg::context* ctx, sv::material_permu
     REQUIRE(group->size() == 2);
     CHECK((*group)[0].closest_hit.has_value());
     for (auto const& e : *group)
-        CHECK(e.any_hit.has_value() == p->can_cut_out);
+        CHECK(e.any_hit.has_value() == p->opacity.can_cut_out());
     co_return;
 }
 
@@ -88,7 +88,7 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - the fallback stands in for a p
     // block was laid out for some other material is simply never touched.
     CHECK(fallback.layout.slots.empty());
     CHECK(fallback.layout.size_bytes == 0);
-    CHECK(!fallback.can_cut_out);
+    CHECK(!fallback.opacity.can_cut_out());
     CHECK(fallback.kind == sv::geometry_kind::triangles);
 
     // Compiled once per cache, like any other permutation.

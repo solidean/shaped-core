@@ -14,7 +14,7 @@
 #include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
-#include <sr_shaders.hh>
+#include <sr_sgl_shaders.hh>
 
 namespace sr
 {
@@ -22,6 +22,9 @@ using impl::is_set;
 
 namespace
 {
+/// What the denoiser writes in front of an upscaler: full floats, like the accumulators it most often filters.
+constexpr auto k_upscale_source_format = sg::pixel_format::rgba32_float;
+
 /// The ratio of output to input each vendor preset stands for.
 ///
 /// The vendors publish the same four, and the numbers below are provisional until a vendor member reads them:
@@ -237,8 +240,7 @@ bool reconstruct_support::supports(denoise_method m) const
 
 reconstruct_support query_reconstruct_support(sg::context const& ctx)
 {
-    // The native members are HLSL, and slib builds HLSL only through DXC — so a context whose library has no compiler
-    // reaching a format it accepts cannot run them, whatever the backend.
+    // A context whose library has no compiler reaching a format it accepts cannot run the native members, whatever the backend.
     // Asking the assets rather than assuming is what keeps the promise `reconstruct_status::unsupported` makes: without
     // it, `automatic` picks a member whose init then fails, and every call reports `failed` instead.
     //
@@ -251,10 +253,9 @@ reconstruct_support query_reconstruct_support(sg::context const& ctx)
     // The ones still unimplemented stay false, which is what makes `automatic` skip them and a named request report
     // `unsupported` rather than silently running something else.
     return {
-        .atrous = buildable(sr::shaders::atrous_denoise.compute.main_cs),
-        .svgf = buildable(sr::shaders::svgf_temporal.compute.main_cs)
-             && buildable(sr::shaders::svgf_variance.compute.main_cs)
-             && buildable(sr::shaders::svgf_atrous.compute.main_cs),
+        .atrous = buildable(sgl_shaders::atrous_denoise.main_cs.asset),
+        .svgf = buildable(sgl_shaders::svgf.temporal_cs.asset) && buildable(sgl_shaders::svgf.variance_cs.asset)
+             && buildable(sgl_shaders::svgf.atrous_cs.asset),
         .oidn = oidn_denoise_routine::is_available(ctx),
         .dlss_rr = dlss_rr_routine::is_available(ctx),
         .nrd = nrd_denoise_routine::is_available(ctx),
@@ -508,16 +509,27 @@ cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scop
     // rather than on the first call.
     // Through prewarm rather than dependency tokens: a token would hold the front pending until every member is ready,
     // and one member this device cannot initialize would then hold every other member hostage.
+    //
+    // The native members compile for the output's format.
+    // Where an upscaler exists they compile for the scratch image the denoiser writes in front of it as well,
+    // unless that is the output's format already.
     auto& ctx = scope.context();
     auto const support = query_reconstruct_support(ctx);
-    if (support.atrous)
-        atrous_denoise_routine::prewarm(ctx);
-    if (support.svgf)
-        svgf_denoise_routine::prewarm(ctx);
+    auto const prewarm_native = [&](sg::pixel_format format)
+    {
+        if (support.atrous)
+            atrous_denoise_routine::prewarm(ctx, format);
+        if (support.svgf)
+            svgf_denoise_routine::prewarm(ctx, format);
+        if (support.oidn)
+            oidn_denoise_routine::prewarm(ctx, format);
+    };
+    if (params() != sg::pixel_format::undefined)
+        prewarm_native(params());
+    if (support.fsr && params() != k_upscale_source_format)
+        prewarm_native(k_upscale_source_format);
     if (support.nrd)
         nrd_denoise_routine::prewarm(ctx);
-    if (support.oidn)
-        oidn_denoise_routine::prewarm(ctx);
     if (support.dlss_rr)
         dlss_rr_routine::prewarm(ctx); // nothing to compile, but the member is a routine like the others
     if (support.fsr)
@@ -531,7 +543,7 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
                                                  reconstruct_settings const& settings)
 {
     // Registers the front on first use, so its init prewarms the members; its own readiness gates nothing.
-    (void)try_acquire(cmd);
+    (void)try_acquire(cmd, in.output.format());
 
     auto& ctx = cmd.context();
     // Asked once and used throughout, since every resolver and support check wants the same answer.
@@ -588,7 +600,7 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
     auto denoised = reconstruct_outcome{.status = reconstruct_status::denoised};
     if (denoising)
     {
-        impl::ensure_image(ctx, history._upscale_source, impl::extent_of(in.color), sg::pixel_format::rgba32_float);
+        impl::ensure_image(ctx, history._upscale_source, impl::extent_of(in.color), k_upscale_source_format);
         auto scratch_inputs = in;
         scratch_inputs.output = history._upscale_source;
         denoised = run_denoiser(cmd, scratch_inputs, history, settings, method);

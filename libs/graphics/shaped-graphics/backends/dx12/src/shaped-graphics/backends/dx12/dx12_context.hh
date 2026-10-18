@@ -53,6 +53,7 @@ enum class sg::backend::dx12::dx12_message_severity : sg::u8
 enum class sg::backend::dx12::dx12_adapter : sg::u8
 {
     /// A hardware GPU, and an error where the host has none.
+    /// No adapter of Microsoft's vendor id counts, even one DXGI does not flag as software: that is WARP.
     hardware,
 
     /// The WARP software adapter, present on every Windows host, which is what makes a headless run possible.

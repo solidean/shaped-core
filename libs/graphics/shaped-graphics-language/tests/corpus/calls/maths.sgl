@@ -88,3 +88,21 @@ struct pixel_input:
     let packed = pack_unorm4x8(float4(fract(wave), round(x), sign(wave), step(0.5, edge)))
     let mixed = float.from_bits(x.bits) + pow(2.0, 0.5) + smoothstep(0.0, 1.0, x)
     return { color = float4(wave, edge, (bits + int.from_bits(packed)) as float, mixed) }
+
+// mix takes a weight per component as well as one for the whole vector.
+test mix(float3(0.0, 2.0, 4.0), float3(4.0, 6.0, 8.0), float3(0.0, 0.5, 1.0)) == float3(0.0, 4.0, 8.0)
+test mix(half2(0.0, 4.0), half2(2.0, 8.0), half2(1.0, 0.25)) == half2(2.0, 5.0)
+
+// is_nan and is_inf of anything finite.
+// A NaN or an infinity cannot be a constant, which WGSL refuses, so the true cases are a GPU's to show: sr's denoise tests feed both.
+test not is_nan(1.0)
+test not is_nan(float.from_bits(0x7f7fffffu))
+test not is_inf(float.from_bits(0xff7fffffu))
+test not is_inf(0.0)
+test is_nan(float2(0.0, -2.0)) == bool2(false, false)
+test is_inf(float4(0.0, 1.0, -1.0, 3.0e38)) == bool4(false, false, false, false)
+// a half is tested as the float it widens to, which keeps a NaN and an infinity, and its largest finite value is neither
+test not is_nan(1.0f16)
+test not is_inf(-65504.0f16)
+test is_nan(half3(0.0, -2.0, 65504.0)) == bool3(false, false, false)
+test is_inf(half4(0.0, 1.0, -65504.0, 65504.0)) == bool4(false, false, false, false)

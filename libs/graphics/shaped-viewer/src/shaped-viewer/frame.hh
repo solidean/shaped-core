@@ -175,6 +175,15 @@ public:
     /// Re-registering the same name is how this is meant to be called — every frame, from the same place.
     void register_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body);
 
+    /// Says this frame's image is not the finished one, for a reason the viewer cannot see — a load of the caller's own.
+    ///
+    ///     if (!asset.is_ready()) f.hold_capture("the asset is loading");
+    ///
+    /// A capture does not settle on a held frame, and names `reason` if it runs out of time on one.
+    /// It holds THIS frame only, so a caller still waiting calls it again on the next.
+    /// On an interactive run it does nothing.
+    void hold_capture(cc::string_view reason);
+
     /// Flattens the frame into a render plan, records it and presents.
     /// Idempotent, and a no-op on a closed frame.
     void present();

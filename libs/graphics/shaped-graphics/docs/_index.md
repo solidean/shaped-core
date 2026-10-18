@@ -70,6 +70,13 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 - [streaming](concepts/streaming.md) — the weaker transfer tier (`ctx.stream`): no automatic sync, and a handle instead — priority, progress, cancellation and a `cc::async` completion.
 - [GPU queries](concepts/queries.md) — `cmd.query.record_gpu_timestamp`: pooled query heaps leased per list, one batched readback per heap at submit, and the poll-after-submit `gpu_timestamp` result.
 
+## Plans
+
+Designs, each stating its status at the top.
+
+- [sticky array declarations](plans/sticky-array-declarations.md) — an array declaration that lives until the caller withdraws it.
+  A bindless table bound for many ops is then tracked once rather than per op.
+
 ## Conventions
 
 - Namespace `sg`; depends on clean-core (vocabulary types + assertions) and typed-geometry (math types).

@@ -77,3 +77,30 @@ fun perturb_frame(f: frame, n_tangent: float3) -> frame:
     let rt = t / len
     let keep = if dot(cross(n, rt), f.b) < 0.0 => -1.0 else 1.0
     return frame(rt, cross(n, rt) * keep, n)
+
+/// The frame `s` is lit in, at a point whose geometric normal, already turned toward the viewer, is `n`.
+///
+/// Three steps: the authored frame where `has_authored` holds, turned to face `v` as `n` was, then the normal map, then the anisotropy direction.
+/// The coat's normal is re-expressed in the result on the way, so `s` comes back ready for `bsdf_prepare`.
+/// A traced hit and a rasterized pixel both build their frame here, which is what keeps the two shading one surface alike.
+fun shading_frame(s: mut surface, n: float3, v: float3, authored: frame, has_authored: bool) -> frame:
+    let mut f = make_frame(n)
+    if has_authored:
+        f = authored
+        // Two-sided, against the same test the geometric normal took: a viewer behind the surface needs the whole basis turned.
+        if dot(f.n, v) < 0.0 => f = flip_frame(f)
+
+    // The frame as authored, which the coat's normal is written in the tangent space of.
+    let authored_frame = f
+
+    // A normal map is a rotation of the frame, not a replacement for it.
+    if s.geometry_normal != float3(0.0, 0.0, 1.0) => f = perturb_frame(f, s.geometry_normal)
+
+    // The anisotropy direction, applied AFTER the normal map, because it is a rotation about the shading normal the normal map decided.
+    if s.geometry_tangent != float3(1.0, 0.0, 0.0) => f = rotate_frame_to_tangent(f, s.geometry_tangent)
+
+    // The coat's normal, re-expressed in the frame the closure works in, before the closure reads it.
+    if s.geometry_coat_normal != float3(0.0, 0.0, 1.0):
+        let coat_world = normalize(to_world(authored_frame, normalize(s.geometry_coat_normal)))
+        s.geometry_coat_normal = normalize(to_local(f, coat_world))
+    return f

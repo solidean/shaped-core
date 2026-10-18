@@ -36,7 +36,8 @@ D3D12_RESOURCE_DESC buffer_resource_desc(isize size_in_bytes, sg::buffer_usages 
 
 dx12_track_result dx12_buffer::track_access(sg::command_list_slot slot,
                                             sg::pipeline_stage_flags stages,
-                                            sg::access_flags access) const
+                                            sg::access_flags access,
+                                            bool from_array_application) const
 {
     return _access.lock(
         [&](access_tracking& t) -> dx12_track_result
@@ -47,15 +48,19 @@ dx12_track_result dx12_buffer::track_access(sg::command_list_slot slot,
                 t.slots.push_back(access_slot{});
             auto& e = t.slots[i];
             e.active = true; // a fresh state on first touch (access_slot{} default); no between-lists seed
+            auto const held_write = e.state.has_curr_writes() || e.state.has_pending_layout_change();
             e.state.declare(stages, access); // accumulate only — layout defaults to general (buffers never transition)
 
             auto const writes = sg::is_unordered_write(access);
             auto const result = dx12_track_result{.first_this_op = !e.pending_barrier,
                                                   .first_this_list = !e.recorded,
-                                                  .first_write_this_list = writes && !e.written};
+                                                  .first_write_this_list = writes && !e.written,
+                                                  .member_write = writes && e.array_member,
+                                                  .held_write = held_write};
             e.pending_barrier = true;
             e.recorded = true;
             e.written = e.written || writes;
+            e.array_member = e.array_member || from_array_application;
             return result;
         });
 }

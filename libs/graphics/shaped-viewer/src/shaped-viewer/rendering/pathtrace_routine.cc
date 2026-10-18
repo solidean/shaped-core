@@ -1,5 +1,6 @@
 #include <clean-core/bytes/hash128.hh>
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/hash.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/profiling.hh>
 #include <clean-core/container/fixed_array.hh>
@@ -59,13 +60,6 @@ enum class group_state
 constexpr u32 records_per_permutation = 2;
 static_assert(path_t::ray_count == int(records_per_permutation), "a row of the table is one record per ray type");
 
-/// `t` as an image view of `Format`, or `stand_in` where the trace writes nothing to it.
-template <sg::pixel_format Format>
-[[nodiscard]] auto image_or(sg::texture_2d const& t, sg::texture_2d const& stand_in)
-{
-    return (t.raw() != nullptr ? t : stand_in).as_image_view<Format>();
-}
-
 /// Whether `t` is absent or at `output`'s extent.
 [[nodiscard]] bool matches_extent(sg::texture_2d const& t, sg::texture_2d const& output)
 {
@@ -75,35 +69,7 @@ template <sg::pixel_format Format>
 
 cc::shared_async<cc::unit> pathtrace_routine::init_once(sg::routine_init_scope scope)
 {
-    auto& ctx = scope.context();
-    auto const stand_in = [&](sg::pixel_format format)
-    {
-        return ctx.persistent.create_texture_2d(
-            {.format = format, .width = 1, .height = 1, .usage = sg::texture_usage::image});
-    };
-    _guide_normal_stand_in = stand_in(sg::pixel_format::rgba16_float);
-    _guide_depth_stand_in = stand_in(sg::pixel_format::r32_float);
-    _guide_albedo_stand_in = stand_in(sg::pixel_format::rgba16_float);
-    _guide_specular_albedo_stand_in = stand_in(sg::pixel_format::rgba16_float);
-    _guide_roughness_stand_in = stand_in(sg::pixel_format::r16_float);
-    _frame_output_stand_in = stand_in(sg::pixel_format::rgba16_float);
-    _frame_diffuse_stand_in = stand_in(sg::pixel_format::rgba16_float);
-    _frame_specular_stand_in = stand_in(sg::pixel_format::rgba16_float);
-    _guide_hit_distance_stand_in = stand_in(sg::pixel_format::rg32_float);
-    _guide_motion_stand_in = stand_in(sg::pixel_format::rg32_float);
-    _primary_depth_stand_in = stand_in(sg::pixel_format::r32_float);
-
-    // Never read, since a trace without decals counts none, but every binding of a group must be filled.
-    auto const table_stand_in = [&](sg::pixel_format format)
-    {
-        return ctx.persistent.create_texture_2d(
-            {.format = format, .width = 1, .height = 1, .usage = sg::texture_usage::texture});
-    };
-    _decal_curves_stand_in = table_stand_in(sg::pixel_format::rgba16_float);
-    _decal_bands_stand_in = table_stand_in(sg::pixel_format::rg16_uint);
-    _decals_stand_in = ctx.persistent.create_buffer<shaders::tracer::decal_record>(1, sg::buffer_usage::readonly_buffer);
-    _decal_shapes_stand_in
-        = ctx.persistent.create_buffer<shaders::tracer::decal_shape>(1, sg::buffer_usage::readonly_buffer);
+    _stand_ins = impl::traced_stand_ins::create(scope.context());
     co_return;
 }
 
@@ -115,8 +81,11 @@ cc::shared_async<cc::unit> pathtrace_routine::init(sg::routine_init_scope scope)
     co_return;
 }
 
-pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::context& ctx, pt_trace_desc const& d)
+pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::context& ctx,
+                                                                           pt_trace_desc const& d,
+                                                                           stand_in_report& stand_ins)
 {
+    stand_ins = {};
     // Started whether or not a substitution ends up needing them, and before any early out.
     auto const* const fallback
         = d.fallback != nullptr && state_of(ctx, d.fallback) == group_state::ready ? d.fallback : nullptr;
@@ -128,15 +97,23 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     // The frame a permutation's group lands, the key changes and a new variant is built with it.
     auto groups = cc::vector<material_permutation const*>();
     groups.reserve(d.hit_groups.size());
+    auto substituted = false;
+    auto pending = false;
     for (auto const* p : d.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
-        if (state_of(ctx, p) != group_state::ready)
+        auto const state = state_of(ctx, p);
+        if (state != group_state::ready)
+        {
             p = p->kind == geometry_kind::quadrics ? quadric_fallback : fallback;
+            substituted = true;
+            pending = pending || state == group_state::pending;
+        }
         if (p == nullptr)
             return nullptr;
         groups.push_back(p);
     }
+    stand_ins = stand_in_report::of(groups, substituted, pending);
 
     auto key_parts = cc::vector<cc::hash128>();
     key_parts.reserve(groups.size());
@@ -213,6 +190,44 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     (void)ctx.backlog.start(variant.pending_description);
     (void)_variants.entry(key).get_or_emplace(cc::move(variant));
     return nullptr;
+}
+
+void place_instance_record(shaders::tracer::instance_record& record,
+                           sg::tlas_instance const& instance,
+                           material_opacity const& opacity)
+{
+    // The TLAS wire layout is already row-major 3x4, translation in column 3 — exactly the record's rows.
+    auto const row = [&](int r)
+    {
+        auto const* const t = &instance.transform[r * 4];
+        return tg::vec4f(t[0], t[1], t[2], t[3]);
+    };
+    record.to_world_x = row(0);
+    record.to_world_y = row(1);
+    record.to_world_z = row(2);
+
+    record.opacity_kind = u32(opacity.kind);
+    record.opacity_offset = opacity.offset;
+    record.opacity_uv_offset = opacity.uv_offset;
+    record.opacity_frequency = opacity.frequency;
+    record.opacity_channel = opacity.channel;
+    record.opacity_sampler = opacity.sampler;
+    record.opacity_transform = opacity.transform;
+    record.opacity_cutoff = opacity.cutoff;
+
+    // A caller's offset counts two records per permutation, so it names the permutation the instance shades with.
+    record.shade_group = instance.hit_group_offset / records_per_permutation;
+}
+
+stand_in_report stand_in_report::of(cc::span<material_permutation const* const> bound, bool substituted, bool pending)
+{
+    if (!substituted)
+        return {};
+    // Never 0, which says nothing was stood in for.
+    auto h = u64(1);
+    for (auto const* const p : bound)
+        h = cc::combine_hash(h, cc::make_hash(p->key.low, p->key.high));
+    return {.hash = h != 0 ? h : 1, .pending = pending};
 }
 
 shaders::tracer::frame_constants default_frame_constants()
@@ -298,9 +313,12 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
               "pathtrace_routine: every target the trace writes beside the accumulator matches its extent");
     CC_ASSERT(!d.hit_groups.empty(), "pathtrace_routine: a trace needs at least one hit group to shade with");
 
-    auto const* const variant = self->_variant_for(ctx, d);
+    auto stand_ins = stand_in_report{};
+    auto const* const variant = self->_variant_for(ctx, d, stand_ins);
     if (variant == nullptr)
         return sg::routine_outcome::declined;
+    if (d.stand_ins != nullptr)
+        *d.stand_ins = stand_ins;
 
     // A caller's offset counts two records per permutation, so it names the permutation, whose row it becomes.
     auto instances = cc::vector<sg::tlas_instance>::create_copy_of(d.instances);
@@ -325,39 +343,8 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
 
     auto const group = ctx.transient.create_binding_group(
         cmd, ctx.cached.acquire_binding_group_layout<tracer::traced>(),
-        tracer::traced{
-            .world = tlas->as_view(),
-            .output = d.output.as_image_view<sg::pixel_format::rgba32_float>(),
-            .frame = d.frame.as_readonly_buffer(),
-            .instances = d.instance_table.as_readonly_buffer(),
-            .background = d.background.reinterpret_as<tg::vec4f>().as_readonly_buffer(),
-            .guide_normal = image_or<sg::pixel_format::rgba16_float>(d.guide_normal, self->_guide_normal_stand_in),
-            .guide_depth = image_or<sg::pixel_format::r32_float>(d.guide_depth, self->_guide_depth_stand_in),
-            .guide_albedo = image_or<sg::pixel_format::rgba16_float>(d.guide_albedo, self->_guide_albedo_stand_in),
-            .guide_specular_albedo
-            = image_or<sg::pixel_format::rgba16_float>(d.guide_specular_albedo, self->_guide_specular_albedo_stand_in),
-            .guide_roughness = image_or<sg::pixel_format::r16_float>(d.guide_roughness, self->_guide_roughness_stand_in),
-            .frame_output = image_or<sg::pixel_format::rgba16_float>(d.frame_output, self->_frame_output_stand_in),
-            .guide_motion = image_or<sg::pixel_format::rg32_float>(d.guide_motion, self->_guide_motion_stand_in),
-            .frame_diffuse = image_or<sg::pixel_format::rgba16_float>(d.frame_diffuse, self->_frame_diffuse_stand_in),
-            .frame_specular = image_or<sg::pixel_format::rgba16_float>(d.frame_specular, self->_frame_specular_stand_in),
-            .guide_hit_distance
-            = image_or<sg::pixel_format::rg32_float>(d.guide_hit_distance, self->_guide_hit_distance_stand_in),
-            .lights = lights.as_readonly_buffer(),
-            .primary_depth = image_or<sg::pixel_format::r32_float>(d.primary_depth, self->_primary_depth_stand_in),
-            .decals = (d.decals.raw() != nullptr ? d.decals : self->_decals_stand_in).as_readonly_buffer(),
-            .decal_shapes
-            = (d.decal_shapes.raw() != nullptr ? d.decal_shapes : self->_decal_shapes_stand_in).as_readonly_buffer(),
-        });
-
-    // An atlas nothing was placed in has no textures yet, so the stand-ins serve it as they serve no atlas at all.
-    auto const has_atlas = d.decal_atlas != nullptr && d.decal_atlas->curve_texture().raw() != nullptr
-                        && d.decal_atlas->band_texture().raw() != nullptr;
-    auto const tables = ctx.transient.create_binding_group(
-        cmd, ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>(),
-        sgl_modules::slug::tables{
-            .curves = (has_atlas ? d.decal_atlas->curve_texture() : self->_decal_curves_stand_in).as_texture_view(),
-            .bands = (has_atlas ? d.decal_atlas->band_texture() : self->_decal_bands_stand_in).as_texture_view()});
+        impl::traced_group_of(d, self->_stand_ins, tlas, lights, d.frame, self->_stand_ins.paths));
+    auto const tables = impl::decal_tables_of(cmd, d, self->_stand_ins);
 
     cmd.raytracing.bind_pipeline(*variant->pipeline);
     cmd.raytracing.bind_group(0, *group);
@@ -365,7 +352,8 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     cmd.raytracing.bind_group(2, *tables);
 
     // An array the code indexes and nobody declared is logged and barriered whole, so every table is declared.
-    d.bindless->declare_raytracing_access(cmd);
+    // Held across the one trace it is for.
+    auto const declared = d.bindless->declare_raytracing_access(cmd);
 
     cmd.raytracing.dispatch_rays(*variant->table, sg::raygen_index(0), d.output.width(), d.output.height());
     return sg::routine_outcome::executed;

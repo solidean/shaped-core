@@ -9,7 +9,6 @@
 #include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/impl/tza.hh>
 #include <sr_sgl_shaders.hh>
-#include <sr_shaders.hh>
 #include <typed-geometry/scalar/half_float.hh>
 
 namespace sr::impl
@@ -115,7 +114,7 @@ constexpr resample_step k_upsamples[] = {
 constexpr int k_upsample_count = int(sizeof(k_upsamples) / sizeof(k_upsamples[0]));
 
 /// How many texels along x one convolution thread produces.
-/// Must match NN_CONV_TEXELS in nn_conv.hlsl; the oracle test is what notices if it does not.
+/// Must match `conv_texels` in nn_conv.sgl; only the OIDN oracle test notices if it does not, and it skips without OIDN.
 constexpr int k_conv_texels = 8;
 
 /// `v` rounded up to a multiple of sixteen, and at least sixteen.
@@ -389,9 +388,15 @@ oidn_tile_plan plan_tiles(tg::vec2i image, int max_tile, int overlap)
     return plan;
 }
 
-bool oidn_network::create(sg::context& ctx, tg::vec2i image_extent, int max_tile, int overlap, oidn_network_size size)
+bool oidn_network::create(sg::context& ctx,
+                          tg::vec2i image_extent,
+                          int max_tile,
+                          int overlap,
+                          oidn_network_size size,
+                          sg::pixel_format output_format)
 {
     _ctx = &ctx;
+    _programs = {.output_format = output_format};
     _size = size;
     _max_tile = max_tile;
     _image_extent = image_extent;
@@ -472,59 +477,40 @@ i64 oidn_network::feature_bytes_for(tg::vec2i image_extent) const
 
 bool oidn_programs::build(sg::context& ctx)
 {
-    conv_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_conv_bindings>();
-    input_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_input_bindings>();
-    output_layout = ctx.cached.acquire_binding_group_layout<shaders::nn_output_bindings>();
+    auto const output_values = sgl_shaders::nn_io_options{.target_format = output_format};
+    conv_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::nn_conv_buffers>();
+    input_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::nn_input_images>();
+    output_layout
+        = ctx.cached.acquire_binding_group_layout(sgl_shaders::nn_output_images::declared_bindings(output_values),
+                                                  sgl_shaders::nn_output_images::declared_samplers());
     pool_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::nn_pool_features>();
     upsample_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::nn_upsample_features>();
 
     // Acquiring is idempotent and cached, so this simply picks up whatever has finished compiling since last time.
-    auto const one = [&](slib::shader_asset_handle const& asset, sg::binding_group_layout_handle const& layout,
+    // An SGL entry point states its own layout, so nothing is looked up in what the shader reflects.
+    auto const one = [&](sg::async_compiled_shader const& shader, sg::pipeline_layout_handle const& layout,
                          sg::async_compute_pipeline& out)
     {
         if (out != nullptr)
             return;
 
-        auto const shader = asset->acquire(ctx);
         auto const* const compiled = shader->try_value();
         if (compiled == nullptr)
             return; // still compiling, or failed; `is_ready` reports both as not ready
 
-        auto const* const constants = [&]() -> sg::binding const*
-        {
-            for (auto const& b : compiled->bindings)
-                if (b.type == sg::binding_type::constants_buffer)
-                    return &b;
-            return nullptr;
-        }();
-        if (constants == nullptr)
-            return;
-
-        out = ctx.cached.acquire_compute_pipeline(
-            {.shader = *compiled,
-             .layout = ctx.cached.acquire_pipeline_layout({.groups = {layout}, .inline_constants = *constants})});
+        out = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = layout});
     };
 
-    one(shaders::nn_conv.compute.main_cs, conv_layout, conv);
-    one(shaders::nn_input.compute.main_cs, input_layout, input);
-    one(shaders::nn_output.compute.main_cs, output_layout, output);
-
-    // An SGL entry point states its own layout, so nothing is looked up in what the shader reflects.
-    auto const one_sgl = [&](auto const& entry, sg::async_compute_pipeline& out)
-    {
-        if (out != nullptr)
-            return;
-
-        auto const shader = entry->acquire(ctx);
-        auto const* const compiled = shader->try_value();
-        if (compiled == nullptr)
-            return; // still compiling, or failed; `is_ready` reports both as not ready
-
-        out = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
-    };
-
-    one_sgl(sgl_shaders::nn_pool.main_cs, pool);
-    one_sgl(sgl_shaders::nn_upsample.main_cs, upsample);
+    auto const& conv_cs = sgl_shaders::nn_conv.main_cs;
+    auto const& input_cs = sgl_shaders::nn_io.input_cs;
+    auto const& output_cs = sgl_shaders::nn_io.output_cs;
+    auto const& pool_cs = sgl_shaders::nn_pool.main_cs;
+    auto const& upsample_cs = sgl_shaders::nn_upsample.main_cs;
+    one(conv_cs->acquire(ctx), conv_cs.acquire_layout(ctx), conv);
+    one(input_cs.acquire(ctx), input_cs.acquire_layout(ctx), input);
+    one(output_cs.acquire(ctx, output_values), output_cs.acquire_layout(ctx, output_values), output);
+    one(pool_cs->acquire(ctx), pool_cs.acquire_layout(ctx), pool);
+    one(upsample_cs->acquire(ctx), upsample_cs.acquire_layout(ctx), upsample);
 
     return is_ready();
 }
@@ -537,14 +523,15 @@ bool oidn_programs::is_ready() const
     return true;
 }
 
-cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx)
+cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx, sg::pixel_format output_format)
 {
     // The shaders first, because a pipeline cannot be built before its shader exists.
-    for (auto const& asset :
-         {shaders::nn_conv.compute.main_cs, shaders::nn_input.compute.main_cs, shaders::nn_output.compute.main_cs,
-          sgl_shaders::nn_pool.main_cs.asset, sgl_shaders::nn_upsample.main_cs.asset})
+    auto const output_values = sgl_shaders::nn_io_options{.target_format = output_format};
+    for (auto const& shader :
+         {sgl_shaders::nn_conv.main_cs->acquire(ctx), sgl_shaders::nn_io.input_cs.acquire(ctx),
+          sgl_shaders::nn_io.output_cs.acquire(ctx, output_values), sgl_shaders::nn_pool.main_cs->acquire(ctx),
+          sgl_shaders::nn_upsample.main_cs->acquire(ctx)})
     {
-        auto const shader = asset->acquire(ctx);
         co_await cc::async_settled(shader);
         if (shader->try_value() == nullptr)
         {
@@ -554,7 +541,7 @@ cc::shared_async<bool> oidn_prewarm_pipelines(sg::context& ctx)
     }
 
     // Every shader is compiled now, so one pass creates all five pipelines; what is left is waiting for them.
-    auto programs = oidn_programs();
+    auto programs = oidn_programs{.output_format = output_format};
     (void)programs.build(ctx);
 
     for (auto const* const p : {&programs.conv, &programs.input, &programs.output, &programs.pool, &programs.upsample})
@@ -605,10 +592,10 @@ void oidn_network::build_groups()
         CC_ASSERT(source_a.has_value() && source_b.has_value(), "a feature map is not a whole number of float4s");
 
         _conv_groups.push_back(ctx.persistent.create_binding_group(
-            _programs.conv_layout, shaders::nn_conv_bindings{.gSourceA = source_a.value().as_readonly_buffer(),
-                                                             .gSourceB = source_b.value().as_readonly_buffer(),
-                                                             .gWeights = _weights.as_readonly_buffer(),
-                                                             .gTarget = _features[step.target].as_readwrite_buffer()}));
+            _programs.conv_layout, sgl_shaders::nn_conv_buffers{.source_a = source_a.value().as_readonly_buffer(),
+                                                                .source_b = source_b.value().as_readonly_buffer(),
+                                                                .weights = _weights.as_readonly_buffer(),
+                                                                .target = _features[step.target].as_readwrite_buffer()}));
     }
 
     for (auto const& p : k_pools)
@@ -656,16 +643,18 @@ bool oidn_network::execute(sg::command_list& cmd,
 
     // The two groups that name the CALLER's textures, built once per call rather than once per tile.
     // Everything else was built with the network, because a tile changes push constants and nothing a group names.
+    CC_ASSERT(output.format() == _programs.output_format, "the output is not the format the network was created for");
     auto const input_group = ctx.transient.create_binding_group(
         cmd, _programs.input_layout,
-        shaders::nn_input_bindings{.gColor = color.as_texture_view(),
-                                   .gAlbedo = albedo.as_texture_view(),
-                                   .gNormal = normal.as_texture_view(),
-                                   .gTarget = _features[f_input].as_readwrite_buffer()});
+        sgl_shaders::nn_input_images{.color = color.as_texture_view(),
+                                     .albedo = albedo.as_texture_view(),
+                                     .normal = normal.as_texture_view(),
+                                     .target = _features[f_input].as_readwrite_buffer()});
     auto const output_group = ctx.transient.create_binding_group(
         cmd, _programs.output_layout,
-        shaders::nn_output_bindings{.gSource = _features[f_out].as_readonly_buffer(),
-                                    .gTarget = output.as_any_image_view()});
+        sgl_shaders::nn_output_images{.source = _features[f_out].as_readonly_buffer(),
+                                      .color = color.as_texture_view(),
+                                      .target = output.as_any_image_view()});
 
     // One pass per tile, each writing only its interior.
     // The tensors are reused across tiles, which is the point: they are sized for one tile and never for the image.
@@ -692,15 +681,15 @@ bool oidn_network::execute(sg::command_list& cmd,
 
             // The nine packed channels.
             cmd.compute.bind_pipeline(**_programs.input->try_value());
-            cmd.compute.bind<shaders::nn_input_bindings>(*input_group);
-            cmd.compute.set_inline_constants(shaders::nn_input_constants{.width = u32(_extent[0]),
-                                                                         .height = u32(_extent[1]),
-                                                                         .source_width = u32(_image_extent[0]),
-                                                                         .source_height = u32(_image_extent[1]),
-                                                                         .source_offset_x = tensor_origin[0],
-                                                                         .source_offset_y = tensor_origin[1],
-                                                                         .input_scale = input_scale,
-                                                                         ._pad0 = 0});
+            cmd.compute.bind_group(0, *input_group);
+            cmd.compute.set_inline_constants(sgl_shaders::nn_input_constants{.width = u32(_extent[0]),
+                                                                             .height = u32(_extent[1]),
+                                                                             .source_width = u32(_image_extent[0]),
+                                                                             .source_height = u32(_image_extent[1]),
+                                                                             .source_offset_x = tensor_origin[0],
+                                                                             .source_offset_y = tensor_origin[1],
+                                                                             .input_scale = input_scale}
+                                                 .to_block());
             cmd.compute.dispatch_threads(_extent[0], _extent[1], 1);
 
             // The convolutions, with the pools and upsamples that feed them.
@@ -756,8 +745,8 @@ bool oidn_network::execute(sg::command_list& cmd,
                 auto const channels_a = _source->feature_channels[step.source];
 
                 cmd.compute.bind_pipeline(**_programs.conv->try_value());
-                cmd.compute.bind<shaders::nn_conv_bindings>(*_conv_groups[n]);
-                cmd.compute.set_inline_constants(shaders::nn_conv_constants{
+                cmd.compute.bind_group(0, *_conv_groups[n]);
+                cmd.compute.set_inline_constants(sgl_shaders::nn_conv_constants{
                     .width = u32(e[0]),
                     .height = u32(e[1]),
                     .in_channels = u32(in_channels),
@@ -765,26 +754,26 @@ bool oidn_network::execute(sg::command_list& cmd,
                     .weight_offset = _source->weight_offsets[n],
                     .bias_offset = _source->bias_offsets[n],
                     .in_channels_a = u32(step.skip == f_count ? in_channels : channels_a),
-                    ._pad = 0,
-                });
+                }
+                                                     .to_block());
                 cmd.compute.dispatch_threads(out_channels, (e[0] + k_conv_texels - 1) / k_conv_texels, e[1]);
             }
 
             // Back to radiance.
             cmd.compute.bind_pipeline(**_programs.output->try_value());
-            cmd.compute.bind<shaders::nn_output_bindings>(*output_group);
-            cmd.compute.set_inline_constants(shaders::nn_output_constants{.width = u32(_extent[0]),
-                                                                          .height = u32(_extent[1]),
-                                                                          .target_width = u32(_image_extent[0]),
-                                                                          .target_height = u32(_image_extent[1]),
-                                                                          .write_width = u32(interior[0]),
-                                                                          .write_height = u32(interior[1]),
-                                                                          .target_offset_x = interior_origin[0],
-                                                                          .target_offset_y = interior_origin[1],
-                                                                          .read_offset_x = read_offset[0],
-                                                                          .read_offset_y = read_offset[1],
-                                                                          .input_scale = input_scale,
-                                                                          ._pad0 = 0});
+            cmd.compute.bind_group(0, *output_group);
+            cmd.compute.set_inline_constants(sgl_shaders::nn_output_constants{.width = u32(_extent[0]),
+                                                                              .height = u32(_extent[1]),
+                                                                              .target_width = u32(_image_extent[0]),
+                                                                              .target_height = u32(_image_extent[1]),
+                                                                              .write_width = u32(interior[0]),
+                                                                              .write_height = u32(interior[1]),
+                                                                              .target_offset_x = interior_origin[0],
+                                                                              .target_offset_y = interior_origin[1],
+                                                                              .read_offset_x = read_offset[0],
+                                                                              .read_offset_y = read_offset[1],
+                                                                              .input_scale = input_scale}
+                                                 .to_block());
             cmd.compute.dispatch_threads(interior[0], interior[1], 1);
         }
 

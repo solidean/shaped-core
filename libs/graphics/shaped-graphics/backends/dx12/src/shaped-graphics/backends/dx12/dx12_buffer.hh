@@ -117,6 +117,7 @@ public:
         bool recorded = false;        // this slot's command list has added the buffer to its finalize set (dedup)
         bool pending_barrier = false; // declared for the current op, awaiting the pre-op flush (per-op dedup)
         bool written = false;         // this slot's command list has added the buffer to its written set (dedup)
+        bool array_member = false;    // an array application of this slot's command list has tracked the buffer
     };
     struct access_tracking
     {
@@ -128,10 +129,12 @@ public:
     /// Call once per binding — a buffer bound several times to the same op declares several times, and `flush_access` then merges them into one barrier.
     /// Returns which firsts this access was, so the command list files the buffer once per op, once per list and once per write.
     /// One lock for all of it: an access is tracked per element of every bound array, so the lock count is the hot cost.
+    /// `from_array_application` marks the buffer an array member of this slot's list.
     /// Thread-safe.
     [[nodiscard]] dx12_track_result track_access(sg::command_list_slot slot,
                                                  sg::pipeline_stage_flags stages,
-                                                 sg::access_flags access) const;
+                                                 sg::access_flags access,
+                                                 bool from_array_application = false) const;
 
     /// Flush the accesses declared for `slot` since the last flush and return the single intra-list barrier that satisfies their union; `needed == false` when it is a freebie.
     /// Called once per op, before it, after all its bindings are declared.

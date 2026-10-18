@@ -93,7 +93,6 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
     auto const* const record = resources.quadrics.get_ptr(batch);
     REQUIRE(record != nullptr);
     REQUIRE(record->state == sv::residency::complete);
-    REQUIRE(record->blas != nullptr);
 
     // The neutral quadric permutation: one hard-coded gray surface, which is all a first trace needs.
     auto const& permutation = resources.shaders.acquire_quadric_fallback();
@@ -113,7 +112,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
         CHECK(e.intersection.has_value());
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = record->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, batch), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(&permutation);
@@ -498,7 +498,8 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
     auto const& permutation = resources.shaders.acquire_quadric_fallback();
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = record->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, batch), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(&permutation);
@@ -759,8 +760,10 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
     hit_groups.push_back(own);
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(
-        sg::tlas_instance{.blas = record->blas, .instance_id = 0, .hit_group_offset = 0, .opaque_override = true});
+    instances.push_back(sg::tlas_instance{.blas = sv_test::blas_of(resources, batch),
+                                          .instance_id = 0,
+                                          .hit_group_offset = 0,
+                                          .opaque_override = true});
 
     auto camera = sv::camera::looking_at(tg::pos3d(0, 0, 4.0), tg::pos3d(0, 0, 0));
     camera.projection.aspect_ratio = 1.0;

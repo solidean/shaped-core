@@ -1,0 +1,100 @@
+// The arrays an array declaration outlives one op for: the fixture of tests/barrier/sticky-array-test.cc.
+// Each array sits in a group of its own, so an op can change its output, or write an element, without rebinding the array.
+
+require binding_arrays
+
+binding shelf:
+    sources: buffer[int][3]
+
+binding tray:
+    merged: mut buffer[int]
+
+binding patch:
+    target: mut buffer[int]
+
+// Copies, per thread, the word of the source `id.x % 3` picks, so a write to a source shows in the next gather.
+@compute(64) fun gather_shelf(@thread_id id: int3){shelf, tray}:
+    tray.merged[id.x] = shelf.sources[nonuniform (id.x % 3)][id.x]
+
+// Adds 1000 to the first 64 words of the buffer bound as the patch: a write the shelf's declaration cannot see.
+@compute(64) fun bump(@thread_id id: int3){patch}:
+    patch.target[id.x] = patch.target[id.x] + 1000
+
+// The gather, and in the same op a write to words the gather never reads.
+@compute(64) fun gather_and_mark(@thread_id id: int3){shelf, tray, patch}:
+    tray.merged[id.x] = shelf.sources[nonuniform (id.x % 3)][id.x]
+    patch.target[id.x + 64] = id.x
+
+binding gallery:
+    images: texture_2d[float4][2]
+
+binding annex:
+    images: texture_2d[float4][2]
+
+binding easel:
+    reds: mut buffer[float]
+
+// Loads texel (0, 0) of the image `id.x % 2` picks, its red channel into the easel.
+@compute(64) fun look(@thread_id id: int3){gallery, easel}:
+    easel.reds[id.x] = gallery.images[nonuniform (id.x % 2)].load(int2(0, 0)).x
+
+// The same through the annex, an array of another name the host can hold the same texture in.
+@compute(64) fun look_annex(@thread_id id: int3){annex, easel}:
+    easel.reds[id.x] = annex.images[nonuniform (id.x % 2)].load(int2(0, 0)).x
+
+// The look with the annex bound beside the gallery, both indexed: the annex adds each image's green, which is 0.
+@compute(64) fun look_beside_annex(@thread_id id: int3){gallery, annex, easel}:
+    let red = gallery.images[nonuniform (id.x % 2)].load(int2(0, 0)).x
+    easel.reds[id.x] = red + annex.images[nonuniform (id.x % 2)].load(int2(0, 0)).y
+
+// A full-screen triangle whose pixel stage reads the shelf, and a twin whose vertex stage reads it too.
+struct shelf_varyings:
+    @position position: hpos4
+    @interpolate(.flat) picked: int
+
+@pixel struct shelf_target:
+    color: float4
+
+// Vertices 0, 1 and 2 land at (-1, -1), (3, -1) and (-1, 3): one triangle covering the target.
+@vertex fun shelf_vs(@vertex_index vertex: int) -> shelf_varyings:
+    let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    return {
+        position = hpos4(t.x * 2.0 - 1.0, t.y * 2.0 - 1.0, 0.0, 1.0)
+        picked = 0
+    }
+
+@vertex fun shelf_reading_vs(@vertex_index vertex: int){shelf} -> shelf_varyings:
+    let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    return {
+        position = hpos4(t.x * 2.0 - 1.0, t.y * 2.0 - 1.0, 0.0, 1.0)
+        picked = shelf.sources[nonuniform (vertex % 3)][0] - shelf.sources[nonuniform (vertex % 3)][0]
+    }
+
+@pixel fun shelf_ps(p: shelf_varyings){shelf} -> shelf_target:
+    return {
+        color = float4(shelf.sources[nonuniform (p.picked % 3)][0] as float, 0.0, 0.0, 1.0)
+    }
+
+pipeline shelf_in_fragment:
+    vertex = shelf_vs
+    pixel = shelf_ps
+    cull = .none
+    format = .rgba32_float
+
+pipeline shelf_in_both:
+    vertex = shelf_reading_vs
+    pixel = shelf_ps
+    cull = .none
+    format = .rgba32_float
+
+// A full-screen triangle whose pixel stage loads the gallery's first image.
+@pixel fun gallery_ps(p: shelf_varyings){gallery} -> shelf_target:
+    return {
+        color = gallery.images[nonuniform (p.picked % 2)].load(int2(0, 0))
+    }
+
+pipeline gallery_in_fragment:
+    vertex = shelf_vs
+    pixel = gallery_ps
+    cull = .none
+    format = .rgba32_float

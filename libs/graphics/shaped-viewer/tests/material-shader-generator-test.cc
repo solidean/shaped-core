@@ -183,14 +183,13 @@ TEST("sv::generate_material_shader - a texture samples through its uv attribute"
 
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
 
-    // A texture reaches the palette, which is the trace's own group, so a load that samples lists it.
-    CHECK(g.source.contains("fun sv_attribute_base_color(ctx: material.shading_context){tracer.traced, "
-                            "tracer.bindless} -> float3:"));
+    // A texture reaches the palette, which sits in the bindless group beside the tables, so a load that samples lists nothing more.
+    CHECK(g.source.contains("fun sv_attribute_base_color(ctx: material.shading_context){tracer.bindless} -> float3:"));
     CHECK(g.source.contains("let uv = material.interpolate_f2("));
     CHECK(g.source.contains("let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + "));
     // An explicit level, because a ray tracing hit shader has no derivatives to pick a mip from.
     CHECK(g.source.contains("let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, "
-                            "tracer.traced.palette_linear_repeat_repeat, level = 0.0)"));
+                            "tracer.bindless.palette_linear_repeat_repeat, level = 0.0)"));
     // An identity swizzle narrows to the declaration's three components and stays a letter swizzle.
     CHECK(g.source.contains("return texel.xyz\n"));
 
@@ -309,7 +308,7 @@ TEST("sv::generate_material_shader - two attributes sampled alike sample through
     mesh.textures.push_back({.name = "emissive", .source = {.texture = sv::texture_id(2), .uv_attribute = "uv"}});
 
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), mesh));
-    auto const sampler = cc::string_view("tracer.traced.palette_linear_repeat_repeat");
+    auto const sampler = cc::string_view("tracer.bindless.palette_linear_repeat_repeat");
     auto const first = g.source.find(sampler);
     REQUIRE(first >= 0);
     CHECK(cc::string_view(g.source).subview(first + sampler.size()).contains(sampler));
@@ -350,6 +349,72 @@ TEST("sv::generate_material_shader - a rotation attribute blends as a quaternion
     auto const f = sv::generate_material_shader(sv::resolve_material(type, bare_material(), flat));
     CHECK(!f.source.contains("material.interpolate_rotation"));
     CHECK(f.source.contains("material.load_element_f4("));
+}
+
+TEST("sv::generate_material_shader - the raster pixel stage evaluates the same material body")
+{
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(sv::material_signature_entry::of("opacity", 1.0f));
+    signature.push_back(sv::material_signature_entry::of("cutoff", 0.0f));
+    auto const type = sv::material_type::create("cut", cc::move(signature), "surface.base_color = base_color\n",
+                                                "opacity", "cutoff");
+
+    auto mesh = make_mesh();
+    mesh.attributes.push_back(make_uvs());
+    mesh.textures.push_back({.name = "base_color", .source = {.texture = sv::texture_id(3), .uv_attribute = "uv"}});
+    mesh.attributes.push_back(
+        bind(sv::mesh_attribute::create("opacity", sv::attribute_frequency::per_triangle, cc::array<f32>{0.3f})));
+    auto const material
+        = sv::material::create("m", sv::material_type_id(0), {sv::material_attribute_binding::of("cutoff", 0.5f)});
+    auto const g = sv::generate_material_shader(sv::resolve_material(type, material, mesh));
+    REQUIRE(g.opacity.can_cut_out());
+
+    // The fragment and every load come through as the hit group has them, through the same palette: only the level differs.
+    CHECK(g.raster_source.contains("use raster\n"));
+    CHECK(g.raster_source.contains("    surface.base_color = base_color\n"));
+    CHECK(g.raster_source.contains("fun sv_attribute_base_color(ctx: material.shading_context){tracer.bindless} -> "
+                                   "float3:"));
+    // A pixel has derivatives, so it samples at the level they pick rather than at level 0.
+    CHECK(g.raster_source.contains(".sample(uv, tracer.bindless.palette_linear_repeat_repeat)\n"));
+    CHECK(!g.raster_source.contains("tracer.traced"));
+    CHECK(!g.raster_source.contains("level = 0.0"));
+    CHECK(!g.raster_source.contains("require raytracing_pipeline"));
+
+    // The cut reads the instance's opacity record through the any-hit's reader, ahead of the evaluation, rather than the material's loads.
+    CHECK(g.raster_source.contains("@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, "
+                                   "slug.tables} -> raster.targets:"));
+    CHECK(g.raster_source.contains("    if raster.is_cut(p, ctx) => discard\n"));
+    CHECK(g.raster_source.find("raster.is_cut") < g.raster_source.find("raster.shade("));
+
+    // The hit group samples the same palette at level 0.
+    CHECK(g.source.contains("tracer.bindless.palette_linear_repeat_repeat, level = 0.0"));
+
+    // A material that cannot cut out has no cut to make.
+    auto const opaque = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
+    REQUIRE(!opaque.opacity.can_cut_out());
+    CHECK(!opaque.raster_source.contains("raster.is_cut"));
+
+    // A quadric batch has no raster stage yet.
+    auto const quadric = sv::generate_material_shader(sv::resolve_material(type, material, make_mesh()),
+                                                      {.kind = sv::geometry_kind::quadrics});
+    CHECK(quadric.raster_source.empty());
+}
+
+TEST("sv::generate_material_shader - the raster pixel stage hands shade the type's occlusion, or 1")
+{
+    auto signature = cc::vector<sv::material_signature_entry>();
+    signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
+    signature.push_back(sv::material_signature_entry::of("ao", 1.0f));
+    auto const type
+        = sv::material_type::create("occluded", cc::move(signature), "surface.base_color = base_color\n", {}, {}, "ao");
+    auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
+    CHECK(g.raster_source.contains("    return raster.shade(p, ctx, sv_evaluate_material(ctx), false, "
+                                   "sv_attribute_ao(ctx))\n"));
+
+    auto const plain_type = make_type();
+    auto const plain = sv::generate_material_shader(sv::resolve_material(plain_type, bare_material(), make_mesh()));
+    CHECK(plain.raster_source.contains("    return raster.shade(p, ctx, sv_evaluate_material(ctx), false, 1.0)\n"));
 }
 
 TEST("sv::generate_material_shader - the builtin pbr type generates")

@@ -9,6 +9,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-rendering/compression/bc_compress_routine.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <typed-geometry/geometry/query/distance.hh>
@@ -358,7 +359,8 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
     // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
-    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     (void)co_await ctx.routines.idle_completion();
 
     auto cmd = ctx.create_command_list();
@@ -398,7 +400,8 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
     // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
-    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     (void)co_await ctx.routines.idle_completion();
 
     // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
@@ -426,6 +429,74 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     CHECK(m.pending_work_count() == 0);
     auto const fourth = co_await drain();
     CHECK(fourth == 0);
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sv - a completed RGBA8 texture is replaced by its BC7 encoding, at a quarter of the budget",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the mipmap and BC7 shaders");
+    if (!sr::bc_compress_routine::can_compress(ctx, sg::pixel_format::rgba8_unorm, sg::pixel_format::bc7_rgba_unorm))
+        SKIP("this device has no BC textures");
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    // 128x128 is above the policy's smallest extent, and arrives with its base level alone.
+    auto const id = m.acquire_texture(
+        sv::texture_data::create(make_pixels(128, 128, 9, false), sg::pixel_format::rgba8_unorm, 128, 128));
+    m.wait_for_pending_uploads();
+    auto const uncompressed_bytes = m.textures.used_bytes();
+    auto const uploaded = std::weak_ptr<sg::raw_texture const>(m.textures.get_ptr(id)->texture.raw());
+    (void)element_of(m, id); // sampled before the swap, as a frame drawing it meanwhile does
+
+    // WORKAROUND, the one the mip tests above carry: a tick drives only routines that are already registered.
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
+    sr::bc_compress_routine::prewarm(ctx, sg::pixel_format::bc7_rgba_unorm);
+    (void)co_await ctx.routines.idle_completion();
+
+    // The mips first, and the encode once the chain they complete is there: two requests, one after the other.
+    for (auto round = 0; round < 4 && m.pending_work_count() > 0; ++round)
+    {
+        auto cmd = ctx.create_command_list();
+        (void)m.record_pending_work(*cmd);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        m.advance_to(ctx.current_epoch());
+    }
+    CHECK(m.pending_work_count() == 0);
+
+    auto const* const record = m.textures.get_ptr(id);
+    REQUIRE(record != nullptr);
+    CHECK(record->compressed);
+    CHECK(record->state == sv::residency::complete);
+    CHECK(record->texture.format() == sg::pixel_format::bc7_rgba_unorm);
+    CHECK(record->texture.mip_levels() == sv::impl::mip_count_of(128, 128));
+
+    // The budget was charged for the full RGBA8 chain at insert; BC7 is a quarter of it, but for the levels below
+    // a block, which still cost a whole one.
+    auto const compressed_bytes = m.textures.used_bytes();
+    CHECK(compressed_bytes < uncompressed_bytes / 3).dump("before", uncompressed_bytes).dump("after", compressed_bytes);
+
+    // The texture it replaced is gone once its bindless element has sat idle long enough to be released, a few
+    // epochs, or the swap would cost memory rather than save it.
+    for (auto round = 0; round < 6; ++round)
+    {
+        // An acquire in each epoch, as a frame resolving a material makes.
+        (void)element_of(m, id);
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        m.advance_to(ctx.current_epoch());
+    }
+    CHECK(uploaded.expired()).dump("holders", uploaded.use_count());
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -763,6 +834,10 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
     CHECK(m.meshes.get(a.geometry).state == sv::residency::complete);
     CHECK(m.meshes.get(b.geometry).state == sv::residency::complete);
     CHECK(m.settling_count() == 0);
+
+    // Landed is drawable, and the BLAS still waits for the first trace that asks for it.
+    CHECK(m.meshes.get(a.geometry).blas == nullptr);
+    CHECK(sv_test::blas_of(m, a.geometry) != nullptr);
     CHECK(m.meshes.get(a.geometry).blas != nullptr);
 
     // Once resident, the record names its own geometry again.
