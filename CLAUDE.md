@@ -516,6 +516,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | File, find or claim an issue     | `uv run dev.py issues new/list/known/claim` ([issue-tracking](docs/guides/issue-tracking.md); the `issue-tracking` skill) |
+| Browse and triage issues in a browser | `uv run dev.py issues serve` — edits write files only; the page's Commit & push is a separate step |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | Update a consumer's submodules   | `uv run dev.py submodules sync [--bump]` — fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |

@@ -115,13 +115,19 @@ def _scalar(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def set_fields(text: str, updates: dict[str, str | None]) -> str:
-    """Set or (with None) remove top-level frontmatter keys, touching no other line."""
+def set_fields(text: str, updates: dict[str, str | list[str] | None]) -> str:
+    """Set or (with None or an empty list) remove top-level frontmatter keys, touching no other line; a list is written `[a, b]`."""
     lines = text.split("\n")
     end = _frontmatter_end(lines)
     fm, rest = (lines[1:end], lines[end + 1:]) if end is not None else ([], lines)
     for key, value in updates.items():
-        new = [] if value is None else [f"{key}: {_scalar(value)}"]
+        if isinstance(value, list):
+            # A flow sequence also ends a plain item at `:`, which a block value would keep.
+            items = [json.dumps(v, ensure_ascii=False) if ":" in v else _scalar(v) for v in value]
+            value = f"[{', '.join(items)}]" if items else None
+            new = [] if value is None else [f"{key}: {value}"]
+        else:
+            new = [] if value is None else [f"{key}: {_scalar(value)}"]
         start = next((i for i, line in enumerate(fm) if re.match(rf"{re.escape(key)}\s*:", line)), None)
         if start is None:
             fm += new
@@ -626,67 +632,120 @@ def _remote_path(repo: Repo, base: str, issue_id: str) -> str | None:
     return hits[0] if hits else None
 
 
-def _publish(ws: Workspace, issue: Issue, verb: str, mutate) -> None:
-    """Commit `mutate(text)` of the issue on top of the remote integration branch, push only that commit, then merge it locally.
+def _in_head(repo: Repo, rev: str, rel: str) -> str | None:
+    """The blob `rel` is at `rev`, or None when `rev` does not have it."""
+    proc = _git(repo.root, "rev-parse", "-q", "--verify", f"{rev}:{rel}", check=False)
+    return proc.stdout.strip() if proc.returncode == 0 else None
 
-    A rejected push means someone pushed first: it refetches, so `mutate` judges the claim against the state that won.
+
+def _push_commit(repo: Repo, message: str, build) -> None:
+    """Commit `build(base)`, a {path: text, or None to delete} map, on top of the remote integration branch, push only that commit, then merge it locally.
+
+    A rejected push means someone pushed first: it refetches, so `build` judges against the state that won.
+    Unpushed local commits stay local, and so do uncommitted changes to every path `build` does not name.
     """
-    repo, rel = issue.repo, issue.rel
-    untracked = not _is_tracked(repo.root, rel)
-    if not untracked and _git(repo.root, "diff", "--quiet", "HEAD", "--", rel, check=False).returncode != 0:
-        raise IssueError(f"{ws.show_path(issue.path)} has uncommitted changes; commit or discard them before you {verb}")
     remote, branch = repo.config.remote, repo.branch
     tracking = f"refs/remotes/{remote}/{branch}"
-    message = f"{verb} {issue.id}"
+    subject = message.split("\n", 1)[0]
 
     for _ in range(_PUSH_ATTEMPTS):
         _git(repo.root, "fetch", "-q", remote, f"+refs/heads/{branch}:{tracking}")
         base = _git_out(repo.root, "rev-parse", "--verify", f"{tracking}^{{commit}}")
-        path = _remote_path(repo, base, issue.id)
-        if path is None:
-            if not untracked:
-                raise IssueError(f"{issue.id} is committed here but not on {remote}/{branch}: push it first")
-            path, text = rel, issue.text
-        else:
-            if untracked:
-                raise IssueError(f"{remote}/{branch} already has an issue {issue.id}, at {path}")
-            if "/closed/" in f"/{path}":
-                raise IssueError(f"{issue.id} is closed on {remote}/{branch}")
-            text = _git(repo.root, "show", f"{base}:{path}").stdout.replace("\r\n", "\n")
-        new_text = mutate(text)
-        blob = _git_out(repo.root, "hash-object", "-w", "--stdin", stdin=new_text.encode("utf-8"))
-        mode = (_git_out(repo.root, "ls-tree", base, "--", path).split() or ["100644"])[0]
+        changes = build(base)
         with tempfile.TemporaryDirectory() as tmp:
             env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
             _git(repo.root, "read-tree", base, env=env)
-            _git(repo.root, "update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}", env=env)
+            for path, text in changes.items():
+                if text is None:
+                    _git(repo.root, "update-index", "--force-remove", "--", path, env=env)
+                    continue
+                # `--path` applies the path's filters, so a checkout with autocrlf commits what `git add` would.
+                blob = _git_out(repo.root, "hash-object", "-w", "--stdin", f"--path={path}", stdin=text.encode("utf-8"))
+                mode = (_git_out(repo.root, "ls-tree", base, "--", path).split() or ["100644"])[0]
+                _git(repo.root, "update-index", "--add", "--cacheinfo", f"{mode},{blob},{path}", env=env)
             tree = _git(repo.root, "write-tree", env=env).stdout.strip()
+        if tree == _git_out(repo.root, "rev-parse", f"{base}^{{tree}}"):
+            raise IssueError(f"nothing to commit: {remote}/{branch} already has these files as they are here")
         commit = _git_out(repo.root, "commit-tree", tree, "-p", base, "-m", message)
         push = _git(repo.root, "push", "-q", remote, f"{commit}:refs/heads/{branch}", check=False)
         if push.returncode == 0:
             break
         if not re.search(r"rejected|fetch first|non-fast-forward|stale info", push.stderr):
-            raise IssueError(f"pushing the {verb} failed:\n{push.stderr.strip()}")
+            raise IssueError(f"pushing `{subject}` failed:\n{push.stderr.strip()}")
     else:
         raise IssueError(f"gave up after {_PUSH_ATTEMPTS} pushes were rejected; {remote}/{branch} is moving fast")
     _git(repo.root, "update-ref", tracking, commit)
-    print(f"{message}: pushed {commit[:10]} to {remote}/{branch}")
+    print(f"{subject}: pushed {commit[:10]} to {remote}/{branch}")
 
-    # Bring the checkout up to date with the one commit; nothing else of the local state goes anywhere.
-    if untracked:
-        issue.path.unlink()
+    # A path the commit carries that the checkout holds uncommitted goes back to HEAD first, so the merge may update it.
+    held = []
+    for path in changes:
+        local = repo.root / path
+        if _in_head(repo, "HEAD", path) is not None:
+            if _git(repo.root, "diff", "--quiet", "HEAD", "--", path, check=False).returncode != 0:
+                _git(repo.root, "checkout", "-q", "HEAD", "--", path)
+                held.append(path)
+        elif local.exists() or _is_tracked(repo.root, path):
+            _git(repo.root, "rm", "-q", "--cached", "--ignore-unmatch", "--", path)
+            local.unlink(missing_ok=True)
+            held.append(path)
     if _git(repo.root, "merge-base", "--is-ancestor", "HEAD", commit, check=False).returncode == 0:
         _git(repo.root, "merge", "--ff-only", "-q", commit)
         return
     if _git(repo.root, "symbolic-ref", "-q", "HEAD", check=False).returncode == 0:
-        merged = _git(repo.root, "merge", "--no-edit", "-q", "-m", f"Merge {message}", commit, check=False)
+        merged = _git(repo.root, "merge", "--no-edit", "-q", "-m", f"Merge {subject}", commit, check=False)
         if merged.returncode == 0:
             print(f"merged it into the local branch, which has commits {remote}/{branch} does not")
             return
         _git(repo.root, "merge", "--abort", check=False)
-    if untracked or not _is_tracked(repo.root, rel):
-        issue.path.write_text(new_text, encoding="utf-8", newline="\n")
-    print(f"warning: the checkout was not updated; `git pull` brings the {verb} in", file=sys.stderr)
+    for path in held:
+        if changes[path] is None:
+            (repo.root / path).unlink(missing_ok=True)
+        else:
+            (repo.root / path).write_text(changes[path], encoding="utf-8", newline="\n")
+    print(f"warning: the checkout was not updated; `git pull` brings `{subject}` in", file=sys.stderr)
+
+
+def _publish(ws: Workspace, issue: Issue, verb: str, mutate) -> None:
+    """Commit `mutate(text)` of the issue as `<verb> <id>`, pushed alone; `mutate` sees the remote's text."""
+    repo, rel = issue.repo, issue.rel
+    untracked = not _is_tracked(repo.root, rel)
+    if not untracked and _git(repo.root, "diff", "--quiet", "HEAD", "--", rel, check=False).returncode != 0:
+        raise IssueError(f"{ws.show_path(issue.path)} has uncommitted changes; commit or discard them before you {verb}")
+    remote, branch = repo.config.remote, repo.branch
+
+    def build(base: str) -> dict[str, str | None]:
+        path = _remote_path(repo, base, issue.id)
+        if path is None:
+            if not untracked:
+                raise IssueError(f"{issue.id} is committed here but not on {remote}/{branch}: push it first")
+            return {rel: mutate(issue.text)}
+        if untracked:
+            raise IssueError(f"{remote}/{branch} already has an issue {issue.id}, at {path}")
+        if "/closed/" in f"/{path}":
+            raise IssueError(f"{issue.id} is closed on {remote}/{branch}")
+        return {path: mutate(_git(repo.root, "show", f"{base}:{path}").stdout.replace("\r\n", "\n"))}
+
+    _push_commit(repo, f"{verb} {issue.id}", build)
+
+
+def publish_files(repo: Repo, rels: list[str], message: str) -> None:
+    """Commit the working-tree state of `rels`, deleted ones as deletions, and push that commit alone.
+
+    Each path must be the same in HEAD and on the remote branch, so the commit carries exactly the local edits and overwrites nobody's.
+    """
+    remote, branch = repo.config.remote, repo.branch
+
+    def build(base: str) -> dict[str, str | None]:
+        changes: dict[str, str | None] = {}
+        for rel in rels:
+            if _in_head(repo, "HEAD", rel) != _in_head(repo, base, rel):
+                raise IssueError(f"{rel} differs between HEAD and {remote}/{branch}; pull, or push the commits that changed it, first")
+            path = repo.root / rel
+            changes[rel] = path.read_bytes().decode("utf-8", errors="replace") if path.is_file() else None
+        return changes
+
+    _push_commit(repo, message, build)
 
 
 def _who(ws: Workspace, repo: Repo, explicit: str | None) -> str:
@@ -972,9 +1031,26 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
 
     sub.add_parser("check", help="validate every issue, and every marker in the code")
 
+    q = sub.add_parser("serve", help="a local web UI to browse and triage; edits files, commits only on request")
+    q.add_argument("--port", type=int, default=7381, help="default: 7381, or a free one when it is taken")
+    q.add_argument("--no-open", action="store_true", help="do not open a browser")
+
+
+def cmd_serve(ws: Workspace, args: argparse.Namespace) -> int:
+    path = Path(__file__).with_name("issues_serve.py")
+    if not path.is_file():
+        raise IssueError("serve needs tools/issues/ checked out, issues_serve.py and web/ next to issues.py; it does not run from a URL")
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("issues_serve", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["issues_serve"] = module
+    spec.loader.exec_module(module)
+    return module.serve(sys.modules[__name__], ws, args)
+
 
 COMMANDS = {"new": cmd_new, "list": cmd_list, "show": cmd_show, "known": cmd_known, "claim": cmd_claim,
-            "release": cmd_release, "close": cmd_close, "reopen": cmd_reopen, "check": cmd_check}
+            "release": cmd_release, "close": cmd_close, "reopen": cmd_reopen, "check": cmd_check, "serve": cmd_serve}
 
 
 def _parser() -> argparse.ArgumentParser:
