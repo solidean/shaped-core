@@ -4,6 +4,8 @@ refs:
   - file: libs/base/nexus/src/nexus/tests/execute.cc
   - symbol: drive_serially
   - symbol: cc::thread_pump_all
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-18T05:59Z
 ---
 
 # The parallel batch drive never sweeps the pump registry, so an unthreaded graph cannot complete on it
