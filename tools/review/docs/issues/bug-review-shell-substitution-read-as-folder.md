@@ -2,6 +2,8 @@
 created: 2026-10-17
 refs:
   - file: tools/review/lib/annotate/providers.py
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-18T05:58Z
 ---
 
 # A bash substitution in a fence reads as a folder reference
