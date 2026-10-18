@@ -203,6 +203,20 @@ It captures per-invocation diagnostics into `.diag.json` sidecars that the `repo
 It is checked into the repo, so there is no install step.
 The `.exe` is Windows-only, so the POSIX presets wire `diag_launcher.sh` → `diag_launcher.py` instead — see [guides/ci.md](guides/ci.md) for which preset gets which.
 
+### Intel SDE
+
+Intel's Software Development Emulator runs a binary as another x86-64 CPU, older or newer than the machine's.
+It answers what a binary built at `SC_X64_LEVEL` does on a CPU below it, which no native run can.
+Intel asks to accept its license before the download, so the download is yours, and `dev.py` installs the archive you got:
+
+```bash
+uv run dev.py install sde                    # names the file and the page to download it from
+uv run dev.py install sde --archive <file>   # into ~/tools/sde, checked against the SHA-256 tools/sde.version pins
+```
+
+Then `~/tools/sde/sde64 -snb -- <program>` runs a program as a Sandy Bridge, with AVX but no AVX2, and `-help` lists the CPUs.
+There are kits for Windows and Linux x86-64 only.
+
 ## What `dev.py doctor` validates
 
 ```bash

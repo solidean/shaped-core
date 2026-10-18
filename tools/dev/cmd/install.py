@@ -5,7 +5,9 @@ An editor extension is a link into the checkout, so a `git pull` or a rebuild up
 `--uninstall` removes only links into this checkout: never a folder of the user's, and never another checkout's link.
 emsdk, the Emscripten SDK the WASM presets build with, is a checkout of its own outside this one, at the version `tools/emsdk.version` pins.
 deno, the second runtime for WASM artifacts, is the release binary at the version `tools/deno.version` pins, in ~/tools/deno.
-Both are folders rather than links, so `--uninstall` names them and leaves deleting them to the user.
+sde, Intel's Software Development Emulator, runs a binary as an older or newer CPU; its archive is downloaded by hand, since Intel asks to accept a license first.
+It is the version and SHA-256 `tools/sde.version` pins, unpacked in ~/tools/sde.
+All three are folders rather than links, so `--uninstall` names them and leaves deleting them to the user.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -26,6 +29,7 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
+from tools.dev.lib.core.layout import DRIVER_ROOT
 from tools.dev.lib.toolchain import jsruntime as jsr
 
 from . import args as a
@@ -82,6 +86,11 @@ _DENO_TARGETS = {
     ("Darwin", "arm64"): "aarch64-apple-darwin",
 }
 
+_SDE = "sde"
+_SDE_PAGE = "https://www.intel.com/content/www/us/en/download/684897/intel-software-development-emulator.html"
+# The kit's suffix per system; SDE runs on x86-64 hosts only, and has no macOS kit any more.
+_SDE_KITS = {"Windows": "win", "Linux": "lin"}
+
 
 def _editors() -> list[_editor]:
     home = Path.home()
@@ -102,6 +111,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
                    help="Only this editor, repeatable; default: every editor whose extensions folder exists")
     p.add_argument("--uninstall", action="store_true", help="Remove the links instead of making them")
     p.add_argument("--no-build", action="store_true", help="Link only, and build nothing first")
+    p.add_argument("--archive", metavar="FILE",
+                   help="sde only: the kit downloaded from Intel's page, after accepting its license there")
     a.emsdk(p)
     return p
 
@@ -170,7 +181,8 @@ def _list(ctx: Context) -> None:
             print(f"  {editor.name:<9} {state}")
     _list_emsdk(ctx)
     _list_deno()
-    print(console.dim(f"\n  uv run dev.py {NAME} <name> [--editor <e>] [--emsdk-path <dir>] [--uninstall]"))
+    _list_sde(ctx)
+    print(console.dim(f"\n  uv run dev.py {NAME} <name> [--editor <e>] [--emsdk-path <dir>] [--archive <file>] [--uninstall]"))
 
 
 def _emsdk_target(args: argparse.Namespace) -> Path:
@@ -313,9 +325,94 @@ def _install_deno(args: argparse.Namespace, ctx: Context) -> None:
     print(console.dim("  dev.py finds it there by itself: --runtime deno needs nothing else"))
 
 
+def default_sde_dir() -> Path:
+    """Where `dev.py install sde` unpacks the kit."""
+    return Path.home() / "tools" / "sde"
+
+
+def sde_executable() -> Path | None:
+    """The installed `sde64`, which runs a 64-bit binary; None when it is not installed."""
+    exe = default_sde_dir() / ("sde64.exe" if platform.system() == "Windows" else "sde64")
+    return exe if exe.is_file() else None
+
+
+def _sde_pin(ctx: Context) -> tuple[str, dict[str, str]]:
+    """The pinned version, and the SHA-256 of its kit per suffix, from tools/sde.version."""
+    # the driver's pin, like deno's: tools/ of shaped-core, also when a consumer runs it
+    lines = (DRIVER_ROOT / "tools" / "sde.version").read_text(encoding="utf-8").split("\n")
+    lines = [line.strip() for line in lines if line.strip()]
+    return lines[0], dict(line.split() for line in lines[1:])
+
+
+def _installed_sde_version() -> str | None:
+    marker = default_sde_dir() / ".version"
+    return marker.read_text(encoding="utf-8").strip() if marker.is_file() else None
+
+
+def _list_sde(ctx: Context) -> None:
+    version, _ = _sde_pin(ctx)
+    print(f"{console.bold(_SDE)}  Intel's Software Development Emulator, to run a binary as another CPU, pinned to {version} in tools/sde.version")
+    installed = _installed_sde_version()
+    exe = sde_executable()
+    if exe is None:
+        print(f"  {console.dim('not installed')}")
+    elif installed == version:
+        print(f"  {console.green(f'{installed} at {exe}')}")
+    else:
+        print(f"  {console.yellow(f'{installed or 'unknown version'} at {exe}, not the pinned {version}')}")
+
+
+def _install_sde(args: argparse.Namespace, ctx: Context) -> None:
+    target_dir = default_sde_dir()
+    if args.uninstall:
+        print(f"  sde is a folder rather than a link, so nothing here deletes it; remove {target_dir} to uninstall it")
+        return
+
+    version, digests = _sde_pin(ctx)
+    kit = _SDE_KITS.get(platform.system())
+    if kit is None or platform.machine() not in ("AMD64", "x86_64"):
+        ctx.die(f"Intel publishes no SDE kit for {platform.system()} {platform.machine()}")
+    name = f"sde-external-{version}-{kit}.tar.xz"
+    if not args.archive:
+        # Intel asks to accept its license before the download, so the download is the user's, never this script's.
+        print(f"  download {name} from {_SDE_PAGE}, accepting Intel's license there,")
+        print(f"  then: uv run dev.py {NAME} sde --archive <path to {name}>")
+        sys.exit(1)
+
+    archive = Path(args.archive).expanduser().resolve()
+    if not archive.is_file():
+        ctx.die(f"{archive} is not a file")
+    if hashlib.sha256(archive.read_bytes()).hexdigest() != digests[kit]:
+        ctx.die(f"{archive.name} is not the pinned {name}: its SHA-256 differs from tools/sde.version; nothing was installed")
+
+    # Unpacked beside the old one and swapped in, so a failed unpack leaves the old one working.
+    staged = target_dir.with_name("sde.new")
+    if staged.exists():
+        shutil.rmtree(staged)
+    staged.mkdir(parents=True)
+    with tarfile.open(archive, "r:xz") as tf:
+        tf.extractall(staged, filter="data")
+    # The kit holds one folder, sde-external-<version>-<kit>, whose contents are the install.
+    (top,) = [p for p in staged.iterdir()]
+    (top / ".version").write_text(version + "\n", encoding="utf-8")
+    if target_dir.exists():
+        shutil.rmtree(target_dir)
+    os.replace(top, target_dir)
+    shutil.rmtree(staged)
+
+    exe = sde_executable()
+    if exe is None:
+        ctx.die(f"{target_dir} holds no sde64 after unpacking {name}")
+    print(f"  {console.green('installed')} sde {version} at {exe}")
+    print(console.dim(f"  e.g. {exe} -snb -- <program>: runs it as a Sandy Bridge, with AVX but no AVX2; `-help` lists the CPUs"))
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
     if not args.name:
         _list(ctx)
+        return
+    if args.name == _SDE:
+        _install_sde(args, ctx)
         return
     if args.name == _EMSDK:
         _install_emsdk(args, ctx)
