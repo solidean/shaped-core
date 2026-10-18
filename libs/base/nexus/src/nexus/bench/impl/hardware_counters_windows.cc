@@ -1,5 +1,6 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/container/fixed_vector.hh>
+#include <clean-core/platform/impl/cpuid.hh>
 #include <clean-core/platform/win32_sanitized.hh>
 #include <evntcons.h>
 #include <evntrace.h>
@@ -111,11 +112,108 @@ cc::string narrow(wchar_t const* w)
     return cc::string(cc::string_view(buffer.data(), needed - 1)); // drop the trailing null
 }
 
+// -- events the HAL lacks, registered for this boot ----------------------------------------------------------
+//
+// Windows' built-in AMD sources define DcacheMisses and CacheMisses with event 0 and no unit mask, so they count nothing.
+// The kernel registers a raw event as a new profile source through NtSetSystemInformation(SystemPerformanceTraceInformation), an undocumented class.
+// The layout below is what the kernel reads, checked against its handler in Windows 11 24H2; phnt's ntexapi.h names it EVENT_TRACE_PROFILE_ADD_INFORMATION.
+// The caller must be in Administrators or Performance Monitor Users (S-1-5-32-558), which tools/setup-pmu-access.ps1 grants.
+// Without that the registration is denied, and the counters it would have backed stay unavailable.
+// A registration is not persisted, so it lasts until reboot; registering the same name with the same event again succeeds.
+
+constexpr ULONG s_system_performance_trace_information = 31;
+constexpr ULONG s_event_trace_profile_source_add_information = 21;
+
+struct profile_source_add
+{
+    ULONG info_class;
+    UCHAR version;    // 3: a 16-bit AMD event select
+    struct alignas(4) // the kernel's union also holds a ULONG
+    {
+        USHORT event_select;
+        UCHAR unit_select;
+        UCHAR cmask;
+        UCHAR cinv;
+        UCHAR edge;
+        UCHAR host_guest;
+        UCHAR pmu_type;
+    } amd;
+    ULONG cpu_family_model_stepping[3]; // ~0 matches any
+    ULONG initial_interval;
+    BOOLEAN persist;
+    WCHAR name[64];
+};
+static_assert(offsetof(profile_source_add, amd) == 0x08 && offsetof(profile_source_add, cpu_family_model_stepping) == 0x10
+                  && offsetof(profile_source_add, initial_interval) == 0x1c
+                  && offsetof(profile_source_add, persist) == 0x20 && offsetof(profile_source_add, name) == 0x22,
+              "the layout the kernel reads");
+
+// An event of one CPU family, named so that source_matches() maps it to its logical counter.
+struct raw_event
+{
+    char const* name;
+    USHORT event_select;
+    UCHAR unit_select;
+};
+
+// AMD family 1Ah, Zen 5, from AMD's event list as Linux perf carries it (amdzen5/load-store.json).
+// Calibrated against row- and column-major walks of 256 MiB: 224 M, 42 k and 2.5 k L1D misses for column-major, row-major and an L1-resident loop.
+constexpr raw_event s_zen5_events[] = {
+    {"Zen5L1DMisses", 0x41, 0x07}, // ls_mab_alloc.load_store_allocations: miss address buffers for demand loads and stores
+    {"Zen5LLCReferences", 0x43, 0xfe}, // ls_dmnd_fills_from_sys, all but local L2: demand fills that reached L3 or beyond
+    {"Zen5LLCMisses", 0x43, 0x48},     // ls_dmnd_fills_from_sys.dram_io_all: demand fills from DRAM or IO
+};
+
+// The events this CPU needs registered, or none.
+cc::span<raw_event const> missing_events()
+{
+    auto const vendor = cc::impl::cpuid(0);
+    auto const amd = vendor.ebx == 0x68747541 && vendor.edx == 0x69746e65 && vendor.ecx == 0x444d4163; // "AuthenticAMD"
+    if (!amd)
+        return {};
+    auto const eax = cc::impl::cpuid(1).eax;
+    auto const base_family = (eax >> 8) & 0xf;
+    auto const family = base_family == 0xf ? base_family + ((eax >> 20) & 0xff) : base_family;
+    if (family == 0x1a)
+        return s_zen5_events;
+    return {};
+}
+
+void register_missing_events()
+{
+    auto const events = missing_events();
+    if (events.empty())
+        return;
+    using nt_set_system_information_t = LONG(NTAPI*)(ULONG, void*, ULONG);
+    auto const nt_set = reinterpret_cast<nt_set_system_information_t>(
+        ::GetProcAddress(::GetModuleHandleA("ntdll.dll"), "NtSetSystemInformation"));
+    if (nt_set == nullptr)
+        return;
+    for (auto const& e : events)
+    {
+        auto info = profile_source_add{};
+        info.info_class = s_event_trace_profile_source_add_information;
+        info.version = 3;
+        info.amd.event_select = e.event_select;
+        info.amd.unit_select = e.unit_select;
+        for (auto& c : info.cpu_family_model_stepping)
+            c = ~ULONG(0);
+        info.initial_interval = 0x10000;
+        info.persist = FALSE;
+        for (auto i = 0; e.name[i] != 0 && i < 63; ++i)
+            info.name[i] = WCHAR(e.name[i]);
+        (void)nt_set(s_system_performance_trace_information, &info,
+                     ULONG(sizeof(info))); // denied without the group: the counter stays unavailable
+    }
+}
+
 // Enumerate the CPU's PMU profile sources once (the list is stable for the process lifetime).
+// The events the HAL lacks are registered first, so they enumerate with the rest.
 cc::vector<profile_source> const& profile_sources()
 {
     static auto const sources = []
     {
+        register_missing_events();
         cc::vector<profile_source> out;
         alignas(8) unsigned char buffer[8192] = {};
         auto return_length = ULONG(0);

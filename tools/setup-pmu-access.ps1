@@ -3,6 +3,8 @@
 # Prepares the current account for NON-ELEVATED hardware-counter (PMU) profiling with nexus/bench.
 # It grants the permissions Microsoft documents as prerequisites for a non-admin SystemTraceProvider session:
 #   1. membership in the built-in "Performance Log Users" group (may start/stop/control ETW sessions),
+#      and in "Performance Monitor Users", which the kernel requires to register a PMU event as a profile source
+#      (EventTraceProfileSourceAddInformation checks Administrators or S-1-5-32-558, nothing else),
 #   2. the "Profile system performance" user right (SeSystemProfilePrivilege), for system-wide profiling, and
 #   3. ETW DACL grants (EventAccessControl) on the fixed session GUID and the System-Trace-Provider GUID —
 #      the piece that actually lets a non-admin StartTrace the PMU system logger (without it StartTrace
@@ -13,7 +15,7 @@
 # The legacy NT Kernel Logger stays administrator-only regardless of this script; nexus/bench uses its own
 # private-named system logger, not that one.
 #
-# It changes exactly these things and nothing else: membership in Performance Log Users, the
+# It changes exactly these things and nothing else: membership in Performance Log Users and Performance Monitor Users, the
 # SeSystemProfilePrivilege assignment for this one account (via LsaAddAccountRights — additive), and additive
 # DACL entries on the two ETW GUIDs (EventAccessControl AddDACL — no existing entry is replaced).
 # On domain-managed machines, Group Policy may later re-overwrite the assigned right.
@@ -35,6 +37,7 @@ $ErrorActionPreference = "Stop"
 
 # The well-known SID of the built-in "Performance Log Users" group (language-independent).
 $PerformanceLogUsersSid = [System.Security.Principal.SecurityIdentifier]::new("S-1-5-32-559")
+$PerformanceMonitorUsersSid = [System.Security.Principal.SecurityIdentifier]::new("S-1-5-32-558")
 
 # A tiny P/Invoke wrapper over the LSA "account rights" API. This is the primitive that secedit and the
 # Local Security Policy UI both ultimately call. Add() grants one named right to one account (idempotent);
@@ -165,25 +168,29 @@ function Assert-Administrator {
     }
 }
 
-# Add the account to Performance Log Users. Identify the group by SID (never the localized/qualified name),
+# Add the account to a built-in group. Identify the group by SID (never the localized/qualified name),
 # and let a real failure (unresolvable account, access denied) surface instead of being swallowed.
-function Add-ToPerformanceLogUsers([string] $AccountName) {
+function Add-ToGroup([System.Security.Principal.SecurityIdentifier] $GroupSid, [string] $GroupName, [string] $AccountName) {
     try {
-        Add-LocalGroupMember -SID $PerformanceLogUsersSid -Member $AccountName -ErrorAction Stop
-        Write-Host "Added '$AccountName' to Performance Log Users."
+        Add-LocalGroupMember -SID $GroupSid -Member $AccountName -ErrorAction Stop
+        Write-Host "Added '$AccountName' to $GroupName."
     }
     catch [Microsoft.PowerShell.Commands.MemberExistsException] {
-        Write-Host "'$AccountName' is already a member of Performance Log Users."
+        Write-Host "'$AccountName' is already a member of $GroupName."
     }
+}
+
+function Test-InGroup([System.Security.Principal.SecurityIdentifier] $GroupSid, [string] $SidValue) {
+    foreach ($member in @(Get-LocalGroupMember -SID $GroupSid)) {
+        if ($member.SID.Value -eq $SidValue) { return $true }
+    }
+    return $false
 }
 
 # Confirm both changes actually took effect; throw (do not print success) otherwise.
 function Assert-Configured([string] $AccountName, [byte[]] $SidBytes, [string] $SidValue) {
-    $inGroup = $false
-    foreach ($member in @(Get-LocalGroupMember -SID $PerformanceLogUsersSid)) {
-        if ($member.SID.Value -eq $SidValue) { $inGroup = $true; break }
-    }
-    if (-not $inGroup) { throw "Verification failed: '$AccountName' is not in Performance Log Users." }
+    if (-not (Test-InGroup $PerformanceLogUsersSid $SidValue)) { throw "Verification failed: '$AccountName' is not in Performance Log Users." }
+    if (-not (Test-InGroup $PerformanceMonitorUsersSid $SidValue)) { throw "Verification failed: '$AccountName' is not in Performance Monitor Users." }
 
     if ([PmuRights]::Enumerate($SidBytes) -notcontains "SeSystemProfilePrivilege") {
         throw "Verification failed: SeSystemProfilePrivilege is not assigned to '$AccountName'."
@@ -199,7 +206,8 @@ $sidBytes = New-Object byte[] ($sid.BinaryLength)
 $sid.GetBinaryForm($sidBytes, 0)
 
 Write-Host "Configuring PMU access for '$Account' (SID $sidValue)..."
-Add-ToPerformanceLogUsers $Account
+Add-ToGroup $PerformanceLogUsersSid "Performance Log Users" $Account
+Add-ToGroup $PerformanceMonitorUsersSid "Performance Monitor Users" $Account
 
 Write-Host "Granting SeSystemProfilePrivilege..."
 [PmuRights]::Add($sidBytes, "SeSystemProfilePrivilege")

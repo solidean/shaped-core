@@ -73,7 +73,8 @@ Run once, elevated:
 powershell.exe -ExecutionPolicy Bypass -File tools\setup-pmu-access.ps1
 ```
 
-It grants three things together: Performance Log Users membership, `SeSystemProfilePrivilege`, and ETW DACLs on the session and System-Trace-Provider GUIDs.
+It grants these together: Performance Log Users and Performance Monitor Users membership, `SeSystemProfilePrivilege`, and ETW DACLs on the session and System-Trace-Provider GUIDs.
+Performance Monitor Users is what lets nexus register the events the HAL lacks (below); without it the data-cache miss counters stay unavailable on AMD, and everything else works.
 Sign out and back in afterward (the group and privilege enter the token at logon).
 `uv run dev.py doctor` reports whether this is in place.
 Without it, `nx::bench` degrades to the baseline and warns once.
@@ -98,10 +99,20 @@ There is no user-mode API that reads PMU counters directly on Windows, so `nx::b
 - A short loop can run entirely inside one quantum, with no context switch at all.
   So the measurement forces a switch just before and just after the body, and bounds counting to that window.
 
+- **Events the HAL lacks are registered for this boot.**
+  Before enumerating, nexus registers its raw events for this CPU family as new profile sources.
+  The call is `NtSetSystemInformation` with `SystemPerformanceTraceInformation` and `EventTraceProfileSourceAddInformation`.
+  That class is undocumented; phnt's `ntexapi.h` names its layout, and the kernel's handler confirms it, on Windows 11 24H2.
+  The kernel admits Administrators and Performance Monitor Users, and checks nothing else.
+  A registration is not persisted, so the first process after a reboot makes it again; registering a name with the same event again succeeds.
+
 **`ReadThreadProfilingData` is deliberately not used.**
 It reads back all zeros in user mode on every machine tried, because its `HwCountersCount` is gated on a global PMC list that cannot be set from user mode.
 
 ### What Windows delivers on a Zen 5
+
+Windows' built-in AMD table, `Amd64ProfileSourceDescriptorTable` in the kernel, defines `DcacheMisses` and `CacheMisses` with event 0 and no unit mask: the names are there, an event is not.
+So nexus registers three Zen 5 events of its own, from AMD's list as Linux perf carries it (`amdzen5/load-store.json`).
 
 Calibrated on a Ryzen 9 9950X3D2 under Windows 11 against row- and column-major walks of 256 MiB (`wpr -pmcsources` lists the sources):
 
@@ -112,10 +123,13 @@ Calibrated on a Ryzen 9 9950X3D2 under Windows 11 against row- and column-major 
 | `BranchInstructions`, `BranchMispredictions` | as named | `branch_instructions`, `branch_misses` |
 | `DcacheAccesses`, `DCAccess` | L1 data-cache accesses, both equal | `cache_l1d_accesses` |
 | `IcacheMisses`, `ICMiss` | instruction-cache misses | none |
-| `DcacheMisses`, `CacheMisses` | nothing: 0 through any workload | none, so no data-cache miss count on this machine |
+| `DcacheMisses`, `CacheMisses` | nothing: 0 through any workload | none |
+| `Zen5L1DMisses`: event 0x41, unit 0x07, `ls_mab_alloc` | miss address buffers for demand loads and stores: 224 M column-major, 42 k row-major | `cache_l1d_misses` |
+| `Zen5LLCReferences`: event 0x43, unit 0xfe, `ls_dmnd_fills_from_sys` | demand fills from L3 or beyond: 38 M column-major, 18 k row-major | `cache_llc_references` |
+| `Zen5LLCMisses`: event 0x43, unit 0x48, `ls_dmnd_fills_from_sys.dram_io_all` | demand fills from DRAM: 248 k column-major, 13 k row-major | `cache_llc_misses` |
 
-**There is no data-cache miss counter here**: a memory-bound claim has to come from an experiment, or from `core_cycles` against instructions.
-The worked example below therefore shows its cycle gap but no miss gap on this machine.
+**The miss counters count demand fills**, so a line the prefetchers brought in first is not a miss.
+The column-major walk misses L1 on nearly every load and still fills little from DRAM on demand: its 8192 live lines fit in L2, and the prefetchers fetch the next ones.
 
 ### Caveats
 

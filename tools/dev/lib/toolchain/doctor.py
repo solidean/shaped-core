@@ -361,29 +361,36 @@ def _deno_check() -> tuple[str, bool | None, str]:
 def _windows_pmu_check() -> tuple[str, bool | None, str]:
     """Report whether non-admin PMU profiling (nexus/bench hardware counters) is set up on Windows.
 
-    tools/setup-pmu-access.ps1 grants three things together: Performance Log Users membership, SeSystemProfilePrivilege, and ETW session-GUID ACLs.
-    The ACLs live under an admin-only registry key we cannot read here, but the script grants all three atomically.
-    So the group and privilege in the current token are a faithful proxy for "the setup ran".
+    tools/setup-pmu-access.ps1 grants these together: Performance Log Users and Performance Monitor Users membership, SeSystemProfilePrivilege, and ETW session-GUID ACLs.
+    The ACLs live under an admin-only registry key we cannot read here, but the script grants them all at once.
+    So the groups and privilege in the current token are a faithful proxy for "the setup ran".
+    Performance Monitor Users came later, for registering the PMU events the HAL lacks; a setup from before it still reads counters, only not the AMD cache misses.
     PMU counters are optional, since baseline timing and cycles work without them, so a missing setup is advisory (SKIP) rather than a hard failure.
     """
     label = "PMU profiling (nexus/bench)"
+    # By path: under Git Bash, MSYS's own whoami comes first on PATH and knows no /groups.
+    whoami = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "whoami.exe")
+    # Group names are localized and printed in the console code page; only the ASCII SIDs are read, so undecodable bytes are replaced.
     try:
-        groups = subprocess.run(["whoami", "/groups", "/fo", "csv", "/nh"],
-                                capture_output=True, text=True, timeout=15).stdout or ""
-        priv = subprocess.run(["whoami", "/priv", "/fo", "csv", "/nh"],
-                              capture_output=True, text=True, timeout=15).stdout or ""
+        groups = subprocess.run([whoami, "/groups", "/fo", "csv", "/nh"],
+                                capture_output=True, text=True, errors="replace", timeout=15).stdout or ""
+        priv = subprocess.run([whoami, "/priv", "/fo", "csv", "/nh"],
+                              capture_output=True, text=True, errors="replace", timeout=15).stdout or ""
     except (OSError, subprocess.TimeoutExpired) as e:
         return (label, None, f"could not query the process token ({e})")
 
     has_group = "S-1-5-32-559" in groups  # Performance Log Users (well-known, language-independent SID)
+    has_monitor_group = "S-1-5-32-558" in groups  # Performance Monitor Users
     has_priv = "SeSystemProfilePrivilege" in priv
-    if has_group and has_priv:
+    if has_group and has_monitor_group and has_priv:
         return (label, True,
-                "non-admin hardware counters configured (Performance Log Users + SeSystemProfilePrivilege)")
+                "non-admin hardware counters configured (Performance Log and Monitor Users + SeSystemProfilePrivilege)")
 
     missing = []
     if not has_group:
         missing.append("Performance Log Users membership")
+    if not has_monitor_group:
+        missing.append("Performance Monitor Users membership")
     if not has_priv:
         missing.append("SeSystemProfilePrivilege")
     return (label, None,
