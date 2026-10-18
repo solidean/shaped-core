@@ -4,6 +4,8 @@ refs:
   - file: libs/base/typed-geometry/src/typed-geometry/linalg/mat.hh
   - symbol: babel::gltf::node
   - issue: feat-tg-transform-builders
+closed: 2026-10-17
+resolution: obsolete
 ---
 
 # An affine transform type, and `mat4 * pos3` / `mat4 * vec3`
@@ -16,3 +18,9 @@ Once a glTF node's local transform exists, composing parent × child down the hi
 
 Today `tg::mat` multiplies `mat<C, R> * vec<C>` only, so there is no affine application at all.
 babel does not attempt it: the node hierarchy comes back as parent / child indices, left un-flattened.
+
+## Resolution
+
+Obsolete: the transform module already is this.
+`affine_transform3` applies to a point with its translation and to a vector without, and a normal is a `bivec` transformed by the cofactor.
+The one missing piece, an affine transform from a 4x4 matrix, landed with feat-tg-transform-builders.

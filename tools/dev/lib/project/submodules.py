@@ -5,10 +5,13 @@ Only two states are moved, and both by a fast-forward alone:
 - its HEAD is detached at a commit the tracked branch already contains, which is how `git submodule update` leaves it.
 Everything else is reported and left alone: uncommitted changes, unpushed commits, another branch checked out, a detached commit the branch does not contain.
 So nothing is ever reset, rebased, merged or rewritten, and no commit can be stranded.
+A submodule `.gitmodules` declares but that is not checked out yet, say one a pull just added, is initialized first at the recorded commit, which leaves it detached within its branch.
+So is a missing submodule of a submodule, at any depth; one already checked out there is left where it is.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,7 +28,7 @@ class Submodule:
 @dataclass(frozen=True)
 class Outcome:
     path: str
-    # "updated", "up-to-date", "skipped" or "refused"; dry runs say "would update".
+    # "initialized", "updated", "up-to-date", "skipped" or "refused"; dry runs say "would init" or "would update".
     status: str
     detail: str
     old: str | None = None
@@ -56,8 +59,8 @@ def _count(root: Path, revs: str) -> int:
     return int(_out(root, "rev-list", "--count", revs))
 
 
-def list_submodules(root: Path) -> list[Submodule]:
-    """The checked-out submodules `.gitmodules` declares, in its order."""
+def list_submodules(root: Path, *, missing: bool = False) -> list[Submodule]:
+    """The checked-out submodules `.gitmodules` declares, in its order; with `missing`, only those not checked out."""
     if not (root / ".gitmodules").is_file():
         return []
     listed = _git(root, "config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$", check=False).stdout
@@ -65,11 +68,34 @@ def list_submodules(root: Path) -> list[Submodule]:
     for line in listed.splitlines():
         key, path = line.split(" ", 1)
         name = key[len("submodule."):-len(".path")]
-        if not (root / path / ".git").exists():
+        if (root / path / ".git").exists() == missing:
             continue
         branch = _git(root, "config", "-f", ".gitmodules", f"submodule.{name}.branch", check=False).stdout.strip()
         subs.append(Submodule(path, name, branch or None))
     return subs
+
+
+def init(root: Path, sub: Submodule, *, dry_run: bool = False) -> Outcome:
+    """Check a declared submodule out at the commit the superproject records, as `git submodule update --init` does."""
+    at = recorded(root, sub)
+    detail = f"at the recorded {at[:10]}" if at else "at the recorded commit"
+    if dry_run:
+        return Outcome(sub.path, "would init", detail)
+    try:
+        _git(root, "submodule", "update", "--init", "--recursive", "--", sub.path)
+    except _GitError as e:
+        return Outcome(sub.path, "refused", str(e))
+    return Outcome(sub.path, "initialized", detail, at, at)
+
+
+def init_nested(root: Path, sub: Submodule, *, dry_run: bool = False) -> list[Outcome]:
+    """Initialize the submodules `sub` declares but has not checked out, at any depth; paths in the outcomes are relative to `root`."""
+    repo = root / sub.path
+    outcomes = [dataclasses.replace(init(repo, n, dry_run=dry_run), path=f"{sub.path}/{n.path}")
+                for n in list_submodules(repo, missing=True)]
+    for n in list_submodules(repo):
+        outcomes += init_nested(root, dataclasses.replace(n, path=f"{sub.path}/{n.path}"), dry_run=dry_run)
+    return outcomes
 
 
 def sync(root: Path, sub: Submodule, *, dry_run: bool = False, fetch: bool = True) -> Outcome:

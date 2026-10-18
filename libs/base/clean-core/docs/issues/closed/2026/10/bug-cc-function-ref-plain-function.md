@@ -4,6 +4,10 @@ refs:
   - file: libs/base/clean-core/src/clean-core/function/function_ref.hh
   - symbol: cc::function_ref
   - file: libs/data/babel-serializer/tests/trace/chrome_trace-test.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-18T05:58Z
+closed: 2026-10-18
+resolution: fixed
 ---
 
 # `cc::function_ref` does not accept a plain function portably

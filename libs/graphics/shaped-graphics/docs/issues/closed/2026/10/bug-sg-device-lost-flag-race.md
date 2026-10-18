@@ -6,6 +6,10 @@ refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/context/context.cc
   - symbol: sg::context::mark_device_lost
   - symbol: sg::context::is_device_lost
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-18T05:58Z
+closed: 2026-10-18
+resolution: fixed
 ---
 
 # `context::_device_lost` is a plain bool, and metal writes it from a driver thread
@@ -24,5 +28,5 @@ It is still a data race a sanitizer is entitled to report, on a field every back
 The fix is `cc::atomic<bool>` plus the release/acquire pair, which costs nothing on the read path.
 It was filed as a question rather than a patch because `SC_THREADS=OFF` turns `cc::atomic` back into a plain value, and a driver thread does not go away with that flag.
 So it might want the same treatment metal's own callback state got.
-Since then `SC_THREADS=OFF` is refused on Apple targets ([platforms](../../../../../docs/platforms.md#threading-sc_threads)).
+Since then `SC_THREADS=OFF` is refused on Apple targets ([platforms](../../../../../../../../docs/platforms.md#threading-sc_threads)).
 So wherever metal runs, `cc::atomic` is a real atomic, and the patch may be all it needs.

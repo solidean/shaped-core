@@ -5,7 +5,7 @@
 
 // issue: feat-cc-container-equality-and-order
 // issue: feat-cc-container-retyping
-// Also not yet: sequence entry points, and resize APIs, which would be totally fine.
+// Also not yet: resize APIs, which would be totally fine.
 
 
 /// Dynamically allocated array of T elements with value semantics.
@@ -32,6 +32,11 @@ public:
 public:
     using base::begin; // get pointer to first element
     using base::end;   // get pointer to one past last element
+
+    // sequences
+public:
+    using base::indices; // index sequence 0 .. size()
+    using base::values;  // the elements as a cc::sequence (owns the container when called on a temporary)
 
     // queries
 public:

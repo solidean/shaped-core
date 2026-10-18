@@ -47,6 +47,8 @@ One-liner per library:
   So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic correctly rounded once per operation.
   Geometric queries are **members** (`a.intersects(b)`, `p.distance_to(seg)`), and an object type is **maximal** — `aabb3` is the solid box, its surface is `aabb3_surface`.
   [docs/plans/geometry-query-matrix.md](libs/base/typed-geometry/docs/plans/geometry-query-matrix.md) is that layer; curves, symbolic and mesh are planned.
+  `camera/` is projections and views: `tg::perspective` is left-handed reverse-Z, and every other convention has an explicit name.
+  `tg::view_projection`'s `project` / `unproject` pair is specified by its round trip — [docs/modules/camera.md](libs/base/typed-geometry/docs/modules/camera.md).
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/base/clean-net`** — networking: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev server.
@@ -514,10 +516,11 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | File, find or claim an issue     | `uv run dev.py issues new/list/known/claim` ([issue-tracking](docs/guides/issue-tracking.md); the `issue-tracking` skill) |
+| Browse and triage issues in a browser | `uv run dev.py issues serve` — edits write files only; the page's Commit & push is a separate step |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | Update a consumer's submodules   | `uv run dev.py submodules sync [--bump]` — fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
-| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno) |
+| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

@@ -24,6 +24,8 @@
 template <int D, class T>
 struct tg::vec
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "vec requires a positive dimension");
 
     T data[D] = {};

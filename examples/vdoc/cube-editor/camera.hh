@@ -2,58 +2,15 @@
 
 #include <typed-geometry/linalg/mat.hh>
 #include <clean-core/common/utility.hh>
-#include <typed-geometry/linalg/cross.hh>
+#include <typed-geometry/camera/camera.hh>
 #include <typed-geometry/linalg/vec.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/linalg/pos.hh>
 
-// tg picks no camera convention, so this one is pinned here: left-handed, z into [0, 1].
-// issue: question-tg-camera-projection-helpers
-// tg::mat is COLUMN-major and subscripts m[col, row] — that part is worth copying rather than re-deriving.
-
 namespace cube_editor
 {
 using namespace cc::primitive_defines;
-
-/// The classic 3-vector cross product.
-/// tg's `cross` is the wedge and returns a bivector, so the vector form is its Hodge dual.
-[[nodiscard]] inline tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
-
-/// A left-handed perspective projection with z mapped into [0, 1].
-[[nodiscard]] inline tg::mat4f perspective(tg::angle_f vertical_fov, float aspect, float z_near, float z_far)
-{
-    auto const t = 1.0f / tg::tan(vertical_fov / 2.0f);
-
-    auto m = tg::mat4f::zero;
-    m[0, 0] = t / aspect;
-    m[1, 1] = t;
-    m[2, 2] = z_far / (z_far - z_near);
-    m[3, 2] = -z_near * z_far / (z_far - z_near);
-    m[2, 3] = 1.0f;
-    return m;
-}
-
-/// A left-handed view matrix: world space into the camera's frame.
-[[nodiscard]] inline tg::mat4f look_at(tg::pos3f eye, tg::pos3f target, tg::vec3f up)
-{
-    auto const f = tg::normalize(target - eye);
-    auto const r = tg::normalize(cross3(up, f));
-    auto const u = cross3(f, r);
-    auto const e = eye - tg::pos3f::zero;
-
-    auto m = tg::mat4f::identity;
-    for (auto i = 0; i < 3; ++i)
-    {
-        m[i, 0] = r[i];
-        m[i, 1] = u[i];
-        m[i, 2] = f[i];
-    }
-    m[3, 0] = -tg::dot(r, e);
-    m[3, 1] = -tg::dot(u, e);
-    m[3, 2] = -tg::dot(f, e);
-    return m;
-}
 
 /// An orbit camera, which is the whole camera state this example has.
 /// It is persisted in the vdoc file's workspace, so it survives a restart without ever becoming an edit.
@@ -71,7 +28,7 @@ struct orbit_camera
         return target + dir * distance;
     }
 
-    [[nodiscard]] tg::mat4f view() const { return look_at(this->eye(), target, tg::vec3f(0, 1, 0)); }
+    [[nodiscard]] tg::rigid_transform3f view() const { return tg::look_at(this->eye(), target); }
 
     /// Clamped just short of the poles, where the up vector and the view direction would become parallel.
     void orbit(tg::vec2f drag)

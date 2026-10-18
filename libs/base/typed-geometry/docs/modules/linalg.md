@@ -35,6 +35,7 @@ The whole point of tg is that the type system encodes geometry, so these are dis
 
 - **`vec`** is a free vector — a direction or displacement, with `vec + vec -> vec`, scaling and `dot`.
 - **`pos`** is a point, and its affine rules are deliberate: `pos - pos -> vec`, `pos + vec -> pos`, `pos - vec -> pos`.
+  Two more follow the as-if rule below: `pos + pos -> pos` translates, and `pos * T` / `pos / T` scale.
 - **`comp`** is the semantics-free component bag (see below).
 
 #### Why `pos + pos -> pos` (and `+ vec` / `+ pos` "translate")
@@ -47,6 +48,14 @@ Translating `{p}` by another point `q`, whose coordinates are read as the offset
 So `+ vec` and `+ pos` both read as "translate this object".
 `pos` is special precisely because it is simultaneously a linear-algebra value and a singleton geometric object.
 `pos - pos -> vec` is the displacement between two points, the one affine operation that yields a free vector.
+
+#### Why `pos * T` and `pos / T` (scaling about the origin)
+
+The same reading covers scaling.
+Multiplying a geometric object by a scalar **scales** it about the origin, so scaling `{p}` by `s` gives `{s·p}`, hence `pos * T -> pos` and `pos / T -> pos`.
+Together with `pos + pos` that makes the mean of points the plain `(p + q + r) / 3`, which is what `cc::sequence::average()` computes.
+Years of tg usage found the as-if operations a friction removal rather than a source of bugs, which is why they stay.
+Scaling by a scalar is not the scalar broadcast `comp` owns: `pos + T` and the Hadamard `pos * pos` remain undefined.
 
 ### `comp` is the semantics-free building block
 

@@ -36,7 +36,9 @@ auto const m2 = nx::bench::measure_hw_counters([&] { work(); }, {
 });
 ```
 
-The counters (`hw_counter`): `elapsed_nanoseconds`, `reference_cycles`, `instructions_retired`, `branch_instructions`, `branch_misses`, `cache_l1d_misses`, `cache_llc_references`, `cache_llc_misses`.
+The counters (`hw_counter`): the baseline `elapsed_nanoseconds` and `reference_cycles`, and the PMU's.
+Those are `instructions_retired`, `core_cycles`, `branch_instructions`, `branch_misses`, `cache_l1d_accesses`, `cache_l1d_misses`, `cache_llc_references` and `cache_llc_misses`.
+`core_cycles` follows frequency scaling and `reference_cycles` does not, so their ratio is the clock the core ran at against the reference.
 
 The call is **best-effort and never fails as a whole**, which is the contract [hardware_counters.hh](../../libs/base/nexus/src/nexus/bench/hardware_counters.hh) states.
 It always yields the baseline — elapsed time plus a reference-cycle count — with no privileges anywhere, including virtualized CI.
@@ -71,7 +73,8 @@ Run once, elevated:
 powershell.exe -ExecutionPolicy Bypass -File tools\setup-pmu-access.ps1
 ```
 
-It grants three things together: Performance Log Users membership, `SeSystemProfilePrivilege`, and ETW DACLs on the session and System-Trace-Provider GUIDs.
+It grants these together: Performance Log Users and Performance Monitor Users membership, `SeSystemProfilePrivilege`, and ETW DACLs on the session and System-Trace-Provider GUIDs.
+Performance Monitor Users is what lets nexus register the events the HAL lacks (below); without it the data-cache miss counters stay unavailable on AMD, and everything else works.
 Sign out and back in afterward (the group and privilege enter the token at logon).
 `uv run dev.py doctor` reports whether this is in place.
 Without it, `nx::bench` degrades to the baseline and warns once.
@@ -82,6 +85,11 @@ There is no user-mode API that reads PMU counters directly on Windows, so `nx::b
 
 - `TraceQueryInformation(TraceProfileSourceListInfo)` enumerates the CPU's named PMU sources, and the logical counters are mapped onto them **by name**.
   The names differ per CPU and per Windows version, which is expected rather than a problem.
+- **A name says little about what a source counts**, so the mapping is calibrated rather than guessed.
+  A name that is part of another source's name is matched exactly: `CacheMisses` must not claim `IcacheMisses`.
+- **A source can program and run and never count.**
+  So once per process, every candidate source runs through a short workload that misses every cache and mispredicts, and one that still reads 0 is not offered.
+  The first query or measurement pays for it: 0.23–0.27 s on a Zen 5, two probe sessions of four sources, each session about 75 ms.
 - nexus starts its own private `SystemTraceProvider` session under a fixed GUID, enables `CSWITCH`, and attaches the chosen PMC sources.
   `TracePmcCounterListInfo` picks the counters and `TracePmcEventListInfo` stamps them onto context-switch events.
   Both calls are required: counters attached to no event produce context-switch records carrying no PMC payload at all.
@@ -91,8 +99,37 @@ There is no user-mode API that reads PMU counters directly on Windows, so `nx::b
 - A short loop can run entirely inside one quantum, with no context switch at all.
   So the measurement forces a switch just before and just after the body, and bounds counting to that window.
 
+- **Events the HAL lacks are registered for this boot.**
+  Before enumerating, nexus registers its raw events for this CPU family as new profile sources.
+  The call is `NtSetSystemInformation` with `SystemPerformanceTraceInformation` and `EventTraceProfileSourceAddInformation`.
+  That class is undocumented; phnt's `ntexapi.h` names its layout, and the kernel's handler confirms it, on Windows 11 24H2.
+  The kernel admits Administrators and Performance Monitor Users, and checks nothing else.
+  A registration is not persisted, so the first process after a reboot makes it again; registering a name with the same event again succeeds.
+
 **`ReadThreadProfilingData` is deliberately not used.**
 It reads back all zeros in user mode on every machine tried, because its `HwCountersCount` is gated on a global PMC list that cannot be set from user mode.
+
+### What Windows delivers on a Zen 5
+
+Windows' built-in AMD table, `Amd64ProfileSourceDescriptorTable` in the kernel, defines `DcacheMisses` and `CacheMisses` with event 0 and no unit mask: the names are there, an event is not.
+So nexus registers three Zen 5 events of its own, from AMD's list as Linux perf carries it (`amdzen5/load-store.json`).
+
+Calibrated on a Ryzen 9 9950X3D2 under Windows 11 against row- and column-major walks of 256 MiB (`wpr -pmcsources` lists the sources):
+
+| source | counts | logical counter |
+|---|---|---|
+| `TotalIssues`, `InstructionRetired`, `FRRetiredx86Instructions` | retired instructions, all three equal | `instructions_retired` |
+| `TotalCycles` | core cycles: 1.3× the reference cycles at boost | `core_cycles` |
+| `BranchInstructions`, `BranchMispredictions` | as named | `branch_instructions`, `branch_misses` |
+| `DcacheAccesses`, `DCAccess` | L1 data-cache accesses, both equal | `cache_l1d_accesses` |
+| `IcacheMisses`, `ICMiss` | instruction-cache misses | none |
+| `DcacheMisses`, `CacheMisses` | nothing: 0 through any workload | none |
+| `Zen5L1DMisses`: event 0x41, unit 0x07, `ls_mab_alloc` | miss address buffers for demand loads and stores: 224 M column-major, 42 k row-major | `cache_l1d_misses` |
+| `Zen5LLCReferences`: event 0x43, unit 0xfe, `ls_dmnd_fills_from_sys` | demand fills from L3 or beyond: 38 M column-major, 18 k row-major | `cache_llc_references` |
+| `Zen5LLCMisses`: event 0x43, unit 0x48, `ls_dmnd_fills_from_sys.dram_io_all` | demand fills from DRAM: 248 k column-major, 13 k row-major | `cache_llc_misses` |
+
+**The miss counters count demand fills**, so a line the prefetchers brought in first is not a miss.
+The column-major walk misses L1 on nearly every load and still fills little from DRAM on demand: its 8192 live lines fit in L2, and the prefetchers fetch the next ones.
 
 ### Caveats
 

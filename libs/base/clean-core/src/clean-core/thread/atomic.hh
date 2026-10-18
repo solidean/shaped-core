@@ -186,6 +186,23 @@ struct cc::atomic_ref
         return old;
     }
 
+    bool compare_exchange_weak(T& expected, T desired, memory_order, memory_order) const noexcept
+    {
+        return _compare_exchange(expected, desired);
+    }
+    bool compare_exchange_weak(T& expected, T desired, memory_order = memory_order_seq_cst) const noexcept
+    {
+        return _compare_exchange(expected, desired);
+    }
+    bool compare_exchange_strong(T& expected, T desired, memory_order, memory_order) const noexcept
+    {
+        return _compare_exchange(expected, desired);
+    }
+    bool compare_exchange_strong(T& expected, T desired, memory_order = memory_order_seq_cst) const noexcept
+    {
+        return _compare_exchange(expected, desired);
+    }
+
     T fetch_add(T arg, memory_order = memory_order_seq_cst) const noexcept
     {
         return _fetch([&](T v) { return T(v + arg); });
@@ -226,6 +243,17 @@ struct cc::atomic_ref
     operator T() const noexcept { return load(); }
 
 private:
+    bool _compare_exchange(T& expected, T desired) const noexcept
+    {
+        if (*_value != expected)
+        {
+            expected = *_value;
+            return false;
+        }
+        *_value = desired;
+        return true;
+    }
+
     template <class F>
     T _fetch(F&& op) const noexcept
     {

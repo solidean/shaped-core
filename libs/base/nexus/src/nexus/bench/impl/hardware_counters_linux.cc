@@ -43,6 +43,10 @@ constexpr perf_event_desc s_pmu_events[] = {
      "L1-dcache-load-misses"},
     {hw_counter::cache_llc_references, PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_REFERENCES, "cache-references"},
     {hw_counter::cache_llc_misses, PERF_TYPE_HARDWARE, PERF_COUNT_HW_CACHE_MISSES, "cache-misses"},
+    {hw_counter::core_cycles, PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES, "cycles"},
+    {hw_counter::cache_l1d_accesses, PERF_TYPE_HW_CACHE,
+     hw_cache_config(PERF_COUNT_HW_CACHE_L1D, PERF_COUNT_HW_CACHE_OP_READ, PERF_COUNT_HW_CACHE_RESULT_ACCESS),
+     "L1-dcache-loads"},
 };
 
 constexpr auto s_max_pmu = isize(sizeof(s_pmu_events) / sizeof(s_pmu_events[0]));

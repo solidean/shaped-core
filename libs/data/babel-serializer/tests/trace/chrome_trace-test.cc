@@ -434,8 +434,7 @@ TRACE_TEST("chrome_trace - sampled frames carry names and source locations")
         {
             cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
             CC_RECORD_MARK("work-begins");
-            // WORKAROUND: cc::function_ref cannot take a plain function portably yet; issue: bug-cc-function-ref-plain-function
-            run_until_sampled(20, [] { busy_round(); });
+            run_until_sampled(20, busy_round);
         });
 
     REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);
@@ -571,8 +570,7 @@ TRACE_TEST("chrome_trace - a recording read back from bytes still resolves its o
         {
             cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
             CC_RECORD_MARK("work-begins");
-            // WORKAROUND: cc::function_ref cannot take a plain function portably yet; issue: bug-cc-function-ref-plain-function
-            run_until_sampled(20, [] { busy_round(); });
+            run_until_sampled(20, busy_round);
         });
 
     REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);

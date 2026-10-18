@@ -41,6 +41,10 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
         },
         [&](sr::mouse_move_event const& m)
         {
+            // A release this window never saw still ends the drag, since every motion says what is held.
+            _orbiting = _orbiting && m.is_held(sr::mouse_button::left);
+            _panning = _panning && m.is_held(sr::mouse_button::middle);
+
             // Motion with no button held is just the cursor passing over the view.
             if (!_orbiting && !_panning)
                 return false;
@@ -233,8 +237,13 @@ bool fps_camera_controller::handle(sr::input_event const& e)
         },
         [&](sr::mouse_move_event const& m)
         {
-            if (config.look_requires_button && !_looking)
-                return false;
+            if (config.look_requires_button)
+            {
+                // A release this window never saw still ends the look, since every motion says what is held.
+                _looking = _looking && m.is_held(sr::mouse_button::right);
+                if (!_looking)
+                    return false;
+            }
             if (m.delta[0] == 0.0f && m.delta[1] == 0.0f)
                 return false;
 

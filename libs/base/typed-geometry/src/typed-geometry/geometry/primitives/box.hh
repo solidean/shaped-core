@@ -26,6 +26,8 @@
 template <int D, int DAmbient, class T>
 struct tg::box
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "box requires a positive dimension");
     static_assert(D <= DAmbient, "a box cannot span more dimensions than the space it is embedded in");
 
@@ -206,6 +208,8 @@ public:
 template <int D, int DAmbient, class T>
 struct tg::box_boundary
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "box_boundary requires a positive dimension");
     static_assert(D <= DAmbient, "a box cannot span more dimensions than the space it is embedded in");
 

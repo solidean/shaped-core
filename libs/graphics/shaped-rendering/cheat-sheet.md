@@ -94,6 +94,12 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
             k.modifiers;   // sr::key_modifiers bit set; has_all(k.modifiers, ctrl | shift)
             k.is_down;  k.is_repeat;
         },
+        [&](sr::mouse_move_event const& m)
+        {
+            m.delta;                              // tg::vec2f — what drives a camera; m.cursor_pos is window-relative
+            m.is_held(sr::mouse_button::right);   // buttons held during the motion: END A DRAG ON IT TOO,
+                                                  // a release outside an uncaptured window never arrives
+        },
         [](auto const&) {});           // catch-all; SPELL ALL FIVE instead and a new event kind fails to compile here
 
     e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel too) — for predicates, and loops that `continue`

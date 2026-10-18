@@ -67,6 +67,11 @@ public:
     using base::linearize; // rearrange into one contiguous run and return it
     using base::segments;  // the up to two contiguous runs holding the content
 
+    // sequences
+public:
+    using base::indices; // index sequence 0 .. size()
+    using base::values;  // the elements front to back as a cc::sequence (lvalues only)
+
     // queries
 public:
     using base::empty;            // check if no elements are stored

@@ -163,6 +163,12 @@ enum class sr::key_modifiers : sr::u8
 namespace sr
 {
 
+/// The bit `mouse_move_event::held_buttons` sets for `b`.
+[[nodiscard]] constexpr u8 mouse_button_bit(mouse_button b)
+{
+    return u8(1u << u8(b));
+}
+
 [[nodiscard]] constexpr key_modifiers operator|(key_modifiers a, key_modifiers b)
 {
     return key_modifiers(u8(a) | u8(b));
@@ -228,6 +234,12 @@ struct sr::mouse_move_event
     /// Motion since the previous event, in pixels.
     /// This is the value to drive a camera with: it stays correct when the cursor is captured or hits the screen edge.
     tg::vec2f delta;
+
+    /// The buttons held during this motion, one `mouse_button_bit` each.
+    /// A drag should end on it as well as on the button's release: a release outside an uncaptured window never arrives.
+    u8 held_buttons = 0;
+
+    [[nodiscard]] bool is_held(mouse_button b) const { return (held_buttons & mouse_button_bit(b)) != 0; }
 };
 
 struct sr::mouse_button_event

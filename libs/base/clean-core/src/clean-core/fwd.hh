@@ -266,6 +266,10 @@ struct bit_index_range;
 
 template <class RangeT>
 struct sequence;
+template <class T>
+struct min_and_max;
+template <class T>
+struct partition_result;
 
 // The virtual ranges the sorting algorithms permute (algorithm/sort.hh), built by cc::as_index_swap_range*.
 template <class RangeT>

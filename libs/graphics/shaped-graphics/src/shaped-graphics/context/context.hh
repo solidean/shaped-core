@@ -128,9 +128,10 @@ public:
     /// Sticky once set: the context is unusable and must be torn down and recreated.
     /// Submit / advance / fence waits and the throwing create façades raise sg::device_lost_exception once this is true.
     /// Device loss surfaces on the `try_*` surface only as an ordinary, unclassified error, so a caller polling it must check this to break its retry loop.
-    [[nodiscard]] bool is_device_lost() const { return _device_lost; }
+    [[nodiscard]] bool is_device_lost() const { return _device_lost.load(cc::memory_order_acquire); }
 
     /// Backend-provided reason the device was lost; empty while the device is healthy.
+    /// Read it only once is_device_lost() is true: a backend may be writing it from its own thread until then.
     [[nodiscard]] cc::string_view device_loss_reason() const { return _device_loss_reason; }
 
     /// Take everything the backend reported since the last call, in the order it saw them.
@@ -797,7 +798,10 @@ protected:
     cc::mutex<cc::vector<device_error>> _pending_errors;
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
-    bool _device_lost = false;
+    // Atomic because metal reports loss from a dispatch queue Apple owns.
+    // _device_loss_claimed picks the one reporter that writes _device_loss_reason; _device_lost publishes it.
+    cc::atomic<bool> _device_loss_claimed = false;
+    cc::atomic<bool> _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
     cc::atomic<bool> _render_pass_split_warnings = true;
 

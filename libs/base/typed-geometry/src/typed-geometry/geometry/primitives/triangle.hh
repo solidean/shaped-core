@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/container/fixed_array.hh>
 #include <typed-geometry/fwd.hh>
 #include <typed-geometry/geometry/fwd.hh>
@@ -27,6 +28,8 @@
 template <int D, class T>
 struct tg::triangle
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "triangle requires a positive dimension");
 
     pos<D, T> pos0;
@@ -63,6 +66,9 @@ public:
         else if constexpr (requires { tg::projective_transform<D, T>(t); })
         {
             auto const p = tg::projective_transform<D, T>(t);
+            CC_ASSERT(tg::impl::one_side_of_projection(tg::impl::projective_w(p, pos0), tg::impl::projective_w(p, pos1),
+                                                       tg::impl::projective_w(p, pos2)),
+                      "a projected triangle must lie on one side of the projection");
             return triangle(pos0.transformed(p), pos1.transformed(p), pos2.transformed(p));
         }
         else

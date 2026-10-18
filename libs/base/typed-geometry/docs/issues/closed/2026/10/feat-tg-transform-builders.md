@@ -3,6 +3,10 @@ created: 2026-10-17
 refs:
   - file: libs/base/typed-geometry/src/typed-geometry/linalg/mat.hh
   - symbol: babel::gltf::node
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-17T18:52Z
+closed: 2026-10-17
+resolution: fixed
 ---
 
 # Transform builders: quaternion → matrix, translation, scaling, TRS composition
@@ -18,3 +22,9 @@ Today `linalg/mat.hh` offers only `make_from_cols`, `make_rotation_x/y/z`, `make
 So `babel::gltf::node` stores whichever form the file used (`has_matrix` says which) and the reader composes nothing.
 That is a defensible native-structure decision on its own.
 The gap is the missing `local_transform(node)` helper, which today would mean hand-rolling quaternion → matrix math inside babel.
+
+## Resolution
+
+Most of this already existed in the transform module rather than on `mat`: `quat::to_rotation_matrix()`, and the translation, rotation and scaling factories on the transform classes.
+What was missing, and landed: `affine_transform::make_trs(t, q, s)`, `affine_transform::make_from_mat(mat4)` for a matrix whose last row is (0, 0, 0, 1), and a variadic `tg::compose`.
+babel's `gltf::node::local_transform()` is built on them.

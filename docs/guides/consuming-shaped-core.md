@@ -42,12 +42,15 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
 
 | The submodule is | sync |
 |---|---|
+| declared but not checked out, as after a pull that adds it | initializes it at the recorded commit, then goes on as for a detached one |
 | on its tracked branch, clean, nothing unpushed | fast-forwards it |
 | detached at a commit the branch contains, as `git submodule update` leaves it | checks the branch out, then fast-forwards it |
 | carrying uncommitted changes to tracked files | refuses |
 | carrying commits its remote branch lacks, on the branch or detached | refuses |
 | on another branch | skips it |
 | without a `branch =` | skips it |
+| a submodule of a submodule, not checked out | initializes it at the commit its parent records, at any depth |
+| a submodule of a submodule, checked out | leaves it alone |
 
 Untracked files do not count: a fast-forward never touches one, and git refuses rather than overwrite it.
 Nothing is ever reset, rebased or merged, and a refusal exits non-zero, naming what is in the way.
