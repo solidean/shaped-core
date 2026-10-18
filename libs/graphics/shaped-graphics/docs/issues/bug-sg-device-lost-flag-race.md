@@ -6,6 +6,8 @@ refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/context/context.cc
   - symbol: sg::context::mark_device_lost
   - symbol: sg::context::is_device_lost
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-18T05:58Z
 ---
 
 # `context::_device_lost` is a plain bool, and metal writes it from a driver thread
