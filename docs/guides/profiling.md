@@ -36,7 +36,9 @@ auto const m2 = nx::bench::measure_hw_counters([&] { work(); }, {
 });
 ```
 
-The counters (`hw_counter`): `elapsed_nanoseconds`, `reference_cycles`, `instructions_retired`, `branch_instructions`, `branch_misses`, `cache_l1d_misses`, `cache_llc_references`, `cache_llc_misses`.
+The counters (`hw_counter`): the baseline `elapsed_nanoseconds` and `reference_cycles`, and the PMU's.
+Those are `instructions_retired`, `core_cycles`, `branch_instructions`, `branch_misses`, `cache_l1d_accesses`, `cache_l1d_misses`, `cache_llc_references` and `cache_llc_misses`.
+`core_cycles` follows frequency scaling and `reference_cycles` does not, so their ratio is the clock the core ran at against the reference.
 
 The call is **best-effort and never fails as a whole**, which is the contract [hardware_counters.hh](../../libs/base/nexus/src/nexus/bench/hardware_counters.hh) states.
 It always yields the baseline — elapsed time plus a reference-cycle count — with no privileges anywhere, including virtualized CI.
@@ -82,6 +84,11 @@ There is no user-mode API that reads PMU counters directly on Windows, so `nx::b
 
 - `TraceQueryInformation(TraceProfileSourceListInfo)` enumerates the CPU's named PMU sources, and the logical counters are mapped onto them **by name**.
   The names differ per CPU and per Windows version, which is expected rather than a problem.
+- **A name says little about what a source counts**, so the mapping is calibrated rather than guessed.
+  A name that is part of another source's name is matched exactly: `CacheMisses` must not claim `IcacheMisses`.
+- **A source can program and run and never count.**
+  So once per process, every candidate source runs through a short workload that misses every cache and mispredicts, and one that still reads 0 is not offered.
+  The first query or measurement pays for it: 0.23–0.27 s on a Zen 5, two probe sessions of four sources, each session about 75 ms.
 - nexus starts its own private `SystemTraceProvider` session under a fixed GUID, enables `CSWITCH`, and attaches the chosen PMC sources.
   `TracePmcCounterListInfo` picks the counters and `TracePmcEventListInfo` stamps them onto context-switch events.
   Both calls are required: counters attached to no event produce context-switch records carrying no PMC payload at all.
@@ -93,6 +100,22 @@ There is no user-mode API that reads PMU counters directly on Windows, so `nx::b
 
 **`ReadThreadProfilingData` is deliberately not used.**
 It reads back all zeros in user mode on every machine tried, because its `HwCountersCount` is gated on a global PMC list that cannot be set from user mode.
+
+### What Windows delivers on a Zen 5
+
+Calibrated on a Ryzen 9 9950X3D2 under Windows 11 against row- and column-major walks of 256 MiB (`wpr -pmcsources` lists the sources):
+
+| source | counts | logical counter |
+|---|---|---|
+| `TotalIssues`, `InstructionRetired`, `FRRetiredx86Instructions` | retired instructions, all three equal | `instructions_retired` |
+| `TotalCycles` | core cycles: 1.3× the reference cycles at boost | `core_cycles` |
+| `BranchInstructions`, `BranchMispredictions` | as named | `branch_instructions`, `branch_misses` |
+| `DcacheAccesses`, `DCAccess` | L1 data-cache accesses, both equal | `cache_l1d_accesses` |
+| `IcacheMisses`, `ICMiss` | instruction-cache misses | none |
+| `DcacheMisses`, `CacheMisses` | nothing: 0 through any workload | none, so no data-cache miss count on this machine |
+
+**There is no data-cache miss counter here**: a memory-bound claim has to come from an experiment, or from `core_cycles` against instructions.
+The worked example below therefore shows its cycle gap but no miss gap on this machine.
 
 ### Caveats
 

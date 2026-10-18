@@ -30,6 +30,7 @@ namespace
 constexpr hw_counter s_pmu_counters[] = {
     hw_counter::instructions_retired, hw_counter::branch_instructions,  hw_counter::branch_misses,
     hw_counter::cache_l1d_misses,     hw_counter::cache_llc_references, hw_counter::cache_llc_misses,
+    hw_counter::core_cycles,          hw_counter::cache_l1d_accesses,
 };
 
 bool is_baseline(hw_counter c)
@@ -57,6 +58,16 @@ constexpr auto s_props_size = isize(sizeof(EVENT_TRACE_PROPERTIES) + 256);
 char to_lower(char c)
 {
     return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c;
+}
+
+bool iequals(cc::string const& a, cc::string_view b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (auto i = isize(0); i < b.size(); ++i)
+        if (to_lower(a[i]) != to_lower(b[i]))
+            return false;
+    return true;
 }
 
 bool icontains(cc::string const& hay, cc::string_view needle)
@@ -127,42 +138,37 @@ cc::vector<profile_source> const& profile_sources()
     return sources;
 }
 
-// Does an ETW profile-source name look like the given logical counter? Names are CPU-specific, so match a
-// few known spellings; the greedy assignment below keeps one source from being claimed twice.
+// Does an ETW profile-source name look like the given logical counter?
+// Names are CPU-specific, so match a few known spellings; the greedy assignment keeps one source from being claimed twice.
+// A name that is a substring of another source's name is matched exactly: "CacheMisses" must not claim "IcacheMisses".
+// Calibrated on a Zen 5 under Windows 11 against row- and column-major walks of 256 MiB:
+// DcacheAccesses and DCAccess count L1D accesses, IcacheMisses and ICMiss instruction-cache misses, TotalCycles core cycles.
+// DcacheMisses and CacheMisses read 0 there through any workload; silent_sources() is what keeps such a source unclaimed.
 bool source_matches(hw_counter c, cc::string const& name)
 {
     switch (c)
     {
     case hw_counter::instructions_retired:
         return icontains(name, "InstructionRetired") || icontains(name, "InstructionsRetired")
-            || icontains(name, "TotalIssues");
+            || iequals(name, "TotalIssues");
     case hw_counter::branch_instructions:
         return icontains(name, "BranchInstruction");
     case hw_counter::branch_misses:
         return icontains(name, "BranchMispredict");
     case hw_counter::cache_l1d_misses:
-        // Claimed before cache_llc_misses, so the L1 D-cache source is taken here rather than by the generic
-        // "CacheMiss" spelling below.
         return icontains(name, "DcacheMiss") || icontains(name, "L1DMiss") || icontains(name, "L1DCacheMiss")
             || icontains(name, "DataCacheMiss");
     case hw_counter::cache_llc_references:
-        return icontains(name, "LLCReference") || icontains(name, "LLCRef") || icontains(name, "DcacheAccess")
-            || icontains(name, "DCAccess");
+        return icontains(name, "LLCReference") || icontains(name, "LLCRef");
     case hw_counter::cache_llc_misses:
-        return icontains(name, "LLCMiss") || icontains(name, "CacheMiss");
+        return icontains(name, "LLCMiss") || iequals(name, "CacheMisses");
+    case hw_counter::core_cycles:
+        return iequals(name, "TotalCycles") || icontains(name, "UnhaltedCoreCycles");
+    case hw_counter::cache_l1d_accesses:
+        return icontains(name, "DcacheAccess") || iequals(name, "DCAccess");
     default:
         return false;
     }
-}
-
-// Index of the first not-yet-claimed profile source matching `c`, or -1.
-isize find_source(hw_counter c, cc::span<bool> used)
-{
-    auto const& sources = profile_sources();
-    for (auto i = isize(0); i < sources.size(); ++i)
-        if (!used[i] && source_matches(c, sources[i].name))
-            return i;
-    return -1;
 }
 
 // Enable SeSystemProfilePrivilege in this process token (held is not enough; it must be enabled).
@@ -349,6 +355,208 @@ void force_context_switch()
     static auto const ev = ::CreateEventW(nullptr, TRUE, FALSE, nullptr); // manual-reset, never signaled
     ::WaitForSingleObject(ev, 1);
 }
+
+// The outcome of running a body with profile sources attached.
+struct source_run
+{
+    bool live = false;    ///< the session ran with at least one source programmed
+    isize configured = 0; ///< how many of the requested sources fit the PMC budget, from the first
+    u64 folds = 0;        ///< scheduling intervals folded into totals; zero means nothing was read
+    u64 totals[MAX_HW_COUNTERS] = {};
+    f64 secs = 0;
+    u64 cycles = 0;
+};
+
+// Runs `body` once with `count` profile sources attached to the context switches that bracket it, and reads the baseline tightly around it.
+// Only a limited number of sources can be programmed at once, so `configured` may come back short of `count`.
+source_run run_with_sources(cc::function_ref<void()> body, ULONG const* source_ids, isize count)
+{
+    auto run = source_run{};
+    auto state = pmc_state{};
+    state.target_tid = ::GetCurrentThreadId();
+
+    auto trace_session = TRACEHANDLE(0);
+    auto consumer_handle = TRACEHANDLE(0);
+    auto consumer_thread = HANDLE(nullptr);
+    alignas(8) unsigned char session_props[s_props_size] = {};
+
+    if (count > 0)
+    {
+        enable_system_profile_privilege();
+
+        // Configuring every source fails with ERROR_BUSY when the budget, a few per core minus what other ETW sessions hold, is short.
+        // Degrade to as many as fit: drop the last source and retry, so a caller gets its highest-priority counters rather than nothing.
+        // Each attempt needs a fresh session, because one whose PMC configuration was rejected will not then accept a smaller one.
+        for (auto want = count; want >= 1; --want)
+        {
+            if (start_session(trace_session, session_props) == ERROR_SUCCESS
+                && configure_session_pmc(trace_session, source_ids, want))
+            {
+                run.configured = want;
+                break;
+            }
+            if (trace_session != 0)
+            {
+                ::ControlTraceA(trace_session, nullptr, reinterpret_cast<EVENT_TRACE_PROPERTIES*>(session_props),
+                                EVENT_TRACE_CONTROL_STOP);
+                trace_session = 0;
+            }
+        }
+
+        if (run.configured > 0)
+        {
+            state.counter_count = run.configured; // the consumer reads exactly this many PMC values per event
+
+            auto logfile = EVENT_TRACE_LOGFILEA{};
+            logfile.LoggerName = const_cast<char*>(s_session_name);
+            logfile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
+            logfile.EventRecordCallback = &on_event;
+            logfile.Context = &state;
+
+            consumer_handle = ::OpenTraceA(&logfile);
+            if (consumer_handle != INVALID_PROCESSTRACE_HANDLE)
+            {
+                consumer_thread = ::CreateThread(nullptr, 0, &consumer_proc, &consumer_handle, 0, nullptr);
+                run.live = consumer_thread != nullptr;
+            }
+        }
+    }
+
+    // Arm the counted window and bracket the single body() call with forced context switches.
+    // The window clock must match the event timestamps (FILETIME).
+    auto now_ts = [&]
+    {
+        auto ft = FILETIME{};
+        ::GetSystemTimePreciseAsFileTime(&ft);
+        return i64((u64(ft.dwHighDateTime) << 32) | u64(ft.dwLowDateTime));
+    };
+
+    if (run.live)
+    {
+        state.t_arm.store(now_ts(), std::memory_order_relaxed);
+        force_context_switch(); // switch out + back in -> a switch-in event snapshots the start counters
+    }
+
+    auto const cycles_begin = cc::current_cycles();
+    auto const secs_begin = cc::current_time_steady_secs();
+    body();
+    auto const secs_end = cc::current_time_steady_secs();
+    auto const cycles_end = cc::current_cycles();
+
+    if (run.live)
+    {
+        force_context_switch(); // switch out -> a switch-out event folds in the region delta
+        state.t_disarm.store(now_ts(), std::memory_order_relaxed);
+    }
+
+    // Stop the session (flushes buffers), drain the consumer, then read the accumulated totals.
+    if (trace_session != 0)
+        ::ControlTraceA(trace_session, nullptr, reinterpret_cast<EVENT_TRACE_PROPERTIES*>(session_props),
+                        EVENT_TRACE_CONTROL_STOP);
+    if (consumer_thread != nullptr)
+    {
+        ::WaitForSingleObject(consumer_thread, INFINITE);
+        ::CloseHandle(consumer_thread);
+    }
+    if (consumer_handle != 0 && consumer_handle != INVALID_PROCESSTRACE_HANDLE)
+        ::CloseTrace(consumer_handle);
+
+    run.secs = secs_end - secs_begin;
+    run.cycles = cycles_end - cycles_begin;
+    run.folds = state.folds;
+    for (auto i = isize(0); i < run.configured; ++i)
+        run.totals[i] = state.totals[i];
+    return run;
+}
+
+// A workload every working counter sees: loads that miss to memory, branches on random data, and millions of cycles.
+// `table` spans 128 MiB, past any last-level cache, with every page written once: loads from untouched pages all read one shared zero page and hit in cache.
+void probe_workload(cc::span<u64 const> table)
+{
+    auto x = u64(0x9E37'79B9'7F4A'7C15ull);
+    auto sum = u64(0);
+    for (auto i = 0; i < (1 << 18); ++i)
+    {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        if (x & 1) // random, so mispredicted about half the time
+            sum += table[isize(x % u64(table.size()))];
+        else
+            sum ^= x >> 3;
+    }
+    static auto volatile sink = u64(0);
+    sink = sum;
+}
+
+// Profile sources that program and run but never count, as DcacheMisses and CacheMisses on a Zen 5 under Windows 11.
+// Probed once per process: the source each logical counter would claim runs through probe_workload(), and one still at 0 is silent.
+// A silent source hands its counter on to the next candidate, which is probed in turn.
+// Every pass is a session of its own, about 75 ms, so passes take four sources: a budget every PMU seen so far meets, which no retry has to discover.
+// A run that reads nothing at all decides nothing, so without readable PMCs no source is silent.
+cc::vector<bool> const& silent_sources()
+{
+    static auto const silent = []
+    {
+        auto const& sources = profile_sources();
+        auto out = cc::vector<bool>::create_defaulted(sources.size());
+        if (!pmu_readable())
+            return out;
+
+        auto probed = cc::vector<bool>::create_defaulted(sources.size());
+        auto table = cc::vector<u64>::create_uninitialized(isize(16) << 20);
+        for (auto i = isize(0); i < table.size(); i += 4096 / isize(sizeof(u64)))
+            table[i] = u64(i);
+
+        while (true)
+        {
+            // each counter's candidate: its first matching source not known to be silent
+            cc::vector<isize> batch;
+            for (auto const c : s_pmu_counters)
+                for (auto i = isize(0); i < sources.size(); ++i)
+                    if (!out[i] && source_matches(c, sources[i].name))
+                    {
+                        auto queued = false;
+                        for (auto const b : batch)
+                            queued = queued || b == i;
+                        if (!probed[i] && !queued)
+                            batch.push_back(i);
+                        break;
+                    }
+            if (batch.empty())
+                return out;
+
+            for (auto begin = isize(0); begin < batch.size();)
+            {
+                ULONG ids[4] = {};
+                auto const count = cc::min(batch.size() - begin, isize(4));
+                for (auto k = isize(0); k < count; ++k)
+                    ids[k] = sources[batch[begin + k]].id;
+                auto const run = run_with_sources([&] { probe_workload(table); }, ids, count);
+                if (!run.live || run.configured == 0 || run.folds == 0)
+                    return out;
+                for (auto k = isize(0); k < run.configured; ++k)
+                {
+                    probed[batch[begin + k]] = true;
+                    out[batch[begin + k]] = run.totals[k] == 0;
+                }
+                begin += run.configured;
+            }
+        }
+    }();
+    return silent;
+}
+
+// Index of the first not-yet-claimed, counting profile source matching `c`, or -1.
+isize find_source(hw_counter c, cc::span<bool> used)
+{
+    auto const& sources = profile_sources();
+    auto const& silent = silent_sources();
+    for (auto i = isize(0); i < sources.size(); ++i)
+        if (!used[i] && !silent[i] && source_matches(c, sources[i].name))
+            return i;
+    return -1;
+}
 } // namespace
 
 cc::vector<backend_counter> backend_enumerate_counters()
@@ -357,7 +565,7 @@ cc::vector<backend_counter> backend_enumerate_counters()
     out.push_back({.id = hw_counter::elapsed_nanoseconds, .available = true});
     out.push_back({.id = hw_counter::reference_cycles, .available = cc::has_cycle_counter()});
 
-    // A PMU counter is measurable only if its source exists AND we can actually start the session to read it.
+    // A PMU counter is measurable only if a counting source exists AND we can actually start the session to read it.
     auto const readable = pmu_readable();
     auto used = cc::vector<bool>::create_defaulted(profile_sources().size());
     for (auto const c : s_pmu_counters)
@@ -409,104 +617,13 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
         mapped.push_back({.id = c, .source = profile_sources()[idx].id, .name = profile_sources()[idx].name});
     }
 
-    // ETW session + consumer state.
-    auto state = pmc_state{};
-    state.target_tid = ::GetCurrentThreadId();
+    ULONG source_ids[MAX_HW_COUNTERS] = {};
+    for (auto i = isize(0); i < mapped.size(); ++i)
+        source_ids[i] = mapped[i].source;
+    auto const run = run_with_sources(body, source_ids, mapped.size());
 
-    auto trace_session = TRACEHANDLE(0);
-    auto consumer_handle = TRACEHANDLE(0);
-    auto consumer_thread = HANDLE(nullptr);
-    auto counters_live = false;
-    auto configured = isize(0); // how many of `mapped` we actually programmed (PMC counters are limited)
-    alignas(8) unsigned char session_props[s_props_size] = {};
-
-    if (!mapped.empty())
-    {
-        enable_system_profile_privilege();
-
-        ULONG source_ids[MAX_HW_COUNTERS] = {};
-        for (auto i = isize(0); i < mapped.size(); ++i)
-            source_ids[i] = mapped[i].source;
-
-        // Only a limited number of PMC counters can be programmed at once: a few per core, minus whatever other ETW sessions hold.
-        // So configuring every requested source can fail with ERROR_BUSY.
-        // Degrade to as many as fit: drop the last-requested source and retry, so a caller gets its highest-priority counters rather than nothing.
-        // Each attempt needs a fresh session, because one whose PMC configuration was rejected will not then accept a smaller one.
-        for (auto want = mapped.size(); want >= 1; --want)
-        {
-            if (start_session(trace_session, session_props) == ERROR_SUCCESS
-                && configure_session_pmc(trace_session, source_ids, want))
-            {
-                configured = want;
-                break;
-            }
-            if (trace_session != 0)
-            {
-                ::ControlTraceA(trace_session, nullptr, reinterpret_cast<EVENT_TRACE_PROPERTIES*>(session_props),
-                                EVENT_TRACE_CONTROL_STOP);
-                trace_session = 0;
-            }
-        }
-
-        if (configured > 0)
-        {
-            state.counter_count = configured; // the consumer reads exactly this many PMC values per event
-
-            auto logfile = EVENT_TRACE_LOGFILEA{};
-            logfile.LoggerName = const_cast<char*>(s_session_name);
-            logfile.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
-            logfile.EventRecordCallback = &on_event;
-            logfile.Context = &state;
-
-            consumer_handle = ::OpenTraceA(&logfile);
-            if (consumer_handle != INVALID_PROCESSTRACE_HANDLE)
-            {
-                consumer_thread = ::CreateThread(nullptr, 0, &consumer_proc, &consumer_handle, 0, nullptr);
-                counters_live = consumer_thread != nullptr;
-            }
-        }
-    }
-
-    // Arm the counted window, bracket the single body() call with forced context switches, and read the baseline as tightly as possible around it.
-    // The window clock must match the event timestamps (FILETIME).
-    auto now_ts = [&]
-    {
-        auto ft = FILETIME{};
-        ::GetSystemTimePreciseAsFileTime(&ft);
-        return i64((u64(ft.dwHighDateTime) << 32) | u64(ft.dwLowDateTime));
-    };
-
-    if (counters_live)
-    {
-        state.t_arm.store(now_ts(), std::memory_order_relaxed);
-        force_context_switch(); // switch out + back in -> a switch-in event snapshots the start counters
-    }
-
-    auto const cycles_begin = cc::current_cycles();
-    auto const secs_begin = cc::current_time_steady_secs();
-    body();
-    auto const secs_end = cc::current_time_steady_secs();
-    auto const cycles_end = cc::current_cycles();
-
-    if (counters_live)
-    {
-        force_context_switch(); // switch out -> a switch-out event folds in the region delta
-        state.t_disarm.store(now_ts(), std::memory_order_relaxed);
-    }
-
-    // Stop the session (flushes buffers), drain the consumer, then read the accumulated totals.
-    if (trace_session != 0)
-        ::ControlTraceA(trace_session, nullptr, reinterpret_cast<EVENT_TRACE_PROPERTIES*>(session_props),
-                        EVENT_TRACE_CONTROL_STOP);
-    if (consumer_thread != nullptr)
-    {
-        ::WaitForSingleObject(consumer_thread, INFINITE);
-        ::CloseHandle(consumer_thread);
-    }
-    if (consumer_handle != 0 && consumer_handle != INVALID_PROCESSTRACE_HANDLE)
-        ::CloseTrace(consumer_handle);
-
-    if (pmu_requested && !counters_live)
+    // A request whose counters all lack a counting source programs nothing, which is not missing access.
+    if (pmu_requested && !mapped.empty() && !run.live)
         warn_pmu_unavailable_once(s_setup_hint);
 
     cc::vector<hw_counter_sample> out;
@@ -516,16 +633,16 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
         auto name = cc::string(logical_counter_name(c));
         if (c == hw_counter::elapsed_nanoseconds)
         {
-            out.push_back({.id = c, .name = name, .value = u64((secs_end - secs_begin) * 1e9), .valid = true});
+            out.push_back({.id = c, .name = name, .value = u64(run.secs * 1e9), .valid = true});
             continue;
         }
         if (c == hw_counter::reference_cycles)
         {
-            out.push_back({.id = c, .name = name, .value = cycles_end - cycles_begin, .valid = cc::has_cycle_counter()});
+            out.push_back({.id = c, .name = name, .value = run.cycles, .valid = cc::has_cycle_counter()});
             continue;
         }
 
-        // A PMU counter: its value sits at the same index in state.totals as in our mapped list.
+        // A PMU counter: its value sits at the same index in run.totals as in our mapped list.
         // Only the first `configured` sources were actually programmed; the rest lost the PMC-counter budget race.
         auto value = u64(0);
         auto valid = false;
@@ -534,12 +651,12 @@ cc::vector<hw_counter_sample> backend_measure(cc::function_ref<void()> body, cc:
             if (mapped[i].id != c)
                 continue;
             name = mapped[i].name;
-            // state.folds is part of the condition because counters_live only says the session programmed them.
+            // run.folds is part of the condition because run.live only says the session programmed them.
             // A host that delivers no PMC data leaves every total at 0, and reporting that as a reading is what makes a
             // zero indistinguishable from a counter that never flowed.
-            if (counters_live && i < configured && state.folds > 0)
+            if (run.live && i < run.configured && run.folds > 0)
             {
-                value = state.totals[i];
+                value = run.totals[i];
                 valid = true;
             }
             break;
