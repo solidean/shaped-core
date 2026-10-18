@@ -2029,6 +2029,13 @@ def test_a_planned_folder_does_not_turn_a_member_access_into_a_file(root: Path) 
     assert not tokens, tokens
 
 
+def test_a_shell_expansion_is_not_a_folder(root: Path) -> None:
+    """A substitution's pattern ends in a slash, and its variable name would otherwise read as a folder."""
+    blocks = '## prose\n\n```bash\necho "raw:${mod//\\//.}" > "$out/"\n```\n'
+    tokens = _context_tokens(root, "", blocks)
+    assert not tokens, [(t.text, t.problem) for t in tokens]
+
+
 def test_a_planned_folder_does_not_make_member_accesses_files(root: Path) -> None:
     """A planned folder draws what resolves nowhere as new, so it must not widen what counts as a reference.
 

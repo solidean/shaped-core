@@ -133,7 +133,7 @@ def _emit(key: str, value) -> str:
 def dump(cfg: ReviewConfig) -> str:
     """Render a config as TOML, with the comments a hand-editor needs."""
     lines = [
-        "# A shaped-core review. `uv run review.py --help` is the CLI over it.",
+        "# A review: what it covers and how far it got. `uv run review.py --help` is the CLI over it.",
         "# base and head are pinned shas: a moving branch must not change what this review already accounted for.",
         "",
         _emit("name", cfg.name),

@@ -235,7 +235,8 @@ def _gone_since(rev: str) -> str:
 # a URL or a route, so `/api/entry/` must not yield a folder reference to `api/entry/`.
 # The lookahead is the mirror of it: a slash with a name after it is part of a longer path, so a file
 # reference never also produces a folder token for the directory it sits in.
-_DIR_RE = re.compile(r"(?<![\w./+:-])((?:new:|old:)?[\w.+-][\w./+-]*/)(?![\w.+-])")
+# Nor does one start after `$` or `{`: in a shell fence `${mod//\//.}` and `$out/` are expansions, not folders.
+_DIR_RE = re.compile(r"(?<![\w./+:${-])((?:new:|old:)?[\w.+-][\w./+-]*/)(?![\w.+-])")
 
 
 @dataclass
