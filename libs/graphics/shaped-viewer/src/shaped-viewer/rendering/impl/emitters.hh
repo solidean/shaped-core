@@ -31,6 +31,13 @@ struct emitter_estimate
     /// Whether `radiance` rests on a stand-in for a factor no read saw above zero, as a strided scan that met only black.
     /// Such an emitter may emit, so it keeps a weight above zero, yet it is no evidence of light: `sv::light_flag_unseen_emission` carries it to selection.
     bool unseen = false;
+
+    /// Whether a factor read the unknown 1 because its summary was not there yet, as a texture that is not resident.
+    /// No evidence of light either, until the summary lands.
+    bool rests_on_unknown = false;
+
+    /// Whether this estimate shows the instance emits: neither `unseen` nor resting on an unknown factor.
+    [[nodiscard]] bool shows_emission() const { return !unseen && !rests_on_unknown; }
 };
 
 /// The summary of a texture in residency `state`, as selection may trust it: `summary` once the texture is sampled, else empty.

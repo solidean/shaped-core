@@ -26,37 +26,6 @@ namespace
 namespace tracer = sv::shaders::tracer;
 using path_t = sv::shaders::tracer_pipeline_path_t;
 
-/// Where one permutation's hit group stands.
-enum class group_state
-{
-    pending, ///< still compiling; the trace that wants it waits a frame
-    ready,
-    failed, ///< settled without a value, and will until a reload
-};
-
-/// The state of `p`'s hit group, starting its compile if nobody has yet.
-/// The cache hands the node back cold, so polling alone would watch one that never starts.
-/// Started on the context's backlog, since nothing awaits it: `sv::background_work` is what a caller ending a run awaits.
-/// A compile that failed is logged once, since the stand-in that replaces it says nothing of why.
-[[nodiscard]] group_state state_of(sg::context& ctx, material_permutation const* p)
-{
-    auto const& node = p->hit_group;
-    if (!node.is_valid())
-        return group_state::failed;
-    if (node->try_value() != nullptr)
-        return group_state::ready;
-    if (node->is_ready())
-    {
-        if (!p->is_failure_reported)
-            CC_LOG_ERROR("the hit group of {} did not compile, so its geometry shades as the stand-in: {}", p->label,
-                         node->try_error()->underlying().to_string());
-        p->is_failure_reported = true;
-        return group_state::failed;
-    }
-    (void)ctx.backlog.start(node);
-    return group_state::pending;
-}
-
 /// The records a caller's `hit_group_offset` counts per permutation: a surface record and a shadow one.
 /// The pipeline's ray set has the same two ray types, so a row of its table is as wide.
 constexpr u32 records_per_permutation = 2;
@@ -90,10 +59,12 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     stand_ins = {};
     // Started whether or not a substitution ends up needing them, and before any early out.
     auto const* const fallback
-        = d.fallback != nullptr && state_of(ctx, d.fallback) == group_state::ready ? d.fallback : nullptr;
+        = d.fallback != nullptr && impl::hit_group_state(ctx, d.fallback) == impl::permutation_state::ready ? d.fallback
+                                                                                                            : nullptr;
     auto const* const quadric_fallback
-        = d.quadric_fallback != nullptr && state_of(ctx, d.quadric_fallback) == group_state::ready ? d.quadric_fallback
-                                                                                                   : nullptr;
+        = d.quadric_fallback != nullptr && impl::hit_group_state(ctx, d.quadric_fallback) == impl::permutation_state::ready
+            ? d.quadric_fallback
+            : nullptr;
 
     // Whatever has not landed is replaced by the stand-in of its kind, and the SUBSTITUTED set is what the pipeline is keyed on.
     // The frame a permutation's group lands, the key changes and a new variant is built with it.
@@ -104,12 +75,12 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     for (auto const* p : d.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
-        auto const state = state_of(ctx, p);
-        if (state != group_state::ready)
+        auto const state = impl::hit_group_state(ctx, p);
+        if (state != impl::permutation_state::ready)
         {
             p = p->kind == geometry_kind::quadrics ? quadric_fallback : fallback;
             substituted = true;
-            pending = pending || state == group_state::pending;
+            pending = pending || state == impl::permutation_state::pending;
         }
         if (p == nullptr)
             return nullptr;
@@ -573,3 +544,22 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     return sg::routine_outcome::executed;
 }
 } // namespace sv
+
+sv::impl::permutation_state sv::impl::hit_group_state(sg::context& ctx, material_permutation const* p)
+{
+    auto const& node = p->hit_group;
+    if (!node.is_valid())
+        return permutation_state::failed;
+    if (node->try_value() != nullptr)
+        return permutation_state::ready;
+    if (node->is_ready())
+    {
+        if (!p->is_failure_reported)
+            CC_LOG_ERROR("the hit group of {} did not compile, so its geometry shades as the stand-in: {}", p->label,
+                         node->try_error()->underlying().to_string());
+        p->is_failure_reported = true;
+        return permutation_state::failed;
+    }
+    (void)ctx.backlog.start(node);
+    return permutation_state::pending;
+}

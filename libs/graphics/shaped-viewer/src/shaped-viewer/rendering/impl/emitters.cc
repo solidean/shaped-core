@@ -16,6 +16,7 @@ namespace
 /// `bound` is an estimate of a value no lane exceeds where `has_bound` holds.
 /// `dark` is the proof that every lane is at or below zero wherever it is read, which only lanes known exactly give.
 /// `finite` is false where the block holds a non-finite constant or transform, which no estimate can weigh.
+/// `unknown` is true where some lane read the unknown 1 because its summary is not there yet.
 struct factor_estimate
 {
     tg::vec3f mean = tg::vec3f(1, 1, 1);
@@ -23,6 +24,7 @@ struct factor_estimate
     bool has_bound = false;
     bool dark = false;
     bool finite = true;
+    bool unknown = false;
 };
 
 [[nodiscard]] bool is_dark(tg::vec3f v)
@@ -109,7 +111,7 @@ constexpr auto dark_margin = 1e-3f;
         auto const* const slot = slot_at(block, material_slot_kind::attribute_descriptor, f.offset);
         auto const summary = slot != nullptr ? sources.attribute(slot->attribute) : cc::optional<value_summary>();
         if (!summary.has_value())
-            return {};
+            return {.unknown = true};
         // Interpolated corners stay within the range of the elements, so an exact range bounds every point.
         auto const& s = summary.value();
         auto const bound = widen(tg::vec3f(s.max[0], s.max[1], s.max[2]));
@@ -132,6 +134,7 @@ constexpr auto dark_margin = 1e-3f;
         auto scales = tg::vec3f(1, 1, 1);
         auto biases = tg::vec3f(0, 0, 0);
         auto dark = true;
+        auto unknown = false;
         for (auto c = 0; c < lanes; ++c)
         {
             auto const lane = lane_of(s, f.channels[c]);
@@ -150,10 +153,13 @@ constexpr auto dark_margin = 1e-3f;
             auto const margin = biases[c] == 0.0f ? 0.0f : dark_margin * (tg::abs(term) + tg::abs(biases[c]));
             auto const lane_dark = biases[c] == 0.0f ? out.bound[c] <= 0.0f : out.bound[c] < -margin;
             dark = dark && known && lane_dark;
+            // A channel with no summary read the unknown 1, unless its scale of 0 leaves the bias alone.
+            unknown = unknown || (s == nullptr && f.channels[c] < 4 && scales[c] != 0.0f);
         }
         out.mean = widen(out.mean);
         out.bound = widen(out.bound);
         out.dark = dark;
+        out.unknown = unknown;
         out.finite = all_finite(scales) && all_finite(biases);
         return out;
     }
@@ -218,9 +224,10 @@ cc::optional<impl::emitter_estimate> impl::emitter_estimate_of(material_emission
     if (color.dark || scale.dark)
         return {};
 
+    auto const unknown = color.unknown || scale.unknown;
     auto const mean = radiance_of(scale.mean, color.mean);
     if (!is_dark(mean))
-        return emitter_estimate{.radiance = mean};
+        return emitter_estimate{.radiance = mean, .rests_on_unknown = unknown};
 
     // Means that multiply to zero belong to an emission that is not dark throughout, so stand-ins take their place.
     // Selection weighs its noise and never its mean, and has to keep picking it.
@@ -231,8 +238,10 @@ cc::optional<impl::emitter_estimate> impl::emitter_estimate_of(material_emission
     auto const fallback = radiance_of(scale_in.has_value() ? scale_in.value() : unseen,
                                       color_in.has_value() ? color_in.value() : unseen);
     if (!is_dark(fallback))
-        return emitter_estimate{.radiance = fallback, .unseen = !scale_in.has_value() || !color_in.has_value()};
-    return emitter_estimate{.radiance = unseen, .unseen = true};
+        return emitter_estimate{.radiance = fallback,
+                                .unseen = !scale_in.has_value() || !color_in.has_value(),
+                                .rests_on_unknown = unknown};
+    return emitter_estimate{.radiance = unseen, .unseen = true, .rests_on_unknown = unknown};
 }
 
 f32 impl::world_area_of(f32 object_area, tg::affine_transform3f const& placement)

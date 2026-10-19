@@ -154,7 +154,9 @@ That pins every unit conversion, at one bounce, where next-event estimation carr
 The parallel light has no bounce branch, so an error in the sun's bounce weighting shows there instead of cancelling.
 
 A layer with no lights of its own is traced under `layer::fallback_light`, a sun unless the layer sets another or turns it off.
-A traced layer whose only lights are emissive instances counts as lit, and takes no fallback.
+A traced layer whose only lights are emissive instances counts as lit, and takes no fallback, once one of them is an emitter shown to emit.
+Shown means its estimate is neither `unseen` nor resting on a factor not summarized yet, and its permutation has not failed.
+One still compiling counts, so the fallback does not switch on for every cold compile.
 A raster layer draws no emitter's light, so it keeps its fallback.
 
 ## Emissive instances
@@ -176,6 +178,7 @@ A texture's lane under a transform scale of exactly 0 reads its bias whatever th
 So the test Cornell box's walls, whose per-triangle `emissive` is zero throughout, light nothing.
 A constant or a texture transform that is not finite makes no light either, since no estimate could weigh it.
 It must also be a resident triangle mesh, shaded by that permutation rather than by the fallback a streaming mesh takes.
+And the integrator that traces it must shade it with that permutation this frame: one it stands in for, compiling or failed, shades no emission, so it gets no light record either.
 `sv::impl::emitter_estimate_of` (rendering/impl/emitters.hh) is the material half of that rule; a quadric batch is camera-only.
 
 **An instance that does not qualify is camera-only**: the camera sees its emission, and no bounce meets it as a light, since `tracer.emitter_pdf` finds no record for it.

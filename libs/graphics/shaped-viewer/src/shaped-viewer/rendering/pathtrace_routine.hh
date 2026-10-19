@@ -51,6 +51,23 @@ static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table 
 /// Its records stand after every analytic one, from `frame_constants::emitter_offset`.
 inline constexpr u32 light_path_mesh = 4;
 
+namespace impl
+{
+/// Where one permutation's shading stands for the integrator that traces it: its hit group, or its shade kernel.
+enum class permutation_state
+{
+    pending, ///< still compiling; a trace shades through the stand-in meanwhile
+    ready,
+    failed, ///< settled without a value, and will until a reload; a trace shades through the stand-in for good
+};
+
+/// The state of `p`'s hit group, starting its compile if nobody has yet.
+/// The cache hands the node back cold, so polling alone would watch one that never starts.
+/// Started on the context's backlog, since nothing awaits it: `sv::background_work` is what a caller ending a run awaits.
+/// A compile that failed is logged once, since the stand-in that replaces it says nothing of why.
+[[nodiscard]] permutation_state hit_group_state(sg::context& ctx, material_permutation const* p);
+} // namespace impl
+
 /// What an instance record's `emitter` holds where the instance lights nothing, `scene.no_offset`.
 inline constexpr u32 no_emitter = 0xffffffffu;
 

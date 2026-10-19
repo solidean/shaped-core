@@ -192,6 +192,19 @@ void wavefront_routine::_record_landed_timings(u64 now)
     }
 }
 
+impl::permutation_state wavefront_routine::shade_kernel_state(sg::command_list& cmd, material_permutation const* p)
+{
+    auto self = try_acquire_exclusive(cmd);
+    if (!self.is_ready())
+        return impl::permutation_state::pending;
+    auto const* const k = self->_shade_kernels.get_ptr(p->key);
+    if (k == nullptr)
+        return impl::permutation_state::pending;
+    if (k->pipeline != nullptr)
+        return impl::permutation_state::ready;
+    return k->failed ? impl::permutation_state::failed : impl::permutation_state::pending;
+}
+
 sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_trace_desc const& d)
 {
     CC_RECORD_SCOPE("sv.wavefront");

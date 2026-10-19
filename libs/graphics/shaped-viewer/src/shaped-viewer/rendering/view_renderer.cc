@@ -86,12 +86,14 @@ struct resolved_view
     cc::vector<shaders::tracer::light_record> emitter_lights;
     cc::vector<shaders::tracer::emitter_record> emitters;
 
-    /// How many traced instances qualify as lights, whether or not their area CDF is built yet.
+    /// How many traced instances are emitters shown to emit, whether or not their area CDF is built yet.
     /// What turns the fallback light off: a layer lit by its emitters is lit, even on the frames before they can be sampled.
+    /// Shown means an estimate that is neither `unseen` nor resting on a factor not summarized yet, and a permutation that has not failed.
+    /// One still compiling counts, so the fallback does not switch on for every cold compile.
     /// A raster frame counts none, as it draws no emitter's light, and neither does a manager whose CDF kernels failed.
     isize emissive_items = 0;
 
-    /// Whether some emissive instance lit nothing this frame because its area CDF is not built yet.
+    /// Whether some emissive instance lit nothing this frame because its area CDF is not built yet, or its permutation is still compiling.
     /// Such a frame is an image of a darker scene, so it restarts as a frame drawn through a stand-in does.
     bool emitters_pending = false;
 
@@ -139,11 +141,25 @@ struct resolved_view
     return tg::compose(placement, onto_box);
 }
 
-/// `l` resolved for a frame recorded onto `cmd`, its acceleration structures built on demand when `traced`.
-///
-/// A raster frame resolves with `traced` false and builds none, which is what lets it draw on a device without ray tracing.
-resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources, bool traced)
+/// Where `p`'s shading stands in the integrator `mode` traces with: the megakernel's hit group, or the wavefront's shade kernel.
+/// A raster frame resolves no light, so for it every permutation is ready.
+[[nodiscard]] impl::permutation_state permutation_state_in(sg::command_list& cmd,
+                                                           render_mode mode,
+                                                           material_permutation const* p)
 {
+    if (mode == render_mode::megakernel)
+        return impl::hit_group_state(cmd.context(), p);
+    if (mode == render_mode::wavefront)
+        return wavefront_routine::shade_kernel_state(cmd, p);
+    return impl::permutation_state::ready;
+}
+
+/// `l` resolved for a frame recorded onto `cmd` in `mode`, its acceleration structures built on demand where it traces.
+///
+/// A raster frame builds none, which is what lets it draw on a device without ray tracing.
+resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_manager& resources, render_mode mode)
+{
+    auto const traced = mode != render_mode::raster;
     auto out = resolved_view{};
 
     // Acquired once rather than per item: it is a resolve walk plus a key hash plus a lookup, and every placeholder in
@@ -267,7 +283,16 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
                                                         {.texture = texture_summary, .attribute = attribute_summary});
         if (!estimate.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
             continue;
-        ++out.emissive_items;
+        auto const state = permutation_state_in(cmd, mode, out.hit_groups[permutation]);
+        if (estimate.value().shows_emission() && state != impl::permutation_state::failed)
+            ++out.emissive_items;
+        // A permutation the trace stands in for shades no emission, so its light record would credit the bounce strategy with light it never carries.
+        // One still compiling may land before the trace binds it, which then shades the lamp with no record for it: an image of a darker scene, so it restarts.
+        if (state != impl::permutation_state::ready)
+        {
+            out.emitters_pending = out.emitters_pending || state == impl::permutation_state::pending;
+            continue;
+        }
 
         // Not pending, so `triangle_count` is the mesh's own, read with `object_area` before any build could move `mesh`.
         auto const triangles = isize(triangle_count);
@@ -1098,7 +1123,7 @@ void view_renderer::acquire_trace(sg::command_list& cmd,
     // trace() declines a layer this device cannot trace, and says so; a walk for it would build BLASes nothing can.
     if (is_traced && missing_trace_feature(cmd.context(), mode).has_value())
         return;
-    (void)resolve_scene(cmd, l, resources, is_traced);
+    (void)resolve_scene(cmd, l, resources, mode);
 }
 
 sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
@@ -1135,7 +1160,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (is_traced && !can_trace(ctx, mode, rec, *slot))
         return sg::routine_outcome::declined;
 
-    auto resolved = resolve_scene(cmd, l, resources, is_traced);
+    auto resolved = resolve_scene(cmd, l, resources, mode);
 
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.
@@ -1788,7 +1813,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // resolve_scene() touches the layer's meshes and instances, keeping this frame's working set resident, and mints every
     // bindless index this trace reads.
-    auto resolved = resolve_scene(cmd, *scene, resources, is_traced);
+    auto resolved = resolve_scene(cmd, *scene, resources, mode);
 
     auto const lights = traced_lights(*scene, resolved);
     link_emitters(resolved, lights);

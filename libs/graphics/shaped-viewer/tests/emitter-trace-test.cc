@@ -88,6 +88,8 @@ struct emitter_scene
     cc::vector<placed_mesh> meshes;
     cc::vector<sv::light> lights;
     sv::camera camera;
+    /// Whether the layer keeps its default fallback light, which every other scene here turns off so the emitters are its only light.
+    bool keeps_fallback = false;
 };
 
 /// A white floor, and a white back wall that stops below the emitters, so nothing sees an emitter's upper face.
@@ -150,7 +152,8 @@ cc::shared_async<cc::vector<tg::vec3f>> render(sg::context& ctx,
     }
     for (auto i = isize(0); i < scene.lights.size(); ++i)
         l.lights.push_back({.id = sv::light_id::from_string(cc::format("light {}", i)), .light = scene.lights[i]});
-    l.fallback_light = cc::nullopt;
+    if (!scene.keeps_fallback)
+        l.fallback_light = cc::nullopt;
     l.settings = settings;
     resources.wait_for_pending_uploads();
 
@@ -1106,6 +1109,110 @@ ASYNC_INVOCABLE_TEST("sv - a textured emitter under a transform and a textured l
         auto const settings = settings_of(mode, 2);
         auto const lit = co_await render(ctx, resources, textured, settings, k_samples);
         auto const reference = co_await render(ctx, resources, halves, settings, k_samples);
+        CHECK(brightest_block(reference) > 0.1f);
+        check_blocks_match(lit, reference, 0.08f, name_of(mode));
+    }
+}
+
+namespace
+{
+/// The patch at `center ± half`, emitting `nits` times a 512 x 512 texture that is black throughout.
+/// Past the texels a summary reads whole, so its summary is a strided scan: inexact, and black wherever it looked.
+[[nodiscard]] sv::mesh black_textured_lamp(tg::pos3f center, tg::vec2f half, f32 nits)
+{
+    auto const positions = ceiling_quad(center, half);
+    auto mesh = mesh_of("black-textured lamp", positions, lambert(tg::vec3f(0, 0, 0), nits));
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex, patch_uvs(positions, center, half)));
+    constexpr auto side = 512;
+    auto pixels = cc::array<byte>::create_filled(isize(side) * side * 4, byte(0));
+    mesh.textures.push_back(
+        {.name = "emission_color",
+         .source = {.texture = sv::texture_data::create(cc::move(pixels), sg::pixel_format::rgba8_unorm, side, side),
+                    .uv_attribute = "uv"}});
+    return mesh;
+}
+} // namespace
+
+// An emitter whose emission no read saw above zero is no evidence of light, so a layer lit by nothing else keeps its fallback sun.
+// The lamp's texture is too large to summarize whole and black wherever the scan looked: its estimate is `unseen`.
+// So the room is lit exactly as with a plain black quad in the lamp's place, under the same sun.
+ASYNC_INVOCABLE_TEST("sv - a layer whose only emitter is shown to emit nothing keeps its fallback light",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (auto const why = skip_reason(ctx); !why.empty())
+        SKIP(why);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+
+    auto const center = tg::pos3f(0, 1.5f, 0.3f);
+    auto const half = tg::vec2f(0.5f, 0.4f);
+
+    auto lamp = emitter_scene{.meshes = room(), .camera = floor_camera(), .keeps_fallback = true};
+    lamp.meshes.push_back({.mesh = black_textured_lamp(center, half, 5.0f)});
+    auto plain = emitter_scene{.meshes = room(), .camera = floor_camera(), .keeps_fallback = true};
+    plain.meshes.push_back({.mesh = mesh_of("black quad", ceiling_quad(center, half), lambert(tg::vec3f(0, 0, 0)))});
+
+    for (auto const mode : k_modes)
+    {
+        if (!can_trace(ctx, mode))
+            continue;
+        auto const settings = settings_of(mode, 2);
+        auto const lit = co_await render(ctx, resources, lamp, settings, k_samples);
+        auto const reference = co_await render(ctx, resources, plain, settings, k_samples);
+        CHECK(brightest_block(reference) > 0.1f);
+        check_blocks_match(lit, reference, 0.08f, name_of(mode));
+    }
+}
+
+// A lamp whose permutation fails to compile shades through the stand-in, which emits nothing, so it must not be sampled as a light either.
+// Its light record would have next-event estimation add light the bounce strategy can never meet, lighting the room at that strategy's share.
+// So the room is lit exactly as it is by the same broken type declaring no emission, which stands in alike.
+ASYNC_INVOCABLE_TEST("sv - an emitter whose material fails to compile lights the room no differently than no emitter",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (auto const why = skip_reason(ctx); !why.empty())
+        SKIP(why);
+
+    auto& lib = sv_test::shared_material_library();
+    auto const broken = [&](cc::string const& name, bool emits)
+    {
+        auto signature = cc::vector<sv::material_signature_entry>();
+        signature.push_back(sv::material_signature_entry::of("glow", tg::vec3f(4, 4, 4)));
+        auto const type = lib.register_type(
+            sv::material_type::create({.name = name,
+                                       .signature = cc::move(signature),
+                                       .shader = "surface.x = not_a_function(glow)\n",
+                                       .emission_color_attribute = emits ? cc::string("glow") : cc::string()}));
+        return lib.acquire(sv::material::create(name, type, {}));
+    };
+    auto const lit_material = broken("sv_test_broken_lamp_lit", true);
+    auto const dark_material = broken("sv_test_broken_lamp_dark", false);
+
+    // Each permutation's failure is said once by each integrator that meets it: the megakernel's hit group, the wavefront's shade kernel.
+    nx::expect_error("the hit group of <material 'sv_test_broken_lamp_*'> did not compile*", nx::exactly(2));
+    nx::expect_error("the shade kernel of <material 'sv_test_broken_lamp_*'> did not compile*", nx::exactly(2));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const center = tg::pos3f(0, 1.5f, 0.3f);
+    auto const half = tg::vec2f(0.5f, 0.4f);
+    auto const key = sv::light::rect(tg::pos3f(0, 1.5f, -0.8f), tg::vec3f(0.3f, 0, 0), tg::vec3f(0, 0, 0.3f)).nits(5.0f);
+
+    auto failed_lamp = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    failed_lamp.meshes.push_back({.mesh = mesh_of("failed lamp", ceiling_quad(center, half), lit_material)});
+    failed_lamp.lights.push_back(key);
+    auto no_lamp = emitter_scene{.meshes = room(), .camera = floor_camera()};
+    no_lamp.meshes.push_back({.mesh = mesh_of("failed quad", ceiling_quad(center, half), dark_material)});
+    no_lamp.lights.push_back(key);
+
+    for (auto const mode : k_modes)
+    {
+        if (!can_trace(ctx, mode))
+            continue;
+        auto const settings = settings_of(mode, 2);
+        auto const lit = co_await render(ctx, resources, failed_lamp, settings, k_samples);
+        auto const reference = co_await render(ctx, resources, no_lamp, settings, k_samples);
         CHECK(brightest_block(reference) > 0.1f);
         check_blocks_match(lit, reference, 0.08f, name_of(mode));
     }

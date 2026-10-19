@@ -115,6 +115,10 @@ public:
     /// A permutation whose shade kernel has not compiled is shaded by the stand-in of its kind, as the megakernel's hit groups are.
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, wavefront_trace_desc const& d);
 
+    /// Where `p`'s shade kernel stands as of the last frame: one no trace has asked for yet is pending, since the next one starts it.
+    /// Starts nothing itself, since building the kernel needs the trace's bindless layout.
+    [[nodiscard]] static impl::permutation_state shade_kernel_state(sg::command_list& cmd, material_permutation const* p);
+
     /// How many medium scatters a walk takes before its Russian roulette may end it: `pt.roulette_after` in shaders/sgl/pt_sampling.sgl.
     static constexpr i32 medium_roulette_after = 16;
 
