@@ -88,10 +88,10 @@ constexpr auto dark_margin = 1e-3f;
 
     switch (f.kind)
     {
-    case material_opacity_kind::none:
+    case material_value_kind::none:
         return {.mean = tg::vec3f(1, 1, 1), .bound = tg::vec3f(1, 1, 1), .has_bound = true};
 
-    case material_opacity_kind::constant:
+    case material_value_kind::constant:
     {
         auto value = tg::vec3f(0, 0, 0);
         if (auto const* const slot = slot_at(block, material_slot_kind::constant, f.offset); slot != nullptr)
@@ -104,7 +104,7 @@ constexpr auto dark_margin = 1e-3f;
                 .finite = all_finite(value)};
     }
 
-    case material_opacity_kind::attribute:
+    case material_value_kind::attribute:
     {
         auto const* const slot = slot_at(block, material_slot_kind::attribute_descriptor, f.offset);
         auto const summary = slot != nullptr ? sources.attribute(slot->attribute) : cc::optional<value_summary>();
@@ -119,7 +119,7 @@ constexpr auto dark_margin = 1e-3f;
                 .dark = s.exact && is_dark(bound)};
     }
 
-    case material_opacity_kind::texture:
+    case material_value_kind::texture:
     {
         auto const* const slot = slot_at(block, material_slot_kind::texture_index, f.offset);
         auto const summary = slot != nullptr ? sources.texture(slot->texture) : cc::optional<value_summary>();
@@ -237,10 +237,7 @@ cc::optional<impl::emitter_estimate> impl::emitter_estimate_of(material_emission
 
 f32 impl::world_area_of(f32 object_area, tg::affine_transform3f const& placement)
 {
-    auto const l = placement.linear_mat();
-    auto const det = l[0, 0] * (l[1, 1] * l[2, 2] - l[2, 1] * l[1, 2]) - l[1, 0] * (l[0, 1] * l[2, 2] - l[2, 1] * l[0, 2])
-                   + l[2, 0] * (l[0, 1] * l[1, 2] - l[1, 1] * l[0, 2]);
-    return object_area * tg::pow(tg::abs(det), 2.0f / 3.0f);
+    return object_area * tg::pow(tg::abs(placement.linear_mat().determinant()), 2.0f / 3.0f);
 }
 
 bool impl::is_similarity(tg::mat3f const& linear)

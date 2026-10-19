@@ -74,11 +74,12 @@ fun light_cone(l: light, cos_axis: float) -> float:
 
 // ---- Scene items ----------------------------------------------------------------------------------------------------
 
-/// How an instance's cutout opacity is read, `instance.opacity_kind`; `sv::material_opacity_kind` mirrors these.
-const opacity_none = 0u
-const opacity_constant = 1u
-const opacity_attribute = 2u
-const opacity_texture = 3u
+/// How a value of a material is read, the cutout opacity's `instance.opacity_kind` and each emission factor's kind; `sv::material_value_kind` mirrors these.
+/// `value_none` reads nothing: the consumer takes its identity value.
+const value_none = 0u
+const value_constant = 1u
+const value_attribute = 2u
+const value_texture = 3u
 
 /// What `instance.opacity_offset` and `opacity_uv_offset` name when they are not a parameter-block offset.
 const no_offset = 0xffffffffu
@@ -97,7 +98,7 @@ struct instance:
     link_mask: uint
 
     /// Where the cutout opacity lives in the parameter block and how it is read — `sv::material_opacity` says per field.
-    /// `opacity_none` never cuts out.
+    /// `value_none` never cuts out.
     opacity_kind: uint
     opacity_offset: uint
     opacity_uv_offset: uint

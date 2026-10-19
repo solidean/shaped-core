@@ -312,20 +312,20 @@ fun emitter_radiance(e: emitter_record, ctx: material.shading_context){traced, b
 
 /// One factor of an emission at `ctx`, `lanes` wide: a constant of the parameter block, a mesh attribute, or a texture, as `kind` says.
 /// `channels` holds up to three swizzle selectors a byte each, and a one-lane factor comes back in `.x`, its other lanes meaning nothing.
-/// `scene.opacity_none` is a factor of 1.
+/// `scene.value_none` is a factor of 1.
 ///
 /// A texture is sampled at level 0 through the palette, as a generated closest hit and a wavefront shade kernel sample it, since neither has derivatives.
 /// So the sample here and the hit's are one value: a level picked by a footprint on one side alone would weigh two different integrands against each other.
 fun emission_factor(kind: uint, offset: uint, uv_offset: uint, frequency: uint, channels: uint, palette: uint, transform_offset: uint, lanes: uint, ctx: material.shading_context){traced, bindless} -> float3:
-    if kind == scene.opacity_none => return float3(1.0)
+    if kind == scene.value_none => return float3(1.0)
     let block = ctx.param_buffer as int
 
-    if kind == scene.opacity_constant:
+    if kind == scene.value_constant:
         // A one-lane constant may be the last word of its block, so it loads one float rather than three.
         if lanes == 1u => return float3(reinterpret_as_float(bindless.buffers[nonuniform block].load(ctx.param_offset + offset)), 0.0, 0.0)
         return reinterpret_as_float(bindless.buffers[nonuniform block].load3(ctx.param_offset + offset))
 
-    if kind == scene.opacity_attribute:
+    if kind == scene.value_attribute:
         let desc = material.load_attribute_desc(bindless.buffers[nonuniform block], ctx.param_offset + offset)
         let desc_buffer = desc.buffer as int
         if lanes == 1u => return float3(material.load_f1_at(bindless.buffers[nonuniform desc_buffer], desc, frequency, ctx), 0.0, 0.0)
@@ -671,13 +671,13 @@ fun texel_channel(texel: float4, channel: uint) -> float:
 /// It lists no group of the trace's, so a raster pixel cuts through it too, `raster.is_cut`.
 /// The value is the declared opacity attribute's, thresholded where the type declares a cutoff above 0, and saturated otherwise.
 fun instance_opacity(inst: scene.instance, ctx: material.shading_context){bindless} -> float:
-    if inst.opacity_kind == scene.opacity_none => return 1.0
+    if inst.opacity_kind == scene.value_none => return 1.0
 
     let block = ctx.param_buffer as int
     let mut opacity = 1.0
-    if inst.opacity_kind == scene.opacity_constant:
+    if inst.opacity_kind == scene.value_constant:
         opacity = reinterpret_as_float(bindless.buffers[nonuniform block].load(ctx.param_offset + inst.opacity_offset))
-    else if inst.opacity_kind == scene.opacity_attribute:
+    else if inst.opacity_kind == scene.value_attribute:
         let desc = material.load_attribute_desc(bindless.buffers[nonuniform block], ctx.param_offset + inst.opacity_offset)
         let desc_buffer = desc.buffer as int
         opacity = material.load_f1_at(bindless.buffers[nonuniform desc_buffer], desc, inst.opacity_frequency, ctx)

@@ -186,8 +186,8 @@ TEST("sv - an emission descriptor says where each of its factors lives")
     {
         auto const g = generate(lib, sv::builtin_material::openpbr, {});
         CHECK(g.emission.declares());
-        CHECK(g.emission.color.kind == sv::material_opacity_kind::constant);
-        CHECK(g.emission.scale.kind == sv::material_opacity_kind::constant);
+        CHECK(g.emission.color.kind == sv::material_value_kind::constant);
+        CHECK(g.emission.scale.kind == sv::material_value_kind::constant);
         auto color_offset = -1;
         auto scale_offset = -1;
         for (auto const& s : g.layout.slots)
@@ -205,13 +205,13 @@ TEST("sv - an emission descriptor says where each of its factors lives")
     {
         auto const e = emission_of(lib, sv::builtin_material::pbr, {});
         CHECK(e.color.is_constant());
-        CHECK(e.scale.kind == sv::material_opacity_kind::none);
+        CHECK(e.scale.kind == sv::material_value_kind::none);
     }
 
     SECTION("a mesh attribute is read through its descriptor, at its frequency")
     {
         auto const e = emission_of(lib, sv::builtin_material::pbr, {}, attribute_mesh("emissive", tg::vec3f(1, 1, 1)));
-        CHECK(e.color.kind == sv::material_opacity_kind::attribute);
+        CHECK(e.color.kind == sv::material_value_kind::attribute);
         CHECK(e.color.frequency == 0u); // `material.frequency_per_triangle`
         CHECK(e.color.offset != sv::material_opacity::no_offset);
     }
@@ -224,7 +224,7 @@ TEST("sv - an emission descriptor says where each of its factors lives")
             {.scale = tg::vec4f(2, 2, 2, 1), .bias = tg::vec4f(0, 0, 0, 0)});
         auto const g = generate(lib, sv::builtin_material::pbr, {}, mesh);
         auto const& e = g.emission;
-        CHECK(e.color.kind == sv::material_opacity_kind::texture);
+        CHECK(e.color.kind == sv::material_value_kind::texture);
         CHECK(e.color.uv_offset != sv::material_opacity::no_offset);
         CHECK(e.color.frequency == 1u); // `material.frequency_per_vertex`, the uv's
         CHECK(e.color.channels[0] == 2u);
@@ -247,18 +247,18 @@ TEST("sv - an emission descriptor says where each of its factors lives")
         CHECK(r.cdf == 9u);
         CHECK(r.triangle_count == 300u);
         CHECK(r.block_count == 2u);
-        CHECK(r.color_kind == u32(sv::material_opacity_kind::texture));
+        CHECK(r.color_kind == u32(sv::material_value_kind::texture));
         CHECK(r.color_offset == textured.color.offset);
         CHECK(r.color_uv_offset == textured.color.uv_offset);
         CHECK(r.color_frequency == textured.color.frequency);
         CHECK(r.color_channels == (2u | (5u << 8)));
         CHECK(r.color_sampler == textured.color.sampler);
         CHECK(r.color_transform == sv::material_opacity::no_offset);
-        CHECK(r.scale_kind == u32(sv::material_opacity_kind::none));
+        CHECK(r.scale_kind == u32(sv::material_value_kind::none));
 
         auto const openpbr = emission_of(lib, sv::builtin_material::openpbr, {});
         auto const o = sv::emitter_record_of(0, 0, 1, 1, openpbr);
-        CHECK(o.scale_kind == u32(sv::material_opacity_kind::constant));
+        CHECK(o.scale_kind == u32(sv::material_value_kind::constant));
         CHECK(o.scale_offset == openpbr.scale.offset);
         CHECK(o.scale_channel == 0u);
     }

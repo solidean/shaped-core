@@ -50,10 +50,10 @@ struct sv::material_parameter_layout
     i32 size_bytes = 0;
 };
 
-/// How an instance's cutout opacity is read — `scene.opacity_*` in shaders/sgl/scene_items.sgl.
-enum class sv::material_opacity_kind : sv::u32
+/// How a value of a material is read — the cutout opacity, or a factor of the emission; `scene.value_*` in shaders/sgl/scene_items.sgl.
+enum class sv::material_value_kind : sv::u32
 {
-    none = 0,      ///< never cuts out
+    none = 0,      ///< not read: the consumer's identity value
     constant = 1,  ///< a value of the parameter block
     attribute = 2, ///< a mesh attribute, through the block's descriptor of it
     texture = 3,   ///< a texture channel, sampled through the block's uv descriptor
@@ -69,7 +69,7 @@ struct sv::material_opacity
     /// What an offset holds when it names no slot.
     static constexpr u32 no_offset = 0xffffffffu;
 
-    material_opacity_kind kind = material_opacity_kind::none;
+    material_value_kind kind = material_value_kind::none;
 
     /// The opacity's own slot: the constant, the attribute descriptor, or the texture index.
     u32 offset = no_offset;
@@ -92,16 +92,15 @@ struct sv::material_opacity
     /// The cutoff's constant slot, where the type declares one; a cutoff above 0 thresholds, and 0 leaves coverage.
     u32 cutoff = no_offset;
 
-    [[nodiscard]] bool can_cut_out() const { return kind != material_opacity_kind::none; }
+    [[nodiscard]] bool can_cut_out() const { return kind != material_value_kind::none; }
 };
 
 /// Where one factor of a permutation's emission lives in its parameter block — the emission counterpart of `material_opacity`.
 ///
 /// Each field means what `material_opacity`'s of the same name does, and `channels` is the swizzle's first three selectors.
-/// `kind` is `material_opacity_kind`, since the four ways a value can be read are the same whatever it is.
 struct sv::material_emission_factor
 {
-    material_opacity_kind kind = material_opacity_kind::none;
+    material_value_kind kind = material_value_kind::none;
     u32 offset = material_opacity::no_offset;
     u32 uv_offset = material_opacity::no_offset;
     u32 frequency = 0;
@@ -109,7 +108,7 @@ struct sv::material_emission_factor
     u32 sampler = 0;
     u32 transform = material_opacity::no_offset;
 
-    [[nodiscard]] bool is_constant() const { return kind == material_opacity_kind::constant; }
+    [[nodiscard]] bool is_constant() const { return kind == material_value_kind::constant; }
 };
 
 /// Where a permutation's emission lives: its color, and the scale applied to it, as the type declares them.
@@ -124,7 +123,7 @@ struct sv::material_emission
     material_emission_factor scale;
 
     /// Whether the type declares where its emission comes from at all.
-    [[nodiscard]] bool declares() const { return color.kind != material_opacity_kind::none; }
+    [[nodiscard]] bool declares() const { return color.kind != material_value_kind::none; }
 };
 
 /// A material permutation as an SGL hit group, plus the parameter layout it reads.

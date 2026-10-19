@@ -427,19 +427,19 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
 
         case material_frequency::material:
         case material_frequency::mesh_instance:
-            out.kind = material_opacity_kind::constant;
+            out.kind = material_value_kind::constant;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
             break;
 
         case material_frequency::mesh_attribute:
-            out.kind = material_opacity_kind::attribute;
+            out.kind = material_value_kind::attribute;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
             out.frequency = frequency_code(a.attribute->frequency);
             break;
 
         case material_frequency::material_texture:
         case material_frequency::mesh_texture_binding:
-            out.kind = material_opacity_kind::texture;
+            out.kind = material_value_kind::texture;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::texture_index).offset);
             out.uv_offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
             out.frequency = frequency_code(a.uv->frequency);
@@ -496,19 +496,19 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
         case material_frequency::material_type:
         case material_frequency::material:
         case material_frequency::mesh_instance:
-            out.kind = material_opacity_kind::constant;
+            out.kind = material_value_kind::constant;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
             break;
 
         case material_frequency::mesh_attribute:
-            out.kind = material_opacity_kind::attribute;
+            out.kind = material_value_kind::attribute;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
             out.frequency = frequency_code(a.attribute->frequency);
             break;
 
         case material_frequency::material_texture:
         case material_frequency::mesh_texture_binding:
-            out.kind = material_opacity_kind::texture;
+            out.kind = material_value_kind::texture;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::texture_index).offset);
             out.uv_offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
             out.frequency = frequency_code(a.uv->frequency);

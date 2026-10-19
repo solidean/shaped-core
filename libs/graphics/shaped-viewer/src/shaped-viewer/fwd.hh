@@ -143,7 +143,7 @@ struct resolved_material;           // a type + material + mesh resolved down th
 enum class material_slot_kind : u8; // what one field of a per-instance parameter block holds
 struct material_slot;
 struct material_parameter_layout; // the parameter block one permutation reads
-enum class material_opacity_kind : u32;
+enum class material_value_kind : u32;
 struct material_opacity;         // where a permutation's cutout opacity lives, for the one generic reader
 struct material_emission_factor; // where one factor of a permutation's emission lives
 struct material_emission; // where a permutation's emission lives, which is what lets its instances light the scene

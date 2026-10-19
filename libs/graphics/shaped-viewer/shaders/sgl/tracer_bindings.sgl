@@ -78,7 +78,7 @@ struct emitter_record:
 
     /// Where the emission color lives in the instance's parameter block and how it is read — `sv::material_emission_factor` says per field.
     /// `color_channels` packs the swizzle's three selectors a byte each, the first lowest.
-    /// The kinds are `scene.opacity_*`, since the four ways a value is read are the same whatever it is.
+    /// The kinds are `scene.value_*`.
     color_kind: uint
     color_offset: uint
     color_uv_offset: uint
@@ -87,7 +87,7 @@ struct emitter_record:
     color_sampler: uint
     color_transform: uint
 
-    /// The same for the scale, whose `scene.opacity_none` is a scale of 1; `scale_channel` is its one selector.
+    /// The same for the scale, whose `scene.value_none` is a scale of 1; `scale_channel` is its one selector.
     scale_kind: uint
     scale_offset: uint
     scale_uv_offset: uint
