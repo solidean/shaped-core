@@ -503,6 +503,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a partial fill starts its share of
     }
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+    if (ctx.metrics.adapter().is_software)
+        SKIP("statistical convergence is checked on hardware, not WARP");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const scene = make_scene(resources);
@@ -906,6 +908,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
     }
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+    if (ctx.metrics.adapter().is_software)
+        SKIP("statistical convergence is checked on hardware, not WARP");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const base = make_scene(resources);
@@ -1028,6 +1032,8 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a dim light near what it lights ke
     }
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+    if (ctx.metrics.adapter().is_software)
+        SKIP("statistical convergence is checked on hardware, not WARP");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const base = make_scene(resources);

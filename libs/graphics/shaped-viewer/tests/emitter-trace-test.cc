@@ -5,7 +5,6 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
-#include <nexus/tests/thorough.hh> // nx::is_thorough
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/rendering/impl/emitters.hh>
@@ -267,27 +266,20 @@ void check_channels_match(cc::span<tg::vec3f const> image,
     return mode != sv::render_mode::wavefront || ctx.supports(sg::feature::ray_query);
 }
 
-/// Why this device and build cannot trace at all, or empty where they can.
+/// Why this device and build cannot run a test of this file's statistical kind, or empty where they can.
+/// Every caller checks a converged image or mean, which a software adapter proves nothing about that hardware does not prove better.
 [[nodiscard]] cc::string_view skip_reason(sg::context& ctx)
 {
     if (!sv_test::shared_env().has_compiler)
         return "no SGL compiler that reaches DXIL to build the path-tracing shaders";
     if (!can_trace(ctx, sv::render_mode::megakernel))
         return "device reports no ray tracing support";
+    if (ctx.metrics.adapter().is_software)
+        return "statistical convergence is checked on hardware, not WARP";
     return {};
 }
 
 constexpr sv::render_mode k_modes[] = {sv::render_mode::megakernel, sv::render_mode::wavefront};
-
-/// The tracers a scene is traced with on `ctx`: both, but the megakernel alone in a default run on a software adapter.
-/// There the wavefront's cost is its dispatches, a dozen per round, and its legs here would take most of the binary's budget.
-/// The emissive quad's test traces both regardless, so the wavefront's emitter sampling is traced by default there too.
-[[nodiscard]] cc::span<sv::render_mode const> modes_of(sg::context& ctx)
-{
-    if (!nx::is_thorough() && ctx.metrics.adapter().is_software)
-        return cc::span<sv::render_mode const>(k_modes).subspan(cc::offset_size{.offset = 0, .size = 1});
-    return k_modes;
-}
 
 [[nodiscard]] cc::string_view name_of(sv::render_mode mode)
 {
@@ -372,7 +364,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter of many uneven triangles lights as a rect 
     rect.lights.push_back(
         sv::light::rect(center - tg::vec3f(0, 1e-3f, 0), tg::vec3f(half[0], 0, 0), tg::vec3f(0, 0, half[1])).nits(nits));
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -402,7 +394,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter's mean is the same sampled or reached by b
     auto bounced = sampled;
     bounced.lights.push_back(sv::light::point(tg::pos3f(0, -0.5f, 3)).candela(1e5f));
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -438,7 +430,7 @@ ASYNC_INVOCABLE_TEST("sv - an emissive furnace converges to its geometric series
     furnace.meshes.push_back({.mesh = mesh_of("furnace", box_positions(tg::pos3f(-1, -1, -1), tg::pos3f(1, 1, 1)),
                                               lambert(tg::vec3f(albedo, albedo, albedo), emission))});
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -480,7 +472,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter placed by a non-uniform scale and a rotati
     auto baked = emitter_scene{.meshes = room(), .camera = floor_camera()};
     baked.meshes.push_back({.mesh = mesh_of("baked lamp", world, material)});
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -511,7 +503,7 @@ ASYNC_INVOCABLE_TEST("sv - power selection over a dim large and a bright small e
         return s;
     };
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -544,7 +536,7 @@ ASYNC_INVOCABLE_TEST("sv - a cutout emitter at opacity one half delivers half th
         return s;
     };
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -777,7 +769,7 @@ ASYNC_INVOCABLE_TEST("sv - a half-black, half-white textured emitter lights as a
         {.mesh = mesh_of("white half", ceiling_quad(center + tg::vec3f(quarter, 0, 0), tg::vec2f(quarter, half[1])),
                          lambert(tg::vec3f(0, 0, 0), nits))});
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -831,7 +823,7 @@ ASYNC_INVOCABLE_TEST("sv - a per-vertex emitter's mean is the same sampled or re
     auto bounced = sampled;
     bounced.lights.push_back(sv::light::point(tg::pos3f(0, -0.5f, 3)).candela(1e5f));
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -890,7 +882,7 @@ ASYNC_INVOCABLE_TEST("sv - the Cornell box's per-triangle lamp lights the box as
     constant.meshes.push_back({.mesh = enclosure});
     constant.meshes.push_back({.mesh = mesh_of("cornell lamp, constant", lamp_positions, constant_material)});
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -948,7 +940,7 @@ ASYNC_INVOCABLE_TEST("sv - an indexed emitter reads its per-vertex and per-corne
     corner_lit.meshes.push_back(
         {.mesh = lamp("indexed ramp, per corner", sv::attribute_frequency::per_corner, per_corner)});
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -1015,7 +1007,7 @@ ASYNC_INVOCABLE_TEST("sv - a per-triangle lamp of two different triangles lights
                                                     lamp_positions.subspan(cc::offset_size{.offset = 3 * t, .size = 3}),
                                                     constant_of(lamp_materials[t], t))});
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
@@ -1107,7 +1099,7 @@ ASYNC_INVOCABLE_TEST("sv - a textured emitter under a transform and a textured l
         {.mesh = mesh_of("right half", ceiling_quad(center + tg::vec3f(quarter, 0, 0), tg::vec2f(quarter, half[1])),
                          glow(tg::vec3f(5, 2.9f, 3.45f), 0.6f))});
 
-    for (auto const mode : modes_of(ctx))
+    for (auto const mode : k_modes)
     {
         if (!can_trace(ctx, mode))
             continue;
