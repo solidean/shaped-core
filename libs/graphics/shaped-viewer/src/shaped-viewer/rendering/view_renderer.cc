@@ -1292,11 +1292,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const samples = !at_target || slot->accum_frame == 0;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
-    // After the target's restart above, so a restart counted there draws a sequence of its own.
     fc.accum_frame = slot->accum_frame;
-    if (slot->accum_frame == 0)
-        ++slot->restarts;
-    fc.rng_seed = seed_of(*slot);
 
     // Set after the hash, like accum_frame, so none of it reaches the hash.
     // The guides count on the normal slot's own frames, since they may have started after the mean did.
@@ -1359,6 +1355,15 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                                 ? sr::reconstruct_input_extent(ctx, upscale_settings, tr.resolution, traceable_guides())
                                 : tr.resolution;
     auto const scaled = input_extent != tr.resolution;
+
+    // Only a full-size frame restarts the mean, so only it counts a restart; a scaled one seeds from its own count below.
+    // After the target's restart above, so a restart counted there draws a sequence of its own.
+    if (!scaled)
+    {
+        if (slot->accum_frame == 0)
+            ++slot->restarts;
+        fc.rng_seed = seed_of(*slot);
+    }
     // A scaled frame is an image of its own rather than a sample of the mean, so it traces whatever the mean holds.
     auto const traces = samples || scaled;
 

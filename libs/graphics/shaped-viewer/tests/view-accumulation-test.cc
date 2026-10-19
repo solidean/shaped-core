@@ -703,12 +703,15 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
     auto const frame_samples = [&]() -> sv::impl::temporal_slot const&
     { return *store.peek_ptr(moving_id)->temporal.get_ptr(sv::temporal_id::frame_samples(0)); };
 
+    // A scaled frame is no restart of the mean, so it leaves the count the seed is drawn from as it was.
+    auto const restarts_before = accumulation().restarts;
     for (auto i = u64(1); i <= 3; ++i)
     {
         (void)co_await frame(i, true);
         CHECK(accumulation().traced_scaled);
         CHECK(accumulation().accum_frame == 0);
     }
+    CHECK(accumulation().restarts == restarts_before);
     auto const input = frame_samples().scaled_denoise.extent();
     CHECK(input[0] < output_size[0]);
     CHECK(input[1] < output_size[1]);
@@ -721,6 +724,7 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
     (void)co_await frame(4, false);
     CHECK(!accumulation().traced_scaled);
     CHECK(accumulation().accum_frame == 1);
+    CHECK(accumulation().restarts == restarts_before + 1); // the full-size frame that restarted it
     CHECK(frame_samples().denoise.extent() == output_size);
 
     (void)co_await frame(5, false);

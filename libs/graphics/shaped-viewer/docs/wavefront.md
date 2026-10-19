@@ -212,7 +212,9 @@ The depth is kept as view depth and made clip depth at resolve, since a drawing 
 ### A pixel's samples do not depend on how the frames split them
 
 A capture waits for samples per pixel rather than frames, since how many samples a frame finishes is the GPU's and the budget's.
-For that to give one image on any GPU, a pixel's k-th sample has to trace the same path however it got there.
+So any GPU stops at the same sample count, and for that count to be the same image a pixel's k-th sample has to trace the same path however it got there.
+**It is the same image only when the run restarted the same number of times**: the seed hashes the slot's restarts, and cold compiles and owed-work drains change how many come before the final run.
+A seed that does not depend on them is `feat-sv-deterministic-seed`.
 
 - **A pixel's paths continue one random stream from sample to sample**, and the fill draws from a stream of its own.
   That stream hashes the slot, the frame's seed, the pixel's count and the slot's draws since its sample last started, so it never advances the path's.

@@ -79,7 +79,8 @@ An example needs **no code for any of this** — `sv::interactive` reads the var
 A capture waits for three things together, because each hides something the others cannot see.
 Every traced view must hold enough samples per pixel, no resource may still owe post-load work, and a trace must actually have dispatched.
 That last one is what stops a routine whose shaders never compiled from writing out a black image at full sample count.
-`accumulate` is in the program's own unit: for `sv` it is samples per pixel, so a capture holds the same samples whatever GPU takes it and however fast.
+`accumulate` is in the program's own unit: for `sv` it is samples per pixel, so a capture holds the same sample count whatever GPU takes it and however fast.
+The image is identical only when the run restarted the same number of times, which cold compiles and drains can change (`feat-sv-deterministic-seed`).
 A program answering the protocol itself counts what it likes, and a raster one counts frames drawn.
 `--capture-accumulate` and `--capture-timeout` move the thresholds when a scene needs longer.
 
