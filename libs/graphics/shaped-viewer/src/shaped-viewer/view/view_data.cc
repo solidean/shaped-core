@@ -1,7 +1,21 @@
+#include <clean-core/common/hash.hh>
 #include <shaped-viewer/view/view_data.hh>
 
 namespace sv
 {
+namespace
+{
+/// What a layer's denoised image is a function of beside its mean and guides: every setting the denoiser or its schedule reads.
+/// Not `fresh_samples`, which each call sets for itself, nor `frame_time_ms`, which no member reads yet and a viewer would set every frame.
+[[nodiscard]] u64 denoised_reset_hash(render_settings const& s)
+{
+    auto const& r = s.reconstruct;
+    return cc::make_hash(r.denoiser, r.upscaler, r.scale, r.quality, r.sharpness, r.temporal_responsiveness,
+                         r.noisy_guides, r.exposure, r.upscale_sharpness, s.temporal_denoise_frames,
+                         s.temporal_denoise_fade_frames);
+}
+} // namespace
+
 layer const* primary_scene_3d(view_data const& v)
 {
     for (auto const& l : v.layers)
@@ -73,7 +87,11 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         out.push_back({.id = temporal_id::normal_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
         out.push_back({.id = temporal_id::depth_guide(u8(i)), .format = sg::pixel_format::r32_float});
         out.push_back({.id = temporal_id::albedo_guide(u8(i)), .format = sg::pixel_format::rgba16_float});
-        out.push_back({.id = temporal_id::denoised(u8(i)), .format = sg::pixel_format::rgba16_float});
+        // The denoised image restarts on every setting that decides it, since a layer at its target traces nothing and
+        // denoises again only once nothing has denoised its mean.
+        out.push_back({.id = temporal_id::denoised(u8(i)),
+                       .format = sg::pixel_format::rgba16_float,
+                       .reset_hash = denoised_reset_hash(v.layers[i].settings)});
 
         // The specular pair, for every member: a split one reads it beside the diffuse albedo, and an unsplit one
         // demodulates by the sum of the two, since a metal's diffuse albedo is zero.

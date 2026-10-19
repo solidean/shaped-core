@@ -325,8 +325,8 @@ struct sweep_row
     //
     // A dark base is what makes it a sweep of EMISSION: emission adds to the surface, so a lit base would carry the low
     // columns and the first half of the row would show the light rather than the parameter.
-    // What it cannot show is an emitter lighting anything — next-event estimation samples the analytic lights alone, so
-    // these spheres are visible to the camera and invisible to their neighbours.
+    // openpbr declares its emission, so these spheres light their neighbors too, but faintly: at these luminances beside
+    // the key light, what the row shows is the parameter rather than the light it casts.
     rows.push_back(
         {.name = "emission",
          .shared = {binding::of("base_color", tg::vec3f(0.05f, 0.05f, 0.06f)), binding::of("specular_roughness", 0.3f),

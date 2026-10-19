@@ -3,6 +3,8 @@ created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-viewer/shaders/sgl/tracer_shade.sgl
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/scene/light.hh
+closed: 2026-10-18
+resolution: fixed
 ---
 
 # An emissive mesh lights nothing but the camera

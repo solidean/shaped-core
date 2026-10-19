@@ -32,8 +32,10 @@ fun mis_weight(pdf_this: float, pdf_other: float) -> float:
 // So both must form the light's density from `light_pdf`.
 // A density the two disagree about is not a weighting error that shows up as noise: the two weights stop summing to one and the estimate is simply wrong.
 
-/// The probability of next-event estimation choosing any one light: uniform over the `light_count` lights the trace holds.
-fun light_select_pdf(light_count: uint) -> float:
+/// The probability of next-event estimation choosing `l`: its record's, which the table writes in proportion to power.
+/// A record carrying none is one of `light_count` lights picked uniformly.
+fun light_select_pdf(l: scene.light, light_count: uint) -> float:
+    if l.select_pdf > 0.0 => return l.select_pdf
     return 1.0 / (max(light_count, 1) as float)
 
 /// The solid-angle density of next-event estimation reaching `l` along a direction.
@@ -41,13 +43,21 @@ fun light_select_pdf(light_count: uint) -> float:
 ///
 /// The light's choice is part of it: uniform area sampling, reprojected onto the sphere of directions, times the probability of having picked this light at all.
 fun light_pdf(l: scene.light, light_count: uint, dist2: float, cos_light: float) -> float:
-    return light_select_pdf(light_count) * dist2 / max(l.area * cos_light, 1e-9)
+    return light_select_pdf(l, light_count) * dist2 / max(l.area * cos_light, 1e-9)
+
+/// The solid-angle density of next-event estimation reaching a point on an emissive instance's triangle.
+/// `select` is the record's choice, `p_tri` the triangle's share of the instance's area CDF and `area` its world area.
+/// `dist2` is the squared distance to the point and `cos_light` the cosine at the triangle, taken two-sided.
+///
+/// The next-event sample and a bounce ray that meets the triangle both form it here, so the two weights sum to one.
+fun mesh_light_pdf(select: float, p_tri: float, area: float, dist2: float, cos_light: float) -> float:
+    return select * p_tri * dist2 / max(area * cos_light, 1e-9)
 
 /// The solid-angle density of next-event estimation reaching a distant disc along a direction inside it.
 /// That is uniform over the cone the disc subtends, times the probability of having picked this light.
 fun disc_pdf(l: scene.light, light_count: uint) -> float:
     let solid_angle = 2.0 * pi * l.one_minus_cos_angular_radius
-    return light_select_pdf(light_count) / max(solid_angle, 1e-20)
+    return light_select_pdf(l, light_count) / max(solid_angle, 1e-20)
 
 /// Whether the unit `dir` falls inside a distant disc.
 ///

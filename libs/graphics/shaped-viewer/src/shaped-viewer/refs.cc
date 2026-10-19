@@ -774,14 +774,14 @@ cc::string_view view_ref::display_name() const
     return _frame->state_of(_view).display_name;
 }
 
-u32 view_ref::accumulated_frames() const
+u32 view_ref::accumulated_samples() const
 {
-    return impl::min_accumulated_frames(_frame->state_of(_view));
+    return impl::min_accumulated_samples(_frame->state_of(_view));
 }
 
-bool view_ref::is_accumulation_converged(cc::optional<u32> frames) const
+bool view_ref::is_accumulation_converged(cc::optional<u32> samples) const
 {
-    return impl::is_accumulation_converged(_frame->state_of(_view), frames);
+    return impl::is_accumulation_converged(_frame->state_of(_view), samples);
 }
 
 // ---- window_ref ------------------------------------------------------------------------------------------

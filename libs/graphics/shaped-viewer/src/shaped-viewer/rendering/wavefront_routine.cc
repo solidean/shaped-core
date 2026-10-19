@@ -38,6 +38,13 @@ void dispatch_slots(sg::command_list& cmd, u32 slots)
                                 int((groups + max_groups_per_axis - 1) / max_groups_per_axis));
 }
 
+/// `traced.counters`' sample floor, followed by its shortfall (`counter_sample_floor` in shaders/sgl/tracer_wavefront.sgl).
+constexpr isize counter_sample_floor = 5;
+
+/// `wavefront_step::fill` that starts every free slot (`fill_full` in shaders/sgl/tracer_wavefront.sgl).
+constexpr u32 fill_full = 65536;
+
+
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
 [[nodiscard]] cc::optional<sg::shader_format> sgl_format_for(sg::context const& ctx, slib::shader_library const& lib)
 {
@@ -256,7 +263,7 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
 
     auto fc = d.frame;
     fc.generation = d.state->generation;
-    fc.wavefront_flags = d.restart ? 1u : 0u;
+    fc.wavefront_flags = d.restart ? impl::wavefront_flag_restart : 0u;
     fc.permutation_count = u32(t.hit_groups.size());
     fc.roulette_after = d.roulette_after;
     auto const frame = ctx.transient.create_buffer_from_pod(cmd, fc, sg::buffer_usage::readonly_buffer);
@@ -277,9 +284,8 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
                                        .regenerate = d.regenerate ? 1u : 0u,
                                        .width = width,
                                        .height = height,
-                                       .pad0 = 0,
-                                       .pad1 = 0,
-                                       .pad2 = 0};
+                                       .fill = u32(cc::clamp(d.fill, 0.0f, 1.0f) * f32(fill_full) + 0.5f),
+                                       .sample_target = d.sample_target};
 
     // What a kernel's groups are: `tracer.traced` at 0 always, then the bindless tables or the arguments at 1, and the decal tables at 2.
     enum class second_group
@@ -389,6 +395,14 @@ sg::routine_outcome wavefront_routine::execute(sg::command_list& cmd, wavefront_
     }
     if (live.raw() != nullptr)
         *d.live_paths = cmd.download.data_from_buffer(live);
+    if (d.sample_floor != nullptr)
+    {
+        // Copied out before the next frame's reset raises it again.
+        auto const floor = ctx.transient.create_buffer<u32>(2, sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+        cmd.copy.buffer_data_region<u32>(
+            {.src = d.state->counters.raw(), .dst = floor.raw(), .count = 2, .src_offset = counter_sample_floor});
+        *d.sample_floor = cmd.download.data_from_buffer(floor);
+    }
     if (t.stand_ins != nullptr)
         *t.stand_ins = stand_in_report::of(bound, substituted, pending);
     return sg::routine_outcome::executed;

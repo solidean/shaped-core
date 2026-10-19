@@ -37,7 +37,7 @@ enum class trace_case
     openpbr_constants, ///< `openpbr` with constants a material binds, coat and anisotropy included
     mesh_attributes,   ///< `openpbr` reading per-vertex colors, normals and a tangent frame
     textured,          ///< a base color texture through uvs past [0, 1], sampled nearest and clamped / mirrored
-    cutout,            ///< a per-vertex opacity the any-hits cut out stochastically, and an alpha-cutoff one
+    cutout,            ///< a stochastic per-vertex opacity, an alpha-cutoff one, and the quadrics beside them
     unlit,             ///< the builtin `unlit` type
     quadrics,          ///< spheres, a capped cylinder and a cone, per-primitive colors read through the batch
 };
@@ -269,7 +269,8 @@ template <class T>
     scene.items.push_back(resources.acquire_scene_item(panel_mesh(c)));
     placements.push_back(panel_placement);
 
-    if (c == trace_case::quadrics)
+    // The cutout case holds the quadrics too, so one scene carries every shape of hit group the generator emits.
+    if (c == trace_case::quadrics || c == trace_case::cutout)
     {
         auto set = sv::quadric_set();
         set.add_sphere(tg::sphere3f(tg::pos3f(1.3f, 0.45f, 0.2f), 0.45f));
@@ -456,13 +457,12 @@ cc::shared_async<cc::vector<tg::vec4f>> trace_once(sg::context* ctx, sv::gpu_res
     co_return image;
 }
 
-/// Case `c` traced on `ctx`.
-cc::shared_async<cc::vector<tg::vec4f>> image_of(sg::context* ctx, trace_case c)
+/// Case `c` traced on `ctx`, through `resources`, which must be `ctx`'s.
+cc::shared_async<cc::vector<tg::vec4f>> image_of(sg::context* ctx, sv::gpu_resource_manager* resources, trace_case c)
 {
-    auto resources = sv::gpu_resource_manager::create(*ctx);
-    auto const scene = make_scene(resources, c);
+    auto const scene = make_scene(*resources, c);
     REQUIRE(scene.has_value());
-    auto image = co_await trace_once(ctx, &resources, scene.value());
+    auto image = co_await trace_once(ctx, resources, scene.value());
     co_await cc::async_settled(sv::background_work(*ctx));
     co_return image;
 }
@@ -545,10 +545,10 @@ constexpr trace_case all_cases[] = {trace_case::pbr,
                                     trace_case::unlit,
                                     trace_case::quadrics};
 
-/// One case per shape of hit group the generator emits: an opaque triangle, a cutout triangle with its any-hits, and a
-/// procedural one; every spelling only under --thorough.
+/// The one case holding every shape of hit group the generator emits: an opaque triangle (the floor), a cutout triangle
+/// with its any-hits, and a procedural one; every spelling only under --thorough.
 /// A debug build compiles each spelling's hit groups through an unoptimized SGL front end, which is what this narrows.
-constexpr trace_case default_cases[] = {trace_case::pbr, trace_case::cutout, trace_case::quadrics};
+constexpr trace_case default_cases[] = {trace_case::cutout};
 
 [[nodiscard]] cc::span<trace_case const> cases_to_trace()
 {
@@ -564,9 +564,10 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - every material spelling traces a l
     if (auto const reason = cannot_trace(*ctx_h); reason.has_value())
         SKIP(reason.value());
     // In sequence on the one context rather than as sections, which would bring the invocation up again per case.
+    auto resources = sv::gpu_resource_manager::create(*ctx_h);
     for (auto const c : cases_to_trace())
     {
-        auto const image = co_await image_of(ctx_h.get(), c);
+        auto const image = co_await image_of(ctx_h.get(), &resources, c);
         auto const mean = checked_mean(image, name_of(c));
         CHECK(mean > 0.05f).context(cc::format("{}: the scene is lit, or nothing traced; mean {}", name_of(c), mean));
     }
@@ -590,9 +591,13 @@ ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to roundi
     auto reference = sg::create_dx12_context(
         {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware});
     auto const has_reference = reference.has_value() && !cannot_trace(*reference.value()).has_value();
+    auto resources = sv::gpu_resource_manager::create(*ctx.value());
+    auto reference_resources = cc::optional<sv::gpu_resource_manager>();
+    if (has_reference)
+        reference_resources.emplace_value(sv::gpu_resource_manager::create(*reference.value()));
     for (auto const c : cases_to_trace())
     {
-        auto const own = co_await image_of(ctx.value().get(), c);
+        auto const own = co_await image_of(ctx.value().get(), &resources, c);
         auto const mean = checked_mean(own, cc::format("{} on vulkan", name_of(c)));
         CHECK(mean > 0.05f).context(cc::format("{} on vulkan: the scene is lit; mean {}", name_of(c), mean));
         if (!has_reference)
@@ -601,7 +606,7 @@ ASYNC_TEST("sv vulkan - the path tracer traces what it traces on dx12, to roundi
             continue;
         }
 
-        auto const held = co_await image_of(reference.value().get(), c);
+        auto const held = co_await image_of(reference.value().get(), &reference_resources.value(), c);
         REQUIRE(held.size() == own.size());
         auto const d = difference_of(held, own);
         CC_LOG_INFO("cross-backend trace, {}: max abs diff {}, max relative diff {}, {} of {} pixels differ",

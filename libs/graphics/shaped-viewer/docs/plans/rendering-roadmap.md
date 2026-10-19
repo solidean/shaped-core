@@ -29,6 +29,8 @@ Today it is unshadowed and reflects only the SH environment; a device without ra
 - **Ray tracing is the first choice and never a requirement.**
   Interactively the hybrid is the mode: rasterized primaries, lighting by hardware ray tracing or by the ray-query polyfill where there is none.
   Done for raster: a raster layer draws on a device without ray tracing, building no acceleration structure, and only a traced layer acquires the tracer.
+  **The polyfill exists on webgpu alone**, where the wavefront is out of scope, so a dx12 or vulkan device without ray tracing has none.
+  Bringing it there is an sg item (`feat-sg-ray-query-polyfill-dx12-vulkan`); until it lands, the hybrid there falls back to the raster path's direct lighting.
 - **A G-buffer holding all of OpenPBR is too much.**
   A visibility buffer is the approach to try first — instance and primitive per pixel, the hit rebuilt where it is lit, which is the wavefront's own hit record.
   Its cost is real, so it is the first candidate rather than the decision; the design review weighs it.
@@ -43,7 +45,7 @@ Today it is unshadowed and reflects only the SH environment; a device without ra
 4. **A design review of the rendering modes and the radiance cache**, run with the review tool.
    - Interactive: rasterized primaries, then ray-traced lighting through a radiance cache, possibly on the megakernel.
      The raster path's G-buffer is its input; what it lacks for that is the material itself, likely as a visibility buffer ([raster.md](../raster.md#the-g-buffer-seam)).
-   - Final: the wavefront tracer converging without the cache.
+   - Final: the wavefront tracer converging without the cache, with power-weighted light selection.
    - Later: special handling for mirrors and caustics.
 
 ## Open, unordered

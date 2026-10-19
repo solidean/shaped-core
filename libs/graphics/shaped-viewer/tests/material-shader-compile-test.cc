@@ -9,6 +9,7 @@
 
 #include <clean-core/container/array.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <nexus/test.hh>

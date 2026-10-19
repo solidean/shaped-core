@@ -28,7 +28,8 @@ namespace
 {
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("color", tg::vec3f(0.5f, 0.5f, 0.5f)));
-    return sv::material_type::create("sv_test_color", cc::move(signature), "surface.base_color = color\n");
+    return sv::material_type::create(
+        {.name = "sv_test_color", .signature = cc::move(signature), .shader = "surface.base_color = color\n"});
 }
 
 [[nodiscard]] sv::mesh_attribute_binding bind(sv::mesh_attribute const& a)

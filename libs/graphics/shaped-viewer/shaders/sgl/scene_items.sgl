@@ -10,12 +10,18 @@ const light_path_point = 0u
 const light_path_area = 1u
 const light_path_distant_point = 2u
 const light_path_distant_disc = 3u
+/// An emissive instance: a record no `sv::light` makes, which the renderer appends after every analytic light.
+/// Its `emission` is an estimate of the instance's radiance, and its `area` an estimate of its world area, both read by selection alone.
+/// `tracer.traced.emitters` holds the rest, at the record's index past `frame_constants::emitter_offset`.
+const light_path_mesh = 4u
 
 // Bits of `light.flags`, which `sv::light_flag_*` restates, since slib generates no const; 0 is the default for each.
-// Written as their values, `1 << 0` to `1 << 2`, since a `const` holds a literal.
+// Written as their values, `1 << 0` to `1 << 3`, since a `const` holds a literal.
 const light_flag_two_sided = 1u
 const light_flag_visible_to_camera = 2u
 const light_flag_casts_no_shadow = 4u
+/// `light_path_mesh` only: the `emission` is a stand-in for one no read saw above zero, which the host's selection alone reads.
+const light_flag_unseen_emission = 8u
 
 /// One light, tagged by `path` — `tracer.light_record`, which `sv::light_record_of` fills (scene/light.hh), 96 bytes.
 ///
@@ -45,7 +51,10 @@ struct light:
     one_minus_cos_angular_radius: float
     /// RESERVED for light linking, read by nothing yet
     link_mask: uint
-    pad0: float2
+    /// The probability next-event estimation picks this light, and the cumulative one up to and including it in the table's order.
+    /// `sv::pt_light_table::grouped` writes them, in proportion to power; 0 in both is a table that picks uniformly.
+    select_pdf: float
+    select_cdf: float
 
 /// Whether geometry between `l` and a surface blocks it.
 fun light_casts_shadows(l: light) -> bool:
@@ -99,7 +108,9 @@ struct instance:
     opacity_cutoff: uint
     /// the index of the permutation the instance shades with in this trace, which a wavefront hit is sorted by
     shade_group: uint
-    pad: uint
+    /// The index of the instance's own record in `tracer.traced.lights`, or `no_offset` where it lights nothing.
+    /// A bounce ray that meets an instance with one weighs its emission against next-event estimation.
+    emitter: uint
 
     /// The rows of the object-to-world transform the instance is placed by, which a hit stored for later shading needs.
     to_world_x: float4

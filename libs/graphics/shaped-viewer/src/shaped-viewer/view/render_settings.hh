@@ -6,7 +6,7 @@
 
 namespace sv
 {
-/// Where a layer stops accumulating, which bounds GPU LOAD rather than the estimate.
+/// The samples per pixel where a layer stops accumulating, which bounds GPU LOAD rather than the estimate.
 ///
 /// Nothing ages out below it: an rgba32_float target still moves its mean at a weight of 1 / (n + 1) here, so the estimate
 /// would go on improving for as long as anyone will watch it.
@@ -17,9 +17,13 @@ namespace sv
 /// gets", and a target above the cap would otherwise wait forever.
 /// `view_ref::is_accumulation_converged` is the answer that already applies it.
 ///
-/// Per view rather than per process is the intended shape: `render_settings::max_accumulated_frames`, excluded from the trace hash.
-/// issue: feat-sv-max-accumulated-frames
-inline constexpr u32 accumulation_frame_cap = 4096;
+/// Samples rather than frames, since what a frame holds is the integrator's and the GPU's: a megakernel frame holds
+/// `samples_per_pixel`, and a wavefront frame whatever its rounds finish.
+/// The wavefront starts no sample past it, and the megakernel traces nothing once its frames reach it, so a still view there costs no trace.
+///
+/// Per view rather than per process is the intended shape: `render_settings::max_samples_per_pixel`, excluded from the trace hash.
+/// issue: feat-sv-max-samples-per-pixel
+inline constexpr u32 accumulation_sample_cap = 16384;
 
 /// The mode a layer asking for `mode` is drawn in on `ctx`: `mode` itself, unless it is `automatic`.
 [[nodiscard]] render_mode resolve_render_mode(sg::context const& ctx, render_mode mode);
@@ -44,7 +48,8 @@ enum class sv::render_mode : sv::u8
     megakernel,
 
     /// Paths split into stages that each run as their own dispatch, and carried across frames.
-    /// A still frame costs `render_settings::rounds_per_frame` rounds.
+    /// A still frame costs what its share of `viewer_config::frame_budget_ms` holds, or `rounds_per_frame` rounds without one.
+    /// Where one full round overruns that share, it runs one round and starts new samples in only a share of the free slots.
     /// A frame that sees the image change starts one sample per pixel and runs each to its end.
     wavefront,
 
@@ -85,11 +90,19 @@ struct sv::render_settings
     /// Under the viewer's `viewer_config::frame_budget_ms`, it is only where the rounds start, until the frame's own timestamps say what one costs.
     i32 rounds_per_frame = 8;
 
+    /// How long a moving image keeps its moving stream after it last changed, in milliseconds.
+    ///
+    /// Under a `scale` below native a move traces at the upscaler's extent, and a still image restarts at full size.
+    /// A frame or two without input in the middle of a move would flip between them, and each switch starts the moving stream's denoiser over, which flickers.
+    /// 0 ends a move on the first frame the image holds still.
+    f32 motion_hold_ms = 250.0f;
+
     /// How this layer's image is denoised before its parent composites it; off unless asked for.
     ///
-    /// **Never restarts accumulation.**
+    /// **Never restarts accumulation short of the layer's sample target.**
     /// The mean is radiance only, and everything this selects is written beside it or computed after it, so none of it
-    /// reaches the trace hash — turning it on, off or to another member keeps a converged image converged.
+    /// reaches the trace hash — turning it on, off or to another member keeps the mean.
+    /// The exception is turning it on at the target: a layer there traces nothing, so the guides would never be written, and the mean starts over instead.
     /// While the mean is young a temporal member denoises this frame's own samples, then a spatial one takes over on
     /// the mean — see `temporal_denoise_frames`.
     ///

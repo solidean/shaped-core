@@ -55,13 +55,21 @@ public:
     /// `views_converged` is the caller's fold over every refreshing trace, through
     /// `view_store::is_accumulation_converged` — which is the rule, and which is why this takes an answer rather than
     /// a list of counts.
-    /// Comparing counts here is what it used to do, and a layer that stops at `sv::accumulation_frame_cap` made an
+    /// Comparing counts here is what it used to do, and a layer that stops at `sv::accumulation_sample_cap` made an
     /// accumulate target above the cap unreachable: the run burned its whole timeout on an image that had converged.
     ///
     /// `any_traced` says whether there was a refreshing trace at all.
     /// A frame with none cannot report a dispatch, so `traces_ran` is only consulted when there was something to run —
     /// otherwise a 2D-only view could never settle.
     [[nodiscard]] bool is_settled(bool views_converged, bool any_traced, isize pending_work, bool traces_ran) const;
+
+    /// Whether work owed on earlier frames has drained by this one, which owes `owed`, so every traced view must start its mean over.
+    ///
+    /// Owed work such as a BC7 encode or a mip chain changes a texture's contents and keeps its id, so it restarts no trace.
+    /// Pixels that reached the target before it landed would hold samples of the old contents: all of them on a fast GPU, a mix on a slow one.
+    /// Starting over once it drains makes the image a function of the final resources alone.
+    /// True once per drain, so work that comes and goes restarts the views each time it goes, and the timeout still ends the run.
+    [[nodiscard]] bool note_owed_work(isize owed);
 
     /// Whether the image has already been written, so the run is finishing rather than still converging.
     [[nodiscard]] bool is_done() const { return _done; }
@@ -78,6 +86,9 @@ private:
     bool _applied = false;
     bool _done = false;
     bool _settled_before_writing = false;
+
+    /// Whether the last frame `note_owed_work` saw owed any work.
+    bool _owing = false;
 
     /// What the frame being authored is held for; empty when nothing holds it.
     cc::string _hold_reason;

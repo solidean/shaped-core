@@ -128,7 +128,8 @@ A cone is stored as the scale and offset of glTF's falloff, which an unshaped li
 The flatten groups them by path with `pt_light_table` — a counting sort over the walk it does anyway — and the frame block carries the count and each path's offset and length.
 A loop over one path's run, like the bounce ray testing every area light, then runs in one branch.
 
-Next-event estimation picks one light uniformly, and the `1/N` of that pick is inside `pt.light_pdf`, and `pt.disc_pdf` for a sun.
+Next-event estimation picks one light with the probability its record carries, `select_pdf`, which `pt_light_table::grouped` writes.
+That probability is inside `pt.light_pdf`, and `pt.disc_pdf` for a sun.
 That density is the one thing both estimators share, since the next-event sample and the bounce ray reaching a light weight against each other.
 A density they disagree about makes the image wrong rather than noisy.
 With exactly one light no pick is drawn, so a one-light scene keeps the sample sequence it always had.
@@ -137,6 +138,8 @@ A point or a parallel light is a delta that no sampled ray reaches, so it has ne
 On a path's last surface hit no bounce ray follows, so next-event estimation takes the full weight there for every light and the sky;
 weighting it against a ray that never flies would darken every rect and sun by the share left to that ray.
 A rect and a sun have both strategies: the bounce ray credits every rect it crosses and every sun it escapes into, each weighted against its own density.
+A bounce ray that left by transmission, or after a medium scatter, takes the full weight instead.
+Next-event estimation samples only directions above both the shading frame and the geometric face, and a medium scatter takes no sample.
 
 Lights occlude nothing — a shadow ray toward one passes straight through another — so the bounce ray credits every area light it crosses before the surface, not only the nearest.
 Treating lights as transparent on one side and opaque on the other would leave part of the integral to neither strategy.
@@ -150,6 +153,73 @@ That pins every unit conversion, at one bounce, where next-event estimation carr
 The parallel light has no bounce branch, so an error in the sun's bounce weighting shows there instead of cancelling.
 
 A layer with no lights of its own is traced under `layer::fallback_light`, a sun unless the layer sets another or turns it off.
+A traced layer whose only lights are emissive instances counts as lit, and takes no fallback.
+A raster layer draws no emitter's light, so it keeps its fallback.
+
+## Emissive instances
+
+**An emissive instance is a light of the trace, but no `sv::light` makes it.**
+The renderer appends one record of path `scene.light_path_mesh` (`sv::light_path_mesh`, 4) per qualifying instance, after every analytic light.
+So emitters and analytic lights share one selection CDF, and a frame's work grows with emissive instances, never with triangles.
+[plans/emissive-triangles.md](plans/emissive-triangles.md) is the design and its phasing.
+
+**Only a type that declares its emission lights the scene.**
+`material_type::emission_color_attribute` (a float3) and the optional `emission_scale_attribute` (a float) say where it comes from.
+The radiance is `max(0, scale) * max(0, color)`, and the generator writes it into `surface` after the fragment, so the closest hit and the light sampler read one value.
+openpbr declares `emission_color` and `emission_luminance`, pbr declares `emissive` at a scale of 1, and unlit declares none: it is a display material, which the camera sees and nothing else does.
+
+**An instance qualifies** where its own permutation declares an emission that is not dark wherever it is read.
+Each factor may be a constant, a texture or a mesh attribute, per vertex, per corner or per triangle.
+Dark means a constant at or below zero, or a texture or an attribute whose every value is, which its summary proves only where it read them all.
+A texture's lane under a transform scale of exactly 0 reads its bias whatever the texels hold, so that lane is known without them.
+So the test Cornell box's walls, whose per-triangle `emissive` is zero throughout, light nothing.
+A constant or a texture transform that is not finite makes no light either, since no estimate could weigh it.
+It must also be a resident triangle mesh, shaded by that permutation rather than by the fallback a streaming mesh takes.
+`sv::impl::emitter_estimate_of` (rendering/impl/emitters.hh) is the material half of that rule; a quadric batch is camera-only.
+
+**An instance that does not qualify is camera-only**: the camera sees its emission, and no bounce meets it as a light, since `tracer.emitter_pdf` finds no record for it.
+So exclusion must be proven rather than guessed, which is why only an exact summary may exclude.
+A summary is exact only where it read every value the sampler reads: the base level, whole, uncompressed.
+A texture the manager re-encodes to BC7 keeps the summary of its source pixels, made inexact, since the encoding's error may lift a texel off zero.
+**A texture's summary counts only once the texture samples its own texels**, at `base_resident` or `complete` (`sv::impl::sampled_texture_summary`).
+A pending texture samples a placeholder and a failed one magenta, so either is unknown, whatever its summary proved, and qualifies at an unknown 1.
+A dark texture thus lights nothing from the frame its upload lands.
+Under a bias that is not zero, a texture's lane must stay a margin below zero to be dark, since the GPU's filtering, sRGB decode and fused multiply-add round otherwise than the CPU does.
+
+**Its record** carries an estimate of the radiance as `emission`, two-sided, and its world area, and only selection reads either.
+Under a similarity the area is the object area times `|det M|^(2/3)`, which is exact there.
+Under any other placement that undercounts a flat lamp flattened along its normal, to nothing at a zero scale, so the GPU sums the exact area instead (`mesh_manager::acquire_world_area`).
+The estimate stands in until that lands a frame or two later, and the landing restarts the image once, as the CDF's does.
+Its weight is that area times π times two faces times the luminance, beside the local lights.
+The estimate takes each factor's mean: a constant's value, a texture's through its swizzle and its scale and bias, an attribute's over its elements.
+A texture's and an attribute's means are `sv::value_summary`s, read on the CPU at the acquire that uploads them, while the payload is at hand.
+A texture's comes from the smallest level the acquire supplied, read whole up to 65536 texels and in short row runs on a coarser grid beyond.
+An attribute's is read whole up to 65536 elements and in short runs beyond, so a larger one is never proven dark.
+An 8-bit sRGB texel decodes through a 256-entry table, so the scan costs a table lookup per channel.
+Every texture is summarized, since which ones a material reads as an emission is not known at the acquire.
+A block-compressed level is decoded by `babel::bcn`, which estimates the mean, and its summary is never exact.
+A format it cannot decode has none, and reads as 1 before the factor's swizzle and its scale and bias.
+Where the means multiply to zero, each factor's bound stands in, exact or not, else its mean, so an emitter that can emit is always picked sometimes.
+A factor no read saw above zero, as a strided scan that met only black, stands in as a tiny value above zero, and its record carries `sv::light_flag_unseen_emission`.
+Such a record is no evidence of light: beside a lit sun, local lights made only of those take a thousandth of the choice rather than half of it.
+Among other local lights its weight is the light table's floor, a thousandth of the mean of its kind, so an importer's black emission map costs a scene little.
+The estimate is finite, and so is each light's selection weight: a NaN weight reads as 0 and an overflowing one as the largest f32.
+The weight shapes the noise and never the mean.
+`traced.emitters` holds the rest, one `emitter_record` per mesh record from `frame_constants::emitter_offset`: the instance's row, its mesh's area CDF, and where each factor of its emission lives.
+The instance record's `emitter` names the light record back, so a bounce ray that meets the instance finds its density.
+
+**The area CDF is the mesh's, built on the GPU** by shaders/emitter_cdf.sgl the first time a trace needs it, and cached with the mesh as its BLAS is (`mesh_manager::acquire_emitter_cdf`).
+It is two-level — triangles within blocks of 256, then blocks — so the f32 widths stay accurate over millions of triangles, and a zero-area triangle has a width of exactly 0.
+It is in object space, which is unbiased under any placement: the density a sample carries is its triangle's width over the triangle's world area.
+While its kernels compile an instance is camera-only, and the frame its CDF lands restarts the image.
+
+**Next-event estimation** picks a triangle by the CDF and a uniform point on it.
+Its solid-angle density, `pt.mesh_light_pdf`, is the record's pick probability times the triangle's width over its world area, times the squared distance over the cosine at the light.
+The emission at the point is read from data by one reader for every material, `tracer.emitter_radiance`, and scaled by the instance's cutout opacity there.
+It reads a constant out of the parameter block, interpolates an attribute at the point, and samples a texture through its uv, palette sampler, swizzle and transform.
+**A texture is sampled at level 0 on both sides**: a closest hit and a shade kernel have no derivatives, so the generated material samples level 0 too.
+The two strategies weighed against each other thus read one value, which the balance heuristic needs.
+**A bounce ray that meets an emitter** forms the same density at its hit (`tracer.emitter_pdf`) and weighs the emission by the balance heuristic; the camera's own view keeps its full weight.
 
 ## Landing order
 
@@ -170,6 +240,15 @@ A layer with no lights of its own is traced under `layer::fallback_light`, a sun
    `visible_to_camera`, off by default and only for a light with an extent, and `casts_shadows`, on by default.
    A light that casts no shadow is ignored by geometry on both sides of the weighting, or the two would disagree about what they integrate.
    A light-linking mask is reserved in both GPU records, light and instance, all ones and read by nothing.
+7. **Power-weighted selection, mixed with uniform.** Landed, in both tracers.
+   `pt_light_table::grouped` writes each record's `select_pdf` and the running `select_cdf`, and next-event estimation picks by a binary search over them.
+   Half of the choice is by power: local lights are weighed by power and distant ones by irradiance, which do not compare, so the two kinds share that half and half where both have light.
+   The other half is uniform over the lights with light to offer, since power knows nothing of distance: alone it starved a dim light that is the near one somewhere.
+   light-stage's bulb by its stairs was twice as noisy by power alone as by uniform selection; the mixture's cost and gain are pinned by a wavefront test with a dim corner light.
+   An emissive instance whose emission no read saw above zero is no light for that rule: it takes none of the uniform half, and only keeps its kind a thousandth of the power half.
+   Every weight is floored at a thousandth of its kind's mean, so no light the multiple-importance weights count on is impossible to pick.
+   A table of `light_selection::uniform` writes both 0, which the tracer reads as every light alike.
+   A record no table wrote says the same.
 
 ## Designed, not landed
 
@@ -177,13 +256,19 @@ A layer with no lights of its own is traced under `layer::fallback_light`, a sun
 - Tube and box emitters.
 - Gobos and IES profiles, as further shaping kinds.
   When a two-dimensional texture sampler is built, it is built once for the environment map and shared.
-- Power-weighted light selection, and the point at which emitters should move into the acceleration structure.
+- The point at which emitters should move into the acceleration structure.
 - **An HDR sky, and the sun inside it.** A captured map carries its own sun, while "a sun is always a light" says the sky holds none.
   Two rules fit, and which one is decided when the HDR sky lands:
   - the sun is extracted into a `distant_disc` light and clipped out of the map, keeping the rule as it stands;
   - the map is an importance-sampled light of its own and no sun light is added.
     Then it is open whether it stays the separate estimator every hit takes today, beside the picked light, or becomes a fifth path in the pick.
 - A stable id per scene item, which picking will want; it is `stable_id<Tag>` again.
+- **Procedural emission that lights the scene.** Emission a fragment computes reaches the camera alone, since next-event estimation reads only the declared attributes.
+  The way there is to run the material's own fragment at a light sample, as a callable, at a material evaluation per shadow ray for every emissive type.
+  Baking each triangle's emission to a constant instead is ruled out: a textured emitter's light sample would then disagree with what a bounce ray sees, which biases the image.
+- **An emitter's power measured on the GPU.** The world area is summed there already for a placement that is not a similarity.
+  A texture's mean is still the CPU's summary, through a decoder for a compressed level; the kernel that walks the triangles could sum area times sampled emission instead.
+  The light table is built on the CPU, so that result lands a frame or two late, which costs noise in that frame rather than an error that lasts.
 
 ## Lower-library gaps
 
@@ -192,3 +277,5 @@ A layer with no lights of its own is traced under `layer::fallback_light`, a sun
 - **typed-geometry types are not hashable.**
   A CPU hash of a light would have to fold `tg::vec3f`, angles and transforms by hand.
   Nothing needs one yet: the trace hash covers the uploaded bytes, which is where equal lights must hash equal.
+- **typed-geometry cannot classify a linear map.**
+  Whether a placement is a similarity, under which an emitter's world area follows from its determinant, is `sv::impl::is_similarity` until it can.

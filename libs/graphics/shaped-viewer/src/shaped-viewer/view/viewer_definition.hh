@@ -26,6 +26,11 @@ struct sv::viewer_definition
     /// 0, the default for a definition built by hand, runs each layer's `render_settings::rounds_per_frame`.
     f32 wavefront_budget_ms = 0.0f;
 
+    /// The samples per pixel a traced layer stops at this frame, or 0 for only `sv::accumulation_sample_cap`.
+    /// A capture sets it to what it waits for, so a traced layer spends nothing past the image it takes.
+    /// Never part of a trace's hash: raising it carries on from the samples the image holds.
+    u32 sample_target = 0;
+
     [[nodiscard]] view_data& operator[](view_index i) { return views[u32(i)]; }
     [[nodiscard]] view_data const& operator[](view_index i) const { return views[u32(i)]; }
 };
