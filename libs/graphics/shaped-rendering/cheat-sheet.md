@@ -418,10 +418,11 @@ One front that denoises, then upscales; the design is [docs/reconstruction.md](d
 #include <shaped-rendering/reconstruct.hh>                 // the front, the vocabulary, the history
 #include <shaped-rendering/atrous_denoise_routine.hh>      // the native spatial member
 #include <shaped-rendering/fsr_upscale_routine.hh>         // FSR 3.1's upscaler, callable directly
+#include <shaped-rendering/metalfx_upscale_routine.hh>     // MetalFX's temporal upscaler, callable directly; metal only
 
 auto const settings = sr::reconstruct_settings{
     .denoiser = sr::denoise_method::automatic,             // flat knobs, each says who reads it; `none` = upscale only
-    .upscaler = sr::upscale_method::automatic,             // fsr where supported, none while the scale is native
+    .upscaler = sr::upscale_method::automatic,             // metalfx, else fsr, where supported; none while the scale is native
     .scale = sr::render_scale_preset::performance,         // named ratios only: 1, 1.5, 1.7, 2
     .fresh_samples = true,                                 // true only when feeding this frame's own samples + motion
     .upscale_sharpness = 0.3f,                             // [0, 1], 0 = off; fsr's RCAS on the upscaled image
@@ -441,7 +442,7 @@ out.status                                                 // denoised | pending
 out.denoiser / out.upscaler / out.restarted                // what ran; whether it started from no history
 history.reset()                                            // a camera cut: the denoiser's and the upscaler's history restart
 
-sr::query_reconstruct_support(ctx)                         // -> sr::reconstruct_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd, fsr}
+sr::query_reconstruct_support(ctx)                         // -> sr::reconstruct_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd, fsr, metalfx}
 sr::resolve_denoise_method(ctx, settings, guides)          // -> the member `automatic` (or a named method) means here; `guides` is what the CALLER can supply
 sr::resolve_upscale_method(ctx, settings, guides)          // -> the upscaler behind it; none for dlss_rr, which upscales itself
                                                            //    every planner takes `guides`, so automatic degrades instead of denoising nothing
@@ -455,6 +456,7 @@ sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal,
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::oidn_denoise_routine::execute(cmd, inputs, history, {.network = sr::oidn_network_size::small})  // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP base, small ~1.6x faster; never `automatic`
 sr::fsr_upscale_routine::execute(cmd, {.color, .depth, .motion, .jitter, .output}, upscale_history, {.sharpening = true})  // -> sr::upscale_outcome; a CLEAN image only
+sr::metalfx_upscale_routine::execute(cmd, {.color, .depth, .motion, .jitter, .output}, upscale_history)  // -> sr::upscale_outcome; metal; a CLEAN image only
 sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = mix(dst, src, w) IN PLACE, w in [0,1]; false while compiling, and after a failed compile, which logs why
 sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the destination's format: one compile each
 ```
@@ -475,6 +477,8 @@ sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the desti
 - **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream, and FSR about 80 MiB for 720p in, 1080p out.
   Drop the history of a view nobody is looking at.
 - **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — issue: bug-warp-fsr-shading-change-pyramid-crash.
+- **MetalFX builds wherever the Metal backend does** (`SR_HAS_METALFX`) and runs on a device with its MTL4 scaler.
+  An output without `render_target` usage costs a copy, and only `rgba16_float` / `rgba32_float` ones are staged.
 - **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
   knob live, a scale selector, and the raw image beside the reconstructed one.
 

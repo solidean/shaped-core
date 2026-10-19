@@ -53,6 +53,7 @@ struct upscale_inputs;               // one upscale call's images
 struct upscale_outcome;              // status + whether history restarted
 class upscale_history;               // the caller-owned state of one upscaled stream
 class fsr_upscale_routine;           // AMD FSR 3.1's upscaler, run through sg (fsr_upscale_routine.hh)
+class metalfx_upscale_routine;       // Apple MetalFX's temporal upscaler, on Metal (metalfx_upscale_routine.hh)
 struct fsr_options;                  // its own options
 
 class dlss_rr_routine;     // the NVIDIA Ray Reconstruction member (dlss_rr_routine.hh)

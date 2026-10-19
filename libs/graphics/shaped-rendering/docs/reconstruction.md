@@ -21,6 +21,7 @@ This is the design, including the parts not built yet.
 | upscaler | kind | where it runs | status |
 |---|---|---|---|
 | `fsr` | temporal, upscales, does not denoise | any GPU; dx12 and vulkan on Windows builds; not WARP | done |
+| `metalfx` | temporal, upscales, does not denoise | Apple GPUs that run MetalFX's MTL4 scaler; metal | done |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**
 The temporal ones work from about one sample per pixel, but only if every pixel's motion is known.
@@ -172,6 +173,28 @@ FSR keeps two full images at the output extent and about a dozen at the traced o
   [bug-warp-fsr-shading-change-pyramid-crash](issues/bug-warp-fsr-shading-change-pyramid-crash.md) records what bisecting it established.
 - It runs on vulkan too, through a patch that gives each of AMD's register classes its own SPIR-V binding range.
   [debt-fsr-spirv-binding-patch](issues/debt-fsr-spirv-binding-patch.md) has what replaces it.
+
+## The MetalFX upscaler
+
+**Apple's temporal upscaler, encoded into sg's own command buffer.**
+MetalFX's MTL4 scaler encodes encoders of its own, so it runs inside sg's Metal native scope and meets sg's encoders at the scope's fence.
+The scaler waits for that fence and updates it when its `fence` is set to it.
+Everything Metal and MetalFX stays in `impl/metalfx_backend.cc`, linked where the Metal backend is built (`SR_HAS_METALFX`); the routine exists everywhere and reports `unsupported` off Metal.
+
+**The inputs meet MetalFX's conventions in one SGL pass, and sr's guides stay as they are.**
+- Depth: `near / depth`, as FSR's, read with `depthReversed`; MetalFX only compares depths, so the near plane is any positive value.
+- Motion: repacked into `rg16_float`; MetalFX's vectors point to where a pixel was, so `motionVectorScale` is -1.
+- Jitter: MetalFX's offset is the negation of sr's, which metalfx-test's sign comparison measured (0.044 against 0.181 the other way).
+- Exposure: `reconstruct_settings::exposure` goes into the one `r16_float` texel MetalFX reads it from.
+
+**It writes only to a texture it may render to.**
+An output without `render_target` usage gets an image of the routine's own, and a compute pass copies it across; it is compiled for `rgba16_float` and `rgba32_float` outputs.
+
+**Its jitter is FSR's sequence**: Halton (2, 3) over 8 times the square of the ratio, since MetalFX leaves the sequence to the caller.
+`automatic` picks it over FSR wherever it runs, as the device's own upscaler; the two never both run on one context today.
+A history switched between the two upscalers starts over, since each one's state is its own type.
+
+**Next on Metal**: MetalFX's denoising upscaler (`MTL4FXTemporalDenoisedScaler`, the counterpart of `dlss_rr`) and its frame interpolator, through the same scope.
 
 ## The OIDN member
 
@@ -350,7 +373,7 @@ Resolving on device support alone picks the best member the hardware has and the
 `oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 The upscaler resolves after the denoiser, and the same way.
-`automatic` is `fsr` where it runs and the scale is below native, and `none` otherwise; a named upscaler runs at a native scale too, as anti-aliasing.
+`automatic` is `metalfx` where it runs, else `fsr` where that does, when the scale is below native, and `none` otherwise; a named upscaler runs at a native scale too, as anti-aliasing.
 A denoiser that upscales by itself has no upscaler behind it, and `denoiser = none` with an upscaler set upscales alone.
 An upscaler requires the depth and motion guides, and a call without them reports `unsupported`.
 

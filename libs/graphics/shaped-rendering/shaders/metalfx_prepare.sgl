@@ -1,0 +1,32 @@
+// sr's guides in the forms MetalFX's temporal scaler reads.
+// Paired with sr::metalfx_upscale_routine.
+//
+// Depth: sr's linear view depth as an inverted depth with an infinite far plane, `near / depth`, which the scaler reads with `depthReversed`; a miss becomes 0, the far plane.
+// MetalFX only compares depths, so any positive near plane works.
+// Motion: sr's motion repacked into the two-channel format the scaler is created with, unchanged; the scaler's motion scale turns it around.
+// Exposure: the one texel the scaler reads its exposure from, written by the first thread.
+
+require extended_image_formats
+
+@inline binding metalfx_prepare_constants:
+    near_plane: float
+    exposure: float
+
+binding metalfx_prepare_io:
+    @unfilterable
+    linear_depth: texture_2d[float4]
+    @unfilterable
+    motion: texture_2d[float4]
+    device_depth: out image_2d[.r32_float]
+    packed_motion: out image_2d[.rg16_float]
+    exposure: out image_2d[.r16_float]
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){metalfx_prepare_io, metalfx_prepare_constants}:
+    if id.x == 0 and id.y == 0 => metalfx_prepare_io.exposure[int2(0, 0)] = metalfx_prepare_constants.exposure
+
+    let size = metalfx_prepare_io.device_depth.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let depth = metalfx_prepare_io.linear_depth.load(id.xy).x
+    metalfx_prepare_io.device_depth[id.xy] = if depth > 0.0 => metalfx_prepare_constants.near_plane / depth else 0.0
+    metalfx_prepare_io.packed_motion[id.xy] = metalfx_prepare_io.motion.load(id.xy).xy

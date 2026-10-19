@@ -70,7 +70,8 @@ enum class sr::upscale_method : sg::u8
     none,
     automatic, ///< the best upscaler this context supports, and none while the scale is native
 
-    fsr, ///< AMD FSR 3.1's analytic upscaler; runs on any GPU
+    fsr,     ///< AMD FSR 3.1's analytic upscaler; runs on any GPU
+    metalfx, ///< Apple MetalFX's temporal upscaler; Metal only
 
     count_
 };
@@ -317,11 +318,12 @@ public:
 
 private:
     friend class fsr_upscale_routine;
+    friend class metalfx_upscale_routine;
     friend class reconstruct_routine;
 
-    /// Brings this to the two extents, keeping the upscaler's state only if neither changed.
+    /// Brings this to the two extents and `upscaler`, keeping the upscaler's state only if none of them changed.
     /// Returns whether the call starts from no history, and consumes a pending `reset`.
-    bool _prepare(tg::vec2i input_extent, tg::vec2i output_extent);
+    bool _prepare(tg::vec2i input_extent, tg::vec2i output_extent, upscale_method upscaler);
 
     /// The upscaler's own per-stream object — for FSR, its context and every image it created.
     /// Type-erased so this header names no SDK type; it must hold only what is safe to drop mid-frame.
@@ -330,6 +332,9 @@ private:
     tg::vec2i _input_extent = tg::vec2i(0, 0);
     tg::vec2i _output_extent = tg::vec2i(0, 0);
     bool _reset_requested = false;
+
+    /// The upscaler `_state` belongs to, since each one's state is its own type.
+    upscale_method _upscaler = upscale_method::none;
 
     /// The denoiser whose output the front last upscaled, so that switching it restarts this history too.
     denoise_method _source_denoiser = denoise_method::none;
@@ -453,6 +458,7 @@ struct sr::reconstruct_support
     bool nrd = false;
 
     bool fsr = false;
+    bool metalfx = false;
 
     [[nodiscard]] bool supports(denoise_method m) const;
     [[nodiscard]] bool supports(upscale_method m) const;
