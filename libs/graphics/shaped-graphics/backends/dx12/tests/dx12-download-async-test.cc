@@ -9,7 +9,7 @@
 using namespace cc::primitive_defines;
 
 // dx12 async-download internals the backend-agnostic tier-1 suite (tests/transfer/download-async-test.cc) can't reach.
-// That is the readback staging pipeline's window packing and recycling, forced with a deliberately tiny window size (a dx12_config knob).
+// That is the readback staging pipeline's window packing and recycling, forced by shrinking the shared context's window for one test.
 // The public download/sync contract is pinned in tier 1.
 // See libs/graphics/shaped-graphics/docs/testing.md and libs/graphics/shaped-graphics/docs/concepts/download.async.md.
 
@@ -33,15 +33,14 @@ void seed(sg::context& c, sg::raw_buffer_handle const& buf, isize n, auto&& fn)
 } // namespace
 
 // A single download larger than one readback window must pack across several windows, pipelining and recycling as it goes.
-// A fresh context with deliberately tiny windows forces it.
-ASYNC_TEST("sg dx12 - async download larger than a staging window packs across windows")
+ASYNC_INVOCABLE_TEST("sg dx12 - async download larger than a staging window packs across windows",
+                     (dx12::dx12_context_handle const& handle))
 {
-    auto ctx = dx12::make_test_context({.async_download_window_bytes = 4096});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
-    auto& c = *ctx.value();
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+    auto const staging = dx12::scoped_transfer_sizes(c, {.async_download_window_bytes = 4096});
 
-    isize const n = 20000; // several windows, non-aligned so partial windows are exercised
+    auto const n = isize(20000); // several windows, non-aligned so partial windows are exercised
     auto buf = c.persistent.create_raw_buffer(n, sg::buffer_usage::copy_src | sg::buffer_usage::copy_dst);
     REQUIRE(buf != nullptr);
     seed(c, buf, n, [](isize i) { return i * 7 + 1; });
@@ -58,12 +57,12 @@ ASYNC_TEST("sg dx12 - async download larger than a staging window packs across w
 
 // Many downloads whose aggregate far exceeds the staging buffer must all land, forcing the actor to wait on the window fence and recycle windows repeatedly.
 // Each targets its own buffer; all must read back intact.
-ASYNC_TEST("sg dx12 - many async downloads recycle the staging windows")
+ASYNC_INVOCABLE_TEST("sg dx12 - many async downloads recycle the staging windows",
+                     (dx12::dx12_context_handle const& handle))
 {
-    auto ctx = dx12::make_test_context({.async_download_window_bytes = 1024});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
-    auto& c = *ctx.value();
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+    auto const staging = dx12::scoped_transfer_sizes(c, {.async_download_window_bytes = 1024});
 
     int const count = 24;
     isize const each = 1024;
@@ -91,12 +90,12 @@ ASYNC_TEST("sg dx12 - many async downloads recycle the staging windows")
 // Uneven download sizes (none a window multiple) force the actor to both pack several reads into one window and split a single read across windows, all while recycling.
 // That is a shape the exact-fill and single-large tests miss.
 // Distinct buffers; each must read back intact.
-ASYNC_TEST("sg dx12 - uneven async downloads pack and straddle staging windows")
+ASYNC_INVOCABLE_TEST("sg dx12 - uneven async downloads pack and straddle staging windows",
+                     (dx12::dx12_context_handle const& handle))
 {
-    auto ctx = dx12::make_test_context({.async_download_window_bytes = 1024});
-    if (ctx.has_error())
-        SKIP("no dx12 adapter");
-    auto& c = *ctx.value();
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+    auto const staging = dx12::scoped_transfer_sizes(c, {.async_download_window_bytes = 1024});
 
     isize const sizes[] = {700, 300, 900, 1500, 200, 1100, 640, 1300, 480, 760};
     int const count = 10;
