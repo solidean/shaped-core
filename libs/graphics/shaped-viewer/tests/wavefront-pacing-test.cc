@@ -3,7 +3,11 @@
 #include <nexus/test.hh>
 #include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/impl/wavefront_pacing.hh>
+#include <shaped-viewer/rendering/render_plan.hh>
 #include <shaped-viewer/rendering/wavefront_routine.hh>
+#include <shaped-viewer/view/view_data.hh>
+#include <shaped-viewer/view/view_store.hh>
+#include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
 
@@ -189,4 +193,30 @@ TEST("sv::wavefront_routine - a draining frame runs every bounce and a medium wa
     CHECK(sv::wavefront_routine::drain_rounds(5) == 5 + 1 + 16);
     CHECK(sv::wavefront_routine::drain_rounds(0) == 1 + 16);
     CHECK(sv::wavefront_routine::drain_rounds(-3) == 1 + 16);
+}
+
+// Two still wavefront views split the budget, but one at its sample target traces nothing, so the other gets all of it.
+TEST("sv::impl - a view at its sample target takes no share of the frame budget")
+{
+    auto def = sv::viewer_definition{};
+    auto plan = sv::render_plan{};
+    auto store = sv::view_store{};
+    for (auto i = 0; i < 2; ++i)
+    {
+        auto v = sv::view_data{};
+        v.id = sv::view_id::from_string(cc::format("view {}", i));
+        sv::ensure_scene_3d(v).settings.mode = sv::render_mode::wavefront;
+        plan.traces.push_back({.id = v.id, .view = sv::view_index(i), .layer = 0});
+        auto& slot = store.get_or_create(v.id).temporal[sv::temporal_id::accumulation(0)];
+        slot.accum_frame = 3;
+        slot.samples = 40;
+        slot.sample_target = 256;
+        def.views.push_back(cc::move(v));
+    }
+    CHECK(sv::impl::still_wavefront_traces(def, plan, store) == 2);
+    CHECK(sv::impl::wavefront_budget_share(16.0f, sv::impl::still_wavefront_traces(def, plan, store)) == 8.0f);
+
+    store.get_or_create(def.views[0].id).temporal[sv::temporal_id::accumulation(0)].samples = 256;
+    CHECK(sv::impl::still_wavefront_traces(def, plan, store) == 1);
+    CHECK(sv::impl::wavefront_budget_share(16.0f, sv::impl::still_wavefront_traces(def, plan, store)) == 16.0f);
 }

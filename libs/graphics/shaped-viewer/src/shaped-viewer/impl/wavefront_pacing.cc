@@ -1,6 +1,10 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
+#include <shaped-viewer/impl/view_state.hh>
 #include <shaped-viewer/impl/wavefront_pacing.hh>
+#include <shaped-viewer/rendering/render_plan.hh>
+#include <shaped-viewer/view/view_store.hh>
+#include <shaped-viewer/view/viewer_definition.hh>
 
 namespace sv::impl
 {
@@ -57,5 +61,22 @@ void wavefront_pacing::reset()
     fill = 1.0f;
     still_frames = 0;
     in_flight.clear();
+}
+
+isize still_wavefront_traces(viewer_definition const& def, render_plan const& plan, view_store const& store)
+{
+    auto count = isize(0);
+    for (auto const& tr : plan.traces)
+    {
+        // `automatic` is the viewer's to resolve, and one that reaches a plan built by hand is the wavefront.
+        auto const mode = def[tr.view].layers[tr.layer].settings.mode;
+        if (!tr.refresh || (mode != render_mode::wavefront && mode != render_mode::automatic))
+            continue;
+        auto const* const rec = store.peek_ptr(tr.id);
+        auto const* const slot = rec != nullptr ? rec->temporal.get_ptr(temporal_id::accumulation(tr.layer)) : nullptr;
+        if (slot != nullptr && slot->accum_frame > 0 && slot->samples < slot->sample_target)
+            ++count;
+    }
+    return count;
 }
 } // namespace sv::impl

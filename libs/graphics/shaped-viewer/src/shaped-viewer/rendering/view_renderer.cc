@@ -695,23 +695,6 @@ void mark_unwritten(impl::temporal_slot* slot)
     return pacing.next(budget, fixed);
 }
 
-/// How many of `plan`'s traces run a still wavefront frame this frame, as far as is known before any of them traces.
-/// That is every refreshing wavefront layer whose mean has not restarted; one whose image changes this frame still counts, and leaves its share unspent.
-[[nodiscard]] isize still_wavefront_traces(viewer_definition const& def, render_plan const& plan, view_store const& store)
-{
-    auto count = isize(0);
-    for (auto const& tr : plan.traces)
-    {
-        if (!tr.refresh || planned_mode(def[tr.view].layers[tr.layer].settings.mode) != render_mode::wavefront)
-            continue;
-        auto const* const rec = store.peek_ptr(tr.id);
-        auto const* const slot = rec != nullptr ? rec->temporal.get_ptr(temporal_id::accumulation(tr.layer)) : nullptr;
-        if (slot != nullptr && slot->accum_frame > 0)
-            ++count;
-    }
-    return count;
-}
-
 /// Traces one frame of a layer into `slot` with the layer's integrator, `d.frame` holding `fc`, a still wavefront frame under `budget_ms`.
 ///
 /// The wavefront's path state lives on `slot`, so this is where it is sized and where a frame decides between restarting and carrying.
@@ -1507,7 +1490,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
              .decal_atlas = decal_buffers.atlas,
              .stand_ins = &stand_ins},
             fc, *slot, scaled,
-            impl::wavefront_budget_share(def.wavefront_budget_ms, still_wavefront_traces(def, plan, store)), target);
+            impl::wavefront_budget_share(def.wavefront_budget_ms, impl::still_wavefront_traces(def, plan, store)),
+            target);
     };
 
     // A frame that traces nothing stands as executed: the mean already is the image.
