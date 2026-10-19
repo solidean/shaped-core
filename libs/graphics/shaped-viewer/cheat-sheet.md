@@ -756,6 +756,7 @@ quadric_manager::acquire_blas(cmd, id)                    // the same, a procedu
 sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas (null until a trace);
                          //   f32 surface_area (object space, summed at acquire); buffer<f32> emitter_cdf (null until an emissive instance is traced); }
 mesh_manager::acquire_emitter_cdf(cmd, id) -> buffer<f32> const*  // the two-level area CDF, built on the GPU onto cmd once and held; null while its kernels compile
+mesh_manager::acquire_world_area(cmd, id, linear) -> optional<f32> // id's exact world area under a non-similarity placement, summed on the GPU; none until it lands
 sv::emitter_cdf_block_size / sv::emitter_cdf_block_count(n)   // 256 triangles a block; the CDF holds n + blocks + 1 floats (shaders/emitter_cdf.sgl)
 manager.get(id) / get_ptr(id) / contains(id)        // resolve an id back to its record (get_ptr also LRU-touches)
 manager.set_limits(max_bytes, max_idle_epochs)      // change the budget at runtime (0/‑1 = unbounded/never)

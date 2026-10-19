@@ -257,7 +257,7 @@ They start in sv and move to shaped-rendering once a second caller exists.
 
 - GPU timestamps per stage, recorded into `cc::rec`.
 - Per-round live-path counts, a diagnostic readback a caller asks for through `wavefront_trace_desc::live_paths`.
-- One benchmark, megakernel against wavefront, on `openpbr-spheres`, `lights`, `quadric-gallery`, `mesh-structure-dense` and the furnace test's dense interior.
+- One benchmark, megakernel against wavefront, on a shallow scene and a deep one: the Cornell box and a dense scattering cube.
 
 A wavefront is not faster on every scene: on a shallow, single-material one, the stored state's memory traffic can lose to the megakernel's registers.
 It did on an RTX laptop GPU and did not on a Radeon 780M, whose tables are below.

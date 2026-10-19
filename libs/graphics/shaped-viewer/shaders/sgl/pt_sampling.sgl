@@ -29,10 +29,10 @@ fun mis_weight(pdf_this: float, pdf_other: float) -> float:
     return pdf_this / max(pdf_this + pdf_other, 1e-9)
 
 // A light's two estimators — the closest-hit's next-event sample and the raygen's continuation ray reaching it — balance against each other.
-// So both must form the light's density from `light_pdf`.
+// So both must form the light's density from the same `pt.*_pdf` of the light's path: `light_pdf` for a rect, `disc_pdf` for a sun, `mesh_light_pdf` for an emissive instance.
 // A density the two disagree about is not a weighting error that shows up as noise: the two weights stop summing to one and the estimate is simply wrong.
 
-/// The probability of next-event estimation choosing `l`: its record's, which the table writes in proportion to power.
+/// The probability of next-event estimation choosing `l`: its record's, which the table writes half by power and half uniformly over the lights with light to offer.
 /// A record carrying none is one of `light_count` lights picked uniformly.
 fun light_select_pdf(l: scene.light, light_count: uint) -> float:
     if l.select_pdf > 0.0 => return l.select_pdf

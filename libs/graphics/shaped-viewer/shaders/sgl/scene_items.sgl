@@ -52,7 +52,7 @@ struct light:
     /// RESERVED for light linking, read by nothing yet
     link_mask: uint
     /// The probability next-event estimation picks this light, and the cumulative one up to and including it in the table's order.
-    /// `sv::pt_light_table::grouped` writes them, in proportion to power; 0 in both is a table that picks uniformly.
+    /// `sv::pt_light_table::grouped` writes them, half by power and half uniformly over the lights with light to offer; 0 in both is a table that picks uniformly.
     select_pdf: float
     select_cdf: float
 

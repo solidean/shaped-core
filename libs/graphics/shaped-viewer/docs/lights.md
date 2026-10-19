@@ -43,6 +43,7 @@ A geometric list would merge paths that differ and split paths that do not.
 | `distant_point` | parallel light | delta, one direction | none | traced |
 | `distant_disc` | the sun, with an angular size | within the cone it subtends | none | traced |
 | `sphere` | a bulb with a radius | within the cap it subtends | inverse square | designed |
+| `mesh` | an emissive instance, appended by the renderer rather than an `sv::light_path` value | a point on one of its triangles | inverse square | traced |
 
 A delta light is never reached by a sampled ray, so it takes no multiple importance sampling at all — that is a different branch, not a degenerate size.
 So a size of zero is normalized away by the factory rather than stored: `sun(dir, 0)` is a `distant_point`, and a zero-radius sphere will be a `point`.
@@ -129,7 +130,7 @@ The flatten groups them by path with `pt_light_table` — a counting sort over t
 A loop over one path's run, like the bounce ray testing every area light, then runs in one branch.
 
 Next-event estimation picks one light with the probability its record carries, `select_pdf`, which `pt_light_table::grouped` writes.
-That probability is inside `pt.light_pdf`, and `pt.disc_pdf` for a sun.
+That probability is inside `pt.light_pdf`, `pt.disc_pdf` for a sun, and `pt.mesh_light_pdf` for an emissive instance.
 That density is the one thing both estimators share, since the next-event sample and the bounce ray reaching a light weight against each other.
 A density they disagree about makes the image wrong rather than noisy.
 With exactly one light no pick is drawn, so a one-light scene keeps the sample sequence it always had.
@@ -261,7 +262,7 @@ The two strategies weighed against each other thus read one value, which the bal
   Two rules fit, and which one is decided when the HDR sky lands:
   - the sun is extracted into a `distant_disc` light and clipped out of the map, keeping the rule as it stands;
   - the map is an importance-sampled light of its own and no sun light is added.
-    Then it is open whether it stays the separate estimator every hit takes today, beside the picked light, or becomes a fifth path in the pick.
+    Then it is open whether it stays the separate estimator every hit takes today, beside the picked light, or becomes a path of its own in the pick.
 - A stable id per scene item, which picking will want; it is `stable_id<Tag>` again.
 - **Procedural emission that lights the scene.** Emission a fragment computes reaches the camera alone, since next-event estimation reads only the declared attributes.
   The way there is to run the material's own fragment at a light sample, as a callable, at a material evaluation per shadow ray for every emissive type.
