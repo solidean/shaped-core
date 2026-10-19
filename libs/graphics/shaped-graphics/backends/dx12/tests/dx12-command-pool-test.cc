@@ -50,7 +50,6 @@ INVOCABLE_TEST("sg dx12 - command lists are pooled and reused", (dx12::dx12_cont
     auto const free_lists = [&] { return c._cmd_pool.free_command_list_count(D3D12_COMMAND_LIST_TYPE_DIRECT); };
 
     // A submitted list is closed and returned to the pool immediately (lists are not epoch-gated).
-    // One of them: this list touches no resource, so it never asks for a pre-list.
     auto first = c.create_dx12_command_list();
     REQUIRE(first.has_value());
     c.submit_dx12_command_list(cc::move(first.value()));

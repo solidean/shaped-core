@@ -83,6 +83,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - async upload window resize preserves uploads", (
     auto const sizes = dx12::scoped_transfer_sizes(*handle, {.async_upload_window_bytes = 1024});
 
     CHECK(co_await async_round_trip(handle, 4096, 1)); // spans several 1 KiB windows
+    dx12::require_async_upload_window(*handle, 1024);  // the guard's size applied, so it really spanned them
 
     handle->upload.set_async_window_size(isize(64) * 1024);        // grow; actor adopts it before next upload
     CHECK(co_await async_round_trip(handle, isize(32) * 1024, 2)); // now fits one window

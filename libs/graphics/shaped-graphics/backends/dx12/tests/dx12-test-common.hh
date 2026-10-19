@@ -106,3 +106,19 @@ private:
     sg::context& _ctx;
     transfer_sizes _sizes;
 };
+
+namespace sg::backend::dx12
+{
+/// Requires the async upload's staging window to be `bytes`, which says a `scoped_transfer_sizes` took effect.
+/// Call once an upload staged under it has landed: the copy actor adopts a size before it stages, and only then writes the field.
+inline void require_async_upload_window(dx12_context const& c, isize bytes)
+{
+    REQUIRE(c._upload_async._window_bytes == bytes);
+}
+
+/// The same for the async download's staging window.
+inline void require_async_download_window(dx12_context const& c, isize bytes)
+{
+    REQUIRE(c._download_async._window_bytes == bytes);
+}
+} // namespace sg::backend::dx12

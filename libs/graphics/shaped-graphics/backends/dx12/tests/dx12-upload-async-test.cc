@@ -102,6 +102,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - async upload larger than a staging window packs 
 
     auto const bytes = co_await future.bytes();
     REQUIRE(bytes.size() == n);
+    dx12::require_async_upload_window(c, 4096); // the guard's size applied, so the upload spans several windows
     bool matches = true;
     for (isize i = 0; i < n; ++i)
         if (bytes[i] != byte(i * 7 + 1))
@@ -174,6 +175,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - many async uploads recycle the staging windows",
                 all_ok = false;
     }
     CHECK(all_ok);
+    dx12::require_async_upload_window(c, 1024); // the guard's size applied, so the uploads recycle windows
 }
 
 // Uneven upload sizes (none a window multiple) force the actor to both pack several jobs into one window and split a single job across windows, all while recycling.
@@ -217,6 +219,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - uneven async uploads pack and straddle staging w
                 all_ok = false;
     }
     CHECK(all_ok);
+    dx12::require_async_upload_window(c, 1024); // the guard's size applied, so the uploads recycle windows
 }
 
 // A transfer still in flight at submit is one queue wait, which the skip above must not swallow.

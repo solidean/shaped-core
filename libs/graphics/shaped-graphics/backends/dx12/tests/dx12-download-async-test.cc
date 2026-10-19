@@ -48,6 +48,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - async download larger than a staging window pack
     auto future = c.download.bytes_from_buffer(buf, 0, n);
     auto const bytes = co_await future.bytes();
     REQUIRE(bytes.size() == n);
+    dx12::require_async_download_window(c, 4096); // the guard's size applied, so the download spans several windows
     bool matches = true;
     for (isize i = 0; i < n; ++i)
         if (bytes[i] != byte(i * 7 + 1))
@@ -85,6 +86,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - many async downloads recycle the staging windows
                 all_ok = false;
     }
     CHECK(all_ok);
+    dx12::require_async_download_window(c, 1024); // the guard's size applied, so the downloads recycle windows
 }
 
 // Uneven download sizes (none a window multiple) force the actor to both pack several reads into one window and split a single read across windows, all while recycling.
@@ -121,4 +123,5 @@ ASYNC_INVOCABLE_TEST("sg dx12 - uneven async downloads pack and straddle staging
                 all_ok = false;
     }
     CHECK(all_ok);
+    dx12::require_async_download_window(c, 1024); // the guard's size applied, so the downloads recycle windows
 }

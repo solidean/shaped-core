@@ -391,6 +391,9 @@ ASYNC_INVOCABLE_TEST("sg dx12 - async texture copy splits across staging windows
 
     auto const bytes = co_await fut.bytes();
     REQUIRE(bytes.size() == isize(sizeof(src)));
+    // Both guards' sizes applied, so the rows really split across windows on both queues.
+    dx12::require_async_upload_window(*ctx, 512);
+    dx12::require_async_download_window(*ctx, 512);
     auto const* got = reinterpret_cast<float const*>(bytes.data());
     bool ok = true;
     for (int i = 0; i < N; ++i)
