@@ -312,6 +312,17 @@ struct parser_impl
                 if (scope == decl_scope::function_scope && (declarator_index < 0 || not_a_declaration))
                 {
                     auto const after = skip_balanced(pos, "{", "}");
+                    // A group right behind a name in an expression is a temporary, `return c ? T{a} : T{b};`, and the statement goes on to its ';'.
+                    // Ending it here would start the next segment mid-expression, and `: T{b}` reads as declaring `T`.
+                    // A block's '{' follows a keyword, a ':', a ')' or nothing, never a name or a template's '>'.
+                    if (not_a_declaration && prev_top_index >= 0
+                        && (tk(prev_top_index).is(token_kind::identifier) || punct(prev_top_index, ">")))
+                    {
+                        descend_lambdas(pos, after, scope, parent);
+                        prev_top_index = after - 1;
+                        pos = after;
+                        continue;
+                    }
                     parse_scope(pos + 1, after - 1, decl_scope::function_scope, parent);
                     return after;
                 }
