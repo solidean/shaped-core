@@ -2,6 +2,7 @@
 
 #include <clean-core/common/macros.hh> // CC_ARCH_ARM64
 #include <clean-core/common/time.hh>
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
