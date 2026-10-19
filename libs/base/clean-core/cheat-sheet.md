@@ -412,6 +412,8 @@ r.or_throw();                             // -> T&& or throws cc::result_excepti
 r.with_context("while parsing");          // chain context (E = any_error); also with_context_lazy
 CC_RETURN_IF_ERROR(expr);                 // early-return the error from the current function
 // cc::any_error: with_context(msg), site(), to_string(), has_stacktrace() — move-only, type-erased.
+//   message() is the text alone, for a library's user; to_string() adds site, context and trace, for its developer.
+//   clone() is the one way to copy one; text of any kind is kept verbatim, any other type through its debug string.
 
 #include <clean-core/error/exception.hh>  // the blessed route to <exception> / <stdexcept>; declares nothing itself
 // Return a result; where something is genuinely exceptional (a lost device, or_throw), throw through this header.
