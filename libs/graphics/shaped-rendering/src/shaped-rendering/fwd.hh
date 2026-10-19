@@ -58,6 +58,8 @@ struct fsr_options;                  // its own options
 
 class dlss_rr_routine;     // the NVIDIA Ray Reconstruction member (dlss_rr_routine.hh)
 struct dlss_options;       // its own options
+class metalfx_rr_routine;  // the Apple MetalFX denoised scaler member (metalfx_rr_routine.hh)
+struct metalfx_rr_options; // its own options
 class nrd_denoise_routine; // the NRD split-signal member (nrd_denoise_routine.hh)
 struct nrd_options;        // its own options
 

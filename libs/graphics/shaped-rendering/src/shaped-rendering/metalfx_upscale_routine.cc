@@ -16,24 +16,13 @@ using impl::is_set;
 
 namespace
 {
-/// The near plane metalfx_prepare.sgl divides by; any positive value, since MetalFX only compares depths.
-constexpr f32 k_near_plane = 0.1f;
-
-/// The output formats metalfx_copy_out.sgl is compiled for: the HDR ones sr's members write.
-constexpr sg::pixel_format k_staged_formats[] = {sg::pixel_format::rgba16_float, sg::pixel_format::rgba32_float};
-
 /// A stream's MetalFX: the scaler and the guides metalfx_prepare.sgl writes for it.
 struct metalfx_state
 {
     std::shared_ptr<impl::metalfx_stream> stream;
     sg::pixel_format color_format = sg::pixel_format::undefined;
     sg::pixel_format output_format = sg::pixel_format::undefined;
-    sg::texture_2d depth;
-    sg::texture_2d motion;
-    sg::texture_2d exposure;
-
-    /// What MetalFX writes when the caller's output is not renderable; empty otherwise.
-    sg::texture_2d staged;
+    impl::metalfx_images images;
 };
 
 /// Element `index` of the Halton sequence in `base`, in [0, 1).
@@ -86,43 +75,15 @@ bool metalfx_upscale_routine::is_available(sg::context const& ctx)
 cc::shared_async<cc::unit> metalfx_upscale_routine::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
-    _prepare = nullptr;
     if (!impl::metalfx_available(ctx))
     {
         fail_init();
         co_return;
     }
 
-    auto const prepare = sgl_shaders::metalfx_prepare.main_cs.acquire_pipeline(ctx);
-    co_await cc::async_settled(prepare);
-    auto const* const pipeline = prepare->try_value();
-    if (pipeline == nullptr)
-    {
-        CC_LOG_ERROR("metalfx: the metalfx_prepare pipeline did not build");
+    _passes = {};
+    if (!co_await impl::metalfx_build_passes(ctx, _passes))
         fail_init();
-        co_return;
-    }
-    _prepare_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::metalfx_prepare_io>();
-    _prepare = *pipeline;
-
-    _copies.clear();
-    for (auto const format : k_staged_formats)
-    {
-        auto const values = sgl_shaders::metalfx_copy_out_options{.output_format = format};
-        auto const copy = sgl_shaders::metalfx_copy_out.main_cs.acquire_pipeline(ctx, values);
-        co_await cc::async_settled(copy);
-        auto const* const copy_pipeline = copy->try_value();
-        if (copy_pipeline == nullptr)
-        {
-            CC_LOG_ERROR("metalfx: the copy out to pixel_format {} did not build", int(format));
-            fail_init();
-            co_return;
-        }
-        _copies.push_back({.format = format,
-                           .layout = ctx.cached.acquire_binding_group_layout(
-                               sgl_shaders::metalfx_copy_out_io::declared_bindings(values)),
-                           .pipeline = *copy_pipeline});
-    }
     co_return;
 }
 
@@ -154,19 +115,12 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
         return {.status = reconstruct_status::failed};
 
     // An output MetalFX cannot render to is written through an image of our own, copied across after.
-    auto const staging = !in.output.raw()->usage().has(sg::texture_usage::render_target);
-    copy_pass const* copy = nullptr;
-    if (staging)
+    auto const staging = impl::metalfx_needs_staging(in.output);
+    auto const* const copy = staging ? self->_passes.copy_to(in.output.raw()->format()) : nullptr;
+    if (staging && copy == nullptr)
     {
-        for (auto const& c : self->_copies)
-            if (c.format == in.output.raw()->format())
-                copy = &c;
-        if (copy == nullptr)
-        {
-            CC_LOG_ERROR("metalfx: an output of pixel_format {} needs render_target usage",
-                         int(in.output.raw()->format()));
-            return {.status = reconstruct_status::failed};
-        }
+        CC_LOG_ERROR("metalfx: an output of pixel_format {} needs render_target usage", int(in.output.raw()->format()));
+        return {.status = reconstruct_status::failed};
     }
 
     auto const restarted = history._prepare(input_extent, output_extent, upscale_method::metalfx);
@@ -193,54 +147,24 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
 
         auto created = std::make_shared<metalfx_state>(
             metalfx_state{.stream = cc::move(stream), .color_format = color_format, .output_format = output_format});
-        impl::ensure_image(ctx, created->depth, input_extent, sg::pixel_format::r32_float);
-        impl::ensure_image(ctx, created->motion, input_extent, sg::pixel_format::rg16_float);
-        impl::ensure_image(ctx, created->exposure, tg::vec2i(1, 1), sg::pixel_format::r16_float);
         state = created.get();
         history._state = cc::move(created);
     }
 
-    auto const group = ctx.transient.create_binding_group(
-        cmd, self->_prepare_layout,
-        sgl_shaders::metalfx_prepare_io{.linear_depth = in.depth.as_texture_view(),
-                                        .motion = in.motion.as_texture_view(),
-                                        .device_depth = state->depth.as_image_view<sg::pixel_format::r32_float>(),
-                                        .packed_motion = state->motion.as_image_view<sg::pixel_format::rg16_float>(),
-                                        .exposure = state->exposure.as_image_view<sg::pixel_format::r16_float>()});
-    cmd.compute.bind_pipeline(*self->_prepare);
-    cmd.compute.bind_group(0, *group);
-    cmd.compute.set_inline_constants(
-        sgl_shaders::metalfx_prepare_constants{.near_plane = k_near_plane, .exposure = in.exposure}.to_block());
-    cmd.compute.dispatch_threads(input_extent[0], input_extent[1], 1);
-
-    if (staging && (!is_set(state->staged) || extent_of(state->staged) != output_extent))
-        state->staged = ctx.persistent.create_texture_2d(
-            {.format = in.output.raw()->format(),
-             .width = output_extent[0],
-             .height = output_extent[1],
-             .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::render_target});
-
-    auto const target = staging ? state->staged : in.output;
+    impl::metalfx_record_prepare(cmd, self->_passes, state->images, in.depth, in.motion, in.exposure);
+    auto const target = impl::metalfx_target(ctx, state->images, in.output);
     if (!impl::metalfx_dispatch(*state->stream, cmd,
                                 {.color = in.color,
-                                 .depth = state->depth,
-                                 .motion = state->motion,
-                                 .exposure = state->exposure,
+                                 .depth = state->images.depth,
+                                 .motion = state->images.motion,
+                                 .exposure = state->images.exposure,
                                  .output = target,
                                  .jitter = in.jitter,
                                  .reset = restarted || fresh}))
         return {.status = reconstruct_status::failed, .restarted = true};
 
     if (staging)
-    {
-        auto const copy_group = ctx.transient.create_binding_group(
-            cmd, copy->layout,
-            sgl_shaders::metalfx_copy_out_io{.source = state->staged.as_texture_view(),
-                                             .target = in.output.as_any_image_view()});
-        cmd.compute.bind_pipeline(*copy->pipeline);
-        cmd.compute.bind_group(0, *copy_group);
-        cmd.compute.dispatch_threads(output_extent[0], output_extent[1], 1);
-    }
+        impl::metalfx_record_copy_out(cmd, *copy, state->images, in.output);
 
     return {.status = reconstruct_status::denoised, .restarted = restarted || fresh};
 }

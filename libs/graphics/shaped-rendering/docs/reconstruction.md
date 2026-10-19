@@ -17,6 +17,7 @@ This is the design, including the parts not built yet.
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12 | done, SDK fetched on request |
 | `fsr_rr` | temporal, split-signal | dx12 | planned |
 | `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
+| `metalfx_rr` | temporal, upscales | Apple GPUs that run MetalFX's MTL4 denoised scaler; metal | done |
 
 | upscaler | kind | where it runs | status |
 |---|---|---|---|
@@ -194,7 +195,24 @@ An output without `render_target` usage gets an image of the routine's own, and 
 `automatic` picks it over FSR wherever it runs, as the device's own upscaler; the two never both run on one context today.
 A history switched between the two upscalers starts over, since each one's state is its own type.
 
-**Next on Metal**: MetalFX's denoising upscaler (`MTL4FXTemporalDenoisedScaler`, the counterpart of `dlss_rr`) and its frame interpolator, through the same scope.
+## The MetalFX denoised scaler
+
+**`metalfx_rr` is MetalFX's `MTL4FXTemporalDenoisedScaler`: one pass that denoises and upscales, the counterpart of `dlss_rr`.**
+It runs as the upscaler does, through the native scope and the same SGL pass for depth, motion and exposure, with the same conventions for each.
+`impl/metalfx_passes` holds what the two share: that pass, the copy for an output it cannot render to, and the images around the scaler.
+
+**It reads the guides `dlss_rr` does**: both albedos, the world-space normal, the roughness, depth and motion, at the input extent.
+It is created for every texture's format, so a guide in a new format builds a new scaler; it takes the formats it is handed, `rgba32_float` ones included.
+It also reads the camera: `world_to_view` from the guides, and a projection made from `view_to_clip`'s x and y rows with the depth SGL wrote, `near / depth` along whichever axis the caller looks down.
+
+**The scene's detail belongs in the albedo.**
+On metalfx-test's stripes as albedo under lighting that is off by up to 30% per sample, 32 frames upscaled 2x end at an error of 0.091 against the scene, and 0.088 without the noise.
+The same stripes as lighting under a white albedo come out at 0.235: it takes detail the albedo does not explain for noise.
+
+**`automatic` ranks it after `dlss_rr`**, so a caller feeding fresh frames with every guide gets it on Metal.
+`reconstruct_jitter` answers its own sequence, the upscaler's, whenever it runs at a smaller extent; at the native extent it runs too, and the jitter is 0.
+
+**Next on Metal**: MetalFX's frame interpolator, through the same scope.
 
 ## The OIDN member
 
@@ -364,7 +382,7 @@ webgpu keeps compiling per format, since WGSL has no such image.
 **Explicit means explicit.**
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
-`dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
+`dlss_rr`, `metalfx_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
 
 **`automatic` walks what the caller can feed, not only what the device can run.**
 A member is skipped when its `required_guides` are not in the `available_guides` the caller passed, because `execute` would refuse it for exactly that and write nothing.

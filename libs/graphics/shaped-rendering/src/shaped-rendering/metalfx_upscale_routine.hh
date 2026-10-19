@@ -1,9 +1,9 @@
 #pragma once
 
-#include <clean-core/container/vector.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
+#include <shaped-rendering/impl/metalfx_passes.hh>
 #include <shaped-rendering/reconstruct.hh>
 
 #include <memory>
@@ -41,15 +41,5 @@ protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    /// metalfx_copy_out.sgl compiled for one output format.
-    struct copy_pass
-    {
-        sg::pixel_format format = sg::pixel_format::undefined;
-        sg::binding_group_layout_handle layout;
-        sg::compute_pipeline_handle pipeline;
-    };
-
-    sg::binding_group_layout_handle _prepare_layout;
-    sg::compute_pipeline_handle _prepare;
-    cc::vector<copy_pass> _copies;
+    impl::metalfx_passes _passes;
 };

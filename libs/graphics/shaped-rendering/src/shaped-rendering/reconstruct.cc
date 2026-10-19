@@ -10,6 +10,7 @@
 #include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
+#include <shaped-rendering/metalfx_rr_routine.hh>
 #include <shaped-rendering/metalfx_upscale_routine.hh>
 #include <shaped-rendering/nrd_denoise_routine.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
@@ -53,7 +54,8 @@ constexpr auto k_upscale_source_format = sg::pixel_format::rgba32_float;
 /// `oidn` is in neither: at roughly 0.2 s per megapixel it is a reference-quality member, not one a frame loop can
 /// afford, so a caller has to name it.
 constexpr denoise_method temporal_preference[] = {
-    denoise_method::dlss_rr, denoise_method::fsr_rr, denoise_method::nrd, denoise_method::svgf, denoise_method::atrous,
+    denoise_method::dlss_rr, denoise_method::metalfx_rr, denoise_method::fsr_rr,
+    denoise_method::nrd,     denoise_method::svgf,       denoise_method::atrous,
 };
 constexpr denoise_method spatial_preference[] = {denoise_method::atrous};
 
@@ -104,6 +106,8 @@ cc::string_view to_string(denoise_method m)
         return "fsr_rr";
     case denoise_method::nrd:
         return "nrd";
+    case denoise_method::metalfx_rr:
+        return "metalfx_rr";
     case denoise_method::count_:
         break;
     }
@@ -228,6 +232,8 @@ bool reconstruct_support::supports(denoise_method m) const
         return fsr_rr;
     case denoise_method::nrd:
         return nrd;
+    case denoise_method::metalfx_rr:
+        return metalfx_rr;
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -265,6 +271,7 @@ reconstruct_support query_reconstruct_support(sg::context const& ctx)
         .oidn = oidn_denoise_routine::is_available(ctx),
         .dlss_rr = dlss_rr_routine::is_available(ctx),
         .nrd = nrd_denoise_routine::is_available(ctx),
+        .metalfx_rr = metalfx_rr_routine::is_available(ctx),
         .fsr = fsr_upscale_routine::is_available(ctx),
         .metalfx = metalfx_upscale_routine::is_available(ctx),
     };
@@ -273,7 +280,7 @@ reconstruct_support query_reconstruct_support(sg::context const& ctx)
 bool is_temporal(denoise_method m)
 {
     return m == denoise_method::svgf || m == denoise_method::dlss_rr || m == denoise_method::fsr_rr
-        || m == denoise_method::nrd;
+        || m == denoise_method::nrd || m == denoise_method::metalfx_rr;
 }
 
 reconstruct_guide_set required_guides(denoise_method m)
@@ -284,6 +291,7 @@ reconstruct_guide_set required_guides(denoise_method m)
     case denoise_method::svgf:
         return g::normal | g::depth | g::motion;
     case denoise_method::dlss_rr:
+    case denoise_method::metalfx_rr:
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::hit_distance
@@ -322,6 +330,8 @@ reconstruct_guide_set optional_guides(denoise_method m)
         return {};
     case denoise_method::nrd:
         return {};
+    case denoise_method::metalfx_rr:
+        return {};
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -355,7 +365,7 @@ namespace
 /// Whether a denoiser upscales by itself, so that no upscaler runs behind it.
 [[nodiscard]] bool upscales_itself(denoise_method m)
 {
-    return m == denoise_method::dlss_rr;
+    return m == denoise_method::dlss_rr || m == denoise_method::metalfx_rr;
 }
 
 /// `resolve_upscale_method` against a support answer and a resolved denoiser the caller already has.
@@ -450,6 +460,8 @@ void log_upscaler_refusal_once(upscale_method m, refusal_reason reason, cc::stri
         return oidn_denoise_routine::execute(cmd, in, history, oidn_denoise_routine::options_for(settings));
     case denoise_method::dlss_rr:
         return dlss_rr_routine::execute(cmd, in, history, dlss_rr_routine::options_for(settings));
+    case denoise_method::metalfx_rr:
+        return metalfx_rr_routine::execute(cmd, in, history, metalfx_rr_routine::options_for(settings));
     case denoise_method::fsr_rr:
     case denoise_method::none:
     case denoise_method::automatic:
@@ -508,10 +520,17 @@ tg::vec2f reconstruct_jitter(sg::context const& ctx,
                              u32 frame_index,
                              reconstruct_guide_set available_guides)
 {
-    auto const upscaler = planned_upscaler(query_reconstruct_support(ctx), settings, available_guides);
+    auto const support = query_reconstruct_support(ctx);
+    auto const input_extent = reconstruct_input_extent(ctx, settings, output_extent, available_guides);
+
+    // A member that upscales by itself places the samples by its own sequence, wherever it runs at a smaller extent.
+    if (resolve_with(support, settings, available_guides) == denoise_method::metalfx_rr)
+        return input_extent == output_extent ? tg::vec2f(0, 0)
+                                             : metalfx_upscale_routine::jitter(frame_index, input_extent, output_extent);
+
+    auto const upscaler = planned_upscaler(support, settings, available_guides);
     if (upscaler == upscale_method::none)
         return tg::vec2f(0, 0);
-    auto const input_extent = reconstruct_input_extent(ctx, settings, output_extent, available_guides);
     if (upscaler == upscale_method::metalfx)
         return metalfx_upscale_routine::jitter(frame_index, input_extent, output_extent);
     return fsr_upscale_routine::jitter(frame_index, input_extent, output_extent);
@@ -547,6 +566,8 @@ cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scop
         nrd_denoise_routine::prewarm(ctx);
     if (support.dlss_rr)
         dlss_rr_routine::prewarm(ctx); // nothing to compile, but the member is a routine like the others
+    if (support.metalfx_rr)
+        metalfx_rr_routine::prewarm(ctx);
     if (support.fsr)
         fsr_upscale_routine::prewarm(ctx);
     if (support.metalfx)

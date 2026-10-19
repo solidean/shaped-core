@@ -6,6 +6,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
+#include <shaped-rendering/metalfx_rr_routine.hh>
 #include <shaped-rendering/metalfx_upscale_routine.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <typed-geometry/scalar/angle.hh>
@@ -13,7 +14,8 @@
 
 using namespace cc::primitive_defines;
 
-// sr's MetalFX upscaler, encoded through sg's Metal native scope, and the front composing it behind a denoiser.
+// sr's MetalFX upscaler, encoded through sg's Metal native scope, and the front composing it behind a denoiser; then the
+// denoised scaler, sr::metalfx_rr_routine, as a member of the front that upscales by itself.
 //
 // The image tests are fsr-test's, run against MetalFX: a known pattern traced at a low resolution with the member's own
 // jitter sequence, upscaled, and measured against the pattern at the output's pixel centres.
@@ -87,6 +89,7 @@ void upload(sg::command_list& cmd, sg::texture_2d const& tex, cc::span<tg::vec4f
 cc::shared_async<cc::unit> prewarm(sg::context& ctx)
 {
     sr::metalfx_upscale_routine::prewarm(ctx);
+    sr::metalfx_rr_routine::prewarm(ctx);
     sr::atrous_denoise_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
     sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
     (void)co_await ctx.routines.idle_completion();
@@ -159,6 +162,140 @@ cc::shared_async<stream_result> run_stream(sg::context& ctx, stream_options opti
     if (!sr::query_reconstruct_support(ctx).metalfx)
         return cc::string_view("MetalFX does not run on this build or context");
     return {};
+}
+
+[[nodiscard]] cc::optional<cc::string_view> why_metalfx_rr_cannot_run(sg::context const& ctx)
+{
+    if (!sr::query_reconstruct_support(ctx).metalfx_rr)
+        return cc::string_view("MetalFX's denoised scaler does not run on this build or context");
+    return {};
+}
+
+/// A hash of the pixel and the frame in [-1, 1), so the noise is uncorrelated between pixels and between frames.
+[[nodiscard]] f32 noise(int x, int y, int frame)
+{
+    auto h = u32(x) * 73856093u ^ u32(y) * 19349663u ^ u32(frame) * 83492791u;
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    h ^= h >> 15;
+    return f32(h & 0xffffu) / 32768.0f - 1.0f;
+}
+
+/// `trace` as an albedo lit by an irradiance of 1 that every sample gets wrong by up to `amplitude`, uniformly.
+/// The scene's detail is the albedo's, as a renderer's texture is, so only the lighting is noisy.
+[[nodiscard]] cc::vector<tg::vec4f> trace_noisy(tg::vec2f jitter, int frame, f32 amplitude)
+{
+    auto pixels = trace(jitter, 0.0f);
+    for (auto y = 0; y < k_in; ++y)
+        for (auto x = 0; x < k_in; ++x)
+        {
+            auto const s = pixels[y * k_in + x][0] * (1.0f + amplitude * noise(x, y, frame));
+            pixels[y * k_in + x] = tg::vec4f(s, s, s, 1);
+        }
+    return pixels;
+}
+
+/// A camera looking down +z with a 60 degree vertical field of view, as a left-handed caller has it.
+[[nodiscard]] tg::mat4f test_projection()
+{
+    auto p = tg::mat4f::zero;
+    p[0, 0] = 1.7320508f;
+    p[1, 1] = 1.7320508f;
+    p[2, 2] = 1.0f;
+    p[2, 3] = 1.0f;
+    p[3, 2] = -0.1f;
+    return p;
+}
+
+/// The guides of a flat wall facing the camera, one unit away, with the scene as its albedo.
+struct wall_guides
+{
+    sg::texture_2d albedo;
+    sg::texture_2d specular_albedo;
+    sg::texture_2d normal;
+    sg::texture_2d roughness;
+    sg::texture_2d depth;
+    sg::texture_2d motion;
+
+    [[nodiscard]] static wall_guides make(sg::context& ctx, int size)
+    {
+        return {.albedo = make_image(ctx, size, sg::pixel_format::rgba32_float),
+                .specular_albedo = make_image(ctx, size, sg::pixel_format::rgba32_float),
+                .normal = make_image(ctx, size, sg::pixel_format::rgba32_float),
+                .roughness = make_image(ctx, size, sg::pixel_format::rgba32_float),
+                .depth = make_image(ctx, size, sg::pixel_format::rgba32_float),
+                .motion = make_image(ctx, size, sg::pixel_format::rgba32_float)};
+    }
+
+    void upload_to(sg::command_list& cmd, int size, tg::vec2f jitter) const
+    {
+        upload(cmd, albedo, trace(jitter, 0.0f));
+        upload(cmd, specular_albedo, filled(size, tg::vec4f(0.04f, 0.04f, 0.04f, 0)));
+        upload(cmd, normal, filled(size, tg::vec4f(0, 0, -1, 0)));
+        upload(cmd, roughness, filled(size, tg::vec4f(1, 0, 0, 0)));
+        upload(cmd, depth, filled(size, tg::vec4f(1, 0, 0, 0)));
+        upload(cmd, motion, filled(size, tg::vec4f(0, 0, 0, 0)));
+    }
+
+    [[nodiscard]] sr::reconstruct_guides guides(tg::vec2f jitter) const
+    {
+        return {.albedo = albedo,
+                .specular_albedo = specular_albedo,
+                .normal = normal,
+                .roughness = roughness,
+                .depth = depth,
+                .motion = motion,
+                .jitter = jitter,
+                .view_to_clip = test_projection()};
+    }
+};
+
+struct denoised_result
+{
+    sr::reconstruct_outcome first;
+    sr::reconstruct_outcome last;
+    cc::vector<tg::vec4f> output;
+};
+
+/// Traces `frames` noisy frames of the still scene and denoises them through the front, naming metalfx_rr.
+/// `jitter_sign` of -1 hands MetalFX the jitter the wrong way round.
+cc::shared_async<denoised_result> run_denoised(sg::context& ctx,
+                                               int frames,
+                                               f32 amplitude,
+                                               int out_size,
+                                               f32 jitter_sign = 1.0f)
+{
+    auto const color = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
+    auto const wall = wall_guides::make(ctx, k_in);
+    auto const output = make_image(ctx, out_size, sg::pixel_format::rgba32_float);
+    auto const settings = sr::reconstruct_settings{.denoiser = sr::denoise_method::metalfx_rr, .fresh_samples = true};
+
+    auto history = sr::reconstruct_history();
+    auto result = denoised_result{};
+    auto readback = sg::data_future<tg::vec4f>();
+    for (auto frame = 0; frame < frames; ++frame)
+    {
+        auto const jitter = out_size == k_in ? tg::vec2f(0, 0)
+                                             : sr::metalfx_upscale_routine::jitter(u32(frame), tg::vec2i(k_in, k_in),
+                                                                                   tg::vec2i(out_size, out_size));
+        auto cmd = ctx.create_command_list();
+        upload(*cmd, color, trace_noisy(jitter, frame, amplitude));
+        wall.upload_to(*cmd, k_in, jitter);
+        auto const outcome = sr::reconstruct_routine::execute(
+            *cmd, {.color = color, .guides = wall.guides(jitter * jitter_sign), .output = output}, history, settings);
+        if (frame == 0)
+            result.first = outcome;
+        result.last = outcome;
+        if (frame + 1 == frames)
+            readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+    }
+
+    auto const pixels = co_await readback.data();
+    for (auto i = isize(0); i < pixels.size(); ++i)
+        result.output.push_back(pixels[i]);
+    co_return result;
 }
 } // namespace
 
@@ -314,5 +451,78 @@ ASYNC_INVOCABLE_TEST("sr - the front upscales through metalfx behind a denoiser"
     CHECK(first.upscaler == sr::upscale_method::metalfx);
     CHECK(first.restarted);
     CHECK(!run(sr::denoise_method::atrous).restarted);
+    co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sr - automatic picks metalfx_rr for fresh samples, and it upscales by itself",
+                     (sg::context_handle const& ctx_h))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context const& ctx = *ctx_h;
+    if (auto const why = why_metalfx_rr_cannot_run(ctx); why.has_value())
+        SKIP(why.value());
+
+    auto const out = tg::vec2i(640, 480);
+    auto const settings = sr::reconstruct_settings{.denoiser = sr::denoise_method::automatic,
+                                                   .scale = sr::render_scale_preset::performance,
+                                                   .fresh_samples = true};
+    CHECK(sr::resolve_denoise_method(ctx, settings, sr_test::every_guide()) == sr::denoise_method::metalfx_rr);
+    CHECK(sr::resolve_upscale_method(ctx, settings, sr_test::every_guide()) == sr::upscale_method::none);
+    CHECK(sr::reconstruct_input_extent(ctx, settings, out, sr_test::every_guide()) == tg::vec2i(320, 240));
+    CHECK(sr::reconstruct_jitter(ctx, settings, out, 5, sr_test::every_guide())
+          == sr::metalfx_upscale_routine::jitter(5, tg::vec2i(320, 240), out));
+    co_return;
+}
+
+ASYNC_INVOCABLE_TEST("sr - metalfx_rr denoises and upscales a noisy stream through the front",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    if (auto const why = why_metalfx_rr_cannot_run(ctx); why.has_value())
+        SKIP(why.value());
+
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    // Uniform noise of +-30% of the lighting; 32 frames of a still scene should leave little of it beyond what the
+    // upscale alone loses, which the same stream without noise measures.
+    auto const clean = co_await run_denoised(ctx, 32, 0.0f, k_out);
+    auto const result = co_await run_denoised(ctx, 32, 0.3f, k_out);
+    REQUIRE(clean.last.status == sr::reconstruct_status::denoised);
+    REQUIRE(result.last.status == sr::reconstruct_status::denoised);
+    CHECK(result.first.restarted);
+    CHECK(!result.last.restarted);
+    CHECK(result.last.denoiser == sr::denoise_method::metalfx_rr);
+    CHECK(result.last.upscaler == sr::upscale_method::none);
+
+    auto const clean_error = rmse_against_scene(clean.output, 0.0f);
+    auto const error = rmse_against_scene(result.output, 0.0f);
+    // Measured on an M4: 0.091 with noise against 0.088 without.
+    CHECK(error < clean_error + 0.02f).context(cc::format("metalfx_rr {} with noise, {} without", error, clean_error));
+
+    // The jitter's sign is the upscaler's, which a stream handed it the other way round shows.
+    auto const flipped = co_await run_denoised(ctx, 32, 0.0f, k_out, -1.0f);
+    auto const flipped_error = rmse_against_scene(flipped.output, 0.0f);
+    CHECK(clean_error < 0.8f * flipped_error)
+        .context(cc::format("metalfx_rr {}, flipped jitter {}", clean_error, flipped_error));
+    co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sr - metalfx_rr runs at the native extent too",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    if (auto const why = why_metalfx_rr_cannot_run(ctx); why.has_value())
+        SKIP(why.value());
+
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    auto const result = co_await run_denoised(ctx, 8, 0.3f, k_in);
+    CHECK(result.last.status == sr::reconstruct_status::denoised);
     co_await ctx.idle_completion();
 }
