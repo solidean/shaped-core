@@ -1049,6 +1049,10 @@
 @builtin @pure @operator("*") fun transform_float4(m: mat4, v: float4) -> float4
 @builtin @pure @operator("*") fun multiply_mat4(m: mat4, b: mat4) -> mat4
 
+// what a matrix is on its own; every target has it under this name
+/// The factor `m` scales a volume by, negative where it mirrors and 0 where it flattens one.
+@builtin @pure fun determinant(m: mat4) -> float
+
 // `x as T` between the numeric families of one width, and between the widths of one family,
 // component for component; each target writes a conversion to `T`
 @builtin @pure @operator("as") fun convert_float_to_int(x: float) -> int

@@ -35,6 +35,9 @@ A listing here is the dump of a flat tree, shortened: a label is `$name`, and a 
   `step(edge, x)` is 1 where `x >= edge` and 0 elsewhere, as HLSL and WGSL define it, so a NaN on either side gives 0.
   A byte of `pack_unorm4x8` and `pack_snorm4x8` is `floor(v + 0.5)` of the scaled value, WGSL's formula, which HLSL's text writes too.
   Metal does not promise that rounding of a value exactly midway between two bytes, so MSL may take it to the even one.
+* **EVAL-98** `determinant(m)` is the determinant of the 4x4 matrix `m`, which its transpose shares, so it does not depend on the layout being column-major.
+  It is defined for every argument: a matrix two of whose columns are equal gives 0, and an element that is a NaN or an infinity gives what float arithmetic makes of it.
+  A target rounds each of its products and sums, and the interpreter rounds once, so the two agree exactly where every step is exact, as with small integers.
 * **EVAL-89** A `discard` ends the run with no result, as the status `discarded`: nothing after it runs, and nothing it would have printed or stored after it happens.
 * **EVAL-84** An integer `/` or `%` by zero, and the most negative `int` divided by `-1`, have no value: a run that reaches one has no behaviour past it ([why](why/evaluation.md#eval-84)).
 * **EVAL-7** A struct value is one value per field, in field order.

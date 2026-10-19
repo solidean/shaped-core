@@ -1,0 +1,20 @@
+// what a mat4 is on its own; `mat4 * x` is the samples' (tests/samples/matrices.sgl)
+// A mat4 has no constructor yet, so a test takes its matrix from a binding, which `sgl test` leaves zero.
+// The matrices that pin `determinant` are bound by a C++ test, `sgl driver bindings - determinant ...`.
+
+binding frame:
+    model: mat4
+
+test {frame}:
+    determinant(frame.model) == 0.0
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+// a model matrix that mirrors turns every triangle's winding over, which its determinant's sign says
+@pixel fun handedness_ps(p: pixel_input){frame} -> target:
+    let mirrors = determinant(frame.model) < 0.0
+    return { color = float4(select(mirrors, 1.0, 0.0), p.position.x, 0.0, 1.0) }
