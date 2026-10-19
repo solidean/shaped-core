@@ -106,7 +106,15 @@ A texture's layout follows from the access through `native_layout_for`, rather t
 
 Under-declaring corrupts the tracker — sg then believes a state the GPU is not in — so the scope hands out a native
 resource only for a handle it declared, and the debug layer catches the rest.
-dx12 today; vulkan when a member needs it.
+
+`sg::backend::metal::metal_native_scope::open(cmd, textures, buffers)` is the Metal twin, with one difference that follows from MTL4.
+Foreign code there encodes encoders of its own, and a barrier lives inside an encoder, so sg's barriers cannot reach the foreign work.
+The two meet at a fence instead.
+Opening flushes the declares and closes sg's encoder behind an update of the context's scope fence.
+The foreign code waits for that fence before its work and updates it after.
+sg's next encoder waits for it again.
+MetalFX does its half when its effect's `fence` property is the scope's.
+dx12 and metal today; vulkan when a member needs it.
 See [shaped-rendering's denoising doc](../../../shaped-rendering/docs/reconstruction.md), which is what asked for it.
 
 ## The vocabulary is backend-neutral

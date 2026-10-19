@@ -98,6 +98,11 @@ MTL4::ComputeCommandEncoder* metal_command_list::compute_encoder()
     // actually rests on, and tests/barrier/cross-list-ordering-test.cc, which fails without it.
     // The pair stays for the visibility half, so a write published by one encoder is readable by the next.
     _encoder->barrierAfterQueueStages(k_compute_encoder_stages, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
+    if (_wait_for_native_fence)
+    {
+        _encoder->waitForFence(_metal_context.native_scope_fence(), k_compute_encoder_stages);
+        _wait_for_native_fence = false;
+    }
 
     // An encoder starts with no state, while sg's bound pipeline outlives it: a timestamp, a copy or a pass closes
     // the encoder between two dispatches that never rebind.
@@ -135,6 +140,19 @@ MTL4::ArgumentTable* metal_command_list::argument_table()
         throw sg::exception(describe_error(error, "the metal device refused an argument table"));
 
     return _argument_table;
+}
+
+void metal_command_list::enter_native_scope()
+{
+    CC_ASSERT(!in_rendering_scope(), "a native scope may not be opened inside a rendering scope");
+
+    // The declared accesses barrier inside sg's own encoder, which then waits on every earlier stage of the queue, so
+    // the fence it updates stands after all of it.
+    flush_barriers();
+    auto* const encoder = compute_encoder();
+    encoder->barrierAfterQueueStages(MTL::StageAll, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
+    encoder->updateFence(_metal_context.native_scope_fence(), k_compute_encoder_stages);
+    end_encoder();
 }
 
 void metal_command_list::end_encoder()
@@ -1265,6 +1283,11 @@ void metal_command_list::open_render_encoder(bool force_load)
 
     // Every encoder is ordered against the queue on open, the same as the compute one.
     _render_encoder->barrierAfterQueueStages(MTL::StageAll, MTL::StageAll, MTL4::VisibilityOptionDevice);
+    if (_wait_for_native_fence)
+    {
+        _render_encoder->waitForFence(_metal_context.native_scope_fence(), k_render_encoder_destination_stages);
+        _wait_for_native_fence = false;
+    }
 
     // Only a fresh scope takes its viewport and scissor from the info: a reopen finds the current ones already here,
     // which is what keeps a caller's mid-pass `set_viewport` across the boundary.

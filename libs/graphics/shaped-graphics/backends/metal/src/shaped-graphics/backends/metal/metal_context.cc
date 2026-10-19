@@ -60,6 +60,10 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
         return cc::error("the metal device refused the zeroed hit-group offsets buffer");
     cc::memset(_zero_hit_group_offsets->contents(), 0, size_t(zero_offsets_bytes));
     _residency.add(_zero_hit_group_offsets);
+
+    _native_scope_fence = _device->newFence();
+    if (_native_scope_fence == nullptr)
+        return cc::error("the metal device refused the native scope's fence");
     return cc::unit{};
 }
 
@@ -545,6 +549,12 @@ void metal_context::shutdown()
         _residency.remove(_zero_hit_group_offsets);
         _zero_hit_group_offsets->release();
         _zero_hit_group_offsets = nullptr;
+    }
+
+    if (_native_scope_fence != nullptr)
+    {
+        _native_scope_fence->release();
+        _native_scope_fence = nullptr;
     }
 
     if (_compiler != nullptr)
