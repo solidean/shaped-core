@@ -1284,6 +1284,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // written by the next frame that traces, from what that frame or the wavefront's tallies saw of every pixel.
     // At the target no frame traces, so the mean starts over instead: a denoiser would read blank guides, and a drawing test or a pick blank depth.
     auto const target = effective_sample_target(def.sample_target);
+    slot->sample_target = target;
     auto const guides_unwritten = has_guides && slot->accum_frame > 0 && ds.normal->accum_frame == 0;
     auto const depth_unwritten = depth_slot != nullptr && slot->accum_frame > 0 && depth_slot->accum_frame == 0;
     auto const at_target = !frame_samples(*slot, target, false);
@@ -1844,7 +1845,8 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     slot.reset_hash = hash;
 
     // As `trace`: a mean whose pixels all hold the cap is the image, and a frame there traces nothing.
-    if (!frame_samples(slot, effective_sample_target(0), false))
+    slot.sample_target = effective_sample_target(0);
+    if (!frame_samples(slot, slot.sample_target, false))
         return slot.texture;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".

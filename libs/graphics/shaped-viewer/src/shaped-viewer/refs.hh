@@ -504,8 +504,9 @@ public:
     /// Whether every traced layer of this view holds `samples` per pixel, or has stopped climbing and never will.
     ///
     /// **This is what a caller waiting for a converged image should ask**, rather than comparing the counter itself.
-    /// A layer stops at `sv::accumulation_sample_cap`, so a target above it is one the counter can never reach: asking
-    /// for 20000 samples and waiting on `accumulated_samples() >= 20000` waits forever on an image that finished long ago.
+    /// A layer stops at its sample target, the smaller of `sv::accumulation_sample_cap` and `viewer_definition::sample_target`,
+    /// so a count above it is one the counter can never reach: asking for 20000 samples and waiting on
+    /// `accumulated_samples() >= 20000` waits forever on an image that finished long ago.
     ///
     /// An unset `samples` asks only whether this view has finished as far as it can.
     /// False for a view with no traced layer, since nothing there has converged.

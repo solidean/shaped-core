@@ -14,6 +14,7 @@
 #include <shaped-viewer/rendering/wavefront_routine.hh>
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/camera_controller.hh>
+#include <shaped-viewer/view/render_settings.hh> // sv::accumulation_sample_cap
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
@@ -57,6 +58,10 @@ struct temporal_slot
     /// A wavefront layer's pixels finish different numbers of paths, so it is raised as each frame's floor reads back, a frame or more late.
     /// 0 whenever `accum_frame` is: `restart_accumulation` resets both.
     u32 samples = 0;
+
+    /// The samples per pixel this layer stops at, as the frame that last decided whether to trace took it.
+    /// The smaller of `sv::accumulation_sample_cap` and `viewer_definition::sample_target` where that is set; `is_accumulation_converged` takes reaching it as stopped.
+    u32 sample_target = accumulation_sample_cap;
 
     /// How many pixels held fewer samples than the trace's target as of the last wavefront floor that landed, and 0 for any other layer.
     /// What a capture that gives up names, since one stalled pixel holds the whole floor down.

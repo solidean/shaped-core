@@ -178,8 +178,8 @@ bool is_accumulation_converged(view_state const& state, cc::optional<u32> sample
         any = true;
 
         // Stopped counts as converged: the layer takes no more samples, so waiting longer buys nothing and a target
-        // above the cap would never be reached.
-        auto const stopped = samples_of(slot) >= accumulation_sample_cap;
+        // above its own would never be reached.
+        auto const stopped = samples_of(slot) >= slot.sample_target;
         auto const reached = samples.has_value() && samples_of(slot) >= samples.value();
         if (!stopped && !reached)
             return false;

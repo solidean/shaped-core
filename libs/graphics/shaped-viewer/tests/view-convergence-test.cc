@@ -84,6 +84,18 @@ TEST("sv - a layer that has stopped climbing counts as converged")
     CHECK(!sv::impl::is_accumulation_converged(view_with(cc::array<cc::pair<u8, u32>>{{0, 60}}), {}));
 }
 
+// A layer whose definition asks for fewer samples than the cap stops there, and waiting on it with no count is waiting for that.
+TEST("sv - a layer at its definition's sample target has converged")
+{
+    auto state = view_with(cc::array<cc::pair<u8, u32>>{{0, 256}});
+    state.temporal[sv::temporal_id::accumulation(0)].sample_target = 256;
+    CHECK(sv::impl::is_accumulation_converged(state, {}));
+    CHECK(sv::impl::is_accumulation_converged(state, 1000));
+
+    state.temporal[sv::temporal_id::accumulation(0)].samples = 255;
+    CHECK(!sv::impl::is_accumulation_converged(state, {}));
+}
+
 // A raster layer's frame is its final image, so the renderer marks it at the cap the frame one lands.
 // That is what lets a raster view finish a capture whatever it asks for.
 TEST("sv - a raster layer at the cap has converged for any target")
