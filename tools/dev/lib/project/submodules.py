@@ -1,9 +1,14 @@
-"""Bring each submodule up to date with the branch `.gitmodules` names for it, never at the cost of local work.
+"""Bring each submodule up to the commit the superproject records for it, or with `tip` to its tracked branch, never at the cost of local work.
 
-Only two states are moved, and both by a fast-forward alone:
-- the submodule is on its tracked branch, with nothing uncommitted and nothing unpushed;
-- its HEAD is detached at a commit the tracked branch already contains, which is how `git submodule update` leaves it.
-Everything else is reported and left alone: uncommitted changes, unpushed commits, another branch checked out, a detached commit the branch does not contain.
+By default a submodule goes no further than the recorded pointer, so the working tree matches what the superproject's HEAD records.
+A submodule ahead of its pointer is left there: that is local work, or a move to the tip someone asked for.
+With `tip` it goes to the head of the branch `.gitmodules` names, which runs ahead of the pointer until a bump commits it.
+
+Either way it moves only by a fast-forward, and only from one of two states:
+- the submodule is on its tracked branch, with nothing uncommitted;
+- its HEAD is detached, which is how `git submodule update` leaves it.
+The fast-forward leaves the tracked branch checked out wherever the branch can reach the target, so a commit made there is never stranded.
+Everything else is reported and left alone: uncommitted changes, another branch checked out, a history that diverged from the target, and for `tip` unpushed commits.
 So nothing is ever reset, rebased, merged or rewritten, and no commit can be stranded.
 A submodule `.gitmodules` declares but that is not checked out yet, say one a pull just added, is initialized first at the recorded commit, which leaves it detached within its branch.
 So is a missing submodule of a submodule, at any depth; one already checked out there is left where it is.
@@ -28,7 +33,7 @@ class Submodule:
 @dataclass(frozen=True)
 class Outcome:
     path: str
-    # "initialized", "updated", "up-to-date", "skipped" or "refused"; dry runs say "would init" or "would update".
+    # "initialized", "updated", "up-to-date", "ahead", "skipped" or "refused"; dry runs say "would init" or "would update".
     status: str
     detail: str
     old: str | None = None
@@ -98,16 +103,84 @@ def init_nested(root: Path, sub: Submodule, *, dry_run: bool = False) -> list[Ou
     return outcomes
 
 
-def sync(root: Path, sub: Submodule, *, dry_run: bool = False, fetch: bool = True) -> Outcome:
-    """Fast-forward one submodule to its tracked branch, or say why not."""
+def sync(root: Path, sub: Submodule, *, dry_run: bool = False, fetch: bool = True, tip: bool = False) -> Outcome:
+    """Fast-forward one submodule to its recorded commit, or with `tip` to its tracked branch, or say why not."""
     repo = root / sub.path
     try:
-        return _sync(repo, sub, dry_run=dry_run, fetch=fetch)
+        if tip:
+            return _sync_tip(repo, sub, dry_run=dry_run, fetch=fetch)
+        return _sync_recorded(root, sub, dry_run=dry_run, fetch=fetch)
     except _GitError as e:
         return Outcome(sub.path, "refused", str(e))
 
 
-def _sync(repo: Path, sub: Submodule, *, dry_run: bool, fetch: bool) -> Outcome:
+def _is_ancestor(repo: Path, a: str, b: str) -> bool:
+    return _git(repo, "merge-base", "--is-ancestor", a, b, check=False).returncode == 0
+
+
+def _has_commit(repo: Path, rev: str) -> bool:
+    return _git(repo, "cat-file", "-e", f"{rev}^{{commit}}", check=False).returncode == 0
+
+
+def _sync_recorded(root: Path, sub: Submodule, *, dry_run: bool, fetch: bool) -> Outcome:
+    repo = root / sub.path
+    target = recorded(root, sub)
+    if target is None:
+        return Outcome(sub.path, "skipped", "the superproject records no commit for it yet")
+    remote = (_git(repo, "config", f"branch.{sub.branch}.remote", check=False).stdout.strip() if sub.branch else "") or "origin"
+    if not _has_commit(repo, target) and fetch:
+        _git(repo, "fetch", "-q", remote)
+    if not _has_commit(repo, target):
+        return Outcome(sub.path, "refused", f"the recorded {target[:10]} is not on {remote}; was the submodule pushed?")
+
+    head = _out(repo, "rev-parse", "HEAD")
+    on = _git(repo, "symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
+    where = on or "detached"
+    if head == target:
+        return Outcome(sub.path, "up-to-date", f"{where} at the recorded {head[:10]}", head, head)
+    if _is_ancestor(repo, target, head):
+        return Outcome(sub.path, "ahead", f"{where}, {_count(repo, f'{target}..{head}')} commit(s) past the recorded {target[:10]}; a bump would commit them",
+                       head, head)
+    if not _is_ancestor(repo, head, target):
+        return Outcome(sub.path, "refused", f"{where} at {head[:10]}, which diverged from the recorded {target[:10]}")
+    if on and on != sub.branch:
+        return Outcome(sub.path, "skipped", f"{on} is checked out, and the recorded {target[:10]} is ahead of it")
+    # Only a move needs a clean tree; a submodule at or past its pointer is reported however dirty.
+    if _out(repo, "status", "--porcelain", "--untracked-files=no"):
+        return Outcome(sub.path, "refused", "uncommitted changes, and the recorded commit is ahead")
+    if _git(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode == 0:
+        return Outcome(sub.path, "refused", "a merge is in progress")
+
+    behind = _count(repo, f"HEAD..{target}")
+    # A detached HEAD goes back onto the tracked branch when that branch can fast-forward to the target too.
+    branch = on or None
+    if not on and sub.branch:
+        local = _git(repo, "rev-parse", "-q", "--verify", f"refs/heads/{sub.branch}", check=False).stdout.strip()
+        tracking = f"refs/remotes/{remote}/{sub.branch}"
+        if local and _is_ancestor(repo, local, target):
+            branch = sub.branch
+        elif not local and _has_commit(repo, tracking) and _is_ancestor(repo, target, tracking):
+            branch = sub.branch
+    detail = f"{where}: {head[:10]}..{target[:10]}, {behind} commit(s) to the recorded pointer"
+    if branch and not on:
+        detail += f", on {branch}"
+    if dry_run:
+        return Outcome(sub.path, "would update", detail, head, target)
+
+    if on:
+        _git(repo, "merge", "--ff-only", "-q", target)
+    elif branch and _git(repo, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False).returncode == 0:
+        _git(repo, "checkout", "-q", branch)
+        _git(repo, "merge", "--ff-only", "-q", target)
+    elif branch:
+        _git(repo, "checkout", "-q", "-b", branch, target)
+        _git(repo, "branch", "-q", f"--set-upstream-to={remote}/{branch}", branch)
+    else:
+        _git(repo, "checkout", "-q", "--detach", target)
+    return Outcome(sub.path, "updated", detail, head, target)
+
+
+def _sync_tip(repo: Path, sub: Submodule, *, dry_run: bool, fetch: bool) -> Outcome:
     if sub.branch is None:
         return Outcome(sub.path, "skipped", "no `branch =` in .gitmodules")
     branch = sub.branch

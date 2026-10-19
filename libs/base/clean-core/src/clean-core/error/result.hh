@@ -43,8 +43,9 @@ public:
 
     /// Construct from any error type E, capturing source location.
     /// The error is converted to a debug string representation.
+    /// Text of any kind, a literal or a string_view, takes the cc::string constructor instead, so the message keeps it verbatim rather than quoted.
     template <class E>
-        requires(!std::is_same_v<std::remove_cvref_t<E>, any_error> && !std::is_same_v<std::remove_cvref_t<E>, cc::string>)
+        requires(!std::is_same_v<std::remove_cvref_t<E>, any_error> && !std::is_convertible_v<E, cc::string_view>)
     explicit any_error(E&& e, cc::source_location site = cc::source_location::current())
       : any_error(cc::default_node_allocator(), cc::to_debug_string(cc::forward<E>(e)), site)
     {
@@ -65,6 +66,14 @@ public:
     /// Returns the moved error for chaining.
     /// NOTE: it's valid to call this on an empty cc::any_error
     any_error with_context(cc::string message, cc::source_location site = cc::source_location::current()) &&;
+
+    /// The message this error was created with, alone: no site, no context, no stacktrace; empty for an empty error.
+    /// It is the text for a user of a library, where to_string() is the developer's.
+    [[nodiscard]] cc::string_view message() const;
+
+    /// An independent deep copy: message, site, context chain and stacktrace.
+    /// any_error stays move-only, so this is the one named way to duplicate it, for a sink that hands each consumer its own.
+    [[nodiscard]] any_error clone() const;
 
     /// Get the source location where this error was created.
     /// NOTE: only reliable if not !is_empty()
