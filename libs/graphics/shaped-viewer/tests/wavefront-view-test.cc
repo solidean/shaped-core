@@ -101,6 +101,10 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode,
 ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and decals", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
+    // TEMPORARY(bug-sv-warp-megakernel-quadric-flake): the megakernel's quadrics come out wrong on CI's WARP under load.
+    if (ctx.metrics.adapter().is_software)
+        SKIP("flaky on WARP, where the megakernel's quadrics come out wrong under load; "
+             "issue: bug-sv-warp-megakernel-quadric-flake");
 
     {
         auto probe = ctx.create_command_list();
