@@ -64,6 +64,32 @@ bool cc::any_error::is_empty() const
     return !_payload.is_valid();
 }
 
+cc::string_view cc::any_error::message() const
+{
+    return _payload.is_valid() ? cc::string_view(_payload->message) : cc::string_view();
+}
+
+cc::any_error cc::any_error::clone() const
+{
+    any_error copy;
+    if (!_payload.is_valid())
+        return copy;
+
+    auto& alloc = cc::default_node_allocator();
+    copy._payload = cc::node_allocation<payload>::create_from(alloc, _payload->message, _payload->site);
+    // the context chain in its own order, newest first
+    auto* tail = &copy._payload->ctx;
+    for (auto const* c = _payload->ctx.is_valid() ? _payload->ctx.ptr : nullptr; c != nullptr;
+         c = c->next.is_valid() ? c->next.ptr : nullptr)
+    {
+        *tail = cc::node_allocation<context_node>::create_from(alloc, c->message, c->site);
+        tail = &tail->ptr->next;
+    }
+    if (_payload->trace.is_valid())
+        copy._payload->trace = cc::node_allocation<cc::stacktrace>::create_from(alloc, *_payload->trace.ptr);
+    return copy;
+}
+
 cc::source_location cc::any_error::site() const
 {
     return _payload.is_valid() ? _payload->site : cc::source_location::current();
