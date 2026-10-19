@@ -77,8 +77,10 @@ The mechanism is environment variables, the same convention `--background` uses,
 An example needs **no code for any of this** — `sv::interactive` reads the variables, waits for the image to settle, writes it, and ends the loop.
 
 A capture waits for three things together, because each hides something the others cannot see.
-Every traced view must have accumulated enough frames, no resource may still owe post-load work, and a trace must actually have dispatched.
-That last one is what stops a routine whose shaders never compiled from writing out a black image at full frame count.
+Every traced view must hold enough samples per pixel, no resource may still owe post-load work, and a trace must actually have dispatched.
+That last one is what stops a routine whose shaders never compiled from writing out a black image at full sample count.
+`accumulate` is in the program's own unit: for `sv` it is samples per pixel, so a capture holds the same samples whatever GPU takes it and however fast.
+A program answering the protocol itself counts what it likes, and a raster one counts frames drawn.
 `--capture-accumulate` and `--capture-timeout` move the thresholds when a scene needs longer.
 
 A run that spends its whole timeout writes what it has to `<out>.partial.<ext>` and **nothing to the path it was asked for**.
