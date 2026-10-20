@@ -35,8 +35,11 @@ from pathlib import Path, PurePosixPath
 # This script lives in extern/bistro/ and installs alongside itself.
 DEST = Path(__file__).resolve().parent
 INSTALL = DEST / ".install"
+STAGING = DEST / ".install.staging"
 PIN_FILE = INSTALL / "pin.txt"
 ARCHIVE = DEST / "Bistro_v5_2.zip.part"
+# Where --keep-archive leaves a verified download, under the name --archive is then given.
+KEPT_ARCHIVE = DEST / "Bistro_v5_2.zip"
 
 # The pin lives in dependency.yml next to this script, so it is written once.
 sys.path.insert(0, str(DEST.parent))
@@ -107,22 +110,26 @@ def download(url: str) -> str:
     return digest.hexdigest()
 
 
-def safe_target(name: str) -> Path:
-    path = PurePosixPath(name)
-    if path.is_absolute() or ".." in path.parts:
+def safe_target(name: str, root: Path) -> Path:
+    # A backslash is a separator on Windows, and a colon names a drive, so neither may hide inside one POSIX part.
+    path = PurePosixPath(name.replace("\\", "/"))
+    if ":" in name or path.is_absolute() or ".." in path.parts:
         sys.exit(f"refusing to extract {name!r} (path traversal)")
-    return INSTALL.joinpath(*path.parts)
+    target = root.joinpath(*path.parts)
+    if not target.resolve().is_relative_to(root.resolve()):
+        sys.exit(f"refusing to extract {name!r} (it resolves outside {root.as_posix()})")
+    return target
 
 
-def extract(archive: zipfile.ZipFile) -> int:
-    """Extracts every file below ARCHIVE_ROOT into INSTALL, returning how many it wrote."""
+def extract(archive: zipfile.ZipFile, root: Path) -> int:
+    """Extracts every file below ARCHIVE_ROOT into root, returning how many it wrote."""
     names = [n for n in archive.namelist() if n.startswith(ARCHIVE_ROOT) and not n.endswith("/")]
     missing = [r for r in REQUIRED if ARCHIVE_ROOT + r not in names]
     if missing:
         sys.exit(f"the archive lacks {len(missing)} file(s) the install needs, the first {missing[0]!r}.")
 
     for name in names:
-        target = safe_target(name[len(ARCHIVE_ROOT):])
+        target = safe_target(name[len(ARCHIVE_ROOT):], root)
         target.parent.mkdir(parents=True, exist_ok=True)
         with archive.open(name) as src, target.open("wb") as dst:
             shutil.copyfileobj(src, dst, CHUNK)
@@ -158,20 +165,26 @@ def main() -> int:
         sys.exit(f"sha256 mismatch for {up.asset}: got {got}, expected {up.pin_hash}.\n"
                  "NVIDIA may have republished the scene; vet the new archive, then update pin_hash and this script's names together.")
 
-    # Fresh install (drop any prior version).
+    # Into a staging directory, moved into place only once every file has arrived, so an interrupted run keeps the old install.
+    if STAGING.exists():
+        shutil.rmtree(STAGING)
+    STAGING.mkdir(parents=True)
+
+    print(f"extracting to {STAGING.as_posix()} ...", flush=True)
+    with zipfile.ZipFile(archive_path) as archive:
+        written = extract(archive, STAGING)
+    (STAGING / PIN_FILE.name).write_text(up.pin_hash + "\n", encoding="utf-8")
+
     if INSTALL.exists():
         shutil.rmtree(INSTALL)
-    INSTALL.mkdir(parents=True)
+    STAGING.rename(INSTALL)
 
-    print(f"extracting to {INSTALL.as_posix()} ...", flush=True)
-    with zipfile.ZipFile(archive_path) as archive:
-        written = extract(archive)
-
-    if not args.archive and not args.keep_archive:
-        ARCHIVE.unlink()
-
-    # Written last, so an interrupted run leaves an install that fails already_installed().
-    PIN_FILE.write_text(up.pin_hash + "\n", encoding="utf-8")
+    if not args.archive:
+        if args.keep_archive:
+            ARCHIVE.replace(KEPT_ARCHIVE)
+            print(f"kept the archive as {KEPT_ARCHIVE.as_posix()}")
+        else:
+            ARCHIVE.unlink()
 
     print(f"\ninstalled {up.name} ({written} files) -> {INSTALL.as_posix()}")
     return 0
