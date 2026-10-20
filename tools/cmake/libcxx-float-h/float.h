@@ -4,5 +4,6 @@
 // so every later <float.h> in the TU is a no-op and FLT_MIN, FLT_MAX and the rest are never defined.
 // Reopening the guard lets each inclusion reach clang's <float.h>, which tracks the __need_* requests itself and is idempotent.
 // LLVM 23 removed libc++'s <float.h> (llvm-project #175849), and with it this header: delete both when the presets move to it.
+// docs/bugs-external/libcxx-float-h-guard-vs-macos27-math-h has the repro that says whether it is still needed.
 #undef _LIBCPP_FLOAT_H
 #include_next <float.h>

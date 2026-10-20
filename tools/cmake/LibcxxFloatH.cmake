@@ -1,7 +1,8 @@
 # Works around libc++ 22's <float.h> against the macOS 27 SDK, by putting tools/cmake/libcxx-float-h ahead of it on the C++ include path.
-# The header itself explains the mechanism; docs/requirements.md has the symptom and when this goes away.
+# The header itself explains the mechanism.
+# docs/bugs-external/libcxx-float-h-guard-vs-macos27-math-h has the symptom, the repro and when this goes away.
 #
-# Only Homebrew LLVM below 23 on Apple needs it.
+# LLVM 22 is the release that needs it; older clangs carry it harmlessly, since their libc++ <float.h> never closes the guard early.
 # AppleClang ships a libc++ without <float.h>, and LLVM 23 removed it upstream (llvm-project #175849), so neither has the guard to reopen.
 # Against the macOS 26 SDK the shim is inert: nothing includes <float.h> partially there, so the guard it reopens is never closed early.
 #

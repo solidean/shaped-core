@@ -17,6 +17,7 @@ Each configuration that reproduces is retried with tools/cmake/libcxx-float-h, t
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,17 @@ def find_sdks() -> list[Path]:
     for c in candidates:
         found.setdefault(c.resolve(), c)
     return list(found.values())
+
+
+def sdk_label(sdk: Path) -> str:
+    """The SDK's directory name, with the version from its SDKSettings.json when the name carries none (Xcode's MacOSX.sdk)."""
+    if any(ch.isdigit() for ch in sdk.name):
+        return sdk.name
+    try:
+        version = json.loads((sdk / "SDKSettings.json").read_text())["Version"]
+    except (OSError, ValueError, KeyError):
+        return sdk.name
+    return f"{sdk.name} ({version})"
 
 
 def compile_one(clang: str, sdk: Path, std: str, shim: bool) -> tuple[str, str]:
@@ -80,10 +92,14 @@ def main() -> int:
         for sdk in find_sdks():
             for std in ("c++17", "c++23"):
                 verdict, detail = compile_one(clang, sdk, std, shim=False)
-                rows.append((version, sdk.name, std, verdict, detail))
+                rows.append((version, sdk_label(sdk), std, verdict, detail))
                 if verdict == "REPRODUCED":
                     verdict, detail = compile_one(clang, sdk, std, shim=True)
-                    rows.append((version + " + shim", sdk.name, std, verdict, detail))
+                    rows.append((version + " + shim", sdk_label(sdk), std, verdict, detail))
+
+    if not rows:
+        print("no clang found - pass one with --clang")
+        return 0
 
     widths = [max(len(r[i]) for r in rows) for i in range(3)]
     for r in rows:

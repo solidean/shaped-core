@@ -230,6 +230,39 @@ def _compiler_check(root: Path, preset: Preset, cxx: str | None, error: str | No
     return ("compiler", ok, detail)
 
 
+def _driver_sysroot(cxx: str) -> str | None:
+    """The SDK `cxx` would compile against with no -isysroot of ours: the last -isysroot in its `-###` output, as tools/cmake/MacosSdk.cmake reads it."""
+    try:
+        out = subprocess.run([cxx, "-###", "-x", "c++", "-c", "/dev/null"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    found = re.findall(r'"-isysroot" "([^"]+)"', out.stderr)
+    return found[-1] if out.returncode == 0 and found else None
+
+
+def _macos_sdk_check(preset: Preset | None, cxx: str | None) -> tuple[str, bool | str, str] | None:
+    """Whether the preset's build directory is still on the SDK the compiler would pick now.
+
+    configure records the SDK it put on the command line as SC_MACOS_SDK.
+    An OS update moves the compiler's own choice without touching the build, so a mismatch is a warning, never a failure: the build stays consistent until someone reconfigures.
+    """
+    if platform.system() != "Darwin" or preset is None or cxx is None:
+        return None
+    try:
+        lines = (preset.build_dir / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    configured = next((ln.partition("=")[2].strip() for ln in lines if ln.startswith("SC_MACOS_SDK:")), None)
+    if not configured:
+        return None
+    now = _driver_sysroot(cxx)
+    if now is None or now == configured:
+        return ("macOS SDK", True, configured)
+    return ("macOS SDK", known_issues.WARN,
+            f"{preset.build_dir} was configured against {configured}, and the compiler now picks {now} - "
+            f"reconfigure to move to it, which rebuilds everything")
+
+
 def _coverage_tool_check(
     label: str, name: str, env_var: str, build_dir: Path | None
 ) -> tuple[str, bool, str]:
@@ -346,7 +379,7 @@ def doctor(
     `preset`, resolved and carrying any pinned `.toolset`, drives the compiler check so it reports the toolchain the build will actually use.
     When None, the compiler check falls back to a generic PATH probe.
     """
-    checks: list[tuple[str, bool | None, str]] = []
+    checks: list[tuple[str, bool | None | str, str]] = []
 
     checks.append(_cmake_check(root))
 
@@ -362,6 +395,9 @@ def doctor(
         # Skip the native compiler line for it, so it does not misreport a host clang++/g++.
         if preset.family != "emscripten":
             checks.append(_compiler_check(root, preset, cxx, cxx_error))
+            sdk = _macos_sdk_check(preset, cxx)
+            if sdk is not None:
+                checks.append(sdk)
     elif platform.system() == "Windows":
         env = msvc_env()
         # None means either cl.exe already on PATH (fine) or not found.

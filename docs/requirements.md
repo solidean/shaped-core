@@ -55,15 +55,19 @@ See [platforms.md](platforms.md) for the full tier matrix — which platforms ar
 
 **The `macos-arm-llvm-*` presets set `CMAKE_OSX_DEPLOYMENT_TARGET` to `26.0`**, which puts `-mmacosx-version-min=26.0` on every compile line.
 26 is the floor the Metal backend already states, since `sg::create_metal_context` refuses anything older; see its [readme](../libs/graphics/shaped-graphics/backends/metal/readme.md).
-Without the pin, Homebrew clang takes its target from the *running* OS, through a per-version config file (`etc/clang/arm64-apple-darwin<N>.cfg`).
+Without the pin, Homebrew clang derives its target from the SDK, and picks the SDK for the *running* OS through a per-version config file (`etc/clang/arm64-apple-darwin<N>.cfg`).
 That never appears on the command line, so an OS update changed what every TU was compiled for while ninja saw nothing to rebuild.
 Precompiled headers built before the update were then refused as built for another target, and stayed refused.
 With the pin, a change to the target is a change to the command line, and that rebuilds the PCHs with everything else.
 
-**The SDK is not pinned.**
-The same config file passes the newest Command Line Tools SDK (`MacOSX<N>.sdk` for the running OS), and `CMAKE_OSX_SYSROOT` is left empty, so CMake adds no `-isysroot` of its own.
+**The SDK is resolved at configure time, not pinned in the presets.**
 Pinning one would need an SDK every machine has, and Xcode 27 ships only the 27 SDK while the Command Line Tools 27 still carry the 26 one.
-To build against another SDK anyway, configure with `-DCMAKE_OSX_SYSROOT=<path>`.
+So [MacosSdk.cmake](../tools/cmake/MacosSdk.cmake) asks the compiler which SDK it would use and puts that `-isysroot` on every compile and link line.
+That is the config file's newest Command Line Tools SDK, `MacOSX<N>.sdk` for the running OS.
+The SDK then moves only when the build directory is reconfigured, and a reconfigure that moves it rebuilds everything, PCHs included.
+Without it the config file's `-isysroot` stays off the command line, and a PCH built against the old SDK is accepted silently by TUs compiled against the new one.
+`dev.py doctor` warns when a build directory's SDK is no longer the one the compiler would pick.
+To build against another SDK, configure with `-DCMAKE_OSX_SYSROOT=<path>`, which the module leaves alone.
 
 Homebrew LLVM 22's libc++ and the macOS 27 SDK need a workaround to build together, which the build applies on its own.
 [libcxx-float-h-guard-vs-macos27-math-h](bugs-external/libcxx-float-h-guard-vs-macos27-math-h/readme.md) has why, and when it goes.
