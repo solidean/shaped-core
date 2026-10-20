@@ -8,7 +8,6 @@ refs:
 
 # Measure what the denoiser guides' and the lobe split's payload growth costs
 
-`tracer.surface_payload` went from 27 to 38 scalar components.
-3 are the diffuse albedo, 4 the specular pair, and 4 more the split (`direct_specular` and `lobe`).
-They are carried on every ray rather than only primary ones.
+`tracer.surface_payload` grew from 27 scalar components, carried on every ray rather than only primary ones.
+The guides added the diffuse albedo and the specular pair, the split `direct_specular` and `lobe`, and light sampling fields of its own since.
 Nothing has measured what that costs the trace.

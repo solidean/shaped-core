@@ -6,12 +6,14 @@
 #include <clean-core/container/fixed_array.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/bit.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <sgl_modules/slug.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/slug_atlas.hh>
 #include <shaped-shader-library/raytracing_pipeline.hh>
+#include <shaped-viewer/rendering/impl/emitters.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
 #include <shaped-viewer/resources/material_shader_cache.hh>
@@ -23,37 +25,6 @@ namespace
 {
 namespace tracer = sv::shaders::tracer;
 using path_t = sv::shaders::tracer_pipeline_path_t;
-
-/// Where one permutation's hit group stands.
-enum class group_state
-{
-    pending, ///< still compiling; the trace that wants it waits a frame
-    ready,
-    failed, ///< settled without a value, and will until a reload
-};
-
-/// The state of `p`'s hit group, starting its compile if nobody has yet.
-/// The cache hands the node back cold, so polling alone would watch one that never starts.
-/// Started on the context's backlog, since nothing awaits it: `sv::background_work` is what a caller ending a run awaits.
-/// A compile that failed is logged once, since the stand-in that replaces it says nothing of why.
-[[nodiscard]] group_state state_of(sg::context& ctx, material_permutation const* p)
-{
-    auto const& node = p->hit_group;
-    if (!node.is_valid())
-        return group_state::failed;
-    if (node->try_value() != nullptr)
-        return group_state::ready;
-    if (node->is_ready())
-    {
-        if (!p->is_failure_reported)
-            CC_LOG_ERROR("the hit group of {} did not compile, so its geometry shades as the stand-in: {}", p->label,
-                         node->try_error()->underlying().to_string());
-        p->is_failure_reported = true;
-        return group_state::failed;
-    }
-    (void)ctx.backlog.start(node);
-    return group_state::pending;
-}
 
 /// The records a caller's `hit_group_offset` counts per permutation: a surface record and a shadow one.
 /// The pipeline's ray set has the same two ray types, so a row of its table is as wide.
@@ -88,10 +59,12 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     stand_ins = {};
     // Started whether or not a substitution ends up needing them, and before any early out.
     auto const* const fallback
-        = d.fallback != nullptr && state_of(ctx, d.fallback) == group_state::ready ? d.fallback : nullptr;
+        = d.fallback != nullptr && impl::hit_group_state(ctx, d.fallback) == impl::permutation_state::ready ? d.fallback
+                                                                                                            : nullptr;
     auto const* const quadric_fallback
-        = d.quadric_fallback != nullptr && state_of(ctx, d.quadric_fallback) == group_state::ready ? d.quadric_fallback
-                                                                                                   : nullptr;
+        = d.quadric_fallback != nullptr && impl::hit_group_state(ctx, d.quadric_fallback) == impl::permutation_state::ready
+            ? d.quadric_fallback
+            : nullptr;
 
     // Whatever has not landed is replaced by the stand-in of its kind, and the SUBSTITUTED set is what the pipeline is keyed on.
     // The frame a permutation's group lands, the key changes and a new variant is built with it.
@@ -102,12 +75,12 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
     for (auto const* p : d.hit_groups)
     {
         CC_ASSERT(p != nullptr, "a path trace names a permutation the shader cache does not hold");
-        auto const state = state_of(ctx, p);
-        if (state != group_state::ready)
+        auto const state = impl::hit_group_state(ctx, p);
+        if (state != impl::permutation_state::ready)
         {
             p = p->kind == geometry_kind::quadrics ? quadric_fallback : fallback;
             substituted = true;
-            pending = pending || state == group_state::pending;
+            pending = pending || state == impl::permutation_state::pending;
         }
         if (p == nullptr)
             return nullptr;
@@ -216,7 +189,43 @@ void place_instance_record(shaders::tracer::instance_record& record,
     record.opacity_cutoff = opacity.cutoff;
 
     // A caller's offset counts two records per permutation, so it names the permutation the instance shades with.
+    // An odd one would shade the instance through its neighbor's material, reading its parameter block in another layout.
+    CC_ASSERT(instance.hit_group_offset % records_per_permutation == 0, "an instance's hit_group_offset counts two "
+                                                                        "records per permutation, so it must be even");
     record.shade_group = instance.hit_group_offset / records_per_permutation;
+
+    // Lights nothing until the trace's light table names it, which only the trace knows.
+    record.emitter = no_emitter;
+}
+
+shaders::tracer::emitter_record emitter_record_of(u32 instance,
+                                                  u32 cdf,
+                                                  u32 triangle_count,
+                                                  u32 block_count,
+                                                  material_emission const& emission)
+{
+    auto const& color = emission.color;
+    auto const& scale = emission.scale;
+    return {.instance = instance,
+            .cdf = cdf,
+            .triangle_count = triangle_count,
+            .block_count = block_count,
+            .color_kind = u32(color.kind),
+            .color_offset = color.offset,
+            .color_uv_offset = color.uv_offset,
+            .color_frequency = color.frequency,
+            .color_channels = color.channels[0] | (color.channels[1] << 8) | (color.channels[2] << 16),
+            .color_sampler = color.sampler,
+            .color_transform = color.transform,
+            .scale_kind = u32(scale.kind),
+            .scale_offset = scale.offset,
+            .scale_uv_offset = scale.uv_offset,
+            .scale_frequency = scale.frequency,
+            .scale_channel = scale.channels[0],
+            .scale_sampler = scale.sampler,
+            .scale_transform = scale.transform,
+            .pad0 = 0,
+            .pad1 = 0};
 }
 
 stand_in_report stand_in_report::of(cc::span<material_permutation const* const> bound, bool substituted, bool pending)
@@ -239,23 +248,198 @@ shaders::tracer::frame_constants default_frame_constants()
     return fc;
 }
 
-pt_light_table pt_light_table::grouped(cc::span<shaders::tracer::light_record const> lights)
+namespace
+{
+/// The float right after `x`, which must be finite and not negative.
+[[nodiscard]] f32 next_float_up(f32 x)
+{
+    return cc::bit_cast<f32>(cc::bit_cast<u32>(x) + 1u);
+}
+
+/// The float right before `x`, which must be finite and positive.
+[[nodiscard]] f32 next_float_down(f32 x)
+{
+    return cc::bit_cast<f32>(cc::bit_cast<u32>(x) - 1u);
+}
+
+/// The luminance of a linear color.
+[[nodiscard]] f32 luminance_of(tg::vec3f c)
+{
+    return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+}
+
+/// What a light offers next-event estimation, before it is normalized against the others of its kind.
+/// A local light's power, its shaping ignored, which only overweighs a narrow spot; a distant light's irradiance, since it has no finite power.
+/// Always finite: a weight that is NaN reads as 0, which the floor below lifts, and one that overflows as the largest f32.
+[[nodiscard]] f32 selection_weight_of(shaders::tracer::light_record const& l)
+{
+    auto const weight = [&]() -> f32
+    {
+        auto const lum = cc::max(luminance_of(l.emission), 0.0f);
+        // An emissive instance's area is an estimate of its world area, and it emits from both faces.
+        if (l.path == light_path_mesh)
+            return lum * l.area * tg::pi<f32> * 2.0f;
+        switch (light_path(l.path))
+        {
+        case light_path::point:
+            return lum * 4.0f * tg::pi<f32>;
+        case light_path::area:
+            return lum * l.area * tg::pi<f32> * ((l.flags & light_flag_two_sided) != 0 ? 2.0f : 1.0f);
+        case light_path::distant_point:
+            return lum;
+        case light_path::distant_disc:
+            return lum * 2.0f * tg::pi<f32> * l.one_minus_cos_angular_radius;
+        }
+        return 0.0f;
+    }();
+    if (!(weight > 0.0f))
+        return 0.0f;
+    return cc::min(weight, impl::largest_finite_f32);
+}
+
+/// The share of the choice a kind made only of `light_flag_unseen_emission` records takes beside a kind that has light.
+/// Above zero, since such a record may emit; small, since nothing says it does.
+constexpr auto unseen_kind_share = 1e-3;
+
+/// The share of the choice picked by power; the rest is uniform over the lights with light to offer.
+constexpr auto power_selection_share = 0.5;
+
+/// Writes each record's selection probability and the running sum of them, the last of which is 1.
+/// Half of it is by power: local and distant lights are normalized apart and share that half and half where both have light, since their weights do not compare.
+/// The other half is uniform over every light with light to offer, which bounds what a dim light near a shading point costs.
+/// A record whose emission no read saw above zero is no evidence of light, and it takes none of the uniform half.
+/// A kind made only of those takes `unseen_kind_share` of the power half beside one that has light.
+/// Every weight is floored at a thousandth of its kind's mean, so no light is impossible to pick while its record says it may be.
+void weigh_by_power(cc::span<shaders::tracer::light_record> records)
+{
+    if (records.empty())
+        return;
+    auto const is_distant = [](shaders::tracer::light_record const& l)
+    { return light_path(l.path) == light_path::distant_point || light_path(l.path) == light_path::distant_disc; };
+    auto const is_unseen = [](shaders::tracer::light_record const& l)
+    { return l.path == light_path_mesh && (l.flags & light_flag_unseen_emission) != 0; };
+
+    auto raw_total = cc::fixed_array<f64, 2>{0.0, 0.0};
+    auto seen_total = cc::fixed_array<f64, 2>{0.0, 0.0};
+    auto count = cc::fixed_array<i32, 2>{0, 0};
+    auto local_unseen = false;
+    for (auto const& l : records)
+    {
+        auto const kind = is_distant(l) ? 1 : 0;
+        auto const w = f64(selection_weight_of(l));
+        raw_total[kind] += w;
+        ++count[kind];
+        if (is_unseen(l))
+            local_unseen = true;
+        else
+            seen_total[kind] += w;
+    }
+    auto min_weight = cc::fixed_array<f64, 2>{1.0, 1.0};
+    for (auto k = 0; k < 2; ++k)
+        if (count[k] > 0 && raw_total[k] > 0.0)
+            min_weight[k] = 1e-3 * raw_total[k] / f64(count[k]);
+    auto const weight = [&](shaders::tracer::light_record const& l)
+    {
+        auto const kind = is_distant(l) ? 1 : 0;
+        return cc::max(f64(selection_weight_of(l)), min_weight[kind]);
+    };
+    auto total = cc::fixed_array<f64, 2>{0.0, 0.0};
+    for (auto const& l : records)
+        total[is_distant(l) ? 1 : 0] += weight(l);
+
+    // A kind takes half the choice only where it has light to offer and the other kind has too.
+    // Local lights made only of stand-ins take a sliver beside a lit sun, and the whole of the choice beside none; a distant light is never one.
+    auto const local_lit = seen_total[0] > 0.0;
+    auto const distant_lit = seen_total[1] > 0.0;
+    auto const unlit_share = count[0] == 0 ? 0.0 : (count[1] == 0 ? 1.0 : 0.5);
+    auto const local_share = [&]
+    {
+        if (local_lit)
+            return distant_lit ? 0.5 : 1.0;
+        if (distant_lit)
+            return local_unseen ? unseen_kind_share : 0.0;
+        return local_unseen ? 1.0 : unlit_share;
+    }();
+    auto const share = cc::fixed_array<f64, 2>{local_share, 1.0 - local_share};
+
+    // Half of the choice is uniform over the lights with light to offer, so a dim light that is the near one somewhere keeps a
+    // fair share: power knows nothing of distance, and alone it starved such a light into noise.
+    // A dark light and a stand-in for an emission no read saw take none of that half, or a scene of them would spend it on nothing.
+    auto const offers_light
+        = [&](shaders::tracer::light_record const& l) { return !is_unseen(l) && selection_weight_of(l) > 0.0f; };
+    auto const lit_count = [&]
+    {
+        auto n = 0;
+        for (auto const& l : records)
+            n += offers_light(l) ? 1 : 0;
+        return n;
+    }();
+    auto const probability = [&](shaders::tracer::light_record const& l)
+    {
+        auto const kind = is_distant(l) ? 1 : 0;
+        auto const by_power = share[kind] * weight(l) / total[kind];
+        if (lit_count == 0)
+            return by_power;
+        auto const uniform = offers_light(l) ? 1.0 / f64(lit_count) : 0.0;
+        return power_selection_share * by_power + (1.0 - power_selection_share) * uniform;
+    };
+
+    // The search picks a light with the width of its interval between two f32 cdfs, so that width is the pdf it is given.
+    // Every interval is kept open by at least one float step, and the last cdf is exactly 1, among any number of lights.
+    auto running = 0.0;
+    auto previous = 0.0f;
+    for (auto& l : records)
+    {
+        running += probability(l);
+        auto const cdf = cc::min(f32(running), 1.0f);
+        l.select_cdf = cdf > previous ? cdf : next_float_up(previous);
+        previous = l.select_cdf;
+    }
+    records.back().select_cdf = 1.0f;
+    for (auto i = records.size() - 2; i >= 0; --i)
+        records[i].select_cdf = cc::min(records[i].select_cdf, next_float_down(records[i + 1].select_cdf));
+    previous = 0.0f;
+    for (auto& l : records)
+    {
+        l.select_pdf = l.select_cdf - previous;
+        previous = l.select_cdf;
+    }
+}
+} // namespace
+
+pt_light_table pt_light_table::grouped(cc::span<shaders::tracer::light_record const> lights, light_selection selection)
 {
     auto out = pt_light_table{};
     for (auto const& l : lights)
     {
-        CC_ASSERT(l.path < 4, "a light record names a path the frame block has no slot for");
+        CC_ASSERT(l.path <= light_path_mesh, "a light record names a path the frame block has no slot for");
         ++out.path_count[l.path];
     }
 
-    for (auto i = 1; i < 4; ++i)
+    for (auto i = 1; i < 5; ++i)
         out.path_offset[i] = out.path_offset[i - 1] + out.path_count[i - 1];
 
     // A counting sort: each light lands at its path's next free slot, so each run keeps the order it was given in.
+    // `light_path_mesh` is the last path, so the emissive instances' records follow every analytic one.
     out.records = cc::vector<shaders::tracer::light_record>::create_defaulted(lights.size());
-    auto next = cc::fixed_array<u32, 4>{out.path_offset[0], out.path_offset[1], out.path_offset[2], out.path_offset[3]};
+    auto next = cc::fixed_array<u32, 5>{out.path_offset[0], out.path_offset[1], out.path_offset[2], out.path_offset[3],
+                                        out.path_offset[4]};
     for (auto const& l : lights)
         out.records[next[l.path]++] = l;
+
+    if (selection == light_selection::power)
+    {
+        weigh_by_power(out.records);
+    }
+    else
+    {
+        // Written whatever the records carried in, since a record copied out of a power-weighted table would keep its own.
+        for (auto& l : out.records)
+        {
+            l.select_pdf = 0.0f;
+            l.select_cdf = 0.0f;
+        }
+    }
     return out;
 }
 
@@ -267,6 +451,7 @@ void pt_light_table::describe_in(shaders::tracer::frame_constants& fc) const
         fc.path_offset[i] = path_offset[i];
         fc.path_count[i] = path_count[i];
     }
+    fc.emitter_offset = path_offset[light_path_mesh];
 }
 
 sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_desc const& d)
@@ -359,3 +544,22 @@ sg::routine_outcome pathtrace_routine::execute(sg::command_list& cmd, pt_trace_d
     return sg::routine_outcome::executed;
 }
 } // namespace sv
+
+sv::impl::permutation_state sv::impl::hit_group_state(sg::context& ctx, material_permutation const* p)
+{
+    auto const& node = p->hit_group;
+    if (!node.is_valid())
+        return permutation_state::failed;
+    if (node->try_value() != nullptr)
+        return permutation_state::ready;
+    if (node->is_ready())
+    {
+        if (!p->is_failure_reported)
+            CC_LOG_ERROR("the hit group of {} did not compile, so its geometry shades as the stand-in: {}", p->label,
+                         node->try_error()->underlying().to_string());
+        p->is_failure_reported = true;
+        return permutation_state::failed;
+    }
+    (void)ctx.backlog.start(node);
+    return permutation_state::pending;
+}

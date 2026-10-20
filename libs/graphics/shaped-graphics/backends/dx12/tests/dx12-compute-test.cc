@@ -95,12 +95,14 @@ ASYNC_INVOCABLE_TEST("sg dx12 - compute dispatch writes a structured buffer", (d
 }
 
 // Drive the same dispatch with a TRANSIENT output buffer and TRANSIENT binding group each epoch.
-// The transient descriptor region is a deliberately tiny 32 slots, so 40 iterations wrap the ring several times.
+// The transient descriptor region is a deliberately tiny 8 slots, and each epoch takes one, so 20 iterations wrap the ring twice.
 // Proves the transient descriptor ring and transient buffer heap reclaim end-to-end on the GPU: no exhaustion, and every epoch's result is correct (Output[i] == i*2).
 // The tiny hand-sized descriptor heap is a dx12 knob, so this takes a dx12 context directly; the work itself is all public sg API.
 ASYNC_TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 {
-    auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 64, .descriptor_transient_fraction = 0.5f});
+    constexpr int transient_slots = 8;
+    auto ctx_r = dx12::make_test_context(
+        {.descriptor_heap_capacity = 2 * transient_slots, .descriptor_transient_fraction = 0.5f});
     if (ctx_r.has_error())
         SKIP("no dx12 adapter");
     auto ctx = ctx_r.value();
@@ -117,7 +119,9 @@ ASYNC_TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
         sg::compute_pipeline_description{.shader = shader, .layout = pipeline_layout});
     REQUIRE(pipeline != nullptr);
 
-    for (int e = 0; e < 40; ++e)
+    // Two and a half times round the ring, so the wrap is reached whatever slot the first group takes.
+    constexpr int epochs = (5 * transient_slots + 1) / 2;
+    for (auto e = 0; e < epochs; ++e)
     {
         auto buf = ctx->transient.create_raw_buffer(isize(count) * isize(sizeof(u32)),
                                                     sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
@@ -155,13 +159,14 @@ ASYNC_TEST("sg dx12 - transient binding groups + buffers recycle across epochs")
 }
 
 // Create + release many PERSISTENT binding groups on a tiny persistent descriptor region (4 slots).
-// Each group takes 1 descriptor; 50 iterations far exceed the region, so the group's range must be
-// returned to the free list (epoch-deferred) and reused — a bump allocator would exhaust after 4. The
-// hand-sized descriptor heap is a dx12 knob; the group create/release cycle is all public sg API.
+// Each group takes 1 descriptor; 10 iterations exceed the region twice over, so the group's range must be returned to the free list (epoch-deferred) and reused.
+// A bump allocator would exhaust after 4.
+// The hand-sized descriptor heap is a dx12 knob; the group create/release cycle is all public sg API.
 ASYNC_TEST("sg dx12 - persistent binding groups free and reuse their descriptor range")
 {
-    // 4 persistent slots
-    auto ctx_r = dx12::make_test_context({.descriptor_heap_capacity = 8, .descriptor_transient_fraction = 0.5f});
+    constexpr int persistent_slots = 4;
+    auto ctx_r = dx12::make_test_context(
+        {.descriptor_heap_capacity = 2 * persistent_slots, .descriptor_transient_fraction = 0.5f});
     if (ctx_r.has_error())
         SKIP("no dx12 adapter");
     auto ctx = ctx_r.value();
@@ -173,7 +178,8 @@ ASYNC_TEST("sg dx12 - persistent binding groups free and reuse their descriptor 
     auto buf = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::readwrite_buffer);
     REQUIRE(buf != nullptr);
 
-    for (int i = 0; i < 50; ++i)
+    constexpr int groups = (5 * persistent_slots + 1) / 2;
+    for (auto i = 0; i < groups; ++i)
     {
         sg::named_view const out = {.name = "Output", .view = sg::buffer<u32>::from_raw(buf).as_readwrite_buffer()};
         auto group = ctx->persistent.create_binding_group(group_layout, cc::span<sg::named_view const>(&out, 1));

@@ -5,6 +5,7 @@
 #include <clean-core/common/utility.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
@@ -43,6 +44,7 @@ struct triangle_cloud;
 struct indexed_mesh;
 struct area_light;
 struct cornell_box;
+struct lit_cornell_box;
 struct pbr_material;
 } // namespace sv_test
 
@@ -511,5 +513,50 @@ inline cornell_box make_cornell_box()
         = area_light{.center = tg::vec3f(0, light_y, 0), .half_x = half_x, .half_z = half_z, .emission = light_emission};
 
     return cb;
+}
+
+/// How many triangles of `make_cornell_box`'s list are its lamp: the quad pushed last.
+inline constexpr isize cornell_lamp_triangles = 2;
+
+} // namespace sv_test
+
+/// The Cornell box lit by its own lamp, as the view-level tests place it: no rect light, so the lamp is the box's only light.
+///
+/// The lamp quad is a mesh of its own whose `pbr` material sets `emissive` to `lamp_nits` as a constant, which is what makes it a light of the trace.
+/// The enclosure's per-triangle `emissive` is zero throughout, so the enclosure is no light.
+/// A lamp left in the enclosure's list would make the whole box one emitter, its area CDF spending most samples on dark walls.
+/// The enclosure is the rest of the list, with its per-triangle materials.
+struct sv_test::lit_cornell_box
+{
+    sv::mesh enclosure;
+    sv::mesh lamp;
+};
+
+namespace sv_test
+{
+
+[[nodiscard]] inline lit_cornell_box as_lit_meshes(cornell_box const& box, f32 lamp_nits)
+{
+    auto const lamp_vertices = 3 * cornell_lamp_triangles;
+    auto const walls = box.positions.size() - lamp_vertices;
+    auto const enclosure_positions
+        = cc::span<tg::pos3f const>(box.positions).subspan(cc::offset_size{.offset = 0, .size = walls});
+    auto const lamp_positions
+        = cc::span<tg::pos3f const>(box.positions).subspan(cc::offset_size{.offset = walls, .size = lamp_vertices});
+    auto const enclosure_materials
+        = cc::span<sv_test::pbr_material const>(box.materials)
+              .subspan(cc::offset_size{.offset = 0, .size = box.materials.size() - cornell_lamp_triangles});
+
+    auto& lib = shared_material_library();
+    auto const pbr = lib.acquire_type(sv::builtin_material::pbr).value();
+    auto const lamp_material = lib.acquire(sv::material::create(
+        cc::format("cornell lamp {}", lamp_nits), pbr,
+        {sv::material_attribute_binding::of("base_color", tg::vec3f(0, 0, 0)),
+         sv::material_attribute_binding::of("emissive", tg::vec3f(lamp_nits, lamp_nits, lamp_nits))}));
+
+    return {.enclosure = as_mesh("cornell box", enclosure_positions, enclosure_materials),
+            .lamp = {.name = "cornell lamp",
+                     .geometry = sv::triangle_geometry::create_from_positions(lamp_positions),
+                     .material = lamp_material}};
 }
 } // namespace sv_test

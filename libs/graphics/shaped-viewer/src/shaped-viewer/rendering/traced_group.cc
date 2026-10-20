@@ -19,11 +19,11 @@ template <sg::pixel_format Format>
     return (t.raw() != nullptr ? t : stand_in).as_image_view<Format>();
 }
 
-/// The counters a state with `max_permutations` needs: one per queue, then a count and a cursor per permutation.
-/// Five queues, which `tracer.counter_permutations` is the count of.
+/// The counters a state with `max_permutations` needs: one per queue, the sample floor and its shortfall, then a count and a cursor per permutation.
+/// Seven before the permutations', which `tracer.counter_permutations` is the count of.
 [[nodiscard]] isize counter_count(i32 max_permutations)
 {
-    return 5 + 2 * isize(max_permutations);
+    return 7 + 2 * isize(max_permutations);
 }
 } // namespace
 
@@ -80,6 +80,7 @@ traced_stand_ins traced_stand_ins::create(sg::context& ctx)
         return ctx.persistent.create_texture_2d(
             {.format = format, .width = 1, .height = 1, .usage = sg::texture_usage::texture});
     };
+    auto paths = wavefront_state::create(ctx, tg::vec2i(1, 1), 1);
     return {.guide_normal = image(sg::pixel_format::rgba16_float),
             .guide_depth = image(sg::pixel_format::r32_float),
             .guide_albedo = image(sg::pixel_format::rgba16_float),
@@ -96,7 +97,8 @@ traced_stand_ins traced_stand_ins::create(sg::context& ctx)
             .decal_bands = table(sg::pixel_format::rg16_uint),
             .decals = ctx.persistent.create_buffer<tracer::decal_record>(1, sg::buffer_usage::readonly_buffer),
             .decal_shapes = ctx.persistent.create_buffer<tracer::decal_shape>(1, sg::buffer_usage::readonly_buffer),
-            .paths = wavefront_state::create(ctx, tg::vec2i(1, 1), 1)};
+            .emitters = ctx.persistent.create_buffer<tracer::emitter_record>(1, sg::buffer_usage::readonly_buffer),
+            .paths = cc::move(paths)};
 }
 
 shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
@@ -124,6 +126,7 @@ shaders::tracer::traced traced_group_of(pt_trace_desc const& d,
         .frame_specular = image_or<sg::pixel_format::rgba16_float>(d.frame_specular, s.frame_specular),
         .guide_hit_distance = image_or<sg::pixel_format::rg32_float>(d.guide_hit_distance, s.guide_hit_distance),
         .lights = lights.as_readonly_buffer(),
+        .emitters = (d.emitters.raw() != nullptr ? d.emitters : s.emitters).as_readonly_buffer(),
         .primary_depth = image_or<sg::pixel_format::r32_float>(d.primary_depth, s.primary_depth),
         .sample_counts = image_or<sg::pixel_format::r32_float>(d.sample_counts, s.sample_counts),
         .decals = (d.decals.raw() != nullptr ? d.decals : s.decals).as_readonly_buffer(),

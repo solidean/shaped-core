@@ -73,6 +73,9 @@ struct traced_stand_ins
     sg::buffer<shaders::tracer::decal_record> decals;
     sg::buffer<shaders::tracer::decal_shape> decal_shapes;
 
+    /// What a trace without emissive instances binds as `traced.emitters`.
+    sg::buffer<shaders::tracer::emitter_record> emitters;
+
     /// One slot of path state, for a trace that keeps none.
     wavefront_state paths;
 

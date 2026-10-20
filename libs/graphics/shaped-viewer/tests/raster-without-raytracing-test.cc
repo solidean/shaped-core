@@ -61,7 +61,7 @@ struct traced_work
 
 // A raster layer's capture, end to end, on the context: the viewer comes up, the image is the Cornell box's, and it is final.
 //
-// The capture asks for `accumulation_frame_cap` frames, which only a converged layer reaches, so a file at all means the layer converged.
+// The capture asks for `accumulation_sample_cap` samples, which only a converged layer holds, so a file at all means the layer converged.
 // The capture protocol is process environment, which is why this carries capture-environment as dx12-entry.cc's drivers do.
 ASYNC_TEST("sv dx12 - a raster layer draws on a device without ray tracing", nx::config::exclusive("capture-environment"))
 {
@@ -81,7 +81,7 @@ ASYNC_TEST("sv dx12 - a raster layer draws on a device without ray tracing", nx:
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", size[0], size[1]));
     auto const acc
-        = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", sv::accumulation_frame_cap));
+        = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", sv::accumulation_sample_cap));
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
 
     auto const box = sv_test::make_cornell_box();
@@ -150,7 +150,7 @@ ASYNC_TEST("sv dx12 - a traced layer on a device without ray tracing is declined
 
     auto const before = ctx.metrics.stats();
     auto frames_after_converged = 0;
-    auto traced_frames = u32(0);
+    auto traced_samples = u32(0);
     auto traced_converged = false;
     auto const start = cc::current_time_steady_secs();
     for (auto f : viewer.frames())
@@ -169,7 +169,7 @@ ASYNC_TEST("sv dx12 - a traced layer on a device without ray tracing is declined
         place(rastered, sv::render_mode::raster);
         place(traced, sv::render_mode::megakernel);
 
-        traced_frames = cc::max(traced_frames, traced.accumulated_frames());
+        traced_samples = cc::max(traced_samples, traced.accumulated_samples());
         traced_converged = traced_converged || traced.is_accumulation_converged();
         if (rastered.is_accumulation_converged() && ++frames_after_converged > 3)
             viewer.request_close();
@@ -177,7 +177,7 @@ ASYNC_TEST("sv dx12 - a traced layer on a device without ray tracing is declined
     }
     co_await cc::async_settled(sv::background_work(ctx));
 
-    CHECK(traced_frames == 0);
+    CHECK(traced_samples == 0);
     CHECK(!traced_converged);
     auto const work = traced_work_since(ctx, before);
     CHECK(work.blas_builds == 0);

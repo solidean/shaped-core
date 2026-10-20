@@ -1,6 +1,8 @@
 #include "dx12-test-common.hh"
 
 #include <clean-core/platform/environment.hh>
+#include <clean-core/thread/async_coroutine.hh>
+#include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/dx12/dx12_buffer.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
@@ -135,13 +137,14 @@ TEST("sg dx12 - a context withholding ray tracing reports neither half of it")
     c.drop_command_list(cc::move(probe));
 }
 
-TEST("sg dx12 - a context counts the textures and buffers alive against it")
+// The count is what the context's destructor asserts is zero, since a resource outliving it releases into freed memory.
+ASYNC_INVOCABLE_TEST("sg dx12 - a context counts the textures and buffers alive against it",
+                     (dx12::dx12_context_handle const& ctx))
 {
-    // A context of its own: no other test's resources move the count.
-    // The count is what the context's destructor asserts is zero, since a resource outliving it releases into freed memory.
-    auto const ctx = dx12::make_fresh_context();
-    if (ctx == nullptr)
-        SKIP("no dx12 adapter");
+    REQUIRE(ctx != nullptr);
+    // The invocables run in sequence, so once the earlier ones' work has drained no other resource moves the count.
+    ctx->advance_epoch();
+    co_await ctx->idle_completion();
     auto const before = ctx->live_resource_count();
     {
         auto const buffer = ctx->persistent.create_raw_buffer(256, sg::buffer_usage::copy_dst);

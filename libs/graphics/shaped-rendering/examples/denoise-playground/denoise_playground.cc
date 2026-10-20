@@ -493,7 +493,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
 
     while (true)
     {
-        if (capture.active && captured_frames >= capture.accumulate_frames)
+        if (capture.active && captured_frames >= capture.accumulate)
             break;
         if (!capture.active && win->is_close_requested())
             break;
@@ -675,7 +675,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
             ++accum_frame;
     }
 
-    if (capture.active && captured_frames >= capture.accumulate_frames)
+    if (capture.active && captured_frames >= capture.accumulate)
     {
         // The readback is an async transfer, and it would otherwise find this texture in the layout the last render
         // pass left it in — a layout the transfer queue cannot use — and submit a fixup list of its own, which warns.

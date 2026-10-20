@@ -362,7 +362,7 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
                 cc::println("gpu: {:.3f} ms/frame", (t1.value() - t0.value()) * 1000.0);
         }
 
-        if (capture.active && frames >= capture.accumulate_frames)
+        if (capture.active && frames >= capture.accumulate)
         {
             auto const writing = sr::write_capture_image_async(*ctx, capture_target, capture.output_path);
             co_await cc::async_settled(writing);

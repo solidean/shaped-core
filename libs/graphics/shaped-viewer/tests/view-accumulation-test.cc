@@ -157,6 +157,27 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::
         CHECK(accumulated(v.id) == 1);
     }
 
+    // What a capture waits on: a megakernel frame adds `samples_per_pixel` to every pixel, so its count is a product.
+    SECTION("a megakernel layer holds its frames' samples")
+    {
+        auto v = view_named("megakernel samples");
+        auto& settings = sv::ensure_scene_3d(v).settings;
+        settings.mode = sv::render_mode::megakernel;
+        settings.samples_per_pixel = 3;
+        (void)trace(v);
+        (void)trace(v);
+        (void)trace(v);
+        REQUIRE(accumulated(v.id) == 3);
+        CHECK(store.min_accumulated_samples(v.id) == 9);
+        CHECK(store.is_accumulation_converged(v.id, 9));
+        CHECK(!store.is_accumulation_converged(v.id, 10));
+
+        // A restart counts nothing of what the old image held.
+        settings.max_bounces += 1;
+        (void)trace(v);
+        CHECK(store.min_accumulated_samples(v.id) == 3);
+    }
+
     SECTION("a resize takes a new target and restarts")
     {
         auto const v = view_named("resized");
@@ -360,8 +381,10 @@ ASYNC_INVOCABLE_TEST("sv - a material that does not compile still accumulates do
     auto& lib = *sv::acquire_material_library().value();
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
-    auto const type = lib.register_type(sv::material_type::create("sv_test_broken_planned", cc::move(signature),
-                                                                  "surface.x = not_a_function(roughness)\n"));
+    auto const type
+        = lib.register_type(sv::material_type::create({.name = "sv_test_broken_planned",
+                                                       .signature = cc::move(signature),
+                                                       .shader = "surface.x = not_a_function(roughness)\n"}));
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -607,6 +630,8 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
         scene.items.push_back(item);
         scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
         scene.settings.reconstruct.scale = sr::render_scale_preset::performance;
+        // A move ends on the first still frame, so what each frame traces does not depend on the clock; the hold is tested below.
+        scene.settings.motion_hold_ms = 0.0f;
         def.views.push_back(cc::move(v));
 
         auto const root_node = def.nodes.add_container(sv::invalid_node);
@@ -678,12 +703,15 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
     auto const frame_samples = [&]() -> sv::impl::temporal_slot const&
     { return *store.peek_ptr(moving_id)->temporal.get_ptr(sv::temporal_id::frame_samples(0)); };
 
+    // A scaled frame is no restart of the mean, so it leaves the count the seed is drawn from as it was.
+    auto const restarts_before = accumulation().restarts;
     for (auto i = u64(1); i <= 3; ++i)
     {
         (void)co_await frame(i, true);
         CHECK(accumulation().traced_scaled);
         CHECK(accumulation().accum_frame == 0);
     }
+    CHECK(accumulation().restarts == restarts_before);
     auto const input = frame_samples().scaled_denoise.extent();
     CHECK(input[0] < output_size[0]);
     CHECK(input[1] < output_size[1]);
@@ -696,10 +724,176 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
     (void)co_await frame(4, false);
     CHECK(!accumulation().traced_scaled);
     CHECK(accumulation().accum_frame == 1);
+    CHECK(accumulation().restarts == restarts_before + 1); // the full-size frame that restarted it
     CHECK(frame_samples().denoise.extent() == output_size);
 
     (void)co_await frame(5, false);
     CHECK(accumulation().accum_frame == 2);
+
+    // Within a move's hold a frame that holds still stays in the moving stream, so a pause mid-move keeps its history.
+    sv::ensure_scene_3d(def.views[0]).settings.motion_hold_ms = 1e9f;
+    (void)co_await frame(6, true);
+    CHECK(accumulation().traced_scaled);
+    auto const scaled_before = accumulation().scaled_frame;
+    (void)co_await frame(7, false);
+    CHECK(accumulation().traced_scaled);
+    CHECK(accumulation().scaled_frame == scaled_before + 1);
+    CHECK(accumulation().accum_frame == 0);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// A layer at its sample target traces nothing, down the plan path, so what it would otherwise write beside the mean is never written.
+//
+// Guides first asked for there — a denoiser turned on — would stay blank, and the denoiser would run once on them and keep that.
+// So the mean starts over, and the frame that restarts it writes the guides.
+// And a change of denoise settings there denoises once more, where a frame at the target otherwise keeps what was last denoised.
+ASYNC_INVOCABLE_TEST("sv - a layer at its target restarts for new guides and denoises again on new settings",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+
+    auto const cloud = sv_test::make_triangle_cloud(32);
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(sv_test::as_mesh("cloud", cloud.positions, cloud.materials));
+    resources.wait_for_pending_uploads();
+
+    auto const output_size = tg::vec2i(64, 64);
+    auto const view_id = sv::view_id::from_string("at target");
+
+    // The megakernel at one sample a frame, so the target is two traced frames.
+    auto def = sv::viewer_definition{};
+    def.sample_target = 2;
+    {
+        auto v = sv::view_data{};
+        v.id = view_id;
+        v.camera = sv::camera{.position = tg::pos3d(2.4, 1.8, -3.2)};
+        auto& scene = sv::ensure_scene_3d(v);
+        scene.items.push_back(item);
+        scene.settings.mode = sv::render_mode::megakernel;
+        scene.settings.samples_per_pixel = 1;
+        def.views.push_back(cc::move(v));
+
+        auto const root_node = def.nodes.add_container(sv::invalid_node);
+        auto leaf = sv::layout_leaf{};
+        leaf.views.push_back(sv::view_index(0));
+        def.nodes.add_leaf(root_node, cc::move(leaf));
+
+        auto root = sv::view_data{};
+        root.id = sv::view_id::from_string("root");
+        root.layers.push_back({.kind = sv::layer_kind::layout, .blend = sv::layer_blend::replace, .root_node = root_node});
+        def.root_view = sv::view_index(def.views.size());
+        def.views.push_back(cc::move(root));
+    }
+    auto& settings = sv::ensure_scene_3d(def.views[0]).settings;
+
+    auto const output = ctx.persistent.create_texture_2d({.format = sg::pixel_format::bgra8_unorm,
+                                                          .width = output_size[0],
+                                                          .height = output_size[1],
+                                                          .usage = sg::texture_usage::render_target});
+
+    auto store = sv::view_store{};
+    auto const history = sv::view_history{};
+
+    // A declined frame is fine here: a hit group or a denoiser still compiling declines, and the loops below wait on state rather than on outcomes.
+    auto const frame = [&](u64 index) -> cc::shared_async<cc::unit>
+    {
+        (void)ctx.routines.tick();
+        auto cmd = ctx.create_command_list();
+        resources.advance_to(ctx.current_epoch());
+        store.begin_frame(u64(ctx.current_epoch()));
+        auto const plan = sv::build_render_plan(def, output_size, index, history);
+        (void)sv::viewer_renderer::execute(*cmd, def, plan, resources, store,
+                                           output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+    };
+
+    auto const slot_of = [&](u64 temporal) -> sv::impl::temporal_slot*
+    {
+        auto* const rec = store.get_ptr(view_id);
+        return rec == nullptr ? nullptr : rec->temporal.get_ptr(temporal);
+    };
+    auto const accumulation = [&]() -> sv::impl::temporal_slot const&
+    {
+        auto const* const slot = slot_of(sv::temporal_id::accumulation(0));
+        CC_ASSERT(slot != nullptr, "the view traced, so it has an accumulator");
+        return *slot;
+    };
+
+    sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba16_float); // the format a denoised slot declares
+    (void)co_await ctx.routines.idle_completion();
+
+    // Until the mean holds the target, which a stand-in still compiling restarts on the way.
+    // A cold shader compile runs as background work the loop has to drive, so the deadline is in seconds rather than frames.
+    auto index = u64(1);
+    auto const start = cc::current_time_steady_secs();
+    while (store.min_accumulated_samples(view_id) < 2)
+    {
+        (void)co_await frame(index++);
+        REQUIRE(cc::current_time_steady_secs() - start < 240.0);
+        sv_test::drive_ambient_work();
+    }
+
+    // At the target nothing traces, so nothing counts.
+    auto const frames_at_target = accumulation().accum_frame;
+    (void)co_await frame(index++);
+    (void)co_await frame(index++);
+    CHECK(accumulation().accum_frame == frames_at_target);
+
+    // A denoiser turned on there asks for guides no frame would write, so the mean starts over and the restarting frame writes them.
+    settings.reconstruct.denoiser = sr::denoise_method::atrous;
+    (void)co_await frame(index++);
+    auto const guide_frames = [&]
+    {
+        auto const* const slot = slot_of(sv::temporal_id::normal_guide(0));
+        return slot == nullptr ? u32(0) : slot->accum_frame;
+    };
+    CHECK(accumulation().accum_frame == 1);
+    CHECK(guide_frames() == 1);
+
+    // Back to the target, denoised.
+    auto const denoised = [&]() -> sv::impl::temporal_slot&
+    {
+        auto* const slot = slot_of(sv::temporal_id::denoised(0));
+        CC_ASSERT(slot != nullptr, "a denoising layer declares its denoised image");
+        return *slot;
+    };
+    // At the target a frame traces nothing and costs next to nothing, so a frame count would run out while the denoiser still compiles.
+    while (store.min_accumulated_samples(view_id) < 2 || denoised().accum_frame == 0)
+    {
+        (void)co_await frame(index++);
+        REQUIRE(cc::current_time_steady_secs() - start < 240.0);
+        sv_test::drive_ambient_work();
+    }
+    CHECK(guide_frames() == accumulation().accum_frame); // the guides hold every frame of this mean
+
+    // A reset only a denoise consumes, which says whether one ran.
+    // At the target with nothing changed, none does.
+    denoised().denoise.reset();
+    (void)co_await frame(index++);
+    CHECK(denoised().denoise.is_reset_pending());
+
+    // A changed denoise setting denoises once more, and restarts nothing of the mean.
+    auto const frames_before = accumulation().accum_frame;
+    settings.reconstruct.sharpness = 0.8f;
+    (void)co_await frame(index++);
+    CHECK(!denoised().denoise.is_reset_pending());
+    CHECK(denoised().accum_frame == 1);
+    CHECK(accumulation().accum_frame == frames_before);
 
     co_await cc::async_settled(sv::background_work(ctx));
 }
@@ -809,7 +1003,16 @@ ASYNC_INVOCABLE_TEST("sv - a wavefront layer carries its paths across still fram
     auto const timed = probe->query.is_supported();
     ctx.drop_command_list(cc::move(probe));
     if (timed)
-        CHECK(until(still, [&] { return slot().pacing.seconds_per_round > 0.0; }));
+        CHECK(until(still, [&] { return slot().pacing.seconds_per_full_round > 0.0; }));
+
+    // A budget no round fits runs one round, starting samples in only a share of the free slots, which each measured frame lowers.
+    // wavefront-trace-test.cc pins that a partial fill keeps the image's mean; this pins that the viewer lowers it at all.
+    if (timed)
+    {
+        auto starved = definition(tg::pos3d(2.4, 1.8, -3.2), sv::render_mode::wavefront);
+        starved.wavefront_budget_ms = 0.001f;
+        CHECK(until(starved, [&] { return slot().pacing.fill < 0.5f; }));
+    }
 
     // A moved camera restarts the mean, and its paths under the next generation.
     auto const moved = definition(tg::pos3d(2.6, 1.8, -3.2), sv::render_mode::wavefront);
