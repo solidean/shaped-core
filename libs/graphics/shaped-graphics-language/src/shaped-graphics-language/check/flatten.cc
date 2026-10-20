@@ -2993,9 +2993,10 @@ struct flattener
                 is_failed = true;
                 return;
             }
-            auto const value = flatten_expr(let->value);
+            // minted ahead of its value, so the name the program wrote is its own and a callee inlined there mints past it
             auto const local = add_local(let->is_mut ? local_kind::var : local_kind::let,
                                          c.text_of(file(), name->where), tables().type_at(let->pattern));
+            auto const value = flatten_expr(let->value);
             current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = local});
             if (let->is_mut)
                 add_stmt(from, flat_var{.local = local, .value = value});
