@@ -58,7 +58,7 @@ The ratio itself comes from `reconstruct_settings::scale`.
 `reconstruct_settings::quality` separately picks the network NGX runs, so the two are independent knobs here and `scale` alone decides the extents.
 
 **Its jitter is the Halton sequence, handed to NGX in sr's sign, and that sign is unverified.**
-FSR and MetalFX each settled theirs by a comparison against a flipped run; `dlss_rr` has the same comparison in denoise-test, which has not yet run on an RTX machine.
+FSR and MetalFX each settled theirs by a comparison against a flipped run; `dlss_rr` has the same comparison in dlss-rr-jitter-test, which has not yet run on an RTX machine.
 Until it has, the sign is sr's convention passed through unchanged, not a measured one.
 
 **NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
@@ -197,6 +197,7 @@ Everything Metal and MetalFX stays in `impl/metalfx_backend.cc`, linked where th
 **It writes only to a texture it may both render to and write from a shader.**
 An output without both `image` and `render_target` usage gets an image of the routine's own, carried across after.
 An `image` output gets a compute copy, compiled for `rgba16_float` and `rgba32_float`; a `render_target` one is drawn in by `sr::blit_routine`, one pipeline per format.
+The staged image is in the output's format and MetalFX writes it as an image, so the blit serves only a format Metal can write that way; `rgba32_float` is the one the tests cover.
 An output with neither is refused.
 
 **Its jitter is FSR's sequence**: Halton (2, 3) over 8 times the square of the ratio, since MetalFX leaves the sequence to the caller.
