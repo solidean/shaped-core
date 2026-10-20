@@ -86,7 +86,7 @@ public:
     ///
     /// This is the part of "is the image finished" that accumulation cannot see.
     /// Such work changes a texture's contents rather than its id, so it never restarts a view's accumulation:
-    /// a caller waiting for a settled image has to watch this, `streaming_resources` AND `view_ref::accumulated_frames`.
+    /// a caller waiting for a settled image has to watch this, `streaming_resources` AND `view_ref::is_accumulation_converged`.
     [[nodiscard]] isize pending_resource_work() const;
 
     /// How many payloads are still streaming in — geometry, attributes, textures.

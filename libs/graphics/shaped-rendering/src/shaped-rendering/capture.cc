@@ -65,11 +65,11 @@ capture_request capture_request::from_environment()
             CC_LOG_WARNING("capture: ignoring unparseable {} (want <width>x<height>)", capture_size_env_var);
     }
 
-    if (auto const frames = cc::environment_variable(capture_accumulate_env_var); frames.has_value())
+    if (auto const accumulate = cc::environment_variable(capture_accumulate_env_var); accumulate.has_value())
     {
         auto parsed = u32(0);
-        if (cc::from_string(frames.value(), parsed) && parsed > 0)
-            req.accumulate_frames = parsed;
+        if (cc::from_string(accumulate.value(), parsed) && parsed > 0)
+            req.accumulate = parsed;
         else
             CC_LOG_WARNING("capture: ignoring unparseable {}", capture_accumulate_env_var);
     }

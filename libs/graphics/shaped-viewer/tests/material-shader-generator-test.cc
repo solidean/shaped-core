@@ -41,8 +41,10 @@ namespace
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
     signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
-    return sv::material_type::create("test", cc::move(signature),
-                                     "surface.specular_roughness = roughness\nsurface.base_color = base_color\n");
+    return sv::material_type::create({.name = "test",
+                                      .signature = cc::move(signature),
+                                      .shader = "surface.specular_roughness = roughness\nsurface.base_color = "
+                                                "base_color\n"});
 }
 
 [[nodiscard]] sv::material bare_material()
@@ -123,7 +125,8 @@ TEST("sv::generate_material_shader - constants come out of the parameter block")
 
 TEST("sv::generate_material_shader - an attribute-less type reads no parameter block")
 {
-    auto const type = sv::material_type::create("bare", {}, "surface.base_color = float3(1.0, 0.0, 1.0)\n");
+    auto const type
+        = sv::material_type::create({.name = "bare", .shader = "surface.base_color = float3(1.0, 0.0, 1.0)\n"});
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
 
     CHECK(g.layout.slots.empty());
@@ -300,7 +303,8 @@ TEST("sv::generate_material_shader - two attributes sampled alike sample through
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     signature.push_back(sv::material_signature_entry::of("emissive", tg::vec3f(0.0f, 0.0f, 0.0f)));
-    auto const type = sv::material_type::create("two", cc::move(signature), "surface.base_color = base_color\n");
+    auto const type = sv::material_type::create(
+        {.name = "two", .signature = cc::move(signature), .shader = "surface.base_color = base_color\n"});
 
     auto mesh = make_mesh();
     mesh.attributes.push_back(make_uvs());
@@ -322,8 +326,8 @@ TEST("sv::generate_material_shader - a rotation attribute blends as a quaternion
 {
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of_rotation("frame", tg::vec4f(0, 0, 0, 1)));
-    auto const type
-        = sv::material_type::create("framed", cc::move(signature), "surface.geometry_tangent_frame = frame\n");
+    auto const type = sv::material_type::create(
+        {.name = "framed", .signature = cc::move(signature), .shader = "surface.geometry_tangent_frame = frame\n"});
 
     // Nothing supplies it: the declaration's default is a constant, and a constant has no corners to blend.
     auto const bare = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
@@ -357,8 +361,11 @@ TEST("sv::generate_material_shader - the raster pixel stage evaluates the same m
     signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     signature.push_back(sv::material_signature_entry::of("opacity", 1.0f));
     signature.push_back(sv::material_signature_entry::of("cutoff", 0.0f));
-    auto const type = sv::material_type::create("cut", cc::move(signature), "surface.base_color = base_color\n",
-                                                "opacity", "cutoff");
+    auto const type = sv::material_type::create({.name = "cut",
+                                                 .signature = cc::move(signature),
+                                                 .shader = "surface.base_color = base_color\n",
+                                                 .opacity_attribute = "opacity",
+                                                 .opacity_cutoff_attribute = "cutoff"});
 
     auto mesh = make_mesh();
     mesh.attributes.push_back(make_uvs());
@@ -406,8 +413,10 @@ TEST("sv::generate_material_shader - the raster pixel stage hands shade the type
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("base_color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     signature.push_back(sv::material_signature_entry::of("ao", 1.0f));
-    auto const type
-        = sv::material_type::create("occluded", cc::move(signature), "surface.base_color = base_color\n", {}, {}, "ao");
+    auto const type = sv::material_type::create({.name = "occluded",
+                                                 .signature = cc::move(signature),
+                                                 .shader = "surface.base_color = base_color\n",
+                                                 .occlusion_attribute = "ao"});
     auto const g = sv::generate_material_shader(sv::resolve_material(type, bare_material(), make_mesh()));
     CHECK(g.raster_source.contains("    return raster.shade(p, ctx, sv_evaluate_material(ctx), false, "
                                    "sv_attribute_ao(ctx))\n"));

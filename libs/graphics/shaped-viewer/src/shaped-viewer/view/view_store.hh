@@ -58,13 +58,21 @@ public:
     /// For tests and debug overlays — the trace needs none of it.
     [[nodiscard]] u32 accumulated_frames(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
 
-    /// The lowest accumulated-frame count across every traced layer of `id`, and 0 for a view with none.
-    /// See `impl::min_accumulated_frames`, which is the rule.
-    [[nodiscard]] u32 min_accumulated_frames(view_id id) const;
+    /// The fewest samples per pixel across every traced layer of `id`, and 0 for a view with none.
+    /// See `impl::min_accumulated_samples`, which is the rule.
+    [[nodiscard]] u32 min_accumulated_samples(view_id id) const;
 
-    /// Whether every traced layer of `id` has reached `frames`, or has stopped climbing and never will.
+    /// How many pixels of `id`'s traced layers held fewer samples than their trace's target, as last read back.
+    /// See `impl::pixels_short_of_target`.
+    [[nodiscard]] u32 pixels_short_of_target(view_id id) const;
+
+    /// Whether every traced layer of `id` holds `samples` per pixel, or has stopped climbing and never will.
     /// See `impl::is_accumulation_converged`, which is the rule; false for a view that is not here.
-    [[nodiscard]] bool is_accumulation_converged(view_id id, cc::optional<u32> frames = {}) const;
+    [[nodiscard]] bool is_accumulation_converged(view_id id, cc::optional<u32> samples = {}) const;
+
+    /// Starts every traced layer of `id` over, as a different image would: its mean, and the denoiser's history with it.
+    /// For a change the trace's hash cannot see, such as a texture's contents replaced in place; nothing for a view that is not here.
+    void restart_accumulation(view_id id);
 
     [[nodiscard]] isize count() const { return _entries.count(); }
     [[nodiscard]] isize payload_bytes() const { return _entries.payload_bytes(); }

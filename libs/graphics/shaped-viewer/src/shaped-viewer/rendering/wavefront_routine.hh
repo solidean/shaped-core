@@ -69,8 +69,18 @@ struct sv::wavefront_trace_desc
     /// A frame that drains takes none, so every sample it started finishes inside it.
     bool regenerate = true;
 
+    /// The share of free slots that start a new sample, in [0, 1]: each one starts with this probability, drawn from its own stream.
+    /// It applies at finalize and at a carrying frame's begin.
+    /// A restart's begin still starts every slot, since each pixel needs its first sample.
+    /// Below 1 a round holds fewer paths and costs less, which is how a still frame fits a budget one full round overruns.
+    f32 fill = 1.0f;
+
     /// The bounce Russian roulette starts after, or 0 for a hard `max_bounces` alone.
     u32 roulette_after = 0;
+
+    /// The samples a pixel stops at, or 0 for no limit: a free slot whose pixel holds this many starts none, whatever `fill` says.
+    /// Never restarts anything, so raising it carries on from the samples the pixels hold.
+    u32 sample_target = 0;
 
     /// Where set, receives how many paths entered each of the frame's rounds, `rounds` values once the list has run.
     /// A diagnostic: it costs a copy per round and a readback, so nothing sets it on an ordinary frame.
@@ -78,6 +88,11 @@ struct sv::wavefront_trace_desc
 
     /// Where set, receives the frame's stage timestamps, which the routine also records as `sv.wavefront.*` stats.
     wavefront_timing* timing = nullptr;
+
+    /// Where set, receives two values once the list has run: the fewest samples any pixel holds once the frame has resolved,
+    /// then how many pixels hold fewer than `sample_target`, 0 where that is 0.
+    /// A sample counts once its path finished, a non-finite one as a sample of nothing, so the first is what the image's mean is a mean of at worst.
+    sg::data_future<u32>* sample_floor = nullptr;
 };
 
 /// The wavefront path tracer: shaders/wavefront.sgl over module `tracer`, plus one generated shade kernel per material permutation.
@@ -99,6 +114,10 @@ public:
     ///
     /// A permutation whose shade kernel has not compiled is shaded by the stand-in of its kind, as the megakernel's hit groups are.
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, wavefront_trace_desc const& d);
+
+    /// Where `p`'s shade kernel stands as of the last frame: one no trace has asked for yet is pending, since the next one starts it.
+    /// Starts nothing itself, since building the kernel needs the trace's bindless layout.
+    [[nodiscard]] static impl::permutation_state shade_kernel_state(sg::command_list& cmd, material_permutation const* p);
 
     /// How many medium scatters a walk takes before its Russian roulette may end it: `pt.roulette_after` in shaders/sgl/pt_sampling.sgl.
     static constexpr i32 medium_roulette_after = 16;
@@ -164,3 +183,9 @@ private:
     /// Records every frame of `_timed` whose timestamps have all landed by epoch `now`, and drops one too old to land ever.
     void _record_landed_timings(u64 now);
 };
+
+namespace sv::impl
+{
+/// `frame_constants::wavefront_flags`, as `wavefront_flag_*` in shaders/sgl/tracer_wavefront.sgl name them.
+inline constexpr u32 wavefront_flag_restart = 1;
+} // namespace sv::impl

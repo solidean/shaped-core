@@ -326,6 +326,37 @@ cc::shared_async<cc::vector<tg::vec4f>> trace_direct(sg::context& ctx,
     return supported && can_raster();
 }
 
+/// Whether `ctx` is an Intel dx12 driver whose own shader cache restores a material's raster pipeline as one that draws nothing.
+/// docs/bugs-external/intel-d3d12-cached-pso-draws-nothing reproduces it; seen up to 32.0.101.9150, so a newer driver runs the tests again.
+/// `adapter_info::driver_version` is opaque, and ordering it is only sound here because the dx12 backend writes it as `a.b.c.d` itself.
+[[nodiscard]] bool has_intel_cached_pso_bug(sg::context& ctx)
+{
+    auto const& adapter = ctx.metrics.adapter();
+    if (ctx.backend() != sg::backend_kind::dx12 || adapter.is_software || adapter.vendor_id != 0x8086)
+        return false;
+    constexpr u64 last_affected[] = {32, 0, 101, 9150};
+    u64 parts[4] = {};
+    auto part = 0;
+    for (auto const c : cc::string_view(adapter.driver_version))
+    {
+        // Anything but the dx12 spelling reads as affected, rather than run a test known to fail.
+        if (c == '.' && ++part == 4)
+            return true;
+        if (c == '.')
+            continue;
+        if (c < '0' || c > '9')
+            return true;
+        parts[part] = parts[part] * 10 + u64(c - '0');
+    }
+    for (auto i = 0; i < 4; ++i)
+        if (parts[i] != last_affected[i])
+            return parts[i] < last_affected[i];
+    return true;
+}
+
+constexpr auto intel_cached_pso_skip = "Intel's dx12 shader cache restores this pipeline as one that draws nothing; "
+                                       "see docs/bugs-external/intel-d3d12-cached-pso-draws-nothing";
+
 /// The Cornell box's enclosure alone, without its two blocks or its lamp: no wall then shadows another, so the tracer's
 /// direct light is unoccluded everywhere, which the raster's always is.
 /// The ceiling light is still the rect `sv_test::light_table_of` names; only the mesh standing in for it is gone.
@@ -428,6 +459,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a cutout thresholds at its cutoff, an
     auto& ctx = *ctx_h;
     if (!can_raster())
         SKIP("no SGL compiler, so the raster shaders do not build");
+    if (has_intel_cached_pso_bug(ctx))
+        SKIP(intel_cached_pso_skip);
 
     // A black, unlit quad filling the view in front of a white environment: a kept pixel is 0, and a cut one is 1.
     auto quad = cc::vector<tg::pos3f>();
@@ -498,6 +531,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a minified textured cutout cuts again
     auto& ctx = *ctx_h;
     if (!can_raster())
         SKIP("no SGL compiler, so the raster shaders do not build");
+    if (has_intel_cached_pso_bug(ctx))
+        SKIP(intel_cached_pso_skip);
 
     // A 256 x 256 opacity whose every 2 x 2 block holds exactly two opaque texels, placed by a hash so nothing aliases.
     // Every mip below it is then exactly the box average, alpha 128, which is under the cutoff of 0.6.
@@ -596,6 +631,8 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a baked occlusion of one half halves 
     auto& ctx = *ctx_h;
     if (!can_raster())
         SKIP("no SGL compiler, so the raster shaders do not build");
+    if (has_intel_cached_pso_bug(ctx))
+        SKIP(intel_cached_pso_skip);
 
     // A white, rough quad filling the view under a uniform environment and no light: all it shows is the ambient term.
     auto quad = cc::vector<tg::pos3f>();
@@ -700,13 +737,13 @@ ASYNC_INVOCABLE_TEST("sv - a raster layer's capture finishes on its first drawn 
     constexpr auto size = tg::vec2i(96, 64);
     auto const path = cc::format("{}/sv-raster-capture.png", cc::temp_directory_path());
 
-    // Asking for the cap, which a traced layer takes thousands of frames to reach: a raster layer is there at once.
+    // Asking for the cap, which a traced layer takes thousands of frames to reach: a raster layer holds it at once.
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
     auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
     auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
     auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", size[0], size[1]));
     auto const acc
-        = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", sv::accumulation_frame_cap));
+        = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", sv::accumulation_sample_cap));
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
 
     auto const box = sv_test::make_cornell_box();
