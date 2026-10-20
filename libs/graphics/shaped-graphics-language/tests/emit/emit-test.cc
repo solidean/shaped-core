@@ -113,6 +113,18 @@ TEST("sgl emit - a reserved member is renamed, and its dx12 semantic still comes
     CHECK(wgsl.contains("    return pixel_input(constants.matrix * vec4f(v.point, 1.0));\n"));
 }
 
+TEST("sgl emit - mat4 of four columns is HLSL's constructor of four rows, transposed")
+{
+    auto const source = with_edges("@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                   "    let c = float4(p.position.x, 0.0, 0.0, 1.0)\n"
+                                   "    let m = mat4(c, c, c, c)\n"
+                                   "    return { color = m * c }\n");
+
+    CHECK(text_of(source, target::hlsl_dx12).contains("    const float4x4 m = transpose(float4x4(c, c, c, c));\n"));
+    CHECK(text_of(source, target::wgsl).contains("    let m: mat4x4f = mat4x4f(c, c, c, c);\n"));
+    CHECK(text_of(source, target::msl).contains("    const float4x4 m = float4x4(c, c, c, c);\n"));
+}
+
 TEST("sgl emit - an underscore that is taken already is minted past")
 {
     auto const source = with_edges("struct target_:\n"

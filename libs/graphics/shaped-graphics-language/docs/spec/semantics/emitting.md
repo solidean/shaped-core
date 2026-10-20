@@ -266,6 +266,7 @@ binding affine:
 * **EMIT-43** HLSL declares every matrix member `column_major` and writes a product `mul(a, b)`; WGSL writes `a * b`, for a matrix times a vector and for a matrix times a matrix.
 * **EMIT-44** `transform_position(m, p)` is the product of `m` and the four-vector `(p, 1.0)`.
 * **EMIT-45** `transform_direction(m, v)` is the `xyz` of the product of `m` and `(v, 0.0)`.
+* **EMIT-156** `mat4(c0, c1, c2, c3)` is the matrix of those columns: WGSL's and MSL's constructor of columns, and HLSL's constructor of rows under a `transpose`.
 
 ## The text
 

@@ -81,6 +81,24 @@ void determinant(leaves in, result& out)
     out.push_back(scalar::of(f32(sum)));
 }
 
+/// The four columns are the matrix's sixteen leaves already.
+void from_columns(leaves in, result& out)
+{
+    for (auto const& leaf : in)
+        out.push_back(leaf);
+}
+
+/// WGSL's and MSL's constructor takes columns, and HLSL's takes rows.
+written write_from_columns(call_context const& c)
+{
+    auto const mat4 = c.builtins.at(c.builtins.find_type("mat4")).spelled_in(c.target);
+    auto const text = cc::format("{}({}, {}, {}, {})", mat4, c.arguments[0].text, c.arguments[1].text,
+                                 c.arguments[2].text, c.arguments[3].text);
+    if (c.target == language::hlsl)
+        return {.text = cc::format("transpose({})", text)};
+    return {.text = text};
+}
+
 /// A matrix times what stands to its right: HLSL has a function for it, and every other target the operator.
 written product(call_context const& c, written lhs, written rhs)
 {
@@ -113,6 +131,7 @@ written write_product(call_context const& c)
 }
 
 constexpr cc::string_view k_mul[] = {"mul"};
+constexpr cc::string_view k_transpose[] = {"transpose"};
 
 void add_product(registry& r,
                  cc::string_view name,
@@ -139,6 +158,14 @@ void sgl::builtins::register_transforms(registry& r)
     add_product(r, "transform_direction", "v", "vec3", "vec3", transform_direction, write_direction);
     add_product(r, "transform_float4", "v", "float4", "float4", transform_float4, write_product);
     add_product(r, "multiply_mat4", "b", "mat4", "mat4", multiply_mat4, write_product);
+
+    r.add_comment("// a matrix of its four columns");
+    r.add(function_record{
+        .signature = "@pure fun mat4(c0: float4, c1: float4, c2: float4, c3: float4) -> mat4",
+        .doc = "/// `c0` to `c2` are where the axes go, and `c3` is where the origin goes.",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_from_columns, .hlsl_names = k_transpose},
+    });
 
     r.add_comment("// what a matrix is on its own; every target has it under this name");
     impl::add_function(r, "determinant", {"m", "mat4"}, "float", determinant, {},

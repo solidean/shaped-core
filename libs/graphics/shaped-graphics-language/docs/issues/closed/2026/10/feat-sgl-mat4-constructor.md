@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/tests/interpret/driver-bindings-test.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-20T13:13Z
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # A `mat4` cannot be constructed in SGL source
