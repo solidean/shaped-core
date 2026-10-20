@@ -883,7 +883,7 @@ void viewer::finish_frame(frame& f)
 
     // A canvas places its drawings in logical pixels, and the window's display scale is how many back-buffer pixels one of those covers.
     if (im.window != nullptr)
-        def.content_scale = im.window->display_scale();
+        def.display_scale = im.window->display_scale();
 
     im.last_frame_views.clear();
     for (auto& v : def.views)

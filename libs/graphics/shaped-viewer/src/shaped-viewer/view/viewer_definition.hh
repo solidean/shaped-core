@@ -20,7 +20,7 @@ struct sv::viewer_definition
 
     /// Texture pixels per logical pixel, which a canvas's 2D instances are placed in: the window's display_scale.
     /// 1 for a headless frame, which has no window to ask.
-    f32 content_scale = 1.0f;
+    f32 display_scale = 1.0f;
 
     /// The GPU milliseconds this frame's still wavefront layers share, which the viewer sets from `viewer_config::frame_budget_ms`.
     /// 0, the default for a definition built by hand, runs each layer's `render_settings::rounds_per_frame`.

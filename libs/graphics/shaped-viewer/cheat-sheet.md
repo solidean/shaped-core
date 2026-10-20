@@ -25,7 +25,7 @@ Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see
 ## Per-frame description — what to render
 
 ```cpp
-sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 content_scale; u32 sample_target; def[i] -> view_data& } — a whole frame, as two flat pools
+sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 display_scale; u32 sample_target; def[i] -> view_data& } — a whole frame, as two flat pools
 sv::view_data                    // { view_id id; vec2i resolution; bool resolution_follows_layout; camera; vector<layer> layers; refresh_policy refresh; vector<temporal_input>; }
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
