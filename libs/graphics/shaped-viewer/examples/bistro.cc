@@ -36,7 +36,7 @@ enum class scene_kind
     interior,
 };
 
-/// How far the exterior's daylight is raised, in stops: the street is open sky, so far less than Sponza's atrium needs.
+/// How far the exterior's daylight is raised, in stops: the street is open sky, so it needs little.
 constexpr float exterior_exposure_stops = 1.0f;
 
 /// What the interior's pendant lights are lowered by, in stops, tuned by eye on the start view's capture.

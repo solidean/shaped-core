@@ -25,7 +25,7 @@ if(_sv_mode STREQUAL "none")
     return()
 endif()
 if(_sv_mode STREQUAL "stub")
-    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals sponza bistro raster tg-objects)
+    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster tg-objects)
         sc_add_example_backend_stub(shaped-viewer-${_stem}-example "${SC_EXAMPLE_BACKEND}" SUPPORTS dx12)
     endforeach()
     return()
@@ -44,7 +44,6 @@ sc_add_single_file_examples(shaped-viewer
     light-stage.cc
     drawings.cc
     decals.cc
-    sponza.cc
     bistro.cc
     raster.cc
     tg-objects.cc
@@ -54,16 +53,12 @@ sc_add_single_file_examples(shaped-viewer
 
 # NGX loads Ray Reconstruction from a DLL beside the executable, so without it staged `automatic` falls back to a lesser denoiser.
 if(SC_DLSS_RUNTIME)
-    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals sponza bistro raster tg-objects)
+    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster tg-objects)
         sc_stage_runtime_dlls(shaped-viewer-${_stem}-example DLLS "${SC_DLSS_RUNTIME}" TAG dlss-${_stem})
     endforeach()
 endif()
 
-# Intel's Sponza is fetched on request into extern/sponza/.install, so the example names where it lands rather than
-# what it contains, and reports a missing scene at run time: a fetch after the build then needs no reconfigure.
-cmake_path(SET _sv_sponza_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../extern/sponza/.install")
-target_compile_definitions(shaped-viewer-sponza-example PRIVATE SV_SPONZA_GLTF="${_sv_sponza_dir}/NewSponza_Main_glTF_003.gltf")
-
-# Bistro is fetched on request into extern/bistro/.install the same way, and named the same way: by where it lands.
+# Bistro is fetched on request into extern/bistro/.install, so the example names where it lands rather than what it
+# contains, and reports a missing scene at run time: a fetch after the build then needs no reconfigure.
 cmake_path(SET _sv_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../../extern/bistro/.install")
 target_compile_definitions(shaped-viewer-bistro-example PRIVATE SV_BISTRO_DIR="${_sv_bistro_dir}")

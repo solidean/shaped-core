@@ -54,8 +54,7 @@ A `url` upstream names its archive's address in `download`; sqlite, the one with
 `on-request` hydrates exactly as `fetched` does, but no configure step runs its script, so it is normally absent.
 A person fetches it by hand with `uv run extern/<dep>/fetch-<dep>.py`, and whatever needs it SKIPs or reports `unsupported` without it.
 The OIDN library is one: only an oracle test compares against it, and 53 MB is not worth paying on every configure for that.
-Intel's Sponza is another, and its script also makes the person running it accept the scene's terms before a byte is downloaded.
-NVIDIA's ORCA Bistro is a third, fetched the same way under the same acceptance.
+So is NVIDIA's ORCA Bistro, whose script also makes the person running it accept the scene's terms before a byte is downloaded.
 
 **`files` lists what a `github-files` upstream fetches**, when the unit wanted is a few files rather than a whole repository or release.
 Each entry is a `path` in the repository at `tag` and the `sha256` of its bytes, and every file is verified on its own.

@@ -56,15 +56,6 @@ exceptions:
       LLVM-scale build we will not run in CI.
       It is Windows-only and reaches no other platform's shipping bundle.
 
-  - identifier: LicenseRef-Intel-Sponza
-    why: >-
-      Intel's Sponza scene, which only shaped-viewer's sponza example reads.
-      Its credits file carries the CC BY 4.0 text, with "for personal use and educational use, limited commercial use for
-      marketing and print purposes" above it, so it is recorded as what it says rather than as plain CC-BY-4.0.
-      Accepted because nothing fetches it by default — extern/sponza is `install: on-request` — and fetch-sponza.py
-      downloads nothing until the person running it has read the terms and accepted them.
-      No binary contains it and nothing redistributes it.
-
   - identifier: LicenseRef-NVIDIA-RTX-SDK
     why: >-
       NVIDIA RTX SDKs License, governing every NVIDIA SDK we fetch for shaped-rendering's denoise members —
