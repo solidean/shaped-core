@@ -617,6 +617,7 @@ TEST("sgl source - a return whose value inlines a call leaves its own block, how
 TEST("sgl source - a dropped value: the call's statements stay, and a rest that is only a local is gone")
 {
     // `graded p.b` leaves nothing behind its statements, and `saturate(...)` stays a statement of its own.
+    // The second `graded p.a` binds `p.a` as the first did, and so reads `v` (L1).
     CHECK(function_text(quiet_drops, quiet_drops_body, sgl::emit::target::wgsl)
           == "@fragment\n"
              "fn main_ps(p: frag) -> target_ {\n"
@@ -630,11 +631,10 @@ TEST("sgl source - a dropped value: the call's statements stay, and a rest that 
              "        graded_result = v_1 * 0.5;\n"
              "    }\n"
              "    var graded_1_result: f32;\n"
-             "    let v_2: f32 = p.a;\n"
-             "    if v_2 < 0.25 {\n"
+             "    if v < 0.25 {\n"
              "        graded_1_result = 0.0;\n"
              "    } else {\n"
-             "        graded_1_result = v_2 * 0.5;\n"
+             "        graded_1_result = v * 0.5;\n"
              "    }\n"
              "    _ = saturate(x + graded_1_result);\n"
              "    return target_(vec4f(x, x, x, 1.0));\n"

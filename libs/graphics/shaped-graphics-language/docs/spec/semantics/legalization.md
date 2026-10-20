@@ -22,11 +22,11 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-7** The `end` of a `for` has no effect and reads no mutable local and no buffer element, since a target evaluates it before every iteration.
   It calls no builtin that takes derivatives either: after a divergent `break`, that re-test runs in part of a quad.
 * **LEGAL-55** An assignment whose place has an index with an effect has a value without one, since a target may write the value's effect first (EVAL-14).
-* **LEGAL-8** A tree that is core already is left as it is.
+* **LEGAL-8** A tree that is core already is left as it is, but for the let rules L1 and L2.
 * **LEGAL-9** An emitter refuses a tree that is not core with the error `not-core`, whose detail names the first violation; it never asserts.
 * **LEGAL-53** (V0) A core tree holds no `check`: each goes with its body, first, since no target writes a check or an `assert` (EVAL-75).
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
-  It is the last rule, since the others introduce locals for results and a `void` result is one of them.
+  It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 
 ## The table
 
@@ -291,6 +291,36 @@ for (var i: i32 = 0; i < 2; i++) {
     }
     total = total + weight;
 }
+```
+
+## Lets
+
+Inlining binds a callee's lets once per call, so a value the source names once is computed and named once per call.
+Two rules run last, over the core tree, and are what keeps the text to one name per value.
+A target's compiler folds the copies too: these rules are for the reader of the text, and for the footprint, which reads the same tree.
+
+* **LEGAL-56** (L1) A let whose value repeats the value of a let in scope reads that let instead, and is gone.
+  The value must be the same wherever the invocation evaluates it.
+  It reads no `var` and no local anything writes through, no workgroup memory, and no resource the stage may write.
+  It calls no builtin that has an effect, takes derivatives, is a barrier, an atomic or a subgroup operation, or gives what differs between invocations.
+  It also reads something: a local, a binding or a sampler.
+  Two lets of literals alone name a number, and they keep their own names, since `metallic` and `roughness` may agree on `0.5`.
+* **LEGAL-57** (L2) A let nothing reads is gone, and so is a let only it read.
+  Its value must have no effect, and must always have a value: an element, a buffer element, a load of `bytes` and a builtin that has none for some argument are kept (EVAL-84, EVAL-90).
+  So a read of a binding that only such a let made leaves the footprint with it.
+
+```wgsl
+// before L1 and L2: both calls of `tinted(ctx, …)` bind `scale`, and nothing reads `dead`
+let scale: f32 = ctx.exposure * 2.0;
+let r: f32 = ctx.red * scale;
+let scale_1: f32 = ctx.exposure * 2.0;
+let g: f32 = ctx.green * scale_1;
+let dead: vec4f = frame.unused * 2.0;
+
+// after
+let scale: f32 = ctx.exposure * 2.0;
+let r: f32 = ctx.red * scale;
+let g: f32 = ctx.green * scale;
 ```
 
 ## What a target's own analysis sees

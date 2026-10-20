@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/material/shader_generator.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-20T13:23Z
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # Inlining repeats a callee's locals per call, so one value is read and named dozens of times
