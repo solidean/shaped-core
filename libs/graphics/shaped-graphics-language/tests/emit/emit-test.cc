@@ -125,6 +125,20 @@ TEST("sgl emit - mat4 of four columns is HLSL's constructor of four rows, transp
     CHECK(text_of(source, target::msl).contains("    const float4x4 m = float4x4(c, c, c, c);\n"));
 }
 
+TEST("sgl emit - a case on a bool local tests the local itself, with no copy and no `== true`")
+{
+    auto const source = with_edges("@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                   "    let lit = p.normal.x > 0.5\n"
+                                   "    let shade = case lit:\n"
+                                   "        true => p.normal.y\n"
+                                   "        false => p.normal.z\n"
+                                   "    return { color = float4(shade) }\n");
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(!wgsl.contains("case_value"));
+    CHECK(!wgsl.contains("== true"));
+    CHECK(wgsl.contains("    if lit {\n"));
+}
+
 TEST("sgl emit - an underscore that is taken already is minted past")
 {
     auto const source = with_edges("struct target_:\n"

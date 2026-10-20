@@ -65,7 +65,8 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
 * **LEGAL-45** A `case` becomes a `switch` when every pattern of every arm is such a literal, and a chain of `if` otherwise ([why](why/legalization.md#legal-45)).
   It runs between two passes of the expression rules: the first takes a `case` out of the block expression that held it, and the second lowers the conditions the chain writes.
 * **LEGAL-46** (C1) The chain binds the scrutinee to a `let`, and each arm is an `if` whose condition is its patterns compared with `==` and joined by `or`; the `default` arm is the last `else`.
-  It costs one `let`.
+  It costs one `let`, and none where the scrutinee is an immutable local, which each arm reads again.
+  A `bool` pattern is the scrutinee itself or its `not`, never `== true`.
 * **LEGAL-47** A pattern that has an effect is carried by the second pass: its block moves in front of the `if` that tests it.
   That `if` stands inside the branch that reaches it, so the pattern runs only where EVAL-68 says it runs.
 * **LEGAL-48** The chain captures no `break`, so an exit that crosses a `case` in that form costs nothing, and only the `switch` form is a construct X5 crosses.

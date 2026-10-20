@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_cases.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-20T16:55Z
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # A `case` on a `bool` is a copy and `== true`
