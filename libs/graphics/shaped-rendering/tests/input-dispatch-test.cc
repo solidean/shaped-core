@@ -244,6 +244,23 @@ TEST("sr - a pixel size change updates that window's size", main_thread, exclusi
     CHECK(win->height() == 768);
 }
 
+TEST("sr - a logical resize updates logical_size alone", main_thread, exclusive("sr-window-system"))
+{
+    auto const wsys = sr::window_system::create({.headless = true});
+    auto const win = wsys->create_window({.title = "w", .width = 800, .height = 600});
+    REQUIRE(win->logical_size() == tg::vec2i(800, 600));
+    REQUIRE(win->pixel_density() == 1.0f); // the dummy driver has no high-density display
+
+    // SDL reports the logical and the pixel size as two events; the pixel one is what width()/height() follow.
+    auto e = window_event(impl::backend_window_id(*win), SDL_EVENT_WINDOW_RESIZED, 512, 384);
+    push(e);
+    wsys->poll_events();
+
+    CHECK(win->logical_size() == tg::vec2i(512, 384));
+    CHECK(win->width() == 800);
+    CHECK(win->height() == 600);
+}
+
 TEST("sr - minimizing reports no drawable area", main_thread, exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create({.headless = true});

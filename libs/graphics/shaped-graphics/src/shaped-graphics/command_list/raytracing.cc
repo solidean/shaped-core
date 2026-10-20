@@ -31,7 +31,7 @@ void command_list::bind_raytracing_group(int group_index, binding_group const& g
 
 void command_list::dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height, int depth)
 {
-    if (context().portability_checks())
+    if (context().hit_record_checks())
         check_hit_records(table);
     raytracing_dispatch_rays(table, raygen, width, height, depth);
 }
@@ -102,7 +102,7 @@ tlas_handle command_list_raytracing_scope::build_tlas(cc::span<tlas_instance con
     auto tlas = _cmd.raytracing_build_tlas(instances, flags);
 
     // Only what the hit-record check at dispatch_rays reads, and only where it runs.
-    if (tlas != nullptr && _cmd.context().portability_checks())
+    if (tlas != nullptr && _cmd.context().hit_record_checks())
     {
         auto records = cc::vector<impl::tlas_instance_record>();
         records.reserve(instances.size());

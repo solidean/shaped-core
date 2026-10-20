@@ -1,10 +1,12 @@
 #include "metal-test-common.hh"
 
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
 #include <shaped-graphics/backends/metal/metal_feedback.hh>
+#include <shaped-graphics/exceptions.hh>
 
 #include <atomic>
 #include <cstdlib>
@@ -160,17 +162,113 @@ TEST("sg metal - a detached sink reports nothing")
     CHECK(ctx->take_pending_errors().empty());
 }
 
+namespace
+{
+/// An NSError as a failed commit's feedback carries it, autoreleased.
+NS::Error* commit_error(char const* domain, NS::Integer code)
+{
+    return NS::Error::error(NS::String::string(domain, NS::UTF8StringEncoding), code, nullptr);
+}
+} // namespace
+
 TEST("sg metal - the device-loss codes are the ones that mean the device is gone")
 {
     // Pure mapping, no device needed.
-    CHECK(mtl::device_error_kind_of(MTL::CommandBufferErrorTimeout) == sg::device_error_kind::device_lost);
-    CHECK(mtl::device_error_kind_of(MTL::CommandBufferErrorDeviceRemoved) == sg::device_error_kind::device_lost);
-    CHECK(mtl::device_error_kind_of(MTL::CommandBufferErrorAccessRevoked) == sg::device_error_kind::device_lost);
+    auto const scope = mtl::autorelease_scope();
+
+    // **The domain decides what a code means**, and an MTL4 commit reports in the queue's domain.
+    // There 1 is a timeout, which is also what a GPU page fault arrives as.
+    // In the classic domain 1 is an internal error.
+    // Reading the one through the other's enum is what once filed every lost device as an ordinary failure.
+    auto const* const mtl4 = "MTL4CommandQueueErrorDomain";
+    CHECK(mtl::device_error_kind_of(commit_error(mtl4, MTL4::CommandQueueErrorTimeout))
+          == sg::device_error_kind::device_lost);
+    CHECK(mtl::device_error_kind_of(commit_error(mtl4, MTL4::CommandQueueErrorNotPermitted))
+          == sg::device_error_kind::device_lost);
+    CHECK(mtl::device_error_kind_of(commit_error(mtl4, MTL4::CommandQueueErrorDeviceRemoved))
+          == sg::device_error_kind::device_lost);
+    CHECK(mtl::device_error_kind_of(commit_error(mtl4, MTL4::CommandQueueErrorAccessRevoked))
+          == sg::device_error_kind::device_lost);
+    CHECK(mtl::device_error_kind_of(commit_error(mtl4, MTL4::CommandQueueErrorOutOfMemory))
+          == sg::device_error_kind::validation);
+    CHECK(mtl::device_error_kind_of(commit_error(mtl4, MTL4::CommandQueueErrorInternal))
+          == sg::device_error_kind::validation);
+
+    auto const* const classic = "MTLCommandBufferErrorDomain";
+    CHECK(mtl::device_error_kind_of(commit_error(classic, NS::Integer(MTL::CommandBufferErrorTimeout)))
+          == sg::device_error_kind::device_lost);
+    CHECK(mtl::device_error_kind_of(commit_error(classic, NS::Integer(MTL::CommandBufferErrorDeviceRemoved)))
+          == sg::device_error_kind::device_lost);
+    CHECK(mtl::device_error_kind_of(commit_error(classic, NS::Integer(MTL::CommandBufferErrorAccessRevoked)))
+          == sg::device_error_kind::device_lost);
 
     // Everything else is one command buffer failing, not the device going away.
-    CHECK(mtl::device_error_kind_of(MTL::CommandBufferErrorOutOfMemory) == sg::device_error_kind::validation);
-    CHECK(mtl::device_error_kind_of(MTL::CommandBufferErrorPageFault) == sg::device_error_kind::validation);
-    CHECK(mtl::device_error_kind_of(MTL::CommandBufferErrorNone) == sg::device_error_kind::validation);
+    CHECK(mtl::device_error_kind_of(commit_error(classic, NS::Integer(MTL::CommandBufferErrorInternal)))
+          == sg::device_error_kind::validation);
+    CHECK(mtl::device_error_kind_of(commit_error(classic, NS::Integer(MTL::CommandBufferErrorPageFault)))
+          == sg::device_error_kind::validation);
+    CHECK(mtl::device_error_kind_of(commit_error("SomeOtherDomain", 1)) == sg::device_error_kind::validation);
+    CHECK(mtl::device_error_kind_of(nullptr) == sg::device_error_kind::validation);
+}
+
+ASYNC_TEST("sg metal - a lost device settles the waits its stopped queue strands")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // **What a real loss leaves behind, minus the fault.**
+    // After a GPU fault the system restarts the GPU and refuses the process's submissions, so no queued signal ever
+    // runs again and every timeline stops where it was.
+    // A queue wait on an event nobody signals stops this queue the same way, and without touching the GPU's health.
+    auto* const blocker = ctx->device()->newSharedEvent();
+    REQUIRE(blocker != nullptr);
+    ctx->queue()->wait(blocker, 1);
+
+    // The epoch closes with nothing submitted: its signal alone is stranded behind the wait.
+    // A command list here would put an allocator in the epoch, and the loss retires the epoch by resetting it, which
+    // Metal forbids while the command buffer is still pending on this queue.
+    auto const closed = ctx->current_epoch();
+    ctx->advance_epoch();
+
+    // Behind everything above, so the test can see the queue finish once it lets it go.
+    auto* const drained = ctx->device()->newSharedEvent();
+    REQUIRE(drained != nullptr);
+    ctx->queue()->signalEvent(drained, 1);
+
+    // Minted before the loss, so the completion waiter is armed for a value the queue will never reach.
+    auto const stranded = ctx->epoch_completion(closed);
+    CHECK(!stranded->is_ready());
+
+    // The feedback handler's own route, with the error a page fault really reports.
+    // Scoped, because an autorelease pool belongs to a thread and the awaits below may resume on another.
+    {
+        auto const scope = mtl::autorelease_scope();
+        auto* const error = commit_error("MTL4CommandQueueErrorDomain", MTL4::CommandQueueErrorTimeout);
+        ctx->feedback_sink()->report(mtl::device_error_kind_of(error), mtl::describe_error(error, "a simulated fault"));
+    }
+
+    // Each of these hung before the loss was recognised.
+    // The error went to the channel as an ordinary failure, and nothing ever raised the timelines the waits parked on.
+    co_await cc::async_settled(stranded);
+    CHECK(stranded->has_error()).context("a wait the loss cut short fails rather than reporting the work done");
+    co_await ctx->epochs_in_flight_completion(0);
+    co_await ctx->idle_completion();
+
+    CHECK(ctx->is_device_lost());
+    auto const errors = ctx->take_pending_errors();
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].kind == sg::device_error_kind::device_lost);
+    CHECK_THROWS_AS((void)ctx->create_command_list(), sg::device_lost_exception);
+
+    // The loss was only simulated, so the queue still holds the wait on `blocker` and the signals behind it.
+    // Let it run them before the events and the context are released.
+    blocker->setSignaledValue(1);
+    while (!drained->waitUntilSignaledValue(1, 1000))
+    {
+    }
+    drained->release();
+    blocker->release();
 }
 
 // Disabled because passing it means ending the process, and a suite cannot contain that.

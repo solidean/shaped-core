@@ -429,12 +429,44 @@ Run it by name and read the abort as the pass; a run that finishes means the lay
 It would mean deriving a correctness signal from message text nobody controls, and redirecting a descriptor Metal writes to from its own threads.
 A miss would then be silent, which is the same failure as having no oracle at all — and the abort's whole value is that it cannot be missed.
 
+### Running under Metal's GPU validation
+
+The API layer above is armed in every test run; **GPU validation is not, and is a run of its own.**
+It instruments every shader with bounds and residency checks, which costs a few times the suite's runtime.
+Metal reads it from the environment, and dev.py passes the environment through:
+
+```bash
+MTL_SHADER_VALIDATION=1 uv run dev.py test shaped-graphics-metal-test
+MTL_SHADER_VALIDATION=1 uv run dev.py test shaped-graphics-test
+```
+
+`MTL_DEBUG_LAYER` need not be set, since `arm_validation_layer()` already sets it; an application sets both.
+
+**Every commit goes through `metal_residency_set::commit`, which is what lets this run at all.**
+With GPU validation on, a commit walks the allocations of the residency sets attached to its queue.
+A transfer's feedback handler removes its staging buffer from the context's set and releases it, on a queue Apple owns.
+A commit racing that walk reached the freed buffer and trapped in `-[MTL4GPUDebugCommandBuffer applyResidencySets:]`.
+So the set is held still across each commit, as it already was across each change to it.
+`sg metal - async uploads commit while earlier ones settle` is the race: it crashed on its first run under validation before, and passes thirty in a row since.
+
+The metal binary passes under GPU validation.
+In `shaped-graphics-test`, the two sampler tests in `tests/pipeline/sampler-test.cc` read zeroes under it and pass without it; that is open.
+
 ### Commit feedback is the one programmatic channel
 
 `MTL4CommitFeedback` reports a failure that arrives after the call that caused it, which is exactly what sg's deferred error channel is for.
 So every commit carries a handler, and an error reaches `ctx.take_pending_errors()`.
 
-Metal's timeout, device-removed and access-revoked codes mean the device itself is gone and mark the context lost; everything else is one command buffer failing.
+A code is read in its domain, and an MTL4 commit reports in `MTL4CommandQueueErrorDomain`, whose numbers are not the classic `MTLCommandBufferError` ones.
+Timeout, not-permitted, device-removed and access-revoked mean the device itself is gone, and mark the context lost.
+Everything else is one command buffer failing.
+
+**A GPU page fault arrives as that timeout**, and the system then refuses every later submission of the process.
+No queued `signalEvent` runs again, so every timeline stops where it was.
+So a loss also abandons both timelines: `metal_epoch_system::abandon_timelines` signals them to their maximum from the host, as dx12 does to a removed fence.
+Every wait returns and every listener fires, and the portable layer, which checks the loss first, fails a pending completion rather than settling it.
+Without that, `epochs_in_flight_completion`, `idle_completion` and shutdown's drain each parked forever on a value nothing would signal.
+`sg metal - a lost device settles the waits its stopped queue strands` is that sequence, with a queue stopped by a wait instead of by a fault.
 
 The handler runs on a dispatch queue at a time nothing here controls, which can be after `shutdown` has returned.
 So it captures a [`metal_feedback_sink`](src/shaped-graphics/backends/metal/metal_feedback.hh) rather than the context, and shutdown detaches it.

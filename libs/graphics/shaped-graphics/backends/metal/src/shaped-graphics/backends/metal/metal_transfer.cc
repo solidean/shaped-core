@@ -200,8 +200,7 @@ void metal_transfer_system::commit(MTL4::CommandQueue* queue,
       // A transfer command buffer can fail the same way a frame's can, and this handler is the only channel that
       // says so — the validation layer speaks only to stderr, and the direct queue's handler never sees this queue.
       if (auto* const error = feedback->error(); error != nullptr)
-          sink->report(device_error_kind_of(NS::UInteger(error->code())),
-                       describe_error(error, "a metal transfer command buffer failed"));
+          sink->report(device_error_kind_of(error), describe_error(error, "a metal transfer command buffer failed"));
 
       // **Before `finish`, because `finish` drops the last handle this transfer held to `resource`.**
       //
@@ -232,8 +231,7 @@ void metal_transfer_system::commit(MTL4::CommandQueue* queue,
           sink->notify_drained();
     });
 
-    MTL4::CommandBuffer const* const buffers[] = {command_buffer};
-    queue->commit(buffers, 1, options);
+    _ctx->residency().commit(queue, command_buffer, options);
     options->release();
 
     queue->signalEvent(claim.is_download ? _download_timeline : _upload_timeline, claim.value);
@@ -500,7 +498,11 @@ void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buf
     auto finish = std::make_shared<cc::unique_function<void()>>(cc::move(on_complete));
 
     auto* const options = MTL4::CommitOptions::alloc()->init();
-    options->addFeedbackHandler(^void(MTL4::CommitFeedback*) {
+    options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
+      // The stream queue fails like the other two, and a lost device has to engage from whichever queue sees it first.
+      if (auto* const error = feedback->error(); error != nullptr)
+          sink->report(device_error_kind_of(error), describe_error(error, "a metal streaming command buffer failed"));
+
       (*finish)();
 
       // The stream queue's own progress, which the epoch cannot report: it tracks the direct queue.
@@ -510,8 +512,7 @@ void metal_transfer_system::commit_stream_batch(MTL4::CommandBuffer* command_buf
           sink->notify_drained();
     });
 
-    MTL4::CommandBuffer const* const buffers[] = {command_buffer};
-    _stream_queue->commit(buffers, 1, options);
+    _ctx->residency().commit(_stream_queue, command_buffer, options);
     options->release();
 
     // No value signalled here: a streaming batch is one slice of a transfer, and what a waiter waits for is the

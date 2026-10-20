@@ -12,12 +12,12 @@ namespace sv
 namespace
 {
 /// Logical pixels, y down from the top-left, to clip space, for a target `resolution` texels wide and tall.
-[[nodiscard]] tg::mat4f logical_pixels_to_clip(tg::vec2i resolution, f32 content_scale)
+[[nodiscard]] tg::mat4f logical_pixels_to_clip(tg::vec2i resolution, f32 display_scale)
 {
     auto m = tg::mat4f::identity;
-    m[0, 0] = 2.0f * content_scale / f32(resolution[0]);
+    m[0, 0] = 2.0f * display_scale / f32(resolution[0]);
     m[3, 0] = -1.0f;
-    m[1, 1] = -2.0f * content_scale / f32(resolution[1]);
+    m[1, 1] = -2.0f * display_scale / f32(resolution[1]);
     m[3, 1] = 1.0f;
     m[2, 2] = 0.0f;
     return m;
@@ -340,7 +340,7 @@ struct builder
             return;
 
         auto const is_3d = l.kind == layer_kind::scene_3d;
-        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto const scale = def.display_scale > 0.0f ? def.display_scale : 1.0f;
         auto const job = u32(plan.drawing_jobs.size());
         plan.drawing_jobs.push_back(
             {.view = view,
@@ -368,7 +368,7 @@ struct builder
         if (l.annotations.empty() || res[0] <= 0 || res[1] <= 0)
             return;
 
-        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto const scale = def.display_scale > 0.0f ? def.display_scale : 1.0f;
         auto const logical = tg::vec2f(f32(res[0]) / scale, f32(res[1]) / scale);
         auto const camera = world_to_clip(def[view].camera, res);
         auto placements = cc::vector<drawing_placement>();
@@ -402,7 +402,7 @@ struct builder
     {
         auto const solution = resolve_layout(def.nodes, l.root_node,
                                              tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(res[0], res[1])), title_texels());
-        auto const scale = def.content_scale > 0.0f ? def.content_scale : 1.0f;
+        auto const scale = def.display_scale > 0.0f ? def.display_scale : 1.0f;
         auto titles = cc::vector<drawing_placement>();
 
         for (auto const& item : solution.items)
@@ -526,10 +526,10 @@ struct builder
                          .job = job});
     }
 
-    /// A title strip's height in the targets' texels, at the definition's content scale.
+    /// A title strip's height in the targets' texels, at the definition's display scale.
     [[nodiscard]] int title_texels() const
     {
-        return int(tg::round(title_strip_height * (def.content_scale > 0.0f ? def.content_scale : 1.0f)));
+        return int(tg::round(title_strip_height * (def.display_scale > 0.0f ? def.display_scale : 1.0f)));
     }
 };
 } // namespace

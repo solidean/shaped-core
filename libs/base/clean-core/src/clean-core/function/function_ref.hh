@@ -37,6 +37,7 @@ public:
 
     /// Construct from any callable — function pointer, lambda, functor, pointer-to-member function, pointer-to-member object.
     /// Takes every kind of reference, since it must not outlive its argument anyway.
+    /// A const callable is invoked as const, so a `mutable` lambda held in a const variable is refused rather than mutated.
     template <class F>
         requires(!std::is_same_v<std::remove_cvref_t<F>, function_ref>)
     function_ref(F&& f)

@@ -229,17 +229,27 @@ struct sr::text_event
 struct sr::mouse_move_event
 {
     /// Cursor position in pixels, relative to the window's client area.
+    /// The pixels of window::width()/height(), so on a Retina display it is twice the logical position — divide by window::pixel_density for that.
     tg::pos2f cursor_pos;
 
     /// Motion since the previous event, in pixels.
-    /// This is the value to drive a camera with: it stays correct when the cursor is captured or hits the screen edge.
+    /// Scaled by pixel_density like cursor_pos, so the same hand motion reports twice the delta on a Retina display.
+    /// It stays correct when the cursor is captured or hits the screen edge, which is why a camera is driven by it —
+    /// through logical_delta, so a drag turns it as far on every display.
     tg::vec2f delta;
+
+    /// The window's pixels per logical unit when this event was read, which cursor_pos and delta were scaled by.
+    /// The event's own rather than the window's current one: motion queued before a move to another display keeps it.
+    float pixel_density = 1.0f;
 
     /// The buttons held during this motion, one `mouse_button_bit` each.
     /// A drag should end on it as well as on the button's release: a release outside an uncaptured window never arrives.
     u8 held_buttons = 0;
 
     [[nodiscard]] bool is_held(mouse_button b) const { return (held_buttons & mouse_button_bit(b)) != 0; }
+
+    /// delta in logical units: the same hand motion gives the same value at every pixel density.
+    [[nodiscard]] tg::vec2f logical_delta() const { return delta / pixel_density; }
 };
 
 struct sr::mouse_button_event
