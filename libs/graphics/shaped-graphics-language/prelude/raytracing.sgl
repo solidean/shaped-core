@@ -834,6 +834,10 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let direction = float3(r.direction.x, r.direction.y, r.direction.z)
 
     // one stack for both levels: a node, and the instance whose BLAS it belongs to, -1 for the TLAS
+    // It holds at most a TLAS's depth, a BLAS's depth and 4 more: a walk pushes one node per level it descends, and a
+    // TLAS leaf at most four instances.
+    // A pool's trees are balanced and share its 2^23 units, two a node, so the two depths sum to at most 42.
+    // So the stack holds at most 46 entries, and the guards on each push are never false.
     let mut nodes = uint[64].filled(0)
     let mut owners = int[64].filled(-1)
     let mut top = 1
@@ -959,6 +963,7 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let origin = float3(r.origin.x, r.origin.y, r.origin.z)
     let direction = float3(r.direction.x, r.direction.y, r.direction.z)
 
+    // a stack as trace_emulated's, which its bound holds to the same 46 entries
     let mut nodes = uint[64].filled(0)
     let mut owners = int[64].filled(-1)
     let mut top = 1
@@ -1063,6 +1068,7 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let origin = float3(r.origin.x, r.origin.y, r.origin.z)
     let direction = float3(r.direction.x, r.direction.y, r.direction.z)
 
+    // a stack as trace_emulated's, which its bound holds to the same 46 entries
     let mut nodes = uint[64].filled(0)
     let mut owners = int[64].filled(-1)
     let mut top = 1
