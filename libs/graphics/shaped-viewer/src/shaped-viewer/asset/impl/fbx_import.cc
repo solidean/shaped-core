@@ -4,10 +4,10 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
-#include <clean-core/string/char_predicates.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
 #include <shaped-viewer/asset/impl/asset_import.hh>
+#include <shaped-viewer/asset/uri_resolver.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <shaped-viewer/scene/mesh.hh>
 #include <typed-geometry/linalg/mat.hh>
@@ -266,30 +266,15 @@ struct fbx_importer
     /// No `:` (a scheme or a drive), no leading `//` (a network path), no `..` component, and no component naming a Windows device.
     [[nodiscard]] static bool is_safe_path(cc::string_view path)
     {
-        if (path.contains(':') || path.starts_with("//"))
+        if (path.contains(':') || path.starts_with("//") || impl::names_windows_device(path))
             return false;
-
-        // CON, PRN, AUX and NUL, and COM1-9 and LPT1-9, whatever follows the first dot and in any case.
-        auto const is_device = [](cc::string_view component)
-        {
-            auto const dot = component.find('.');
-            auto const stem = dot >= 0 ? component.subview({.offset = 0, .size = dot}) : component;
-            auto upper = cc::string(stem);
-            auto* const c = upper.data();
-            for (auto i = isize(0); i < upper.size(); ++i)
-                c[i] = cc::to_upper(c[i]);
-            auto const u = cc::string_view(upper);
-            if (u == "CON" || u == "PRN" || u == "AUX" || u == "NUL")
-                return true;
-            return u.size() == 4 && (u.starts_with("COM") || u.starts_with("LPT")) && u[3] >= '1' && u[3] <= '9';
-        };
 
         auto rest = path;
         while (!rest.empty())
         {
             auto const slash = rest.find('/');
             auto const component = slash >= 0 ? rest.subview({.offset = 0, .size = slash}) : rest;
-            if (component == ".." || is_device(component))
+            if (component == "..")
                 return false;
             rest = slash >= 0 ? rest.subview(slash + 1) : cc::string_view();
         }

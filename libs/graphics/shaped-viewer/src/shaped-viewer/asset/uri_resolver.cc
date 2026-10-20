@@ -58,49 +58,6 @@ uri_resolver_provider g_resolve_uri;
     return false;
 }
 
-#ifdef CC_OS_WINDOWS
-/// Whether Windows would open `path` as a device rather than a file: a `\\.\` device-namespace path, or a component naming one.
-/// A component is a device when what precedes its first dot or colon, trailing spaces dropped, is one in any case.
-/// Windows 11 no longer treats `nul.png` or `dir\CON` that way, but earlier versions do, and none of these is a file a document names.
-[[nodiscard]] bool names_windows_device(cc::string_view path)
-{
-    if (path.size() >= 4 && is_separator(path[0]) && is_separator(path[1]) && path[2] == '.' && is_separator(path[3]))
-        return true;
-
-    auto const is_device = [](cc::string_view component)
-    {
-        auto end = isize(0);
-        while (end < component.size() && component[end] != '.' && component[end] != ':')
-            ++end;
-        while (end > 0 && component[end - 1] == ' ')
-            --end;
-        auto upper = cc::string(component.subview({.offset = 0, .size = end}));
-        auto* const c = upper.data();
-        for (auto i = isize(0); i < upper.size(); ++i)
-            c[i] = cc::to_upper(c[i]);
-        auto const u = cc::string_view(upper);
-        if (u == "CON" || u == "PRN" || u == "AUX" || u == "NUL" || u == "CONIN$" || u == "CONOUT$")
-            return true;
-        if (u.size() < 4 || !(u.starts_with("COM") || u.starts_with("LPT")))
-            return false;
-        auto const digit = u.subview(3);
-        // 1-9, and the superscripts Windows also accepts there: U+00B9, U+00B2 and U+00B3 in UTF-8.
-        return (digit.size() == 1 && digit[0] >= '1' && digit[0] <= '9') || digit == "\xC2\xB9" || digit == "\xC2\xB2"
-            || digit == "\xC2\xB3";
-    };
-
-    auto start = isize(0);
-    for (auto i = isize(0); i <= path.size(); ++i)
-    {
-        if (i < path.size() && !is_separator(path[i]))
-            continue;
-        if (is_device(path.subview({.offset = start, .size = i - start})))
-            return true;
-        start = i + 1;
-    }
-    return false;
-}
-#endif
 } // namespace
 
 void set_resolve_uri(uri_resolver_provider provider)
@@ -151,6 +108,45 @@ cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::st
 
     // Moved into the pin rather than copied, so a large `.glb` is read once and never duplicated.
     return cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(bytes)));
+}
+
+bool impl::names_windows_device(cc::string_view path)
+{
+    if (path.size() >= 4 && is_separator(path[0]) && is_separator(path[1]) && path[2] == '.' && is_separator(path[3]))
+        return true;
+
+    auto const is_device = [](cc::string_view component)
+    {
+        auto end = isize(0);
+        while (end < component.size() && component[end] != '.' && component[end] != ':')
+            ++end;
+        while (end > 0 && component[end - 1] == ' ')
+            --end;
+        auto upper = cc::string(component.subview({.offset = 0, .size = end}));
+        auto* const c = upper.data();
+        for (auto i = isize(0); i < upper.size(); ++i)
+            c[i] = cc::to_upper(c[i]);
+        auto const u = cc::string_view(upper);
+        if (u == "CON" || u == "PRN" || u == "AUX" || u == "NUL" || u == "CONIN$" || u == "CONOUT$")
+            return true;
+        if (u.size() < 4 || !(u.starts_with("COM") || u.starts_with("LPT")))
+            return false;
+        auto const digit = u.subview(3);
+        // 1-9, and the superscripts Windows also accepts there: U+00B9, U+00B2 and U+00B3 in UTF-8.
+        return (digit.size() == 1 && digit[0] >= '1' && digit[0] <= '9') || digit == "\xC2\xB9" || digit == "\xC2\xB2"
+            || digit == "\xC2\xB3";
+    };
+
+    auto start = isize(0);
+    for (auto i = isize(0); i <= path.size(); ++i)
+    {
+        if (i < path.size() && !is_separator(path[i]))
+            continue;
+        if (is_device(path.subview({.offset = start, .size = i - start})))
+            return true;
+        start = i + 1;
+    }
+    return false;
 }
 
 cc::string impl::percent_decode(cc::string_view uri)

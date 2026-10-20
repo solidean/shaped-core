@@ -9,6 +9,7 @@
 #include <geometry/fbx_fixtures.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
+#include <shaped-viewer/asset/uri_resolver.hh>
 #include <shaped-viewer/material/material.hh>
 #include <shaped-viewer/material/material_library.hh>
 #include <shaped-viewer/material/material_type.hh>
@@ -493,6 +494,13 @@ TEST("sv::asset_loader - an FBX texture naming a Windows device is never asked f
     // Names that merely start like one are ordinary files.
     CHECK(!requests_of(scene_naming("console.png", "")).empty());
     CHECK(!requests_of(scene_naming("COM10.png", "")).empty());
+}
+
+TEST("sv::asset_loader - an FBX texture naming a console or a superscript port is never asked for")
+{
+    CHECK(requests_of(scene_naming("textures/CONIN$.png", "")).empty());
+    CHECK(requests_of(scene_naming("COM\xC2\xB9.png", "")).empty());
+    CHECK(requests_of(scene_naming("conout$ .tga", "")).empty());
 }
 
 TEST("sv::asset_loader - an ORCA packed map that does not decode leaves a neutral surface, not the constant")
@@ -1086,7 +1094,17 @@ TEST("sv::asset_loader - the filesystem default reads regular files under the ce
     // A directory is not a file, however a document names it.
     CHECK(sv::impl::resolve_uri_from_filesystem(cc::temp_directory_path()).has_error());
 
-#ifdef CC_OS_WINDOWS
+    // A device states one size and yields another; where there is none, there is nothing to prove.
+    if (cc::file_read_stream_adapter::open("/dev/zero").has_error())
+        SKIP("no /dev/zero on this platform");
+    CHECK(sv::impl::resolve_uri_from_filesystem("/dev/zero").has_error());
+}
+
+TEST("sv::asset_loader - on Windows the filesystem default refuses a device by its name")
+{
+#ifndef CC_OS_WINDOWS
+    SKIP("only Windows opens a file name as a device; sv::impl::names_windows_device is tested everywhere");
+#else
     // NUL opens, states 0 bytes and reads as empty, so only its name gives it away; CON states no size at all.
     // Neither may ever be read, and CON could read the console.
     auto const dir = cc::temp_directory_path();
@@ -1110,10 +1128,18 @@ TEST("sv::asset_loader - the filesystem default reads regular files under the ce
     CHECK(sv::impl::resolve_uri_from_filesystem(console, 1024).has_value());
     CHECK(cc::remove_file(console));
 #endif
-    // A device states one size and yields another; where there is none, there is nothing to prove.
-    if (cc::file_read_stream_adapter::open("/dev/zero").has_error())
-        SKIP("no /dev/zero on this platform");
-    CHECK(sv::impl::resolve_uri_from_filesystem("/dev/zero").has_error());
+}
+
+TEST("sv::impl::names_windows_device - judges a name the same on every platform")
+{
+    for (auto const name : {"CON", "nul", "NUL.png", "aux ", "COM1:", "lpt9.tga", "CONIN$", "conout$.txt",
+                            "COM\xC2\xB9.png", "LPT\xC2\xB3", "textures/CON.png", "a\\prn\\b", "\\\\.\\pipe\\x"})
+        CHECK(sv::impl::names_windows_device(name));
+
+    // U+00B4 is an accent, not a superscript digit.
+    for (auto const name : {"", "console.png", "COM10.png", "COM0", "LPT", "nullable.png", "textures/wood.png",
+                            "CONIN.png", "COM\xC2\xB4", "a.con"})
+        CHECK(!sv::impl::names_windows_device(name));
 }
 
 // The real thing, when a developer has fetched it.

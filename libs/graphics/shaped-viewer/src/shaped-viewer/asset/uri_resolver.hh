@@ -60,6 +60,10 @@ namespace impl
 [[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri_from_filesystem(cc::string_view uri,
                                                                                   i64 max_bytes = default_max_file_bytes);
 
+/// Whether Windows would open `path` as a device: a `\\.\` path, or a component naming `CON`, `COM1`, `CONIN$` and the like before its first dot or colon.
+/// Judged the same on every platform and in any case, since a name authored anywhere may be opened on Windows.
+[[nodiscard]] bool names_windows_device(cc::string_view path);
+
 /// `%20` and friends decoded; every other byte copied through.
 /// A lone `%` or a malformed escape is kept verbatim rather than being an error — a uri is a caller's string, and a
 /// path that happens to contain a percent must still open.
