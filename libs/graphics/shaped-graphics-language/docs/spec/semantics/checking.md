@@ -610,6 +610,14 @@ fun shade(k: float) -> float:
   A `uint` sum, difference and product wrap, as WGSL folds them.
 * **CHK-313** A `/` or a `%` whose operands are all integer literals is the normal error `literal-needs-type`, although `int` has both ([why](why/checking.md#chk-313)).
   So `1 / 3` is an error, and `1.0 / 3`, `(1 as int) / 3` and a division of two `int` locals are not.
+* **CHK-394** A prelude operator whose operands are all number literals is a **folded literal**, a number literal of the value it gives ([why](why/checking.md#chk-394)).
+  It converts by CHK-253 where it is used, as a written literal does.
+  It folds in 64 bits: an integer where every operand is one, and a float wherever one operand is.
+  `+`, `-`, `*`, `&`, `|`, `^`, `<<`, `>>`, a prefix `-` and `~` fold over integers, and `+`, `-`, `*` and `/` over floats.
+  An integer `/` or `%` is CHK-313's error and folds to nothing, nor does a float `%`, a shift whose count CHK-270 refuses, or a sum past 64 bits.
+  The type a folded literal ends up with holds its value, or it is `literal-not-representable`: `2147483647 + 1` is no `int`, and is a `uint`.
+  A comparison of two number literals is a `bool` literal, so a branch on it is flattened on the side it takes (CHK-356).
+  An operator the program declares is a call, and never folds.
 * **CHK-71** No matching candidate is the normal error `no-matching-overload`, and its detail spells the call with its argument types and says why each candidate did not match.
 * **CHK-72** Matching candidates without a best are the normal error `ambiguous-overload` ([why](why/checking.md#chk-72)).
 * **CHK-73** The best matching candidate is the call's target, and its return type is the call's type.

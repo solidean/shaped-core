@@ -1073,9 +1073,164 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
     return result;
 }
 
+namespace
+{
+/// `a op b` over two folded number literals, in 64 bits: an integer where both are, and a float where either is.
+/// None where the language leaves it to a call: an integer `/` or `%` (CHK-313), a float `%`, a bit operator on a
+/// float, a shift by a count outside the bits of an int (CHK-270), and an integer result past 64 bits.
+number_literal folded(cc::string_view op, number_literal const& a, number_literal const& b)
+{
+    if (a.is_integer && b.is_integer)
+    {
+        auto result = i64(0);
+        auto const x = a.integer;
+        auto const y = b.integer;
+        // past 2^62 a sum may leave 64 bits, and the product's magnitude is judged in a double, which holds it to 2^-52
+        constexpr auto limit = i64(1) << 62;
+        auto const is_small = [&](i64 v) { return v > -limit && v < limit; };
+        auto overflows = false;
+        if (op == "+" || op == "-")
+        {
+            overflows = !is_small(x) || !is_small(y);
+            if (!overflows)
+                result = op == "+" ? x + y : x - y;
+        }
+        else if (op == "*")
+        {
+            auto const product = f64(x) * f64(y);
+            overflows = product >= f64(limit) || product <= -f64(limit);
+            if (!overflows)
+                result = x * y;
+        }
+        else if (op == "&")
+            result = x & y;
+        else if (op == "|")
+            result = x | y;
+        else if (op == "^")
+            result = x ^ y;
+        else if ((op == "<<" || op == ">>") && y >= 0 && y <= 31)
+            result = op == "<<" ? i64(u64(x) << y) : x >> y;
+        else
+            return {};
+        if (overflows || (op == "<<" && (result >> y) != x))
+            return {};
+        return {.is_number = true, .is_integer = true, .integer = result};
+    }
+    auto const x = a.is_integer ? f64(a.integer) : a.real;
+    auto const y = b.is_integer ? f64(b.integer) : b.real;
+    auto result = 0.0;
+    if (op == "+")
+        result = x + y;
+    else if (op == "-")
+        result = x - y;
+    else if (op == "*")
+        result = x * y;
+    else if (op == "/" && y != 0.0)
+        result = x / y;
+    else
+        return {};
+    return {.is_number = true, .real = result};
+}
+} // namespace
+
+bool checker::calls_prelude_operator(i32 file, ast::expr_id expr) const
+{
+    // a program's own operator is a function it calls, which folding would step past
+    auto const& t = out.files[file].target_at(expr);
+    return t.kind == target_kind::overload && is_valid(t.symbol) && is_valid(out.at(t.symbol).intrinsic)
+        && is_prelude_file(out.at(t.symbol).file);
+}
+
+cc::optional<bool> checker::comparison_of(i32 file, ast::expr_id expr) const
+{
+    if (!ast::is_valid(expr))
+        return cc::nullopt;
+    auto const* const call = ast_of(file).at(expr).node.try_as<ast::call>();
+    if (call == nullptr || call->spelling != ast::call_spelling::infix || !sgl::is_valid(call->op)
+        || call->is_short_circuit || call->arguments.count != 2 || !calls_prelude_operator(file, expr))
+        return cc::nullopt;
+    auto const op = text_of(file, file_of(file).at(call->op).where);
+    auto const arguments = ast_of(file).at(call->arguments);
+    for (auto const& argument : arguments)
+        if (!argument.name.empty() || argument.is_splat)
+            return cc::nullopt;
+    auto const a = number_of(file, arguments[0].value);
+    auto const b = number_of(file, arguments[1].value);
+    if (!a.is_number || !b.is_number)
+        return cc::nullopt;
+    if (a.is_integer && b.is_integer)
+    {
+        auto const x = a.integer;
+        auto const y = b.integer;
+        if (op == "==")
+            return x == y;
+        if (op == "!=")
+            return x != y;
+        if (op == "<")
+            return x < y;
+        if (op == "<=")
+            return x <= y;
+        if (op == ">")
+            return x > y;
+        if (op == ">=")
+            return x >= y;
+        return cc::nullopt;
+    }
+    auto const x = a.is_integer ? f64(a.integer) : a.real;
+    auto const y = b.is_integer ? f64(b.integer) : b.real;
+    if (op == "==")
+        return x == y;
+    if (op == "!=")
+        return x != y;
+    if (op == "<")
+        return x < y;
+    if (op == "<=")
+        return x <= y;
+    if (op == ">")
+        return x > y;
+    if (op == ">=")
+        return x >= y;
+    return cc::nullopt;
+}
+
 number_literal checker::number_of(i32 file, ast::expr_id expr) const
 {
-    if (!ast::is_valid(expr) || !ast_of(file).at(expr).node.is<ast::literal>())
+    if (!ast::is_valid(expr))
+        return {};
+    // CHK-394: an operator over number literals alone is a number literal itself
+    if (auto const* const call = ast_of(file).at(expr).node.try_as<ast::call>())
+    {
+        if (!sgl::is_valid(call->op) || call->is_short_circuit || !calls_prelude_operator(file, expr))
+            return {};
+        auto const op = text_of(file, file_of(file).at(call->op).where);
+        auto const arguments = ast_of(file).at(call->arguments);
+        for (auto const& a : arguments)
+            if (!a.name.empty() || a.is_splat)
+                return {};
+        if (call->spelling == ast::call_spelling::prefix && arguments.size() == 1)
+        {
+            auto const operand = number_of(file, arguments[0].value);
+            if (!operand.is_number)
+                return {};
+            if (op == "-" && operand.is_integer && operand.integer != i64(1ull << 63))
+                return {.is_number = true, .is_integer = true, .integer = -operand.integer};
+            if (op == "-" && !operand.is_integer)
+                return {.is_number = true, .real = -operand.real};
+            if (op == "~" && operand.is_integer)
+                return {.is_number = true, .is_integer = true, .integer = ~operand.integer};
+            return {};
+        }
+        if (call->spelling != ast::call_spelling::infix || arguments.size() != 2)
+            return {};
+        auto const a = number_of(file, arguments[0].value);
+        if (!a.is_number)
+            return {};
+        auto const b = number_of(file, arguments[1].value);
+        if (!b.is_number)
+            return {};
+        return folded(op, a, b);
+    }
+    if (!ast_of(file).at(expr).node.is<ast::literal>())
         return {};
     auto const text = text_of(file, span_of(file, expr));
     switch (classify_number(text))
@@ -1209,9 +1364,13 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
             return type_of_builtin(builtins::k_bool, file, where);
         auto const* const found = operators_seen_from(file).get_ptr(spelling);
         auto const none = cc::span<symbol_id const>();
-        return resolve_overload(scope, id, ast::expr_id::none,
-                                found != nullptr ? cc::span<symbol_id const>(*found) : none, arguments,
-                                cc::format("operator {}", spelling));
+        auto const result = resolve_overload(scope, id, ast::expr_id::none,
+                                             found != nullptr ? cc::span<symbol_id const>(*found) : none, arguments,
+                                             cc::format("operator {}", spelling));
+        // CHK-394: what the operator folds to is judged at the type it ends up with, as a literal written there is
+        if (result != error_type && number_of(file, id).is_number)
+            wide_literals.push_back({.file = file, .expr = id, .function = scope.function});
+        return result;
     }
 
     if (!ast::is_valid(call.callee))

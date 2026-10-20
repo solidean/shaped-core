@@ -530,7 +530,7 @@ TEST("sgl check - a constant count or divisor is judged alone, whatever stands b
                           "@compute(1) fun cs(@thread_id id: int3){res}:\n";
     CHECK(reports_for(cc::format("{}    res.ints[0] = id.x >> (40 - 9)\n", head)) == "");
     CHECK(reports_for(cc::format("{}    res.ints[0] = id.x << (40 - 8)\n", head))
-              .contains("shift-out-of-range user:[id.x << (40 - 8)] `id.x << (40 - 8)` shifts by 32"));
+              .contains("shift-out-of-range user:[id.x << (40 - 8)] a shift by 32"));
     CHECK(reports_for(cc::format("{}    res.ints[0] = id.x % (2 - 2)\n", head))
               .contains("constant-without-value user:[id.x % (2 - 2)]"));
     CHECK(reports_for(cc::format("{}    res.ints[0] = (int2(id.x, 1) / int2(1, 0)).x\n", head))

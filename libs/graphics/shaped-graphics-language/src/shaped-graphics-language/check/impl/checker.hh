@@ -993,8 +993,13 @@ struct checker
     [[nodiscard]] bool holds(number_literal const& n, type_id to) const;
     /// The prelude's `float`, `int` or `uint` by name, as a literal's conversion knows them; `none` for another name.
     [[nodiscard]] type_id prelude_type(cc::string_view name) const;
-    /// What a number literal `expr` holds; `is_number` is false for any other expression.
+    /// What a number literal `expr` holds, or an operator over number literals alone folds to (CHK-394); `is_number`
+    /// is false for any other expression.
     [[nodiscard]] number_literal number_of(i32 file, ast::expr_id expr) const;
+    /// Whether the operator call `expr` resolved to a builtin of the prelude, which alone CHK-394 folds.
+    [[nodiscard]] bool calls_prelude_operator(i32 file, ast::expr_id expr) const;
+    /// What a comparison of number literals alone folds to (CHK-394); none for any other expression.
+    [[nodiscard]] cc::optional<bool> comparison_of(i32 file, ast::expr_id expr) const;
     /// The elements of tuple or object literal `expr`, checked where they are no literal themselves, into `literals`.
     [[nodiscard]] i32 shape_literal(function_scope& scope, ast::expr_id expr);
     /// Converts literal `expr`, shaped as `literal`, to `to` by a call of `to`'s name (CHK-81, CHK-85).

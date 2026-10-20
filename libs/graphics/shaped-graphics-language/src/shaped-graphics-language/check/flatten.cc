@@ -802,6 +802,14 @@ struct flattener
 
         if (e.node.is<ast::literal>())
             return flatten_number(id, type);
+        // CHK-394: an operator over number literals alone is the literal it folds to
+        if (e.node.is<ast::call>())
+        {
+            if (auto const n = c.number_of(file(), id); n.is_number)
+                return flatten_folded(id, type, n);
+            if (auto const b = c.comparison_of(file(), id); b.has_value())
+                return add_expr(type, id, flat_bool_literal{.value = b.value()});
+        }
         // a tuple or an object literal is the call it converts by (CHK-81)
         if ((e.node.is<ast::tuple>() || e.node.is<ast::object>()) && tables().call_at(id) >= 0)
             return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
@@ -980,6 +988,26 @@ struct flattener
         }
         auto const value = parse_plain_float(text);
         return value.has_value() ? literal(value.value()) : fail();
+    }
+
+    /// What an operator over number literals folded to, as the type it was checked as.
+    flat_expr_id flatten_folded(ast::expr_id id, type_id type, number_literal const& n)
+    {
+        auto const is_half = type == c.prelude_type(builtins::k_half);
+        auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+        if (n.is_integer && !is_float)
+        {
+            auto const is_unsigned
+                = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);
+            auto const v = n.integer;
+            if (is_unsigned ? v < 0 || v > 4294967295ll : v < -2147483647 - 1 || v > 2147483647)
+                return fail();
+            return add_expr(type, id, flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned});
+        }
+        if (!is_float)
+            return fail();
+        auto const v = n.is_integer ? f64(n.integer) : n.real;
+        return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v});
     }
 
     /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).

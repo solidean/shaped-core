@@ -219,6 +219,15 @@ A pattern with the top bit set belongs in a `uint`, or is built with `int.from_b
 Folding literals, which the [literal-types](../../incubator/literal-types.md) incubator sketches, makes that expression an error rather than a silent `0`.
 Refusing it now means nothing written today changes meaning when folding lands, which is CHK-257's reason carried over to the day `int` gained a `/`.
 
+## CHK-394
+
+`1 + 2` was the `int` sum of two literals, so it did not take a `float` parameter that `3` takes, and `(1 + 2) * 0.5` had no overload.
+Folding makes "what is the type of `1 + 2`" stop being a question: it is the literal `3`, which converts as `3` does.
+The value is the language's, not a target's: an integer is held in 64 bits as a written literal is, and is judged where its type settles, so an overflow is an error rather than a silent wrap.
+A float folds in 64 bits and rounds once to the type it settles at; a target that computed the same expression in 32 bits could round twice, which this rounding never does.
+Only the prelude's operators fold, since a program's own operator is a function whose body the literals are handed to.
+The incubator's open questions stay open: whether a literal type survives inside a tuple, and what a generic function sees.
+
 ## CHK-81
 
 A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.
