@@ -250,8 +250,9 @@ struct planner
                     return false;
             return true;
         };
-        while (!is_free())
-            result += "_";
+        // one trailing underscore, then a number after it: a second underscore would make a name C++ reserves
+        for (auto suffix = 0; !is_free(); ++suffix)
+            result = suffix == 0 ? cc::format("{}_", name) : cc::format("{}_{}", name, suffix);
         return result;
     }
 

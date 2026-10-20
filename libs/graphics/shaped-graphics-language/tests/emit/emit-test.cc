@@ -140,8 +140,26 @@ TEST("sgl emit - an underscore that is taken already is minted past")
                                    "    }\n");
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("struct target_ {\n    x: f32,\n}\n"));
-    CHECK(wgsl.contains("struct target__1 {\n    @location(0) color: vec4f,\n}\n"));
-    CHECK(wgsl.contains("fn main_ps(p: pixel_input) -> target__1 {\n"));
+    // the number follows the underscore directly, since `__` makes a name C++ and so MSL reserves
+    CHECK(wgsl.contains("struct target_1 {\n    @location(0) color: vec4f,\n}\n"));
+    CHECK(wgsl.contains("fn main_ps(p: pixel_input) -> target_1 {\n"));
+}
+
+TEST("sgl emit - a member named like its reserved type takes a number, never a second underscore")
+{
+    auto const source = with_edges("struct ray:\n"
+                                   "    t: float\n"
+                                   "\n"
+                                   "struct shot:\n"
+                                   "    ray: ray\n"
+                                   "\n"
+                                   "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                   "    let s = shot(ray(p.normal.x))\n"
+                                   "    return { color = float4(s.ray.t) }\n");
+    // MSL reserves `ray`, so the type is `ray_`, and the member may not hide it (EMIT-138)
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    ray_ ray_1;\n"));
+    CHECK(!msl.contains("__"));
 }
 
 TEST("sgl emit - an entry point a target reserves is renamed there, and the text says what it is called")

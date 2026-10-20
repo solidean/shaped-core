@@ -235,8 +235,12 @@ struct writer
         if (needs_member_assignment(x))
         {
             // A construction in the middle of an expression: every expression is pure, so building it first changes nothing.
-            auto name = p.names.mint(is_array(x.type) ? cc::string("array_value")
-                                                      : cc::format("{}_value", type_text(p, d, x.type)));
+            // a type a target renamed `ray_` takes no second underscore, which C++ reserves
+            auto const spelled = cc::string(type_text(p, d, x.type));
+            auto type = cc::string_view(spelled);
+            while (type.ends_with("_"))
+                type = type.subview({.start = 0, .end = type.size() - 1});
+            auto name = p.names.mint(is_array(x.type) ? cc::string("array_value") : cc::format("{}_value", type));
             build_struct(x, name);
             return {.text = cc::move(name)};
         }
