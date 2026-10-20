@@ -1,6 +1,7 @@
 #include <clean-core/record/log.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/blit_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/metalfx_passes.hh>
 #include <sr_sgl_shaders.hh>
@@ -66,6 +67,28 @@ bool metalfx_needs_staging(sg::texture_2d const& output)
     // MetalFX's output usage is ShaderRead | ShaderWrite | RenderTarget, which sg spells `image` plus `render_target`.
     auto const usage = output.raw()->usage();
     return !usage.has(sg::texture_usage::image) || !usage.has(sg::texture_usage::render_target);
+}
+
+metalfx_output_path metalfx_output_path_of(metalfx_passes const& passes, sg::texture_2d const& output)
+{
+    if (!metalfx_needs_staging(output))
+        return metalfx_output_path::direct;
+    auto const usage = output.raw()->usage();
+    if (usage.has(sg::texture_usage::image) && passes.copy_to(output.raw()->format()) != nullptr)
+        return metalfx_output_path::copy;
+    if (usage.has(sg::texture_usage::render_target))
+        return metalfx_output_path::blit;
+    return metalfx_output_path::none;
+}
+
+bool metalfx_record_blit_out(sg::command_list& cmd, metalfx_images const& images, sg::texture_2d const& output)
+{
+    auto pass = cmd.raster.render_to({.color_targets = {output.as_render_target_view().discarded()}});
+    if (sr::blit_routine::execute(pass, images.staged) == sg::routine_outcome::executed)
+        return true;
+    // A routine is registered by its first acquire, and only a registered one is built.
+    sr::blit_routine::prewarm(cmd.context(), output.raw()->format());
+    return false;
 }
 
 void metalfx_record_prepare(sg::command_list& cmd,

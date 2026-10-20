@@ -69,6 +69,24 @@ void metalfx_record_prepare(sg::command_list& cmd,
 /// The image the scaler writes: `output` itself, or `images.staged` at its extent and format where it needs staging.
 [[nodiscard]] sg::texture_2d metalfx_target(sg::context& ctx, metalfx_images& images, sg::texture_2d const& output);
 
+/// How MetalFX's result reaches an output.
+enum class metalfx_output_path
+{
+    direct, ///< MetalFX writes the output itself: it has `image` and `render_target`
+    copy,   ///< staged, then metalfx_copy_out.sgl writes it as an image: it has `image` and a format the copy has
+    blit,   ///< staged, then `sr::blit_routine` draws it in: it has `render_target` alone
+    none,   ///< nothing can write it
+};
+
+/// The path for `output`, given the copies `passes` has.
+[[nodiscard]] metalfx_output_path metalfx_output_path_of(metalfx_passes const& passes, sg::texture_2d const& output);
+
+/// Draws `images.staged` into `output` with `sr::blit_routine`; false while that routine's pipeline for the output's
+/// format is not built yet, which this asks for, and then nothing was drawn.
+[[nodiscard]] bool metalfx_record_blit_out(sg::command_list& cmd,
+                                           metalfx_images const& images,
+                                           sg::texture_2d const& output);
+
 /// Records the copy from `images.staged` into `output`.
 void metalfx_record_copy_out(sg::command_list& cmd,
                              metalfx_passes::copy_pass const& copy,

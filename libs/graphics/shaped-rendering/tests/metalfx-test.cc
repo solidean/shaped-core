@@ -7,6 +7,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
+#include <shaped-rendering/blit_routine.hh>
 #include <shaped-rendering/metalfx_rr_routine.hh>
 #include <shaped-rendering/metalfx_upscale_routine.hh>
 #include <shaped-rendering/reconstruct.hh>
@@ -40,10 +41,11 @@ cc::shared_async<cc::unit> prewarm(sg::context& ctx)
 struct stream_options
 {
     int frames = 24;
-    f32 jitter_sign = 1.0f;         ///< -1 hands MetalFX the jitter the wrong way round
-    f32 shift_per_frame = 0.0f;     ///< input pixels the scene moves right each frame
-    bool honest_motion = true;      ///< false reports a still image whatever moved
-    bool renderable_output = false; ///< an output MetalFX may write itself, rather than through the routine's copy
+    f32 jitter_sign = 1.0f;          ///< -1 hands MetalFX the jitter the wrong way round
+    f32 shift_per_frame = 0.0f;      ///< input pixels the scene moves right each frame
+    bool honest_motion = true;       ///< false reports a still image whatever moved
+    bool renderable_output = false;  ///< an output MetalFX may write itself, rather than through the routine's copy
+    bool render_target_only = false; ///< an output with `render_target` and no `image`, drawn in by sr's blit
 };
 
 struct stream_result
@@ -63,7 +65,10 @@ cc::shared_async<stream_result> run_stream(sg::context& ctx, stream_options opti
         {.format = sg::pixel_format::rgba32_float,
          .width = k_out,
          .height = k_out,
-         .usage = options.renderable_output ? image_usage | sg::texture_usage::render_target : image_usage});
+         .usage = options.render_target_only
+                    ? sg::texture_usage::texture | sg::texture_usage::render_target | sg::texture_usage::copy_src
+                : options.renderable_output ? image_usage | sg::texture_usage::render_target
+                                            : image_usage});
 
     auto history = sr::upscale_history();
     auto result = stream_result{};
@@ -226,6 +231,35 @@ ASYNC_INVOCABLE_TEST("sr - metalfx writes a renderable output itself, and the sa
     auto largest = 0.0f;
     for (auto i = isize(0); i < direct.output.size(); ++i)
         largest = cc::max(largest, tg::abs(direct.output[i][0] - copied.output[i][0]));
+    CHECK(largest < 1e-3f).context(cc::format("largest difference {}", largest));
+}
+
+// MetalFX writes only an output it may both render to and write from a shader, and the copy only one it may write as an
+// image; one with `render_target` alone gets the staged image drawn in by sr's blit routine.
+ASYNC_INVOCABLE_TEST("sr - metalfx draws into an output with render_target but no image, and matches the copy",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    if (auto const why = why_metalfx_cannot_run(ctx); why.has_value())
+        SKIP(why.value());
+
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    // The blit is registered by its first acquire, so that frame declines; prewarming its format keeps every frame ready.
+    sr::blit_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
+    (void)co_await ctx.routines.idle_completion();
+
+    auto const target_only = co_await run_stream(ctx, {.render_target_only = true});
+    auto const copied = co_await run_stream(ctx, {});
+    REQUIRE(target_only.last.status == sr::reconstruct_status::denoised);
+    REQUIRE(copied.last.status == sr::reconstruct_status::denoised);
+
+    auto largest = 0.0f;
+    for (auto i = isize(0); i < target_only.output.size(); ++i)
+        largest = cc::max(largest, tg::abs(target_only.output[i][0] - copied.output[i][0]));
     CHECK(largest < 1e-3f).context(cc::format("largest difference {}", largest));
 }
 

@@ -195,7 +195,9 @@ Everything Metal and MetalFX stays in `impl/metalfx_backend.cc`, linked where th
 - Exposure: `reconstruct_settings::exposure` goes into the one `r16_float` texel MetalFX reads it from.
 
 **It writes only to a texture it may both render to and write from a shader.**
-An output without both `image` and `render_target` usage gets an image of the routine's own, and a compute pass copies it across; it is compiled for `rgba16_float` and `rgba32_float` outputs.
+An output without both `image` and `render_target` usage gets an image of the routine's own, carried across after.
+An `image` output gets a compute copy, compiled for `rgba16_float` and `rgba32_float`; a `render_target` one is drawn in by `sr::blit_routine`, one pipeline per format.
+An output with neither is refused.
 
 **Its jitter is FSR's sequence**: Halton (2, 3) over 8 times the square of the ratio, since MetalFX leaves the sequence to the caller.
 `automatic` picks it over FSR wherever it runs, as the device's own upscaler; the two never both run on one context today.

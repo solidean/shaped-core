@@ -21,10 +21,11 @@ class sr::metalfx_upscale_routine : public sg::render_routine<metalfx_upscale_ro
 public:
     /// Upscales `in.color` into `in.output`, carrying `history` from call to call.
     ///
-    /// MetalFX writes only to a texture it may both render to and write from a shader; an output without both `image`
-    /// and `render_target` usage gets an image of the routine's own, copied across after, which it has for
-    /// `rgba16_float` and `rgba32_float` outputs only.
-    /// `pending` while the pass compiles, `failed` when it does not build or MetalFX refuses the formats, and
+    /// MetalFX writes only an output with both `image` and `render_target` usage; any other is written through an image
+    /// of the routine's own and carried across after.
+    /// An `image` output in `rgba16_float` or `rgba32_float` is copied by a compute pass, a `render_target` one is drawn
+    /// in by `sr::blit_routine`, and one with neither is `failed`.
+    /// `pending` while the pass compiles, or the blit for a new output format does, `failed` when it does not build or MetalFX refuses the formats, and
     /// `unsupported` off Metal, on a device without MetalFX, or at a ratio past the device's largest.
     [[nodiscard]] static upscale_outcome execute(sg::command_list& cmd, upscale_inputs const& in, upscale_history& history);
 

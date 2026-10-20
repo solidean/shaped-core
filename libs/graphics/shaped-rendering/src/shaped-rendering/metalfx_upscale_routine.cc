@@ -101,13 +101,12 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
     if (self.is_failed())
         return {.status = reconstruct_status::failed};
 
-    // An output MetalFX cannot write is written through an image of our own, copied across after.
-    auto const staging = impl::metalfx_needs_staging(in.output);
-    auto const* const copy = staging ? self->_passes.copy_to(in.output.raw()->format()) : nullptr;
-    // The copy writes the output as an image, so an output MetalFX cannot write needs `image` usage itself.
-    if (staging && (copy == nullptr || !in.output.raw()->usage().has(sg::texture_usage::image)))
+    // An output MetalFX cannot write is written through an image of our own, copied or drawn across after.
+    auto const path = impl::metalfx_output_path_of(self->_passes, in.output);
+    if (path == impl::metalfx_output_path::none)
     {
-        CC_LOG_ERROR("metalfx: an output of pixel_format {} needs image usage, and render_target too to skip the copy",
+        CC_LOG_ERROR("metalfx: an output of pixel_format {} needs render_target or image usage, the latter in "
+                     "rgba16_float or rgba32_float",
                      int(in.output.raw()->format()));
         return {.status = reconstruct_status::failed};
     }
@@ -157,8 +156,10 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
     }
     state->reset_pending = false;
 
-    if (staging)
-        impl::metalfx_record_copy_out(cmd, *copy, state->images, in.output);
+    if (path == impl::metalfx_output_path::copy)
+        impl::metalfx_record_copy_out(cmd, *self->_passes.copy_to(in.output.raw()->format()), state->images, in.output);
+    if (path == impl::metalfx_output_path::blit && !impl::metalfx_record_blit_out(cmd, state->images, in.output))
+        return {.status = reconstruct_status::pending, .restarted = reset};
 
     return {.status = reconstruct_status::denoised, .restarted = reset};
 }
