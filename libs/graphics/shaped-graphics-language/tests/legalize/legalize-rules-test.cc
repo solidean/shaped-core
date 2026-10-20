@@ -602,18 +602,17 @@ TEST("sgl legalize - X6: a block that ends in a loop is left by leaving the loop
     t.finish({weight.stmt, shade.stmt, t.b.print(t.b.local(shade.local))});
     CHECK(t.core()
           == "  (var weight : float = (lit 1.0 : float))\n"
-             "  (var:temporary found_result : float)\n"
+             "  (var:temporary shade : float)\n"
              "  (loop $rows\n"
              "    (assign (local weight : float) = (call multiply (local weight : float) (lit 0.5 : float) : float))\n"
              "    (if (call less (local weight : float) (lit 0.25 : float) : bool)\n"
              "      (then\n"
-             "        (assign (local found_result : float) = (local weight : float))\n"
+             "        (assign (local shade : float) = (local weight : float))\n"
              "        (break)))\n"
              "    (if (local d : bool)\n"
              "      (then\n"
-             "        (assign (local found_result : float) = (lit 0.0 : float))\n"
+             "        (assign (local shade : float) = (lit 0.0 : float))\n"
              "        (break))))\n"
-             "  (let shade : float = (local found_result : float))\n"
              "  (print (local shade : float))\n"
              "  (return (lit 0.0 : float))\n");
 }

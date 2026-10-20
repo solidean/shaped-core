@@ -572,6 +572,148 @@ struct let_simplifier
         close_scope(mark);
     }
 
+    /// Whether `id` writes `local` anywhere in it, as an assignment's place or a call that writes through it.
+    [[nodiscard]] bool writes_local(flat_stmt_id id, local_id local, int depth) const
+    {
+        if (!is_known(e(), id) || depth > k_max_depth)
+            return true;
+        auto const& s = e().at(id);
+        if (auto const* const assign = s.node.try_as<flat_assign>();
+            assign != nullptr && root_local_of(e(), assign->place) == local)
+            return true;
+        auto writes = false;
+        for_each_body_of(e(), s,
+                         [&](ast::range_of<flat_stmt_id> inner)
+                         {
+                             if (is_known(e(), inner))
+                                 for (auto const n : e().at(inner))
+                                     writes = writes || writes_local(n, local, depth + 1);
+                         });
+        return writes;
+    }
+
+    /// How often `local` is read, a place of an assignment not among them, in what `range` holds.
+    void count_value_reads(flat_expr_id id, local_id local, isize& reads, int depth) const
+    {
+        if (!is_known(e(), id) || depth > k_max_depth)
+            return;
+        auto const& x = e().at(id);
+        if (auto const* const ref = x.node.try_as<flat_local_ref>(); ref != nullptr && ref->local == local)
+            ++reads;
+        for_each_operand(e(), x, [&](flat_expr_id operand) { count_value_reads(operand, local, reads, depth + 1); });
+    }
+
+    void count_value_reads(ast::range_of<flat_stmt_id> range, local_id local, isize& reads, int depth) const
+    {
+        if (!is_known(e(), range) || depth > k_max_depth)
+            return;
+        for (auto const id : e().at(range))
+        {
+            if (!is_known(e(), id))
+                continue;
+            auto const& s = e().at(id);
+            if (auto const* const assign = s.node.try_as<flat_assign>())
+            {
+                // a place is written, and only its indices are read
+                auto at = assign->place;
+                for (auto step = 0; is_known(e(), at) && step < k_max_depth; ++step)
+                {
+                    auto const& node = e().at(at).node;
+                    if (auto const* const element = node.try_as<flat_element>())
+                    {
+                        count_value_reads(element->index, local, reads, depth + 1);
+                        at = element->object;
+                    }
+                    else if (auto const* const member = node.try_as<flat_member>())
+                        at = member->object;
+                    else
+                    {
+                        if (!node.is<flat_local_ref>())
+                            count_value_reads(at, local, reads, depth + 1);
+                        break;
+                    }
+                }
+                count_value_reads(assign->value, local, reads, depth + 1);
+            }
+            else
+                for_each_expr_of(s, [&](flat_expr_id x) { count_value_reads(x, local, reads, depth + 1); });
+            for_each_pattern_of(e(), s,
+                                [&](ast::range_of<flat_expr_id> patterns)
+                                {
+                                    if (is_known(e(), patterns))
+                                        for (auto const p : e().at(patterns))
+                                            count_value_reads(p, local, reads, depth + 1);
+                                });
+            for_each_body_of(
+                e(), s, [&](ast::range_of<flat_stmt_id> inner) { count_value_reads(inner, local, reads, depth + 1); });
+        }
+    }
+
+    /// Whether the `end` of a `for` in `range` reads `local`, which may then not become a `var` (LEGAL-7).
+    [[nodiscard]] bool bounds_a_loop(ast::range_of<flat_stmt_id> range, local_id local, int depth) const
+    {
+        if (!is_known(e(), range) || depth > k_max_depth)
+            return true;
+        auto bounds = false;
+        for (auto const id : e().at(range))
+        {
+            if (!is_known(e(), id) || bounds)
+                continue;
+            auto const& s = e().at(id);
+            if (auto const* const f = s.node.try_as<flat_for>())
+            {
+                auto reads = isize(0);
+                count_value_reads(f->end, local, reads, 0);
+                bounds = reads > 0;
+            }
+            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner)
+                             { bounds = bounds || bounds_a_loop(inner, local, depth + 1); });
+        }
+        return bounds;
+    }
+
+    /// L3: a `let` whose value is a block's result, the temporary `var` E1 declared in the same list, is that `var`
+    /// under the let's name, where nothing else reads the `var` and nothing writes it after the let.
+    void merge_results(ast::range_of<flat_stmt_id> range, ast::range_of<flat_stmt_id> whole, int depth)
+    {
+        if (!is_known(e(), range) || depth > k_max_depth)
+            return;
+        auto list = stmt_list();
+        list.push_back_range(e().at(range));
+        auto declared = cc::vector<local_id>();
+        for (auto i = isize(0); i < list.size(); ++i)
+        {
+            if (!is_known(e(), list[i]))
+                continue;
+            auto const& s = e().at(list[i]);
+            if (auto const* const var = s.node.try_as<flat_var>(); var != nullptr && !is_valid(var->value)
+                                                                   && is_known(e(), var->local)
+                                                                   && e().at(var->local).kind == local_kind::temporary)
+                declared.push_back(var->local);
+            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { merge_results(inner, whole, depth + 1); });
+
+            auto const* const let = s.node.try_as<flat_let>();
+            if (let == nullptr || !is_known(e(), let->local) || e().at(let->local).kind != local_kind::let)
+                continue;
+            auto const* const ref = e().at(let->value).node.try_as<flat_local_ref>();
+            auto is_declared_here = false;
+            for (auto const d : declared)
+                is_declared_here = is_declared_here || (ref != nullptr && d == ref->local);
+            if (!is_declared_here || e().at(ref->local).type != e().at(let->local).type)
+                continue;
+            auto reads = isize(0);
+            count_value_reads(whole, ref->local, reads, 0);
+            auto is_written_after = false;
+            for (auto k = i + 1; k < list.size() && !is_written_after; ++k)
+                is_written_after = writes_local(list[k], ref->local, 0);
+            if (reads != 1 || is_written_after || bounds_a_loop(whole, let->local, 0))
+                continue;
+            replaced[index_of(let->local)] = ref->local;
+            out.e.locals[index_of(ref->local)].name = e().at(let->local).name;
+            drop(list[i]);
+        }
+    }
+
     /// Every local read through what L1 replaced.
     void apply_replacements()
     {
@@ -738,7 +880,9 @@ stmt_list sgl::check::impl::simplify_lets(flat_builder& out, stmt_list const& un
 
     auto s = let_simplifier{.out = out};
     s.find_written();
-    s.scan_body(out.stmt_list(body), 0);
+    auto const whole = out.stmt_list(body);
+    s.merge_results(whole, whole, 0);
+    s.scan_body(whole, 0);
     s.apply_replacements();
     s.drop_unread(body);
     if (!s.drops_any)

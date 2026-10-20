@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_exprs.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-20T18:21Z
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # A block's result is a var of its own, which the let that takes it then copies

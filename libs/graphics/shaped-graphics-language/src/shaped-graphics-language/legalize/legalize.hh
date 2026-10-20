@@ -40,6 +40,7 @@ namespace sgl::check
 /// - L1: a let whose value repeats the value of a let in scope reads that let instead, where the value reads something
 ///   and is the same wherever the invocation evaluates it.
 /// - L2: a let nothing reads is gone, where its value has no effect and always has one.
+/// - L3: a let of a block's result `var` is that `var`, under the let's name.
 ///
 /// Every name it introduces comes from the entry point's mint.
 /// A tree that is core already comes back meaning the same, and a `once` or a `break` of the input is read as a block and a leave.
