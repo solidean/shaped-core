@@ -15,7 +15,7 @@ upstreams:
     pin_hash: 0d50e3c724c6c5da19f8eb99ad3f53e36fec37ffa2df9621f9ccf0603f3934e1
     license: CC-BY-4.0
     license_files: [.install/LICENSE.txt]
-    used_by: shaped-viewer — the bistro example and the FBX importer's Bistro tests, and nothing else
+    used_by: shaped-viewer — the bistro example; and tests that skip without it (babel's FBX reader and DDS / TGA decode, sv's FBX importer)
     notes: |
       Amazon Lumberyard's Bistro, revealed at GDC 2017, as NVIDIA's Open Research Content Archive (ORCA) republished it for Falcor: version 5.2.
       Three FBX scenes (the exterior, the interior, and the interior with filled wine glasses), 633 DDS and TGA textures, Falcor's .pyscene files, and the san_giuseppe_bridge_4k.hdr sky.

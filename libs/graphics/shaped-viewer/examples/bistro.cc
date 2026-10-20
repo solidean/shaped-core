@@ -1,4 +1,5 @@
-#include <clean-core/record/log.hh> // CC_LOG_ERROR, CC_LOG_INFO
+#include <clean-core/record/log.hh>          // CC_LOG_ERROR, CC_LOG_INFO
+#include <clean-core/streams/file_stream.hh> // cc::file_read_stream_adapter
 #include <nexus/test.hh>
 #include <shaped-viewer/all.hh>
 
@@ -14,7 +15,8 @@ using namespace cc::primitive_defines;
 // That is a base color, a packed occlusion-roughness-metalness map, a DirectX-convention normal map and an emissive map.
 //
 // Two scenes share this file.
-// `bistro` is the exterior in daylight: `sv::daylight`'s sky, with its sun aimed the way the file's own directional light points.
+// `bistro` is the exterior under a low sun: `sv::daylight`'s sky, with its sun aimed the way the file's own directional light points.
+// That sun stands behind the buildings, so the street lies in shadow and only the upper floors catch it.
 // The archive's san_giuseppe_bridge_4k.hdr is not used: sv's background is a spherical-harmonics probe, not a map.
 // `bistro-interior` is the interior at night, lit by small rects standing in for its four point lights, and by its emissive lamps.
 // FBX gives a light no physical unit; the file's intensities are taken as candela and lowered by a level tuned by eye.
@@ -52,7 +54,7 @@ constexpr float interior_emission_stops = 3.0f;
 /// One of the glass and liquid materials Falcor's BistroInterior_Wine.pyscene sets up, which the FBX itself cannot say are transmissive.
 struct glass_override
 {
-    cc::string_view material;
+    cc::string_view material = {};
     float ior = 1.5f;
     float roughness = 0.0f;
     /// Beer-Lambert absorption per meter; zero for clear glass.
@@ -139,6 +141,14 @@ void run(cc::string_view id, scene_kind kind)
     // Held where it will not move: a load in flight reaches back into its loader.
     auto const loader = sv::asset_loader({.fbx_materials = sv::fbx_material_convention::orca_metal_rough});
     auto const file = file_of(kind);
+
+    // A scene that was never fetched is the normal state of a checkout, so it is information; a present one that fails to load is an error.
+    if (cc::file_read_stream_adapter::open(file).has_error())
+    {
+        CC_LOG_INFO("bistro: {} is not here; fetch the scene with `uv run extern/bistro/fetch-bistro.py`", file);
+        return;
+    }
+
     auto bistro = loader.load_async(file);
 
     auto meshes = cc::vector<sv::mesh>();
@@ -151,7 +161,6 @@ void run(cc::string_view id, scene_kind kind)
         if (bistro.has_error())
         {
             CC_LOG_ERROR("bistro: could not load {}: {}", file, bistro.error());
-            CC_LOG_ERROR("bistro: fetch the scene with `uv run extern/bistro/fetch-bistro.py`");
             return;
         }
 

@@ -18,6 +18,9 @@ if(NOT SC_BUILD_EXAMPLES)
     return()
 endif()
 
+# Every example here, by stem: each is <stem>.cc and the target shaped-viewer-<stem>-example.
+set(_sv_example_stems hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster tg-objects)
+
 # Its own gate passed, so the question left is which backend the build was ASKED for.
 # The viewer's default context is dx12's, so a build set to vulkan gets targets that say so, though the tracer itself runs there.
 sc_resolve_example_backend(_sv_backend _sv_mode SUPPORTS dx12)
@@ -25,35 +28,23 @@ if(_sv_mode STREQUAL "none")
     return()
 endif()
 if(_sv_mode STREQUAL "stub")
-    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster tg-objects)
+    foreach(_stem IN LISTS _sv_example_stems)
         sc_add_example_backend_stub(shaped-viewer-${_stem}-example "${SC_EXAMPLE_BACKEND}" SUPPORTS dx12)
     endforeach()
     return()
 endif()
 
+list(TRANSFORM _sv_example_stems APPEND ".cc" OUTPUT_VARIABLE _sv_example_sources)
 sc_add_single_file_examples(shaped-viewer
     FILES
-    hello-cube.cc
-    load-asset.cc
-    openpbr-spheres.cc
-    mesh-structure.cc
-    mesh-structure-dense.cc
-    quadric-gallery.cc
-    quadric-arrows.cc
-    lights.cc
-    light-stage.cc
-    drawings.cc
-    decals.cc
-    bistro.cc
-    raster.cc
-    tg-objects.cc
+    ${_sv_example_sources}
     LINK shaped-viewer
     PCH SG NEXUS
 )
 
 # NGX loads Ray Reconstruction from a DLL beside the executable, so without it staged `automatic` falls back to a lesser denoiser.
 if(SC_DLSS_RUNTIME)
-    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals bistro raster tg-objects)
+    foreach(_stem IN LISTS _sv_example_stems)
         sc_stage_runtime_dlls(shaped-viewer-${_stem}-example DLLS "${SC_DLSS_RUNTIME}" TAG dlss-${_stem})
     endforeach()
 endif()
