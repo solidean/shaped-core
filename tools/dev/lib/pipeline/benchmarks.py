@@ -14,6 +14,7 @@ and revalidated by (mtime, size) — a rebuilt binary re-probes, an untouched on
 Public API:
     collect_benchmarks(preset, targets, root, ...) -> list[Benchmark]
     select_benchmarks(benchmarks, match) -> (selected, diagnostic)
+    filter_argument(name) -> str
     unselected_overreach(selected, benchmarks) -> [(selected name, other name)]
 """
 
@@ -145,6 +146,14 @@ def select_benchmarks(benchmarks: list[Benchmark], match: str) -> tuple[list[Ben
     if suggestions := _suggest(match, [b.name for b in benchmarks]):
         message += ". Did you mean: " + ", ".join(suggestions)
     return [], message
+
+
+def filter_argument(name: str) -> str:
+    """`name` as one filter argument: a binary splits a filter at each comma, and a backslash before one keeps it in the name.
+
+    Unescaped, a name like `sort, single-threaded` becomes two filters, and the second selects every benchmark containing it.
+    """
+    return name.replace(",", "\\,")
 
 
 def unselected_overreach(selected: list[Benchmark], benchmarks: list[Benchmark]) -> list[tuple[str, str]]:
