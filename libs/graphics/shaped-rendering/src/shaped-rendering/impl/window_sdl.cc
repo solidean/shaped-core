@@ -651,13 +651,12 @@ void window_system::poll_events()
         {
             auto* const w = window_from_id(event.motion.windowID);
             auto const density = density_of(w);
-            _events.push_back(
-                {.window = w,
-                 .payload = mouse_move_event{
-                     .cursor_pos = impl::pixels_from_logical(event.motion.x, event.motion.y, density),
-                     .delta = impl::pixels_from_logical_delta(event.motion.xrel, event.motion.yrel, density),
-                     .held_buttons = impl::held_buttons_from_sdl(event.motion.state),
-                     .pixel_density = density}});
+            _events.push_back({.window = w,
+                               .payload = mouse_move_event{
+                                   .cursor_pos = impl::pixels_from_logical(event.motion.x, event.motion.y, density),
+                                   .delta = impl::pixels_from_logical_delta(event.motion.xrel, event.motion.yrel, density),
+                                   .held_buttons = impl::held_buttons_from_sdl(event.motion.state),
+                                   .pixel_density = density}});
             break;
         }
 
