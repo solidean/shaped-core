@@ -2,7 +2,7 @@
 // Paired with sr::metalfx_upscale_routine.
 //
 // Depth: sr's linear view depth as an inverted depth with an infinite far plane, `near / depth`, which the scaler reads with `depthReversed`; a miss becomes 0, the far plane.
-// MetalFX only compares depths, so any positive near plane works.
+// The upscaler only compares depths, and the denoised scaler is handed a projection built to match, so any positive near plane works; a surface nearer than it lands past 1.
 // Motion: sr's motion repacked into the two-channel format the scaler is created with, unchanged; the scaler's motion scale turns it around.
 // Exposure: the one texel the scaler reads its exposure from, written by the first thread.
 

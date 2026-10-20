@@ -15,7 +15,9 @@
 
 namespace sr::impl
 {
-/// The near plane metalfx_prepare.sgl divides by; any positive value, since MetalFX only compares depths.
+/// The near plane metalfx_prepare.sgl divides by.
+/// Any positive value: the upscaler only compares depths, and `metalfx_view_to_clip` matches the denoised scaler's projection to it.
+/// A surface nearer than it gets a depth past 1.
 inline constexpr f32 metalfx_near_plane = 0.1f;
 
 /// The compiled passes.
@@ -33,7 +35,7 @@ struct metalfx_passes
     sg::compute_pipeline_handle prepare;
     cc::vector<copy_pass> copies;
 
-    /// The copy into `format`, or null where there is none: an output in that format must be renderable.
+    /// The copy into `format`, or null where there is none: an output in that format must need no staging.
     [[nodiscard]] copy_pass const* copy_to(sg::pixel_format format) const;
 };
 
@@ -45,14 +47,15 @@ struct metalfx_images
     sg::texture_2d motion;
     sg::texture_2d exposure;
 
-    /// What MetalFX writes when the caller's output is not renderable; empty otherwise.
+    /// What MetalFX writes when the caller's output needs staging; empty otherwise.
     sg::texture_2d staged;
 };
 
 /// Builds `out`; false, logged, when a pass does not build.
 [[nodiscard]] cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& out);
 
-/// Whether an output may be handed to the scaler as it is, or needs `metalfx_staged_target` and a copy after.
+/// Whether an output needs `metalfx_target`'s staged image and a copy after: one without both `image` and
+/// `render_target` usage, which is what MetalFX writes.
 [[nodiscard]] bool metalfx_needs_staging(sg::texture_2d const& output);
 
 /// Records metalfx_prepare.sgl: sr's linear `depth` and `motion` into `images`, and `exposure` into its texel.
@@ -63,7 +66,7 @@ void metalfx_record_prepare(sg::command_list& cmd,
                             sg::texture_2d const& motion,
                             f32 exposure);
 
-/// The image the scaler writes: `output` itself, or `images.staged` at its extent and format where it is not renderable.
+/// The image the scaler writes: `output` itself, or `images.staged` at its extent and format where it needs staging.
 [[nodiscard]] sg::texture_2d metalfx_target(sg::context& ctx, metalfx_images& images, sg::texture_2d const& output);
 
 /// Records the copy from `images.staged` into `output`.

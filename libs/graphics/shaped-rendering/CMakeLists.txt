@@ -67,6 +67,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/metalfx_upscale_routine.hh
     src/shaped-rendering/impl/metalfx_backend.hh
     src/shaped-rendering/impl/metalfx_passes.hh
+    src/shaped-rendering/impl/jitter_sequence.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/compression/bc_compress_routine.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
@@ -409,6 +410,7 @@ if(SC_BUILD_TESTS)
             tests/slug-routine-test.cc
             tests/slug-traced-test.cc
             tests/metalfx-test.cc
+            tests/dlss-rr-jitter-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
 

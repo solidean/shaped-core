@@ -57,6 +57,10 @@ A caller who scaled by a ratio of their own would then trace at half resolution 
 The ratio itself comes from `reconstruct_settings::scale`.
 `reconstruct_settings::quality` separately picks the network NGX runs, so the two are independent knobs here and `scale` alone decides the extents.
 
+**Its jitter is the Halton sequence, handed to NGX in sr's sign, and that sign is unverified.**
+FSR and MetalFX each settled theirs by a comparison against a flipped run; `dlss_rr` has the same comparison in denoise-test, which has not yet run on an RTX machine.
+Until it has, the sign is sr's convention passed through unchanged, not a measured one.
+
 **NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
 It compiles nothing at run time, owns no device memory and records nothing.
 What it answers is "which compute dispatches would denoise this frame, against which resources, with which constants", and sr executes that answer through sg.
@@ -156,7 +160,8 @@ The fp16 and wave64 variants AMD tunes for are a follow-up: [perf-fsr-fp16-wave6
 
 **One offset per frame.**
 An upscaler reconstructs from where each frame's samples landed, so every sample of a frame has to land at the same offset from its pixel's centre.
-`sr::reconstruct_jitter` hands out FSR's Halton sequence, and a tracer uses it in place of a random position inside the pixel while an upscaler runs.
+`sr::reconstruct_jitter` hands out the upscaler's sequence, and a tracer uses it in place of a random position inside the pixel while an upscaler runs.
+FSR answers its own; every member that leaves the sequence to its caller — both MetalFX members and `dlss_rr` — gets a Halton (2, 3) one, `impl/jitter_sequence.hh`.
 It answers (0, 0) when nothing upscales, so a tracer may always ask.
 
 **An upscaled image's alpha is the upscaler's.**
@@ -183,13 +188,14 @@ The scaler waits for that fence and updates it when its `fence` is set to it.
 Everything Metal and MetalFX stays in `impl/metalfx_backend.cc`, linked where the Metal backend is built (`SR_HAS_METALFX`); the routine exists everywhere and reports `unsupported` off Metal.
 
 **The inputs meet MetalFX's conventions in one SGL pass, and sr's guides stay as they are.**
-- Depth: `near / depth`, as FSR's, read with `depthReversed`; MetalFX only compares depths, so the near plane is any positive value.
+- Depth: `near / depth`, as FSR's, read with `depthReversed`.
+  The upscaler only compares depths, and the denoised scaler is handed a projection built to match, so any positive near plane works; a surface nearer than it lands past 1.
 - Motion: repacked into `rg16_float`; MetalFX's vectors point to where a pixel was, so `motionVectorScale` is -1.
 - Jitter: MetalFX's offset is the negation of sr's, which metalfx-test's sign comparison measured (0.044 against 0.181 the other way).
 - Exposure: `reconstruct_settings::exposure` goes into the one `r16_float` texel MetalFX reads it from.
 
-**It writes only to a texture it may render to.**
-An output without `render_target` usage gets an image of the routine's own, and a compute pass copies it across; it is compiled for `rgba16_float` and `rgba32_float` outputs.
+**It writes only to a texture it may both render to and write from a shader.**
+An output without both `image` and `render_target` usage gets an image of the routine's own, and a compute pass copies it across; it is compiled for `rgba16_float` and `rgba32_float` outputs.
 
 **Its jitter is FSR's sequence**: Halton (2, 3) over 8 times the square of the ratio, since MetalFX leaves the sequence to the caller.
 `automatic` picks it over FSR wherever it runs, as the device's own upscaler; the two never both run on one context today.
@@ -210,7 +216,7 @@ On metalfx-test's stripes as albedo under lighting that is off by up to 30% per 
 The same stripes as lighting under a white albedo come out at 0.235: it takes detail the albedo does not explain for noise.
 
 **`automatic` ranks it after `dlss_rr`**, so a caller feeding fresh frames with every guide gets it on Metal.
-`reconstruct_jitter` answers its own sequence, the upscaler's, whenever it runs at a smaller extent; at the native extent it runs too, and the jitter is 0.
+`reconstruct_jitter` answers the Halton sequence whenever it runs at a smaller extent, as for every member that upscales by itself; at the native extent it runs too, and the jitter is 0.
 
 **Next on Metal**: MetalFX's frame interpolator, through the same scope.
 

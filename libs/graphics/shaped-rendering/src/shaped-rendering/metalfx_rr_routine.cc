@@ -22,6 +22,9 @@ struct metalfx_rr_state
     std::shared_ptr<impl::metalfx_denoised_stream> stream;
     impl::metalfx_denoised_stream_desc desc;
     impl::metalfx_images images;
+
+    /// A dispatch refused this stream since it last encoded, so its next encode resets: MetalFX holds no history yet.
+    bool reset_pending = false;
 };
 
 [[nodiscard]] bool same_formats(impl::metalfx_denoised_stream_desc const& a, impl::metalfx_denoised_stream_desc const& b)
@@ -81,6 +84,10 @@ reconstruct_outcome metalfx_rr_routine::execute(sg::command_list& cmd,
 
     auto const input_extent = extent_of(in.color);
     auto const output_extent = extent_of(in.output);
+    CC_ASSERT(extent_of(in.guides.albedo) == input_extent && extent_of(in.guides.specular_albedo) == input_extent
+                  && extent_of(in.guides.normal) == input_extent && extent_of(in.guides.roughness) == input_extent
+                  && extent_of(in.guides.depth) == input_extent && extent_of(in.guides.motion) == input_extent,
+              "the guides are at the input extent");
     CC_ASSERT(output_extent[0] >= input_extent[0] && output_extent[1] >= input_extent[1],
               "MetalFX upscales: the output must be at least the input's extent");
     auto const max_scale = impl::metalfx_denoised_max_scale(ctx);
@@ -96,9 +103,11 @@ reconstruct_outcome metalfx_rr_routine::execute(sg::command_list& cmd,
 
     auto const staging = impl::metalfx_needs_staging(in.output);
     auto const* const copy = staging ? self->_passes.copy_to(in.output.raw()->format()) : nullptr;
-    if (staging && copy == nullptr)
+    // The copy writes the output as an image, so an output MetalFX cannot write needs `image` usage itself.
+    if (staging && (copy == nullptr || !in.output.raw()->usage().has(sg::texture_usage::image)))
     {
-        CC_LOG_ERROR("metalfx: an output of pixel_format {} needs render_target usage", int(in.output.raw()->format()));
+        CC_LOG_ERROR("metalfx: an output of pixel_format {} needs image usage, and render_target too to skip the copy",
+                     int(in.output.raw()->format()));
         return outcome(reconstruct_status::failed);
     }
 
@@ -137,6 +146,7 @@ reconstruct_outcome metalfx_rr_routine::execute(sg::command_list& cmd,
         restarted = true;
     }
 
+    restarted = restarted || state->reset_pending;
     impl::metalfx_record_prepare(cmd, self->_passes, state->images, in.guides.depth, in.guides.motion, options.exposure);
     auto const target = impl::metalfx_target(ctx, state->images, in.output);
     if (!impl::metalfx_denoised_dispatch(*state->stream, cmd,
@@ -153,7 +163,11 @@ reconstruct_outcome metalfx_rr_routine::execute(sg::command_list& cmd,
                                           .world_to_view = in.guides.world_to_view,
                                           .view_to_clip = impl::metalfx_view_to_clip(in.guides.view_to_clip),
                                           .reset = restarted}))
+    {
+        state->reset_pending = true;
         return outcome(reconstruct_status::failed, true);
+    }
+    state->reset_pending = false;
 
     if (staging)
         impl::metalfx_record_copy_out(cmd, *copy, state->images, in.output);

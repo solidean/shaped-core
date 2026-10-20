@@ -10,6 +10,7 @@
 #include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
+#include <shaped-rendering/impl/jitter_sequence.hh>
 #include <shaped-rendering/metalfx_rr_routine.hh>
 #include <shaped-rendering/metalfx_upscale_routine.hh>
 #include <shaped-rendering/nrd_denoise_routine.hh>
@@ -523,10 +524,11 @@ tg::vec2f reconstruct_jitter(sg::context const& ctx,
     auto const support = query_reconstruct_support(ctx);
     auto const input_extent = reconstruct_input_extent(ctx, settings, output_extent, available_guides);
 
-    // A member that upscales by itself places the samples by its own sequence, wherever it runs at a smaller extent.
-    if (resolve_with(support, settings, available_guides) == denoise_method::metalfx_rr)
+    // A member that upscales by itself leaves the sequence to its caller, so it gets the Halton one wherever it runs at
+    // a smaller extent; at the native extent it runs too, unjittered.
+    if (upscales_itself(resolve_with(support, settings, available_guides)))
         return input_extent == output_extent ? tg::vec2f(0, 0)
-                                             : metalfx_upscale_routine::jitter(frame_index, input_extent, output_extent);
+                                             : impl::halton_jitter(frame_index, input_extent, output_extent);
 
     auto const upscaler = planned_upscaler(support, settings, available_guides);
     if (upscaler == upscale_method::none)

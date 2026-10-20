@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
+#include <shaped-rendering/impl/jitter_sequence.hh>
 #include <shaped-rendering/impl/metalfx_backend.hh>
 #include <shaped-rendering/metalfx_upscale_routine.hh>
 #include <sr_sgl_shaders.hh>
@@ -23,20 +24,10 @@ struct metalfx_state
     sg::pixel_format color_format = sg::pixel_format::undefined;
     sg::pixel_format output_format = sg::pixel_format::undefined;
     impl::metalfx_images images;
-};
 
-/// Element `index` of the Halton sequence in `base`, in [0, 1).
-[[nodiscard]] f32 halton(u32 index, u32 base)
-{
-    auto f = 1.0f;
-    auto r = 0.0f;
-    for (auto i = index; i > 0; i /= base)
-    {
-        f /= f32(base);
-        r += f * f32(i % base);
-    }
-    return r;
-}
+    /// A dispatch refused this stream since it last encoded, so its next encode resets: MetalFX holds no history yet.
+    bool reset_pending = false;
+};
 } // namespace
 
 f32 metalfx_upscale_routine::ratio_of(render_scale_preset preset)
@@ -57,11 +48,7 @@ f32 metalfx_upscale_routine::ratio_of(render_scale_preset preset)
 
 tg::vec2f metalfx_upscale_routine::jitter(u32 frame_index, tg::vec2i input_extent, tg::vec2i output_extent)
 {
-    auto const ratio = input_extent[0] > 0 ? f32(output_extent[0]) / f32(input_extent[0]) : 1.0f;
-    auto const phases = cc::max(u32(1), u32(tg::ceil(8.0f * ratio * ratio)));
-    // Halton's first element is 0 in either base, a sample on the centre; the sequence starts at 1 to skip it.
-    auto const i = frame_index % phases + 1;
-    return tg::vec2f(halton(i, 2) - 0.5f, halton(i, 3) - 0.5f);
+    return impl::halton_jitter(frame_index, input_extent, output_extent);
 }
 
 bool metalfx_upscale_routine::is_available(sg::context const& ctx)
@@ -114,12 +101,14 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
     if (self.is_failed())
         return {.status = reconstruct_status::failed};
 
-    // An output MetalFX cannot render to is written through an image of our own, copied across after.
+    // An output MetalFX cannot write is written through an image of our own, copied across after.
     auto const staging = impl::metalfx_needs_staging(in.output);
     auto const* const copy = staging ? self->_passes.copy_to(in.output.raw()->format()) : nullptr;
-    if (staging && copy == nullptr)
+    // The copy writes the output as an image, so an output MetalFX cannot write needs `image` usage itself.
+    if (staging && (copy == nullptr || !in.output.raw()->usage().has(sg::texture_usage::image)))
     {
-        CC_LOG_ERROR("metalfx: an output of pixel_format {} needs render_target usage", int(in.output.raw()->format()));
+        CC_LOG_ERROR("metalfx: an output of pixel_format {} needs image usage, and render_target too to skip the copy",
+                     int(in.output.raw()->format()));
         return {.status = reconstruct_status::failed};
     }
 
@@ -151,6 +140,7 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
         history._state = cc::move(created);
     }
 
+    auto const reset = restarted || fresh || state->reset_pending;
     impl::metalfx_record_prepare(cmd, self->_passes, state->images, in.depth, in.motion, in.exposure);
     auto const target = impl::metalfx_target(ctx, state->images, in.output);
     if (!impl::metalfx_dispatch(*state->stream, cmd,
@@ -160,12 +150,16 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
                                  .exposure = state->images.exposure,
                                  .output = target,
                                  .jitter = in.jitter,
-                                 .reset = restarted || fresh}))
+                                 .reset = reset}))
+    {
+        state->reset_pending = true;
         return {.status = reconstruct_status::failed, .restarted = true};
+    }
+    state->reset_pending = false;
 
     if (staging)
         impl::metalfx_record_copy_out(cmd, *copy, state->images, in.output);
 
-    return {.status = reconstruct_status::denoised, .restarted = restarted || fresh};
+    return {.status = reconstruct_status::denoised, .restarted = reset};
 }
 } // namespace sr

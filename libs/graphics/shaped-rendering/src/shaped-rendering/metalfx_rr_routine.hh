@@ -31,8 +31,8 @@ public:
     /// Denoises `in.color` into `in.output`, carrying `history` from call to call.
     ///
     /// `in.output` may be larger than `in.color`, by a ratio `sr::reconstruct_input_extent` produced.
-    /// An output without `render_target` usage is written through an image of the routine's own, copied across after,
-    /// which it has for `rgba16_float` and `rgba32_float` outputs only.
+    /// An output without both `image` and `render_target` usage is written through an image of the routine's own,
+    /// copied across after, which it has for `rgba16_float` and `rgba32_float` outputs only.
     [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
                                                      reconstruct_inputs const& in,
                                                      reconstruct_history& history,

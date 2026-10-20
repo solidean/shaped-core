@@ -35,8 +35,7 @@ struct metalfx_stream_desc
     sg::pixel_format output_format = sg::pixel_format::undefined;
 };
 
-/// Creates a stream's scaler; null when MetalFX refuses the descriptor or `output_format`'s usage falls short of what
-/// the scaler needs, both of which are logged.
+/// Creates a stream's scaler; null, logged, when MetalFX refuses the descriptor.
 /// Its release waits for the GPU, so a stream may be dropped mid-frame.
 [[nodiscard]] std::shared_ptr<metalfx_stream> metalfx_create_stream(sg::context& ctx, metalfx_stream_desc const& desc);
 
@@ -56,7 +55,8 @@ struct metalfx_dispatch_desc
 };
 
 /// Encodes one upscale into `cmd` through sg's Metal native scope.
-/// False when the output's usage falls short of the scaler's needs; nothing reached `desc.output` then.
+/// False when the output's usage falls short of the scaler's needs, logged once per stream; nothing reached
+/// `desc.output` then.
 [[nodiscard]] bool metalfx_dispatch(metalfx_stream& stream, sg::command_list& cmd, metalfx_dispatch_desc const& desc);
 
 // MetalFX's temporal denoised scaler, which denoises and upscales in one pass.
@@ -113,7 +113,8 @@ struct metalfx_denoised_dispatch_desc
 };
 
 /// Encodes one denoise into `cmd` through sg's Metal native scope.
-/// False, logged, when a texture's usage falls short of the scaler's needs; nothing reached `desc.output` then.
+/// False when a texture's usage falls short of the scaler's needs, logged once per stream; nothing reached
+/// `desc.output` then.
 [[nodiscard]] bool metalfx_denoised_dispatch(metalfx_denoised_stream& stream,
                                              sg::command_list& cmd,
                                              metalfx_denoised_dispatch_desc const& desc);

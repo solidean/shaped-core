@@ -24,7 +24,14 @@ metalfx_passes::copy_pass const* metalfx_passes::copy_to(sg::pixel_format format
 cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& out)
 {
     out = {};
+
+    // Every pipeline is asked for before any is awaited, so the compiles overlap.
     auto const prepare = sgl_shaders::metalfx_prepare.main_cs.acquire_pipeline(ctx);
+    auto copies = cc::vector<decltype(sgl_shaders::metalfx_copy_out.main_cs.acquire_pipeline(ctx))>();
+    for (auto const format : k_staged_formats)
+        copies.push_back(sgl_shaders::metalfx_copy_out.main_cs.acquire_pipeline(
+            ctx, sgl_shaders::metalfx_copy_out_options{.output_format = format}));
+
     co_await cc::async_settled(prepare);
     auto const* const pipeline = prepare->try_value();
     if (pipeline == nullptr)
@@ -35,17 +42,17 @@ cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& ou
     out.prepare_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::metalfx_prepare_io>();
     out.prepare = *pipeline;
 
-    for (auto const format : k_staged_formats)
+    for (auto i = isize(0); i < copies.size(); ++i)
     {
-        auto const values = sgl_shaders::metalfx_copy_out_options{.output_format = format};
-        auto const copy = sgl_shaders::metalfx_copy_out.main_cs.acquire_pipeline(ctx, values);
-        co_await cc::async_settled(copy);
-        auto const* const copy_pipeline = copy->try_value();
+        auto const format = k_staged_formats[i];
+        co_await cc::async_settled(copies[i]);
+        auto const* const copy_pipeline = copies[i]->try_value();
         if (copy_pipeline == nullptr)
         {
             CC_LOG_ERROR("metalfx: the copy out to pixel_format {} did not build", int(format));
             co_return false;
         }
+        auto const values = sgl_shaders::metalfx_copy_out_options{.output_format = format};
         out.copies.push_back({.format = format,
                               .layout = ctx.cached.acquire_binding_group_layout(
                                   sgl_shaders::metalfx_copy_out_io::declared_bindings(values)),
@@ -56,7 +63,9 @@ cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& ou
 
 bool metalfx_needs_staging(sg::texture_2d const& output)
 {
-    return !output.raw()->usage().has(sg::texture_usage::render_target);
+    // MetalFX's output usage is ShaderRead | ShaderWrite | RenderTarget, which sg spells `image` plus `render_target`.
+    auto const usage = output.raw()->usage();
+    return !usage.has(sg::texture_usage::image) || !usage.has(sg::texture_usage::render_target);
 }
 
 void metalfx_record_prepare(sg::command_list& cmd,

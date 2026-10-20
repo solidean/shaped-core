@@ -21,6 +21,9 @@ public:
     ~metalfx_stream() { _scaler->release(); }
 
     MTL4FX::TemporalScaler* _scaler = nullptr;
+
+    /// A refusal of this stream's textures was logged, so the next one is not.
+    bool _refusal_logged = false;
 };
 
 /// The denoised scaler, retained for as long as the stream lives.
@@ -33,6 +36,9 @@ public:
     ~metalfx_denoised_stream() { _scaler->release(); }
 
     MTL4FX::TemporalDenoisedScaler* _scaler = nullptr;
+
+    /// A refusal of this stream's textures was logged, so the next one is not.
+    bool _refusal_logged = false;
 };
 
 namespace sr::impl
@@ -50,13 +56,15 @@ namespace
     return static_cast<mtl::metal_texture const&>(*texture.raw()).texture()->usage();
 }
 
-/// Whether `texture` has every usage bit `needed` names; logs the ones it lacks under `name`.
-[[nodiscard]] bool has_usage(sg::texture_2d const& texture, MTL::TextureUsage needed, char const* name)
+/// Whether `texture` has every usage bit `needed` names; logs the ones it lacks under `name`, once per stream.
+[[nodiscard]] bool has_usage(sg::texture_2d const& texture, MTL::TextureUsage needed, char const* name, bool& logged)
 {
     auto const missing = needed & ~usage_of(texture);
     if (missing == 0)
         return true;
-    CC_LOG_ERROR("metalfx: the {} texture lacks usage bits {:#x} the scaler needs", name, u64(missing));
+    if (!logged)
+        CC_LOG_ERROR("metalfx: the {} texture lacks usage bits {:#x} the scaler needs", name, u64(missing));
+    logged = true;
     return false;
 }
 
@@ -121,7 +129,7 @@ bool metalfx_dispatch(metalfx_stream& stream, sg::command_list& cmd, metalfx_dis
 
     // MetalFX states what each texture must allow; sg's `image` usage covers reads and writes, and anything more is
     // the caller's to add.
-    if (!has_usage(desc.output, scaler->outputTextureUsage(), "output"))
+    if (!has_usage(desc.output, scaler->outputTextureUsage(), "output", stream._refusal_logged))
         return false;
 
     using sg::access_flag;
@@ -219,12 +227,12 @@ bool metalfx_denoised_dispatch(metalfx_denoised_stream& stream,
 {
     auto* const scaler = stream._scaler;
 
-    if (!has_usage(desc.color, scaler->colorTextureUsage(), "color")
-        || !has_usage(desc.albedo, scaler->diffuseAlbedoTextureUsage(), "albedo")
-        || !has_usage(desc.specular_albedo, scaler->specularAlbedoTextureUsage(), "specular albedo")
-        || !has_usage(desc.normal, scaler->normalTextureUsage(), "normal")
-        || !has_usage(desc.roughness, scaler->roughnessTextureUsage(), "roughness")
-        || !has_usage(desc.output, scaler->outputTextureUsage(), "output"))
+    if (!has_usage(desc.color, scaler->colorTextureUsage(), "color", stream._refusal_logged)
+        || !has_usage(desc.albedo, scaler->diffuseAlbedoTextureUsage(), "albedo", stream._refusal_logged)
+        || !has_usage(desc.specular_albedo, scaler->specularAlbedoTextureUsage(), "specular albedo", stream._refusal_logged)
+        || !has_usage(desc.normal, scaler->normalTextureUsage(), "normal", stream._refusal_logged)
+        || !has_usage(desc.roughness, scaler->roughnessTextureUsage(), "roughness", stream._refusal_logged)
+        || !has_usage(desc.output, scaler->outputTextureUsage(), "output", stream._refusal_logged))
         return false;
 
     using sg::access_flag;
