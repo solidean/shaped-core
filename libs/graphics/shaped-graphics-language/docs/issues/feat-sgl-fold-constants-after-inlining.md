@@ -4,6 +4,8 @@ priority: someday
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_lets.cc
   - issue: feat-sgl-literal-folding
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T17:32Z
 ---
 
 # Nothing is folded once inlining and unrolling have made it constant
