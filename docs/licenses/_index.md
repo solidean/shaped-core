@@ -8,6 +8,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 
 | Dependency | Version | License | Used by | Text |
 |---|---|---|---|---|
+| [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) | v5.2 | `CC-BY-4.0` | shaped-viewer — the bistro example and the FBX importer's Bistro tests, and nothing else | [amazon-lumberyard-bistro.txt](amazon-lumberyard-bistro.txt) |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.6 | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | clean-core — cc::blake3 / cc::hash256 (the cryptographic hash) | [blake3-cc0.txt](blake3-cc0.txt), [blake3-a2.txt](blake3-a2.txt), [blake3-a2llvm.txt](blake3-a2llvm.txt) |
 | [DLSS](https://github.com/NVIDIA/DLSS) | v310.9.1 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::dlss_rr_routine (the DLSS Ray Reconstruction denoise member) | [dlss.txt](dlss.txt) |
 | [DXC](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2602.24 | `LicenseRef-Microsoft-DXC-Binary` | shaped-shader-compiler-dxc — HLSL to sg::compiled_shader | [dxc.txt](dxc.txt), [dxc-llvm.txt](dxc-llvm.txt), [dxc-mit.txt](dxc-mit.txt) |
@@ -27,6 +28,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [OIDN-Weights](https://github.com/RenderKit/oidn-weights) | 28883d1769d5930e13cf7f1676dd852bd81ed9e7 | `Apache-2.0` | shaped-rendering — the trained network sr::denoise_method::oidn runs | [oidn-weights.txt](oidn-weights.txt) |
 | [SDL3](https://github.com/libsdl-org/SDL) | release-3.4.12 | `Zlib` | shaped-rendering — sr::window_system and sr::window | [sdl3.txt](sdl3.txt) |
 | [SPIRV-Reflect](https://github.com/KhronosGroup/SPIRV-Reflect) | vulkan-sdk-1.4.321.0 | `Apache-2.0` | shaped-shader-compiler-dxc — reflecting the bindings out of an emitted SPIR-V module | [spirv-reflect.txt](spirv-reflect.txt) |
+| [Intel Sponza](https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html) | base-scene | `LicenseRef-Intel-Sponza` | shaped-viewer — the sponza example, and nothing else | [intel-sponza.txt](intel-sponza.txt) |
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |
 | [stb](https://github.com/nothings/stb) | 31c1ad374564 | `MIT OR Unlicense` | babel-serializer — the JPEG codec behind babel::jpg | [stb.txt](stb.txt) |
 | [ufbx](https://github.com/ufbx/ufbx) | v0.23.1 | `MIT OR Unlicense` | babel-serializer — the FBX reader behind babel::fbx | [ufbx.txt](ufbx.txt) |

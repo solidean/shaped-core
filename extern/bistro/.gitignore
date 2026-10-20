@@ -1,0 +1,3 @@
+# The scene is fetched on request (fetch-bistro.py), never committed.
+.install/
+*.zip.part

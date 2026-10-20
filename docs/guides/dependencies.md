@@ -45,6 +45,7 @@ Before the manifests, the same constant name meant a git commit in six scripts a
 They diverge more often than you would expect.
 Zydis is a `github-release` we *clone* rather than download, so its digest is a git commit.
 stb, ImPlot and ImGuizmo cut no usable tags, so they are `default-branch`: "newer" means a head some number of commits ahead, not a higher version.
+A `url` upstream names its archive's address in `download`; sqlite, the one without it, builds the address from `year` and `asset`.
 
 **`install` names the tier.**
 `vendored` is committed in-tree.
@@ -53,6 +54,8 @@ stb, ImPlot and ImGuizmo cut no usable tags, so they are `default-branch`: "newe
 `on-request` hydrates exactly as `fetched` does, but no configure step runs its script, so it is normally absent.
 A person fetches it by hand with `uv run extern/<dep>/fetch-<dep>.py`, and whatever needs it SKIPs or reports `unsupported` without it.
 The OIDN library is one: only an oracle test compares against it, and 53 MB is not worth paying on every configure for that.
+Intel's Sponza is another, and its script also makes the person running it accept the scene's terms before a byte is downloaded.
+NVIDIA's ORCA Bistro is a third, fetched the same way under the same acceptance.
 
 **`files` lists what a `github-files` upstream fetches**, when the unit wanted is a few files rather than a whole repository or release.
 Each entry is a `path` in the repository at `tag` and the `sha256` of its bytes, and every file is verified on its own.

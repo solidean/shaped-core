@@ -1,0 +1,32 @@
+# Pin and license for the upstream fetched here.
+# fetch-sponza.py reads its pin from this file; which files of the archive it extracts stays in the script.
+# It is `on-request`, so no configure step fetches it; `dev.py deps list` reports whether .install/ is current.
+
+upstreams:
+  - name: Intel Sponza
+    homepage: https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html
+    install: on-request
+    source: url
+    track: none
+    version: base-scene
+    asset: sponza-base.zip
+    download: https://cdrdv2.intel.com/v1/dl/getContent/830833
+    digest_algo: sha256
+    pin_hash: b8bb853884ab1566b3beb35666bd09882a4e0dc16661e4684e103792cf0229b9
+    license: LicenseRef-Intel-Sponza
+    license_files: [.install/credits_license.txt]
+    used_by: shaped-viewer — the sponza example, and nothing else
+    notes: |
+      Intel's 2022 rebuild of Crytek's Sponza for a physically based pipeline, from Intel's GPU Research Samples: the base scene, without the curtain, ivy, tree, candle or flood add-ons.
+
+      FETCHED ON REQUEST, because it is a scene to look at rather than anything a build or a test needs.
+      The archive is about 4 GB and holds the scene four times over — 3ds Max, USD, glTF and FBX — over one shared texture folder.
+      So the script streams it to disk, verifies it, extracts the glTF, its buffer and the 72 textures it names, about 2 GB, and deletes the archive.
+
+      THE PERSON FETCHING IT ACCEPTS THE TERMS: fetch-sponza.py prints them and asks, or takes --accept-license, and downloads nothing otherwise.
+      They are not a plain CC BY 4.0: the credits file says "for personal use and educational use, limited commercial use for marketing and print purposes" above the license text.
+      The credits file travels with the install, and anything showing the scene outside this repository credits Frank Meinl and Anton Kaplanyan as it asks.
+
+      The download address is Intel's content id rather than a file name, and it redirects to a signed, expiring CDN link.
+      So the id is what is pinned and the digest is what is trusted: a republished scene under the same id fails the check rather than installing.
+      `track: none`, since Intel publishes no versions to compare against.

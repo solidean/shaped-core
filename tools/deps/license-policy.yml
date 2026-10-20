@@ -31,6 +31,12 @@ allowed:
     why: Apache-2.0 minus the notice requirement for compiled output, which is what makes it linkable into a binary.
   - identifier: CC0-1.0
     why: Public-domain dedication.
+  - identifier: CC-BY-4.0
+    why: >-
+      Attribution only, for content rather than code — NVIDIA's ORCA release of Amazon Lumberyard Bistro.
+      Read by shaped-viewer's bistro example and by two thorough-only tests (babel's FBX reader, sv's importer), which skip without it.
+      Its one condition is crediting the work wherever it is shown, which the example and extern/bistro/dependency.yml do.
+      Nothing fetches it by default (extern/bistro is `install: on-request`), no binary contains it, and nothing redistributes it.
   - identifier: Unlicense
     why: Public-domain dedication.
   - identifier: blessing
@@ -49,6 +55,15 @@ exceptions:
       application, which is exactly and only how we use it, and because building DXC from source is an
       LLVM-scale build we will not run in CI.
       It is Windows-only and reaches no other platform's shipping bundle.
+
+  - identifier: LicenseRef-Intel-Sponza
+    why: >-
+      Intel's Sponza scene, which only shaped-viewer's sponza example reads.
+      Its credits file carries the CC BY 4.0 text, with "for personal use and educational use, limited commercial use for
+      marketing and print purposes" above it, so it is recorded as what it says rather than as plain CC-BY-4.0.
+      Accepted because nothing fetches it by default — extern/sponza is `install: on-request` — and fetch-sponza.py
+      downloads nothing until the person running it has read the terms and accepted them.
+      No binary contains it and nothing redistributes it.
 
   - identifier: LicenseRef-NVIDIA-RTX-SDK
     why: >-
