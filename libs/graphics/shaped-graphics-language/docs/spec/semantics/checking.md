@@ -376,7 +376,7 @@ fun shade(k: float) -> float:
 | a test | `@expect` |
 | a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding`, `@layout` |
 | a binding member | `@unfilterable`, `@non_filtering`, `@sampler`, `@coherent`, `@atomic` |
-| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@edge_factors` and `@inside_factors` on any other |
+| a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@per_draw`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
 | a pipeline | `@raster`, `@compute`, `@raytracing` |
 | a `for` statement | `@unroll` |
@@ -725,6 +725,11 @@ fun f() -> float:
   The kind is `.perspective`, the default, `.linear` or `.flat`; the sampling is `.center`, the default, `.centroid` or `.sample`, and `.flat` takes none.
   An `int` or `uint` member, and a vector of them, crosses only `.flat`, or the entry point is `invalid-entry-point`, and no member that crosses no stage edge carries `@interpolate`.
   A flat member takes the value of the primitive's first vertex.
+* **CHK-393** `@per_draw` on a member of the struct a vertex stage returns says the member is the same in every invocation of a draw ([why](why/checking.md#chk-393)).
+  It crosses flat, which it implies; `@interpolate` beside it names `.flat` or nothing, and a `@position` member is no `@per_draw` one.
+  The vertex stage is held to it: what each `return` gives the member, and the control flow the `return` stands in, are uniform by CHK-283, or it is `non-uniform-per-draw`.
+  So the pixel stage reads the member as uniform: an index by it takes no `nonuniform`, and a derivative after a branch on it stands in uniform control flow.
+  A geometry or tessellation stage that writes such a member is `invalid-entry-point`, since nothing yet judges what it writes, and a member no stage edge crosses takes no `@per_draw`.
 * **CHK-275** `@format(.case)` on a member of a `@vertex struct` names the `sg::vertex_attribute_format` its bytes are, and never a pipeline setting ([why](why/checking.md#chk-275)).
   The format decodes into the member's type, or it is `type-mismatch`: `.rgba8_unorm` into a `float4`, `.rgba8_uint` into a `uint4`.
   A member without one reads the format its type has at full width: `float3` is `vec3f`, `uint` is `u32`.
@@ -871,6 +876,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   An access word stands before it and qualifies its element: `out image_2d[.rgba8_unorm][4]`.
 * **CHK-300** An index into a binding array that the uniformity pass cannot prove the same in every invocation is `non-uniform-index` unless it is `nonuniform i` ([why](why/checking.md#chk-300)).
   `nonuniform i` is its argument unchanged, and on an index the pass proves uniform it is the warning `needless-nonuniform`.
+  The warning names a mark of the program's own file, which every inlined copy of it finds uniform: a mark of a module or the prelude serves callers this program is not.
   It stands only as the whole index into a binding array, `textures[nonuniform i]`; anywhere else, a `let` or an index into a value array included, it is `wrong-kind-of-name`.
 
 ## Workgroup memory
@@ -922,7 +928,8 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
   A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
 * **CHK-283** A value is **non-uniform** where it comes from what the stage is handed, from a `mut` buffer or a `mut` image,
   from a non-uniform value, or from a local set anywhere in non-uniform control flow.
-  What a stage is handed is each of its parameters but `@workgroup_id` and `@launch_size`, which are the same in every invocation.
+  What a stage is handed is each of its parameters but `@workgroup_id` and `@launch_size`, which are the same in every invocation, and but a `@per_draw` member of the pixel stage's struct (CHK-393).
+  A field of a `let` that holds a construction made in uniform control flow is as uniform as the value it was built from, whatever the struct's other fields are.
   Among them are the stage struct, every other stage input, a tessellation stage's factors, and a ray-tracing stage's payload, ray, hit, candidate and box (CHK-326).
   A local a trace writes as its payload, or a callable as its parameter, is non-uniform throughout, as one set in non-uniform control flow is.
   The shaders the call ran read what their own invocations are handed.
@@ -1432,6 +1439,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
 | `non-uniform-index` | CHK-300 |
 | `needless-nonuniform` | CHK-300 |
+| `non-uniform-per-draw` | CHK-393 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
 

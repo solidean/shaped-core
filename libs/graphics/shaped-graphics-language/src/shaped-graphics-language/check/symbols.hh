@@ -329,6 +329,9 @@ struct sgl::check::member_info
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.
     bool has_interpolate = false;
+    /// Carries `@per_draw`: a stage link the vertex stage writes the same in every invocation of a draw, which crosses
+    /// flat and which the pixel stage reads as uniform (CHK-393).
+    bool is_per_draw = false;
     /// On a `@pixel struct`, whether the member is a color target or another output; `color` everywhere else.
     pixel_output output = pixel_output::color;
     /// `@edge_factors` or `@inside_factors`: a tessellation factor of a factors struct (CHK-305); `none` everywhere else.

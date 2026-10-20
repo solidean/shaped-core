@@ -6,6 +6,8 @@ refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/material/shader_generator.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-20T14:06Z
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # A per-draw value reaching the pixel stage as a varying must be indexed `nonuniform`
@@ -27,5 +29,5 @@ So two fixes, which do not exclude each other:
 - **In shaped-viewer:** the pixel stage reads the instance from `raster.draw` directly, which the pass already proves uniform, and the raster spelling drops `nonuniform`.
   Its `needless-nonuniform` warning would then also guard the spelling.
 
-It is not what triggers [intel-d3d12-cached-pso-draws-nothing](../../../../../docs/bugs-external/intel-d3d12-cached-pso-draws-nothing/readme.md).
+It is not what triggers [intel-d3d12-cached-pso-draws-nothing](../../../../../../../../docs/bugs-external/intel-d3d12-cached-pso-draws-nothing/readme.md).
 With every `NonUniformResourceIndex` removed, that bug still reproduces.

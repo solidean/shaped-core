@@ -384,7 +384,8 @@ Gotchas:
 - **A sample names its level, 0** — a ray tracing hit shader has no derivatives to pick a mip from.
   The raster pixel stage is the one spelling that does not: it has derivatives, so it samples the same palette at the level they pick.
   Its cutout is not one of its loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0, since a box-filtered mip averages a cutout away.
-- **Every bindless index is `nonuniform`**, because it varies per instance within a wave.
+- **A traced spelling marks every bindless index `nonuniform`**, because it varies per instance within a wave.
+  The raster pixel spelling marks none: its instance is `raster.varyings`' `@per_draw` member, the same across the draw.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
 - **Each load is a function of its own**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
   `sv_` is the generator's prefix: `sv_attribute_*`, `sv_supplied_*` and the material function.

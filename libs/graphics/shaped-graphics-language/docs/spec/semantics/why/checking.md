@@ -392,6 +392,14 @@ It may come later as sugar over these parameters, and the [stage-interfaces](../
 The two axes and their names are WGSL's, which are exactly what every target has: HLSL's qualifiers and MSL's attributes spell the same combinations.
 An integer member must say `.flat` rather than being flat by default, because which vertex's value wins is part of what it means: a primitive id is right only because the first vertex's is taken.
 
+## CHK-393
+
+Every stage input is non-uniform by CHK-283, which is right for what varies per pixel and wrong for a value one draw hands every pixel.
+A renderer that pulls its instance through a flat varying then marks every bindless index `nonuniform`, and some hardware pays a loop per marked access.
+The mark is an explicit claim that the vertex stage proves, rather than an inference across the stages of a pipeline, so the source says why an index is unmarked.
+Uniform across a draw is enough: Vulkan defines dynamic uniformity over the invocations of one draw command, a quad never spans two primitives, and so never two draws.
+The rule is strict and relaxable: inferring the claim from what a vertex stage writes would accept every program it accepts now.
+
 ## CHK-275
 
 A format is not a type, which the vector-and-format incubator settled for render targets: a member has the type the shader computes with, and the format is an attribute.

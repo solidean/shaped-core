@@ -56,8 +56,8 @@ binding drawn:
 /// The triangle and its barycentrics are what a traced hit reports, so a pixel builds the same `material.shading_context` a hit does.
 struct varyings:
     @position position: hpos4
-    /// the row of `drawn.instances`, flat so a pixel indexes by it as a hit indexes by its instance id
-    @interpolate(.flat) instance: uint
+    /// the row of `drawn.instances`, which the vertex stage reads from `draw`, so a pixel indexes by it unmarked
+    @per_draw instance: uint
     @interpolate(.flat) primitive: uint
     /// `(1 - b.x - b.y, b.x, b.y)` of a traced hit at the same point: the weight of each corner, in order
     barycentrics: float3

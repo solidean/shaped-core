@@ -635,6 +635,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   HLSL `ByteAddressBuffer`, else an array of words (EMIT-155); the host binds a `*_buffer_view<cc::byte>`.
 - **A binding array, `texture_2d[float4][64]`, needs `binding_arrays`** and is read by element alone (CHK-299).
   An index the uniformity pass cannot prove uniform is `nonuniform i`, or it is `non-uniform-index`; a needless mark is a warning (CHK-300).
+  A stage-link member marked `@per_draw` crosses flat and is uniform in the pixel stage; the vertex stage must return it uniform, or it is `non-uniform-per-draw` (CHK-393).
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.
