@@ -119,7 +119,7 @@ TEST("sgl samples - helpers is written for all four targets, and its WGSL reads 
              "        shade_result = color * clamp(0.1 + light_1 + rim_result, 0.0, 1.0);\n"
              "    }\n"
              "    let lit: vec3f = shade_result;\n"
-             "    return target_(vec4f(lit.x, lit.y, lit.z, 1.0));\n"
+             "    return target_(vec4f(lit, 1.0));\n"
              "}\n");
     CHECK(pixel_function(sgl::emit::target::hlsl_dx12)
           == "target main_ps(pixel_input p)\n"
@@ -177,7 +177,7 @@ TEST("sgl samples - helpers is written for all four targets, and its WGSL reads 
              "    }\n"
              "    const float3 lit = shade_result;\n"
              "    target result;\n"
-             "    result.color = float4(lit.x, lit.y, lit.z, 1.0);\n"
+             "    result.color = float4(lit, 1.0);\n"
              "    return result;\n"
              "}\n");
 }

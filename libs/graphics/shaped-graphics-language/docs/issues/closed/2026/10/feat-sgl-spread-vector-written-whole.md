@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/text_writer.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-20T16:53Z
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # A vector spread into a constructor is written component by component

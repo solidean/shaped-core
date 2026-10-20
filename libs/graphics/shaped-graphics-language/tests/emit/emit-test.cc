@@ -52,18 +52,18 @@ TEST("sgl emit - a local that is reserved in one target gets its underscore ther
     auto const hlsl = text_of(source, target::hlsl_dx12);
     CHECK(hlsl.contains("    const float3 filter = normalize(p.normal);\n"));
     CHECK(hlsl.contains("    const float mul_ = saturate(dot(filter, filter));\n"));
-    CHECK(hlsl.contains("    result.color = float4(filter.x, filter.y, filter.z, mul_);\n"));
+    CHECK(hlsl.contains("    result.color = float4(filter, mul_);\n"));
 
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("    let filter_: vec3f = normalize(p.normal);\n"));
     CHECK(wgsl.contains("    let mul: f32 = saturate(dot(filter_, filter_));\n"));
-    CHECK(wgsl.contains("    return frame(vec4f(filter_.x, filter_.y, filter_.z, mul));\n"));
+    CHECK(wgsl.contains("    return frame(vec4f(filter_, mul));\n"));
 
     // `filter` is an enum of the metal namespace, and `mul` is nothing there
     auto const msl = text_of(source, target::msl);
     CHECK(msl.contains("    const float3 filter_ = normalize(p.normal);\n"));
     CHECK(msl.contains("    const float mul = saturate(dot(filter_, filter_));\n"));
-    CHECK(msl.contains("    result.color = float4(filter_.x, filter_.y, filter_.z, mul);\n"));
+    CHECK(msl.contains("    result.color = float4(filter_, mul);\n"));
 }
 
 TEST("sgl emit - a name that only MSL reserves is renamed in MSL and nowhere else")
@@ -343,7 +343,7 @@ TEST("sgl emit - a struct of the program is declared before its first use, and b
                         "    sun.power = 0.5;\n"));
     // a splatted value that is no local was bound to a temporary by the check pass, and it reads like any `let`
     CHECK(hlsl.contains("    const float3 splat = sun.towards;\n"));
-    CHECK(hlsl.contains("    result.color = float4(splat.x, splat.y, splat.z, sun.power);\n"));
+    CHECK(hlsl.contains("    result.color = float4(splat, sun.power);\n"));
 
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("struct light {\n    towards: vec3f,\n    power: f32,\n}\n"));
