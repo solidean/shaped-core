@@ -297,8 +297,17 @@ for (var i: i32 = 0; i < 2; i++) {
 ## Lets
 
 Inlining binds a callee's lets once per call, so a value the source names once is computed and named once per call.
-Two rules run last, over the core tree, and are what keeps the text to one name per value.
+And it hands a callee its literal arguments, so what the callee computes from them is constant where the source was not: `0 / 4`, `(0 & 64) == 64`.
+Four rules run last, over the core tree, and are what keeps the text to one name per value and to no arithmetic on constants.
 A target's compiler folds the copies too: these rules are for the reader of the text, and for the footprint, which reads the same tree.
+
+* **LEGAL-58** (F1) A call of a pure builtin, a `not`, an `and` or an `or` whose operands are all literals, and whose value is an `int`, a `uint` or a `bool`, is that value's literal.
+  An immutable `let` of a literal counts as its literal inside such an expression, and keeps its name everywhere else.
+  The value is EVAL's, the interpreter's own evaluator's, so an integer wraps as it does at run time.
+  A float result is left to the target, which rounds each step itself, and so is a call that has no value for its arguments (EVAL-84).
+  A builtin that takes derivatives, reads memory, or exchanges values between invocations never folds.
+* **LEGAL-59** (F2) An `if` on a `bool` literal is the side it takes, in its place, and a `while` on `false` is nothing.
+  F1 runs first, so a branch on what it folded goes too, and then L2 drops what only the other side read.
 
 * **LEGAL-56** (L1) A let whose value repeats the value of a let in scope reads that let instead, and is gone.
   The value must be the same wherever the invocation evaluates it.

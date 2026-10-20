@@ -5,7 +5,8 @@
 #include <shaped-graphics-language/legalize/impl/legalizer.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
-// Rules L1 (LEGAL-56) and L2 (LEGAL-57), after V1: a let that repeats one in scope, and a let nothing reads.
+// Rules F1 (LEGAL-58) and F2 (LEGAL-59), then L1 (LEGAL-56) and L2 (LEGAL-57), after V1: what substitution made
+// constant, a branch on it, a let that repeats one in scope, and a let nothing reads.
 
 using namespace sgl;
 using namespace sgl::check;
@@ -30,6 +31,241 @@ local_id root_local_of(flat_entry_point const& e, flat_expr_id id)
     }
     return local_id::none;
 }
+
+/// Rules F1 and F2, before L1 and L2: what substitution made constant is the literal it is, and a branch on one is
+/// the side it takes.
+struct constant_folder
+{
+    flat_builder& out;
+    /// Per local: the literal an immutable `let` holds, which a call that folds whole reads through.
+    cc::vector<flat_expr_id> literal_of;
+
+    [[nodiscard]] checked_module const& m() const { return out.m; }
+    [[nodiscard]] flat_entry_point const& e() const { return out.e; }
+
+    /// The scalar a number or bool type holds one of; none for any other type.
+    [[nodiscard]] check::value_kind scalar_kind_of(type_id type) const
+    {
+        auto const* const record = m().builtin_type_of(type);
+        if (record == nullptr || record->leaf_count != 1)
+            return check::value_kind::none;
+        return record->leaf_kind;
+    }
+
+    /// The scalar `id` is where it is constant, reading through the immutable lets of a literal; none elsewhere.
+    [[nodiscard]] cc::optional<check::scalar> value_of(flat_expr_id id, int depth) const
+    {
+        using check::scalar;
+        using check::value_kind;
+        if (!is_known(e(), id) || depth > k_max_depth)
+            return cc::nullopt;
+        auto const& x = e().at(id);
+        if (auto const* const n = x.node.try_as<flat_int_literal>())
+            return n->is_unsigned ? scalar::of_uint(u32(n->value)) : scalar::of(n->value);
+        if (auto const* const b = x.node.try_as<flat_bool_literal>())
+            return scalar::of(b->value);
+        if (auto const* const f = x.node.try_as<flat_literal>();
+            f != nullptr && scalar_kind_of(x.type) == value_kind::scalar_float)
+            return scalar::of(f32(f->value));
+        if (auto const* const v = x.node.try_as<flat_enum_value>(); v != nullptr && m().is_plain_enum(x.type))
+        {
+            auto const cases = m().at(m().at(x.type).cases);
+            if (v->case_index < 0 || v->case_index >= cases.size())
+                return cc::nullopt;
+            return scalar::of(cases[v->case_index].value);
+        }
+        if (auto const* const ref = x.node.try_as<flat_local_ref>())
+        {
+            if (!is_known(e(), ref->local) || !is_valid(literal_of[index_of(ref->local)]))
+                return cc::nullopt;
+            return value_of(literal_of[index_of(ref->local)], depth + 1);
+        }
+        if (auto const* const n = x.node.try_as<flat_not>())
+        {
+            auto const operand = value_of(n->operand, depth + 1);
+            if (!operand.has_value() || operand.value().kind != value_kind::boolean)
+                return cc::nullopt;
+            return scalar::of(!operand.value().as_bool());
+        }
+        if (x.node.is<flat_and>() || x.node.is<flat_or>())
+        {
+            auto const is_and = x.node.is<flat_and>();
+            auto const lhs = value_of(is_and ? x.node.as<flat_and>().lhs : x.node.as<flat_or>().lhs, depth + 1);
+            auto const rhs = value_of(is_and ? x.node.as<flat_and>().rhs : x.node.as<flat_or>().rhs, depth + 1);
+            if (!lhs.has_value() || !rhs.has_value())
+                return cc::nullopt;
+            return scalar::of(is_and ? lhs.value().as_bool() && rhs.value().as_bool()
+                                     : lhs.value().as_bool() || rhs.value().as_bool());
+        }
+        auto const* const call = x.node.try_as<flat_call>();
+        if (call == nullptr || !call->is_pure || !is_known(e(), call->arguments))
+            return cc::nullopt;
+        auto const* const record = m().builtin_function(call->intrinsic);
+        if (record == nullptr || record->evaluate == nullptr || record->uses_derivatives
+            || record->is_subgroup_operation || record->is_quad_operation || record->is_barrier || record->is_atomic
+            || record->differs_between_invocations || record->bytes_words > 0 || record->is_nonuniform_mark)
+            return cc::nullopt;
+        // only an integer or a bool result: a float would be rounded here where a target rounds on its own
+        auto const result_kind = scalar_kind_of(x.type);
+        if (result_kind != value_kind::scalar_int && result_kind != value_kind::scalar_uint
+            && result_kind != value_kind::boolean)
+            return cc::nullopt;
+        auto arguments = cc::vector<scalar>();
+        for (auto const a : e().at(call->arguments))
+        {
+            auto const value = value_of(a, depth + 1);
+            if (!value.has_value())
+                return cc::nullopt;
+            arguments.push_back(value.value());
+        }
+        if (arguments.empty())
+            return cc::nullopt;
+        // a call with no value for these arguments stays, so a run still meets it (EVAL-84)
+        if (record->undefined_when != nullptr && !record->undefined_when(arguments).empty())
+            return cc::nullopt;
+        auto result = cc::vector<scalar>();
+        record->evaluate(arguments, result);
+        if (result.size() != 1 || result[0].kind != result_kind)
+            return cc::nullopt;
+        return result[0];
+    }
+
+    /// F1 at `id` and below it: an operation that is constant is its literal, written in place, since that is what
+    /// it means wherever it stands.
+    /// A literal and a read of a local stay as they are.
+    void fold(flat_expr_id id, int depth)
+    {
+        if (!is_known(e(), id) || depth > k_max_depth)
+            return;
+        auto const& x = e().at(id);
+        if (x.node.is<flat_call>() || x.node.is<flat_not>() || x.node.is<flat_and>() || x.node.is<flat_or>())
+            if (auto const value = value_of(id, 0); value.has_value())
+            {
+                auto& folded = out.e.exprs[index_of(id)];
+                if (value.value().kind == check::value_kind::boolean)
+                    folded.node = flat_bool_literal{.value = value.value().as_bool()};
+                else
+                    folded.node = flat_int_literal{.value = value.value().as_int(),
+                                                   .is_unsigned = value.value().kind == check::value_kind::scalar_uint};
+                return;
+            }
+        auto operands = cc::vector<flat_expr_id>();
+        for_each_operand(e(), x, [&](flat_expr_id operand) { operands.push_back(operand); });
+        for (auto const operand : operands)
+            fold(operand, depth + 1);
+    }
+
+    void fold_statements(ast::range_of<flat_stmt_id> range, int depth)
+    {
+        if (!is_known(e(), range) || depth > k_max_depth)
+            return;
+        auto list = stmt_list();
+        list.push_back_range(e().at(range));
+        for (auto const id : list)
+        {
+            if (!is_known(e(), id))
+                continue;
+            auto const s = e().at(id);
+            for_each_expr_of(s, [&](flat_expr_id x) { fold(x, 0); });
+            for_each_pattern_of(e(), s,
+                                [&](ast::range_of<flat_expr_id> patterns)
+                                {
+                                    if (is_known(e(), patterns))
+                                        for (auto const p : e().at(patterns))
+                                            fold(p, 0);
+                                });
+            if (auto const* const let = s.node.try_as<flat_let>();
+                let != nullptr && is_known(e(), let->local) && !e().at(let->local).is_mut)
+            {
+                auto const& value = e().at(let->value).node;
+                if (value.is<flat_int_literal>() || value.is<flat_bool_literal>() || value.is<flat_enum_value>()
+                    || value.is<flat_literal>())
+                    literal_of[index_of(let->local)] = let->value;
+            }
+            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { fold_statements(inner, depth + 1); });
+        }
+    }
+
+    /// Whether `id` is a bool literal, and which.
+    [[nodiscard]] cc::optional<bool> constant_condition(flat_expr_id id) const
+    {
+        if (!is_known(e(), id))
+            return cc::nullopt;
+        if (auto const* const b = e().at(id).node.try_as<flat_bool_literal>())
+            return b->value;
+        return cc::nullopt;
+    }
+
+    ast::range_of<flat_stmt_id> pruned_body(ast::range_of<flat_stmt_id> range, int depth)
+    {
+        auto list = stmt_list();
+        if (is_known(e(), range))
+            list.push_back_range(e().at(range));
+        return out.stmt_list(pruned(list, depth + 1));
+    }
+
+    /// F2: an `if` on a constant is the side it takes, in its place, and a `while` on false is nothing.
+    stmt_list pruned(stmt_list const& list, int depth)
+    {
+        auto result = stmt_list();
+        for (auto const id : list)
+        {
+            if (!is_known(e(), id) || depth > k_max_depth)
+            {
+                result.push_back(id);
+                continue;
+            }
+            auto copy = e().at(id);
+            if (auto const* const i = copy.node.try_as<flat_if>())
+                if (auto const taken = constant_condition(i->condition); taken.has_value())
+                {
+                    auto const body = taken.value() ? i->then_body : i->else_body;
+                    auto inner = stmt_list();
+                    if (is_known(e(), body))
+                        inner.push_back_range(e().at(body));
+                    result.push_back_range(pruned(inner, depth + 1));
+                    continue;
+                }
+            if (auto const* const w = copy.node.try_as<flat_while>())
+                if (auto const taken = constant_condition(w->condition); taken.has_value() && !taken.value())
+                    continue;
+            auto has_body = true;
+            if (auto* const i = copy.node.try_as<flat_if>())
+            {
+                i->then_body = pruned_body(i->then_body, depth);
+                i->else_body = pruned_body(i->else_body, depth);
+            }
+            else if (auto* const l = copy.node.try_as<flat_loop>())
+                l->body = pruned_body(l->body, depth);
+            else if (auto* const w = copy.node.try_as<flat_while>())
+                w->body = pruned_body(w->body, depth);
+            else if (auto* const f = copy.node.try_as<flat_for>())
+                f->body = pruned_body(f->body, depth);
+            else if (auto* const o = copy.node.try_as<flat_once>())
+                o->body = pruned_body(o->body, depth);
+            else if (auto* const sw = copy.node.try_as<flat_switch>())
+            {
+                auto arms = cc::vector<flat_arm>();
+                if (is_known(e(), sw->arms))
+                    arms.push_back_range(e().at(sw->arms));
+                for (auto& arm : arms)
+                    arm.body = pruned_body(arm.body, depth);
+                sw->arms = out.arm_list(arms);
+                sw->default_body = pruned_body(sw->default_body, depth);
+            }
+            else
+                has_body = false;
+            if (!has_body)
+            {
+                result.push_back(id);
+                continue;
+            }
+            out.e.stmts.push_back(cc::move(copy));
+            result.push_back(flat_stmt_id(out.e.stmts.size() - 1));
+        }
+        return result;
+    }
+};
 
 struct let_simplifier
 {
@@ -492,8 +728,14 @@ struct let_simplifier
 };
 } // namespace
 
-stmt_list sgl::check::impl::simplify_lets(flat_builder& out, stmt_list const& body)
+stmt_list sgl::check::impl::simplify_lets(flat_builder& out, stmt_list const& unfolded)
 {
+    auto folder = constant_folder{
+        .out = out,
+        .literal_of = cc::vector<flat_expr_id>::create_filled(out.e.locals.size(), flat_expr_id::none)};
+    folder.fold_statements(out.stmt_list(unfolded), 0);
+    auto const body = folder.pruned(unfolded, 0);
+
     auto s = let_simplifier{.out = out};
     s.find_written();
     s.scan_body(out.stmt_list(body), 0);

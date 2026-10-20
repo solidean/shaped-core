@@ -735,6 +735,37 @@ TEST("sgl legalize - L2: a let nothing reads is gone with what only it read, unl
              "  (return (lit 0.0 : float))\n");
 }
 
+TEST("sgl legalize - F1 and F2: what substitution made constant is its literal, and a branch on one is the side it "
+     "takes")
+{
+    auto t = rule_fixture();
+    auto const two = t.b.let("two", t.b.int_literal(2));
+    auto const sum = t.b.call("add_int", {t.b.local(two.local), t.b.int_literal(3)});
+    auto const less = t.b.call("less_int", {t.b.int_literal(1), t.b.local(two.local)});
+    auto const half = t.b.call("add", {t.f(0.25), t.f(0.25)});
+    // an int division by zero has no value, so it stays where a run meets it (EVAL-84)
+    auto const undefined = t.b.call("divide_int", {t.b.int_literal(1), t.b.int_literal(0)});
+    t.finish({
+        two.stmt,
+        t.b.print(sum),
+        t.b.if_(less, {t.print(1.0)}, {t.print(2.0)}),
+        t.b.print(half),
+        t.b.print(t.b.local(two.local)),
+        t.b.if_(t.d(), {t.b.print(undefined)}),
+    });
+    // `two` is read by name where nothing folds, and a float sum is the target's to round
+    CHECK(t.core()
+          == "  (let two : int = (lit 2 : int))\n"
+             "  (print (lit 5 : int))\n"
+             "  (print (lit 1.0 : float))\n"
+             "  (print (call add (lit 0.25 : float) (lit 0.25 : float) : float))\n"
+             "  (print (local two : int))\n"
+             "  (if (local d : bool)\n"
+             "    (then\n"
+             "      (print (call divide_int (lit 1 : int) (lit 0 : int) : int))))\n"
+             "  (return (lit 0.0 : float))\n");
+}
+
 TEST("sgl legalize - an eval is a statement like any other: its blocks move in front, and a call stays where it stood")
 {
     auto t = rule_fixture();

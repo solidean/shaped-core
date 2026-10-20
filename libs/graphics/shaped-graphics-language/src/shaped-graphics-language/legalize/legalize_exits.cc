@@ -668,7 +668,8 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
         auto out = flat_builder::extend(m, e);
         auto const body = ids_of(out.e, out.e.body);
         auto const simplified = simplify_lets(out, body);
-        if (ast::impl::is_equal(simplified, body))
+        // F1 folds in place, so an unchanged body may still hold folded expressions
+        if (ast::impl::is_equal(simplified, body) && ast::impl::is_equal(out.e.exprs, e.exprs))
             return compacted(m, e, ids_of(e, e.body));
         return compacted(m, out.e, simplified);
     }

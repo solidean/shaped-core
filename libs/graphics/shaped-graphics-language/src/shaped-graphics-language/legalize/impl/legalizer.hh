@@ -38,9 +38,10 @@ using stmt_list = cc::vector<flat_stmt_id>;
 /// Rule V1: no local, assignment or result of type void is left, and what evaluating one did stays as an `eval`.
 [[nodiscard]] stmt_list erase_void(flat_builder& out, stmt_list const& body);
 
-/// Rules L1 and L2, last, over a core body: a let whose value repeats a let in scope reads that one instead, and a
-/// let nothing reads is gone where its value has no effect and always has a value.
-[[nodiscard]] stmt_list simplify_lets(flat_builder& out, stmt_list const& body);
+/// Rules F1, F2, L1 and L2, last, over a core body: what is constant is its literal, written in place, a branch on
+/// one is the side it takes, a let whose value repeats a let in scope reads that one instead, and a let nothing reads
+/// is gone where its value has no effect and always has a value.
+[[nodiscard]] stmt_list simplify_lets(flat_builder& out, stmt_list const& unfolded);
 
 /// `e` with `body` as its body and only the nodes `body` reaches, numbered in the order a walk meets them.
 [[nodiscard]] flat_entry_point compacted(checked_module const& m, flat_entry_point const& e, stmt_list const& body);
