@@ -859,6 +859,10 @@ struct checker
     void check_test(i32 index);
     /// The flat tree of test `index`, when it checked soundly and all it reaches inlines whole (flatten.cc).
     void flatten_test(i32 index);
+    /// Every module-level name as `out.symbols` now holds them, the last of `out.module_names`, made anew only when a
+    /// symbol joined since `module_names_for`.
+    [[nodiscard]] cc::set<cc::string> const* module_names();
+    isize module_names_for = -1;
     /// True where the parser or the AST pass reported an error inside `extent` of `file`.
     [[nodiscard]] bool has_syntax_error_in(i32 file, source_span extent) const;
     /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and

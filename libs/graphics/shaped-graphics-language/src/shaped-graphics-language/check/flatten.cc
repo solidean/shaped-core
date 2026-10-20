@@ -3143,6 +3143,20 @@ void report_unroll(checker& c, flattener::unroll_report const& u)
 }
 } // namespace
 
+cc::set<cc::string> const* checker::module_names()
+{
+    if (out.module_names.empty() || module_names_for != out.symbols.size())
+    {
+        auto names = cc::make_shared<cc::set<cc::string>>();
+        for (auto const& s : out.symbols)
+            if (!s.name.empty())
+                (void)names->insert(s.name);
+        out.module_names.push_back(cc::move(names));
+        module_names_for = out.symbols.size();
+    }
+    return out.module_names.back().get();
+}
+
 void checker::flatten_test(i32 index)
 {
     // by value: flattening appends to the module's vectors
@@ -3162,9 +3176,7 @@ void checker::flatten_test(i32 index)
     // CHK-333: what the test lists, which its driver binds
     for (auto const binding : out.at(out.functions[out.at(test.symbol).info].bindings))
         f.entry.bindings.push_back(binding);
-    for (auto const& other : out.symbols)
-        if (!other.name.empty())
-            f.entry.names.reserve(other.name);
+    f.entry.names.also_taken = module_names();
     f.frames.push_back({.function = test.symbol, .file = test.file, .result = checked_module::void_type});
 
     auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
@@ -3266,10 +3278,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         f.entry.bindings.push_back(binding);
 
     // Every module-level name is taken, so no local can hide a type, a binding or a builtin an emitter writes.
+    f.entry.names.also_taken = module_names();
     f.entry.names.reserve(s.name);
-    for (auto const& other : out.symbols)
-        if (!other.name.empty())
-            f.entry.names.reserve(other.name);
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
     // CHK-326: a ray-tracing stage's one parameter of the target is its payload, `locals[0]`, which the stage writes

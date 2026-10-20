@@ -6,6 +6,8 @@ refs:
   - symbol: flatten_entry_point
   - symbol: name_mint
   - test: sgl profile - one compile of a file, sampled
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # Every flat tree takes every module-level name into a mint of its own
