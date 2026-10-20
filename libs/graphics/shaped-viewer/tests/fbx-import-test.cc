@@ -544,6 +544,19 @@ namespace
     return babel::test::fbx_scene_with(scaling, cc::format("{}\t\t\t{}\n", scaling, property), s);
 }
 
+/// Node `name`'s transform to the asset's root, its parents' composed in.
+[[nodiscard]] tg::affine_transform3f world_of(sv::asset_data const& asset, cc::string_view name)
+{
+    auto index = i32(-1);
+    for (auto i = isize(0); i < asset.nodes.size(); ++i)
+        if (asset.nodes[i].name == name)
+            index = i32(i);
+    auto world = tg::affine_transform3f();
+    for (; index >= 0; index = asset.nodes[index].parent)
+        world = tg::compose(asset.nodes[index].transform, world);
+    return world;
+}
+
 /// A per-vertex f32 attribute of `m`, empty when it has none.
 [[nodiscard]] cc::vector<f32> f32_attribute(sv::mesh const& m, cc::string_view name)
 {
@@ -629,6 +642,149 @@ TEST("sv::asset_loader - an unused FBX Shininess is never clamped, nor reported"
     auto const alone = babel::test::fbx_scene_with(shininess, "P: \"Shininess\", \"double\", \"Number\", \"\",1e999");
     auto const fallback = REQUIRED_VALUE(loader.load(pin(alone), sv::asset_format::fbx, "fallback.fbx"));
     CHECK(mentions(fallback.issues, "clamped"));
+}
+
+TEST("sv::asset_loader - an unflattened FBX import composes the space conversion into the root")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib, .import_textures = false, .flatten_hierarchy = false});
+    auto const flat_loader = sv::asset_loader({.materials = &lib, .import_textures = false});
+
+    // Centimeters, so the conversion is a scale of 0.01 that only the root carries.
+    auto const text = babel::test::fbx_scene({.unit_scale_factor = 1});
+    auto const asset = REQUIRED_VALUE(loader.load(pin(text), sv::asset_format::fbx, "tree.fbx"));
+    auto const flat = REQUIRED_VALUE(flat_loader.load(pin(text), sv::asset_format::fbx, "flat.fbx"));
+
+    REQUIRE(!asset.nodes.empty());
+    CHECK(asset.nodes[0].parent == -1);
+    CHECK(near(asset.nodes[0].transform.transform(tg::pos3f(100, 0, 0)), tg::pos3f(1, 0, 0)));
+
+    // A mesh is placed by its node's geometric transform alone, the identity here.
+    auto const* const child = asset.find_mesh("child.0");
+    REQUIRE(child != nullptr);
+    CHECK(near(child->transform.transform(tg::pos3f(1, 2, 3)), tg::pos3f(1, 2, 3)));
+
+    // Its node's world transform puts it where the flattened import does.
+    auto const* const flat_child = flat.find_mesh("child.0");
+    REQUIRE(flat_child != nullptr);
+    auto const world = tg::compose(world_of(asset, "child"), child->transform);
+    for (auto const p : {tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 0), tg::pos3f(0, 0, 1)})
+        CHECK(near(world.transform(p), flat_child->transform.transform(p)));
+    CHECK(near(world.transform(tg::pos3f::zero), tg::pos3f(0.1f, 0.1f, 0)));
+
+    // A light sits at its node's origin, which the node's world transform places.
+    REQUIRE(asset.lights.size() == 1);
+    CHECK(near(asset.lights[0].light.placement.transform(tg::pos3f::zero), tg::pos3f::zero));
+    CHECK(near(world_of(asset, "lamp").transform(tg::pos3f::zero), tg::pos3f(0, 0, 0.03f)));
+}
+
+TEST("sv::asset_loader - an FBX geometric transform moves the node's mesh and not its children")
+{
+    auto lib = make_library();
+    auto const text = scene_with_parent_property("P: \"GeometricTranslation\", \"Vector3D\", \"Vector\", \"\",0,0,1",
+                                                 {.unit_scale_factor = 100});
+
+    // Flattened: the offset is in the node's space, so the parent's scale of 2 doubles it.
+    auto const flat_loader = sv::asset_loader({.materials = &lib, .import_textures = false});
+    auto const flat = REQUIRED_VALUE(flat_loader.load(pin(text), sv::asset_format::fbx, "geometric.fbx"));
+    REQUIRE(flat.find_mesh("parent.0") != nullptr);
+    REQUIRE(flat.find_mesh("child.0") != nullptr);
+    CHECK(near(placed_origin_of(*flat.find_mesh("parent.0")), tg::pos3f(10, 0, 2)));
+    CHECK(near(placed_origin_of(*flat.find_mesh("child.0")), tg::pos3f(10, 10, 0)));
+
+    // Unflattened, it is the mesh's own transform, and the child's node never sees it.
+    auto const tree_loader = sv::asset_loader({.materials = &lib, .import_textures = false, .flatten_hierarchy = false});
+    auto const tree = REQUIRED_VALUE(tree_loader.load(pin(text), sv::asset_format::fbx, "geometric-tree.fbx"));
+    REQUIRE(tree.find_mesh("parent.0") != nullptr);
+    CHECK(near(placed_origin_of(*tree.find_mesh("parent.0")), tg::pos3f(0, 0, 1)));
+    CHECK(near(world_of(tree, "child").transform(tg::pos3f::zero), tg::pos3f(10, 10, 0)));
+}
+
+TEST("sv::asset_loader - a negatively scaled FBX node is mirrored, and its children with it")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib, .import_textures = false});
+
+    auto const text = babel::test::fbx_scene_with("P: \"Lcl Scaling\", \"Lcl Scaling\", \"\", \"A\",2,2,2",
+                                                  "P: \"Lcl Scaling\", \"Lcl Scaling\", \"\", \"A\",2,2,-2",
+                                                  {.unit_scale_factor = 100});
+    auto const asset = REQUIRED_VALUE(loader.load(pin(text), sv::asset_format::fbx, "mirror.fbx"));
+
+    auto const* const quad = asset.find_mesh("parent.0");
+    REQUIRE(quad != nullptr);
+    auto const origin = quad->transform.transform(tg::pos3f::zero);
+    auto const x = quad->transform.transform(tg::pos3f(1, 0, 0)) - origin;
+    auto const y = quad->transform.transform(tg::pos3f(0, 1, 0)) - origin;
+    auto const z = quad->transform.transform(tg::pos3f(0, 0, 1)) - origin;
+    CHECK(near(origin, tg::pos3f(10, 0, 0)));
+    CHECK(near(origin + z, tg::pos3f(10, 0, -2)));
+    CHECK(tg::dot(tg::dual(tg::cross(x, y)), z) < 0.0f); // a mirror, which no rotation reaches
+
+    // The child inherits the mirror; its (0,5,0) lies in the plane the mirror keeps.
+    auto const* const child = asset.find_mesh("child.0");
+    REQUIRE(child != nullptr);
+    CHECK(near(placed_origin_of(*child), tg::pos3f(10, 10, 0)));
+    CHECK(near(child->transform.transform(tg::pos3f(0, 0, 1)), tg::pos3f(10, 10, -2)));
+}
+
+TEST("sv::asset_loader - generated FBX tangents are mirrored exactly where the uv layout is")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader(
+        {.materials = &lib,
+         .resolve = [](cc::string_view) -> cc::result<cc::pinned_data<byte const>>
+         { return cc::pinned_data<byte const>(cc::pinned_data<byte>::create_copy_of(png_2x2(false))); }});
+
+    // The fixture's texture on NormalMap, so the quad's material wants tangents along its uvs.
+    auto const normal_mapped
+        = babel::test::fbx_scene_with("C: \"OP\",500,400, \"DiffuseColor\"", "C: \"OP\",500,400, \"NormalMap\"");
+
+    // The quad's uvs run with its positions, +u along +x and +v along +y: +v is cross(+z, +x), so +1.
+    auto const straight = REQUIRED_VALUE(loader.load(pin(normal_mapped), sv::asset_format::fbx, "straight.fbx"));
+    auto const* const quad = straight.find_mesh("parent.0");
+    REQUIRE(quad != nullptr);
+    REQUIRE(texture_named(*quad, "normal") != nullptr);
+    auto const plus = f32_attribute(*quad, "tangent_handedness");
+    REQUIRE(plus.size() == quad->geometry.positions.size());
+    for (auto const h : plus)
+        CHECK(h == 1.0f);
+
+    // Mirrored in u: the tangent turns to -x while +v still runs along +y, the opposite of cross(+z, -x), so -1.
+    auto mirrored = cc::string(normal_mapped);
+    REQUIRE(mirrored.replace_first("a: 0,0,1,0,1,1,0,1", "a: 1,0,0,0,0,1,1,1"));
+    auto const flipped = REQUIRED_VALUE(loader.load(pin(mirrored), sv::asset_format::fbx, "mirrored.fbx"));
+    auto const* const mirrored_quad = flipped.find_mesh("parent.0");
+    REQUIRE(mirrored_quad != nullptr);
+    auto const minus = f32_attribute(*mirrored_quad, "tangent_handedness");
+    REQUIRE(minus.size() == mirrored_quad->geometry.positions.size());
+    for (auto const h : minus)
+        CHECK(h == -1.0f);
+}
+
+TEST("sv::asset_loader - an FBX mesh with no faces emits no mesh")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib, .import_textures = false});
+
+    auto text = babel::test::fbx_scene_with("\tMaterial: 400, \"Material::red\"",
+                                            "\tGeometry: 110, \"Geometry::empty\", \"Mesh\" {\n"
+                                            "\t\tVertices: *3 {\n\t\t\ta: 0,0,0\n\t\t}\n"
+                                            "\t}\n"
+                                            "\tModel: 310, \"Model::empty\", \"Mesh\" {\n\t\tVersion: 232\n\t}\n"
+                                            "\tMaterial: 400, \"Material::red\"");
+    REQUIRE(text.replace_first("\tC: \"OO\",300,0\n", "\tC: \"OO\",300,0\n\tC: \"OO\",310,0\n\tC: \"OO\",110,310\n"));
+
+    auto const asset = REQUIRED_VALUE(loader.load(pin(text), sv::asset_format::fbx, "empty.fbx"));
+    CHECK(asset.meshes.size() == 4);
+    CHECK(asset.find_mesh("empty") == nullptr);
+    auto found = false;
+    for (auto const& n : asset.nodes)
+        if (n.name == "empty")
+        {
+            found = true;
+            CHECK(n.mesh_count == 0);
+        }
+    CHECK(found);
 }
 
 TEST("sv::asset_loader - a left-handed FBX scene is mirrored into sv's, with an issue")
@@ -930,6 +1086,30 @@ TEST("sv::asset_loader - the filesystem default reads regular files under the ce
     // A directory is not a file, however a document names it.
     CHECK(sv::impl::resolve_uri_from_filesystem(cc::temp_directory_path()).has_error());
 
+#ifdef CC_OS_WINDOWS
+    // NUL opens, states 0 bytes and reads as empty, so only its name gives it away; CON states no size at all.
+    // Neither may ever be read, and CON could read the console.
+    auto const dir = cc::temp_directory_path();
+    for (auto const& name :
+         {cc::string("NUL"), cc::string("con"), cc::string("NUL.png"), cc::string("aux "), cc::string("COM1:"),
+          cc::format("{}/CON", dir), cc::format("{}\\nul.txt", dir), cc::string("\\\\.\\NUL")})
+    {
+        auto const r = sv::impl::resolve_uri_from_filesystem(name, 1024);
+        REQUIRE(r.has_error());
+        CHECK(cc::format("{}", r.error()).contains("device"));
+    }
+
+    // A name merely starting like one is an ordinary file.
+    auto const console = cc::format("{}/console-sv-fbx.bin", dir);
+    {
+        auto file = REQUIRED_VALUE(cc::file_write_stream_adapter::create(console));
+        auto stream = file.stream();
+        REQUIRE(stream.write(cc::vector<byte>::create_filled(4, byte(1))).has_value());
+        REQUIRE(stream.flush().has_value());
+    }
+    CHECK(sv::impl::resolve_uri_from_filesystem(console, 1024).has_value());
+    CHECK(cc::remove_file(console));
+#endif
     // A device states one size and yields another; where there is none, there is nothing to prove.
     if (cc::file_read_stream_adapter::open("/dev/zero").has_error())
         SKIP("no /dev/zero on this platform");
