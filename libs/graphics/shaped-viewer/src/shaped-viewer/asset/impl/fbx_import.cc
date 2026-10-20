@@ -121,6 +121,15 @@ struct decoded_texture
     bool has_alpha = false;
 };
 
+/// A texture's encoded bytes, or why there are none: a name the importer refused is reported as refused and nothing else.
+struct fetched_texture
+{
+    cc::optional<cc::pinned_data<byte const>> bytes;
+
+    /// no bytes, and the name as written was never safe to ask for
+    bool refused = false;
+};
+
 /// The reconstructed third component of a two-channel normal map, from the two it stored.
 ///
 /// A BC5 normal map keeps x and y and drops z, since a unit normal's z follows from them.
@@ -172,7 +181,7 @@ struct fbx_importer
     cc::vector<cc::string> unfetched;
     cc::vector<cc::string> undecodable;
 
-    /// the texture names that are not a relative file path — a scheme, a drive, a network path — and are never fetched
+    /// the texture names that are not a relative file path inside the document's directory — a scheme, a drive, a network path, a device, a `..` — and are never fetched as written
     cc::vector<cc::string> refused;
 
     /// the materials whose values were not finite and non-negative, and were clamped
@@ -182,6 +191,15 @@ struct fbx_importer
     cc::vector<cc::string> packed_unusable;
 
     void note(cc::string message) { out.issues.push_back(cc::move(message)); }
+
+    /// Adds `name` to one of the per-texture lists unless it is there already, since one texture decodes once per role.
+    static void remember(cc::vector<cc::string>& names, cc::string name)
+    {
+        for (auto const& known : names)
+            if (known == name)
+                return;
+        names.push_back(cc::move(name));
+    }
 
     /// One issue naming how many textures failed `how`, and the first few of them.
     void note_textures(cc::span<cc::string const> names, cc::string_view how)
@@ -204,16 +222,17 @@ struct fbx_importer
     /// - A name holding `:` anywhere — a scheme (`https:`, `file:`) or a drive (`C:\`, `D:x.png`) — is never asked for as written.
     /// - Nor is a name opening with `//` once its backslashes are portable, a UNC or network path.
     /// - Nor is one with a component Windows opens as a device (`CON`, `NUL`, `COM1`, `LPT1`, ... in any case, with any extension).
+    /// - Nor is one with a `..` component, which would climb out of the document's directory.
     /// - A name opening with `/` is absolute, so only its bare file name is asked for.
     /// - `%` is escaped as `%25`, so the resolver's percent-decoding hands the name back literally rather than turning `%5C%5C` into a network path or `%2E%2E%2F` into `../`.
     /// - The join is done here, onto the document's directory, so no absolute passthrough is reached.
     /// After those checks the bare file name — what follows the last `/` — is still tried beside the document whenever it is itself safe.
-    /// That is what a Windows-authored FBX naming `C:\Users\...\wood.png` needs.
-    /// `absolute_filename` is only ever asked for by that bare name; only a literal `../` in a relative name climbs out of the directory.
-    [[nodiscard]] cc::optional<cc::pinned_data<byte const>> fetch(bf::texture const& t)
+    /// That is what a Windows-authored FBX naming `C:\Users\...\wood.png` needs, and `../shared/wood.png` is asked for as `wood.png` the same way.
+    /// So nothing the file names is ever fetched from outside the document's directory; `absolute_filename` is only ever asked for by its bare name.
+    [[nodiscard]] fetched_texture fetch(bf::texture const& t)
     {
         if (t.content.size() > 0)
-            return t.content;
+            return {.bytes = t.content};
 
         auto const& written = t.relative_filename.empty() ? t.absolute_filename : t.relative_filename;
 
@@ -230,23 +249,21 @@ struct fbx_importer
         auto const tried = whole_safe && !t.relative_filename.empty();
         if (tried)
             if (auto bytes = resolve_beside(view); bytes.has_value())
-                return cc::move(bytes.value());
+                return {.bytes = cc::move(bytes.value())};
 
         // The bare file name, which is where an archive moved off its author's machine usually keeps it.
         auto const slash = view.rfind('/');
         auto const base = slash >= 0 ? view.subview(slash + 1) : view;
         if (!base.empty() && is_safe_path(base) && (!tried || base != view))
             if (auto bytes = resolve_beside(base); bytes.has_value())
-                return cc::move(bytes.value());
+                return {.bytes = cc::move(bytes.value())};
 
         // Nothing safe resolved; a name that was unsafe as written is the more useful thing to report.
-        if (!is_safe_path(view))
-            refused.push_back(cc::string(written));
-        return {};
+        return {.refused = !is_safe_path(view)};
     }
 
     /// Whether `path` (portable separators) is a relative file path the importer may hand the resolver.
-    /// No `:` (a scheme or a drive), no leading `//` (a network path), and no component naming a Windows device.
+    /// No `:` (a scheme or a drive), no leading `//` (a network path), no `..` component, and no component naming a Windows device.
     [[nodiscard]] static bool is_safe_path(cc::string_view path)
     {
         if (path.contains(':') || path.starts_with("//"))
@@ -272,7 +289,7 @@ struct fbx_importer
         {
             auto const slash = rest.find('/');
             auto const component = slash >= 0 ? rest.subview({.offset = 0, .size = slash}) : rest;
-            if (is_device(component))
+            if (component == ".." || is_device(component))
                 return false;
             rest = slash >= 0 ? rest.subview(slash + 1) : cc::string_view();
         }
@@ -313,17 +330,22 @@ struct fbx_importer
         if (!t->is_file)
             return {}; // babel already said so
 
-        auto bytes = fetch(*t);
-        if (!bytes.has_value())
+        auto fetched = fetch(*t);
+        if (fetched.refused)
         {
-            unfetched.push_back(t->relative_filename.empty() ? t->name : t->relative_filename);
+            remember(refused, t->relative_filename.empty() ? t->absolute_filename : t->relative_filename);
+            return {};
+        }
+        if (!fetched.bytes.has_value())
+        {
+            remember(unfetched, t->relative_filename.empty() ? t->name : t->relative_filename);
             return {};
         }
 
-        auto image = babel::image::read(bytes.value().span());
+        auto image = babel::image::read(fetched.bytes.value().span());
         if (image.has_error())
         {
-            undecodable.push_back(t->relative_filename.empty() ? t->name : t->relative_filename);
+            remember(undecodable, t->relative_filename.empty() ? t->name : t->relative_filename);
             return {};
         }
 
@@ -476,7 +498,10 @@ struct fbx_importer
         else
         {
             // Phong's specular exponent onto a GGX roughness: Blinn-Phong n matches a Beckmann alpha of sqrt(2 / (n + 2)), and OpenPBR's roughness is the square root of alpha.
-            auto const exponent = number_of(m, "ShininessExponent", number_of(m, "Shininess", 20.0f));
+            // Shininess only stands in for an absent ShininessExponent, so it is never sanitized, or reported, when unused.
+            auto const* const exponent_property = m.find_property("ShininessExponent");
+            auto const exponent = exponent_property != nullptr ? sanitized(m, exponent_property->value[0])
+                                                               : number_of(m, "Shininess", 20.0f);
             auto const alpha = tg::sqrt(2.0f / ((exponent > 0.0f ? exponent : 0.0f) + 2.0f));
             bindings.push_back(binding::of("specular_roughness", tg::sqrt(alpha)));
             bindings.push_back(binding::of("base_metalness", 0.0f));
@@ -1075,8 +1100,8 @@ cc::result<asset_data> impl::import_fbx(babel::fbx::data const& doc,
     impl::disambiguate_light_ids(importer.out.lights);
     importer.note_textures(importer.unfetched, "fetched");
     if (!importer.refused.empty())
-        importer.note(cc::format("fbx: {} texture(s) name a scheme, a drive, a network path or a device rather than a "
-                                 "relative file, which is never fetched: '{}'{}",
+        importer.note(cc::format("fbx: {} texture(s) name a scheme, a drive, a network path, a device or a parent "
+                                 "directory rather than a file beside the document, which is never fetched: '{}'{}",
                                  importer.refused.size(), importer.refused[0],
                                  importer.refused.size() > 1 ? ", ..." : ""));
     if (!importer.clamped_materials.empty())

@@ -308,6 +308,11 @@ TEST("sv::asset_loader - the ORCA convention reads SpecularColor as packed occlu
     patched += "C: \"OP\",500,400, \"SpecularColor\"\n\tC: \"OP\",500,400, \"NormalMap\"";
     patched += text.subview({.offset = at + connection.size(), .size = text.size() - at - connection.size()});
 
+    // "glow" connects no map, and states a SpecularColor of its own.
+    auto const factor = cc::string_view("P: \"EmissiveFactor\", \"Number\", \"\", \"A\",4");
+    REQUIRE(patched.replace_first(
+        factor, cc::format("{}\n\t\t\tP: \"SpecularColor\", \"Color\", \"\", \"A\",0.25,0.3,0.7", factor)));
+
     auto const asset = REQUIRED_VALUE(loader.load(pin(patched), sv::asset_format::fbx, "orca.fbx"));
     auto const* const quad = asset.find_mesh("parent.0");
     REQUIRE(quad != nullptr);
@@ -334,9 +339,11 @@ TEST("sv::asset_loader - the ORCA convention reads SpecularColor as packed occlu
         has_frame = has_frame || a.name == "tangent_frame";
     CHECK(has_frame);
 
-    // The constant is read the same way where no map overrides it: the fixture's SpecularColor is the FBX default.
-    auto const& red = lib.get(asset.material("red"));
-    CHECK(red.find("base_metalness") != nullptr);
+    // Where no map is connected the constant is read the same way: green is roughness, blue metalness.
+    auto const& glow = lib.get(asset.material("glow"));
+    CHECK(near(constant_of<f32>(glow, "specular_roughness"), 0.3f));
+    CHECK(near(constant_of<f32>(glow, "base_metalness"), 0.7f));
+    CHECK(texture_named(*asset.find_mesh("child.0"), "base_metalness") == nullptr); // glow's instance
 }
 
 TEST("sv::asset_loader - an FBX normal map decoded with a zero third channel has it rebuilt")
@@ -413,7 +420,8 @@ namespace
 }
 } // namespace
 
-TEST("sv::asset_loader - an FBX texture is asked for beside the document, then by its bare name, never absolutely")
+TEST("sv::asset_loader - an FBX texture is asked for beside the document, then by its bare name, never absolutely or "
+     "above it")
 {
     // The relative name first, then the bare file name; the exporting machine's absolute path never.
     auto const plain = requests_of(scene_naming("textures\\wood.png", "C:/somewhere/textures/wood.png"));
@@ -429,10 +437,30 @@ TEST("sv::asset_loader - an FBX texture is asked for beside the document, then b
     REQUIRE(windows.size() == 1);
     CHECK(windows[0] == "assets/tex.png");
 
-    // A ../ still climbs out of the document's directory, as it does for glTF.
-    auto const parent = requests_of(scene_naming("../shared/wood.png", ""));
-    REQUIRE(!parent.empty());
-    CHECK(parent[0] == "assets/../shared/wood.png");
+    // A name climbing out of the document's directory never does, unlike a glTF uri; its bare name is still asked for beside it.
+    auto issues = cc::vector<cc::string>();
+    auto const parent = requests_of(scene_naming("../shared/wood.png", ""), &issues);
+    REQUIRE(parent.size() == 1);
+    CHECK(parent[0] == "assets/wood.png");
+    CHECK(mentions(issues, "parent directory"));
+    auto const buried = requests_of(scene_naming("textures/../../wood.png", ""));
+    REQUIRE(buried.size() == 1);
+    CHECK(buried[0] == "assets/wood.png");
+
+    // A `.` component stays where it is, so it is asked for as written.
+    auto const here = requests_of(scene_naming("./textures/wood.png", ""));
+    REQUIRE(!here.empty());
+    CHECK(here[0] == "assets/./textures/wood.png");
+}
+
+TEST("sv::asset_loader - a refused FBX texture name is one issue, not also an unfetched one")
+{
+    auto issues = cc::vector<cc::string>();
+    [[maybe_unused]] auto const requested = requests_of(scene_naming("https://example.com/wood.png", ""), &issues);
+    auto mentioning = 0;
+    for (auto const& i : issues)
+        mentioning += cc::string_view(i).contains("example.com") ? 1 : 0;
+    CHECK(mentioning == 1);
 }
 
 TEST("sv::asset_loader - an FBX texture on a network path is never fetched as one, and says so")
@@ -515,6 +543,23 @@ namespace
     auto const scaling = cc::string_view("\t\t\tP: \"Lcl Scaling\", \"Lcl Scaling\", \"\", \"A\",2,2,2\n");
     return babel::test::fbx_scene_with(scaling, cc::format("{}\t\t\t{}\n", scaling, property), s);
 }
+
+/// A per-vertex f32 attribute of `m`, empty when it has none.
+[[nodiscard]] cc::vector<f32> f32_attribute(sv::mesh const& m, cc::string_view name)
+{
+    auto out = cc::vector<f32>();
+    for (auto const& a : m.attributes)
+        if (a.name == name)
+        {
+            for (auto at = isize(0); at + isize(sizeof(f32)) <= a.data.size(); at += isize(sizeof(f32)))
+            {
+                auto v = 0.0f;
+                cc::memcpy(&v, a.data.data() + at, sizeof(v));
+                out.push_back(v);
+            }
+        }
+    return out;
+}
 } // namespace
 
 TEST("sv::asset_loader - a hidden FBX node hides its whole subtree, lights included")
@@ -565,6 +610,25 @@ TEST("sv::asset_loader - an FBX hole face imports no triangles")
     CHECK(holed.find_mesh("parent") != nullptr);
     CHECK(holed.find_mesh("child") != nullptr);
     CHECK(!mentions(holed.issues, "fanned"));
+}
+
+TEST("sv::asset_loader - an unused FBX Shininess is never clamped, nor reported")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib, .import_textures = false});
+
+    auto const shininess = cc::string_view("P: \"Shininess\", \"double\", \"Number\", \"\",20");
+    auto const both
+        = babel::test::fbx_scene_with(shininess, "P: \"ShininessExponent\", \"double\", \"Number\", \"\",20\n"
+                                                 "\t\t\tP: \"Shininess\", \"double\", \"Number\", \"\",1e999");
+    auto const asset = REQUIRED_VALUE(loader.load(pin(both), sv::asset_format::fbx, "exponent.fbx"));
+    CHECK(near(constant_of<f32>(lib.get(asset.material("red")), "specular_roughness"), 0.5491f));
+    CHECK(!mentions(asset.issues, "clamped"));
+
+    // Shininess alone is the exponent, and is held to a finite value like any other.
+    auto const alone = babel::test::fbx_scene_with(shininess, "P: \"Shininess\", \"double\", \"Number\", \"\",1e999");
+    auto const fallback = REQUIRED_VALUE(loader.load(pin(alone), sv::asset_format::fbx, "fallback.fbx"));
+    CHECK(mentions(fallback.issues, "clamped"));
 }
 
 TEST("sv::asset_loader - a left-handed FBX scene is mirrored into sv's, with an issue")
