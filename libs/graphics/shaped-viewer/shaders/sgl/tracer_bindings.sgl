@@ -374,7 +374,9 @@ binding bindless:
     textures_3d: texture_3d[float4][128]
 
     /// Raw buffers: vertices, indices, attributes and parameter blocks, which a hit reads through `scene.instance`.
-    buffers: bytes[4096]
+    /// Several per scene item, so a production scene of a few thousand meshes needs over ten thousand.
+    /// Every snapshot of this group takes the whole table from the backend's shader-visible heap, which bounds how large it may grow.
+    buffers: bytes[16384]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //
