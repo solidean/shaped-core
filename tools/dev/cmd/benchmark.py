@@ -26,7 +26,8 @@ from pathlib import Path
 
 from tools import dev
 from tools.dev import console
-from tools.dev.lib.pipeline.benchmarks import collect_benchmarks, filter_argument, select_benchmarks, unselected_overreach
+from tools.dev.lib.pipeline.benchmarks import collect_benchmarks, select_benchmarks, unselected_overreach
+from tools.dev.lib.pipeline.eligibility import nexus_filter
 
 from tools.dev.lib.toolchain import jsruntime as jsr
 
@@ -147,7 +148,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             # Each name is a substring filter within the bucket, which unselected_overreach has ruled safe above.
             command = [*prefix, str(artifact), "--benchmarks"]
             for b in by_target[target]:
-                command.append(filter_argument(b.name))
+                command.append(nexus_filter(b.name))
 
             # Suffixed per binary and per repeat, so several binaries or several runs never overwrite one another.
             if args.json:

@@ -23,6 +23,7 @@ from ..core.models import Preset, Target
 from ..core.process import emsdk_env, run_step
 from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
+from .eligibility import nexus_filter
 
 # nexus prints this when a name filter matches no tests in a binary.
 # With a filter active that is "nothing to run here", not a failure.
@@ -224,7 +225,7 @@ def test(
                 # selects tests — and ahead of the name, so a test named like one of its commands still means the test.
                 cmd = [*launcher, str(target.artifact), "--tests"]
                 if test_name:
-                    cmd.append(test_name)
+                    cmd.append(nexus_filter(test_name))
                 # Forward verbosity to the runner: nexus' -v prints "- start <test>" before each test, so a crash or hang pinpoints the last one that started.
                 # A harmless positional for other runners.
                 if verbose:

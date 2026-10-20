@@ -2,6 +2,8 @@
 created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-graphics/src/shaped-graphics/barrier/access_inference.hh
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T13:23Z
 ---
 
 # A footprint is only as exact as the code the emitter prints
