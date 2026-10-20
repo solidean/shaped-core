@@ -99,16 +99,28 @@ void command_list_compute_scope::dispatch_groups_indirect_bytes(raw_buffer_handl
     _cmd.dispatch_indirect(args, offset_in_bytes);
 }
 
-void command_list_compute_scope::declare_array_buffer_access(cc::string_view binding_name,
-                                                             cc::span<array_buffer_access const> elements)
+array_access_declaration command_list_compute_scope::declare_array_buffer_access(buffer_array_binding array,
+                                                                                 cc::span<array_buffer_access const> elements)
 {
-    _cmd.compute_declare_array_buffer_access(binding_name, elements);
+    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_buffer_access(array.name, elements), false);
 }
 
-void command_list_compute_scope::declare_array_texture_access(cc::string_view binding_name,
-                                                              cc::span<array_texture_access const> elements)
+array_access_declaration command_list_compute_scope::declare_array_buffer_access(cc::string_view binding_name,
+                                                                                 cc::span<array_buffer_access const> elements)
 {
-    _cmd.compute_declare_array_texture_access(binding_name, elements);
+    return declare_array_buffer_access(_cmd.named_buffer_array(binding_name), elements);
+}
+
+array_access_declaration command_list_compute_scope::declare_array_texture_access(texture_array_binding array,
+                                                                                  cc::span<array_texture_access const> elements)
+{
+    return _cmd.adopt_array_declaration(_cmd.compute_declare_array_texture_access(array.name, elements), false);
+}
+
+array_access_declaration command_list_compute_scope::declare_array_texture_access(cc::string_view binding_name,
+                                                                                  cc::span<array_texture_access const> elements)
+{
+    return declare_array_texture_access(_cmd.named_texture_array(binding_name), elements);
 }
 
 void command_list_compute_scope::set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset)

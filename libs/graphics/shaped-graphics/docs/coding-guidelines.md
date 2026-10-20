@@ -35,7 +35,7 @@ The `_handle` suffix is the one vocabulary that makes "reference-counted GPU-sid
 **`std::shared_ptr` is the sanctioned ownership type here, and stays that way for now.**
 [`cc::shared_ptr`](../../../base/clean-core/src/clean-core/memory/shared_ptr.hh) is an 8 B intrusive-refcount handle, but its Traits protocol is provisional.
 See [systems/shared-ptr](../../../base/clean-core/docs/systems/shared-ptr.md).
-Switching the typedefs over is what would keep sg inside the `cc` vocabulary, and [TODO](TODO.md) tracks it against that API settling.
+Switching the typedefs over is what would keep sg inside the `cc` vocabulary, and [chore-sg-cc-shared-ptr-handles](issues/chore-sg-cc-shared-ptr-handles.md) tracks it against that API settling.
 So `std::shared_ptr` remains the one sanctioned `std::` ownership type in sg.
 A new handle follows the existing pattern; do not invent a second ownership mechanism.
 
@@ -130,7 +130,8 @@ The concrete backend types are public and the `sg::context` handle *is* that obj
 That is a deliberate, unpoliced escape hatch, and fully "you are on your own" — the code is now coupled to one backend and its version.
 Reach for it only for backend-specific behavior sg does not expose.
 
-A **blessed** middle ground is planned: an API handing back the raw underlying GPU handles without exposing the concrete backend *types* — tracked in [TODO](TODO.md).
+A **blessed** middle ground is planned: an API handing back the raw underlying GPU handles without exposing the concrete backend *types*.
+[feat-sg-native-handle-escape-hatch](issues/feat-sg-native-handle-escape-hatch.md) tracks it.
 Prefer it once it exists.
 
 ## Backends expose backend-typed create methods; the virtuals are thin forwarders

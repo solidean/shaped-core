@@ -56,7 +56,7 @@ Not an oversight, and worth knowing before "migrating" anything:
 - shaped-graphics' resources are polymorphic — `dx12_buffer final : public sg::raw_buffer`.
   So `default_shared_traits`' `sizeof(T)`-derived control offset cannot find the counts through a base-typed handle.
   They also derive from `std::enable_shared_from_this`, with 30+ `shared_from_this()` call sites that `cc::shared_ptr` has no equivalent for.
-  See [sg's TODO](../../../../graphics/shaped-graphics/docs/TODO.md).
+  See [sg's issue](../../../../graphics/shaped-graphics/docs/issues/chore-sg-cc-shared-ptr-handles.md).
 - shaped-shader-library's filesystem handles are polymorphic, and `default_shared_traits` places the control block at an offset derived from `sizeof(T)`.
   So a base-typed handle to a derived object would look for the counts in the wrong place.
   That needs a base-keyed Traits, which is the same shape async had to write by hand.

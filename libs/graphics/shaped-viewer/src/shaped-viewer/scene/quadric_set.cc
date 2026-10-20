@@ -1,19 +1,10 @@
 #include "quadric_set.hh"
 
-#include <clean-core/common/utility.hh> // cc::min, cc::max
+#include <clean-core/common/assert.hh>
 #include <shaped-viewer/impl/content_hash.hh>
 
 using namespace cc::primitive_defines;
 
-namespace
-{
-tg::aabb3f united(tg::aabb3f const& a, tg::aabb3f const& b)
-{
-    auto const lo = tg::pos3f(cc::min(a.min[0], b.min[0]), cc::min(a.min[1], b.min[1]), cc::min(a.min[2], b.min[2]));
-    auto const hi = tg::pos3f(cc::max(a.max[0], b.max[0]), cc::max(a.max[1], b.max[1]), cc::max(a.max[2], b.max[2]));
-    return tg::aabb3f(lo, hi);
-}
-} // namespace
 
 void sv::quadric_set::add(quadric_primitive const& p)
 {
@@ -22,7 +13,8 @@ void sv::quadric_set::add(quadric_primitive const& p)
     _hash_dirty = true;
 
     // The bounds fold stays, because a union of boxes is not a byte range and has no bulk form to defer to.
-    _bounds = _bounds.has_value() ? united(_bounds.value(), p.bounds) : p.bounds;
+    CC_ASSERT(!p.bounds.is_empty(), "a quadric primitive needs its bounds: the BLAS reads them as its box");
+    _bounds = _bounds.has_value() ? tg::aabb_of(_bounds.value(), p.bounds) : p.bounds;
 
     _primitives.push_back(p);
 }

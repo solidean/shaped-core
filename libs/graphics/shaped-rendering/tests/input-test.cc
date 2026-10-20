@@ -6,8 +6,7 @@
 // These cover the value types and the event-buffer lifetime, which is what sr owns outright.
 //
 // They do not cover the SDL-to-sr translation — the scancode table, the wheel-direction flip, the keycode to
-// character rule — because reaching it means injecting real SDL events, and SDL lives in exactly one file
-// (../docs/coding-guidelines.md). See ../docs/TODO.md.
+// character rule — which input-translation-test.cc tests at the seam.
 
 // nx::main_thread here because sr::window_system must be created on the process main thread; see window-test.cc.
 TEST("sr - key modifiers combine and test as a bit set", main_thread)

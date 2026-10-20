@@ -107,7 +107,7 @@ The key is one XXH3-128 pass over the primitive span, taken lazily on the first 
 Folding a digest per `add` was the first shape, and it is about five times the work for the same invariant.
 The cost is the call count rather than the bytes, and `tests/quadric-set-benchmark.cc` is what settled it.
 It is also what lands the streaming, residency and eviction story for free.
-A quadric batch becomes the same kind of thing `mesh_manager` already holds: a hashed payload that `ctx.stream` uploads, and that `record_pending_work` builds a BLAS behind.
+A quadric batch becomes the same kind of thing `mesh_manager` already holds: a hashed payload that `ctx.stream` uploads, and that the first trace reaching it builds a BLAS behind.
 It differs in one way, and deliberately: `quadric_data` BORROWS its span rather than pinning it.
 The authored form cannot be uploaded as it stands — it splits into a primitive buffer and a box buffer — so the acquire builds new arrays anyway, and only on a miss.
 

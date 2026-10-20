@@ -55,7 +55,7 @@ private:
 /// So prepare() records them on the command list before the scope opens, and execute() only draws.
 /// On vulkan the first draw's barrier on that uploaded geometry still splits the scope once per frame, until sg can
 /// declare a buffer's access before a scope opens — libs/graphics/shaped-rendering/docs/imgui.md says it too, and
-/// libs/graphics/shaped-graphics/docs/TODO.md carries the declaration this waits on.
+/// issue: feat-sg-declare-scope-accesses-up-front is the declaration this waits on.
 ///
 /// This frame's geometry is deliberately *not* routine state:
 /// it is allocated from the transient scope and travels in the prepared_frame, so the pair is re-entrant across imgui's viewports.

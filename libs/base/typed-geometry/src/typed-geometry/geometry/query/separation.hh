@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/error/optional.hh>
 #include <typed-geometry/geometry/query/impl/kernels.hh>
 
@@ -11,6 +12,7 @@ namespace tg::impl
 template <class A, class B>
 [[nodiscard]] constexpr auto separation_from(A const& a, B const& b)
 {
+    CC_ASSERT(!impl::is_empty_set(a) && !impl::is_empty_set(b), "the empty set has no separation from anything");
     if constexpr (has_op<separation_op, A, B>)
         return separation_op<A, B>::apply(a, b);
     else if constexpr (epa_pair<A, B>)

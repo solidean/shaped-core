@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import clangd, graphics, known_issues, network
+from . import clangd, graphics, jsruntime, known_issues, network
 from .llvm_tools import find_tool, resolve_tool
 from ..core.models import Preset
 from ..core.process import (
@@ -263,6 +263,44 @@ def _macos_sdk_check(preset: Preset | None, cxx: str | None) -> tuple[str, bool 
             f"reconfigure to move to it, which rebuilds everything")
 
 
+def _available_compilers_checks() -> list[tuple[str, bool | None, str]]:
+    """Every C++ compiler this machine offers, one advisory row per family: MSVC toolsets per VS install, clang, gcc.
+
+    The `compiler` row above answers for the preset; these answer what else `--preset` or `--toolset` could reach.
+    A family that is absent is advisory rather than a failure, since no single machine is expected to carry all three.
+    """
+    from . import toolset as ts
+
+    try:
+        data = ts.list_toolsets()
+    except Exception as e:  # noqa: BLE001 - discovery is best-effort, and doctor must not crash on it
+        return [("compilers", None, f"could not enumerate ({e})")]
+
+    rows: list[tuple[str, bool | None, str]] = []
+    if platform.system() == "Windows":
+        installs = [i for i in data.get("msvc", []) if i.get("toolsets")]
+        if installs:
+            detail = "; ".join(
+                f"{i['name']}{' (prerelease)' if i.get('prerelease') else ''}: {', '.join(i['toolsets'])}"
+                for i in installs
+            )
+            rows.append(("msvc toolsets", True, detail))
+        else:
+            rows.append(("msvc toolsets", None, "none found (Visual Studio with the C++ workload)"))
+
+    for family in ("clang", "gcc"):
+        entries = data.get(family, [])
+        if not entries:
+            rows.append((f"{family} compilers", None, "none found on PATH"))
+            continue
+        versions = []
+        for e in entries:
+            m = re.search(r"version\s+(\S+)", e.get("version") or "")
+            versions.append(f"{e['name']} {m.group(1)}" if m else e["name"])
+        rows.append((f"{family} compilers", True, ", ".join(versions)))
+    return rows
+
+
 def _coverage_tool_check(
     label: str, name: str, env_var: str, build_dir: Path | None
 ) -> tuple[str, bool, str]:
@@ -337,32 +375,55 @@ def _emscripten_checks(emsdk_path: str | None) -> list[tuple[str, bool | None, s
     return checks
 
 
+def _deno_check() -> tuple[str, bool | None, str]:
+    """Report the deno `--runtime deno` would launch, and whether it is the pinned one.
+
+    Advisory either way: node is the default runtime, and a deno on PATH at another version still runs artifacts.
+    """
+    label = "deno (--runtime deno)"
+    pinned = jsruntime.pinned_deno_version()
+    rt = jsruntime.resolve(kind="deno")
+    if rt is None:
+        return (label, None, f"not installed (optional) - `uv run dev.py install deno` for {pinned}")
+    found = jsruntime.deno_version_number(rt.version)
+    if found == pinned:
+        return (label, True, f"{found} at {rt.exe}")
+    return (label, None, f"{found or 'unknown version'} at {rt.exe}, tools/deno.version pins {pinned} - run: uv run dev.py install deno")
+
+
 def _windows_pmu_check() -> tuple[str, bool | None, str]:
     """Report whether non-admin PMU profiling (nexus/bench hardware counters) is set up on Windows.
 
-    tools/setup-pmu-access.ps1 grants three things together: Performance Log Users membership, SeSystemProfilePrivilege, and ETW session-GUID ACLs.
-    The ACLs live under an admin-only registry key we cannot read here, but the script grants all three atomically.
-    So the group and privilege in the current token are a faithful proxy for "the setup ran".
+    tools/setup-pmu-access.ps1 grants these together: Performance Log Users and Performance Monitor Users membership, SeSystemProfilePrivilege, and ETW session-GUID ACLs.
+    The ACLs live under an admin-only registry key we cannot read here, but the script grants them all at once.
+    So the groups and privilege in the current token are a faithful proxy for "the setup ran".
+    Performance Monitor Users came later, for registering the PMU events the HAL lacks; a setup from before it still reads counters, only not the AMD cache misses.
     PMU counters are optional, since baseline timing and cycles work without them, so a missing setup is advisory (SKIP) rather than a hard failure.
     """
     label = "PMU profiling (nexus/bench)"
+    # By path: under Git Bash, MSYS's own whoami comes first on PATH and knows no /groups.
+    whoami = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "whoami.exe")
+    # Group names are localized and printed in the console code page; only the ASCII SIDs are read, so undecodable bytes are replaced.
     try:
-        groups = subprocess.run(["whoami", "/groups", "/fo", "csv", "/nh"],
-                                capture_output=True, text=True, timeout=15).stdout or ""
-        priv = subprocess.run(["whoami", "/priv", "/fo", "csv", "/nh"],
-                              capture_output=True, text=True, timeout=15).stdout or ""
+        groups = subprocess.run([whoami, "/groups", "/fo", "csv", "/nh"],
+                                capture_output=True, text=True, errors="replace", timeout=15).stdout or ""
+        priv = subprocess.run([whoami, "/priv", "/fo", "csv", "/nh"],
+                              capture_output=True, text=True, errors="replace", timeout=15).stdout or ""
     except (OSError, subprocess.TimeoutExpired) as e:
         return (label, None, f"could not query the process token ({e})")
 
     has_group = "S-1-5-32-559" in groups  # Performance Log Users (well-known, language-independent SID)
+    has_monitor_group = "S-1-5-32-558" in groups  # Performance Monitor Users
     has_priv = "SeSystemProfilePrivilege" in priv
-    if has_group and has_priv:
+    if has_group and has_monitor_group and has_priv:
         return (label, True,
-                "non-admin hardware counters configured (Performance Log Users + SeSystemProfilePrivilege)")
+                "non-admin hardware counters configured (Performance Log and Monitor Users + SeSystemProfilePrivilege)")
 
     missing = []
     if not has_group:
         missing.append("Performance Log Users membership")
+    if not has_monitor_group:
+        missing.append("Performance Monitor Users membership")
     if not has_priv:
         missing.append("SeSystemProfilePrivilege")
     return (label, None,
@@ -408,6 +469,8 @@ def doctor(
         cxx = shutil.which("clang++") or shutil.which("g++")
         checks.append(("compiler", cxx is not None, cxx or "no clang++/g++ on PATH"))
 
+    checks.extend(_available_compilers_checks())
+
     cov_build_dir: Path | None = None
     try:
         presets = load_presets(root)
@@ -427,6 +490,7 @@ def doctor(
 
     # Emscripten/WASM toolchain (optional; advisory unless emsdk is signalled).
     checks.extend(_emscripten_checks(emsdk_path))
+    checks.append(_deno_check())
 
     # The graphics environment the sg backends, sr::window and the shader library need — advisory throughout.
     checks.extend(graphics.checks(root, cxx))

@@ -4,10 +4,14 @@
 #include <clean-core/common/time.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/record/event_view.hh>
+#include <clean-core/record/recording.hh>
+#include <clean-core/record/scope.hh> // CC_RECORD_SCOPE, cc::rec::impl::t_writer
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
+#include <nexus/rec.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -40,7 +44,8 @@ ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (s
     auto viewer = cc::move(v_r.value());
 
     auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    // Lit by its own lamp, an emissive mesh, which is the box's only light.
+    auto const lit = sv_test::as_lit_meshes(box, box.light.emission[0]);
 
     // Built once, outside the loop, exactly as an example builds its mesh — that is what pins the buffers and hashes
     // them, so placing it every frame uploads nothing after the first.
@@ -63,10 +68,10 @@ ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (s
         view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
 
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
 
-        accumulated = view.accumulated_frames();
+        accumulated = view.accumulated_samples();
         pending_at_end = f.pending_resource_work();
 
         // A headless loop is ended by the body alone: nothing polls, so there is no close button and no quit.
@@ -80,7 +85,7 @@ ASYNC_INVOCABLE_TEST("sv - headless viewer runs a frame loop with no window", (s
     CHECK(frames_drawn >= 8);
     co_await cc::async_settled(sv::background_work(ctx));
 
-    // The accumulator is read while authoring, so it reports what the PREVIOUS frame integrated — seven, not eight.
+    // The accumulator is read while authoring, and a wavefront layer's samples read back from the GPU, so it trails the frames.
     // What matters is that it climbed at all: a trace that never dispatched leaves it at zero forever.
     CHECK(accumulated > 0);
     CHECK(pending_at_end == 0);
@@ -122,7 +127,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop",
     auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
 
     auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
+    auto const lit = sv_test::as_lit_meshes(box, box.light.emission[0]);
 
     auto frames = 0;
     auto front_applied = 0;
@@ -153,8 +158,8 @@ ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop",
         f.register_capture("side", [&](sv::capture_context const&) { ++side_applied; });
 
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        scene.add_rect_light("key", tg::pos3f(0, 1.9f, 0), tg::vec3f(0.4f, 0, 0), tg::vec3f(0, 0, 0.4f)).nits(12);
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
 
         ++frames;
         // The capture ends the loop itself; this only stops a hang from becoming a test timeout.
@@ -187,6 +192,97 @@ ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop",
         CHECK(decoded.value().height == size[1]);
     }
     cc::remove_file(path);
+}
+
+namespace
+{
+/// The value the last `name` stat of `r` recorded, or -1 where it recorded none.
+[[nodiscard]] f64 last_stat(cc::rec::recording const& r, cc::string_view name)
+{
+    auto last = -1.0;
+    r.for_each_event(
+        [&](cc::rec::chunk_view const&, cc::rec::event_view const& e)
+        {
+            if (e.kind() == cc::rec::event_kind::stat_snapshot && cc::string_view(e.name()) == name)
+                last = e.field_as_double("value").value_or(-1.0);
+        });
+    return last;
+}
+} // namespace
+
+// A capture counts samples per pixel rather than frames, so what it holds is the same whatever GPU takes it.
+//
+// The wavefront starts no sample past the capture's target, so the floor the image is written at is the target exactly.
+// Each still frame runs enough rounds for several samples a pixel, so a trace ignoring the target would overshoot it.
+// A settled run is what says the slowest pixel reached it: settling asks `is_accumulation_converged` of exactly that.
+ASYNC_INVOCABLE_TEST("sv - a wavefront capture settles at its samples per pixel and takes none past them",
+                     (sg::context_handle const& ctx_h),
+                     nx::config::recorded)
+{
+    auto& ctx = *ctx_h;
+    auto rec = nx::test_recording();
+    REQUIRE(rec.is_attached());
+
+    {
+        auto probe = ctx.create_command_list();
+        auto const supported = probe->raytracing.is_supported();
+        ctx.drop_command_list(cc::move(probe));
+        if (!supported)
+            SKIP("device reports no ray tracing support");
+    }
+
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+    if (!ctx.supports(sg::feature::ray_query))
+        SKIP("the wavefront tracer needs inline ray queries");
+
+    auto const path = cc::format("{}/sv-capture-samples.jpg", cc::temp_directory_path());
+    auto const partial = sv::impl::partial_capture_path(path);
+    cc::remove_file(path);
+    cc::remove_file(partial); // leftovers from an earlier run would make both checks below vacuous
+
+    // Odd, and below what one still frame adds past the restart's sample, so an overshoot cannot land on it by chance.
+    constexpr u32 target = 7;
+    auto const request = sr::capture_request{.active = true,
+                                             .output_path = path,
+                                             .size = tg::vec2i(64, 48),
+                                             .accumulate = target,
+                                             .timeout_seconds = 120.0};
+
+    auto const box = sv_test::make_cornell_box();
+    auto const lit = sv_test::as_lit_meshes(box, box.light.emission[0]);
+
+    auto highest = u32(0);
+    auto const loop_start = cc::current_time_steady_secs();
+    for (auto f : sv::interactive(ctx, "sv-test/capture-samples", {}, request))
+    {
+        auto view = f.window().view();
+        view.initial_orbit({.target = tg::pos3d(0, 0, 0), .distance = 6.0});
+
+        auto scene = view.add_scene();
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
+        // 48 rounds a still frame, since a headless viewer has no budget: a box path ends within `max_bounces + 1` of them, so a frame adds about eight.
+        scene.settings({.mode = sv::render_mode::wavefront, .rounds_per_frame = 48});
+
+        highest = cc::max(highest, view.accumulated_samples());
+
+        // The capture ends the loop itself; this only stops a hang from becoming a test timeout.
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
+    }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+
+    CHECK(cc::file_read_stream_adapter::open(path).has_value());
+    CHECK(cc::file_read_stream_adapter::open(partial).has_error());
+    CHECK(highest <= target).context(cc::format("a pixel floor of {} samples under a target of {}", highest, target));
+    // The floor the image was written at, read where the capture settled rather than a frame before it.
+    auto const written = last_stat(rec.sync(), "sv.capture.samples_per_pixel");
+    CHECK(written == f64(target))
+        .context(cc::format("written at {} samples per pixel under a target of {}", written, target));
+
+    cc::remove_file(path);
+    cc::remove_file(partial);
 }
 
 // A capture asked for by a name nothing registers must fail, and must fail WITHOUT writing anything.
@@ -279,11 +375,12 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
     auto const timeout_seconds = 60.0;
     nx::expect_warning("capture: giving up after", nx::exactly(1));
 
-    // Above the accumulation cap, so no number of frames settles it; only the clock can end this run.
+    // Below the accumulation cap, which a view at the cap would count as settled, and far beyond what the frames before
+    // the clock jumps can trace, so only the clock can end this run.
     auto const request = sr::capture_request{.active = true,
                                              .output_path = path,
                                              .size = tg::vec2i(64, 48),
-                                             .accumulate_frames = 100000,
+                                             .accumulate = sv::accumulation_sample_cap - 1,
                                              .timeout_seconds = timeout_seconds,
                                              .clock_seconds = [] { return g_timeout_test_now; }};
 
@@ -304,7 +401,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
         view.add_scene().add_mesh(mesh);
 
         // The whole timeout passes within this frame, so the capture gives up as it ends.
-        if (view.accumulated_frames() > 0)
+        if (view.accumulated_samples() > 0)
         {
             traced_before_timeout = true;
             g_timeout_test_now = timeout_seconds;
@@ -331,6 +428,41 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
         CHECK(decoded.value().height == 48);
     }
     cc::remove_file(partial);
+}
+
+// A frame that holds the capture is not the finished image, whatever the viewer itself sees.
+//
+// A view with nothing traced settles on its first frame, so the hold is the only thing that can keep this run going.
+// That is the Sponza example's situation: its scene is not there until its own load lands, and an unheld capture
+// converged on the empty sky instead.
+INVOCABLE_TEST("sv - a capture waits for every frame that holds it", (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto const path = cc::format("{}/sv-capture-hold.jpg", cc::temp_directory_path());
+    cc::remove_file(path); // a leftover from an earlier run would make the check below vacuous
+
+    auto const request = sr::capture_request{.active = true,
+                                             .output_path = path,
+                                             .size = tg::vec2i(64, 48),
+                                             .accumulate = 1,
+                                             .timeout_seconds = 120.0};
+
+    auto frames = 0;
+    for (auto f : sv::interactive(ctx, "sv-test/capture-hold", {}, request))
+    {
+        (void)f.window().view();
+
+        ++frames;
+        if (frames < 5)
+            f.hold_capture("the test is holding it");
+
+        REQUIRE(frames < 200); // the first unheld frame settles it; this only keeps a hang from becoming a timeout
+    }
+
+    CHECK(frames == 5);
+    CHECK(cc::file_read_stream_adapter::open(path).has_value());
+    cc::remove_file(path);
 }
 
 // A light's id is hashed under the frame's id stack exactly as a view's is, so the same name under two scopes names
@@ -373,6 +505,26 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// A frames() loop opens no `sv.frame` scope, so tearing its viewer down must close none.
+// An unmatched close pops whatever scope the caller has open on its thread, and a coroutine step around the loop then
+// fails as a profiling scope crossing a co_await.
+INVOCABLE_TEST("sv - a viewer closes no profiling scope it did not open", (sg::context_handle const& ctx_h))
+{
+    CC_RECORD_SCOPE("sv-test.enclosing");
+    auto const depth = cc::rec::impl::t_writer.scope_depth;
+    {
+        auto v_r = sv::viewer::try_create(*ctx_h, "sv-test/scope-balance", {.width = 32, .height = 32, .headless = true});
+        REQUIRE(v_r.has_value());
+        auto viewer = cc::move(v_r.value());
+        for (auto f : viewer.frames())
+        {
+            (void)f;
+            viewer.request_close();
+        }
+    }
+    CHECK(cc::rec::impl::t_writer.scope_depth == depth);
+}
+
 // A frame loop lands its streamed payloads rather than ending on a frame count.
 //
 // What this pins is that residency is reached at all: five payloads go in flight and the loop ends on
@@ -385,7 +537,7 @@ ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate i
 // A blocking wait sweeps the pump registry itself, so it does the copy actor's turn and the sweep is redundant here.
 // The case the sweep exists for is a loop paced slowly enough that the GPU is never behind — a real display's vsync,
 // or a frame limiter — and no test reaches it yet.
-// libs/graphics/shaped-viewer/docs/TODO.md carries it.
+// issue: debt-sv-pump-sweep-untested
 INVOCABLE_TEST("sv - a frame loop lands its streamed payloads", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;

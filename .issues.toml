@@ -1,5 +1,6 @@
 # The issue tracker: docs/guides/issue-tracking.md.
 name = "shaped-core"
 branch = "main"
-# Its self-test writes markers into throwaway repositories, so its source names issues that exist only there.
-exclude = ["tools/issues/issues-self-test.py"]
+# These name issues that exist nowhere: the tool's self-test writes markers into throwaway repositories, and the
+# no-bare-todo corpus shows what a marker looks like.
+exclude = ["tools/issues/issues-self-test.py", "tools/shaped-linter/rules/prose/no-bare-todo/no_bare_todo.md"]

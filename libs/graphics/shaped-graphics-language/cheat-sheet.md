@@ -465,6 +465,9 @@ sgl::print_source(file)      // == file.source for EVERY input: the lossless inv
 @option const tile = 8                   // the host sets it per compile, and this is its default (CHK-353)
 @compute(tile, tile) fun blur(...)       // an option stands where a const stands: a workgroup size, an array length, an image format
                                          // a used module's option is set as `common.taps`, apart from the program's `taps` (CHK-354)
+texel[.rg16_float]                       // the type an image of that format loads and stores: float2; texel[out_format] per compile (CHK-390)
+img[xy] = v as texel[out_format]         // a store into a host-picked format: .x / .xy of a wider v, a narrower one filled from (0, 0, 0, 1)
+                                         // the ONLY width change: `float4 as float2` is no conversion, and no kind changes (CHK-391, CHK-392)
 if tile > 8: ...                         // a branch on a constant keeps the side it takes, in text, footprint and verdicts (CHK-356)
 fun f(x: float, .fast: bool)             // ...and a literal argument is a constant, so `f(x, fast = false)` sheds its fast side
 @unroll                                  // on a `for`: the body once per index, the index a literal in each copy, within 256 copies (CHK-389)
@@ -602,10 +605,15 @@ ops[i](mut v)                                            // raygen, miss, closes
   Leaving its default type is one step of a literal's chain; candidates rank by dominance over those chains, then a type-scope function wins (CHK-254).
   `0xff`, `0b1010` are integer literals like decimal ones (CHK-269); `&`, `|`, `^`, `~`, `<<`, `>>` take int, uint and their vectors, a shift's count keeps its low five bits.
   `1 / 3` is `literal-needs-type` (CHK-313): `/` and `%` over integer literals alone say nothing of int or float; an integer literal is held in 64 bits and refused only in a type that cannot hold it.
-- **The maths builtins** are records of `register_math.cc`: trig, `exp`/`log`, `pow`, `sqrt`/`inverse_sqrt`, rounding, `sign`, `step`/`smoothstep`.
+- **The maths builtins** are records of `register_math.cc`: trig, `exp`/`log`, `pow`, `sqrt`/`inverse_sqrt`, rounding, `sign`, `step`/`smoothstep`, `is_nan`/`is_inf`.
+  `is_nan` and `is_inf` are a bit test on every target, since Vulkan, WGSL and MSL may each assume neither arises.
+  They take a half too, tested as the float it widens to.
   Beside them `ddx`/`ddy`, `cross`, `distance`, `reflect`/`refract`, the integer bit functions and packing; `round` is ties to even.
   The interpreter computes them with `builtins/impl/soft_math.hh`, never a libm, so every host meets the same bits; a test compares them with `nearly_equal(a, b, within = …)`.
   `x.bits` and `float.from_bits(u)` are extensions in `core.sgl` over `reinterpret_as_*`, and a WGSL-indeterminate argument (`pow(-1.0, 0.5)`) is a `program-error`.
+- **`mat4` is the one matrix**, opaque and column-major, with NO constructor: a matrix comes from a binding.
+  `register_transforms.cc` holds `m * p`, `m * v`, `m * float4`, `m * m` and `determinant(m) -> float` (EVAL-98), every target's own function.
+  A test of a particular matrix binds it through `driver_bindings`, 16 floats column by column; `sgl test` alone sees the zero matrix.
 - **Stage inputs are parameters** (CHK-271): the stage struct first, then `@vertex_index i: int`, `@is_front_facing f: bool`, `@thread_id id: int3`, ….
   `flat_entry_point::input` is `none` for a vertex stage without a vertex buffer, and `stage_inputs` holds each input's local; `run_inputs::stage_inputs` gives them values.
 - **Geometry and tessellation stages** (CHK-301 to CHK-307): `@geometry(max_vertices = N)` takes `tri: varyings[3]` first and `stream: mut triangle_stream[varyings]` last.

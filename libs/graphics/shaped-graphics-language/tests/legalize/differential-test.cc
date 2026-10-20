@@ -30,7 +30,8 @@ struct sweep
     int failed = 0;
 };
 
-sweep run_seeds(checked_module const& m, u64 count, legalize_options const& options = {})
+/// A non-empty `until` ends the sweep at the first failure containing it, which is then among `failures`.
+sweep run_seeds(checked_module const& m, u64 count, legalize_options const& options = {}, cc::string_view until = {})
 {
     auto result = sweep();
     for (auto seed = u64(0); seed < count; ++seed)
@@ -38,7 +39,13 @@ sweep run_seeds(checked_module const& m, u64 count, legalize_options const& opti
         auto const failure = differential_failure(m, seed, shape_of(seed), options);
         if (failure.empty())
             continue;
-        if (++result.failed <= 3)
+        ++result.failed;
+        if (!until.empty() && failure.contains(until))
+        {
+            result.failures += failure;
+            break;
+        }
+        if (result.failed <= 3)
             result.failures += failure;
     }
     return result;
@@ -93,7 +100,7 @@ TEST("sgl legalize - the random programs exercise every rule")
 TEST("sgl legalize - the differential test has teeth: without pinning some seed fails")
 {
     auto const checked = flat_test_module();
-    auto const result = run_seeds(checked.module, 400, {.skip_pinning = true});
+    auto const result = run_seeds(checked.module, 400, {.skip_pinning = true}, "the two forms behave differently");
     CHECK(result.failed > 0);
     CHECK(result.failures.contains("the two forms behave differently"));
 }
@@ -101,7 +108,7 @@ TEST("sgl legalize - the differential test has teeth: without pinning some seed 
 TEST("sgl legalize - the differential test has teeth: without the flag tests some seed fails")
 {
     auto const checked = flat_test_module();
-    auto const result = run_seeds(checked.module, 400, {.skip_flag_tests = true});
+    auto const result = run_seeds(checked.module, 400, {.skip_flag_tests = true}, "the two forms behave differently");
     CHECK(result.failed > 0);
     CHECK(result.failures.contains("the two forms behave differently"));
 }

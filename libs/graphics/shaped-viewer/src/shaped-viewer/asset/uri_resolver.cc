@@ -16,7 +16,7 @@ namespace
 /// resolver would deadlock the moment a resolver resolves something itself.
 uri_resolver_provider g_resolve_uri;
 
-/// The value one hex digit names; `cc` has `is_hex_digit` but no nibble decoder yet.
+/// The value one hex digit names; `cc` has `is_hex_digit` but no nibble decoder yet (issue: feat-cc-hex-value).
 [[nodiscard]] int hex_value(char c)
 {
     if (c >= '0' && c <= '9')

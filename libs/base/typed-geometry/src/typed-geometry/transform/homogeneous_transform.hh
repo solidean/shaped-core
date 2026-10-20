@@ -257,13 +257,45 @@ public:
     }
 
     /// an arbitrary homogeneous matrix.
-    /// Only a projective transform can hold one unchanged.
+    /// A projective transform holds any; an affine one holds a matrix whose last row is (0, ..., 0, 1), exactly.
+    /// That is the shape every affine matrix read from a file has, a glTF node's `matrix` among them.
     [[nodiscard]] static constexpr homogeneous_transform make_from_mat(mat<DSource + 1, DTarget + 1, T> const& m)
-        requires(has_projection)
+        requires(has_projection
+                 || (has_translation && linear_flags == tg::impl::linear_kind::general_linear && DSource == DTarget))
     {
         homogeneous_transform r;
-        r._representation.m = m;
+        if constexpr (has_projection)
+            r._representation.m = m;
+        else
+        {
+            for (int c = 0; c < DSource; ++c)
+                CC_ASSERT(tg::traits::is_zero(m[c, DTarget]), "an affine matrix's last row is (0, ..., 0, 1)");
+            CC_ASSERT(tg::traits::is_one(m[DSource, DTarget]), "an affine matrix's last row is (0, ..., 0, 1)");
+            for (int c = 0; c < DSource; ++c)
+                for (int row = 0; row < DTarget; ++row)
+                    r._representation.linear.linear[c, row] = m[c, row];
+            for (int row = 0; row < DTarget; ++row)
+                r._representation.translation.data[row] = m[DSource, row];
+        }
         return r;
+    }
+
+    /// translation, rotation and scale, applied scale first: the order glTF, USD and every engine store a node's transform in.
+    /// A scale factor may be negative, which mirrors, or zero, which flattens: glTF hides a node that way.
+    [[nodiscard]] static constexpr homogeneous_transform make_trs(vec<3, T> const& translation,
+                                                                  quat<T> const& rotation,
+                                                                  vec<3, T> const& scale)
+        requires(DSource == 3 && DTarget == 3 && tg::impl::transform_is_subclass(tg::impl::transform_class::affine, Flags))
+    {
+        auto const trs
+            = homogeneous_transform<3, 3, T, tg::impl::transform_class::translation>::make_translation(translation)
+                  .composed(homogeneous_transform<3, 3, T, tg::impl::transform_class::rotation>::make_rotation(rotation))
+                  .composed(
+                      homogeneous_transform<3, 3, T, tg::impl::transform_class::signed_scaling>::make_scaling(scale));
+        if constexpr (decltype(trs)::flags == Flags)
+            return trs;
+        else
+            return homogeneous_transform(trs);
     }
 
     // special values
@@ -667,3 +699,25 @@ inline homogeneous_transform<DSource, DTarget, T, Flags> const homogeneous_trans
     = homogeneous_transform<DSource, DTarget, T, Flags>{};
 
 } // namespace tg
+
+namespace tg::impl
+{
+/// The homogeneous w a projective transform gives `p`: zero at infinity, and one sign on each side of the projection.
+/// Which sign is in front depends on the matrix, since -M is the same map as M.
+template <int D, class T, transform_flags Flags>
+[[nodiscard]] constexpr T projective_w(homogeneous_transform<D, D, T, Flags> const& t, pos<D, T> const& p)
+{
+    auto const m = t.to_mat();
+    auto w = m[D, D];
+    for (int c = 0; c < D; ++c)
+        w += m[c, D] * p.data[c];
+    return w;
+}
+
+/// Whether every point keeps to one side of the projection, the condition for a convex hull to map onto the hull of its images.
+template <class... Ws>
+[[nodiscard]] constexpr bool one_side_of_projection(Ws... ws)
+{
+    return ((ws > decltype(ws)(0)) && ...) || ((ws < decltype(ws)(0)) && ...);
+}
+} // namespace tg::impl

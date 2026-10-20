@@ -18,7 +18,8 @@ namespace sv
 /// needs no context at all, and a caller who wants their own sets that hook once instead of threading one through.
 /// Everything else — the window, swapchain, shader library and scene resources — the viewer brings up itself.
 ///
-/// This throws if the viewer cannot be created (no context, no window backend, no display, no ray tracing).
+/// This throws if the viewer cannot be created (no context, no window backend, no display).
+/// A device without ray tracing still creates one: its raster layers draw, and a traced layer is declined with one logged error.
 /// `sv::viewer::try_create` is the fallible form, for a caller who wants to degrade rather than fail.
 [[nodiscard]] frame_range interactive(cc::string_view id, viewer_config config = {});
 

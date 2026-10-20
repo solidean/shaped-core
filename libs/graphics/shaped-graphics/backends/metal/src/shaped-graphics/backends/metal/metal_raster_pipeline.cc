@@ -41,8 +41,8 @@ struct loaded_stage
 /// **An attribute's `[[attribute(n)]]` index is its position in `attributes`**, because sg identifies a vertex input by
 /// an HLSL `semantic` string and MSL has no such thing.
 /// That is the same rule the vulkan backend states for its SPIR-V locations, and it is a workaround for the same
-/// missing field: the backend-neutral numeric `location` on `sg::vertex_attribute` that
-/// libs/graphics/shaped-graphics/docs/TODO.md already plans.
+/// missing field: the backend-neutral numeric `location` on `sg::vertex_attribute`.
+/// issue: feat-sg-vertex-attribute-location
 ///
 /// The layout index is `k_vertex_buffer_base_index + slot`, which is what `raster_bind_vertex_buffers` writes the
 /// buffer's address into — the two halves have to agree or the fetch reads whatever else is bound there.

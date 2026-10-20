@@ -217,6 +217,29 @@ A braced return value is an expression.
 P f() { return P{1, 2}; }
 ```
 
+Both arms of a conditional are too.
+The first brace group once ended the statement as if it were a block, so the second arm, behind the `:`, read as a declaration of `P<int, int>` and `--fix` wrote `P<int, int> = {y, x}`.
+
+```cpp ~[default-init-assignment]
+P<int, int> f(int x, int y) { return x < y ? P<int, int>{x, y} : P<int, int>{y, x}; }
+```
+
+```cpp ~[default-init-assignment]
+P f(bool c) { return c ? P{1} : P{2}; }
+```
+
+A temporary in the middle of a statement, behind an operator, leaves the rest of the statement an expression.
+
+```cpp ~[default-init-assignment]
+void f() { out << T{1} << T{2}; }
+```
+
+A declaration behind such a statement is still found.
+
+```cpp [default-init-assignment] fix=" = {3}"
+void f(bool c) { return c ? P{1} : P{2}; int y{3}; }
+```
+
 So is a braced temporary in statement position.
 
 ```cpp ~[default-init-assignment]

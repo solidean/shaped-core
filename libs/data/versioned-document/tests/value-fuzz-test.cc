@@ -160,6 +160,9 @@ TEST("vdoc - value decoder fuzz")
                             CHECK(vdoc::to_debug_string(v).size() > 0);
                         });
 
+    if (!nx::is_thorough())
+        test->cap_seed_count(48);
+
     SECTION("fuzz")
     {
         CHECK(test->execute_fuzz_test());

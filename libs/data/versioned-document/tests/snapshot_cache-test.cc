@@ -40,6 +40,15 @@ namespace
 {
     return snapshot_cache({.max_unpinned_entries = 1 << 20});
 }
+
+/// Every op of `c` materialized, in the order of `c.ops`.
+[[nodiscard]] cc::vector<vdoc::raw_document> materialized_ops(corpus_case const& c)
+{
+    auto out = cc::vector<vdoc::raw_document>();
+    for (auto const& op : c.ops)
+        out.push_back(c.graph.materialize(op));
+    return out;
+}
 } // namespace
 
 TEST("vdoc - a cached materialization equals an uncached one, over the whole corpus")
@@ -48,15 +57,17 @@ TEST("vdoc - a cached materialization equals an uncached one, over the whole cor
     auto ever_used = false;
 
     for (auto const& c : corpus)
+    {
+        auto const at_op = materialized_ops(c);
         for (auto const& heads : c.head_sets)
         {
             auto const expected = c.graph.materialize(heads);
 
             // installing at EVERY op in turn is what makes this exhaustive rather than anecdotal
-            for (auto const& at : c.ops)
+            for (auto i = isize(0); i < c.ops.size(); ++i)
             {
                 auto cache = unbounded_cache();
-                cache.install(at, snapshot_document::create_owning_copy(c.graph.materialize(at)));
+                cache.install(c.ops[i], snapshot_document::create_owning_copy(at_op[i]));
 
                 auto stats = vdoc::impl::materialize_stats();
                 auto const actual = materialize_cached(c.graph, heads, cache, stats);
@@ -65,6 +76,7 @@ TEST("vdoc - a cached materialization equals an uncached one, over the whole cor
                 ever_used = ever_used || stats.snapshots_used == 1;
             }
         }
+    }
 
     CHECK(ever_used);
 }
@@ -80,16 +92,17 @@ TEST("vdoc - two snapshots at once equal one and equal none")
         if (c.ops.size() > 16)
             continue;
 
+        auto const at_op = materialized_ops(c);
         for (auto const& heads : c.head_sets)
         {
             auto const expected = c.graph.materialize(heads);
 
-            for (isize i = 0; i < c.ops.size(); ++i)
-                for (isize j = i + 1; j < c.ops.size(); ++j)
+            for (auto i = isize(0); i < c.ops.size(); ++i)
+                for (auto j = i + 1; j < c.ops.size(); ++j)
                 {
                     auto cache = unbounded_cache();
-                    cache.install(c.ops[i], snapshot_document::create_owning_copy(c.graph.materialize(c.ops[i])));
-                    cache.install(c.ops[j], snapshot_document::create_owning_copy(c.graph.materialize(c.ops[j])));
+                    cache.install(c.ops[i], snapshot_document::create_owning_copy(at_op[i]));
+                    cache.install(c.ops[j], snapshot_document::create_owning_copy(at_op[j]));
 
                     auto stats = vdoc::impl::materialize_stats();
                     auto const actual = materialize_cached(c.graph, heads, cache, stats);
@@ -121,14 +134,15 @@ TEST("vdoc - a filtered sweep may terminate at a snapshot too")
         if (entities.empty())
             continue;
 
+        auto const at_op = materialized_ops(c);
         for (auto const& heads : c.head_sets)
         {
             auto const expected = c.graph.materialize_entities(heads, entities);
 
-            for (auto const& at : c.ops)
+            for (auto i = isize(0); i < c.ops.size(); ++i)
             {
                 auto cache = unbounded_cache();
-                cache.install(at, snapshot_document::create_owning_copy(c.graph.materialize(at)));
+                cache.install(c.ops[i], snapshot_document::create_owning_copy(at_op[i]));
 
                 // a snapshot is unfiltered, and the filter is applied to it by projection — which is sound only
                 // because state propagation is per-path independent

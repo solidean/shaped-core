@@ -19,6 +19,8 @@
 template <class T>
 struct tg::quat
 {
+    using scalar_t = T;
+
     T data[4] = {};
 
     // construction

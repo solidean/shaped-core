@@ -175,7 +175,7 @@ public:
     /// **An edit to one of those does NOT move a caller's cache key.** The generated source carries a literal `#include` line
     /// whose bytes never change when the file does, and `outcome.dependencies` — the only thing that knows what was pulled in —
     /// is not returned from here.
-    /// So a generated permutation does not hot-reload on an include edit — see [shaped-viewer's TODO](../../../shaped-viewer/docs/TODO.md).
+    /// So a generated permutation does not hot-reload on an include edit — issue: bug-sv-hit-group-module-reload.
     ///
     /// **slib adds no cache of its own at this seam** — which is not to say the path is uncached.
     /// A compiler that keeps its own cache still applies it here: DXC's and Metal's `shader_cache`, in-memory tier and

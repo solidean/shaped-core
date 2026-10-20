@@ -367,7 +367,7 @@ struct uniformity_pass
             (void)value(condition, exit);
         if (exit.is && !entered.is && (repeats || !reconverges))
             (void)statements(body, exit);
-        scopes.pop_back();
+        scopes.remove_back();
         // a `break` or a `continue` stays inside it, and a `return` goes on out
         auto const after = reconverges ? first_of(flow, returned) : first_of(flow, exit);
         return {.flow = after, .jumps = returns > returns_before};
@@ -437,7 +437,7 @@ struct uniformity_pass
                 for (auto const& a : e.at(sw.arms))
                     left = first_of(left, statements(a.body, inside).flow);
                 left = first_of(left, statements(sw.default_body, inside).flow);
-                scopes.pop_back();
+                scopes.remove_back();
                 // the arms meet again after it, unless one left the loop or the function around it
                 result.jumps = returns + continues > jumps_before;
                 if (result.jumps)

@@ -173,7 +173,7 @@ A `tlas` binds as a shader resource through the `acceleration_structure` binding
 The pipeline path is `raytracing_pipeline`, `raytracing_shader_table` and `cmd.raytracing.dispatch_rays`, on dx12 (WARP included), vulkan and metal.
 See [raytracing-pipeline](raytracing-pipeline.md), which also says which feature each backend reports.
 
-**Deferred** (see [TODO.md](../TODO.md)):
+**Deferred** (see [epic-sg-acceleration-structure-gaps](../issues/epic-sg-acceleration-structure-gaps.md) and [epic-sg-raytracing-pipeline-gaps](../issues/epic-sg-raytracing-pipeline-gaps.md)):
 
 - the **transient (single-epoch) variant**, and the **refit / update + compaction** runtime path;
 - the shader table's own storage abstraction — it is backed by a plain readable buffer today, and [types.hh](../../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately;

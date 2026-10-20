@@ -60,7 +60,7 @@ struct sv::layer
     /// scene_3d: geometry, lights, the environment a missed ray sees, and the trace's own knobs.
     ///
     /// A traced layer writes no meaningful alpha yet, so it is always opaque and is forced to `replace`.
-    /// Compositing one `over` another needs the raygen to write coverage into `.a` first (see libs/graphics/shaped-viewer/docs/TODO.md).
+    /// Compositing one `over` another needs the raygen to write coverage into `.a` first (issue: feat-sv-traced-layer-alpha).
     cc::vector<scene_item> items;
     cc::vector<scene_light> lights; ///< in the caller's order, which the GPU record does not have to keep
 

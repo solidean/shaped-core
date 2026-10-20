@@ -842,9 +842,9 @@ cc::async_error cc::impl::async_error_propagate(async_error const& e)
     if (e.is_cancelled())
         return async_error::make_cancelled();
 
-    // cc::any_error is move-only and a shared node's error must not be moved out, so re-materialize the message.
-    // The context chain is lost — a richer error-sharing scheme is a follow-up.
-    return async_error::make_error(cc::any_error(e.underlying().to_string()));
+    // cc::any_error is move-only and a shared node's error must not be moved out, so each dependent gets a clone.
+    // It keeps the root's message, site and context chain: a chain of any length reports the error as it was raised.
+    return async_error::make_error(e.underlying().clone());
 }
 
 cc::async_error cc::custom::async_error_from_exception_trait<cc::async_error>::make(cc::string_view message)

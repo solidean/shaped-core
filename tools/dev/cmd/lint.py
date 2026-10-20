@@ -142,7 +142,7 @@ def run_shaped_linter(
     # A spec file rather than argv, since the run already batches to stay under the command-line limit.
     changed_lines_spec: Path | None = None
     if scope is not None:
-        spec = dev.format_changed_line_spec(dev.changed_line_ranges(ctx.root, scope))
+        spec = dev.format_changed_line_spec(dev.lint_changed_line_ranges(ctx.root, scope, layout=ctx.policy.layout))
         if spec:
             changed_lines_spec = preset.build_dir / "shaped-linter-changed-lines.txt"
             changed_lines_spec.parent.mkdir(parents=True, exist_ok=True)

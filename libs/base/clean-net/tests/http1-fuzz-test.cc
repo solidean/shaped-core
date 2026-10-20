@@ -200,6 +200,9 @@ TEST("cnet - the http/1.1 parser reads the same message however it is split")
 
     test->add_invariant("chunk-independent", [](cc::string const& s) { return parses_the_same_however_split(s); });
 
+    if (!nx::is_thorough())
+        test->cap_seed_count(48);
+
     SECTION("fuzz")
     {
         CHECK(test->execute_fuzz_test());

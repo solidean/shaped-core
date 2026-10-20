@@ -37,6 +37,8 @@ template <class T>
 template <int D, class T>
 struct tg::cylinder
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a cylinder is 3D");
 
     segment<D, T> axis;
@@ -153,6 +155,8 @@ public:
 template <int D, class T>
 struct tg::cylinder_boundary
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a cylinder is 3D");
 
     segment<D, T> axis;
@@ -247,6 +251,8 @@ public:
 template <int D, class T>
 struct tg::cylinder_mantle
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a cylinder is 3D");
 
     segment<D, T> axis;

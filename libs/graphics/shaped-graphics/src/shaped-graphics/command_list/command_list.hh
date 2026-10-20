@@ -4,6 +4,7 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/command_list/array_access_declaration.hh>
 #include <shaped-graphics/command_list/compute.hh>
 #include <shaped-graphics/command_list/copy.hh>
 #include <shaped-graphics/command_list/download.hh>
@@ -134,12 +135,19 @@ protected:
     virtual void compute_dispatch_indirect(raw_buffer_handle const& args, isize offset_in_bytes) = 0;
     virtual void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) = 0;
 
-    // Records explicit per-element access for an array/bindless binding (reached through cmd.compute).
+    // Records explicit per-element access for an array/bindless binding (reached through cmd.compute and cmd.raytracing).
     // Split by resource family: buffers carry no layout, textures do.
-    virtual void compute_declare_array_buffer_access(cc::string_view binding_name,
-                                                     cc::span<array_buffer_access const> elements) = 0;
-    virtual void compute_declare_array_texture_access(cc::string_view binding_name,
-                                                      cc::span<array_texture_access const> elements) = 0;
+    // Each returns the id of a declaration in force until withdraw_array_declaration ends it.
+    [[nodiscard]] virtual u32 compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                                  cc::span<array_buffer_access const> elements) = 0;
+    [[nodiscard]] virtual u32 compute_declare_array_texture_access(cc::string_view binding_name,
+                                                                   cc::span<array_texture_access const> elements) = 0;
+
+    // Ends declaration `id`, which is live: the token guarantees it.
+    virtual void withdraw_array_declaration(u32 id) = 0;
+
+    // The id a backend's next array declaration takes, unique within this list.
+    [[nodiscard]] u32 next_array_declaration_id() { return ++_last_array_declaration_id; }
 
     // Raster rendering scope (reached through cmd.raster).
     // begin_rendering transitions each target to its render-target / depth-stencil layout, binds the
@@ -179,12 +187,12 @@ protected:
     virtual void raster_bind_vertex_buffers(int first_slot, cc::span<vertex_buffer_view const> views) = 0;
     virtual void raster_bind_index_buffer(index_buffer_view const& view) = 0;
 
-    // The raster twin of the compute pair above, held for the next draw rather than the next dispatch.
-    // The graphics bind point keeps its own pending declarations, since its bound groups are its own.
-    virtual void raster_declare_array_buffer_access(cc::string_view binding_name,
-                                                    cc::span<array_buffer_access const> elements) = 0;
-    virtual void raster_declare_array_texture_access(cc::string_view binding_name,
-                                                     cc::span<array_texture_access const> elements) = 0;
+    // The raster twin of the compute pair above, in force for every draw rather than every dispatch.
+    // The graphics bind point keeps its own declarations, since its bound groups are its own, and they end with the rendering scope.
+    [[nodiscard]] virtual u32 raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                                 cc::span<array_buffer_access const> elements) = 0;
+    [[nodiscard]] virtual u32 raster_declare_array_texture_access(cc::string_view binding_name,
+                                                                  cc::span<array_texture_access const> elements) = 0;
     virtual void raster_set_viewport(viewport const& vp) = 0;
     virtual void raster_set_scissor(tg::aabb2i const& rect) = 0;
     virtual void raster_set_stencil_reference(u32 reference) = 0;
@@ -248,8 +256,31 @@ protected:
     void note_render_pass_split(cc::string_view cause, split_remedy remedy = split_remedy::record_outside_scope);
 
     friend impl::stat_counts const& impl::recorded_stats(command_list const& cmd);
+    friend void impl::end_array_declarations_at_submit(command_list& cmd);
+
+    /// Wraps declaration `id`, just made on the compute or the raster bind point, in the value that keeps it in force.
+    [[nodiscard]] array_access_declaration adopt_array_declaration(u32 id, bool raster);
+
+    /// The array a by-name declaration names, which must be a buffer array of some layout the context holds.
+    /// Where a misspelled name is caught, at the declare, whatever the ops after it bind.
+    [[nodiscard]] buffer_array_binding named_buffer_array(cc::string_view name);
+
+    /// The texture form: `name` must be a texture array of some layout the context holds.
+    [[nodiscard]] texture_array_binding named_texture_array(cc::string_view name);
 
 private:
+    friend class array_access_declaration;
+
+    /// Ends `link`'s declaration from its value's side: withdrawn, or destroyed.
+    void end_array_declaration(impl::array_declaration_link& link);
+
+    /// Ends every live declaration from this list's side: the raster ones at a rendering scope's end, or all at a submit or a drop.
+    void end_array_declarations(bool raster_only);
+
+    // Every declaration made on this list and still in force, each shared with its value.
+    cc::vector<impl::array_declaration_token> _live_array_declarations;
+    u32 _last_array_declaration_id = 0;
+
     void check_raster_aliasing(bool indexed);
     void check_hit_records(raytracing_shader_table const& table);
 

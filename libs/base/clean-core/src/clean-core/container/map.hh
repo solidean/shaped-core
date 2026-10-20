@@ -191,6 +191,126 @@ public:
         node* _found;
     };
 
+    // sequences
+private:
+    /// The source over every node, walking bucket by bucket and chain by chain.
+    /// It reads the bucket array, never the map, so an owning source may move the map it sits beside.
+    template <bool IsKey, bool IsConst>
+    struct node_source
+    {
+        using map_ptr = std::conditional_t<IsConst, map const*, map*>;
+        using item_t = std::conditional_t<IsKey, K const&, std::conditional_t<IsConst, V const&, V&>>;
+        static constexpr bool is_borrowed = true;
+
+        node* const* _bucket;
+        node* const* _bucket_end;
+        node* _node = nullptr; // the next node of the chain being walked
+        isize _remaining;
+
+        explicit node_source(map_ptr m)
+        {
+            auto const b = m->_buckets.obj_span();
+            _bucket = b.data();
+            _bucket_end = b.data() + b.size();
+            _remaining = m->_size;
+        }
+
+        [[nodiscard]] static item_t _item(node* n)
+        {
+            if constexpr (IsKey)
+                return n->key;
+            else
+                return n->value;
+        }
+
+        [[nodiscard]] std::remove_reference_t<item_t>* next()
+        {
+            while (_node == nullptr)
+            {
+                if (_bucket == _bucket_end)
+                    return nullptr;
+                _node = *_bucket++;
+            }
+            node* const n = _node;
+            _node = n->next;
+            --_remaining;
+            return &node_source::_item(n);
+        }
+
+        [[nodiscard]] bool try_fold(auto&& step)
+        {
+            for (node* n = _node; n != nullptr; n = n->next)
+                if (step(node_source::_item(n)))
+                    return true;
+            for (auto b = _bucket; b != _bucket_end; ++b)
+                for (node* n = *b; n != nullptr; n = n->next)
+                    if (step(node_source::_item(n)))
+                        return true;
+            return false;
+        }
+
+        [[nodiscard]] isize size() const { return _remaining; }
+        [[nodiscard]] bool is_empty() const { return _remaining == 0; }
+    };
+
+    /// A node source that also answers contains(k) by lookup, for keys().
+    template <bool IsConst>
+    struct key_source : node_source<true, IsConst>
+    {
+        std::conditional_t<IsConst, map const*, map*> _owner;
+
+        explicit key_source(std::conditional_t<IsConst, map const*, map*> m) : node_source<true, IsConst>(m), _owner(m)
+        {
+        }
+
+        template <class K2>
+        [[nodiscard]] bool contains(K2 const& k) const
+        {
+            return _owner->contains(k);
+        }
+    };
+
+    /// The source a temporary map hands out: the map itself, and a node source over it.
+    /// Nodes never move, and neither does the bucket array when the map is moved, so the inner source survives a move.
+    template <bool IsKey>
+    struct owning_node_source
+    {
+        using inner_t = node_source<IsKey, false>;
+        using item_t = typename inner_t::item_t;
+        static constexpr bool is_expiring = !IsKey; // keys are const, so only mapped values may move out
+
+        map _map;
+        inner_t _inner;
+
+        explicit owning_node_source(map&& m) : _map(cc::move(m)), _inner(&_map) {}
+
+        [[nodiscard]] auto* next() { return _inner.next(); }
+        [[nodiscard]] bool try_fold(auto&& step) { return _inner.try_fold(step); }
+        [[nodiscard]] isize size() const { return _inner.size(); }
+        [[nodiscard]] bool is_empty() const { return _inner.is_empty(); }
+
+        template <class K2>
+            requires IsKey
+        [[nodiscard]] bool contains(K2 const& k) const
+        {
+            return _map.contains(k);
+        }
+    };
+
+public:
+    /// The keys as a cc::sequence, in iteration order; contains(k) is the map's own lookup.
+    /// On a temporary the sequence takes the map over.
+    [[nodiscard]] auto keys() const& { return cc::impl::seq_make<false>(key_source<true>(this)); }
+    [[nodiscard]] auto keys() && { return cc::impl::seq_make<false>(owning_node_source<true>(cc::move(*this))); }
+    auto keys() const&& = delete; // a const temporary dies with the expression and cannot be moved from
+
+    /// The mapped values as a cc::sequence, in iteration order.
+    /// On a temporary the sequence takes the map over, and materializing moves the values out.
+    [[nodiscard]] auto values() & { return cc::impl::seq_make<false>(node_source<false, false>(this)); }
+    [[nodiscard]] auto values() const& { return cc::impl::seq_make<false>(node_source<false, true>(this)); }
+    [[nodiscard]] auto values() && { return cc::impl::seq_make<false>(owning_node_source<false>(cc::move(*this))); }
+    auto values() const&& = delete;
+
     // ctors / dtor
 public:
     map() = default;

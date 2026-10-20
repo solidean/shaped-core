@@ -240,7 +240,7 @@ The same numbers print after the pass/fail line of a test run, and not of an exa
 
 ## Known gaps
 
-The following Catch2 XML features are not yet implemented (tracked in the `export/catch2.cc` TODO comment):
+The following Catch2 XML features are not yet implemented (tracked in [feat-nexus-catch2-xml-fidelity](issues/feat-nexus-catch2-xml-fidelity.md)):
 
 - `<StdOut>` / `<StdErr>` capture inside test cases
 - `INFO` / `CAPTURE` contextual messages

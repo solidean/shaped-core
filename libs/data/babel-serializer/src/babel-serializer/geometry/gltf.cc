@@ -783,6 +783,19 @@ public:
                 for (auto c = 0; c < 4; ++c)
                     for (auto r = 0; r < 4; ++r)
                         nod.matrix[c, r] = f32(matrix[isize(c) * 4 + isize(r)].as_double());
+
+                // the spec requires an affine matrix, and local_transform() relies on it
+                auto const affine
+                    = nod.matrix[0, 3] == 0 && nod.matrix[1, 3] == 0 && nod.matrix[2, 3] == 0 && nod.matrix[3, 3] == 1;
+                if (!affine)
+                {
+                    add_issue(gltf::issue_kind::malformed,
+                              cc::format("node {}: matrix's last row is not (0, 0, 0, 1); its affine part is kept", i));
+                    nod.matrix[0, 3] = 0;
+                    nod.matrix[1, 3] = 0;
+                    nod.matrix[2, 3] = 0;
+                    nod.matrix[3, 3] = 1;
+                }
             }
             else
             {

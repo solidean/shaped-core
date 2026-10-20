@@ -29,7 +29,7 @@ The [readme](../readme.md#file-organization) has the per-folder table, the inclu
   Written from the vulkan build-out and grown as it goes, because only a second implementation knows which of the first one's choices were the API leaking through.
 - [testing](testing.md) — the two test tiers: backend-agnostic API tests (`INVOCABLE_TEST`, run against every backend) vs per-backend smoke + internal-invariant suites, and where a new test goes.
 - [tier1-pipeline-tests](tier1-pipeline-tests.md) — the plan for executing the pipeline semantics in tier 1: the harness, the enum zoo, and the sg follow-ups it found.
-- [TODO](TODO.md) — running list of known follow-ups.
+- [issues](issues/) — open issues: known bugs, gaps and follow-ups, one file each.
 
 ## Concepts
 
@@ -69,6 +69,13 @@ Where a concept doc has a per-backend section, it sits at the end, so the body s
 - [async download](concepts/download.async.md) — bulk GPU→CPU readback on a dedicated copy queue (`ctx.download`), off the frame path, with automatic per-resource sync in both directions.
 - [streaming](concepts/streaming.md) — the weaker transfer tier (`ctx.stream`): no automatic sync, and a handle instead — priority, progress, cancellation and a `cc::async` completion.
 - [GPU queries](concepts/queries.md) — `cmd.query.record_gpu_timestamp`: pooled query heaps leased per list, one batched readback per heap at submit, and the poll-after-submit `gpu_timestamp` result.
+
+## Plans
+
+Designs, each stating its status at the top.
+
+- [sticky array declarations](plans/sticky-array-declarations.md) — an array declaration that lives until the caller withdraws it.
+  A bindless table bound for many ops is then tracked once rather than per op.
 
 ## Conventions
 
