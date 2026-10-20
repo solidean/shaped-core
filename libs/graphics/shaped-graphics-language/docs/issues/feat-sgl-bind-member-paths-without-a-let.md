@@ -4,6 +4,8 @@ priority: someday
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/flatten.cc
   - symbol: bind_parameter
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T15:24Z
 ---
 
 # An inlined call binds a member of an immutable local to a let of its own
