@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/text_writer.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-20T18:51Z
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # A stage input nothing reads is still converted into a let

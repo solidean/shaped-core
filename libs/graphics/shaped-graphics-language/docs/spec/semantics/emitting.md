@@ -292,6 +292,7 @@ binding affine:
   MSL's `first_bit_*` and HLSL's packing functions are helpers the text declares (EMIT-102).
 * **EMIT-127** A stage input is a parameter of the target's entry point, handed over as the target's own type, and converted to SGL's where the body reads it.
   HLSL marks it with a semantic (`SV_VertexID`, `SV_DispatchThreadID`, …), WGSL with `@builtin(…)` and MSL with an attribute (`[[vertex_id]]`, …).
+  One the body never reads stays a parameter, and has no line converting it.
   WGSL's `primitive_index` is an extension, which the text enables ahead of every declaration.
 * **EMIT-128** HLSL counts a vertex and an instance from the draw's base, on dx12 and on vulkan through DXC alike, so the text adds `SV_StartVertexLocation` and `SV_StartInstanceLocation` back.
 * **EMIT-129** A stage link's member carries its interpolation: HLSL's `nointerpolation`, `noperspective`, `centroid` and `sample`, and WGSL's `@interpolate(…)`.

@@ -139,6 +139,22 @@ TEST("sgl emit - a case on a bool local tests the local itself, with no copy and
     CHECK(wgsl.contains("    if lit {\n"));
 }
 
+TEST("sgl emit - a stage input nothing reads keeps its parameter, and has no line converting it")
+{
+    auto const source
+        = cc::string_view("binding work:\n"
+                          "    values: mut buffer[int]\n"
+                          "@compute(8) fun main_cs(@thread_id id: int3, @local_thread_index li: int){work}:\n"
+                          "    work.values[li] = 1\n");
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("@builtin(global_invocation_id) id_in: vec3u"));
+    CHECK(!wgsl.contains("let id: vec3i"));
+    CHECK(wgsl.contains("let li: i32 = i32(li_in);"));
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(!hlsl.contains("const int3 id ="));
+    CHECK(hlsl.contains("const int li = int(li_in);"));
+}
+
 TEST("sgl emit - an underscore that is taken already is minted past")
 {
     auto const source = with_edges("struct target_:\n"
