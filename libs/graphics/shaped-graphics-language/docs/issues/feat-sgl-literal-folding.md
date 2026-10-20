@@ -3,6 +3,8 @@ created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/check_expr.cc
   - file: libs/graphics/shaped-graphics-language/docs/spec/incubator/literal-types.md
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T15:04Z
 ---
 
 # Literal folding
