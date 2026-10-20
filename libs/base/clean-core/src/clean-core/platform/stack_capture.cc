@@ -215,6 +215,36 @@ cc::stack_capture_result capture_wasm(cc::span<void*> out, isize skip)
 #endif
 }
 
+/// One frame of the walk: looks `ctx`'s function up and unwinds `ctx` past it.
+/// Returns false when the frame has no unwind data, or when the step faulted.
+///
+/// A sampled thread is suspended wherever it happened to be, and a frame the tables misdescribe there yields a garbage
+/// stack pointer, which the next step dereferences.
+/// Such a step faults inside RtlVirtualUnwind, and unguarded that fault took the whole process down.
+/// A fault here ends the walk instead; nothing the walk touches is shared, so ending it leaves nothing half-done.
+/// Kept free of C++ objects, which a function with __try cannot unwind.
+[[nodiscard]] bool unwind_one_frame(CONTEXT& ctx, UNWIND_HISTORY_TABLE& history, bool& faulted)
+{
+    __try
+    {
+        DWORD64 image_base = 0;
+        auto* const function = ::RtlLookupFunctionEntry(context_pc(ctx), &image_base, &history);
+        if (function == nullptr)
+            return false;
+
+        PVOID handler_data = nullptr;
+        DWORD64 establisher_frame = 0;
+        ::RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context_pc(ctx), function, &ctx, &handler_data,
+                           &establisher_frame, nullptr);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        faulted = true;
+        return false;
+    }
+}
+
 /// Unwinds `start` (or the caller's own context when null) one frame at a time.
 ///
 /// Hand-rolled rather than RtlCaptureStackBackTrace for two reasons that both matter here.
@@ -274,23 +304,28 @@ CC_DONT_INLINE cc::stack_capture_result capture_from_context(void* start,
 
     for (isize walked = 0; walked < max_frames; ++walked)
     {
-        DWORD64 image_base = 0;
-        auto* const function = ::RtlLookupFunctionEntry(context_pc(ctx), &image_base, &history);
-        if (function == nullptr)
+        // A leaf with no unwind data, or a frame whose unwind faulted: the chain ends here, marked broken.
+        auto const sp_before = u64(context_sp(ctx));
+        auto const pc_before = u64(context_pc(ctx));
+        auto faulted = false;
+        if (!unwind_one_frame(ctx, history, faulted))
         {
-            // A leaf with no unwind data: its return address is at the stack pointer, and there is nothing to unwind.
             result.broken = true;
             break;
         }
 
-        PVOID handler_data = nullptr;
-        DWORD64 establisher_frame = 0;
-        ::RtlVirtualUnwind(UNW_FLAG_NHANDLER, image_base, context_pc(ctx), function, &ctx, &handler_data,
-                           &establisher_frame, nullptr);
-
         auto const pc = context_pc(ctx);
         if (pc == 0)
             break; // the outermost frame of the thread
+
+        // Unwinding never moves down the stack, and a step that kept both the stack pointer and the pc would repeat forever.
+        // An unchanged stack pointer alone is fine: an arm64 leaf without a frame returns through its link register.
+        auto const sp = u64(context_sp(ctx));
+        if (sp < sp_before || (sp == sp_before && u64(pc) == pc_before))
+        {
+            result.broken = true;
+            break;
+        }
 
         if (stop != 0 && u64(context_sp(ctx)) >= stop)
         {

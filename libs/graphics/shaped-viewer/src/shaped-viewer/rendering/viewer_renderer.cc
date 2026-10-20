@@ -194,8 +194,8 @@ cc::shared_async<cc::unit> viewer_renderer::init(sg::routine_init_scope scope)
 {
     auto& ctx = scope.context();
 
-    // The frame runs through the view renderer, so the edge is declared: this routine reports pending until the whole
-    // chain below it -- view_renderer, and the pathtracer it traces through -- is ready.
+    // The frame runs through the view renderer, so the edge is declared: this routine reports pending until it is ready.
+    // The tracers are not in that chain, so a raster layer never waits on them; a traced layer declines while they come up.
     _view_renderer = depend_on<view_renderer>(ctx);
 
     // The layout routine is neither declared nor prewarmed here, and cannot be either: it is acquired per target
@@ -240,6 +240,12 @@ sg::routine_outcome viewer_renderer::execute(sg::command_list& cmd,
                         .depth = job.is_3d ? depth : sg::texture_2d(),
                         .probe = job.kind == drawing_job_kind::annotations ? depth : sg::texture_2d()});
     }
+
+    // Every trace's acquires before any trace freezes the tables, so the frame mints one snapshot of them, not one per
+    // view that brought something new — each is a whole-table copy in the persistent descriptor heap.
+    for (auto i = u32(0); i < plan.traces.size(); ++i)
+        if (plan.traces[i].refresh)
+            view_renderer::acquire_trace(cmd, def, plan, i, res, resources);
 
     // Every trace first.
     //

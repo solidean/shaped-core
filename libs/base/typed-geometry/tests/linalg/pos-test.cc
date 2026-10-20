@@ -72,3 +72,16 @@ TEST("tg pos - distance")
     // distance_sqr_to is available for integer scalars (no sqrt needed)
     CHECK(tg::pos2i(0, 0).distance_sqr_to(tg::pos2i(3, 4)) == 25);
 }
+
+TEST("tg pos - scaling by a scalar scales the singleton about the origin")
+{
+    auto const p = tg::pos3f(2, -4, 6);
+    CHECK(p * 0.5f == tg::pos3f(1, -2, 3));
+    CHECK(0.5f * p == tg::pos3f(1, -2, 3));
+    CHECK(p / 2.0f == tg::pos3f(1, -2, 3));
+
+    // so the mean of points is their sum over the count
+    auto const a = tg::pos3f(0, 0, 0);
+    auto const b = tg::pos3f(2, 4, 6);
+    CHECK((a + b) / 2.0f == tg::pos3f(1, 2, 3));
+}

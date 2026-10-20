@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/assert.hh>
 #include <typed-geometry/geometry/query/impl/kernels.hh>
 
 /// `a.project_to(b)`: a mapped onto b — for a pos, the point of b nearest to it.
@@ -10,6 +11,7 @@ namespace tg::impl
 template <class A, class B>
 [[nodiscard]] constexpr auto project_to(A const& a, B const& b)
 {
+    CC_ASSERT(!impl::is_empty_set(a) && !impl::is_empty_set(b), "nothing projects onto or from the empty set");
     if constexpr (has_op<project_op, A, B>)
         return project_op<A, B>::apply(a, b);
     else

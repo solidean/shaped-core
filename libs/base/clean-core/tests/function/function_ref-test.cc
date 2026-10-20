@@ -419,7 +419,7 @@ TEST("function_ref - return type preservation")
             // The standalone reproduction and the matrix that isolates it are docs/bugs-external/msvc-const-ref-through-type-erased-call.
             // clang-cl, clang/gcc and cl < 19.51 are all correct.
             // Only the runtime value-check is quarantined; the type assertion above still runs everywhere.
-            // TODO(msvc-19.51): drop this guard once the compiler fix ships.
+            // TEMPORARY(debt-cc-msvc-const-ref-type-erased-call-guard): drop this guard once the compiler fix ships.
             // Filed upstream: https://developercommunity.visualstudio.com/t/MSVC-O2-miscompiles-returned-const-loca/11114080
 #if !(defined(_MSC_VER) && !defined(__clang__) && _MSC_VER >= 1951)
             CHECK(ref() == 42);
@@ -649,6 +649,25 @@ TEST("function_ref - capture-heavy lambda")
         };
         check(lambda);
     }
+}
+
+namespace
+{
+int forty_two()
+{
+    return 42;
+}
+} // namespace
+
+TEST("function_ref - construction from a plain function")
+{
+    // a function is not an object, so it cannot travel as the `void*` a callable object does
+    auto check = [](cc::function_ref<int()> f) { CHECK(f() == 42); };
+    check(forty_two);
+    check(&forty_two);
+
+    auto stored = cc::function_ref<int()>(forty_two);
+    CHECK(stored() == 42);
 }
 
 TEST("function_ref - function pointer decay via unary plus")

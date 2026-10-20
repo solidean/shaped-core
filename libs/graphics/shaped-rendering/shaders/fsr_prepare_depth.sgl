@@ -1,0 +1,22 @@
+// sr's linear view depth, as the device depth FSR 3.1 reads.
+// Paired with sr::fsr_upscale_routine.
+//
+// FSR reconstructs view-space positions from a rasterizer's depth buffer and a near plane, where sr's guide is the view depth itself, 0 or less where a ray missed.
+// Written as an inverted depth with an infinite far plane — `near / depth` — which FSR's own docs recommend, and which FSR turns back into exactly this view depth with the same `near`.
+// A miss becomes 0, the infinitely far plane.
+
+@inline binding fsr_prepare_depth_constants:
+    // the near plane FSR is told; any positive value, as long as both sides use the same one
+    near_plane: float
+
+binding fsr_prepare_depth_io:
+    @unfilterable
+    linear_depth: texture_2d[float4]
+    device_depth: out image_2d[.r32_float]
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){fsr_prepare_depth_io, fsr_prepare_depth_constants}:
+    let size = fsr_prepare_depth_io.device_depth.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let depth = fsr_prepare_depth_io.linear_depth.load(id.xy).x
+    fsr_prepare_depth_io.device_depth[id.xy] = if depth > 0.0 => fsr_prepare_depth_constants.near_plane / depth else 0.0

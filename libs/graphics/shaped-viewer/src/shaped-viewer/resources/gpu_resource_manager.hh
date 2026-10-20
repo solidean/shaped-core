@@ -5,6 +5,7 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/result.hh>
 #include <sgl_modules/tracer.hh> // sv::shaders::tracer::instance_record
 #include <shaped-graphics/binding/bindless_array.hh>
 #include <shaped-graphics/fwd.hh>
@@ -44,6 +45,15 @@ struct sv::texture_policy
 {
     /// Fill the levels an acquire did not supply, through whichever mipmap routine the format admits.
     bool generate_mips = true;
+
+    /// Replace an RGBA8 texture by its BC7 encoding once its chain is complete, at a quarter of the memory.
+    ///
+    /// The texture is sampled uncompressed until then, and keeps its `texture_id` across the swap.
+    /// Applies only where the device has `sg::feature::texture_compression_bc`, and only from `compress_min_extent` up.
+    bool compress = true;
+
+    /// The smallest width and height worth compressing: below it a texture saves too little to be worth the encode.
+    i32 compress_min_extent = 64;
 };
 
 /// Per-manager configuration for a whole scene's GPU resources.
@@ -65,7 +75,7 @@ struct sv::gpu_resource_manager_config
 /// Several may be taken per epoch, one per recording, because sg only ever reclaims an element *not acquired
 /// this epoch* — so indices another recording already handed to the GPU survive this one's mints.
 ///
-/// `elements(table)` is what a dispatch needs for `declare_array_texture_access` / `declare_array_buffer_access`:
+/// `elements(table)` is what an op needs for `declare_array_texture_access` / `declare_array_buffer_access`:
 /// sg logs and barriers every element of a bound array the code indexes and nobody declared, and the manager is
 /// the only thing that knows which elements this epoch actually acquired.
 /// Move-only; a moved-from snapshot is disarmed and unlocks nothing.
@@ -89,13 +99,24 @@ public:
     /// Empty means the table is unused this epoch, which is a perfectly good thing to declare.
     [[nodiscard]] cc::span<u32 const> elements(bindless_table table) const;
 
-    /// Declares this epoch's elements of every declared table for the **next `dispatch_rays` on `cmd`**, as shader reads.
+    /// Declares this epoch's elements of every table as shader reads, for **every trace on `cmd` while the result lives**.
     ///
-    /// sg refuses a dispatch whose bound array bindings were not all declared, and a table nobody acquired from still
-    /// has to be declared — as empty — rather than skipped.
+    /// sg covers and logs a bound array nobody declared, and a table nobody acquired from still has to be declared —
+    /// as empty — rather than skipped.
     /// So this covers the whole group rather than the tables a caller believes it touched, which is the only version
     /// that cannot silently under-declare.
-    void declare_raytracing_access(sg::command_list& cmd) const;
+    /// A trace binding arrays of a table's family, but never `group()`, leaves its declaration unmet, which asserts when it dies.
+    [[nodiscard]] declared_tables declare_raytracing_access(sg::command_list& cmd) const;
+
+    /// The same, for **every compute dispatch on `cmd`** while the result lives — what a wavefront's kernels reading the
+    /// tables need, declared once rather than per dispatch.
+    /// A dispatch binding no table leaves the declarations dormant.
+    [[nodiscard]] declared_tables declare_compute_access(sg::command_list& cmd) const;
+
+    /// The same, for **every draw of the open rendering scope** while the result lives — what a raster pass's material
+    /// pixel stage reading the tables needs.
+    /// The scope's end also ends them, so declare after it opens.
+    [[nodiscard]] declared_tables declare_raster_access(sg::command_list& cmd) const;
 
 private:
     friend class gpu_resource_manager;
@@ -106,6 +127,19 @@ private:
 
     gpu_resource_manager* _manager = nullptr; // null = disarmed (moved-from)
     sg::binding_group_handle _group;
+};
+
+/// Every bindless table declared on one bind point of one command list, as `bound_resources::declare_*_access` made them.
+/// In force while this lives: each op binding `bound_resources::group()` skips the element work once applied.
+/// Move-only, and destroying it withdraws them all.
+class sv::declared_tables
+{
+public:
+    declared_tables() = default;
+
+private:
+    friend class bound_resources;
+    cc::vector<sg::array_access_declaration> _declarations;
 };
 
 /// Where resource management comes together: the mesh, material and texture managers, the staging binding group
@@ -130,19 +164,22 @@ private:
 /// `pin_texture` / `pin_buffer` are still here for an index that must outlive its epoch, and the type system is what keeps the
 /// two apart: a `sg::bindless_index` cannot be written where a `sg::bindless_element_handle` is wanted.
 ///
-/// TODO: the lock is sound but conservative, and it is not what makes an index valid.
+/// The lock is sound but conservative, and it is not what makes an index valid.
 /// What keeps a live index from being reassigned is sg's reclaim rule — a full array reclaims only indices *not
 /// acquired this epoch*, and never a pinned one — which is structural and needs no lock.
 /// The lock covers one narrower hazard: binding a snapshot taken before your mint.
-/// Two things are known-open, and [docs/TODO.md](../../../docs/TODO.md) carries them:
-/// the lock *prohibits* where a mint-generation stamp recorded in `bound_resources` would *verify*;
+/// Two things are known-open:
+/// the lock *prohibits* where a mint-generation stamp recorded in `bound_resources` would *verify* (issue: debt-sv-bindless-lock-generation-stamp);
 /// and it is global where the hazard is per-recording, so a routine acquiring mid-recording is refused rather
-/// than told to re-snapshot and rebind (which is nearly free, since a clean `snapshot()` is cached).
+/// than told to re-snapshot and rebind (issue: debt-sv-bindless-lock-per-recording).
 class sv::gpu_resource_manager
 {
 public:
     /// Creates the four managers, the staging group over module `tracer`'s bindless layout, and one array per table.
     [[nodiscard]] static gpu_resource_manager create(sg::context& ctx, gpu_resource_manager_config const& cfg = {});
+
+    /// The context every manager here records into.
+    [[nodiscard]] sg::context& context() const { return *_ctx; }
 
     /// Reclaim and advance to epoch `e`, if not already there.
     ///
@@ -194,6 +231,10 @@ public:
     /// A clean snapshot is the cached handle, so freezing an unchanged working set costs nothing.
     [[nodiscard]] bound_resources freeze();
 
+    /// `freeze`, failing rather than throwing when the snapshot cannot be minted — descriptor-heap exhaustion — and then left unlocked.
+    /// The form for a frame's own traces: a failed snapshot declines that trace instead of tearing the frame down.
+    [[nodiscard]] cc::result<bound_resources> try_freeze();
+
     /// Records whatever follow-up work this epoch's budget allows, oldest request first.
     ///
     /// Must be called with a command list the caller submits, and before the work that reads those resources —
@@ -232,7 +273,8 @@ public:
     /// No bindless index is minted here — the block's bytes are this epoch's, and `describe_instance` is what builds them.
     ///
     /// Content-cached on `r.parameter_key`, so re-acquiring an unchanged mesh every frame is a lookup.
-    /// Nothing is evicted: a record is ids and tens of bytes, bounded by the distinct (material, mesh) pairs a scene draws.
+    /// Nothing is evicted, and a record is ids and tens of bytes.
+    /// The key holds texture and attribute ids, so each eviction and re-upload of one a material reads mints a new record, and the old one stays, naming a dead id nothing reads.
     [[nodiscard]] instance_id acquire_instance(resolved_material const& r, material_parameter_layout const& layout);
 
     /// Whether `id` names a record this manager minted.
@@ -262,6 +304,8 @@ public:
     /// traces with it and before `freeze()` — every index it returns is minted here.
     /// The buffer it is uploaded into is the record's own and persistent, which is what lets an unchanged working set leave
     /// the staging group clean and its snapshot cached.
+    /// That persistence is load-bearing: a fresh transient buffer per frame re-minted the whole bindless table on every
+    /// trace, and exhausted the descriptor heap within a second of `interactive-showcase-manual-test`.
     [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,
                                                                      mesh_id mesh,
                                                                      instance_id instance);
@@ -440,12 +484,27 @@ private:
     /// One resource waiting for its post-load step, in request order.
     /// A texture whose record is gone by the time its turn comes is skipped: eviction is the answer to
     /// "was this still wanted".
+    enum class work_kind : u8
+    {
+        /// fill the levels the upload did not supply
+        mips,
+        /// encode the complete chain to BC7 and swap it in
+        compress,
+    };
+
     struct pending_work
     {
         texture_id texture = texture_id::invalid;
+        work_kind kind = work_kind::mips;
         i32 dispatches = 0; ///< what it will cost, counted when it was queued
     };
     cc::vector<pending_work> _pending;
+
+    /// Queues `id`'s compression when the policy, the device and the texture all allow it.
+    void _queue_compression(texture_id id);
+
+    /// Encodes every level of `id` into a new BC7 texture and swaps it in; false while the encoder is not ready.
+    [[nodiscard]] bool _compress(sg::command_list& cmd, texture_id id);
 
     /// Every resolved parameter block, indexed by `instance_id`, plus the `parameter_key` index onto it.
     cc::vector<instance_record> _instances;

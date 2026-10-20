@@ -861,6 +861,47 @@ TEST("result - any_error integration")
     }
 }
 
+TEST("result - any_error message and clone")
+{
+    SECTION("message is the text alone, and context does not change it")
+    {
+        auto err = cc::any_error{"disk full"};
+        CHECK(err.message() == "disk full");
+        err.with_context("while saving");
+        CHECK(err.message() == "disk full");
+        CHECK(err.to_string().contains("while saving"));
+    }
+
+    SECTION("an empty error has an empty message")
+    {
+        auto const err = cc::any_error{};
+        CHECK(err.message().empty());
+        CHECK(err.clone().is_empty());
+    }
+
+    SECTION("a clone has the message, site and context chain, in order")
+    {
+        auto const site = cc::source_location::current();
+        auto err = cc::any_error{"root", site};
+        err.with_context("first");
+        err.with_context("second");
+
+        auto const copy = err.clone();
+        CHECK(copy.message() == "root");
+        CHECK(copy.site().line() == site.line());
+        CHECK(copy.to_string() == err.to_string());
+    }
+
+    SECTION("a clone is independent of its original")
+    {
+        auto err = cc::any_error{"root"};
+        auto copy = err.clone();
+        copy.with_context("only on the copy");
+        CHECK(!err.to_string().contains("only on the copy"));
+        CHECK(copy.to_string().contains("only on the copy"));
+    }
+}
+
 TEST("result - self-assignment safety")
 {
     SECTION("self-copy assignment - value")

@@ -146,6 +146,8 @@ Per-platform specifics:
 - **WARP runs on the Windows Clang job alone.**
   No hosted Windows runner has a GPU, so WARP is what runs the dx12 GPU tests, and it compiles every shader single-threaded: tens of seconds per binary.
   The other Windows jobs set `SC_DX12_ADAPTER=hardware`, which hides WARP, and their dx12 tests skip.
+  On the Windows ARM image that rests on sg counting Microsoft's adapters as software: its Basic Render Driver also enumerates *without* DXGI's software flag.
+  Taken for hardware, it ran every sv test on a WARP that fastfails there — [warp-arm64-pac-fastfail](../bugs-external/warp-arm64-pac-fastfail/readme.md).
   The binaries that bring WARP up declare a 180 s timeout; see [sg's testing doc](../../libs/graphics/shaped-graphics/docs/testing.md#devices-and-adapters).
 - **Every cross job also builds a native `sgl`**, the compiler the SGL shader packages are generated with, in the platform's default preset.
   `--toolset` names the cross compiler there, so `SC_HOST_TOOLSET` pins the host one instead: `21` on the Linux-hosted wasm and Android jobs.

@@ -27,6 +27,11 @@ issues = importlib.util.module_from_spec(_spec)
 sys.modules["issues"] = issues
 _spec.loader.exec_module(issues)
 
+_spec = importlib.util.spec_from_file_location("issues_serve", Path(__file__).with_name("issues_serve.py"))
+serve = importlib.util.module_from_spec(_spec)
+sys.modules["issues_serve"] = serve
+_spec.loader.exec_module(serve)
+
 VERBOSE = "-v" in sys.argv
 
 
@@ -93,6 +98,21 @@ def test_set_fields_touches_only_its_lines():
     assert out == "---\n# keep me\ncreated: 2026-10-16\nrefs: gone\nodd: [x, y]\nclaimed-by: Claude (for Alice)\n---\n\n# T\n", out
     assert issues.set_fields("---\nclosed: x\n---\n\n# T\n", {"closed": None}) == "# T\n"
     assert issues.set_fields("# T\n", {"a": "b: c"}) == '---\na: "b: c"\n---\n# T\n'
+    listed = issues.set_fields("---\ntags:\n  - a\nx: 1\n---\n# T\n", {"tags": ["a", "dev.py", "b c", "k:v"], "blocked-by": []})
+    assert listed == '---\ntags: [a, dev.py, b c, "k:v"]\nx: 1\n---\n# T\n', listed
+    assert issues._parse_meta(listed)[0]["tags"] == ["a", "dev.py", "b c", "k:v"]
+    assert issues.set_fields(listed, {"tags": []}) == "---\nx: 1\n---\n# T\n"
+
+
+def test_notes_section_round_trips():
+    text = "---\nx: 1\n---\n\n# T\n\nBody.\n\n```\n## Notes\n```\n"
+    added = serve.set_notes(issues, text, "first\n\nsecond")
+    assert added == text.rstrip("\n") + "\n\n## Notes\n\nfirst\n\nsecond\n", added
+    assert serve.split_notes(issues, added) == ("Body.\n\n```\n## Notes\n```", "first\n\nsecond")
+    middle = "# T\n\n## Notes\n\nold\n\n## Plan\n\nsteps\n"
+    assert serve.set_notes(issues, middle, "new") == "# T\n\n## Notes\n\nnew\n\n## Plan\n\nsteps\n"
+    assert serve.set_notes(issues, middle, "") == "# T\n\n## Plan\n\nsteps\n"
+    assert serve.set_notes(issues, added, "  ") == text.rstrip("\n") + "\n"
 
 
 def test_new_writes_a_valid_issue(base: Path):
@@ -199,6 +219,91 @@ def test_claim_of_a_new_issue_adds_it(base: Path):
     assert code == 0, err
     assert "claimed-by: Bob" in git(base / "remote.git", "show", "main:docs/issues/perf-slow-path.md")
     assert git(b, "status", "--porcelain") == "", "the file is now tracked, as pushed"
+
+
+def test_publish_files_pushes_only_the_chosen_files(base: Path):
+    a, b = setup(base)
+    remote = base / "remote.git"
+    write(a / "wip.txt", "unpushed\n")
+    git(a, "add", "wip.txt")
+    git(a, "commit", "-q", "-m", "local work")
+    wip = git(a, "rev-parse", "HEAD")
+    write(a / "docs/issues/bug-crash.md", issue_text("It crashes", "priority: next"))
+    write(a / "docs/issues/feat-shiny.md", issue_text("Shiny, edited but not chosen"))
+    write(a / "docs/issues/chore-new.md", issue_text("New"))
+    repo = issues.Workspace(a).top
+    with redirect_stdout(io.StringIO()):
+        issues.publish_files(repo, ["docs/issues/bug-crash.md", "docs/issues/chore-new.md"], "issues: triage")
+    assert git(remote, "log", "-1", "--format=%s", "main") == "issues: triage"
+    assert git(remote, "diff", "--name-only", "main~1", "main").splitlines() == ["docs/issues/bug-crash.md", "docs/issues/chore-new.md"]
+    assert subprocess.run(["git", "-C", str(remote), "cat-file", "-e", wip]).returncode != 0, "the local commit stayed local"
+    status = git(a, "status", "--porcelain")
+    assert status == "M docs/issues/feat-shiny.md", f"the unchosen edit is still outstanding, and nothing else: {status!r}"
+
+    # Bob edits a file the remote has changed since his HEAD: refused rather than overwritten.
+    write(b / "docs/issues/bug-crash.md", issue_text("It crashes", "priority: someday"))
+    try:
+        with redirect_stdout(io.StringIO()):
+            issues.publish_files(issues.Workspace(b).top, ["docs/issues/bug-crash.md"], "issues: triage")
+        raise AssertionError("expected a refusal")
+    except issues.IssueError as e:
+        assert "differs between HEAD" in str(e), e
+
+
+def test_serve_edits_files_and_pushes_on_request(base: Path):
+    import json
+    import threading
+    import urllib.request
+
+    a, _ = setup(base)
+    write(a / "docs/issues/epic-big.md", issue_text("Big"))
+    server, state = serve.make_server(issues, a)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_port}"
+
+    def call(path: str, body: dict | None = None, token: str | None = state.token) -> tuple[int, dict]:
+        data = None if body is None else json.dumps(body).encode()
+        req = urllib.request.Request(url + path, data=data, headers={"Content-Type": "application/json", **(
+            {"X-Issues-Token": token} if token else {})})
+        try:
+            with urllib.request.urlopen(req) as res:
+                return res.status, json.loads(res.read())
+        except urllib.error.HTTPError as e:
+            raw = e.read()
+            return e.code, json.loads(raw) if raw.startswith(b"{") else {}
+
+    try:
+        code, snap = call("/api/issues")
+        assert code == 200 and {i["qid"] for i in snap["issues"]} == {"bug-crash", "feat-shiny", "epic-big"}, snap
+        assert call("/api/edit", {"qid": "bug-crash", "fields": {"priority": "next"}}, token=None)[0] == 403
+        assert call("/api/edit", {"qid": "bug-crash", "fields": {"priority": "next", "tags": ["x"]}, "notes": "seen"})[0] == 200
+        text = (a / "docs/issues/bug-crash.md").read_text(encoding="utf-8")
+        assert "priority: next\ntags: [x]\n---" in text and text.endswith("## Notes\n\nseen\n"), text
+        assert git(a, "log", "-1", "--format=%s") == "seed", "an edit commits nothing"
+
+        code, err = call("/api/edit", {"qid": "feat-shiny", "fields": {"parent": "bug-crash"}})
+        assert code == 400 and "is not an epic" in err["error"], err
+        assert "parent" not in (a / "docs/issues/feat-shiny.md").read_text(encoding="utf-8"), "a refused edit is taken back"
+        assert call("/api/edit", {"qid": "feat-shiny", "fields": {"parent": "epic-big", "blocked-by": ["bug-crash"]}})[0] == 200
+        shiny = next(i for i in call("/api/issues")[1]["issues"] if i["qid"] == "feat-shiny")
+        assert shiny["parent_qid"] == "epic-big" and shiny["blocked"], shiny
+
+        assert call("/api/rename-tag", {"from": "x", "to": "y"})[1] == {"renamed": 1}
+        code, pending = call("/api/pending")
+        assert sorted(p["rel"] for p in pending) == ["docs/issues/bug-crash.md", "docs/issues/epic-big.md", "docs/issues/feat-shiny.md"]
+        assert all(p["touched"] == (p["rel"] != "docs/issues/epic-big.md") for p in pending), pending
+        code, err = call("/api/publish", {"paths": [str(a / "src/lib.cc")]})
+        assert code == 400 and "not an issue file" in err["error"], err
+
+        code, err = call("/api/publish", {"paths": [p["path"] for p in pending if p["touched"]]})
+        assert code == 400 and "names epic-big, which is not committed" in err["error"], err
+        code, out = call("/api/publish", {"paths": [p["path"] for p in pending], "message": "issues: triage"})
+        assert code == 200, out
+        assert git(base / "remote.git", "log", "-1", "--format=%s", "main") == "issues: triage"
+        assert call("/api/pending")[1] == [] and git(a, "status", "--porcelain") == ""
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_close_moves_and_relinks(base: Path):

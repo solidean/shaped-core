@@ -20,9 +20,15 @@ struct cc::function_ref<R(Args...)>
 {
     // internal storage
 private:
-    // const, so a const callable binds without a cast; the thunk restores exactly the constness it was bound with
-    void const* _payload = nullptr;
-    cc::function_ptr<R(void const*, Args...)> _thunk = nullptr;
+    // A function pointer converts to `void*` only conditionally (clang outside Windows refuses), so a function gets its own member.
+    union payload
+    {
+        void* object;
+        void (*function)();
+    };
+
+    payload _payload = {.object = nullptr};
+    cc::function_ptr<R(payload, Args...)> _thunk = nullptr;
 
     // construction
 public:
@@ -34,17 +40,25 @@ public:
     /// A const callable is invoked as const, so a `mutable` lambda held in a const variable is refused rather than mutated.
     template <class F>
         requires(!std::is_same_v<std::remove_cvref_t<F>, function_ref>)
-    function_ref(F&& f) : _payload(&f)
+    function_ref(F&& f)
     {
         // Future: check if we want this as requires or not
         static_assert(cc::is_invocable_r<R, F&, Args...>, "F must be callable with Args... and return R");
 
         using Fn = std::remove_reference_t<F>;
         // NOLINTBEGIN
-        // Fn carries the bound object's own constness, so the const_cast restores what the payload's type erased:
-        // a non-const object is invoked as non-const, which it always was, and a const one stays const.
-        _thunk = [](void const* p, Args... args) -> R
-        { return cc::invoke(*static_cast<Fn*>(const_cast<void*>(p)), cc::forward<Args>(args)...); };
+        if constexpr (std::is_function_v<Fn>)
+        {
+            _payload.function = reinterpret_cast<void (*)()>(&f);
+            _thunk = [](payload p, Args... args) -> R
+            { return cc::invoke(*reinterpret_cast<Fn*>(p.function), cc::forward<Args>(args)...); };
+        }
+        else
+        {
+            _payload.object = const_cast<void*>(static_cast<void const*>(&f));
+            _thunk = [](payload p, Args... args) -> R
+            { return cc::invoke(*static_cast<Fn*>(p.object), cc::forward<Args>(args)...); };
+        }
         // NOLINTEND
     }
 

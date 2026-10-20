@@ -124,6 +124,17 @@ void mix(leaves in, result& out)
         out.push_back(scalar::of(in[i].as_float() * (1.0f - t) + in[width + i].as_float() * t));
 }
 
+/// `mix` with a weight per component.
+void mix_componentwise(leaves in, result& out)
+{
+    auto const width = in.size() / 3;
+    for (auto i = isize(0); i < width; ++i)
+    {
+        auto const t = in[2 * width + i].as_float();
+        out.push_back(scalar::of(in[i].as_float() * (1.0f - t) + in[width + i].as_float() * t));
+    }
+}
+
 /// Componentwise on the bits, which is two's-complement wrapping for int and plain wrapping for uint alike.
 template <class Fn>
 void bitwise_pairs(leaves in, result& out, Fn&& fn)
@@ -391,6 +402,10 @@ void sgl::builtins::register_vector_math(registry& r)
         add_function(r, "clamp", {"x", type, "low", type, "high", type}, type, clamp, {}, {}, clamp_undefined);
         add_function(r, "mix", {"a", type, "b", type, "t", element}, type, mix, {.hlsl = "lerp"},
                      "/// `a` where `t` is 0 and `b` where it is 1.");
+        if (type != element)
+            add_function(r, "mix", {"a", type, "b", type, "t", type}, type, mix_componentwise, {.hlsl = "lerp"},
+                         "/// `mix` with a weight per component: `a` where a component of `t` is 0 and `b` where it is "
+                         "1.");
     }
 
     r.add_comment("// float3 and float4 are plain numbers, so all of their arithmetic is componentwise");

@@ -18,7 +18,7 @@ It is the front door — sg's vocabulary, this library's packages and reload, an
   Also what metal needs of a pipeline, which slib supplies.
 - [coding-guidelines](coding-guidelines.md) — the rules this library rests on that the code cannot enforce itself.
   Short, and worth reading before changing anything here.
-- [TODO](TODO.md) — known follow-ups that are open, as against `structure.md`'s roadmap of what has landed.
+- [issues](issues/) — known follow-ups that are open, one file each, as against `structure.md`'s roadmap of what has landed.
 
 ## Conventions
 

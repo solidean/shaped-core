@@ -19,6 +19,8 @@
 template <int D, class T>
 struct tg::line
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "line requires a positive dimension");
 
     pos<D, T> origin;

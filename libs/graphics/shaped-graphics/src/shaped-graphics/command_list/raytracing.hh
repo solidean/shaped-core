@@ -3,6 +3,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-graphics/binding/binding_group.hh> // sg::declared_binding_group, for bind<G>
+#include <shaped-graphics/command_list/array_access_declaration.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
 
@@ -73,14 +74,20 @@ public:
     /// Only a tlas built, and a group or staging group created, while the checks were on is seen.
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height = 1, int depth = 1);
 
-    /// Declares per-element access for a *buffer* array / bindless binding, applied to the **next dispatch_rays only** — the compute scope's contract, at the raytracing stage.
-    /// Every array the pipeline's code indexes must be declared before each dispatch.
-    /// An undeclared one logs and is covered whole, and an empty `elements` span declares it unused.
-    void declare_array_buffer_access(cc::string_view binding_name, cc::span<array_buffer_access const> elements);
+    /// Declares per-element access for a *buffer* array / bindless binding, for every trace while the result lives.
+    /// The compute scope's contract at the raytracing stage, and the same bind point: a declaration made here is in force for dispatches too.
+    /// An array the pipeline's code indexes with no live declaration logs and is covered whole, and an empty `elements` declares it unused.
+    /// `array` is what the shader package generates for the binding, and the by-name overload checks the name as the compute one does.
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(buffer_array_binding array,
+                                                                       cc::span<array_buffer_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_buffer_access(cc::string_view binding_name,
+                                                                       cc::span<array_buffer_access const> elements);
 
-    /// Declares per-element access for a *texture* array / bindless binding.
-    /// Like the buffer form it applies to the next dispatch_rays only, but each element also names the layout it must be in.
-    void declare_array_texture_access(cc::string_view binding_name, cc::span<array_texture_access const> elements);
+    /// The texture form: each element also names the layout it must be in.
+    [[nodiscard]] array_access_declaration declare_array_texture_access(texture_array_binding array,
+                                                                        cc::span<array_texture_access const> elements);
+    [[nodiscard]] array_access_declaration declare_array_texture_access(cc::string_view binding_name,
+                                                                        cc::span<array_texture_access const> elements);
 
     // Pinned to its owning command list: neither copyable nor movable.
     command_list_raytracing_scope(command_list_raytracing_scope const&) = delete;

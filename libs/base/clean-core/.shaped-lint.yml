@@ -381,13 +381,18 @@ rules:
     reason: the allocator cc::mimalloc_resource wraps
     files: src/clean-core/memory/mimalloc_resource.cc
 
+  - kind: allow-include
+    value: <iterator>
+    reason: "std::forward_iterator tells which begin/end ranges hand out references that outlive a step; the header is opt-in because <iterator> costs every includer 100 ms or more"
+    files: src/clean-core/sequence/iterator_ranges.hh
+
   # =========================================================================================================
   # Waiting on a cc:: replacement
   # =========================================================================================================
 
   - kind: allow-include
     value: <memory>
-    reason: "TODO: std::shared_ptr / std::unique_ptr predate the cc:: ones here — migrate to clean-core/memory/"
+    reason: "std::shared_ptr / std::unique_ptr where the cc:: ones cannot serve yet: a polymorphic upcast (key_value_cache, threaded_actor) or an aliasing, type-erased owner (pinned_data)"
     files:
       - src/clean-core/container/key_value_cache.hh
       - src/clean-core/container/pinned_data.hh
@@ -400,9 +405,14 @@ rules:
   # naming a std:: container is the point rather than a lapse.
 
   - kind: allow-include
-    value: [<vector>, <string>, <string_view>, <array>, <list>, <memory>]
+    value: [<vector>, <string>, <string_view>, <array>, <list>, <memory>, <iterator>]
     reason: the std:: counterparts these tests compare cc:: types against, and convert to and from
     files: tests/**
+
+  - kind: allow-include
+    value: [<vector>, <list>]
+    reason: the foreign ranges this example turns into sequences with cc::values_of
+    files: examples/sequence-sources.cc
 
   - kind: allow-include
     value: [<filesystem>, <fstream>]

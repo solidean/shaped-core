@@ -10,11 +10,9 @@
 #include <type_traits>
 
 
-// TODO:
-// - adopting an existing cc::allocation, taking the largest power of two at or below its capacity
-// - extract_allocation, which needs the content linearized (or a check that it already is)
-// - equality, order
-// - contains/find/count and the predicate-based removal family
+// issue: feat-cc-ringbuffer-allocation-interop
+// issue: feat-cc-container-equality-and-order
+// issue: feat-cc-container-search-family
 
 
 /// Growable ring buffer: a queue over heap storage with strict O(1) push and pop at **both** ends.
@@ -68,6 +66,11 @@ public:
     using base::end;       //
     using base::linearize; // rearrange into one contiguous run and return it
     using base::segments;  // the up to two contiguous runs holding the content
+
+    // sequences
+public:
+    using base::indices; // index sequence 0 .. size()
+    using base::values;  // the elements front to back as a cc::sequence (lvalues only)
 
     // queries
 public:

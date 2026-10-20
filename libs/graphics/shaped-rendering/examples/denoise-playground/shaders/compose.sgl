@@ -1,0 +1,68 @@
+// The split view: the tracer's raw image on the left of the divider, the denoiser's output on the right.
+//
+// Side by side rather than a toggle, because the whole question a denoiser answers is "compared to what".
+// A viewer that flips between two images asks its reader to remember one of them; this one does not.
+//
+// The raw image may be smaller than the output, traced for an upscaler; it is then shown pixel for pixel, blocky, since that is what the upscaler was handed.
+//
+// It also tonemaps, which is where the HDR radiance the tracer produces becomes something a bgra8 back buffer can show.
+// Without it the linear values clip and the image reads as washed out rather than bright.
+
+@inline binding compose_constants:
+    // where the divider sits, in [0, 1] of the width
+    split: float
+    // multiplies the radiance before the tonemap
+    exposure: float
+    // 0 shows the right-hand image everywhere, for a reader who wants one picture
+    show_split: int
+
+binding compose_images:
+    // the tracer's own output
+    @unfilterable
+    raw: texture_2d[float4]
+    // what the denoiser made of it, at the output's size when it upscaled
+    @unfilterable
+    denoised: texture_2d[float4]
+    target: out image_2d[.rgba32_float]
+
+// ACES, the Narkowicz fit: cheap, and it rolls the highlights off instead of clipping them.
+fun tonemap(color: float3) -> float3:
+    let c = max(color, float3(0.0))
+    let n = c * (2.51 * c + 0.03)
+    let d = c * (2.43 * c + 0.59) + 0.14
+    return saturate(n / d)
+
+// The back buffer is unorm rather than _srgb, so the encode happens here.
+// Branchless: a mix by a step per component.
+fun to_srgb(c: float3) -> float3:
+    let lo = c * 12.92
+    let hi = 1.055 * pow(max(c, float3(0.00000001)), float3(1.0 / 2.4)) - 0.055
+    let s = step(c, float3(0.0031308))
+    return mix(hi, lo, s)
+
+fun as_float2(v: int2) => float2(v.x as float, v.y as float)
+
+fun scaled(p: int2, from: int2, to: int2) -> int2:
+    let s = as_float2(p) * as_float2(to) / as_float2(from)
+    return int2(s.x as int, s.y as int)
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){compose_images, compose_constants}:
+    let size = compose_images.target.size()
+    if id.x >= size.x or id.y >= size.y => return
+
+    let p = id.xy
+    let split_x = compose_constants.split * (size.x as float)
+    let left = compose_constants.show_split != 0 and (p.x as float) < split_x
+
+    // Each side is read at its own size: a call that did not upscale hands the raw image to both.
+    let raw_p = scaled(p, size, compose_images.raw.size())
+    let denoised_p = scaled(p, size, compose_images.denoised.size())
+
+    let c = if left => compose_images.raw.load(raw_p).xyz else compose_images.denoised.load(denoised_p).xyz
+    let mut out_color = to_srgb(tonemap(c * compose_constants.exposure))
+
+    // A one-pixel divider, so the seam is a deliberate line rather than something to look for.
+    if compose_constants.show_split != 0 and abs((p.x as float) - split_x) < 1.0:
+        out_color = float3(1.0)
+
+    compose_images.target[id.xy] = float4(..out_color, 1.0)

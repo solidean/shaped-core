@@ -40,8 +40,11 @@ window focus          [done]  is_focused() as of the last poll, focus() to ask f
 borderless / topmost  [done]  window_description: has_decoration, is_always_on_top, has_taskbar_icon, is_focusable
 fullscreen            [planned]
 HiDPI                 [done]  high-density windows: pixel width()/height() and input, logical sizes and desktop coords
-gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see TODO
+gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see issues/feat-sr-gamepad-input.md
 ```
+
+The hand-rolled Win32 windows in shaped-graphics' dx12 swapchain test and shaped-shader-compiler-dxc's cube tests **cannot** move to `sr::window`.
+Both libraries sit below sr, so the duplication is structural rather than an oversight; a windowed test above sr belongs in shaped-viewer.
 
 The API is always present.
 Only the backend is optional, since SDL3 is fetched on demand — without one, `window_system::try_create` fails and `SR_HAS_WINDOW` is 0.
@@ -107,9 +110,9 @@ sr::svgf_denoise_routine     [done]     temporal, native; temporal, variance and
 sr::oidn_denoise_routine     [done]     spatial, trained; Intel's weights in our own shaders, named only
                                         (far too slow for `automatic`)
 sr::fsr_upscale_routine      [done]     AMD FSR 3.1's upscaler, its host code driven through sg; any GPU, dx12 and vulkan, not WARP yet
-dlss_rr                      [planned]  needs sg's declared native scope
-fsr_rr                       [planned]  AMD Ray Regeneration; RDNA 4 only
-nrd                          [planned]  waits for a tracer that splits diffuse from specular
+sr::dlss_rr_routine          [done]     NVIDIA Ray Reconstruction through sg's dx12 native scope; SDK fetched on request
+sr::nrd_denoise_routine      [done]     NVIDIA's split-signal planner executed through sg; dx12, sources fetched on request
+fsr_rr                       [planned]  FidelityFX's split-signal denoiser; waits for the tracer
 ```
 
 `shaped-rendering/denoise-playground` is the example: a small path tracer, every knob live, a scale selector, and a split between the raw image and the reconstructed one.

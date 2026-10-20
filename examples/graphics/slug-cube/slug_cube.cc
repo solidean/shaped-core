@@ -29,10 +29,12 @@
 #include <shaped-rendering/window.hh>
 #include <shaped-shader-library/compiler/available_compilers.hh>
 #include <shaped-shader-library/shader_library.hh>
+#include <typed-geometry/camera/camera.hh>
 #include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 #include <typed-geometry/scalar/angle.hh>
+#include <typed-geometry/transform/compose.hh>
 #include <sgl_modules/slug.hh>
 #include <slug_cube_shaders.hh>
 
@@ -49,40 +51,6 @@ using namespace cc::primitive_defines;
 namespace
 {
 using cube_vertex = shaders::cube_vertex;
-
-// Left-handed, z into [0, 1]: the same pair sgl-cube carries, for the same reason (tg has no transform module yet).
-[[nodiscard]] tg::vec3f cross3(tg::vec3f a, tg::vec3f b) { return tg::dual(tg::cross(a, b)); }
-
-[[nodiscard]] tg::mat4f perspective(tg::angle_f vertical_fov, float aspect, float z_near, float z_far)
-{
-    auto const t = 1.0f / tg::tan(vertical_fov / 2.0f);
-    auto m = tg::mat4f::zero;
-    m[0, 0] = t / aspect;
-    m[1, 1] = t;
-    m[2, 2] = z_far / (z_far - z_near);
-    m[3, 2] = -z_near * z_far / (z_far - z_near);
-    m[2, 3] = 1.0f;
-    return m;
-}
-
-[[nodiscard]] tg::mat4f look_at(tg::pos3f eye, tg::pos3f target, tg::vec3f up)
-{
-    auto const f = tg::normalize(target - eye);
-    auto const r = tg::normalize(cross3(up, f));
-    auto const u = cross3(f, r);
-    auto const e = eye - tg::pos3f::zero;
-    auto m = tg::mat4f::identity;
-    for (auto i = 0; i < 3; ++i)
-    {
-        m[i, 0] = r[i];
-        m[i, 1] = u[i];
-        m[i, 2] = f[i];
-    }
-    m[3, 0] = -tg::dot(r, e);
-    m[3, 1] = -tg::dot(u, e);
-    m[3, 2] = -tg::dot(f, e);
-    return m;
-}
 
 [[nodiscard]] tg::mat4f rotation_y(tg::angle_f a)
 {
@@ -104,7 +72,9 @@ struct orbit_camera
     {
         auto const cp = tg::cos(pitch);
         auto const eye = tg::pos3f::zero + tg::vec3f(cp * tg::sin(yaw), tg::sin(pitch), cp * tg::cos(yaw)) * distance;
-        return perspective(tg::angle_f::make_from_degree(45.0f), aspect, 0.1f, 100.0f) * look_at(eye, tg::pos3f::zero, tg::vec3f(0, 1, 0));
+        // a forward [0, 1] depth range, which this pipeline's depth test and clear are set up for
+        auto const projection = tg::perspective_lh_zero_to_one(tg::angle_f::make_from_degree(45.0f), aspect, 0.1f, 100.0f);
+        return tg::compose(projection, tg::look_at(eye, tg::pos3f::zero)).to_mat();
     }
 
     void orbit(tg::vec2f drag)
@@ -137,7 +107,7 @@ constexpr int decal_face = 5; // the top face carries the star
     {
         auto const n = face_normals[face];
         auto const u = tg::vec3f(n[1], n[2], n[0]);
-        auto const v = cross3(n, u);
+        auto const v = tg::dual(tg::cross(n, u));
         for (auto corner = 0; corner < 4; ++corner)
         {
             auto const su = (corner == 1 || corner == 2) ? 1.0f : -1.0f;
@@ -234,8 +204,8 @@ void append_circle(cc::vector<sr::slug_instance>& out, sr::slug_font& font, cc::
 [[nodiscard]] tg::mat4f face_frame(int face)
 {
     auto const n = face_normals[face];
-    auto const up = tg::vec3f(0, 1, 0);
-    auto const right = cross3(n, up);
+    // the face as a viewer outside it sees it, looking along -n
+    auto const [right, up] = tg::orthonormal_basis(-n, tg::vec3f(0, 1, 0));
     auto m = tg::mat4f::identity;
     for (auto i = 0; i < 3; ++i)
     {
@@ -475,7 +445,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
 
     // The routine draws the instances prepare() uploaded and the atlas textures it filled, so each draw's barrier is found
     // inside the scope, and vulkan splits the scope for it.
-    // Nothing states a scope's accesses before it opens yet; libs/graphics/shaped-graphics/docs/TODO.md, "Barriers + access tracking".
+    // Nothing states a scope's accesses before it opens yet; issue: feat-sg-declare-scope-accesses-up-front.
     nx::allow_warnings("was closed and reopened around a barrier", "sg");
 
     // Both routine parametrizations this frame uses, named up front so the first frame does not decline.
@@ -582,7 +552,7 @@ ASYNC_EXAMPLE("graphics/slug-cube")
         co_await ctx->epochs_in_flight_completion(2);
         ++frames;
 
-        if (capture.active && frames >= capture.accumulate_frames)
+        if (capture.active && frames >= capture.accumulate)
         {
             auto const writing = sr::write_capture_image_async(*ctx, capture_target, capture.output_path);
             co_await cc::async_settled(writing);

@@ -37,23 +37,32 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
 
 ## Keeping the submodules current
 
-`uv run dev.py submodules sync` fetches each submodule's tracked branch, the `branch =` its `.gitmodules` entry names, and fast-forwards to it.
-**It never touches local work**, so it is safe to run at any time:
+`uv run dev.py submodules sync` fast-forwards each submodule to the commit the superproject records for it, and no further.
+So the working tree matches what HEAD records: `git status` stays clean, and `check` tests what a push would carry.
+**It never touches local work**, so it is safe to run at any time, after every pull above all:
 
 | The submodule is | sync |
 |---|---|
-| on its tracked branch, clean, nothing unpushed | fast-forwards it |
-| detached at a commit the branch contains, as `git submodule update` leaves it | checks the branch out, then fast-forwards it |
+| declared but not checked out, as after a pull that adds it | initializes it at the recorded commit |
+| behind the recorded commit, on its tracked branch and clean | fast-forwards the branch to it |
+| behind the recorded commit, detached, as `git submodule update` leaves it | checks the tracked branch out and fast-forwards it, or detaches at the recorded commit when the branch is past it |
+| at the recorded commit | leaves it |
+| ahead of the recorded commit: local work, or a `--tip` | leaves it and says so; only a bump moves the pointer |
+| diverged from the recorded commit | refuses |
 | carrying uncommitted changes to tracked files | refuses |
-| carrying commits its remote branch lacks, on the branch or detached | refuses |
+| recording a commit its remote lacks, as when a bump went out before the submodule's push | refuses |
 | on another branch | skips it |
-| without a `branch =` | skips it |
+| a submodule of a submodule, not checked out | initializes it at the commit its parent records, at any depth |
+| a submodule of a submodule, checked out | leaves it alone |
 
 Untracked files do not count: a fast-forward never touches one, and git refuses rather than overwrite it.
 Nothing is ever reset, rebased or merged, and a refusal exits non-zero, naming what is in the way.
 
-Moving a submodule changes the commit the superproject records.
-`--bump` commits each moved pointer in a commit of its own; a project's own bump rules still apply, and its `check` enforces them.
+**`--tip` goes to the head of the tracked branch instead**, the `branch =` the `.gitmodules` entry names.
+That is for starting work in a submodule, or for taking in what others pushed there before a bump.
+It refuses unpushed commits and skips a submodule without a `branch =`; otherwise it moves as the table says.
+A submodule past its pointer shows as modified in the superproject until a bump commits it.
+`--bump` implies `--tip` and commits each moved pointer in a commit of its own; a project's own rules on when to bump still apply.
 `--dry-run` reports what would move, and `sync <path>` limits it to some submodules.
 
 Set `update = merge` on each `.gitmodules` entry as well.

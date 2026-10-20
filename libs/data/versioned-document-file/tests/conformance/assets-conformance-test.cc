@@ -46,6 +46,15 @@ cc::vector<byte> large_payload(isize size)
     return out;
 }
 
+/// The first index where `got` and `want` differ, or -1 when none does; their sizes must match.
+isize first_mismatch(cc::span<byte const> got, cc::span<byte const> want)
+{
+    for (auto i = isize(0); i < got.size(); ++i)
+        if (got[i] != want[i])
+            return i;
+    return -1;
+}
+
 blob_upload upload_of(cc::span<byte const> decoded, cc::string_view format = "bin")
 {
     auto made = blob_upload::of(decoded, format);
@@ -365,30 +374,28 @@ INVOCABLE_TEST("vdoc::file - a blob spanning several chunks round-trips, at an o
     auto const whole = wait_for(*reopened, source->load(hash));
     REQUIRE(whole.has_value());
     REQUIRE(whole.value().size() == payload.size());
-    for (isize i = 0; i < payload.size(); ++i)
-        REQUIRE(whole.value()[i] == payload[i]);
+    CHECK(first_mismatch(whole.value(), payload) == -1);
+
+    auto const expected = cc::span<byte const>(payload);
 
     // A range wholly inside the first chunk.
     auto const head = wait_for(*reopened, source->load_range(hash, 16, 64));
     REQUIRE(head.has_value());
     REQUIRE(head.value().size() == 64);
-    for (isize i = 0; i < 64; ++i)
-        REQUIRE(head.value()[i] == payload[16 + i]);
+    CHECK(first_mismatch(head.value(), expected.subspan({.offset = 16, .size = 64})) == -1);
 
     // A range that STRADDLES a chunk boundary, which is the case chunking makes possible to get wrong.
     auto const boundary = (1 << 20);
     auto const across = wait_for(*reopened, source->load_range(hash, boundary - 100, 200));
     REQUIRE(across.has_value());
     REQUIRE(across.value().size() == 200);
-    for (isize i = 0; i < 200; ++i)
-        REQUIRE(across.value()[i] == payload[boundary - 100 + i]);
+    CHECK(first_mismatch(across.value(), expected.subspan({.offset = boundary - 100, .size = 200})) == -1);
 
     // A negative size means "to the end", and the tail lives in the partial last chunk.
     auto const tail = wait_for(*reopened, source->load_range(hash, payload.size() - 50, -1));
     REQUIRE(tail.has_value());
     REQUIRE(tail.value().size() == 50);
-    for (isize i = 0; i < 50; ++i)
-        REQUIRE(tail.value()[i] == payload[payload.size() - 50 + i]);
+    CHECK(first_mismatch(tail.value(), expected.subspan(payload.size() - 50)) == -1);
 
     // Past the end is an error rather than an empty answer, so a bad offset cannot read as an empty blob.
     CHECK(wait_for(*reopened, source->load_range(hash, payload.size() + 1, 10)).has_error());

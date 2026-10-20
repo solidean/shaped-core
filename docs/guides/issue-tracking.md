@@ -102,6 +102,8 @@ Code points back at an issue with a **marker**:
 - **`issue: <id>`** in a comment, at the code an issue concerns.
 - **`TEMPORARY(<id>)`** on a workaround, naming the `debt` issue that replaces it.
 
+These are the only spellings of open work in code: a bare `TODO`, `FIXME`, `HACK` or `XXX` in a comment is a shaped-linter finding (`no-bare-todo`).
+
 `issues known <query>` answers "is this known?" for a path, a `path:line`, a test name, a symbol or plain text.
 It searches refs, markers and the text, closed issues included and marked, since a fixed issue is what a regression looks for.
 A marker counts for its whole file, since it sits above the code it marks rather than on the line a query names.
@@ -151,6 +153,25 @@ It rewrites the moved file's own relative links, and every markdown link in the 
 `issues reopen <id>` moves it back.
 By hand: move the file and add, or remove, the two lines.
 
+## Triage in the browser
+
+`issues serve` opens a local web page over the issue files: a filtered list, each issue rendered in a side panel, and a graph of what blocks what and which epic holds which issue.
+It also edits: priority, tags, epic, `blocked-by`, a claim, and a `## Notes` section in the body, plus renaming a tag on every issue and bulk tagging.
+
+**An edit writes the file and nothing else.**
+The page shows how many issue files differ from `HEAD`, edited there or anywhere else, and its **Commit & push** is the only thing that commits.
+It commits the chosen issue files alone, on top of the fetched remote branch, the way a claim does, so other local work stays local.
+It refuses a file the remote changed since `HEAD`, a file `issues check` faults, and an issue naming one that is not committed yet unless that one goes along.
+
+A claim made there is an edit like any other, pushed with the rest.
+`issues claim` pushes at once because an agent needs the claim visible before it starts; a person triaging does not.
+
+**A triage commit is exempt from the pre-push gate**, as a claim is: it changes only issue files, and its own check runs before it pushes.
+
+The page binds to `127.0.0.1` and answers only loopback host names, and a write needs the token the page was served with.
+Rendering and the graph load marked, DOMPurify and cytoscape from cdn.jsdelivr.net.
+It needs `tools/issues/` checked out, so unlike the other commands it does not run from a URL.
+
 ## Several repositories
 
 Each git repository is its own tracker: its issues, its ids, its integration branch.
@@ -184,6 +205,7 @@ Claiming a submodule's issue pushes to the submodule's remote.
 | `claim <id>`, `release <id>` | one commit, pushed alone: `--as`, `--force` |
 | `close <id>`, `reopen <id>` | move it: `--resolution`, `--date` |
 | `check` | validate every issue and every marker |
+| `serve` | the web page above: `--port`, `--no-open` |
 
 An `<id>` may also be `repo:id`, a fragment unique among the ids, or the file's path.
 

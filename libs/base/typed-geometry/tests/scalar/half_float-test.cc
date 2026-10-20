@@ -151,14 +151,24 @@ TEST("tg f16 - widening is exact for every value")
 
 TEST("tg f16 - narrowing rounds to nearest even at every midpoint")
 {
-    auto const check_f32 = [](f32 x)
+    auto mismatches = 0;
+    auto first_mismatch = cc::string();
+    auto const note = [&](bool matches, cc::string_view path, f64 x)
+    {
+        if (matches)
+            return;
+        if (mismatches == 0)
+            first_mismatch = cc::format("{} narrowing of {}", path, x);
+        ++mismatches;
+    };
+    auto const check_f32 = [&](f32 x)
     {
         auto const expected = reference_narrow(f64(x));
-        CHECK(f16(x).bits() == expected);
-        CHECK(tg::impl::f32_to_half_bits_portable(x) == expected);
-        CHECK(f16(f64(x)).bits() == expected);
+        note(f16(x).bits() == expected, "f32", f64(x));
+        note(tg::impl::f32_to_half_bits_portable(x) == expected, "portable f32", f64(x));
+        note(f16(f64(x)).bits() == expected, "f64 of an f32", f64(x));
     };
-    auto const check_f64 = [](f64 x) { CHECK(f16(x).bits() == reference_narrow(x)); };
+    auto const check_f64 = [&](f64 x) { note(f16(x).bits() == reference_narrow(x), "f64", x); };
 
     for (auto i = 0; i <= int(max_finite_bits); ++i)
     {
@@ -187,6 +197,7 @@ TEST("tg f16 - narrowing rounds to nearest even at every midpoint")
             }
         }
     }
+    CHECK(mismatches == 0).context(first_mismatch);
 }
 
 TEST("tg f16 - narrowing random floats")

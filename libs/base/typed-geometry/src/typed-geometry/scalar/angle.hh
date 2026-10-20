@@ -22,6 +22,8 @@
 template <class T>
 struct tg::angle
 {
+    using scalar_t = T;
+
     // construction
 public:
     angle() = default;

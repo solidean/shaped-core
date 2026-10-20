@@ -93,7 +93,7 @@ void refresh_monitors(window_system const& wsys)
 
 /// Routes a viewport window's close request to imgui.
 ///
-/// TODO(windowing): PlatformRequestMove / PlatformRequestResize are still unset,
+/// PlatformRequestMove / PlatformRequestResize are still unset (issue: feat-imgui-viewport-wm-move-resize),
 /// so imgui never learns when the *window manager* — rather than imgui — moves or resizes a viewport window (a snap, a clamp, a drag by an OS title bar).
 /// imgui then keeps its own idea of the geometry and re-commands it.
 ///

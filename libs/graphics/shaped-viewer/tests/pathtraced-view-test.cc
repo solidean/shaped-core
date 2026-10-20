@@ -59,7 +59,8 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
     // One instance at identity — the Cornell box geometry is already in world space.
     // Hit group 0 is the one permutation this scene shades with.
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
@@ -161,8 +162,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     auto& lib = *sv::acquire_material_library().value();
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
-    auto const type = lib.register_type(
-        sv::material_type::create("sv_test_broken", cc::move(signature), "surface.x = not_a_function(roughness)\n"));
+    auto const type = lib.register_type(sv::material_type::create(
+        {.name = "sv_test_broken", .signature = cc::move(signature), .shader = "surface.x = not_a_function(roughness)\n"}));
 
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -180,7 +181,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     REQUIRE(mesh_rec != nullptr);
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
 
@@ -188,6 +190,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
 
     // Records one trace into `cmd` and reports what it decided; the caller owns the frame around it, so the same body
     // serves a one-shot check and a driven one.
+    auto stand_ins = sv::stand_in_report{};
     auto const trace = [&](sg::command_list& cmd, sv::material_permutation const* fallback)
     {
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
@@ -217,7 +220,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
                                                     .instance_table = instance_table,
                                                     .hit_groups = hit_groups,
                                                     .fallback = fallback,
-                                                    .bindless = &bindless});
+                                                    .bindless = &bindless,
+                                                    .stand_ins = &stand_ins});
     };
 
     // The permutation genuinely does not build, so it cannot be traced with.
@@ -244,12 +248,17 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
     CHECK(sv_test::frames_until_executed(
         ctx, [&](sg::command_list& cmd) { return trace(cmd, &resources.shaders.acquire_fallback()); }));
 
+    // And it says so: a frame shaded by the stand-in is an image of other materials, which a mean must tell apart.
+    // The compile failed for good, so the substitution is settled and a mean of it may converge.
+    CHECK(stand_ins.hash != 0);
+    CHECK(!stand_ins.pending);
+
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
 // The same trace, shaded through a texture rather than through per-face colours.
 //
-// A permutation samples only when its material does, through module tracer's palette in the trace's own group.
+// A permutation samples only when its material does, through module tracer's palette in the bindless group.
 // Every other path-traced scene in this suite is untextured, so without this a hit group reaching the palette and the
 // bindless texture table is never traced at all.
 //
@@ -285,10 +294,11 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material samples through the p
     REQUIRE(permutation != nullptr);
 
     // The guard this test rests on: a textured material is what puts a sample in the permutation.
-    REQUIRE(permutation->source.contains("tracer.traced.palette_"));
+    REQUIRE(permutation->source.contains("tracer.bindless.palette_"));
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
@@ -384,7 +394,8 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
     REQUIRE(permutation != nullptr);
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
 
@@ -538,14 +549,13 @@ struct light_scene
     sv::background environment = {};
 };
 
-/// The mesh `positions` / `materials` describe, acquired and ready to trace, or empty when it did not build.
+/// `placed`, acquired and ready to trace, or empty when it did not build.
 [[nodiscard]] cc::optional<light_scene> make_light_scene(sv::gpu_resource_manager& resources,
-                                                         cc::vector<tg::pos3f> const& positions,
-                                                         cc::vector<sv_test::pbr_material> const& materials,
+                                                         sv::mesh const& placed,
                                                          sv::camera const& camera)
 {
     auto scene = light_scene{};
-    scene.item = resources.acquire_scene_item(sv_test::as_mesh("light scene", positions, materials));
+    scene.item = resources.acquire_scene_item(placed);
     resources.wait_for_pending_uploads();
 
     auto const* const mesh = resources.meshes.get_ptr(scene.item.mesh);
@@ -553,10 +563,20 @@ struct light_scene
     if (mesh == nullptr || permutation == nullptr)
         return {};
 
-    scene.instances.push_back(sg::tlas_instance{.blas = mesh->blas, .instance_id = 0, .hit_group_offset = 0});
+    scene.instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, scene.item.mesh), .instance_id = 0, .hit_group_offset = 0});
     scene.hit_groups.push_back(permutation);
     scene.camera = camera;
     return scene;
+}
+
+/// The mesh `positions` / `materials` describe, acquired and ready to trace, or empty when it did not build.
+[[nodiscard]] cc::optional<light_scene> make_light_scene(sv::gpu_resource_manager& resources,
+                                                         cc::vector<tg::pos3f> const& positions,
+                                                         cc::vector<sv_test::pbr_material> const& materials,
+                                                         sv::camera const& camera)
+{
+    return make_light_scene(resources, sv_test::as_mesh("light scene", positions, materials), camera);
 }
 
 /// Traces `scene` once per table — all of them in one frame, with one seed, so the images differ only by their lights —
@@ -708,8 +728,8 @@ ASYNC_INVOCABLE_TEST("sv - every kind of light traces to the sum of each alone",
 {
     // The same inline-readback path volumetric-furnace-test documents as fastfailing on Windows on ARM.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -776,8 +796,8 @@ ASYNC_INVOCABLE_TEST("sv - every kind of light delivers the illuminance its unit
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -840,8 +860,8 @@ ASYNC_INVOCABLE_TEST("sv - a sun delivers its illuminance with its bounce-ray st
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -897,8 +917,8 @@ ASYNC_INVOCABLE_TEST("sv - a surface's emission and an area light's nits are the
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -973,8 +993,8 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -1035,13 +1055,196 @@ ASYNC_INVOCABLE_TEST("sv - a light that casts no shadow ignores what stands in i
     co_await cc::async_settled(sv::background_work(ctx));
 }
 
+// A surface reflects only light on its face's own side, however far its authored normal leans off the face.
+//
+// The light here comes from below the floor and casts no shadow, so nothing but that rule keeps it off the side the camera sees.
+// The same light mirrored above the floor shows the setup lights at all.
+ASYNC_INVOCABLE_TEST("sv - a surface whose authored normal leans off its face is not lit from behind",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 0.5f};
+    auto ground = sv_test::cornell_box{};
+    sv_test::cb_push_quad(ground, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          white);
+    auto mesh = sv_test::as_mesh("tilted floor", ground.positions, ground.materials);
+
+    // The authored normal leans 55 degrees off the floor's +y toward -x: it faces both lights and the camera.
+    // The frame is +z turned a quarter turn about cross(+z, authored), which carries +z onto it.
+    auto const authored = tg::normalize(tg::vec3f(-1.0f, 0.7f, 0.0f));
+    auto const half = tg::sqrt(0.5f);
+    auto const frame = tg::vec4f(-authored[1] * half, authored[0] * half, 0.0f, half);
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec4f>::create_filled(ground.positions.size(), frame)));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+    auto scene = make_light_scene(resources, mesh, cam);
+    REQUIRE(scene.has_value());
+    // The second segment is the continuation, which reaches the rect below the floor directly.
+    scene.value().max_bounces = 2;
+
+    // A parallel light reaches the floor through next-event alone, and a rect off toward -x through the continuation too.
+    struct mirrored
+    {
+        sv::light above;
+        sv::light below;
+    };
+    auto const pairs = cc::vector<mirrored>{
+        {.above = sv::light::directional(tg::vec3f(1, -1, 0)).lux(2).casts_shadows(false),
+         .below = sv::light::directional(tg::vec3f(1, 1, 0)).lux(2).casts_shadows(false)},
+        {.above
+         = sv::light::rect(tg::pos3f(-3, 1, 0), tg::vec3f(1, 0, 0), tg::vec3f(0, 0, 2)).nits(4).casts_shadows(false),
+         .below
+         = sv::light::rect(tg::pos3f(-3, -1, 0), tg::vec3f(0, 0, 2), tg::vec3f(1, 0, 0)).nits(4).casts_shadows(false)},
+    };
+    for (auto const& pair : pairs)
+    {
+        auto const traced = trace_under(
+            &ctx, &resources, scene.value(),
+            {table_of(cc::span<sv::light const>(&pair.above, 1)), table_of(cc::span<sv::light const>(&pair.below, 1))});
+        auto const& images = co_await traced;
+        REQUIRE(images.size() == 2);
+
+        auto const size = scene.value().size;
+        auto const lit = mean_brightness(images[0], size, 2);
+        CHECK(lit > 0.1f);
+        CHECK(mean_brightness(images[1], size, 2) < 0.01f * lit);
+    }
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// Which side a surface's authored normal is turned to is the face's to decide, never the camera's.
+//
+// The floor's authored normal leans toward -x, and the light is straight above.
+// From +x the camera is behind that normal yet in front of the face: the floor stays lit, only seen from elsewhere.
+ASYNC_INVOCABLE_TEST("sv - a surface lit along its authored normal stays lit from a camera behind that normal",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 1.0f};
+    auto ground = sv_test::cornell_box{};
+    sv_test::cb_push_quad(ground, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          white);
+    auto mesh = sv_test::as_mesh("leaning floor", ground.positions, ground.materials);
+
+    // A quarter turn about cross(+z, authored) carries +z onto the authored normal, 59 degrees off the floor's +y.
+    auto const authored = tg::normalize(tg::vec3f(-1.0f, 0.6f, 0.0f));
+    auto const half = tg::sqrt(0.5f);
+    auto const frame = tg::vec4f(-authored[1] * half, authored[0] * half, 0.0f, half);
+    mesh.attributes.push_back(
+        sv::mesh_attribute::create("tangent_frame", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec4f>::create_filled(ground.positions.size(), frame)));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto from_front = sv::camera::looking_at(tg::pos3d(-3, 3, 0), tg::pos3d(0, 0, 0));
+    from_front.projection.aspect_ratio = 1.0;
+    auto from_behind = sv::camera::looking_at(tg::pos3d(4, 2, 0), tg::pos3d(0, 0, 0));
+    from_behind.projection.aspect_ratio = 1.0;
+
+    auto front_scene = make_light_scene(resources, mesh, from_front);
+    REQUIRE(front_scene.has_value());
+    front_scene.value().max_bounces = 1;
+    auto behind_scene = front_scene.value();
+    behind_scene.camera = from_behind;
+
+    auto const overhead = sv::light::directional(tg::vec3f(0, -1, 0)).lux(2);
+    auto const front_traced
+        = trace_under(&ctx, &resources, front_scene.value(), {table_of(cc::span<sv::light const>(&overhead, 1))});
+    auto const& front_images = co_await front_traced;
+    auto const behind_traced
+        = trace_under(&ctx, &resources, behind_scene, {table_of(cc::span<sv::light const>(&overhead, 1))});
+    auto const& behind_images = co_await behind_traced;
+    REQUIRE(front_images.size() == 1);
+    REQUIRE(behind_images.size() == 1);
+
+    auto const size = behind_scene.size;
+    auto const seen_from_front = mean_brightness(front_images[0], size, 2);
+    CHECK(seen_from_front > 0.1f);
+    CHECK(mean_brightness(behind_images[0], size, 2) > 0.5f * seen_from_front);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// An opaque surface has no interior, so its back face reflects exactly as its front face does.
+//
+// The camera looks down and the light comes in low, more than 85 degrees from the view over every pixel measured.
+// That puts each half vector past a dielectric's critical angle.
+// Read from inside, that angle reflects the whole lobe; read from outside, as an opaque surface always must be, it is only Schlick's share.
+ASYNC_INVOCABLE_TEST("sv - an opaque surface reflects the same from its back face as from its front",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+
+    auto& ctx = *ctx_h;
+    if (auto const reason = cannot_trace(ctx); reason.has_value())
+        SKIP(reason.value());
+
+    auto const white = sv_test::pbr_material{.base_color = tg::vec3f(0.73f, 0.73f, 0.73f), .roughness = 0.74f};
+    auto facing_up = sv_test::cornell_box{};
+    sv_test::cb_push_quad(facing_up, tg::pos3f(-5, 0, -5), tg::pos3f(-5, 0, 5), tg::pos3f(5, 0, 5), tg::pos3f(5, 0, -5),
+                          white);
+    auto facing_down = sv_test::cornell_box{};
+    sv_test::cb_push_quad(facing_down, tg::pos3f(-5, 0, -5), tg::pos3f(5, 0, -5), tg::pos3f(5, 0, 5),
+                          tg::pos3f(-5, 0, 5), white);
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto cam = sv::camera::looking_at(tg::pos3d(0, 4, -0.5), tg::pos3d(0, 0, 0));
+    cam.projection.aspect_ratio = 1.0;
+    auto up_scene = make_light_scene(resources, facing_up.positions, facing_up.materials, cam);
+    auto down_scene = make_light_scene(resources, facing_down.positions, facing_down.materials, cam);
+    REQUIRE(up_scene.has_value());
+    REQUIRE(down_scene.has_value());
+    up_scene.value().max_bounces = 1;
+    down_scene.value().max_bounces = 1;
+
+    auto const low = sv::light::directional(tg::vec3f(-1.0f, -0.04f, 0.0f)).lux(80);
+    auto const up_traced
+        = trace_under(&ctx, &resources, up_scene.value(), {table_of(cc::span<sv::light const>(&low, 1))});
+    auto const& up_images = co_await up_traced;
+    auto const down_traced
+        = trace_under(&ctx, &resources, down_scene.value(), {table_of(cc::span<sv::light const>(&low, 1))});
+    auto const& down_images = co_await down_traced;
+    REQUIRE(up_images.size() == 1);
+    REQUIRE(down_images.size() == 1);
+
+    auto const size = up_scene.value().size;
+    auto const front = mean_brightness(up_images[0], size, 2);
+    CHECK(front > 0.1f);
+    CHECK(tg::abs(mean_brightness(down_images[0], size, 2) - front) < 0.03f * front);
+
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
 // A light the camera may see is seen at its own radiance, and one it may not is not seen at all.
 // The rect faces the camera and away from the floor, so the floor under it stays dark either way.
 ASYNC_INVOCABLE_TEST("sv - a light visible to the camera is seen at its radiance", (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;

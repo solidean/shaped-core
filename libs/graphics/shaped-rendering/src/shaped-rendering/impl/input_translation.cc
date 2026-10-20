@@ -139,6 +139,22 @@ sr::mouse_button mouse_button_from_sdl(u8 sdl_button)
     }
 }
 
+u8 held_buttons_from_sdl(SDL_MouseButtonFlags state)
+{
+    auto held = u8(0);
+    if ((state & SDL_BUTTON_LMASK) != 0)
+        held |= mouse_button_bit(mouse_button::left);
+    if ((state & SDL_BUTTON_MMASK) != 0)
+        held |= mouse_button_bit(mouse_button::middle);
+    if ((state & SDL_BUTTON_RMASK) != 0)
+        held |= mouse_button_bit(mouse_button::right);
+    if ((state & SDL_BUTTON_X1MASK) != 0)
+        held |= mouse_button_bit(mouse_button::x1);
+    if ((state & SDL_BUTTON_X2MASK) != 0)
+        held |= mouse_button_bit(mouse_button::x2);
+    return held;
+}
+
 float wheel_amount(float raw, SDL_MouseWheelDirection direction)
 {
     return direction == SDL_MOUSEWHEEL_FLIPPED ? -raw : raw;

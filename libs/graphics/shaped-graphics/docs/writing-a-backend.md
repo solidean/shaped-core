@@ -274,7 +274,7 @@ Recorded as each is met, because this is what the next backend most wants to kno
   `cached_pipeline_data()` returns empty rather than a fabricated blob.
   **That is a design question about where the archive lives, not a missing call**, and the honest interim is an empty
   blob plus a `used_cached_pipeline()` of false, pinned by a test so the gap reads as deliberate.
-  See [TODO](TODO.md).
+  See [question-sg-metal-pipeline-blob](issues/question-sg-metal-pipeline-blob.md).
 
 - **Objects a descriptor merely names want a per-context cache, not per-group ownership.**
   A dx12 sampler descriptor leaves no object behind, and D3D12 creates a view straight into a heap.
@@ -474,4 +474,4 @@ Small, and each costs a build cycle to rediscover.
 - [concepts/backends.md](concepts/backends.md) — what a backend is, and why we duplicate rather than abstract.
 - [testing](testing.md) — the two tiers, and which one a finding belongs in.
 - [structure](structure.md) — the tagged roadmap; update your backend's tags per milestone, not at the end.
-- [TODO](TODO.md) — where an unresolved divergence goes.
+- [issues](issues/) — where an unresolved divergence goes.

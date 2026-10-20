@@ -65,7 +65,7 @@ It is text in a box, a marker on the anchor, and a leader from the marker to the
 - **Leaders are straight or elbowed**, with a width, a color and a dash pattern of their own, and another for the hidden look.
 
 An anchor behind the camera or outside the view draws nothing.
-Labels do not avoid each other yet; decluttering is its own feature, in [TODO.md](TODO.md).
+Labels do not avoid each other yet; decluttering is its own feature, [feat-sv-annotation-declutter](issues/feat-sv-annotation-declutter.md).
 
 ## View titles
 

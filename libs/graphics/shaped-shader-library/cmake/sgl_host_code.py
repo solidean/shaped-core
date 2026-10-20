@@ -390,6 +390,9 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
         out.append(f"    {array(f'sg::{access}_buffer_view<{element}>')} {member['name']}; ///< `{sgl_type}`\n")
     out.append("\n")
+    out.append(emit_array_bindings(f"shader package '{package}': '{file.path}' `binding {name}`",
+                                   [(m["name"], m.get("host_name", ""), m["kind"], m.get("count", 1))
+                                    for m in binding["members"]]))
     if has_block(binding):
         out.append("    /// The group's constant buffer: its plain members, laid out as the shader reads them, at this slot.\n")
         out.append("    /// sg allocates and fills it when the group is created, so no caller supplies it.\n")
@@ -416,6 +419,30 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
     out.append("// So a protocol mismatch names this group rather than a scope template's constraint.\n")
     out.append(f"static_assert(sg::declared_binding_set<{name}>);\n")
     out.append(f"}} // namespace {namespace}\n")
+    return "".join(out)
+
+
+ARRAY_FAMILIES = {"buffer": "buffer", "bytes": "buffer", "texture": "texture", "image": "texture"}
+
+
+def emit_array_bindings(where: str, members: list[tuple[str, str, str, int]]) -> str:
+    """A group's `arrays` struct: one sg handle per binding array, which `declare_array_*_access` takes.
+
+    Each of `members` is (member, host name, kind, count); the host name is the reflection name sg resolves.
+    A misspelled member is then a compile error, where a reflection name string is a lookup at run time.
+    A group without a binding array gets no struct, so no member can collide with a name it never emits.
+    """
+    arrays = [(member, name, ARRAY_FAMILIES[kind]) for member, name, kind, count in members
+              if count > 1 and kind in ARRAY_FAMILIES]
+    if not arrays:
+        return ""
+    if any(member == "arrays" for member, _, _, _ in members):
+        raise HostCodeError(f"{where} has a member named 'arrays', which its generated handles take as their struct's name")
+    out = ["    /// Its binding arrays, as `declare_array_buffer_access` / `declare_array_texture_access` name them.\n"]
+    out.append("    struct arrays\n    {\n")
+    for member, name, family in arrays:
+        out.append(f'        static constexpr sg::{family}_array_binding {member} = {{.name = "{name}"}};\n')
+    out.append("    };\n\n")
     return "".join(out)
 
 
@@ -1316,7 +1343,7 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
                                 f"declare the file as '{file.path}:*'")
         refuse_option_layouts(package, f"`@raytracing pipeline {p['name']}` of '{file.path}'", groups, entries)
         if any(not m for m in p["misses"]):
-            # TODO: a ray type without a miss wants an empty miss record, which sg's table has no spelling for yet
+            # issue: feat-slib-raytracing-ray-type-without-miss
             raise HostCodeError(f"{where} leaves a ray type without a miss, which slib cannot table yet")
 
         def handle(entry: str) -> str:

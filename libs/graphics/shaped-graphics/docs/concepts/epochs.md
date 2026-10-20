@@ -154,8 +154,9 @@ Preserve these; the rest is tuning:
 Plus the `allowed_in_flight` throttle, deferred deletion of buffers with finalizers, and per-epoch command-allocator (dx12) / command-pool (vulkan) recycling.
 dx12 additionally holds a resource back past its epoch while an async upload to it is still in flight — a second gate on the copy fence, see [async upload](upload.async.md).
 
-**Deferred** (see [TODO.md](../TODO.md)): the split GPU/CPU download watermarks for readback, and vulkan's async copy queue with its per-resource pending syncs.
+**Deferred** (see [issues](../issues/)): the split GPU/CPU download watermarks for readback, and vulkan's async copy queue with its per-resource pending syncs.
 Also placed transient *textures*: one works today, but as a dedicated allocation auto-expired at the next epoch rather than suballocated from the transient bump heap, which is buffers-only.
+[feat-sg-transient-texture-heap](../issues/feat-sg-transient-texture-heap.md) tracks that.
 
 ## See also
 

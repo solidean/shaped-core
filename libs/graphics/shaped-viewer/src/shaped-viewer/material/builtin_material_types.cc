@@ -15,9 +15,9 @@
 // `openpbr` exposes it directly; `pbr` and `unlit` are projections onto it, the same way glTF's metallic-roughness maps onto
 // OpenPBR.
 //
-// TEMPORARY: these live as string literals because slib has no named-fragment asset kind — a fragment is not a shader, so
-// `sc_add_shader_package` has nothing to declare it as.
-// Moving them into `shaders/` once it does gets editor support and hot reload; see libs/graphics/shaped-viewer/docs/TODO.md.
+// TEMPORARY(debt-sv-builtin-material-fragments-as-strings): these live as string literals because slib has no named-fragment asset kind.
+// A fragment is not a shader, so `sc_add_shader_package` has nothing to declare it as.
+// Moving them into `shaders/` once it does gets editor support and hot reload.
 
 namespace sv
 {
@@ -25,14 +25,19 @@ namespace
 {
 // The identity fragment: every attribute is already an OpenPBR parameter, so this only clamps what the BSDF requires.
 //
+// `opacity` and `alpha_cutoff` are not read here: the type declares them as its cutout opacity and cutoff, which the
+// tracer reads directly.
 // A cutout is a step rather than a blend: alpha_cutoff at 0 leaves opacity continuous, and any positive value makes the
 // surface either fully present or fully absent at that threshold.
 // Baking the step into the imported alpha instead fails as soon as mips filter it, which is exactly when a cutout matters.
 //
+// `emission_color` and `emission_luminance` are not read here either: the type declares them as its emission.
+// The generator writes it after this fragment, so the light sampler reads the same emission the closest hit does.
+//
 // `occlusion` is declared and imported, and deliberately not read here.
 // Baked ambient occlusion in a path tracer is double-counting: the integrator computes that occlusion itself, correctly and
 // per bounce, so applying a baked term on top darkens the surface twice.
-// It is carried anyway because a raster fallback will want it, and an asset that lost its AO map on load cannot get it back.
+// The type declares it as its occlusion attribute instead, which the raster path darkens its environment light by.
 constexpr cc::string_view openpbr_shader = R"sgl(
 surface.base_weight = saturate(base_weight)
 surface.base_color = saturate(base_color)
@@ -74,13 +79,9 @@ surface.thin_film_weight = saturate(thin_film_weight)
 surface.thin_film_thickness = max(0.0, thin_film_thickness)
 surface.thin_film_ior = max(1.0, thin_film_ior)
 
-surface.emission_luminance = max(0.0, emission_luminance)
-surface.emission_color = max(float3(0.0), emission_color)
-
 surface.geometry_thin_walled = thin_walled
 surface.geometry_normal = normalize(normal)
 surface.geometry_coat_normal = normalize(coat_normal)
-surface.geometry_opacity = if alpha_cutoff > 0.0 => step(alpha_cutoff, opacity) else saturate(opacity)
 
 surface.geometry_tangent_frame = tangent_frame
 surface.geometry_tangent = tangent
@@ -93,14 +94,12 @@ surface.geometry_handedness = tangent_handedness
 // `specular_roughness`, and the dielectric keeps OpenPBR's default IOR of 1.5 — which is glTF's 0.04 reflectance.
 // `occlusion` folds into `base_weight` rather than being a parameter of its own, because OpenPBR has no such parameter and a
 // baked occlusion term is a modulation of how much base is there.
+// `emissive` is the type's declared emission color, at a scale of 1, which the generator writes after the fragment.
 constexpr cc::string_view pbr_shader = R"sgl(
 surface.base_weight = saturate(occlusion)
 surface.base_color = base_color
 surface.base_metalness = saturate(metallic)
 surface.specular_roughness = saturate(roughness)
-
-surface.emission_luminance = 1.0
-surface.emission_color = emissive
 
 surface.geometry_normal = normalize(normal)
 surface.geometry_tangent_frame = tangent_frame
@@ -108,14 +107,13 @@ surface.geometry_handedness = tangent_handedness
 )sgl";
 
 // Unlit is emission and nothing else: no base and no specular means no bounce reaches it, so the integrator returns `color`.
+// It declares no emission attribute on purpose: unlit is a display material, so it reaches the camera and lights nothing.
 constexpr cc::string_view unlit_shader = R"sgl(
 surface.base_weight = 0.0
 surface.specular_weight = 0.0
 
 surface.emission_luminance = 1.0
 surface.emission_color = color
-
-surface.geometry_opacity = saturate(opacity)
 )sgl";
 
 [[nodiscard]] material_type make_openpbr()
@@ -184,7 +182,7 @@ surface.geometry_opacity = saturate(opacity)
     // 0 disables it, so `OPAQUE` and `BLEND` both bind nothing here and opacity stays continuous.
     signature.push_back(material_signature_entry::of("alpha_cutoff", 0.0f));
 
-    // Baked ambient occlusion, imported but ignored by the path-tracing fragment — see the fragment for why it is carried.
+    // Baked ambient occlusion, which the raster path's environment light reads and the path-tracing fragment ignores — see the fragment.
     signature.push_back(material_signature_entry::of("occlusion", 1.0f));
 
     // Nonzero makes the surface a shell with no interior: it does not refract and encloses no medium.
@@ -204,8 +202,14 @@ surface.geometry_opacity = saturate(opacity)
     signature.push_back(material_signature_entry::of_rotation("tangent_frame", tg::quat_f::make_identity()));
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
 
-    return material_type::create(cc::string(builtin_material::openpbr), cc::move(signature), cc::string(openpbr_shader),
-                                 "opacity");
+    return material_type::create({.name = cc::string(builtin_material::openpbr),
+                                  .signature = cc::move(signature),
+                                  .shader = cc::string(openpbr_shader),
+                                  .opacity_attribute = "opacity",
+                                  .opacity_cutoff_attribute = "alpha_cutoff",
+                                  .occlusion_attribute = "occlusion",
+                                  .emission_color_attribute = "emission_color",
+                                  .emission_scale_attribute = "emission_luminance"});
 }
 
 [[nodiscard]] material_type make_pbr()
@@ -225,7 +229,10 @@ surface.geometry_opacity = saturate(opacity)
     signature.push_back(material_signature_entry::of_rotation("tangent_frame", tg::quat_f::make_identity()));
     signature.push_back(material_signature_entry::of("tangent_handedness", 1.0f));
 
-    return material_type::create(cc::string(builtin_material::pbr), cc::move(signature), cc::string(pbr_shader));
+    return material_type::create({.name = cc::string(builtin_material::pbr),
+                                  .signature = cc::move(signature),
+                                  .shader = cc::string(pbr_shader),
+                                  .emission_color_attribute = "emissive"});
 }
 
 [[nodiscard]] material_type make_unlit()
@@ -233,8 +240,10 @@ surface.geometry_opacity = saturate(opacity)
     auto signature = cc::vector<material_signature_entry>();
     signature.push_back(material_signature_entry::of("color", tg::vec3f(0.8f, 0.8f, 0.8f)));
     signature.push_back(material_signature_entry::of("opacity", 1.0f));
-    return material_type::create(cc::string(builtin_material::unlit), cc::move(signature), cc::string(unlit_shader),
-                                 "opacity");
+    return material_type::create({.name = cc::string(builtin_material::unlit),
+                                  .signature = cc::move(signature),
+                                  .shader = cc::string(unlit_shader),
+                                  .opacity_attribute = "opacity"});
 }
 } // namespace
 

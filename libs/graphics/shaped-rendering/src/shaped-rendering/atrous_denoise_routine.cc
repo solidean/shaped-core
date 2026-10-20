@@ -4,8 +4,9 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/atrous_denoise_routine.hh>
+#include <shaped-rendering/impl/build_failure.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
-#include <sr_shaders.hh>
+#include <sr_sgl_shaders.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 namespace sr
@@ -15,7 +16,7 @@ using impl::is_set;
 
 namespace
 {
-// The flag bits atrous_denoise.hlsl tests.
+// The flag bits atrous_denoise.sgl tests.
 constexpr u32 k_has_albedo = 1u << 0;
 constexpr u32 k_has_normal = 1u << 1;
 constexpr u32 k_has_depth = 1u << 2;
@@ -28,6 +29,10 @@ constexpr u32 k_has_sample_counts = 1u << 6;
 // à-trous keeps no history, so the two scratch slots are all it ever touches — the rest stay empty under it.
 constexpr int k_scratch = 0; // 0, 1: the passes' ping-pong
 constexpr int k_slots_used = 2;
+
+// rgba32_float to match the accumulator it most often filters.
+// The first pass divides by the albedo, and a half float would lose the dim end of that range.
+constexpr auto k_scratch_format = sg::pixel_format::rgba32_float;
 
 static_assert(k_scratch + k_slots_used <= reconstruct_history::state_slots,
               "a-trous reaches past the slots reconstruct_history has");
@@ -64,48 +69,36 @@ cc::shared_async<cc::unit> atrous_denoise_routine::init(sg::routine_init_scope s
     auto& ctx = scope.context();
 
     // Cleared first, so a reload that fails to compile leaves nothing built against the previous shader.
-    _group_layout = nullptr;
-    _pipeline = nullptr;
+    _scratch = {};
+    _output = {};
 
-    auto const shader = sr::shaders::atrous_denoise.compute.main_cs->acquire(ctx);
-    co_await cc::async_settled(shader);
-    auto const* const compiled = shader->try_value();
-    if (compiled == nullptr)
+    // Every pass but the last writes the scratch images, and the last writes the caller's output.
+    // Two compiles of one source, then, unless the output is the scratch format too.
+    auto const scratch = build_pass(ctx, k_scratch_format);
+    auto const output = params() == k_scratch_format ? scratch : build_pass(ctx, params());
+    for (auto const* const p : {&scratch, &output})
     {
-        fail_init();
-        co_return;
+        co_await cc::async_settled(p->pipeline);
+        if (p->pipeline->try_value() == nullptr)
+        {
+            impl::log_build_failure(p->pipeline, "atrous", p == &scratch ? k_scratch_format : params());
+            fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
+            co_return;
+        }
     }
 
-    auto const* const constants_binding = [&]() -> sg::binding const*
-    {
-        for (auto const& b : compiled->bindings)
-            if (b.type == sg::binding_type::constants_buffer)
-                return &b;
-        return nullptr;
-    }();
-    if (constants_binding == nullptr)
-    {
-        fail_init(); // a shader that reflects no constants block cannot be driven
-        co_return;
-    }
-
-    auto group_layout = ctx.cached.acquire_binding_group_layout<shaders::atrous_bindings>();
-    auto const pipeline_layout
-        = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}, .inline_constants = *constants_binding});
-
-    auto const pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
-    co_await cc::async_settled(pipeline);
-    auto const* const built = pipeline->try_value();
-    if (built == nullptr)
-    {
-        fail_init();
-        co_return;
-    }
-
-    // Both published together, after the build: readiness is what makes them visible to execute.
-    _group_layout = cc::move(group_layout);
-    _pipeline = *built;
+    // Published together, after the build: readiness is what makes them visible to execute.
+    _scratch = scratch;
+    _output = output;
     co_return;
+}
+
+atrous_denoise_routine::pass atrous_denoise_routine::build_pass(sg::context& ctx, sg::pixel_format target)
+{
+    auto const values = sgl_shaders::atrous_denoise_options{.target_format = target};
+    return {.group_layout = ctx.cached.acquire_binding_group_layout(
+                sgl_shaders::atrous_images::declared_bindings(values), sgl_shaders::atrous_images::declared_samplers()),
+            .pipeline = sgl_shaders::atrous_denoise.main_cs.acquire_pipeline(ctx, values)};
 }
 
 reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
@@ -124,7 +117,7 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
     CC_ASSERT(options.iterations >= 1, "à-trous needs at least one pass");
 
     // Read-only: execute touches nothing init did not publish, and the ping-pong images are the caller's.
-    auto const self = try_acquire(cmd);
+    auto const self = try_acquire(cmd, in.output.format());
     if (self.is_pending())
         return {.status = reconstruct_status::pending, .denoiser = denoise_method::atrous};
     if (self.is_failed())
@@ -136,12 +129,10 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
 
     // Pass i reads scratch[(i - 1) % 2] and writes scratch[i % 2], so no pass reads what it writes.
     // The first reads the input and the last writes the output, so one pass needs no scratch and two need one image.
-    // rgba32_float to match the accumulator it most often filters: the first pass divides by the albedo, and a half
-    // float would lose the dim end of that range.
     if (options.iterations > 1)
-        (void)impl::ensure_image(ctx, history._state[k_scratch], extent, sg::pixel_format::rgba32_float);
+        (void)impl::ensure_image(ctx, history._state[k_scratch], extent, k_scratch_format);
     if (options.iterations > 2)
-        (void)impl::ensure_image(ctx, history._state[k_scratch + 1], extent, sg::pixel_format::rgba32_float);
+        (void)impl::ensure_image(ctx, history._state[k_scratch + 1], extent, k_scratch_format);
 
     auto guide_flags = u32(0);
     if (is_set(in.guides.albedo))
@@ -182,28 +173,28 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
         if (demodulate && i == last)
             flags |= k_remodulate_out;
 
-        auto const constants = shaders::atrous_constants{
+        auto const& pass = i == last ? self->_output : self->_scratch;
+        auto const group = ctx.transient.create_binding_group(cmd, pass.group_layout,
+                                                              sgl_shaders::atrous_images{
+                                                                  .source = source.as_texture_view(),
+                                                                  .albedo = albedo,
+                                                                  .specular_albedo = specular_albedo,
+                                                                  .normal = normal,
+                                                                  .depth = depth,
+                                                                  .sample_counts = sample_counts,
+                                                                  .target = target.as_any_image_view(),
+                                                              });
+
+        cmd.compute.bind_pipeline(**pass.pipeline->try_value());
+        cmd.compute.bind_group(0, *group);
+        cmd.compute.set_inline_constants(sgl_shaders::atrous_constants{
             .step = 1 << i,
             .flags = flags,
             .luminance_scale = luminance_scale,
             .normal_power = options.normal_power,
             .depth_sigma = options.depth_sigma,
-        };
-
-        auto const group = ctx.transient.create_binding_group(cmd, self->_group_layout,
-                                                              shaders::atrous_bindings{
-                                                                  .gSource = source.as_texture_view(),
-                                                                  .gAlbedo = albedo,
-                                                                  .gSpecularAlbedo = specular_albedo,
-                                                                  .gNormal = normal,
-                                                                  .gDepth = depth,
-                                                                  .gSampleCounts = sample_counts,
-                                                                  .gTarget = target.as_any_image_view(),
-                                                              });
-
-        cmd.compute.bind_pipeline(*self->_pipeline);
-        cmd.compute.bind<shaders::atrous_bindings>(*group);
-        cmd.compute.set_inline_constants(constants);
+        }
+                                             .to_block());
         cmd.compute.dispatch_threads(extent[0], extent[1], 1);
 
         luminance_scale *= k_per_pass_noise_falloff;

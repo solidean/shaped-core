@@ -162,14 +162,20 @@ Three rules distinguish an array binding from a scalar one:
   All-vacant is legal — a table can start empty — and a null-handle view is an error everywhere: a view always binds a resource.
 - **Access is never inferred.**
   Which elements a shader indexes, and how, cannot be read from the binding, so array bindings skip the automatic hazard tracking scalar bindings get.
-  The caller declares the touched elements via `declare_array_buffer_access` / `declare_array_texture_access`, applied to the next dispatch or draw only.
+  The caller declares the touched elements via `declare_array_buffer_access` / `declare_array_texture_access`.
+  Each takes the array as the handle its shader package generates, `<group>::arrays::<member>`, or by reflection name for a layout no package generates.
+  A name no layout the context holds carries, in that family, asserts at the declare.
+  Each returns an `sg::array_access_declaration`, in force for every op of its bind point until the value is withdrawn or destroyed.
   The compute, raytracing and raster scopes each carry the pair.
   An element is tracked at the stages the pipeline's code touches the array in, as a scalar binding is.
   A pipeline with no footprint — only a hand-supplied shader blob — has its elements tracked at every stage of the op; one that wants narrower barriers supplies a footprint.
-  A declaration belongs to the bind point it was made on: a draw never resolves a compute declaration, and one still pending when its rendering scope closes is dropped with it.
-- **Every array the pipeline's code indexes must be declared before each dispatch or draw.**
+  A declaration belongs to the bind point it was made on: a draw never meets a compute declaration, and a raster one ends with its rendering scope.
+  Once an op has applied one, a later op that reads the array at stages and access already applied skips the element work.
+  The write counter behind that is per list: a write to any resource any application tracked ends every application, and an op at new stages or access re-applies.
+  [barriers](barriers.md) has when.
+- **Every array the pipeline's code indexes must have a live declaration at each dispatch or draw.**
   A missing one logs an error and costs a global barrier over every element, since a hot-reloaded shader can start indexing an array at any frame.
-  An empty element span says "unused by this op", and an array the code never indexes needs no declaration at all.
+  An empty element span says "unused" for every op it lives through, and an array the code never indexes needs no declaration at all.
 
 Element resources are still kept alive by the group, exactly like scalar bindings.
 Arrays of samplers, constants buffers or acceleration structures are not supported.

@@ -73,6 +73,8 @@ Each of these is a fact about Metal rather than a gap in the backend.
   A buffer holds a GPU address, a texture or sampler an `MTLResourceID`, and an array binding takes `count` consecutive slots.
   That is what SPIRV-Cross emits for a descriptor set, which is the whole reason the layout was chosen.
   A group holds every resource it names: an argument buffer is raw addresses, so nothing else keeps the target alive.
+  **A command list retains every group it binds** until it is consumed, and reads a bound group's resources and arrays through it at each op rather than copying them at the bind.
+  A copy of a bindless array would cost its whole capacity at every bind, and a retained group's address is what an array declaration's application is keyed on.
   A staging group is the CPU-side image of one such buffer, and a snapshot is a fresh buffer copied from it — which is what makes snapshots independent of the builder and of each other.
   It needs **one** descriptor array where dx12 needs two: an argument buffer has no view/sampler heap split, so both of the base's offsets are `binding.index`.
   **An array binding consumes `count` indices, and nothing checks that.**
@@ -83,7 +85,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
   `cached_pipeline_data()` returns empty and `used_cached_pipeline()` is always false, so every pipeline build is cold.
   Metal 4's `MTL4Archive` is one store per *compiler* where sg's surface is one blob per *pipeline*, so the mapping
   vulkan found — a `VkPipelineCache` per pipeline — has no counterpart here.
-  Recorded as open in [docs/TODO.md](../../docs/TODO.md), and pinned by a test so it reads as deliberate.
+  Recorded as open in [question-sg-metal-pipeline-blob](../../docs/issues/question-sg-metal-pipeline-blob.md), and pinned by a test so it reads as deliberate.
 - **Vertex buffers and inline constants are argument-table addresses, because Metal has neither of the usual forms.**
   MTL4's render encoder has no `setVertexBuffer`, and Metal has no root constants and no push constants — so both arrive the way a binding group does, as an address in the one `MTL4ArgumentTable`.
   That fixes a buffer-index convention the shader has to agree with, and `metal_common.hh` is where it is stated.
@@ -123,7 +125,8 @@ Each of these is a fact about Metal rather than a gap in the backend.
   That is also what makes a mask clamping to nothing in `flush_barriers` harmless rather than a dropped dependency.
 - **An array binding's elements are declared one at a time, and an undeclared one is an error.**
   Which elements a shader indexes is decided by data no backend sees, so a group keeps its array bindings apart from its scalar ones.
-  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by the `declare_array_*_access` pair on the scope recording the op.
+  The scalar bindings are declared automatically at the dispatch or draw, and the arrays only by a live declaration from the `declare_array_*_access` pair of the op's bind point.
+  A texture has no layout here, so a layout another declaration asks for writes nothing, and leaves an applied declaration current.
   An array the code indexes with no declare is logged and covered whole, and an empty span is how a caller says one is unused — the same accounting dx12 and vulkan keep.
   An acceleration-structure array is the exception and stays automatic.
   A trace reads every structure its table can reach, and sg's two declare calls are split by buffer and texture with no third for that kind to arrive through.
@@ -265,7 +268,7 @@ Each of these is a fact about Metal rather than a gap in the backend.
 - **Metal orders the async tier against in-flight streams, where dx12 does not.**
   The per-resource streaming timeline is what makes it cheap: an async transfer waits on the same value a command list would.
   `promote_to_async` is then purely the statement of intent it is documented to be — it suppresses the warning, and adds no wait, because the wait is already there.
-  docs/TODO.md records the gap on the backend that still has it.
+  [bug-sg-dx12-async-transfer-ignores-stream](../../docs/issues/bug-sg-dx12-async-transfer-ignores-stream.md) records the gap on the backend that still has it.
 - **An acceleration structure is not a buffer.**
   DXR names one by the GPU virtual address of the buffer the driver built it into, and Vulkan wraps an object around such a buffer.
   `MTL::AccelerationStructure` derives from `MTL::Resource` and there is no `MTLBuffer` in the caller's hands at any point.
@@ -487,7 +490,7 @@ It is what makes the two execution tests the only thing anywhere that traces a r
 The agreed shape is HLSL run through SPIRV-Cross with all three artifacts checked in.
 The argument-buffer layout this backend encodes was chosen to match what SPIRV-Cross emits, so a hand-written kernel can agree with the backend and still disagree with every real shader.
 Neither DXC nor SPIRV-Cross is available on an arm64 macOS host today, which is why it exists in the meantime.
-`raytrace.metal`'s own comment says so, and [docs/TODO.md](../../docs/TODO.md) carries the gap.
+`raytrace.metal`'s own comment says so, and [debt-sg-metal-hand-written-fixtures](../../docs/issues/debt-sg-metal-hand-written-fixtures.md) carries the gap.
 So the fixture is reproducible by hand, and the binary needs neither the shader library nor the Metal toolchain.
 Its reflection is written out by hand next to it, so the test states the binding shape it means rather than inheriting whatever a reflector produced.
 Every test builds its own context, because the context is its subject.

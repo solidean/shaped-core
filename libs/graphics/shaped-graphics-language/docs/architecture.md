@@ -55,7 +55,7 @@ A new keyword, operator, literal form or line-tree rule is not done until both d
 Both colour as control keywords the builtins whose names alone constrain control flow: `ddx`, `ddy`, `fwidth`, the barriers, `workgroup_uniform_load`, and the subgroup and quad operations.
 Those last two are listed by exact name, never by prefix, since `quad_count` is an ordinary name.
 The review tool's self-test holds the lexer's keywords to the form parser's `sgl_keywords`, and both highlighters' subgroup and quad names to the prelude's.
-Nothing else is checked yet ([TODO](TODO.md)).
+Nothing else is checked yet ([chore-sgl-highlighter-agreement-test](issues/chore-sgl-highlighter-agreement-test.md)).
 
 ## The check pass
 

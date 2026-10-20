@@ -17,10 +17,13 @@ WebGPU implementations, which is exactly the divergence the pair is meant to cat
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from ..core.layout import DRIVER_ROOT
 
 KINDS = ("node", "deno")
 DEFAULT_KIND = "node"
@@ -36,6 +39,30 @@ class NotFound(RuntimeError):
 # Env fallbacks, mirroring SC_EMSDK_PATH's role for the emsdk.
 _PATH_ENV = {"node": "SC_NODE_PATH", "deno": "SC_DENO_PATH"}
 _KIND_ENV = "SC_JS_RUNTIME"
+# Whitespace-separated V8 flags, the fallback for --v8-flag.
+_V8_FLAGS_ENV = "SC_V8_FLAGS"
+
+
+def default_deno_dir() -> Path:
+    """Where `dev.py install deno` puts deno, and where the lookup finds it ahead of PATH."""
+    return Path.home() / "tools" / "deno"
+
+
+def pinned_deno_version() -> str:
+    """The deno version `tools/deno.version` pins: the driver's, like the emsdk pin."""
+    return (DRIVER_ROOT / "tools" / "deno.version").read_text(encoding="utf-8").strip()
+
+
+def deno_version_number(version: str | None) -> str | None:
+    """`2.9.7` from deno's `deno 2.9.7 (stable, release, ...)` banner."""
+    m = re.match(r"deno (\S+)", version or "")
+    return m.group(1) if m else None
+
+
+def _deno_reuses_stale_code_cache(version: str | None) -> bool:
+    """Whether this deno has the stale code cache bug: below 2.9.7, where its repro last reproduced; an unknown version is assumed to."""
+    m = re.match(r"(\d+)\.(\d+)\.(\d+)", deno_version_number(version) or "")
+    return m is None or tuple(int(g) for g in m.groups()) < (2, 9, 7)
 
 # Installs navigator.gpu under node; the `webgpu` package it loads is pinned in the package.json beside it.
 _NODE_WEBGPU_PRELOAD = Path(__file__).resolve().parents[2] / "js" / "webgpu-preload.mjs"
@@ -46,11 +73,15 @@ class JsRuntime:
     kind: str
     exe: Path
     version: str | None
+    # Flags for the runtime's V8, such as a wasm proposal's `--experimental-wasm-*`; each runtime takes them its own way.
+    v8_flags: tuple[str, ...] = ()
 
     @property
     def launch_prefix(self) -> list[str]:
         """The argv prefix that runs an artifact — `[*prefix, artifact, ...args]`."""
         if self.kind == "deno":
+            # Deno takes V8 flags as one comma-separated --v8-flags; unknown ones are reported rather than fatal.
+            v8 = [f"--v8-flags={','.join(self.v8_flags)}"] if self.v8_flags else []
             # Deno denies filesystem and env access by default, and a nexus binary needs both.
             # NODERAWFS reads and writes real paths, and the JUnit report is a file write.
             # `run` is also required before the script path.
@@ -59,17 +90,20 @@ class JsRuntime:
             # into a `.js`, which Deno reads as ESM and rejects before the module runs at all.
             # Single-threaded output emits no require and does not need it, but the flag is harmless there.
             #
-            # --no-code-cache because Deno reuses a CommonJS script's cached compile after a rebuild that keeps the file's length.
+            # --no-code-cache below 2.9.7, because those reuse a CommonJS script's cached compile after a rebuild that keeps the file's length.
             # The run then fails with a SyntaxError on a fragment of an identifier, and a relink that only reorders functions is enough.
-            # Every deno launch pays an uncached compile for it, about 0.2 s for the 280 KB threaded rotating-cube loader.
+            # It costs an uncached compile per launch, about 0.2 s for the 280 KB threaded rotating-cube loader.
             # See docs/bugs-external/deno-code-cache-stale-same-length-source.
-            return [str(self.exe), "run", "--allow-all", "--unstable-detect-cjs", "--no-code-cache"]
+            cache = ["--no-code-cache"] if _deno_reuses_stale_code_cache(self.version) else []
+            return [str(self.exe), "run", "--allow-all", "--unstable-detect-cjs", *cache, *v8]
+        # Node takes V8 flags as its own options, and refuses one its V8 does not know ("bad option").
+        node = [str(self.exe), *self.v8_flags]
         # Node has no navigator.gpu of its own; the preload installs one backed by Dawn, and loads Dawn only when a
         # module first asks for it, so the many artifacts that never touch a GPU pay nothing.
         # Deno needs none: its WebGPU is built in.
         if _NODE_WEBGPU_PRELOAD.is_file():
-            return [str(self.exe), "--import", _NODE_WEBGPU_PRELOAD.as_uri()]
-        return [str(self.exe)]
+            return [*node, "--import", _NODE_WEBGPU_PRELOAD.as_uri()]
+        return node
 
     def describe(self) -> str:
         return f"{self.kind} {self.version or '(version unknown)'} at {self.exe}"
@@ -87,7 +121,7 @@ def _version_of(exe: Path) -> str | None:
 
 
 def _locate(kind: str, explicit: str | None, env: dict[str, str] | None) -> Path | None:
-    """Find one runtime's executable: an explicit path, then its SC_*_PATH env var, then PATH.
+    """Find one runtime's executable: an explicit path, then its SC_*_PATH env var, then the pinned install (emsdk's node, ~/tools/deno), then PATH.
 
     `env` is the environment the search runs against, so an emsdk overlay's PATH is honored rather than the
     inherited one.
@@ -105,6 +139,9 @@ def _locate(kind: str, explicit: str | None, env: dict[str, str] | None) -> Path
         from_emsdk = (env or os.environ).get("EMSDK_NODE")
         if from_emsdk:
             candidates.append(Path(from_emsdk))
+    # The same for deno: the one `dev.py install deno` put at the pinned version.
+    if kind == "deno":
+        candidates.append(default_deno_dir())
 
     for c in candidates:
         # A directory is accepted as the install dir, which is how these are usually spelled.
@@ -126,6 +163,7 @@ def resolve(
     node_path: str | None = None,
     deno_path: str | None = None,
     env: dict[str, str] | None = None,
+    v8_flags: tuple[str, ...] = (),
 ) -> JsRuntime | None:
     """Pick the runtime to launch WASM artifacts with, or None when it cannot be found.
 
@@ -151,7 +189,7 @@ def resolve(
     exe = _locate(chosen, explicit, env)
     if exe is None:
         return None
-    return JsRuntime(kind=chosen, exe=exe, version=_version_of(exe))
+    return JsRuntime(kind=chosen, exe=exe, version=_version_of(exe), v8_flags=v8_flags)
 
 
 @dataclass(frozen=True)
@@ -165,17 +203,21 @@ class JsRuntimeRequest:
     kind: str | None = None
     node_path: str | None = None
     deno_path: str | None = None
+    v8_flags: tuple[str, ...] = ()
 
     @classmethod
     def from_args(cls, args) -> "JsRuntimeRequest":
+        flags = getattr(args, "v8_flag", None) or os.environ.get(_V8_FLAGS_ENV, "").split()
         return cls(
             kind=getattr(args, "runtime", None),
             node_path=getattr(args, "node_path", None),
             deno_path=getattr(args, "deno_path", None),
+            v8_flags=tuple(flags),
         )
 
     def resolve(self, env: dict[str, str] | None = None) -> JsRuntime | None:
-        return resolve(kind=self.kind, node_path=self.node_path, deno_path=self.deno_path, env=env)
+        return resolve(kind=self.kind, node_path=self.node_path, deno_path=self.deno_path, env=env,
+                       v8_flags=self.v8_flags)
 
 
 # Artifact suffixes that are not directly runnable and must be launched by a JS runtime.

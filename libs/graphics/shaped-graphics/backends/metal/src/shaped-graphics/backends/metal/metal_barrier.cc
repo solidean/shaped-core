@@ -72,9 +72,7 @@ MTL4::VisibilityOptions visibility_for(sg::access_flags src_access, sg::access_f
     // Nothing was written, so nothing has to become visible and the barrier only has to order execution.
     // `MTL4VisibilityOptionNone` is that cheaper form, and on a tiler the difference is a real flush rather than a
     // bookkeeping detail.
-    auto const writes = sg::is_unordered_write(src_access) || src_access.has(sg::access_flag::color_write)
-                     || src_access.has(sg::access_flag::depth_write);
-    if (!writes)
+    if (!sg::has_write_access(src_access))
         return MTL4::VisibilityOptionNone;
 
     (void)dst_access;

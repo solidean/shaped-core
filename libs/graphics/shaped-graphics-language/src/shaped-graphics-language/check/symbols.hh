@@ -707,6 +707,8 @@ enum class sgl::check::target_kind : sgl::u8
     /// On a call: the prelude's `undefined()`, a value of the type the parameter it meets has, which nobody reads
     /// (CHK-341).
     undefined_value,
+    /// On a cast: `x as texel[F]` to a texel of another width than `x`'s (CHK-391).
+    texel_conversion,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.

@@ -323,10 +323,11 @@ The core maps directly: `baseColorFactor` to `base_color`, `metallicFactor` to `
 Four decisions the mapping needed:
 
 - **Emission.** `emission_luminance` takes `KHR_materials_emissive_strength` (1 without it) and `emission_color` takes `emissiveFactor`, so strength multiplies luminance.
-- **Alpha.** `OPAQUE` binds nothing, leaving the default 1, and `BLEND` binds `opacity` continuously, which the existing `geometry_opacity` path already handles.
-  `MASK` needs a new **`alpha_cutoff` attribute on the openpbr type**, defaulting to 0 (disabled), with the fragment stepping opacity against it.
+- **Alpha.** `OPAQUE` binds nothing, leaving the default 1, and `BLEND` binds `opacity`, which the tracer treats as coverage.
+  `MASK` binds the **`alpha_cutoff` attribute on the openpbr type**, defaulting to 0 (disabled), which the type declares as its opacity cutoff.
   Baking the step into the imported alpha instead fails as soon as mips filter it, which is exactly when a cutout matters.
-- **Occlusion.** `occlusion` is **declared on the type and imported**, because a raster fallback will want baked AO and an asset that loses its AO map on load cannot get it back.
+- **Occlusion.** `occlusion` is **declared on the type, imported, and named as the type's `occlusion_attribute`**.
+  The raster path darkens its environment light by it, which is the one term there nothing else occludes.
   The path-tracing fragment **ignores it**, with a comment saying why: baked AO in a path tracer is double-counting, since the integrator computes that occlusion correctly and per bounce.
 - **Packed textures.** These are the norm rather than the exception, so `texture_sample_source` grows a **channel swizzle**.
   It is four selectors over `{r, g, b, a, zero, one}`, of which the declaration's `component_count()` decides how many are read.
@@ -393,11 +394,7 @@ The geometric fallback gives a normal but an arbitrary tangent, so anisotropy an
 tangents.
 That stays off by default and is enabled per material by the importer when an asset actually carries a normal map.
 
-**TODO, to be written into [TODO.md](TODO.md) when this lands:** our tangents will not match MikkTSpace.
-Nearly every DCC tool bakes normal maps against it, so an asset only reproduces exactly if the runtime basis matches the baker's.
-Per-corner area- and angle-weighted accumulation is close but not identical, and diverges visibly on high-frequency normal maps and
-mirrored uv shells.
-Fixing it means porting MikkTSpace's algorithm into the same mesh-processing helpers.
+**Our generated tangents will not match MikkTSpace**, which [feat-sv-mikktspace-tangents](issues/feat-sv-mikktspace-tangents.md) carries.
 
 ## No filesystem
 
@@ -469,7 +466,9 @@ not yet need would be the wrong order.
    for sv to sit on it.
    `from_memory` plus `adopted` is what sv implements, and it covers everything until an asset is big enough that
    holding its payloads resident is the problem.
-7. **Later.** `.mtl`, PLY, MikkTSpace tangents, block compression as a derived recipe, the base-color fallback block.
+7. **Later.** `.mtl`, PLY, MikkTSpace tangents, the base-color fallback block.
+   Block compression landed as follow-up work rather than a recipe: a complete RGBA8 texture is re-encoded to BC7 on the GPU behind its own id (`texture_policy::compress`).
+   Caching the encoded blocks, so a reload skips the encode, is still the derived recipe's job.
 
 ## Library-extension seams this opens
 
@@ -480,7 +479,7 @@ Per the repo's living-libraries rule, what belongs lower than sv:
   They are written here as free functions over spans, so the eventual move down is a file move rather than a rewrite.
   This is also what unblocks babel's own `load_mesh`.
 - **`tg::aabb3f` from glTF accessor bounds.**
-  Already recorded in babel's [lower-library-gaps.md](../../../data/babel-serializer/docs/lower-library-gaps.md).
+  babel now answers it: `doc.bounds_of(accessor)` returns the stated bounds as a `tg::aabb3f`.
   `min_of` / `max_of` hand back untyped spans today, and this design makes the typed box load-bearing.
 - **A virtual filesystem in clean-core.** Our resolver hook is a deliberate intermediate for it.
 - **An mmap-backed `cc::pinned_data`.**

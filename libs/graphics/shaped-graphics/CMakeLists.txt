@@ -10,6 +10,7 @@ add_library(shaped-graphics
     src/shaped-graphics/resource/raw_texture.cc
     src/shaped-graphics/bytes_future.cc
     src/shaped-graphics/command_list/command_list.cc
+    src/shaped-graphics/command_list/array_access_declaration.cc
     src/shaped-graphics/command_list/upload.cc
     src/shaped-graphics/command_list/download.cc
     src/shaped-graphics/command_list/copy.cc
@@ -23,6 +24,7 @@ add_library(shaped-graphics
     src/shaped-graphics/raytracing/impl/hit_record_check.cc
     src/shaped-graphics/barrier/command_list_slot.cc
     src/shaped-graphics/barrier/footprint.cc
+    src/shaped-graphics/barrier/array_declarations.cc
     src/shaped-graphics/binding/binding.cc
     src/shaped-graphics/binding/impl/binding_conflicts.cc
     src/shaped-graphics/binding/impl/portability.cc
@@ -95,6 +97,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/routine/routine_registry.hh
     src/shaped-graphics/context/pipeline_cache.hh
     src/shaped-graphics/command_list/command_list.hh
+    src/shaped-graphics/command_list/array_access_declaration.hh
     src/shaped-graphics/command_list/impl/aliasing_scope.hh
     src/shaped-graphics/command_list/upload.hh
     src/shaped-graphics/command_list/download.hh
@@ -128,6 +131,7 @@ target_sources(shaped-graphics
     src/shaped-graphics/barrier/resource_access_state.hh
     src/shaped-graphics/barrier/access_inference.hh
     src/shaped-graphics/barrier/footprint.hh
+    src/shaped-graphics/barrier/array_declarations.hh
     src/shaped-graphics/resource/subresource.hh
     src/shaped-graphics/barrier/subresource_state.hh
     src/shaped-graphics/resource/views.hh
@@ -262,6 +266,7 @@ if(SC_BUILD_TESTS)
         tests/barrier/slot-test.cc
         tests/barrier/slot-recording-test.cc
         tests/barrier/array-plan-test.cc
+        tests/barrier/array-declaration-book-test.cc
         tests/context/stats-recording-test.cc
         tests/raytracing/hit-row-test.cc
     )
@@ -272,11 +277,8 @@ if(SC_BUILD_TESTS)
     # each invocable runnable by name across all backends. Only meaningful when some driver actually registers —
     # a compiled-but-unregistered backend leaves every invocable orphaned (100+ of them), which fails the binary.
     #
-    # TODO: introduce a CPU / validation backend (an always-available, in-process context — likely no shader
-    # support at all) so these backend-agnostic tests run everywhere, not just where a real GPU backend builds.
-    # It would make this `if(_sg_test_drivers)` guard unnecessary (a driver is always present), let large parts
-    # of the suite run on headless CI without a GPU, and double as a reference oracle to validate real backends
-    # against. Future work.
+    # A CPU / validation backend would make this guard unnecessary, since a driver would always be present.
+    # issue: feat-sg-cpu-validation-backend
     if(_sg_test_drivers)
         target_sources(shaped-graphics-test PRIVATE
             tests/backends/backends.cc
@@ -391,6 +393,7 @@ if(SC_BUILD_TESTS)
             tests/shaders/sgl-package-test.cc
             tests/compute/compute-test.cc
             tests/compute/compute-sync-test.cc
+            tests/barrier/sticky-array-test.cc
             tests/compute/compute-coherence-test.cc
             tests/compute/compute-sixteen-bit-test.cc
             tests/compute/compute-texture-test.cc
@@ -429,6 +432,8 @@ if(SC_BUILD_TESTS)
                 layout.sgl:*
                 sync.sgl:*
                 binding_arrays.sgl:*
+                sticky_arrays.sgl:*
+                sticky_arrays_traced.sgl:*
                 bytes.sgl:*
                 rects.sgl:*
                 draws.sgl:*

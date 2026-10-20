@@ -13,7 +13,7 @@ namespace sg
 {
 /// The access a shader performs on a bound view of this class — the inferred replacement for an explicit per-binding declaration.
 /// Constants blocks read, readonly buffers and textures read, readwrite buffers and images write.
-/// An image counts as written whatever its binding's `access` says; libs/graphics/shaped-graphics/docs/TODO.md tracks narrowing that.
+/// An image counts as written whatever its binding's `access` says; issue: perf-sg-image-access-narrowing.
 [[nodiscard]] constexpr access_flags shader_access_of(view_class c)
 {
     switch (c)

@@ -103,6 +103,12 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
             k.modifiers;   // sr::key_modifiers bit set; has_all(k.modifiers, ctrl | shift)
             k.is_down;  k.is_repeat;
         },
+        [&](sr::mouse_move_event const& m)
+        {
+            m.delta;                              // tg::vec2f — what drives a camera; m.cursor_pos is window-relative
+            m.is_held(sr::mouse_button::right);   // buttons held during the motion: END A DRAG ON IT TOO,
+                                                  // a release outside an uncaptured window never arrives
+        },
         [](auto const&) {});           // catch-all; SPELL ALL FIVE instead and a new event kind fails to compile here
 
     e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel too) — for predicates, and loops that `continue`
@@ -212,14 +218,14 @@ sr::capture_request_env_var        // "SC_CAPTURE" — on means HEADLESS: render
 sr::capture_name_env_var           // "SC_CAPTURE_NAME"       — which named capture; unset is the program's default view
 sr::capture_output_env_var         // "SC_CAPTURE_OUT"        — where the image goes; the extension picks jpg or png
 sr::capture_size_env_var           // "SC_CAPTURE_SIZE"       — "<width>x<height>"
-sr::capture_accumulate_env_var     // "SC_CAPTURE_ACCUMULATE" — frames to be satisfied for; what "satisfied" means is the program's
+sr::capture_accumulate_env_var     // "SC_CAPTURE_ACCUMULATE" — what to accumulate, in the program's unit (sv: samples per pixel; a raster app: frames)
 sr::capture_timeout_env_var        // "SC_CAPTURE_TIMEOUT"    — seconds before it gives up
 
 auto const req = sr::capture_request::from_environment();  // -> capture_request; every var, defaults for the unset
 req.active                         // -> bool; everything below is meaningless when false
 req.name / req.output_path         // -> cc::string
 req.size                           // -> tg::vec2i, default 1920x1080
-req.accumulate_frames              // -> u32, default 60
+req.accumulate                     // -> u32, default 60, in the program's own unit
 req.timeout_seconds                // -> double, default 60, spent against req.clock_seconds
 req.clock_seconds                  // -> double (*)(), default cc::current_time_steady_secs; a test swaps in a clock it advances
 
@@ -360,13 +366,15 @@ Fills a texture's mip chain by averaging each level into the next — one comput
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
 sr::box_filter_mipmap_routine::execute(cmd, texture, first_level = 1);  // generates first_level..end from the level below each
 sr::box_filter_mipmap_routine::level_count(texture, first_level = 1);   // -> int — dispatches it WOULD record; ask before committing, for a work budget
-sr::box_filter_mipmap_routine::prewarm(ctx);                            // warm the compiles ahead of the first use
+sr::box_filter_mipmap_routine::prewarm(ctx, {.shape = sr::mipmap_variant::tex_2d, .format = f});   // warm one shape and format's compile
+// keyed by sr::mipmap_key { shape, format }: box_filter_mipmap.sgl writes `as texel[target_format]`, so EACH FORMAT is a compile
+//   a float, unorm or snorm format SGL names as an image format; one of fewer channels keeps the average's leading ones
 // EVERY mippable shape: texture_1d/_2d/_3d, arrays, cube, cube array. Templated on the texture, so a multisampled one fails to COMPILE
-//   one HLSL entry point per view dimension (HLSL cannot abstract over them); a cube rides the 2D-array one, since its UAV is already a 2D array
+//   one entry point per view dimension; a cube rides the 2D-array one, since its image is already a 2D array
 //   arrays average WITHIN a slice, never across — so cube faces never bleed. 3D is the one shape halving in z, so it is an 8-tap average
 // texture needs texture | image usage, and the levels ALLOCATED already — this fills a chain, never reshapes one
 // source is bound as a single-mip view of level N, target as the UAV of N+1, so no level is read and written by one dispatch
-// no-op when that variant's shader did not compile (a broken 3D shader leaves 2D working), or when there is no level to generate
+// declines when that key's shader did not compile (a broken 3D shader leaves 2D working); a no-op when there is no level to generate
 // NOT for a format `sg::supports_typed_uav` refuses — an sRGB one above all; that is the raster routine below
 ```
 
@@ -435,7 +443,7 @@ auto const out = sr::reconstruct_routine::execute(cmd,     // -> sr::reconstruct
     {.color = noisy,                                       // linear HDR, TRACED extent; its alpha rides through unless upscaled
      .guides = {.albedo = a, .normal = n, .depth = d, .motion = m, .jitter = jitter, .view_to_clip = proj},
      .output = image,                                      // OUTPUT extent, image usage, never the same texture as color
-     .sample_count = spp * accumulated_frames},            // spatial members back off as it grows; 0 means 1
+     .sample_count = samples_per_pixel},                   // the mean's fewest samples a pixel; spatial members back off as it grows; 0 means 1
                                                             //   .sample_counts = a float texture of the count per pixel, which wins where set
     history, settings);
 out.status                                                 // denoised | pending | unsupported | failed — output untouched unless denoised
@@ -456,7 +464,8 @@ sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal,
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::oidn_denoise_routine::execute(cmd, inputs, history, {.network = sr::oidn_network_size::small})  // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP base, small ~1.6x faster; never `automatic`
 sr::fsr_upscale_routine::execute(cmd, {.color, .depth, .motion, .jitter, .output}, upscale_history, {.sharpening = true})  // -> sr::upscale_outcome; a CLEAN image only
-sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = lerp(dst, src, w) IN PLACE, w in [0,1]; false while compiling
+sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = mix(dst, src, w) IN PLACE, w in [0,1]; false while compiling, and after a failed compile, which logs why
+sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the destination's format: one compile each
 ```
 
 - **A named member that cannot run reports `unsupported`, logs once, and writes nothing** — only `automatic` chooses.
@@ -466,13 +475,15 @@ sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = ler
 - **History is the caller's**, because a routine cannot know which stream a call belongs to.
   One per view or layer, dropped with it.
 - **The front's readiness gates nothing.** Acquiring it registers it, and its init prewarms every supported member.
-  `sr::reconstruct_routine::prewarm(ctx)` at startup starts their compiles before the first call.
+  `sr::reconstruct_routine::prewarm(ctx, output_format)` at startup starts their compiles before the first call.
+- **The native members are keyed by the output's format**, which their last pass writes: any float or normalized format the device writes as an image.
+  A new output format is a compile of its own, so its first call reports `pending`.
 - **`fresh_samples` lives in the settings, not beside the call**, so planning a frame and running it read one answer.
   False (the default) is a converging mean and picks among the spatial members; true is this frame's own samples plus motion vectors.
 - **A denoised image keeps `color`'s alpha.** Every denoise member writes rgb and copies the alpha; an upscaled image's alpha is the upscaler's.
 - **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream, and FSR about 80 MiB for 720p in, 1080p out.
   Drop the history of a view nobody is looking at.
-- **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — see docs/TODO.md.
+- **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — issue: bug-warp-fsr-shading-change-pyramid-crash.
 - **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
   knob live, a scale selector, and the raw image beside the reconstructed one.
 

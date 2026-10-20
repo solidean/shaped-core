@@ -8,6 +8,7 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
+#include <shaped-graphics/binding/binding_group_layout.hh>
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
@@ -44,7 +45,7 @@ std::unique_ptr<command_list> context::create_command_list()
         return cc::move(r.value());
 
     // Command-list creation only fails on device loss (backend already marked it) or an internal bug.
-    if (_device_lost)
+    if (is_device_lost())
         throw device_lost_exception(_device_loss_reason);
 
     CC_UNREACHABLE("create_command_list failed on a healthy device — internal error");
@@ -77,7 +78,7 @@ swapchain_handle context::create_swapchain(swapchain_description const& desc)
     if (r.has_value())
         return cc::move(r.value());
 
-    if (_device_lost)
+    if (is_device_lost())
         throw device_lost_exception(_device_loss_reason);
     throw swapchain_creation_exception(r.error());
 }
@@ -94,10 +95,10 @@ submission_token context::submit_command_list_and_present(swapchain& sc, std::un
 void context::mark_device_lost(cc::string reason)
 {
     // Sticky: the first observed reason wins; later observations don't overwrite it.
-    if (_device_lost)
+    if (_device_loss_claimed.exchange(true, cc::memory_order_acq_rel))
         return;
-    _device_lost = true;
     _device_loss_reason = reason;
+    _device_lost.store(true, cc::memory_order_release);
 
     // And onto the deferred channel, so a frame loop that drains errors sees it without polling is_device_lost().
     // Once, because the flag above is sticky — a caller draining every frame would otherwise get it every frame.
@@ -217,6 +218,40 @@ bool context::claim_render_pass_split_warning(cc::string_view cause)
                     return false;
             warned.push_back(cc::string(cause));
             return true;
+        });
+}
+
+void context::note_array_layout(binding_group_layout_handle const& layout)
+{
+    auto has_array = false;
+    for (auto const& b : layout->bindings())
+        has_array = has_array || is_buffer_array(b) || is_texture_array(b);
+    if (!has_array)
+        return;
+
+    _array_layouts.lock(
+        [&](cc::vector<std::weak_ptr<binding_group_layout const>>& layouts)
+        {
+            layouts.remove_all_where([](std::weak_ptr<binding_group_layout const> const& l) { return l.expired(); });
+            layouts.push_back(layout);
+        });
+}
+
+bool context::holds_array_binding(cc::string_view name, bool is_texture)
+{
+    return _array_layouts.lock(
+        [&](cc::vector<std::weak_ptr<binding_group_layout const>> const& layouts)
+        {
+            for (auto const& weak : layouts)
+            {
+                auto const layout = weak.lock();
+                if (layout == nullptr)
+                    continue;
+                for (auto const& b : layout->bindings())
+                    if (b.name == name && (is_texture ? is_texture_array(b) : is_buffer_array(b)))
+                        return true;
+            }
+            return false;
         });
 }
 

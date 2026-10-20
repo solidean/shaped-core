@@ -1,6 +1,7 @@
 #include "shader_generator.hh"
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/common/log.hh>
 #include <clean-core/container/byte_stream_builder.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
@@ -74,14 +75,6 @@ enum class load_shape
         // `per_triangle` is one element for the whole primitive, whichever geometry numbered it.
         return load_shape::flat;
     }
-}
-
-[[nodiscard]] bool samples_texture(resolved_material const& r)
-{
-    for (auto const& a : r.attributes)
-        if (a.sample != nullptr)
-            return true;
-    return false;
 }
 
 /// The parameter block: one slot per thing the shader has to be told at run time, in signature order.
@@ -268,17 +261,34 @@ enum class load_shape
                       element_expression(binding.frequency));
 }
 
+/// What differs between the stages a material's body is spelled for: how a texture picks its level.
+///
+/// Everything else — the loads, the fragment, the bindless tables and the sampler palette among them — is the same text for a traced hit and a rasterized pixel.
+struct body_spelling
+{
+    /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
+    /// A pixel's cutout does not read through these loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0 as a hit does.
+    bool explicit_level = true;
+};
+
+/// The spelling a hit group and a wavefront shade kernel read their attributes in.
+constexpr auto traced_spelling = body_spelling{};
+
+/// The spelling a raster pixel stage reads its attributes in.
+constexpr auto raster_spelling = body_spelling{.explicit_level = false};
+
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
-[[nodiscard]] cc::string attribute_function(resolved_material const& r, material_parameter_layout const& layout, i32 index)
+[[nodiscard]] cc::string attribute_function(resolved_material const& r,
+                                            material_parameter_layout const& layout,
+                                            i32 index,
+                                            body_spelling const& spelling)
 {
     auto const& a = r.attributes[index];
     auto const components = a.format.component_count();
-    auto const samples = a.frequency == material_frequency::material_texture
-                      || a.frequency == material_frequency::mesh_texture_binding;
 
     auto out = cc::string();
-    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{{}}} -> {}:\n", a.name,
-                      samples ? "tracer.traced, tracer.bindless" : "tracer.bindless", sgl_type_of(a.format));
+    cc::format_append(out, "fun sv_attribute_{}(ctx: material.shading_context){{tracer.bindless}} -> {}:\n", a.name,
+                      sgl_type_of(a.format));
     out += "    let block = ctx.param_buffer as int\n";
 
     switch (a.frequency)
@@ -330,10 +340,11 @@ enum class load_shape
         cc::format_append(
             out, "    let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + {}u) as int\n",
             tex.offset);
-        // An explicit level, since a hit has no derivatives; the texel is named because a constant selector reads it twice.
+        // An explicit level where there are no derivatives, at a hit.
+        // The texel is named because a constant selector reads it twice.
         cc::format_append(
-            out, "    let texel = tracer.bindless.{}[nonuniform image].sample(uv, tracer.traced.{}, level = 0.0)\n",
-            "textures_2d", sgl_palette_sampler(a.sample->sampler));
+            out, "    let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, tracer.bindless.{}{})\n",
+            sgl_palette_sampler(a.sample->sampler), spelling.explicit_level ? ", level = 0.0" : "");
 
         auto value = texel_expression(a.sample->swizzle, a.format);
 
@@ -357,24 +368,198 @@ enum class load_shape
     return out;
 }
 
-/// The hit group of one permutation; `generate_material_shader`'s header says what it holds.
-[[nodiscard]] cc::string generate_hit_group(resolved_material const& r,
-                                            material_parameter_layout const& layout,
-                                            geometry_kind kind,
-                                            bool can_cut_out)
+/// Module `material`'s `frequency_*` for a mesh attribute's frequency.
+[[nodiscard]] u32 frequency_code(attribute_frequency f)
 {
-    auto const procedural = kind == geometry_kind::quadrics;
+    switch (f)
+    {
+    case attribute_frequency::per_vertex:
+        return 1;
+    case attribute_frequency::per_corner:
+        return 2;
+    default:
+        return 0;
+    }
+}
 
+/// `tracer.texel_channel`'s number for one swizzle selector.
+[[nodiscard]] u32 channel_code(texture_channel c)
+{
+    switch (c)
+    {
+    case texture_channel::r:
+        return 0;
+    case texture_channel::g:
+        return 1;
+    case texture_channel::b:
+        return 2;
+    case texture_channel::a:
+        return 3;
+    case texture_channel::zero:
+        return 4;
+    case texture_channel::one:
+        return 5;
+    }
+    return 0;
+}
+
+/// Where `r`'s cutout opacity lives in `layout`, or `none` where the permutation cannot cut out.
+///
+/// It cannot where the type declares no opacity attribute, or where nothing supplied it: at `material_type` frequency the
+/// value is the signature's own default, and an any-hit would run at every intersection to reject nothing.
+[[nodiscard]] material_opacity opacity_of(resolved_material const& r, material_parameter_layout const& layout)
+{
+    auto out = material_opacity();
+    if (r.type->opacity_attribute.empty())
+        return out;
+
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        auto const& a = r.attributes[i];
+        if (a.name != r.type->opacity_attribute)
+            continue;
+
+        switch (a.frequency)
+        {
+        case material_frequency::material_type:
+            // The signature's own default, which nothing supplied: it cannot cut out.
+            break;
+
+        case material_frequency::material:
+        case material_frequency::mesh_instance:
+            out.kind = material_value_kind::constant;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
+            break;
+
+        case material_frequency::mesh_attribute:
+            out.kind = material_value_kind::attribute;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.attribute->frequency);
+            break;
+
+        case material_frequency::material_texture:
+        case material_frequency::mesh_texture_binding:
+            out.kind = material_value_kind::texture;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::texture_index).offset);
+            out.uv_offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.uv->frequency);
+            out.channel = channel_code(a.sample->swizzle.components[0]);
+            out.sampler = palette_index(a.sample->sampler);
+            if (!a.sample->transform.is_identity(a.format.component_count()))
+                out.transform = u32(slot_for(layout, i32(i), material_slot_kind::sample_transform).offset);
+            break;
+        }
+    }
+    if (!out.can_cut_out() || r.type->opacity_cutoff_attribute.empty())
+        return out;
+
+    // A cutoff is a threshold, so it has to be one value for the instance: sourced from a texture or a mesh attribute, it is ignored.
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        auto const& a = r.attributes[i];
+        if (a.name != r.type->opacity_cutoff_attribute)
+            continue;
+        auto const constant = a.frequency == material_frequency::material_type
+                           || a.frequency == material_frequency::material
+                           || a.frequency == material_frequency::mesh_instance;
+        if (constant)
+            out.cutoff = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
+        else
+            CC_LOG_WARNING("material type '{}' resolved its opacity cutoff '{}' from a texture or a mesh attribute, "
+                           "which a "
+                           "threshold cannot be; the cutout falls back to coverage",
+                           r.type->name, a.name);
+    }
+    return out;
+}
+
+/// Where attribute `name` of `r` lives in `layout`, read as one factor of the emission; `none` where `name` is empty.
+///
+/// Unlike the opacity, a value at `material_type` frequency counts: the signature's default is a real emission.
+/// A default of zero is what keeps an instance from qualifying as a light at all.
+[[nodiscard]] material_emission_factor emission_factor_of(resolved_material const& r,
+                                                          material_parameter_layout const& layout,
+                                                          cc::string_view name)
+{
+    auto out = material_emission_factor();
+    if (name.empty())
+        return out;
+
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        auto const& a = r.attributes[i];
+        if (a.name != name)
+            continue;
+
+        switch (a.frequency)
+        {
+        case material_frequency::material_type:
+        case material_frequency::material:
+        case material_frequency::mesh_instance:
+            out.kind = material_value_kind::constant;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
+            break;
+
+        case material_frequency::mesh_attribute:
+            out.kind = material_value_kind::attribute;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.attribute->frequency);
+            break;
+
+        case material_frequency::material_texture:
+        case material_frequency::mesh_texture_binding:
+            out.kind = material_value_kind::texture;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::texture_index).offset);
+            out.uv_offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.uv->frequency);
+            for (auto c = 0; c < 3; ++c)
+                out.channels[c] = channel_code(a.sample->swizzle.components[c]);
+            out.sampler = palette_index(a.sample->sampler);
+            if (!a.sample->transform.is_identity(a.format.component_count()))
+                out.transform = u32(slot_for(layout, i32(i), material_slot_kind::sample_transform).offset);
+            break;
+        }
+    }
+    return out;
+}
+
+/// Where `r`'s emission lives in `layout`, as its type declares it.
+[[nodiscard]] material_emission emission_of(resolved_material const& r, material_parameter_layout const& layout)
+{
+    if (!r.type->declares_emission())
+        return {};
+    return {.color = emission_factor_of(r, layout, r.type->emission_color_attribute),
+            .scale = emission_factor_of(r, layout, r.type->emission_scale_attribute)};
+}
+
+/// The header every generated source of one permutation opens with: what it is, what it requires, and the modules it joins.
+/// `extra_use` is one more module the stages join, or empty.
+[[nodiscard]] cc::string source_header(resolved_material const& r,
+                                       geometry_kind kind,
+                                       cc::string_view requires_,
+                                       cc::string_view extra_use = {})
+{
     auto src = cc::string();
     cc::format_append(src, "// generated from material type '{}' — do not edit\n", r.type->name);
-    src += "require raytracing_pipeline\n\n";
-    src += "use material\nuse openpbr\n";
-    if (procedural)
+    src += requires_;
+    src += "\nuse material\nuse openpbr\n";
+    if (kind == geometry_kind::quadrics)
         src += "use quadric\n";
+    if (!extra_use.empty())
+        cc::format_append(src, "use {}\n", extra_use);
     src += "use slug\nuse tracer\n\n";
+    return src;
+}
 
-    // Restated rather than named as `tracer.path_rays`, since a hit group names a set of its own file.
-    src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
+/// The material itself, which every source of a permutation shares: the `sv_supplied_*` constants, an attribute
+/// function per attribute, and `sv_evaluate_material`.
+/// Hands back what a stage passes as `supplied_tangent_frame`.
+[[nodiscard]] cc::string material_body(resolved_material const& r,
+                                       material_parameter_layout const& layout,
+                                       cc::string& supplied_frame,
+                                       body_spelling const& spelling)
+{
+    auto src = cc::string();
 
     // Whether anything actually supplied each attribute, as a compile-time constant per permutation.
     //
@@ -391,13 +576,11 @@ enum class load_shape
 
     for (auto i = 0; i < r.attributes.size(); ++i)
     {
-        src += attribute_function(r, layout, i32(i));
+        src += attribute_function(r, layout, i32(i), spelling);
         src += "\n";
     }
 
-    auto const samples = samples_texture(r);
-    cc::format_append(src, "fun sv_evaluate_material(ctx: material.shading_context){{{}}} -> openpbr.surface:\n",
-                      samples ? "tracer.traced, tracer.bindless" : "tracer.bindless");
+    src += "fun sv_evaluate_material(ctx: material.shading_context){tracer.bindless} -> openpbr.surface:\n";
     for (auto const& a : r.attributes)
         cc::format_append(src, "    let {} = sv_attribute_{}(ctx)\n", a.name, a.name);
     src += "    let mut surface = openpbr.default_surface()\n";
@@ -415,13 +598,44 @@ enum class load_shape
         src += "\n";
         line_start = line_end + 1;
     }
+
+    // A type declaring its emission has it written here, after the fragment, from the declared attributes alone.
+    // That is the value the light sampler reads as well, so the two strategies weighed against each other see one emission.
+    // A traced spelling samples a texture at level 0, the level `tracer.emission_factor` reads too; a raster pixel's level is no light strategy.
+    if (r.type->declares_emission())
+    {
+        src += "\n    // --- the declared emission ---\n";
+        cc::format_append(src, "    surface.emission_color = max(float3(0.0), {})\n", r.type->emission_color_attribute);
+        if (r.type->emission_scale_attribute.empty())
+            src += "    surface.emission_luminance = 1.0\n";
+        else
+            cc::format_append(src, "    surface.emission_luminance = max(0.0, {})\n", r.type->emission_scale_attribute);
+    }
     src += "    return surface\n\n";
 
     // The tangent frame is the one supplied attribute the shading itself asks after, and a type that declares none supplies none.
-    auto supplied_frame = cc::string("false");
+    supplied_frame = cc::string("false");
     for (auto const& a : r.attributes)
         if (a.name == "tangent_frame")
             supplied_frame = "sv_supplied_tangent_frame";
+    return src;
+}
+
+/// The hit group of one permutation; `generate_material_shader`'s header says what it holds.
+[[nodiscard]] cc::string generate_hit_group(resolved_material const& r,
+                                            material_parameter_layout const& layout,
+                                            geometry_kind kind,
+                                            bool can_cut_out)
+{
+    auto const procedural = kind == geometry_kind::quadrics;
+
+    auto src = source_header(r, kind, "require raytracing_pipeline\n");
+
+    // Restated rather than named as `tracer.path_rays`, since a hit group names a set of its own file.
+    src += "rays path_rays:\n    surface: tracer.surface_payload\n    occlusion: tracer.shadow_payload\n\n";
+
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, traced_spelling);
 
     if (procedural)
     {
@@ -459,17 +673,70 @@ enum class load_shape
     }
 
     // The cutout test twice, since an any hit takes the payload of the one ray type its record serves.
-    src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload, @launch_id id: "
-           "int3){tracer.traced, "
+    // Neither reads the material's code: opacity comes through the instance's record, the same for every material.
+    // Each draws from its payload: a surface ray from the path's stream as the ray left, a shadow ray from the seed its caller wrote.
+    src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload){tracer.traced, "
            "tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, id, sv_evaluate_material(tracer.candidate_context(c)).geometry_opacity)\n\n";
-    src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload, @launch_id id: "
-           "int3){tracer.traced, "
+           "    return tracer.cutout(c, tracer.cutout_seed(p.rng, tracer.cutout_ray_surface), "
+           "tracer.candidate_opacity(c))\n\n";
+    src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload){tracer.traced, "
            "tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, id, sv_evaluate_material(tracer.candidate_context(c)).geometry_opacity)\n\n";
+           "    return tracer.cutout(c, p.seed, tracer.candidate_opacity(c))\n\n";
     src += "hit_group sv_material for path_rays:\n"
            "    surface = (closest_hit = sv_closest_hit, any_hit = sv_any_hit)\n"
            "    occlusion = (any_hit = sv_shadow_any_hit)\n";
+    return src;
+}
+
+/// The wavefront's shade kernel of one permutation: `sv_shade`, over this permutation's range of the sorted hits.
+[[nodiscard]] cc::string generate_shade_kernel(resolved_material const& r,
+                                               material_parameter_layout const& layout,
+                                               geometry_kind kind)
+{
+    // The tracer's acceleration structure is in the group this lists, and it needs the pipeline wherever a device grants one.
+    auto src = source_header(r, kind, "require ray_query\nrequire raytracing_pipeline\n");
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, traced_spelling);
+
+    src += "@compute(64) fun sv_shade(@thread_id id: int3){tracer.traced, tracer.bindless, slug.tables, "
+           "tracer.wavefront_step}:\n"
+           "    let slot = tracer.shade_slot(tracer.thread_index(id))\n"
+           "    if slot == tracer.no_slot => return\n";
+    if (kind == geometry_kind::quadrics)
+        cc::format_append(src,
+                          "    let ctx = tracer.stored_quadric_context(slot)\n"
+                          "    tracer.shade_stored_quadric(slot, sv_evaluate_material(ctx), {})\n",
+                          supplied_frame);
+    else
+        cc::format_append(src,
+                          "    let ctx = tracer.stored_triangle_context(slot)\n"
+                          "    tracer.shade_stored_triangle(slot, ctx, sv_evaluate_material(ctx), {})\n",
+                          supplied_frame);
+    return src;
+}
+
+/// The raster path's pixel stage of one triangle permutation: `sv_raster`, over the triangle module `raster`'s vertex stage drew.
+///
+/// The cutout reads the instance's opacity record through `tracer.instance_opacity`, the reader a hit's any-hit cuts through.
+/// So a pixel cuts what a hit does wherever the type's cutoff is above 0; coverage, a cutoff of 0, is cut below one half (`raster.is_cut`).
+/// The type's declared occlusion reaches `raster.shade` the same way, and 1 where it declares none.
+[[nodiscard]] cc::string generate_raster_pixel(resolved_material const& r,
+                                               material_parameter_layout const& layout,
+                                               material_opacity const& opacity)
+{
+    auto src = source_header(r, geometry_kind::triangles, {}, "raster");
+    auto supplied_frame = cc::string();
+    src += material_body(r, layout, supplied_frame, raster_spelling);
+
+    src += "@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, slug.tables} -> raster.targets:\n"
+           "    let ctx = raster.pixel_context(p)\n";
+    if (opacity.can_cut_out())
+        src += "    if raster.is_cut(p, ctx) => discard\n";
+    auto const occlusion = r.type->occlusion_attribute.empty()
+                             ? cc::string("1.0")
+                             : cc::format("sv_attribute_{}(ctx)", r.type->occlusion_attribute);
+    cc::format_append(src, "    return raster.shade(p, ctx, sv_evaluate_material(ctx), {}, {})\n", supplied_frame,
+                      occlusion);
     return src;
 }
 } // namespace
@@ -491,6 +758,25 @@ cc::string sgl_palette_sampler(sg::sampler const& s)
     };
     auto const filter = s.mag_filter == sg::sampler_filter::nearest ? cc::string_view("nearest") : "linear";
     return cc::format("palette_{}_{}_{}", filter, address(s.address_u), address(s.address_v));
+}
+
+u32 palette_index(sg::sampler const& s)
+{
+    auto const address = [](sg::sampler_address_mode m) -> u32
+    {
+        switch (m)
+        {
+        case sg::sampler_address_mode::repeat:
+            return 0;
+        case sg::sampler_address_mode::mirror_repeat:
+            return 1;
+        case sg::sampler_address_mode::clamp_edge:
+            return 2;
+        }
+        return 0;
+    };
+    auto const filter = s.mag_filter == sg::sampler_filter::nearest ? u32(0) : u32(1);
+    return filter * 9 + address(s.address_u) * 3 + address(s.address_v);
 }
 
 cc::hash128 material_shader_key(cc::hash128 permutation_key, material_shader_options const& opts)
@@ -547,29 +833,19 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                                                   "u32");
 
     auto layout = build_layout(r);
+    auto const opacity = opacity_of(r, layout);
+    auto const emission = emission_of(r, layout);
 
-    // Whether THIS permutation can reject an intersection, which is narrower than whether its type could.
-    //
-    // The type names the attribute its fragment writes `geometry_opacity` from, and that attribute's resolved frequency
-    // is what decides the answer.
-    // `material_type` frequency means nothing supplied it, so the fragment clamps the signature's own default and the
-    // value is a compile-time constant.
-    // An any-hit there would run at every intersection to reject nothing, and cost the instance its opaque fast path.
-    auto const can_cut_out = [&]
-    {
-        if (r.type->opacity_attribute.empty())
-            return false;
-
-        for (auto const& a : r.attributes)
-            if (a.name == r.type->opacity_attribute)
-                return a.frequency != material_frequency::material_type;
-        return false;
-    }();
-
-    auto source = generate_hit_group(r, layout, opts.kind, can_cut_out);
+    auto source = generate_hit_group(r, layout, opts.kind, opacity.can_cut_out());
+    auto shade_source = generate_shade_kernel(r, layout, opts.kind);
+    // A quadric has no raster stage yet; issue: feat-sv-raster-quadric-batches
+    auto raster_source = opts.kind == geometry_kind::triangles ? generate_raster_pixel(r, layout, opacity) : cc::string();
     return {.source = cc::move(source),
+            .shade_source = cc::move(shade_source),
+            .raster_source = cc::move(raster_source),
             .layout = cc::move(layout),
-            .can_cut_out = can_cut_out,
+            .opacity = opacity,
+            .emission = emission,
             .key = material_shader_key(r.permutation_key, opts)};
 }
 } // namespace sv

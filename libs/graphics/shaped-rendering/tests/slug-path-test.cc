@@ -65,8 +65,8 @@ namespace
     return (p - (a + ab * t)).length();
 }
 
-/// The path as a dense polyline, close enough that distances to it are exact at test precision.
-[[nodiscard]] cc::vector<tg::pos2f> sampled(sr::slug_curve const& c, int n = 2048)
+/// `c` at `n + 1` evenly spaced parameters.
+[[nodiscard]] cc::vector<tg::pos2f> sampled(sr::slug_curve const& c, int n)
 {
     auto out = cc::vector<tg::pos2f>();
     for (auto i = 0; i <= n; ++i)
@@ -119,6 +119,9 @@ void check_region(sr::slug_outline const& outline, tg::aabb2f box, f32 step, f32
             auto const p = tg::pos2f(x, y);
             auto const d = signed_distance(p);
             auto const w = winding(outline, p);
+            auto const holds = w >= 0 && (d >= -margin || w > 0) && (d <= margin || w == 0);
+            if (holds)
+                continue;
             auto const where = cc::format("({}, {}), signed distance {}, winding {}", x, y, d, w);
             CHECK(w >= 0).context(where);
             if (d < -margin)

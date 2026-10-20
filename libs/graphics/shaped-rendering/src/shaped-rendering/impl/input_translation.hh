@@ -28,6 +28,9 @@ namespace sr::impl
 /// SDL numbers its mouse buttons from 1; anything past the two extra buttons is reported as x2.
 [[nodiscard]] sr::mouse_button mouse_button_from_sdl(u8 sdl_button);
 
+/// SDL's held-button mask as `mouse_button_bit`s.
+[[nodiscard]] u8 held_buttons_from_sdl(SDL_MouseButtonFlags state);
+
 /// The scroll amount with the platform's inverted-scroll flag applied.
 /// SDL reports the raw direction plus a flag rather than pre-correcting it, so forgetting this inverts scrolling
 /// for every user who has natural scrolling on.

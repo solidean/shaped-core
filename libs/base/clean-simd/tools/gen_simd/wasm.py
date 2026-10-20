@@ -154,8 +154,9 @@ def mask_ops(kernel: str, lane_bits: int, w: int) -> dict[str, Impl]:
     lanes = 128 // lane_bits
     weights = ", ".join(str(1 << i) for i in range(lanes)) if lane_bits != 8 else ", ".join(str(1 << (i % 8)) for i in range(16))
     if lane_bits == 8:
+        # The u8 constructor: the top weight is 128, which an i8 lane would hold only by wrapping, and clang warns on that.
         make = (f"wasm_v128_and(wasm_i8x16_shuffle(wasm_i64x2_splat(i64(b)), wasm_i64x2_splat(i64(b)), "
-                f"0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1), wasm_i8x16_make({weights}))")
+                f"0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1), wasm_u8x16_make({weights}))")
     else:
         make = f"wasm_v128_and(wasm_{iv}_splat(i{lane_bits}(b)), wasm_{iv}_make({weights}))"
     return {
