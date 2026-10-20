@@ -225,7 +225,9 @@ ASYNC_TEST("sg metal - a lost device settles the waits its stopped queue strands
     REQUIRE(blocker != nullptr);
     ctx->queue()->wait(blocker, 1);
 
-    (void)ctx->submit_command_list(ctx->create_command_list());
+    // The epoch closes with nothing submitted: its signal alone is stranded behind the wait.
+    // A command list here would put an allocator in the epoch, and the loss retires the epoch by resetting it, which
+    // Metal forbids while the command buffer is still pending on this queue.
     auto const closed = ctx->current_epoch();
     ctx->advance_epoch();
 
@@ -259,8 +261,8 @@ ASYNC_TEST("sg metal - a lost device settles the waits its stopped queue strands
     CHECK(errors[0].kind == sg::device_error_kind::device_lost);
     CHECK_THROWS_AS((void)ctx->create_command_list(), sg::device_lost_exception);
 
-    // The loss was only simulated, so the queue still holds a command buffer the context has written off.
-    // It has to finish before the context releases the allocator it was recorded into.
+    // The loss was only simulated, so the queue still holds the wait on `blocker` and the signals behind it.
+    // Let it run them before the events and the context are released.
     blocker->setSignaledValue(1);
     while (!drained->waitUntilSignaledValue(1, 1000))
     {
