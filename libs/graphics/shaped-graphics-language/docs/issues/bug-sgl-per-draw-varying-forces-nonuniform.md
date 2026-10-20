@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/checking.md
   - file: libs/graphics/shaped-viewer/shaders/sgl/raster_shade.sgl
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/material/shader_generator.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T14:06Z
 ---
 
 # A per-draw value reaching the pixel stage as a varying must be indexed `nonuniform`
