@@ -507,6 +507,66 @@ TEST("sv::asset_loader - a hidden FBX node's meshes stay out")
     CHECK(mentions(asset.issues, "hidden"));
 }
 
+namespace
+{
+/// The shared scene with one more property on node "parent", after its scaling.
+[[nodiscard]] cc::string scene_with_parent_property(cc::string_view property, babel::test::fbx_settings s = {})
+{
+    auto const scaling = cc::string_view("\t\t\tP: \"Lcl Scaling\", \"Lcl Scaling\", \"\", \"A\",2,2,2\n");
+    return babel::test::fbx_scene_with(scaling, cc::format("{}\t\t\t{}\n", scaling, property), s);
+}
+} // namespace
+
+TEST("sv::asset_loader - a hidden FBX node hides its whole subtree, lights included")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib, .import_textures = false});
+
+    // "parent" hidden, "child" under it visible on its own: FBX's VisibilityInheritance hides both.
+    auto const group = REQUIRED_VALUE(loader.load(pin(scene_with_parent_property("P: \"Visibility\", \"Visibility\", "
+                                                                                 "\"\", \"A\",0")),
+                                                  sv::asset_format::fbx, "group.fbx"));
+    CHECK(group.meshes.empty());
+    CHECK(group.lights.size() == 1); // the lamp hangs off the root
+    CHECK(mentions(group.issues, "2 node(s) placing a mesh are hidden"));
+
+    // A hidden light node is left out like a hidden mesh.
+    auto const lamp
+        = babel::test::fbx_scene_with("\t\t\tP: \"Lcl Translation\", \"Lcl Translation\", \"\", \"A\",0,0,3\n",
+                                      "\t\t\tP: \"Lcl Translation\", \"Lcl Translation\", \"\", \"A\",0,0,3\n"
+                                      "\t\t\tP: \"Visibility\", \"Visibility\", \"\", \"A\",0\n");
+    auto const dark = REQUIRED_VALUE(loader.load(pin(lamp), sv::asset_format::fbx, "dark.fbx"));
+    CHECK(dark.lights.empty());
+    CHECK(dark.meshes.size() == 4);
+    CHECK(mentions(dark.issues, "light(s) are hidden"));
+}
+
+TEST("sv::asset_loader - an FBX hole face imports no triangles")
+{
+    auto lib = make_library();
+    auto const loader = sv::asset_loader({.materials = &lib, .import_textures = false});
+
+    // Read without triangulation, which is what keeps hole faces; the quad, slot 0, is marked as one by hand.
+    auto doc = REQUIRED_VALUE(babel::fbx::read(cc::string_view(babel::test::fbx_scene())));
+    REQUIRE(doc.meshes.size() == 1);
+    REQUIRE(doc.meshes[0].faces.size() == 2);
+
+    auto const whole = REQUIRED_VALUE(loader.load(doc, "whole.fbx"));
+    CHECK(whole.meshes.size() == 4);
+    CHECK(mentions(whole.issues, "fanned")); // the quad, untriangulated
+
+    doc.meshes[0].face_holes = {true, false};
+    auto const holed = REQUIRED_VALUE(loader.load(doc, "holed.fbx"));
+
+    // Only the triangle is left, so each instance is one part named after its node.
+    REQUIRE(holed.meshes.size() == 2);
+    for (auto const& m : holed.meshes)
+        CHECK(m.geometry.indices.size() == 3);
+    CHECK(holed.find_mesh("parent") != nullptr);
+    CHECK(holed.find_mesh("child") != nullptr);
+    CHECK(!mentions(holed.issues, "fanned"));
+}
+
 TEST("sv::asset_loader - a left-handed FBX scene is mirrored into sv's, with an issue")
 {
     auto lib = make_library();

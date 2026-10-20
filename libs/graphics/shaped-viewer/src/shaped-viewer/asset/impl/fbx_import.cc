@@ -805,7 +805,7 @@ struct fbx_importer
         auto keys = cc::vector<u64>(); // slot in the high half, face in the low, so one sort groups and orders both
         keys.reserve(m.faces.size());
         for (auto f = isize(0); f < m.faces.size(); ++f)
-            if (m.faces[f].corner_count >= 3)
+            if (m.faces[f].corner_count >= 3 && !m.is_hole(f))
                 keys.push_back((u64(u32(m.material_slot_of(f))) << 32) | u64(u32(f)));
         cc::sort(keys);
 
@@ -977,13 +977,20 @@ struct fbx_importer
     /// One forward pass, since babel hands the nodes parents first.
     void walk_nodes()
     {
-        auto hidden = isize(0);
+        auto hidden_meshes = isize(0);
+        auto hidden_lights = isize(0);
         auto any_inherit_mode = false;
+
+        // FBX's VisibilityInheritance is on unless a file says otherwise, and neither ufbx nor babel carries it, so a hidden node hides its whole subtree.
+        auto shown = cc::vector<bool>();
+        shown.reserve(doc.nodes.size());
         for (auto i = isize(0); i < doc.nodes.size(); ++i)
         {
             auto const& n = doc.nodes[i];
             auto const parent = isize(int(n.parent));
             any_inherit_mode = any_inherit_mode || n.inherit != bf::inherit_mode::normal;
+            shown.push_back(n.visible && (parent < 0 || shown[parent]));
+            auto const visible = shown.back();
 
             // The root's local transform takes the space conversion, so an unflattened tree composes into sv's space too.
             auto local = affine_of(n.local);
@@ -1003,19 +1010,35 @@ struct fbx_importer
             auto const light_placement
                 = cfg.flatten_hierarchy ? tg::compose(conversion, n.node_to_world) : tg::affine_transform3f();
 
-            // A hidden node is helper or proxy geometry its author switched off, so its meshes stay out.
-            if (n.mesh != bf::mesh_index::invalid && n.visible)
-                emit_meshes(n, mesh_placement);
-            hidden += n.mesh != bf::mesh_index::invalid && !n.visible ? 1 : 0;
+            // A hidden node is helper or proxy content its author switched off, so its meshes and lights stay out.
+            if (n.mesh != bf::mesh_index::invalid)
+            {
+                if (visible)
+                    emit_meshes(n, mesh_placement);
+                else
+                    ++hidden_meshes;
+            }
             if (n.light != bf::light_index::invalid)
-                emit_light(n, light_placement);
+            {
+                if (visible)
+                    emit_light(n, light_placement);
+                else
+                    ++hidden_lights;
+            }
 
             out.nodes[slot].mesh_count = i32(out.meshes.size()) - out.nodes[slot].first_mesh;
             out.nodes[slot].light_count = i32(out.lights.size()) - out.nodes[slot].first_light;
         }
 
-        if (hidden > 0)
-            note(cc::format("fbx: {} hidden node(s) place meshes, which were not imported", hidden));
+        if (hidden_meshes > 0)
+            note(cc::format("fbx: {} node(s) placing a mesh are hidden, by their own Visibility or an ancestor's, so "
+                            "their meshes were not imported",
+                            hidden_meshes));
+        if (hidden_lights > 0)
+            note(cc::format("fbx: {} light(s) are hidden, by their node's Visibility or an ancestor's, so they were "
+                            "not "
+                            "imported",
+                            hidden_lights));
 
         if (any_inherit_mode && !cfg.flatten_hierarchy)
             note("fbx: some nodes ignore or reshape their parent's scale, which composing `asset_node::transform` does "
