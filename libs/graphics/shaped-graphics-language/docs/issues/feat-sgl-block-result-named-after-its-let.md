@@ -3,6 +3,8 @@ created: 2026-10-20
 priority: someday
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_exprs.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T18:21Z
 ---
 
 # A block's result is a var of its own, which the let that takes it then copies
