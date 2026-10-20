@@ -701,7 +701,7 @@ c.update(dt) -> bool             // advance that glide (config.focus_seconds, ea
 c.is_focusing()                  // whether update would still move the camera
 c.camera() / c.is_dragging()     // the resulting camera / whether a drag is in progress
 sv::primary_hit_position(record, pixel, resolution, depth, near) // -> optional<pos3d>: a texel of the trace's primary depth back to world; none = escaped
-sv::camera_controller_config     // { f64 orbit_degrees_per_pixel, pan_units_per_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
+sv::camera_controller_config     // { f64 orbit_degrees_per_logical_pixel, pan_units_per_logical_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
 ```
 
 Left drag orbits, middle drag pans the target (scaled by distance, so one drag covers the same screen fraction at every zoom), the wheel scales the distance geometrically.
@@ -727,7 +727,7 @@ c.handle(sr::input_event) -> bool  // apply one event ALREADY routed to this vie
 c.update(dt) -> bool             // integrate the held keys over dt seconds; true if the camera moved. Call EVERY frame, event or not
 c.camera() / c.is_looking() / c.is_moving()
 c.release_input()                // drop every held key + the look — for a view that lost focus and will never see the key-up
-sv::fps_camera_controller_config // { f64 look_degrees_per_pixel, move_units_per_second, fast_multiplier, slow_multiplier, speed_per_wheel_tick,
+sv::fps_camera_controller_config // { f64 look_degrees_per_logical_pixel, move_units_per_second, fast_multiplier, slow_multiplier, speed_per_wheel_tick,
                                  //   min/max_move_units_per_second; angle_d max_pitch; bool look_requires_button; }
 ```
 

@@ -105,7 +105,8 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
         },
         [&](sr::mouse_move_event const& m)
         {
-            m.delta;                              // tg::vec2f — what drives a camera; m.cursor_pos is window-relative
+            m.delta;  m.cursor_pos;               // tg::vec2f / pos2f, PIXELS; cursor_pos is window-relative
+            m.logical_delta();                    // delta / m.pixel_density — what drives a camera, the same on every display
             m.is_held(sr::mouse_button::right);   // buttons held during the motion: END A DRAG ON IT TOO,
                                                   // a release outside an uncaptured window never arrives
         },
