@@ -106,8 +106,8 @@ EXAMPLE("shaped-viewer/quadric-arrows")
     auto const floor
         = sv::mesh{.name = "floor",
                    .geometry = sv::triangle_geometry::create_from_positions(
-                       cc::vector<tg::pos3f>{tg::pos3f(-9, 0, -9), tg::pos3f(9, 0, -9), tg::pos3f(9, 0, 5),
-                                             tg::pos3f(-9, 0, -9), tg::pos3f(9, 0, 5), tg::pos3f(-9, 0, 5)}),
+                       cc::vector<tg::pos3f>{tg::pos3f(-9, 0, -9), tg::pos3f(9, 0, 5), tg::pos3f(9, 0, -9),
+                                             tg::pos3f(-9, 0, -9), tg::pos3f(-9, 0, 5), tg::pos3f(9, 0, 5)}),
                    .attributes = {sv::mesh_attribute::create_value("base_color", tg::vec3f(0.22f, 0.23f, 0.25f))}};
 
     for (auto f : sv::interactive("shaped-viewer/quadric-arrows"))
