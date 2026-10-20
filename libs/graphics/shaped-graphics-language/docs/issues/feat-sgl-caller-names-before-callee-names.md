@@ -4,6 +4,8 @@ priority: someday
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/flatten.cc
   - symbol: name_mint
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T19:23Z
 ---
 
 # An inlined callee's names are minted before the caller's own
