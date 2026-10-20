@@ -2,6 +2,8 @@
 created: 2026-10-20
 refs:
   - file: libs/graphics/shaped-graphics-language/prelude/raytracing.sgl
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T17:57Z
 ---
 
 # The emulated trace drops a subtree silently when its traversal stack is full
