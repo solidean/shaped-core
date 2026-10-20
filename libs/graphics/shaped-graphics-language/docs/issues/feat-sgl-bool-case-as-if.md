@@ -3,6 +3,8 @@ created: 2026-10-20
 priority: someday
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/legalize/legalize_cases.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-20T16:55Z
 ---
 
 # A `case` on a `bool` is a copy and `== true`
