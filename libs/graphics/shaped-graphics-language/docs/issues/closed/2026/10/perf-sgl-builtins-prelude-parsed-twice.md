@@ -7,6 +7,8 @@ refs:
   - symbol: registry::finalize
   - symbol: sgl::parsed_prelude
   - test: sgl profile - one compile of a file, sampled
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # A process parses the generated `builtins.sgl` twice
