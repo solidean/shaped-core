@@ -63,12 +63,12 @@ void set_resolve_uri(uri_resolver_provider provider)
     g_resolve_uri = cc::move(provider);
 }
 
-cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri)
+cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri, i64 max_bytes)
 {
-    return g_resolve_uri ? g_resolve_uri(uri) : impl::resolve_uri_from_filesystem(uri);
+    return g_resolve_uri ? g_resolve_uri(uri) : impl::resolve_uri_from_filesystem(uri, max_bytes);
 }
 
-cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::string_view uri)
+cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::string_view uri, i64 max_bytes)
 {
     auto const path = percent_decode(uri);
 
@@ -78,12 +78,28 @@ cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::st
         return cc::error(cc::format("shaped-viewer: cannot open '{}'", path));
 
     auto stream = adapter.value().stream();
-    auto bytes = stream.read_all();
-    if (bytes.has_error())
+
+    // The size the source states, checked against the ceiling before a byte is read.
+    auto const size = stream.size();
+    if (size.has_error() || size.value() < 0)
+        return cc::error(cc::format("shaped-viewer: '{}' is not a regular file", path));
+    if (size.value() > max_bytes)
+        return cc::error(
+            cc::format("shaped-viewer: '{}' is {} bytes, over the {} a load reads", path, size.value(), max_bytes));
+
+    auto bytes = cc::vector<byte>();
+    bytes.resize_to_uninitialized(size.value());
+    if (stream.read_exact(bytes).has_error())
         return cc::error(cc::format("shaped-viewer: cannot read '{}'", path));
 
+    // A regular file ends where it said it would; a device that states 0 and keeps yielding does not.
+    auto probe = byte(0);
+    auto const more = stream.read(cc::span<byte>(&probe, 1));
+    if (more.has_error() || more.value() != 0)
+        return cc::error(cc::format("shaped-viewer: '{}' is not a regular file", path));
+
     // Moved into the pin rather than copied, so a large `.glb` is read once and never duplicated.
-    return cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(bytes.value())));
+    return cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(bytes)));
 }
 
 cc::string impl::percent_decode(cc::string_view uri)

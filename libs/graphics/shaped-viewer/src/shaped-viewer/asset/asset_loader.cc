@@ -1,3 +1,4 @@
+#include <babel-serializer/geometry/fbx.hh>
 #include <babel-serializer/geometry/gltf.hh>
 #include <babel-serializer/geometry/obj.hh>
 #include <babel-serializer/geometry/stl.hh>
@@ -22,6 +23,8 @@ cc::optional<asset_format> asset_format_of_uri(cc::string_view uri)
         return asset_format::obj;
     if (extension == "stl")
         return asset_format::stl;
+    if (extension == "fbx")
+        return asset_format::fbx;
     return {};
 }
 
@@ -38,7 +41,7 @@ cc::result<asset_data> asset_loader::load(cc::string_view uri) const
     if (!format.has_value())
         return cc::error(cc::format("shaped-viewer: '{}' names no format asset_loader reads", uri));
 
-    auto bytes = _config.resolve ? _config.resolve(uri) : resolve_uri(uri);
+    auto bytes = _config.resolve ? _config.resolve(uri) : resolve_uri(uri, _config.max_file_bytes);
     if (bytes.has_error())
         return cc::error(cc::move(bytes).error());
 
@@ -70,7 +73,7 @@ cc::result<asset_data> asset_loader::_import(cc::pinned_data<byte const> bytes,
         auto resolve = [&](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
         {
             auto const joined = impl::join_uri(base_uri, uri);
-            return _config.resolve ? _config.resolve(joined) : resolve_uri(joined);
+            return _config.resolve ? _config.resolve(joined) : resolve_uri(joined, _config.max_file_bytes);
         };
 
         auto doc = babel::gltf::read(cc::move(bytes), {.resolve_uri = resolve});
@@ -93,6 +96,20 @@ cc::result<asset_data> asset_loader::_import(cc::pinned_data<byte const> bytes,
         if (doc.has_error())
             return cc::error(cc::move(doc).error());
         return impl::import_stl(doc.value(), _config, name, definitions);
+    }
+
+    case asset_format::fbx:
+    {
+        // Triangulated by babel, whose ear clip handles a concave polygon a fan would fold over.
+        auto doc = babel::fbx::read(bytes.span(), {.triangulate = true});
+        if (doc.has_error())
+            return cc::error(cc::move(doc).error());
+
+        // A texture's file name travels the seam the FBX itself did; the importer checks it and joins it onto
+        // `base_uri`'s directory itself, since a file name an FBX carries is a path and never a uri.
+        auto resolve = [&](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
+        { return _config.resolve ? _config.resolve(uri) : resolve_uri(uri, _config.max_file_bytes); };
+        return impl::import_fbx(doc.value(), _config, name, resolve, base_uri, definitions);
     }
     }
     return cc::error("shaped-viewer: unknown asset_format");
@@ -123,7 +140,7 @@ sv::asset asset_loader::load_async(cc::string_view uri) const
                 return ctx.resolve_to_error(cc::async_error::make_error(
                     cc::any_error(cc::format("shaped-viewer: '{}' names no format asset_loader reads", owned_uri))));
 
-            auto bytes = _config.resolve ? _config.resolve(owned_uri) : resolve_uri(owned_uri);
+            auto bytes = _config.resolve ? _config.resolve(owned_uri) : resolve_uri(owned_uri, _config.max_file_bytes);
             if (bytes.has_error())
                 return ctx.resolve_to_error(cc::async_error::make_error(cc::move(bytes).error()));
             if (dropped->load())
@@ -171,5 +188,14 @@ cc::result<asset_data> asset_loader::load(babel::stl::data const& doc, cc::strin
 {
     auto definitions = cc::vector<impl::asset_material_definition>();
     return _finish(impl::import_stl(doc, _config, name, definitions), definitions);
+}
+
+cc::result<asset_data> asset_loader::load(babel::fbx::data const& doc, cc::string_view name, cc::string_view base_uri) const
+{
+    auto resolve = [&](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
+    { return _config.resolve ? _config.resolve(uri) : resolve_uri(uri, _config.max_file_bytes); };
+
+    auto definitions = cc::vector<impl::asset_material_definition>();
+    return _finish(impl::import_fbx(doc, _config, name, resolve, base_uri, definitions), definitions);
 }
 } // namespace sv

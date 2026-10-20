@@ -626,8 +626,9 @@ loader.load(pinned, fmt, name, base_uri)   // the same from bytes in hand; base_
 // glTF's normalTexture (with its scale) and occlusionTexture (with its strength) both import as sample transforms
 loader.load(babel::gltf::data)   // an ALREADY-PARSED document — no re-read for a caller who parsed it themselves
 loader.load(babel::obj::data) / loader.load(babel::stl::data)
+loader.load(babel::fbx::data, name, base_uri)   // read it with {.triangulate = true}; base_uri is what texture file names join against
 loader.load_async(uri)           // -> sv::asset; fetch + parse + import off this thread, the LOADER must outlive it
-sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl
+sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl | fbx
 
 sv::asset                        // a load in flight; move-only; dropping it mid-load WAITS for the worker to leave the loader
 a.poll()                         // -> bool; collects a landed load and mints its materials — never blocks, call it per frame
@@ -635,10 +636,11 @@ a.wait()                         // -> bool; drives the load on THIS thread, the
 a.is_ready() / a.has_error() / a.error()
 a.data() / a.meshes() / a.issues()   // an empty asset until it lands, so a frame loop needs no branch
 
-sv::asset_loader_config          // { material_library* materials; uri_resolver_provider resolve;
+sv::asset_loader_config          // { material_library* materials; uri_resolver_provider resolve; i64 max_file_bytes = 4 GiB (regular files only);
                                  //   unique_function<bool(string_view)> include_mesh; bool import_materials, import_textures;
                                  //   unique_function<material_id(string_view)> material_override; bool flatten_hierarchy;
-                                 //   tangent_frame_options frames; }
+                                 //   tangent_frame_options frames; fbx_material_convention fbx_materials = phong; }
+sv::fbx_material_convention      // phong (FBX's own reading) | orca_metal_rough (NVIDIA ORCA / Falcor: SpecularColor packs occlusion, roughness, metalness)
 sv::tangent_frame_options        // { bool prefer_file = true; frame_generation generate = none; angle_f crease_angle; float weld_epsilon; }
 sv::frame_generation             // none (let the geometric fallback answer) | smooth | crease  — only `none` is implemented
 
@@ -685,6 +687,17 @@ Gotchas:
 - **`.mtl` is not read**, so an OBJ import carries geometry plus material names only — each name mints an unbound `openpbr` material so the slot exists to be overridden.
 - **An STL is one mesh of raw triangles**, with no material and no attributes.
   Its per-facet normals are dropped on purpose: the hit shader derives the geometric frame from the triangle, so a per-triangle normal could only ever match it.
+- **An FBX import lands in sv's convention** — meters, +Y up, right-handed — whatever axes and unit the file declared, through one transform at the root of every placement.
+- **FBX materials hang off the NODE**, so meshes split per (node, material slot): `"lamp.0"`, `"lamp.1"`, each instance free to draw a slot with its own material.
+  The geometry of one FBX mesh is built once and shared by every instance, which content hashing makes one upload.
+- **Which material reading an FBX gets is asked for, never detected** (`fbx_materials`): nothing in a file says that its SpecularColor map is ORCA's packed one.
+  A texture is fetched through the resolver by its relative name (backslashes made portable), then by its bare file name, both beside the document.
+  A texture name is a raw file path, never a uri: one holding `:`, opening with `//` or naming a Windows device is never asked for as written.
+  Its bare file name still is when that is safe, and `%` is escaped.
+  An ORCA packed specular map that does not decode leaves metalness 0 and roughness 0.5 rather than the SpecularColor constant.
+  A hidden node (FBX `Visibility` 0) places nothing: it is helper or proxy geometry.
+  A base color whose alpha drops below 1 anywhere becomes a cutout at 0.5, and a material with a normal map gets tangents generated along its uv layout.
+- **FBX light intensities have no unit.** They are taken one-to-one as candela or lux, and a caller rescales; a decay other than quadratic is an issue.
 - **`generate` beyond `none` is not implemented.**
   What lands is `prefer_file`: glTF NORMAL + TANGENT become a `tangent_frame` + `tangent_handedness`.
   A normal with no tangent gets an arbitrary perpendicular one, which is fine for everything but anisotropy and normal mapping.

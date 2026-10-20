@@ -4,7 +4,7 @@
 **Phase 6 is not ours to build — see its entry in the phasing below.**
 The CPU / GPU type split is in — `sv::mesh`, `sv::resident_mesh`, symmetric textures, `add_mesh` taking either.
 So is the material mapping — `alpha_cutoff`, `occlusion` and the channel swizzle, through resolve, generation and the permutation key.
-And so is the synchronous importer — `sv::asset_loader` over glTF, OBJ and STL, with the resolver hook.
+And so is the synchronous importer — `sv::asset_loader` over glTF, OBJ, STL and FBX, with the resolver hook.
 Everything else here is still design, and the phasing at the end is what lands in which order.
 
 The goal is one convenience layer: **load meshes from a file and draw them**, across glTF, OBJ, STL and whatever comes after,
@@ -309,8 +309,10 @@ upload touches it.
 - **STL** — *landed* in babel, both containers, and imported as one mesh of raw triangles with no material.
   Its per-facet normals are dropped: the hit shader derives the geometric frame anyway.
 - **PLY** — planned in babel, and worth having, though sv has no point-cloud item kind yet.
-- **FBX / USD / 3MF / Collada** — out of scope, deliberately rather than as a TODO.
-  Each is a project of its own, and the first two mean vendoring something substantial.
+- **FBX** — *landed*, over babel's reader, which vendors ufbx; see [FBX to OpenPBR](#fbx-to-openpbr) below.
+  It was out of scope until a scene worth tracing — NVIDIA's ORCA Bistro — shipped as nothing else.
+- **USD / 3MF / Collada** — out of scope, deliberately rather than as a TODO.
+  Each is a project of its own, and USD means vendoring something substantial.
 
 ## glTF to OpenPBR
 
@@ -349,6 +351,83 @@ it is generated code, not a value.
 Color space stays part of `texture_data`'s `sg::pixel_format` and therefore part of its hash.
 Base color and emissive are sRGB-encoded while metallic-roughness, normal and occlusion are linear, so a texture bound as both
 uploads twice — rare, correct, and better than a per-sample decode flag that makes one resident texture mean two things.
+
+## FBX to OpenPBR
+
+An FBX differs from a glTF in three ways the importer has to answer, and each answer is where FBX's own semantics stop.
+
+- **The space.**
+  sv is glTF's convention: meters, +Y up, right-handed.
+  FBX declares its own axes and unit, and babel reports them without applying them.
+  So one affine transform — the file's right, up and front onto +X, +Y and +Z, scaled to meters — sits at the root of every placement.
+  A left-handed file is mirrored by it, with an issue, since faces keep their winding.
+- **The instancing.**
+  FBX connects materials to the node placing a mesh rather than to the mesh, and a face names a slot of the node's list.
+  So the unit of import is (node, slot): `"lamp.0"`, `"lamp.1"`.
+  The geometry of one FBX mesh is built once per slot and shared by every node placing it, which content hashing turns into one upload.
+- **The material model.**
+  FBX's Phong and Lambert properties mean whatever the exporting pipeline made them mean, and a file never says which.
+  So `asset_loader_config::fbx_materials` names the reading, rather than the importer guessing it.
+
+`fbx_material_convention::phong` is FBX's own reading.
+DiffuseColor (times DiffuseFactor) is `base_color`, and the surface is a dielectric.
+Shininess becomes `specular_roughness` through the Blinn-Phong to Beckmann correspondence, alpha = sqrt(2 / (n + 2)), and OpenPBR's roughness is alpha's square root.
+A SpecularColor map has no OpenPBR parameter to land on, and is reported rather than bound.
+
+`fbx_material_convention::orca_metal_rough` is NVIDIA's ORCA scenes as Falcor reads them, which is what the Bistro ships under.
+Bistro's README states the layout, and the importer follows it.
+
+| FBX property | channel | OpenPBR |
+|---|---|---|
+| DiffuseColor map | rgb, sRGB | `base_color` |
+| DiffuseColor map | a, when any texel is below 1 | `opacity`, with `alpha_cutoff` 0.5 |
+| SpecularColor map | r, linear | `occlusion` (carried, ignored by the tracer) |
+| SpecularColor map | g | `specular_roughness` |
+| SpecularColor map | b | `base_metalness` |
+| SpecularColor constant | g, b | the same two, where no map is connected |
+| a connected SpecularColor map that does not decode | — | metalness 0 and roughness 0.5, with an issue |
+| NormalMap | xyz, DirectX convention | `normal`, its y negated |
+| EmissiveColor map or constant | rgb, sRGB | `emission_color`, at `emission_luminance` = EmissiveFactor (1 when absent) |
+
+Three things hold under both readings.
+
+- **The cutout is read off the pixels.**
+  FBX has no alpha mode, and binding opacity for every material would send every mesh through the any-hit path.
+  A base color with any texel below full alpha steps at one half, which is Falcor's alpha test.
+- **Opacity below 1 is coverage**, as glTF's `BLEND` is read, with an issue: FBX cannot say whether a surface is glass, and transmission is not guessed.
+  Bistro's glasses and drinks are that case; their transmission lives in Falcor's `.pyscene`, which nothing here reads.
+- **A normal map brings its tangents.**
+  FBX rarely carries tangents, so a mesh drawn by a material with a normal map gets them generated along its first uv set, area-weighted per vertex.
+  A two-channel map (BC5) has its third channel rebuilt on the CPU when it is decoded, since an rgba8 decode leaves it zero.
+
+A texture babel cannot decode leaves its material on its factors — except a connected packed specular map, whose constant is a placeholder and is NOT used.
+Bistro's SpecularColor constant is 0.5, which would make every surface half metal wherever a map does not decode, so a neutral surface stands in.
+
+Textures are fetched through the loader's resolver by their relative name, joined against the FBX's own location with its backslashes made portable, and then by their bare file name beside it.
+A file name is something the FILE says, and it is a raw file path, never a uri — so the importer never follows one off the machine or anywhere absolute.
+A name holding a `:` (a scheme like `https:` or `file:`, or a drive like `C:`) is never asked for as written.
+Nor is a name opening with `//` once backslashes are portable, a UNC or network path.
+Nor is one with a component Windows opens as a device — `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, in any case and with any extension.
+After those checks the bare file name is still tried beside the document whenever it is itself safe, which is what a Windows-authored FBX naming `C:\Users\...\wood.png` needs.
+Only when nothing safe resolved is the name reported, with an issue.
+A `%` is escaped before the resolver percent-decodes, so `%5C%5C` or `%2E%2E%2F` stays the literal file name it is.
+The importer joins the name onto the document's directory itself, so no uri passthrough applies.
+`absolute_filename` is only ever asked for by its bare file name, and so is a name rooted at `/`.
+
+The importer's checks confine what a name may SAY; they are not a sandbox.
+One class of reach remains, and it is glTF's too: a relative name with `../` climbs out of the document's directory.
+A host that must confine an import to one directory does so in its resolver, which sees every uri before anything is opened.
+The filesystem default refuses what is not a regular file — a directory, a pipe, a device such as `/dev/zero` — and any file over `asset_loader_config::max_file_bytes`, 4 GiB unless set.
+That holds for glTF's buffers and images as much as for FBX's textures.
+One that cannot be fetched or decoded leaves its material on its factors, and the failures arrive as one issue per kind rather than one per texture.
+
+A hidden node (FBX `Visibility` 0) is helper or proxy geometry its author switched off, so its meshes are not imported, with an issue.
+
+Lights take only a position and a direction from their node, as glTF's do.
+FBX gives an intensity no physical unit — its `Intensity` is a percentage of the DCC tool's own — so the importer takes it one-to-one as candela for a point or spot and lux for a directional light.
+The Bistro example rescales them.
+A decay other than quadratic is an issue, since sv's falloff is physical.
+An area or volume light carries no size FBX states, and is skipped with an issue.
 
 ## Tangent frames
 
@@ -467,6 +546,7 @@ not yet need would be the wrong order.
    `from_memory` plus `adopted` is what sv implements, and it covers everything until an asset is big enough that
    holding its payloads resident is the problem.
 7. **Later.** `.mtl`, PLY, MikkTSpace tangents, the base-color fallback block.
+   FBX landed out of this order, because Bistro ships as nothing else.
    Block compression landed as follow-up work rather than a recipe: a complete RGBA8 texture is re-encoded to BC7 on the GPU behind its own id (`texture_policy::compress`).
    Caching the encoded blocks, so a reload skips the encode, is still the derived recipe's job.
 
