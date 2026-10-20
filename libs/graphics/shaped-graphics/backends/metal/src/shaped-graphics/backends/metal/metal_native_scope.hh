@@ -36,8 +36,11 @@ struct sg::backend::metal::native_buffer_access
 /// Opening closes sg's encoder after it waits on everything recorded before and updates `fence()`.
 /// The foreign code must wait for that fence before its work and update it after — MetalFX does both when its
 /// scaler's `fence` property is set to it.
-/// The first encoder sg opens after the scope waits for the fence, so it sees what the foreign code wrote.
+/// Once the scope is destroyed, the first encoder sg opens waits for the fence, so it sees what the foreign code wrote.
 /// Foreign code that ignores the fence races sg in both directions.
+///
+/// **Record no sg work while the scope is alive**: let it go first.
+/// An sg encoder opened inside it would not wait for the foreign work, so opening one ASSERTS.
 ///
 /// **A caller that under-declares corrupts the tracker**: sg will believe a state the GPU is not in.
 /// Declare every resource the foreign call touches, and nothing it does not.

@@ -84,6 +84,7 @@ MTL4::ComputeCommandEncoder* metal_command_list::compute_encoder()
 {
     if (_encoder != nullptr)
         return _encoder;
+    CC_ASSERT(!_native_scope_open, "sg recorded onto a list while a native scope is open; let the scope go first");
 
     // Retained for the same reason the render encoder is: an autoreleased object outlives this call only by whichever
     // pool happens to be current, and a submit opens one of its own.
@@ -153,6 +154,7 @@ void metal_command_list::enter_native_scope()
     encoder->barrierAfterQueueStages(MTL::StageAll, k_compute_encoder_stages, MTL4::VisibilityOptionDevice);
     encoder->updateFence(_metal_context.native_scope_fence(), k_compute_encoder_stages);
     end_encoder();
+    _native_scope_open = true;
 }
 
 void metal_command_list::end_encoder()
@@ -1206,6 +1208,8 @@ void metal_command_list::raster_begin_rendering(rendering_info const& info)
 
 void metal_command_list::open_render_encoder(bool force_load)
 {
+    CC_ASSERT(!_native_scope_open, "sg recorded onto a list while a native scope is open; let the scope go first");
+
     auto const& info = _scope_info;
 
     auto const scope = autorelease_scope();

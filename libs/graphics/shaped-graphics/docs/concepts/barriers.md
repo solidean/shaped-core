@@ -112,8 +112,10 @@ Foreign code there encodes encoders of its own, and a barrier lives inside an en
 The two meet at a fence instead.
 Opening flushes the declares and closes sg's encoder behind an update of the context's scope fence.
 The foreign code waits for that fence before its work and updates it after.
-sg's next encoder waits for it again.
+sg's next encoder waits for it again, once the scope is destroyed, so the scope must go before sg records anything more; an encoder sg opens inside it asserts.
 MetalFX does its half when its effect's `fence` property is the scope's.
+Ending sg's command buffer at the scope instead, so the submission timeline orders the foreign work, would need no fence.
+It is not done because it costs two extra commits per call, and sg's submit, query and download paths all assume a list is one command buffer.
 dx12 and metal today; vulkan when a member needs it.
 See [shaped-rendering's denoising doc](../../../shaped-rendering/docs/reconstruction.md), which is what asked for it.
 

@@ -362,8 +362,13 @@ private:
 
     /// The two ends of a native scope (metal_native_scope.hh): opening flushes the declares and closes the encoder
     /// behind an update of the context's scope fence; closing makes the next encoder wait for that fence.
+    /// No sg encoder may open in between, since it would not wait for the foreign work.
     void enter_native_scope();
-    void leave_native_scope() { _wait_for_native_fence = true; }
+    void leave_native_scope()
+    {
+        _native_scope_open = false;
+        _wait_for_native_fence = true;
+    }
 
     /// Emit the barriers every buffer declared since the last flush needs, then clear the declares.
     /// Called immediately before the op those declares were for.
@@ -401,6 +406,9 @@ private:
 
     /// A native scope closed since the last encoder opened, so the next one waits for the context's scope fence.
     bool _wait_for_native_fence = false;
+
+    /// A native scope is open on this list, so no sg encoder may open until it closes.
+    bool _native_scope_open = false;
 
     /// A rendering scope whose encoder a copy or a barrier closed, and no draw has reopened yet.
     bool _render_suspended = false;

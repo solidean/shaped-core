@@ -1071,4 +1071,5 @@ native.command_buffer() / native.device() / native.compiler()  // -> MTL4::Comma
 native.fence()                         // -> MTL::Fence*: the foreign work MUST wait for it first and update it last
 native.texture(tex) / native.buffer(buf)  // -> MTL::Texture* / MTL::Buffer*; ASSERTS on a handle the scope did not declare
 // MetalFX: set the effect's `fence` to native.fence() and it does both halves itself
+// record no sg work while the scope is alive — an sg encoder opened inside it ASSERTS; let the scope go first
 ```
