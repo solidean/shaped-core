@@ -24,3 +24,6 @@ Not tested yet: swapping `seed_of` back to `accum_frame + 1` and repeating the t
 Not re-measured since #240's review fixes, which changed when a scaled frame counts a restart and made a frame with a lamp still compiling restart.
 
 Repeat with `uv run dev.py test "a per-triangle lamp of two different" --repeat 60`, which stops at the first failure and keeps its logs.
+
+Seen twice in `dev.py check`'s `debug-nopch-clang` leg on 2026-10-20, on main, with the same value both times: block (1, 0) channel 0 holds 2.3049817 and channel 1 2.5153303.
+So the dark state looks like one fixed wrong answer rather than noise, and both times the next run of the test step passed.
