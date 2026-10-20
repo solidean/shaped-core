@@ -656,7 +656,7 @@ sv::asset_node                   // { string name; i32 parent; affine_transform3
 sv::uri_resolver                 // function_ref<result<pinned_data<byte const>>(string_view)> — the borrowed, per-call form
 sv::uri_resolver_provider        // the owning form a hook and a config hold
 sv::set_resolve_uri(provider)    // process-wide; {} restores the filesystem default
-sv::resolve_uri(uri)             // -> the hook's answer, or impl::resolve_uri_from_filesystem
+sv::resolve_uri(uri, max_bytes)  // -> the hook's answer, or impl::resolve_uri_from_filesystem; max_bytes (4 GiB) bounds only the latter
 ```
 
 Gotchas:
@@ -675,7 +675,7 @@ Gotchas:
 - **`import_materials = false` imports no textures either**: a map with no material to bind into is noise, and the fallback `pbr` material declares different attribute names.
 - **A successful load with a non-empty `issues` is the normal case.** Check it before concluding you got everything the file described.
 - **glTF today maps the core metallic-roughness set plus emission.** babel does not interpret the `KHR_materials_*` extensions yet, so transmission, ior, clearcoat and sheen do not cross.
-- **glTF lights cross as `asset_data::lights`** — `{ id, light, optional range }`, world-placed like the meshes: `for (auto const& l : a.lights) scene.add_light(l.id, l.light);`
+- **glTF and FBX lights cross as `asset_data::lights`** — `{ id, light, optional range }`, world-placed like the meshes: `for (auto const& l : a.lights) scene.add_light(l.id, l.light);`
   `id` is the file's name, `name##i` when shared, or `light##i` when empty (bumped past any name already taken); `range` is kept but not honoured, and says so in `issues`.
   Ids are unique within one asset only: placing it twice in a layer asserts on the duplicate unless each placement sits under its own `f.scoped_id(...)`.
   Unflattened, a light sits at its node's local transform and `asset_node::first_light` / `light_count` say which node placed it.
@@ -689,18 +689,21 @@ Gotchas:
   Its per-facet normals are dropped on purpose: the hit shader derives the geometric frame from the triangle, so a per-triangle normal could only ever match it.
 - **An FBX import lands in sv's convention** — meters, +Y up, right-handed — whatever axes and unit the file declared, through one transform at the root of every placement.
 - **FBX materials hang off the NODE**, so meshes split per (node, material slot): `"lamp.0"`, `"lamp.1"`, each instance free to draw a slot with its own material.
-  The geometry of one FBX mesh is built once and shared by every instance, which content hashing makes one upload.
+  The geometry of one FBX mesh is built once per slot and shared by every instance, which content hashing makes one upload.
 - **Which material reading an FBX gets is asked for, never detected** (`fbx_materials`): nothing in a file says that its SpecularColor map is ORCA's packed one.
-  A texture is fetched through the resolver by its relative name (backslashes made portable), then by its bare file name, both beside the document.
-  A texture name is a raw file path, never a uri: one holding `:`, opening with `//` or naming a Windows device is never asked for as written.
-  Its bare file name still is when that is safe, and `%` is escaped.
   An ORCA packed specular map that does not decode leaves metalness 0 and roughness 0.5 rather than the SpecularColor constant.
-  A hidden node (FBX `Visibility` 0) places nothing: it is helper or proxy geometry.
-  A base color whose alpha drops below 1 anywhere becomes a cutout at 0.5, and a material with a normal map gets tangents generated along its uv layout.
-- **FBX light intensities have no unit.** They are taken one-to-one as candela or lux, and a caller rescales; a decay other than quadratic is an issue.
+- **FBX textures are fetched beside the document**: by their relative name (backslashes made portable), then by their bare file name.
+  A texture name is a raw file path, never a uri: one holding `:`, opening with `//`, climbing with `..` or naming a Windows device is never asked for as written.
+  Its bare file name still is when that is safe, and `%` is escaped.
+- **A hidden FBX node (`Visibility` 0) places nothing, and nor does anything under it**: it is helper or proxy geometry.
+- **An FBX base color whose alpha drops below 1 anywhere becomes a cutout at 0.5.**
+- **An FBX material with a normal map gets tangents generated along its uv layout**, when the file carries normals and `prefer_file` is on.
+- **FBX light intensities have no unit.** They are taken one-to-one as candela or lux, and a caller rescales.
+  A decay other than quadratic is an issue.
 - **`generate` beyond `none` is not implemented.**
-  What lands is `prefer_file`: glTF NORMAL + TANGENT become a `tangent_frame` + `tangent_handedness`.
+  What lands is `prefer_file`: glTF NORMAL + TANGENT, and FBX's normals and tangents, become a `tangent_frame` + `tangent_handedness`.
   A normal with no tangent gets an arbitrary perpendicular one, which is fine for everything but anisotropy and normal mapping.
+  The exception is an FBX mesh under a normal-mapped material, which gets uv-aligned tangents generated.
 
 ## Camera control — orbit and first-person
 

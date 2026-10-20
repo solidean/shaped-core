@@ -134,12 +134,13 @@ car.override_material("glass", my_glass);   // rewrites every mesh bound to that
 with `find_mesh(name)`, `meshes_with_material(name)` and `material(name)` as the convenience queries on top.
 
 Load options then carry only what must happen *during* the parse, because it saves work or cannot be undone afterwards:
-an `include_mesh` predicate, `import_materials`, `import_textures`, a `material_override` hook, `flatten_hierarchy`, and the
-tangent-frame options below.
+an `include_mesh` predicate, `import_materials`, `import_textures`, a `material_override` hook, `flatten_hierarchy`, the
+tangent-frame options below, `max_file_bytes` for the filesystem default, and `fbx_materials` for an FBX's material reading.
 
-**One mesh per contiguous (geometry, material) pair**, whatever the format.
+**One mesh per (geometry, material) pair**, whatever the format.
 A glTF mesh with three primitives becomes three meshes; an OBJ's `usemtl` runs become one mesh per run, which
 `babel::obj::data::materials` already hands over as spans.
+An FBX's faces are gathered per material slot, so a slot's faces form one mesh however they are interleaved in the file.
 It falls out of `sv::resident_mesh` carrying exactly one `material_id`.
 
 **The node hierarchy is flattened by default**, because instancing is already free here: geometry is content-hashed, so ten nodes
@@ -289,7 +290,7 @@ Making it per-mesh needs a `mesh` whose geometry has not been read at all — a 
 a box and nothing else — which `create_mesh` has no form for.
 That is the same shape the `from_uri` recipe below wants, so the two want doing together.
 
-OBJ and STL have no structure/payload split, so nothing is known until the whole file is parsed and `is_ready()` simply stays false
+OBJ, STL and FBX have no structure/payload split, so nothing is known until the whole file is parsed and `is_ready()` simply stays false
 longer.
 Same API, degenerate behavior, no special case at the call site.
 
@@ -355,6 +356,7 @@ uploads twice — rare, correct, and better than a per-sample decode flag that m
 ## FBX to OpenPBR
 
 An FBX differs from a glTF in three ways the importer has to answer, and each answer is where FBX's own semantics stop.
+FBX is read natively rather than converted to glTF first, because glTF can hold neither materials attached per node nor the file's declared axes and unit.
 
 - **The space.**
   sv is glTF's convention: meters, +Y up, right-handed.
@@ -365,13 +367,15 @@ An FBX differs from a glTF in three ways the importer has to answer, and each an
   FBX connects materials to the node placing a mesh rather than to the mesh, and a face names a slot of the node's list.
   So the unit of import is (node, slot): `"lamp.0"`, `"lamp.1"`.
   The geometry of one FBX mesh is built once per slot and shared by every node placing it, which content hashing turns into one upload.
+  A slot is built a second time only where its nodes' materials differ in whether they need generated tangents.
 - **The material model.**
   FBX's Phong and Lambert properties mean whatever the exporting pipeline made them mean, and a file never says which.
   So `asset_loader_config::fbx_materials` names the reading, rather than the importer guessing it.
 
 `fbx_material_convention::phong` is FBX's own reading.
 DiffuseColor (times DiffuseFactor) is `base_color`, and the surface is a dielectric.
-Shininess becomes `specular_roughness` through the Blinn-Phong to Beckmann correspondence, alpha = sqrt(2 / (n + 2)), and OpenPBR's roughness is alpha's square root.
+ShininessExponent, or Shininess where it is absent, becomes `specular_roughness` through the Blinn-Phong to Beckmann correspondence.
+That is alpha = sqrt(2 / (n + 2)), and OpenPBR's roughness is alpha's square root.
 A SpecularColor map has no OpenPBR parameter to land on, and is reported rather than bound.
 
 `fbx_material_convention::orca_metal_rough` is NVIDIA's ORCA scenes as Falcor reads them, which is what the Bistro ships under.
@@ -385,7 +389,7 @@ Bistro's README states the layout, and the importer follows it.
 | SpecularColor map | g | `specular_roughness` |
 | SpecularColor map | b | `base_metalness` |
 | SpecularColor constant | g, b | the same two, where no map is connected |
-| a connected SpecularColor map that does not decode | — | metalness 0 and roughness 0.5, with an issue |
+| a connected SpecularColor map that does not decode, or is not read (`import_textures` off) | — | metalness 0 and roughness 0.5, with an issue when it failed to decode |
 | NormalMap | xyz, DirectX convention | `normal`, its y negated |
 | EmissiveColor map or constant | rgb, sRGB | `emission_color`, at `emission_luminance` = EmissiveFactor (1 when absent) |
 
@@ -398,6 +402,7 @@ Three things hold under both readings.
   Bistro's glasses and drinks are that case; their transmission lives in Falcor's `.pyscene`, which nothing here reads.
 - **A normal map brings its tangents.**
   FBX rarely carries tangents, so a mesh drawn by a material with a normal map gets them generated along its first uv set, area-weighted per vertex.
+  That needs the file's normals and `frames.prefer_file`, and it runs whatever `frames.generate` says.
   A two-channel map (BC5) has its third channel rebuilt on the CPU when it is decoded, since an rgba8 decode leaves it zero.
 
 A texture babel cannot decode leaves its material on its factors — except a connected packed specular map, whose constant is a placeholder and is NOT used.
@@ -408,20 +413,23 @@ A file name is something the FILE says, and it is a raw file path, never a uri �
 A name holding a `:` (a scheme like `https:` or `file:`, or a drive like `C:`) is never asked for as written.
 Nor is a name opening with `//` once backslashes are portable, a UNC or network path.
 Nor is one with a component Windows opens as a device — `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, in any case and with any extension.
+Nor is one with a `..` component, so a name never climbs out of the document's directory.
 After those checks the bare file name is still tried beside the document whenever it is itself safe, which is what a Windows-authored FBX naming `C:\Users\...\wood.png` needs.
 Only when nothing safe resolved is the name reported, with an issue.
 A `%` is escaped before the resolver percent-decodes, so `%5C%5C` or `%2E%2E%2F` stays the literal file name it is.
 The importer joins the name onto the document's directory itself, so no uri passthrough applies.
 `absolute_filename` is only ever asked for by its bare file name, and so is a name rooted at `/`.
 
-The importer's checks confine what a name may SAY; they are not a sandbox.
-One class of reach remains, and it is glTF's too: a relative name with `../` climbs out of the document's directory.
+The importer's checks confine what a name may SAY; they are not a sandbox, since a link inside the directory can still lead out of it.
+glTF reaches further: its uris are uris, so `../` resolves as written and an absolute one passes through `join_uri` untouched.
 A host that must confine an import to one directory does so in its resolver, which sees every uri before anything is opened.
 The filesystem default refuses what is not a regular file — a directory, a pipe, a device such as `/dev/zero` — and any file over `asset_loader_config::max_file_bytes`, 4 GiB unless set.
+On Windows it refuses a device by name (`NUL`, `CON`, …) as well, since `NUL` opens and reads as an empty file.
 That holds for glTF's buffers and images as much as for FBX's textures.
 One that cannot be fetched or decoded leaves its material on its factors, and the failures arrive as one issue per kind rather than one per texture.
 
-A hidden node (FBX `Visibility` 0) is helper or proxy geometry its author switched off, so its meshes are not imported, with an issue.
+A hidden node (FBX `Visibility` 0) is helper or proxy geometry its author switched off, so neither it nor anything under it is imported — meshes and lights — with an issue.
+A face the file marks as a hole is not geometry, which matters only for a document read without `triangulate`.
 
 Lights take only a position and a direction from their node, as glTF's do.
 FBX gives an intensity no physical unit — its `Intensity` is a percentage of the DCC tool's own — so the importer takes it one-to-one as candela for a point or spot and lux for a directional light.
@@ -471,9 +479,9 @@ Those functions are also the ones that eventually move down to `tg::mesh`.
 
 The geometric fallback gives a normal but an arbitrary tangent, so anisotropy and normal maps still want generated, uv-aligned
 tangents.
-That stays off by default and is enabled per material by the importer when an asset actually carries a normal map.
+That stays off by default; the FBX importer enables it per material when the material carries a normal map, and the glTF importer does not yet.
 
-**Our generated tangents will not match MikkTSpace**, which [feat-sv-mikktspace-tangents](issues/feat-sv-mikktspace-tangents.md) carries.
+**Our generated tangents do not match MikkTSpace**, which [feat-sv-mikktspace-tangents](issues/feat-sv-mikktspace-tangents.md) carries.
 
 ## No filesystem
 
@@ -564,7 +572,7 @@ Per the repo's living-libraries rule, what belongs lower than sv:
 - **A virtual filesystem in clean-core.** Our resolver hook is a deliberate intermediate for it.
 - **An mmap-backed `cc::pinned_data`.**
   The other half of babel's zero-copy story, and what would make a large `.glb` touch its vertex bytes only when read.
-- **`.mtl`, `.stl` and `.ply` readers in babel**, which are format work rather than viewer work.
+- **`.mtl` and `.ply` readers in babel**, which are format work rather than viewer work.
 
 ## Open questions
 

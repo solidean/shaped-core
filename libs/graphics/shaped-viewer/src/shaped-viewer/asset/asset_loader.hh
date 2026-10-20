@@ -81,7 +81,7 @@ enum class sv::asset_format : sv::u8
 /// How an FBX material's properties are read, since FBX's Phong and Lambert properties mean whatever the exporting pipeline made them mean and the file never says which.
 enum class sv::fbx_material_convention : sv::u8
 {
-    /// FBX's own semantics: DiffuseColor is the base color, Shininess the specular exponent, the surface a dielectric.
+    /// FBX's own semantics: DiffuseColor is the base color, ShininessExponent the specular exponent, the surface a dielectric.
     /// A specular color map has no OpenPBR parameter to land on and is reported rather than bound.
     phong,
 
@@ -97,7 +97,7 @@ enum class sv::fbx_material_convention : sv::u8
 /// Everything else — picking meshes out, renaming, replacing a material after the fact — is ordinary code over
 /// `asset_data`, which is why there is so little here.
 ///
-/// The two hooks own their callables, since a loader outlives the expression that built it.
+/// Its hooks own their callables, since a loader outlives the expression that built it.
 ///
 /// **Every hook here is called from a WORKER**, and from several at once when several `load_async` loads are in
 /// flight — they are the only caller-supplied code an import runs, and the import is what moved off the main thread.
@@ -114,7 +114,7 @@ struct sv::asset_loader_config
 
     /// The largest file the filesystem default reads, for the asset and everything it references.
     /// It reads regular files only, and refuses a device, a pipe or a directory however a document names one.
-    /// A caller's own `resolve` hook applies its own policy instead.
+    /// A `resolve` hook, this config's or the process-wide one, applies its own policy instead.
     i64 max_file_bytes = default_max_file_bytes;
 
     /// Called per candidate mesh, with the name it would carry.

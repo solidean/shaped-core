@@ -54,9 +54,9 @@ namespace impl
 ///
 /// **Only a regular file of at most `max_bytes` is read.**
 /// A uri comes from a file as often as from a caller, and a device or a pipe would otherwise be read until memory runs out.
-/// With no metadata layer in clean-core, "regular" is what the stream shows: a seekable source whose stated size is
-/// exactly what reading yields.
+/// With no metadata layer in clean-core, "regular" is what the stream shows: a seekable source whose stated size is exactly what reading yields.
 /// A directory fails to open, a pipe cannot seek, and a device such as /dev/zero states one size and yields more.
+/// On Windows a device is refused by name as well, since `NUL` states a size of zero and yields exactly that.
 [[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri_from_filesystem(cc::string_view uri,
                                                                                   i64 max_bytes = default_max_file_bytes);
 
