@@ -41,6 +41,18 @@ test float(true) == 1.0
 @expect(error = "no-matching-overload")
 test int2(float3(1.0)) == int2(1)
 
+// a literal is its default type, as it is to `as`: `1.5 as short` and `1 as half` have no conversion, so neither call has
+@expect(error = "no-matching-overload")
+test short(1.5) as int == 1
+
+@expect(error = "no-matching-overload")
+test half(1) == 1.0
+
+// a value of the 16-bit type still converts
+test:
+    let h = half(0.5)
+    short(h) as int == 0
+
 binding counts:
     totals: mut buffer[uint]
     weights: buffer[float]

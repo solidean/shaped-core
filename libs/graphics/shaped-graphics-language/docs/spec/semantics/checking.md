@@ -637,6 +637,7 @@ fun shade(k: float) -> float:
   So `float(k)` of an `int` is `k as float`, and `float3(n)` of an `int3` converts each component, by CHK-197 and with its unspecified values.
   Each is a function of `T`'s name beside its constructors (CHK-240), so a literal meets the overload of its own type.
   `float(1)` converts the `int` 1, and `uint(-1)` is `constant-not-representable` as `(-1) as uint` is.
+  A literal meets these functions at its default type alone, as it meets `as`: `short(1.5)` and `half(1)` are `no-matching-overload`, since `1.5 as short` and `1 as half` are.
   A type `as` does not convert takes no such call: `float(true)` and `int2(v)` of a `float3` are `no-matching-overload`, and a `bool` or a `bool32` converts by `as` alone.
 
 ```sgl

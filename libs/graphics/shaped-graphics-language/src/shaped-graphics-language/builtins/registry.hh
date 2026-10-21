@@ -261,6 +261,9 @@ struct sgl::builtins::function_record
     /// Gives a struct of `core.sgl`, which no registry type names: the check pass resolves it as it resolves the
     /// prelude, and the interpreter builds the value itself, which only an atomic's weak compare-exchange does so far.
     bool gives_prelude_struct = false;
+    /// Takes a number literal only at its default type, as `as` does, so `T(x)` never reaches a conversion `x as T`
+    /// has not (CHK-390).
+    bool takes_literal_at_default = false;
     /// Stores a texel of its first argument, an image, which MSL fences before the same thread reads it (EMIT-151).
     bool is_image_store = false;
     /// Loads or stores this many 32-bit words of its first argument, `bytes`, at its second, a byte offset; 0 for any

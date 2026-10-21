@@ -1857,6 +1857,8 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     // what `chain_of` reads of a parameter, copied without its name since a compile may move the original
     auto const shape_of
         = [&](isize p) { return parameter{.type = out.at(range)[p].type, .is_mut = out.at(range)[p].is_mut}; };
+    auto const* const record = out.builtin_function(out.at(candidate).intrinsic);
+    auto const takes_literal_at_default = record != nullptr && record->takes_literal_at_default;
     auto bound = bind_arguments(out.at(range), arguments);
     if (bound.failure != miss_reason::none)
         return cc::nullopt;
@@ -1883,6 +1885,9 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
         }
         auto const length = chain_of(file, shape_of(p), arguments, i);
         if (!length.has_value())
+            return cc::nullopt;
+        // CHK-390: `T(x)` of a literal is `x as T`, which takes the literal at its default type alone
+        if (length.value() > 0 && arguments.numbers[i].is_number && takes_literal_at_default)
             return cc::nullopt;
         result.chains[i] = length.value();
     }

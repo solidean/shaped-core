@@ -235,6 +235,7 @@ void sgl::builtins::register_conversions(registry& r)
                         .signature = signature,
                         .evaluate = same,
                         .write = {.kind = spelling_kind::custom, .custom = write_same},
+                        .takes_literal_at_default = true,
                     });
                     continue;
                 }
@@ -243,6 +244,7 @@ void sgl::builtins::register_conversions(registry& r)
                     .evaluate = converter_to(to.kind),
                     .unrepresentable_when_constant = unrepresentable_of(from, to),
                     .write = conversion_to(to, width),
+                    .takes_literal_at_default = true,
                 });
             }
 
