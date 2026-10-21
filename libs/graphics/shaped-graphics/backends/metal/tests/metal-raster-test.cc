@@ -3,12 +3,13 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/binding/compiled_shader.hh>
 
 #include <atomic>
-#include <thread>
 
 // Raster, end to end: a pipeline built from a metallib, a rendering scope that clears and draws, and the target read
 // back.
@@ -89,12 +90,12 @@ TEST("sg metal - pipelines build concurrently from several contexts")
     // Without the lock this aborts the binary in roughly one run in five, so it is a probabilistic gate: a regression
     // shows up within a few runs of the suite rather than on the first.
     constexpr auto thread_count = 8;
-    auto threads = cc::vector<std::thread>::create_with_capacity(thread_count);
+    auto threads = cc::vector<cc::native_thread>::create_with_capacity(thread_count);
     auto built = std::atomic<int>(0);
     auto ready = std::atomic<int>(0);
 
     for (auto i = 0; i < thread_count; ++i)
-        threads.emplace_back(
+        threads.push_back(cc::native_thread::start(
             [&]
             {
                 auto const ctx = mtl::test::make_context();
@@ -104,13 +105,13 @@ TEST("sg metal - pipelines build concurrently from several contexts")
                 // Line the threads up so they reach the compiler together rather than one after another.
                 ready.fetch_add(1, std::memory_order_acq_rel);
                 while (ready.load(std::memory_order_acquire) < thread_count)
-                    std::this_thread::yield();
+                    cc::this_thread_yield();
 
                 // No CHECK on a spawned thread: it would not be attributed to the running test, and what is being
                 // proven is the aggregate below — plus the absence of an abort, which no check can express.
                 if (make_triangle_pipeline(ctx, sg::pixel_format::rgba8_unorm).has_value())
                     built.fetch_add(1, std::memory_order_acq_rel);
-            });
+            }));
 
     for (auto& t : threads)
         t.join();

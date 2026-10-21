@@ -23,7 +23,7 @@ void cc::threaded_actor_base::start(threaded_actor_mode mode)
 
     if (threaded)
     {
-        _thread = std::thread([this] { execute_actor_thread(); });
+        _thread = cc::native_thread::start([this] { execute_actor_thread(); });
     }
     else
     {

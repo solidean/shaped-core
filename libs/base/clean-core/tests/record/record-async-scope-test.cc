@@ -10,10 +10,10 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
@@ -307,7 +307,7 @@ REC_TEST("record/async-scope - a scope OPENED INSIDE a coroutine survives the su
                 co_return 7;
             }(gate, &inside, &after_suspend);
 
-            std::thread waker(
+            auto waker = cc::native_thread::start(
                 [&gate]
                 {
                     cc::this_thread_sleep_secs(0.02);

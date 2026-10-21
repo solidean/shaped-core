@@ -2,6 +2,7 @@
 #include <clean-core/record/stat.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/pgo.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
@@ -9,9 +10,6 @@
 #include <nexus/tests/schedule.hh>
 #include <nexus/tests/thread_scope.hh>
 
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 using cc::async_context;
 
@@ -218,13 +216,14 @@ TEST("threaded check - a node of one test driven inside another is never billed 
 TEST("threaded check - a check on a bare thread is an orphan, and fails the run", no_scheduler)
 {
     nx::test_registry reg;
-    reg.add_declaration("bare_thread", {},
-                        []
-                        {
-                            CHECK(true);
-                            std::thread t([] { CHECK(true); }); // true, and still an error: nothing can attribute it
-                            t.join();
-                        });
+    reg.add_declaration(
+        "bare_thread", {},
+        []
+        {
+            CHECK(true);
+            auto t = cc::native_thread::start([] { CHECK(true); }); // true, and still an error: nothing can attribute it
+            t.join();
+        });
 
     auto schedule = nx::test_schedule::create({}, reg);
     auto exec = nx::execute_tests(schedule, {});
@@ -241,7 +240,7 @@ TEST("threaded check - attributed_to_current_test rescues a bare thread", no_sch
     reg.add_declaration("attributed_thread", {},
                         []
                         {
-                            std::thread t(nx::attributed_to_current_test([] { CHECK(1 == 2); }));
+                            auto t = cc::native_thread::start(nx::attributed_to_current_test([] { CHECK(1 == 2); }));
                             t.join();
                         });
 
@@ -262,7 +261,7 @@ TEST("threaded check - an attributed thread's checks are filed under the section
                         {
                             SECTION("threaded")
                             {
-                                std::thread t(nx::attributed_to_current_test(
+                                auto t = cc::native_thread::start(nx::attributed_to_current_test(
                                     []
                                     {
                                         CHECK(true);
@@ -294,16 +293,17 @@ TEST("threaded check - with_fallback_test bills a bare thread to the fallback an
     auto outer = nx::capture_current_test();
 
     nx::test_registry reg;
-    reg.add_declaration("installer", {},
-                        [&]
-                        {
-                            auto fallback = nx::capture_current_test();
+    reg.add_declaration(
+        "installer", {},
+        [&]
+        {
+            auto fallback = nx::capture_current_test();
 
-                            // A thread no test started: the report lands on the installer instead of on no test.
-                            std::thread t([&] { nx::with_fallback_test(fallback, [] { CHECK(1 == 2); }); });
-                            t.join();
-                            fallback.reset();
-                        });
+            // A thread no test started: the report lands on the installer instead of on no test.
+            auto t = cc::native_thread::start([&] { nx::with_fallback_test(fallback, [] { CHECK(1 == 2); }); });
+            t.join();
+            fallback.reset();
+        });
     reg.add_declaration("bystander", {},
                         [&]
                         {
@@ -341,7 +341,7 @@ TEST("threaded check - a REQUIRE on an attributed bare thread records instead of
     reg.add_declaration("attributed_require", {},
                         [&]
                         {
-                            std::thread t(nx::attributed_to_current_test(
+                            auto t = cc::native_thread::start(nx::attributed_to_current_test(
                                 [&]
                                 {
                                     REQUIRE(1 == 2);

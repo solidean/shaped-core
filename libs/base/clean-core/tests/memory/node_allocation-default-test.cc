@@ -1,9 +1,9 @@
 #include "node_allocation-test-types.hh"
 
 #include <clean-core/memory/node_allocation.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 // The per-thread default node allocator: hydration, set/get, and scoped overrides.
 //
@@ -116,7 +116,7 @@ TEST("node_allocation - a fresh thread starts unhydrated and restores to null")
     bool served_by_local = false;
     bool restored_to_null = false;
 
-    std::thread(
+    cc::native_thread::start(
         [&]
         {
             // a thread that never allocated has an empty slot; nothing has resolved for it yet
@@ -146,7 +146,7 @@ TEST("node_allocation - each thread has its own default")
     auto* const main_default = &cc::default_node_allocator();
     cc::node_allocator* worker_default = nullptr;
 
-    std::thread([&] { worker_default = &cc::default_node_allocator(); }).join();
+    cc::native_thread::start([&] { worker_default = &cc::default_node_allocator(); }).join();
 
     CHECK(worker_default != nullptr);
     CHECK(worker_default != main_default);                   // the system resource segregates allocators per thread

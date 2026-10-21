@@ -1,11 +1,9 @@
 #include <clean-core/common/macros.hh> // CC_HAS_THREADS
 #include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/test.hh>
 
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 using namespace cc::primitive_defines;
 
@@ -563,7 +561,7 @@ TEST("shared_ptr - a racing weak drop never frees while destroy_object runs")
         // strong drop starts — otherwise the two never overlap and the test samples nothing.
         cc::atomic<bool> spinning = {false};
         cc::atomic<bool> go = {false};
-        std::thread t(
+        auto t = cc::native_thread::start(
             [&]
             {
                 spinning.store(true, cc::memory_order_release);

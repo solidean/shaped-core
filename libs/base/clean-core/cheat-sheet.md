@@ -869,6 +869,13 @@ cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for th
 cc::register_at_thread_exit(fn, userdata); // void(*)(void*), run at thread exit, last registered first; register from a COLD path
                                           //   the way a hot thread_local stays trivially destructible (MSVC/clang-cl guard every access to one that is not)
 
+#include <clean-core/thread/native_thread.hh> // the escape hatch: work goes to cc::async or a threaded_actor, never a raw thread
+auto t = cc::native_thread::start([&] { ... });              // an OS thread with an 8 MiB stack on EVERY platform (std::thread: 512 KiB on macOS)
+auto t = cc::native_thread::start(fn, {.name = "io", .stack_bytes = 16 << 20}); // named from inside, before the body runs
+t.join();                                 // required before destruction or reassignment — no detach; joinable() until then
+                                          // without threads: start runs the body inline, so join returns at once
+                                          // <thread> is denied repo-wide; yield/sleep are cc::this_thread_yield / cc::this_thread_sleep_secs
+
 #include <clean-core/thread/spin.hh>
 cc::spin_pause();                         // CPU spin-wait hint, for a SHORT bounded spin; never a substitute for blocking
                                           // not a scheduling yield: nothing goes to the OS, and it is a no-op where unsupported

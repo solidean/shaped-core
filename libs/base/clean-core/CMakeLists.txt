@@ -92,6 +92,7 @@ add_library(clean-core
     src/clean-core/container/byte_stream_builder.cc
     src/clean-core/container/key_value_cache.cc
     src/clean-core/thread/thread.cc
+    src/clean-core/thread/native_thread.cc
     src/clean-core/thread/threaded_actor.cc
     src/clean-core/thread/thread_pump.cc
     src/clean-core/thread/async_parker.cc
@@ -283,6 +284,7 @@ target_sources(clean-core
     src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
     src/clean-core/thread/thread.hh
+    src/clean-core/thread/native_thread.hh
     src/clean-core/thread/thread_pump.hh
     src/clean-core/thread/threaded_actor.hh
     src/clean-core/thread/async_node.hh
@@ -336,7 +338,7 @@ if(SC_MIMALLOC)
     target_link_libraries(clean-core PRIVATE mimalloc)
 endif()
 
-# std::thread / pthread_setname_np (cc::threaded_actor, cc::set_current_thread_name) need the
+# pthread_create / pthread_setname_np (cc::native_thread, cc::set_current_thread_name) need the
 # platform threads library on POSIX; a no-op on Windows. PUBLIC so consumers link it transitively.
 find_package(Threads REQUIRED)
 target_link_libraries(clean-core PUBLIC Threads::Threads)
@@ -670,6 +672,7 @@ if(SC_BUILD_TESTS)
         tests/thread/atomic-test.cc
         tests/thread/chase_lev_deque-test.cc
         tests/thread/mutex-test.cc
+        tests/thread/native_thread-test.cc
         tests/thread/thread-test.cc
         tests/thread/thread_pump-test.cc
         tests/thread/threaded_actor-test.cc
