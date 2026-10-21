@@ -81,6 +81,22 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::
         return target;
     };
 
+    // A frame shaded through a stand-in for a permutation still compiling restarts the mean, which `trace` counts as moved.
+    // So a throwaway view is traced until two frames accumulate, and every section below starts with the shaders built.
+    {
+        auto const warm = view_named("warm-up");
+        auto const warmed = sv_test::frames_until_executed(
+            ctx,
+            [&](sg::command_list& cmd)
+            {
+                resources.advance_to(ctx.current_epoch());
+                store.begin_frame(u64(ctx.current_epoch()));
+                (void)sv::view_renderer::execute(cmd, warm, resources, store);
+                return accumulated(warm.id) >= 2 ? sg::routine_outcome::executed : sg::routine_outcome::declined;
+            });
+        REQUIRE(warmed);
+    }
+
     SECTION("an unchanged view keeps counting into the one target")
     {
         auto const v = view_named("steady");
@@ -553,6 +569,16 @@ ASYNC_INVOCABLE_TEST("sv - a camera cut waits for a traced frame and drops the t
     sr::reconstruct_routine::prewarm(ctx, sg::pixel_format::rgba16_float); // the format a denoised slot declares
     (void)co_await ctx.routines.idle_completion();
     REQUIRE(sv_test::frames_until_executed(ctx, [&](sg::command_list& cmd) { return execute(cmd, 0, traced).second; }));
+    // A trace executes while a permutation still compiles behind a stand-in, and every such frame restarts the mean.
+    // So the warm-up lasts until two frames accumulate, which a slow compile beside a busy suite otherwise outlasts.
+    REQUIRE(sv_test::frames_until_executed(ctx,
+                                           [&](sg::command_list& cmd)
+                                           {
+                                               auto const outcome = execute(cmd, 0, traced).second;
+                                               return store.accumulated_frames(cut_id) >= 2
+                                                        ? outcome
+                                                        : sg::routine_outcome::declined;
+                                           }));
     store = sv::view_store{}; // the warm-up's own counts are not what this test is about
 
     auto const frame_history = [&]() -> sr::reconstruct_history const&

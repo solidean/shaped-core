@@ -91,7 +91,7 @@ cc::async_thread_pool::async_thread_pool(int worker_count, async_inline_deps def
 
     // start threads only after every slot exists (external ones included), so a stealer always sees all deques
     for (int i = 0; i < _thread_count; ++i)
-        _workers[i]->thread = std::thread([this, wp = _workers[i].get()] { worker_main(*wp); });
+        _workers[i]->thread = cc::native_thread::start([this, wp = _workers[i].get()] { worker_main(*wp); });
 }
 
 cc::async_thread_pool::~async_thread_pool()

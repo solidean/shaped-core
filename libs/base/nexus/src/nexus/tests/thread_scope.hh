@@ -2,6 +2,7 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/thread/async_ambient.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/fwd.hh>
 
 // Attributing a thread you started yourself to the test that started it.
@@ -45,7 +46,7 @@ namespace nx
 
 /// Wrap `f` so it runs attributed to the test running right now — the shape for handing work to a thread:
 ///
-///   std::thread t(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
+///   auto t = cc::native_thread::start(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
 template <class F>
 [[nodiscard]] auto attributed_to_current_test(F&& f)
 {

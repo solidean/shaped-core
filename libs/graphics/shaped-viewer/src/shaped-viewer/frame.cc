@@ -150,6 +150,11 @@ isize frame::streaming_resources() const
     return _viewer == nullptr ? 0 : _viewer->streaming_resources();
 }
 
+cc::span<sr::input_event const> frame::input_events() const
+{
+    return _viewer == nullptr ? cc::span<sr::input_event const>() : _viewer->input_events();
+}
+
 cc::shared_async<cc::unit> frame::background_work()
 {
     CC_ASSERT(_viewer != nullptr, "a closed frame has no viewer whose work to wait on");

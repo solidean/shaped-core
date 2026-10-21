@@ -84,7 +84,7 @@ wsys->has_clipboard_text();
 for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
 {
     e.window;                          // -> sr::window*, null if none was focused
-    e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event>
+    e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event, file_drop_event>
 
     e.payload.visit(                   // THE way to consume an event; every handler must return the same type
         [&](sr::key_event const& k)
@@ -100,10 +100,14 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
             m.is_held(sr::mouse_button::right);   // buttons held during the motion: END A DRAG ON IT TOO,
                                                   // a release outside an uncaptured window never arrives
         },
-        [](auto const&) {});           // catch-all; SPELL ALL FIVE instead and a new event kind fails to compile here
+        [&](sr::file_drop_event const& d)
+        {
+            d.path;                               // cc::string — one event per dropped file
+        },
+        [](auto const&) {});           // catch-all; SPELL ALL SIX instead and a new event kind fails to compile here
 
-    e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel too) — for predicates, and loops that `continue`
-    e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_* too)
+    e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel/_file_drop too) — for predicates, and loops that `continue`
+    e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_*/_file_drop too)
 }
 
 win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)

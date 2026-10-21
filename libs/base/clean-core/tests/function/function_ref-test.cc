@@ -670,6 +670,23 @@ TEST("function_ref - construction from a plain function")
     CHECK(stored() == 42);
 }
 
+TEST("function_ref - a function pointer is held by value, so a registration built from `&f` outlives the statement")
+{
+    struct registration
+    {
+        cc::function_ref<int()> hook;
+    };
+
+    // `&forty_two` is a temporary pointer that dies at the end of this statement
+    auto const r = registration{.hook = &forty_two};
+    CHECK(r.hook() == 42);
+
+    auto ptr = &forty_two;
+    auto const from_lvalue = registration{.hook = ptr};
+    ptr = nullptr;
+    CHECK(from_lvalue.hook() == 42);
+}
+
 TEST("function_ref - function pointer decay via unary plus")
 {
     SECTION("unary + on stateless lambda")
@@ -1151,4 +1168,35 @@ TEST("function_ref - temporary conversions with various signatures")
         CHECK(process_rvalue([](int&& x) { return x * 2; }, 5) == 10);
         CHECK(process_rvalue([](int&& x) { return x + 1; }, 9) == 10);
     }
+}
+
+TEST("function_ref - a const callable binds and is invoked as const")
+{
+    // a const lambda: the case a `void*` payload could not take without a cast
+    auto const add = [](int a, int b) { return a + b; };
+    cc::function_ref<int(int, int)> const f = add;
+    CHECK(f(2, 3) == 5);
+
+    // a functor whose call operator has a const and a non-const overload: the const one is the one reached
+    struct which
+    {
+        int operator()() const { return 1; }
+        int operator()() { return 2; }
+    };
+    auto const fixed = which{};
+    auto mutable_one = which{};
+    CHECK(cc::function_ref<int()>(fixed)() == 1);
+    CHECK(cc::function_ref<int()>(mutable_one)() == 2);
+
+    // a mutable lambda bound through a non-const reference still mutates its own state
+    auto calls = 0;
+    auto counter = [n = 0, &calls]() mutable
+    {
+        ++calls;
+        return ++n;
+    };
+    cc::function_ref<int()> const g = counter;
+    CHECK(g() == 1);
+    CHECK(g() == 2);
+    CHECK(calls == 2);
 }

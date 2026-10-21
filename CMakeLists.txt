@@ -106,6 +106,12 @@ option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-c
 # Only the test binary sees it, so unlike the checks above it is no ODR hazard; the debug-nopch presets turn it on.
 option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one per element type" OFF)
 
+# Shaders come from the binary alone: no source directory is mounted over a package's embedded copy, and nothing hot-reloads.
+# An executable that calls sc_embed_shader_bundle serves what its recorded bundle holds without compiling it, and compiles
+# the rest from the embedded sources at run time.
+# A whole-build switch, set by the frozen-* presets; libs/graphics/shaped-shader-library/docs/frozen-shaders.md is the design.
+option(SC_FROZEN_SHADERS "Serve shaders from the binary alone: embedded sources and recorded bytecode, no disk, no reload" OFF)
+
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
 #
@@ -119,6 +125,18 @@ if (SC_FRAME_POINTERS)
     elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         sc_build_options(COMPILE -fno-omit-frame-pointer)
     endif()
+endif()
+
+# What a binary says about its own source at each cc::source_location: FULL, OPAQUE or OFF → clean-core's CC_SOURCE_SITES.
+# FULL keeps file, line and function as strings, as std::source_location does, and is the default.
+# OPAQUE keeps only the site's code address, which the build's debug info resolves offline, so a shipped binary names
+# no source file and no function; checks drop their condition text too.
+# OFF keeps nothing.
+# A whole-build switch, never per-target: cc::source_location's layout changes with it.
+set(SC_SOURCE_SITES "FULL" CACHE STRING "What a cc::source_location keeps of its site: FULL, OPAQUE or OFF")
+set_property(CACHE SC_SOURCE_SITES PROPERTY STRINGS FULL OPAQUE OFF)
+if(NOT SC_SOURCE_SITES MATCHES "^(FULL|OPAQUE|OFF)$")
+    message(FATAL_ERROR "SC_SOURCE_SITES must be FULL, OPAQUE or OFF, got '${SC_SOURCE_SITES}'")
 endif()
 
 # Target CPU is x86-64.
@@ -159,6 +177,8 @@ include(PGO)          # SC_PGO_*     — IR-based profile-guided optimization (c
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
 include(Simd)         # SC_X64_LEVEL — the x86-64 feature level every function may assume
 include(FloatingPoint) # no floating-point contraction, on every compiler
+include(LibcxxFloatH)  # Homebrew LLVM < 23 on Apple: libc++'s <float.h> against the macOS 27 SDK
+include(MacosSdk)      # macOS: the SDK on the command line, so it moves only with a reconfigure
 
 # Per-target precompiled headers.
 # Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();

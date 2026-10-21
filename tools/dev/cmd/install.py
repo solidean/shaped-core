@@ -8,6 +8,8 @@ deno, the second runtime for WASM artifacts, is the release binary at the versio
 sde, Intel's Software Development Emulator, runs a binary as an older or newer CPU; its archive is downloaded by hand, since Intel asks to accept a license first.
 It is the version and SHA-256 `tools/sde.version` pins, unpacked in ~/tools/sde.
 All three are folders rather than links, so `--uninstall` names them and leaves deleting them to the user.
+shaped-view, the standalone model viewer, is a frozen copy in ~/tools/shaped-view plus the file associations that open it — install_shaped_view.py.
+That folder is wholly the install's, so `--uninstall` removes it along with the associations.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from tools.dev.lib.core.layout import DRIVER_ROOT
 from tools.dev.lib.toolchain import jsruntime as jsr
 
 from . import args as a
+from . import install_shaped_view
 from .context import Context
 
 NAME = "install"
@@ -109,8 +112,8 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("name", nargs="?", help="What to install; without it, every installable and where it stands")
     p.add_argument("--editor", action="append", choices=[e.name for e in _editors()],
                    help="Only this editor, repeatable; default: every editor whose extensions folder exists")
-    p.add_argument("--uninstall", action="store_true", help="Remove the links instead of making them")
-    p.add_argument("--no-build", action="store_true", help="Link only, and build nothing first")
+    p.add_argument("--uninstall", action="store_true", help="Remove what the install made instead of making it")
+    p.add_argument("--no-build", action="store_true", help="Install what is already built, and build nothing first")
     p.add_argument("--archive", metavar="FILE",
                    help="sde only: the kit downloaded from Intel's page, after accepting its license there")
     a.emsdk(p)
@@ -182,6 +185,7 @@ def _list(ctx: Context) -> None:
     _list_emsdk(ctx)
     _list_deno()
     _list_sde(ctx)
+    install_shaped_view.list_state()
     print(console.dim(f"\n  uv run dev.py {NAME} <name> [--editor <e>] [--emsdk-path <dir>] [--archive <file>] [--uninstall]"))
 
 
@@ -331,8 +335,9 @@ def default_sde_dir() -> Path:
 
 
 def sde_executable() -> Path | None:
-    """The installed `sde64`, which runs a 64-bit binary; None when it is not installed."""
-    exe = default_sde_dir() / ("sde64.exe" if platform.system() == "Windows" else "sde64")
+    """The installed launcher that runs a 64-bit binary, None when it is not installed."""
+    # The Windows kit has no sde64.exe: its sde.exe runs 64-bit programs too.
+    exe = default_sde_dir() / ("sde.exe" if platform.system() == "Windows" else "sde64")
     return exe if exe.is_file() else None
 
 
@@ -402,7 +407,7 @@ def _install_sde(args: argparse.Namespace, ctx: Context) -> None:
 
     exe = sde_executable()
     if exe is None:
-        ctx.die(f"{target_dir} holds no sde64 after unpacking {name}")
+        ctx.die(f"{target_dir} holds no SDE launcher after unpacking {name}")
     print(f"  {console.green('installed')} sde {version} at {exe}")
     print(console.dim(f"  e.g. {exe} -snb -- <program>: runs it as a Sandy Bridge, with AVX but no AVX2; `-help` lists the CPUs"))
 
@@ -419,6 +424,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         return
     if args.name == _DENO:
         _install_deno(args, ctx)
+        return
+    if args.name == install_shaped_view.NAME:
+        install_shaped_view.run(args, ctx)
         return
     item = next((i for i in _INSTALLABLES if i.name == args.name), None)
     if item is None:

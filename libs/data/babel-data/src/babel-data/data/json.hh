@@ -121,6 +121,10 @@ public:
 public:
     [[nodiscard]] bool is_valid() const { return _doc != nullptr && _index >= 0; }
 
+    /// The node's index in its document, which `ref(doc, index)` takes back; -1 for an invalid ref.
+    /// What a reader keeps to name a value of a document it holds on to, since a ref points at the document it came from.
+    [[nodiscard]] i32 node_index() const { return _index; }
+
     [[nodiscard]] node_kind kind() const { return _node().kind; }
 
     [[nodiscard]] bool is_null() const { return is_valid() && kind() == node_kind::null; }

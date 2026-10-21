@@ -279,7 +279,7 @@ SKIP();  SKIP("not implemented yet");    // skip the test (a pass, but named by 
 CHECK(x);                                  \ on a pool worker: counted against the test that scheduled the node
 
 \ A thread you start yourself carries nothing, so wrap its work:
-std::thread t(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
+auto t = cc::native_thread::start(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
 auto captured = nx::capture_current_test(); \ for a thread already running: capture here, install there
 nx::test_thread_scope const s(captured);    \ ... on that thread
 ```

@@ -115,7 +115,7 @@ void print_failing(nx::test_execution const& exec, cc::string const& prefix)
 
     if (exec.root.is_considered_failing && decl != nullptr)
     {
-        cc::eprintln("  {} at {}:{}", label, decl->location.file_name(), decl->location.line());
+        cc::eprintln("  {} at {}", label, nx::impl::site_text(decl->location));
 
         // What it ran WITH, when that is not simply nothing: a parametrized example that failed is not
         // reproducible from its name alone.
@@ -358,7 +358,7 @@ int report_run(nx::test_schedule_config const& config,
             {
                 if (orphan_count == 0)
                     cc::eprintln("\nOrphan invocable tests (declared but never invoked):");
-                cc::eprintln("  {} at {}:{}", decl.name, decl.location.file_name(), decl.location.line());
+                cc::eprintln("  {} at {}", decl.name, nx::impl::site_text(decl.location));
                 ++orphan_count;
             }
     }
@@ -395,7 +395,7 @@ int report_run(nx::test_schedule_config const& config,
         {
             cc::eprintln("\nChecks outside any test:");
             for (auto const& e : execution.orphan_errors)
-                cc::eprintln("  {} at {}:{}", e.expanded, e.location.file_name(), e.location.line());
+                cc::eprintln("  {} at {}", e.expanded, nx::impl::site_text(e.location));
             cc::eprintln("\n{} check(s) ran outside any test context", orphan_checks);
         }
         if (unattributed_logs > 0)

@@ -3,13 +3,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/exceptions.hh>
-
-#include <thread>
 
 namespace sg::backend::metal
 {
@@ -600,7 +599,7 @@ void metal_context::block_until_transfers_drained()
         while (still_pending())
         {
             if (!cc::thread_pump_all())
-                std::this_thread::yield();
+                cc::this_thread_yield();
         }
     };
 

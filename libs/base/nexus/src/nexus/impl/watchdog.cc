@@ -11,14 +11,11 @@
 #include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 
 #include <cstdio>  // stderr, because the report path must stay as small as the crash path it borrows
 #include <cstdlib> // std::_Exit: a hung test cannot be unwound, so the run ends here
-
-#if CC_HAS_THREADS && !defined(__EMSCRIPTEN__)
-#include <thread>
-#endif
 
 using namespace cc::primitive_defines;
 
@@ -46,7 +43,7 @@ struct nx::impl::run_watchdog::state
 #if CC_HAS_THREADS && !defined(__EMSCRIPTEN__)
     cc::mutex<bool> stop = cc::mutex<bool>(false);
     std::condition_variable wake;
-    std::thread thread;
+    cc::native_thread thread;
 #endif
 };
 
@@ -126,7 +123,7 @@ nx::impl::run_watchdog::run_watchdog(double quiet_secs, void (*report)(double qu
 
 #if CC_HAS_THREADS && !defined(__EMSCRIPTEN__)
     // Not started under wasm even with threads: the run is stepped from the host loop, which calls poll() instead.
-    _state->thread = std::thread(
+    _state->thread = cc::native_thread::start(
         [this]
         {
             cc::set_current_thread_name("nexus watchdog");

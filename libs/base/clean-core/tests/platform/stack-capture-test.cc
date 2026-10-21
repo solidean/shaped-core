@@ -5,10 +5,10 @@
 #include <clean-core/platform/impl/wasm_frames.hh>
 #include <clean-core/platform/stack_capture.hh>
 #include <clean-core/platform/symbolize.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 
@@ -318,7 +318,7 @@ TEST("stack capture - works on a thread we did not start it on")
     // The stack bounds are cached per thread, so a fresh thread exercises the query rather than the cache.
     isize count = 0;
     bool broken = true;
-    std::thread t(
+    auto t = cc::native_thread::start(
         [&]
         {
             auto const c = take();
@@ -348,7 +348,7 @@ TEST("stack capture - a deep stack on a second thread is not cut short")
     // wasm is the case this pins: the engine truncates at a per-realm limit, every pthread is a realm of its own,
     // and a limit raised only on the main thread leaves every other thread at ten frames without saying so.
     isize count = 0;
-    std::thread t([&] { count = take_at_depth(40).result.count; });
+    auto t = cc::native_thread::start([&] { count = take_at_depth(40).result.count; });
     t.join();
 
     CHECK(count > 40);

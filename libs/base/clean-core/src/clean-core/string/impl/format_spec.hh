@@ -39,7 +39,7 @@ namespace cc::impl
 /// one.
 [[noreturn]] inline void format_error(char const* msg)
 {
-    cc::impl::handle_assert_failure("cc::format", msg, cc::source_location::current());
+    cc::impl::handle_assert_failure(CC_SITE_TEXT("cc::format"), msg, cc::source_location::current());
     cc::impl::perform_abort();
 }
 

@@ -30,6 +30,10 @@ Repeat with `uv run dev.py test "a per-triangle lamp of two different" --repeat 
 Seen twice in `dev.py check`'s `debug-nopch-clang` leg on 2026-10-20, on main, with the same value both times: block (1, 0) channel 0 holds 2.3049817 and channel 1 2.5153303.
 So the dark state looks like one fixed wrong answer rather than noise, and both times the next run of the test step passed.
 
+Seen again in `dev.py check`'s `release` leg on 2026-10-21, from a solidean session, on the megakernel.
+Block (1, 0) held 2.3049238 and 2.5152862 in channels 0 and 1, nearly the values above, but against expected values of 1.8609288 and 2.175361.
+The lamp's image was about 24% brighter than the reference here, not darker; which of the two images left its usual value is not known, since the megakernel's usual reference was not recorded.
+
 ## Findings, 2026-10-21
 
 The image is a function of the restart count alone, and the count is what varies from run to run.
@@ -58,3 +62,5 @@ The fix belongs either in the test, so that its result does not depend on the se
 `restarts` now advances only where a restart for a different image ends a run that drew samples (`restart_for_image`).
 Frames that declined to trace and frames restarted only because their last frame traced through something loading no longer count.
 Every render of `emitter-trace-test.cc` then ends on 0 to 4 restarts rather than thousands, and 40 debug runs in a row passed.
+
+A capture in `denoise-view-test.cc` was once thought to be in the same state; it is not a firefly but a 38% bias, and is `bug-sv-megakernel-emitter-capture-dark`.

@@ -17,11 +17,8 @@
 #include <clean-core/string/string_view.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
-
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 #if defined(_WIN32)
 #include <clean-core/platform/win32_sanitized.hh>
@@ -328,7 +325,7 @@ void write_sample(sample const& s, cc::span<void* const> frames)
 }
 
 #if CC_HAS_THREADS
-std::thread g_sampler;
+cc::native_thread g_sampler;
 
 void sampler_main()
 {
@@ -515,7 +512,7 @@ void cc::rec::start_sampling(cc::rec::sampling_config const& cfg)
     g_stop.store(false, cc::memory_order_release);
     g_running.store(true, cc::memory_order_release);
 
-    g_sampler = std::thread(sampler_main);
+    g_sampler = cc::native_thread::start([] { sampler_main(); });
 #endif
 }
 

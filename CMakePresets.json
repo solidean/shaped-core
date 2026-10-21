@@ -311,23 +311,35 @@
             }
         },
         {
+            "name": "x64-windows-clang-ninja-frozen",
+            "displayName": "Frozen release Clang (Ninja, Windows)",
+            "description": "Release build with SC_FROZEN_SHADERS=ON: shaders come from the binary alone, precompiled where a recorded bundle holds them. What `dev.py install shaped-view` ships.",
+            "inherits": "x64-windows-clang-ninja-base",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "SC_FROZEN_SHADERS": "ON"
+            }
+        },
+        {
             "name": "x64-windows-clang-ninja-singlethreaded",
             "displayName": "Single-threaded Clang (Ninja, Windows)",
-            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM; and SC_SOURCE_SITES=OPAQUE, so check exercises a level below FULL",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_THREADS": "OFF"
+                "SC_THREADS": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
             "name": "x64-linux-clang-ninja-singlethreaded",
             "displayName": "Single-threaded Clang (Ninja, Linux)",
-            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM; and SC_SOURCE_SITES=OPAQUE, so check exercises a level below FULL",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_THREADS": "OFF"
+                "SC_THREADS": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
@@ -494,6 +506,7 @@
             "cacheVariables": {
                 "CMAKE_C_COMPILER": "/opt/homebrew/opt/llvm@22/bin/clang",
                 "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm@22/bin/clang++",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "26.0",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
                 "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
                 "CMAKE_EXE_LINKER_FLAGS": "-L/opt/homebrew/opt/llvm@22/lib/c++ -lc++abi",
@@ -843,6 +856,10 @@
         {
             "name": "singlethreaded-clang",
             "configurePreset": "x64-windows-clang-ninja-singlethreaded"
+        },
+        {
+            "name": "frozen-clang",
+            "configurePreset": "x64-windows-clang-ninja-frozen"
         },
         {
             "name": "singlethreaded-linux-clang",

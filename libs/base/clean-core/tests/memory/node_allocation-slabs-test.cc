@@ -2,9 +2,9 @@
 
 #include <clean-core/container/vector.hh>
 #include <clean-core/memory/node_allocation.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 // Slab-lifecycle tests for the frontend split.
 // These use a *private* node_allocator bound to the real default resource — a fresh slab_info, isolated from the process-wide default_node_allocator() other tests share.
@@ -177,7 +177,7 @@ TEST("node_allocation - remote drain reclaims cross-thread frees")
         track_base(seen, base_of(n));
 
     // free the whole batch on ANOTHER thread -> each free routes into its slab's remote bitmap
-    std::thread([&nodes] { nodes.clear(); }).join();
+    cc::native_thread::start([&nodes] { nodes.clear(); }).join();
 
     // owner reallocates the same batch: local is empty everywhere, so the cold path must drain the remote
     // bitmaps to reclaim the slots -- otherwise it would allocate brand-new slabs (new bases).
@@ -201,7 +201,7 @@ TEST("node_allocation - cross-thread free then reuse (basic)")
     CHECK(c.ptr->data[0] == 33);
 
     // free all three on another thread (remote path: differing owner token)
-    std::thread(
+    cc::native_thread::start(
         [&]
         {
             a.reset();
@@ -240,7 +240,7 @@ TEST("node_allocation - thread-exit reclaims fully-free slabs to backing", exclu
 
     // a thread allocates a multi-slab batch, frees it ALL on itself, then exits.
     // every slab is fully free at the allocator's teardown, so all of them go back to the backing resource and NOTHING is orphaned.
-    std::thread(
+    cc::native_thread::start(
         []
         {
             cc::node_allocator worker(cc::default_node_memory_resource);
@@ -264,7 +264,7 @@ TEST("node_allocation - abandoned slab is adopted by a later thread", exclusive(
     // its slab still holds live nodes -> not fully free -> orphaned to the global bin on teardown.
     cc::vector<cc::node_allocation<T8B>> shared;
     byte* producer_base = nullptr;
-    std::thread(
+    cc::native_thread::start(
         [&]
         {
             cc::node_allocator producer(cc::default_node_memory_resource);

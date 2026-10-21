@@ -6,13 +6,10 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_thread_pool.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 using namespace cc::primitive_defines;
 
@@ -97,7 +94,7 @@ TEST("async - external push from a foreign thread wakes a pool-parked dependent"
     auto ext = cc::make_async_manual<int>();
     auto p = cc::make_async_lazy([](int x) { return x + 1; }, ext);
 
-    std::thread pusher(
+    auto pusher = cc::native_thread::start(
         [&]
         {
             cc::this_thread_sleep_secs(0.002); // bias toward p parking first
@@ -121,10 +118,10 @@ TEST("async - a pool can be destroyed as soon as a root completed by a foreign t
     for (auto i = 0; i < 200; ++i)
     {
         auto root = cc::make_async_manual<int>();
-        std::thread pusher;
+        cc::native_thread pusher;
         {
             cc::async_thread_pool pool(1);
-            pusher = std::thread([root] { root->push_value(7); });
+            pusher = cc::native_thread::start([root] { root->push_value(7); });
             got += cc::async_blocking_get_on(pool, root);
         }
         pusher.join();
@@ -458,7 +455,8 @@ TEST("async - a node woken across threads still runs under its own ambient conte
     }
     // The scope is gone from THIS thread, and it was never installed on any worker.
 
-    std::thread pusher([&] { gate->push_value(1); }); // completes it from a thread with nothing bound at all
+    auto pusher
+        = cc::native_thread::start([&] { gate->push_value(1); }); // completes it from a thread with nothing bound at all
     pusher.join();
 
     CHECK(cc::async_blocking_get_on(pool, dependent) == scope_value);
@@ -466,7 +464,7 @@ TEST("async - a node woken across threads still runs under its own ambient conte
 
 TEST("async - a throwing frame on a worker does not take the process down", nx::config::no_scheduler)
 {
-    // Needs real threads: a worker loop has no handler of its own, so an escaping exception would leave worker_main via std::thread and terminate the process outright.
+    // Needs real threads: a worker loop has no handler of its own, so an escaping exception would leave worker_main and terminate the process outright.
     // Containment happens per node, in poll.
     cc::async_thread_pool pool(4);
 
@@ -505,12 +503,12 @@ TEST("async - a work item stolen by a parked participant runs under its own cont
         {
             hog_running.store(true, cc::memory_order_release);
             while (!release_hog.load(cc::memory_order_acquire))
-                std::this_thread::yield();
+                cc::this_thread_yield();
             return 0;
         });
     hog->schedule_on(pool);
     while (!hog_running.load(cc::memory_order_acquire))
-        std::this_thread::yield();
+        cc::this_thread_yield();
 
     int scope_value = 7;
     cc::atomic<int> observed = {-1}; // what `victim` saw: -1 not run, 0 no context, 7 the stealer's
@@ -528,12 +526,12 @@ TEST("async - a work item stolen by a parked participant runs under its own cont
 
     // Nothing is bound on this thread, so `victim` reaches the queue with a null token — the case that inherits.
     // Releasing the root only once `victim` has run is what makes the order the test claims the order it gets.
-    std::thread pusher(
+    auto pusher = cc::native_thread::start(
         [&]
         {
             victim->schedule_on(pool);
             while (observed.load(cc::memory_order_acquire) < 0)
-                std::this_thread::yield();
+                cc::this_thread_yield();
             gate->push_value(1);
         });
 

@@ -202,6 +202,33 @@ sc_add_shader_package(
 # sc_add_single_file_examples is a no-op when SC_BUILD_EXAMPLES is off.
 add_subdirectory(examples)
 
+# shaped-view: the standalone viewer a file association opens, which `uv run dev.py install shaped-view` registers.
+# Gated as the examples are, since it traces on the default dx12 context and reaches DXIL through DXC.
+if(SC_BUILD_TOOLS AND WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
+    add_executable(shaped-view
+        tools/shaped-view/main.cc
+        tools/shaped-view/shaped_view.cc
+    )
+    sc_nexus_binary(shaped-view KINDS tool)
+    target_link_libraries(shaped-view PRIVATE shaped-viewer nexus)
+    sc_target_pch(shaped-view SG NEXUS)
+
+    # A windowed program: opened from Explorer, a console subsystem binary would bring a console window up beside it.
+    set_target_properties(shaped-view PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_link_options(shaped-view PRIVATE "LINKER:/ENTRY:mainCRTStartup")
+
+    sc_stage_runtime_dlls(shaped-view DLLS "$<TARGET_RUNTIME_DLLS:shaped-view>")
+    # dxil.dll is loaded by dxcompiler rather than linked, so $<TARGET_RUNTIME_DLLS> never lists it.
+    sc_stage_runtime_dlls(shaped-view TAG shaped-view-dxc DLLS ${DXC_RUNTIME_DLLS})
+
+    # Exactly what the install copies out of the output directory, which every other binary shares.
+    file(GENERATE OUTPUT "$<TARGET_FILE_DIR:shaped-view>/shaped-view.runtime-dlls"
+        CONTENT "$<JOIN:$<TARGET_RUNTIME_DLLS:shaped-view>;${DXC_RUNTIME_DLLS},\n>\n")
+
+    # What a frozen build serves without compiling; the install records it from a run of the frozen binary itself.
+    sc_embed_shader_bundle(TARGET shaped-view)
+endif()
+
 # Test executable.
 # The vocabulary test needs no device and runs everywhere; the GPU tests drive a dx12 WARP/hardware context
 # and compile the ray-tracing shaders through DXC, so they need the dx12 backend and a compiler.

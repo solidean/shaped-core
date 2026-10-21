@@ -110,6 +110,7 @@ struct text_event;
 struct mouse_move_event;
 struct mouse_button_event;
 struct mouse_wheel_event;
+struct file_drop_event;
 struct input_event;
 
 // Dear ImGui, drawn through sg.
