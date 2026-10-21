@@ -90,14 +90,14 @@ CC_COLD_FUNC void handle_assert_failure_sv(char const* expression, cc::string_vi
 } // namespace cc::impl
 
 // CC_ASSERTS_ALWAYS implementation - always enabled regardless of build configuration
-#define CC_IMPL_ASSERTS_ALWAYS(cond, msg)                                                       \
-    do                                                                                          \
-    {                                                                                           \
-        if (!(cond)) [[unlikely]]                                                               \
-        {                                                                                       \
+#define CC_IMPL_ASSERTS_ALWAYS(cond, msg)                                                                     \
+    do                                                                                                        \
+    {                                                                                                         \
+        if (!(cond)) [[unlikely]]                                                                             \
+        {                                                                                                     \
             ::cc::impl::handle_assert_failure_sv(CC_SITE_TEXT(#cond), msg, ::cc::source_location::current()); \
-            CC_BREAK_AND_ABORT();                                                               \
-        }                                                                                       \
+            CC_BREAK_AND_ABORT();                                                                             \
+        }                                                                                                     \
     } while (false)
 
 // Asserts implementation - enabled in debug/relwithdebinfo, optionally in release

@@ -84,15 +84,16 @@
 // =========================================================================================================
 
 // CC_ASSERTF_ALWAYS implementation - always enabled regardless of build configuration
-#define CC_IMPL_ASSERTF_ALWAYS(cond, msg, ...)                                                                         \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        if (!(cond)) [[unlikely]]                                                                                      \
-        {                                                                                                              \
-            ::cc::impl::handle_assert_failure(CC_SITE_TEXT(#cond), ::cc::format(msg __VA_OPT__(, ) __VA_ARGS__).c_str_materialize(), \
-                                              ::cc::source_location::current());                                       \
-            CC_BREAK_AND_ABORT();                                                                                      \
-        }                                                                                                              \
+#define CC_IMPL_ASSERTF_ALWAYS(cond, msg, ...)                                                                  \
+    do                                                                                                          \
+    {                                                                                                           \
+        if (!(cond)) [[unlikely]]                                                                               \
+        {                                                                                                       \
+            ::cc::impl::handle_assert_failure(CC_SITE_TEXT(#cond),                                              \
+                                              ::cc::format(msg __VA_OPT__(, ) __VA_ARGS__).c_str_materialize(), \
+                                              ::cc::source_location::current());                                \
+            CC_BREAK_AND_ABORT();                                                                               \
+        }                                                                                                       \
     } while (false)
 
 // Assertf implementation - enabled in debug/relwithdebinfo, optionally in release

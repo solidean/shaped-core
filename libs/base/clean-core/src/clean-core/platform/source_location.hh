@@ -43,10 +43,11 @@ namespace cc::impl
 {
 #if CC_SOURCE_SITES == 1 && (defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)) && defined(CC_ARCH_X64)
 /// The address of this instruction, inlined into the site: one `lea`, as std::source_location's capture is.
+/// Of the `lea` itself, through a local label, since `0(%rip)` is the next instruction, which may be another line's.
 CC_FORCE_INLINE void const* current_code_address() noexcept
 {
     void const* p;
-    asm volatile("leaq 0(%%rip), %0" : "=r"(p));
+    asm volatile("1: leaq 1b(%%rip), %0" : "=r"(p));
     return p;
 }
 #elif CC_SOURCE_SITES == 1 && (defined(CC_COMPILER_CLANG) || defined(CC_COMPILER_GCC)) && defined(CC_ARCH_ARM64)
