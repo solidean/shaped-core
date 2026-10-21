@@ -126,8 +126,8 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
   One that changes bytes registers a hook for bufferViews, accessors or both, and `view_of` reads what it decoded.
   EXT_meshopt_compression runs through the same hooks, as the reader's own registration.
   Images, textures and materials have no hooks: an extension on them adds information, which the caller reads through `json_of`.
-- `[planned]` **a node's composed local transform** — blocked on typed-geometry, which has no TRS composition yet.
-  The reader stores `matrix` or TRS in whichever form the file used and composes nothing; [lower-library-gaps.md](lower-library-gaps.md) has that gap and the rest.
+- `[done]` **a node's composed local transform** — `node::local_transform()`, matrix or TRS as one `tg::affine_transform3f`.
+  The reader still stores `matrix` or TRS in whichever form the file used; `local_transform()` composes it on demand.
 - `[planned]` **writer**.
 
 ### stl [done]

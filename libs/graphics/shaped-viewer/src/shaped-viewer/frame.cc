@@ -1,6 +1,9 @@
 #include <clean-core/common/asserts.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <shaped-viewer/frame.hh>
+#include <shaped-viewer/resources/gpu_resource_manager.hh>
+#include <shaped-viewer/scene/mesh.hh>
+#include <shaped-viewer/scene/triangle_geometry.hh>
 #include <shaped-viewer/viewer.hh> // frame drives the viewer to present, and to run the frame loop
 
 namespace sv
@@ -130,6 +133,13 @@ void frame::register_capture(cc::string_view name, cc::function_ref<void(capture
         _viewer->apply_capture(name, body, *this);
 }
 
+void frame::hold_capture(cc::string_view reason)
+{
+    CC_ASSERT(_open, "cannot author a closed frame");
+    if (_viewer != nullptr)
+        _viewer->hold_capture(reason);
+}
+
 isize frame::pending_resource_work() const
 {
     return _viewer == nullptr ? 0 : _viewer->pending_resource_work();
@@ -138,6 +148,11 @@ isize frame::pending_resource_work() const
 isize frame::streaming_resources() const
 {
     return _viewer == nullptr ? 0 : _viewer->streaming_resources();
+}
+
+cc::span<sr::input_event const> frame::input_events() const
+{
+    return _viewer == nullptr ? cc::span<sr::input_event const>() : _viewer->input_events();
 }
 
 cc::shared_async<cc::unit> frame::background_work()
@@ -216,6 +231,87 @@ void frame::_flush_immediate_quadrics()
     }
 
     _immediate_quadrics.clear();
+}
+
+u32 frame::_add_immediate_shape(immediate_shape shape,
+                                cc::span<tg::pos3f const> points,
+                                cc::span<tg::segment3f const> segments,
+                                cc::span<tg::triangle3f const> triangles)
+{
+    shape.first_point = _shape_points.size();
+    shape.point_count = points.size();
+    shape.first_segment = _shape_segments.size();
+    shape.segment_count = segments.size();
+    shape.first_triangle = _shape_triangles.size();
+    shape.triangle_count = triangles.size();
+    _shape_points.push_back_range(points);
+    _shape_segments.push_back_range(segments);
+    _shape_triangles.push_back_range(triangles);
+    _immediate_shapes.push_back(shape);
+    return u32(_immediate_shapes.size() - 1);
+}
+
+void frame::_flush_immediate_shapes()
+{
+    struct face_batch
+    {
+        view_index view = view_index(0);
+        u32 layer = 0;
+        material_id material = material_id::invalid;
+        cc::vector<tg::triangle3f> triangles;
+    };
+    auto face_batches = cc::vector<face_batch>();
+
+    for (auto const& s : _immediate_shapes)
+    {
+        auto const points
+            = cc::span<tg::pos3f const>(_shape_points).subspan({.offset = s.first_point, .size = s.point_count});
+        switch (s.kind)
+        {
+        case shape_kind::vertices:
+            (void)_immediate_batch_for(s.view, s.layer, s.material).add_vertices(points, s.vertex);
+            break;
+        case shape_kind::edges:
+        {
+            auto const segments = cc::span<tg::segment3f const>(_shape_segments)
+                                      .subspan({.offset = s.first_segment, .size = s.segment_count});
+            (void)_immediate_batch_for(s.view, s.layer, s.material).add_edges(segments, points, s.edge);
+            break;
+        }
+        case shape_kind::faces:
+        {
+            auto const triangles = cc::span<tg::triangle3f const>(_shape_triangles)
+                                       .subspan({.offset = s.first_triangle, .size = s.triangle_count});
+            face_batch* batch = nullptr;
+            for (auto& b : face_batches)
+                if (b.view == s.view && b.layer == s.layer && b.material == s.material)
+                    batch = &b;
+            if (batch == nullptr)
+            {
+                face_batches.push_back({.view = s.view, .layer = s.layer, .material = s.material});
+                batch = &face_batches.back();
+            }
+            batch->triangles.push_back_range(triangles);
+            break;
+        }
+        }
+    }
+
+    // One mesh per batch, content-hashed like any other, so an unchanged drawing uploads nothing frame to frame.
+    for (auto& b : face_batches)
+    {
+        if (b.triangles.empty())
+            continue;
+        auto const mesh = sv::mesh{.name = "immediate faces",
+                                   .geometry = triangle_geometry::create_from_triangles(cc::move(b.triangles)),
+                                   .material = b.material};
+        _views[u32(b.view)].layers[b.layer].items.push_back(resources().acquire_scene_item(mesh));
+    }
+
+    _immediate_shapes.clear();
+    _shape_points.clear();
+    _shape_segments.clear();
+    _shape_triangles.clear();
 }
 
 void frame::present()

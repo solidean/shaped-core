@@ -87,8 +87,7 @@ void acquire_asset_materials(asset_data& out,
 /// one yields a NaN quaternion the hit shader then trusts — which is strictly worse than supplying no frame, since the
 /// geometric fallback is correct and a NaN is not shading at all.
 /// So an importer tests this BEFORE building a frame, and drops the whole attribute for a mesh that fails it.
-/// Written as a self-comparison plus a bound because `cc` has no float classification yet
-/// (libs/base/clean-core/docs/TODO.md).
+/// Written as a self-comparison plus a bound, which predates `cc::is_finite` in `clean-core/math/float.hh`.
 [[nodiscard]] bool is_usable_normal(tg::vec3f n);
 
 /// The tangent frame a supplied normal and glTF TANGENT describe, as a rotation taking tangent space to object space.

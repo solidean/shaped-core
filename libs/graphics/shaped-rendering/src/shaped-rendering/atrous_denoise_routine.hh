@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shaped-graphics/fwd.hh>
+#include <shaped-graphics/resource/pixel_format.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh>
 #include <shaped-rendering/reconstruct.hh>
@@ -29,7 +30,7 @@ struct sr::atrous_options
 
 /// Edge-avoiding à-trous wavelet denoising (Dammertz et al. 2010), steered by normal, depth and luminance.
 ///
-/// Spatial and native: HLSL through DXC, and the member CI can test.
+/// Spatial and native: its shader is SGL, and it is the member CI can test.
 /// It requires no guide, and uses whichever of albedo, normal and depth it is given.
 ///
 /// **Its luminance edge-stop scales with `1 / sqrt(sample_count)`.**
@@ -42,13 +43,17 @@ struct sr::atrous_options
 ///
 /// Holds its two ping-pong images in the caller's `reconstruct_history`, so a steady stream allocates nothing.
 /// It keeps no history in the temporal sense, so a `restarted` call looks exactly like any other.
-class sr::atrous_denoise_routine : public sg::render_routine<atrous_denoise_routine>
+///
+/// A render routine **parametrized on the output's format**, which its last pass writes and its shader names.
+/// `prewarm(ctx, format)` starts the compile for the outputs a caller will hand it; `reconstruct_routine` prewarms it.
+class sr::atrous_denoise_routine : public sg::render_routine<atrous_denoise_routine, sg::pixel_format>
 {
 public:
     /// Filters `in.color` into `in.output`.
     ///
-    /// `in.output` must match `in.color`'s extent — à-trous does not upscale — and carry `image` usage.
-    /// `pending` while the shader compiles, `failed` after a compile that did not build.
+    /// `in.output` must match `in.color`'s extent — à-trous does not upscale.
+    /// It carries `image` usage, in a float or normalized format the device writes as an image.
+    /// `pending` while the shader for that format compiles, `failed` after a compile that did not build.
     [[nodiscard]] static reconstruct_outcome execute(sg::command_list& cmd,
                                                      reconstruct_inputs const& in,
                                                      reconstruct_history& history,
@@ -61,6 +66,17 @@ protected:
     cc::shared_async<cc::unit> init(sg::routine_init_scope scope) override;
 
 private:
-    sg::binding_group_layout_handle _group_layout;
-    sg::compute_pipeline_handle _pipeline;
+    /// One compile of the pass: its group's layout follows the format its target names.
+    struct pass
+    {
+        sg::binding_group_layout_handle group_layout;
+        sg::async_compute_pipeline pipeline;
+    };
+
+    [[nodiscard]] static pass build_pass(sg::context& ctx, sg::pixel_format target);
+
+    /// What every pass but the last writes, into the history's scratch images.
+    pass _scratch;
+    /// What the last pass writes, into the caller's output.
+    pass _output;
 };

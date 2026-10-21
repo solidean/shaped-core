@@ -697,8 +697,8 @@ TEST("sv - a traced layer implies an accumulation temporal input, sized by the p
     auto const plan = sv::build_render_plan(def, tg::vec2i(128, 64), 0, {});
     REQUIRE(plan.validate());
 
-    // One per traced layer — its accumulator — and none for the layout views, which accumulate nothing.
-    REQUIRE(plan.temporals.size() == 1);
+    // Two per traced layer — its accumulator and its primary depth — and none for the layout views, which trace nothing.
+    REQUIRE(plan.temporals.size() == 2);
     auto const& t = plan.temporals[0];
     CHECK(t.id == sv::view_id::from_string("traced"));
     CHECK(t.temporal_id == sv::temporal_id::accumulation(0));
@@ -710,6 +710,12 @@ TEST("sv - a traced layer implies an accumulation temporal input, sized by the p
 
     // Outside the range a caller may declare in, so an implied id and a declared one cannot collide.
     CHECK(t.temporal_id >= sv::temporal_id::caller_range_end);
+
+    // The depth a double-click picks from, kept whether or not the layer draws anything over its trace.
+    auto const& depth = plan.temporals[1];
+    CHECK(depth.temporal_id == sv::temporal_id::primary_depth(0));
+    CHECK(depth.resolution == tg::vec2i(128, 64));
+    CHECK(depth.format == sg::pixel_format::r32_float);
 }
 
 // A layer inserted *above* a traced one must not hand its accumulator to a different layer.
@@ -734,7 +740,7 @@ TEST("sv - a caller-declared temporal input rides alongside the implied one")
     def.root_view = root;
 
     auto const plan = sv::build_render_plan(def, tg::vec2i(128, 64), 0, {});
-    REQUIRE(plan.temporals.size() == 2); // the caller's, plus the traced layer's accumulator
+    REQUIRE(plan.temporals.size() == 3); // the caller's, plus the traced layer's accumulator and primary depth
 
     // The declaration is carried verbatim — a set resolution is NOT overwritten by the view's.
     auto const& own = plan.temporals[0];
@@ -746,6 +752,111 @@ TEST("sv - a caller-declared temporal input rides alongside the implied one")
     // The implied one still lands, at the view's own resolution.
     CHECK(plan.temporals[1].temporal_id == sv::temporal_id::accumulation(0));
     CHECK(plan.temporals[1].resolution == tg::vec2i(128, 64));
+}
+
+// A rasterized layer writes its whole G-buffer beside its image every frame, whatever it denoises with.
+// The slots are the guides' own ids and formats, which is what lets a later lighting pass — or a denoiser — read
+// a raster layer's primary hits exactly as it reads a traced one's.
+TEST("sv - a raster layer implies its G-buffer and nothing a denoiser keeps")
+{
+    auto def = sv::viewer_definition{};
+
+    auto v = sv::view_data{};
+    v.id = sv::view_id::from_string("raster");
+    auto& scene = sv::ensure_scene_3d(v);
+    scene.items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
+    scene.settings.mode = sv::render_mode::raster;
+    // Asked for, and ignored: a raster frame is final, so there is nothing to denoise.
+    scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
+    auto const raster = sv::view_index(def.views.size());
+    def.views.push_back(cc::move(v));
+
+    auto const root = add_layout_view(def, "root");
+    (void)add_leaf(def, layout_root_of(def, root), cc::span<sv::view_index const>(&raster, 1));
+    def.root_view = root;
+
+    auto const plan = sv::build_render_plan(def, tg::vec2i(64, 32), 0, {});
+    REQUIRE(plan.validate());
+    REQUIRE(plan.traces.size() == 1);
+
+    auto const format_of = [&](u64 id) -> cc::optional<sg::pixel_format>
+    {
+        for (auto const& t : plan.temporals)
+            if (t.temporal_id == id)
+                return t.format;
+        return {};
+    };
+    CHECK(format_of(sv::temporal_id::accumulation(0)) == sg::pixel_format::rgba32_float);
+    CHECK(format_of(sv::temporal_id::normal_guide(0)) == sg::pixel_format::rgba16_float);
+    CHECK(format_of(sv::temporal_id::depth_guide(0)) == sg::pixel_format::r32_float);
+    CHECK(format_of(sv::temporal_id::albedo_guide(0)) == sg::pixel_format::rgba16_float);
+    CHECK(format_of(sv::temporal_id::specular_albedo_guide(0)) == sg::pixel_format::rgba16_float);
+    CHECK(format_of(sv::temporal_id::roughness_guide(0)) == sg::pixel_format::r16_float);
+    CHECK(format_of(sv::temporal_id::motion_guide(0)) == sg::pixel_format::rg32_float);
+    // Every traced layer keeps one, since a double-click picks off it.
+    CHECK(format_of(sv::temporal_id::primary_depth(0)) == sg::pixel_format::r32_float);
+
+    // No denoised image, no frame samples: what a parent samples is the raster image itself.
+    CHECK(!format_of(sv::temporal_id::denoised(0)).has_value());
+    CHECK(!format_of(sv::temporal_id::frame_samples(0)).has_value());
+    CHECK(plan.temporals.size() == 8);
+}
+
+// A layer at its sample target traces nothing, and denoises again only once something restarted its denoised image.
+// So the denoised slot's declaration is what notices a denoiser setting change there, and it must notice every one —
+// and nothing a viewer sets per frame, or a converged view would denoise every frame.
+TEST("sv - a denoised image's declaration restarts on its denoise settings and nothing else")
+{
+    auto const denoised_hash = [](sv::render_settings const& settings)
+    {
+        auto v = sv::view_data{};
+        v.id = sv::view_id::from_string("denoised");
+        auto& scene = sv::ensure_scene_3d(v);
+        scene.items.push_back({.mesh = sv::mesh_id(1), .instance = sv::instance_id(1)});
+        scene.settings = settings;
+        for (auto const& t : sv::temporal_inputs_of(v))
+            if (t.id == sv::temporal_id::denoised(0))
+                return cc::optional<u64>(t.reset_hash);
+        return cc::optional<u64>();
+    };
+
+    auto base = sv::render_settings{};
+    base.reconstruct.denoiser = sr::denoise_method::atrous;
+    auto const reference = denoised_hash(base);
+    REQUIRE(reference.has_value());
+
+    // Asked twice of the same settings, one answer.
+    CHECK(denoised_hash(base) == reference);
+
+    auto member = base;
+    member.reconstruct.denoiser = sr::denoise_method::automatic;
+    CHECK(denoised_hash(member) != reference);
+
+    auto quality = base;
+    quality.reconstruct.quality = sr::denoise_quality::best;
+    CHECK(denoised_hash(quality) != reference);
+
+    auto sharpness = base;
+    sharpness.reconstruct.sharpness = 0.75f;
+    CHECK(denoised_hash(sharpness) != reference);
+
+    auto window = base;
+    window.temporal_denoise_frames += 1;
+    CHECK(denoised_hash(window) != reference);
+
+    // Neither of these decides the image: one is set per call, and the other a viewer would set per frame.
+    auto fresh = base;
+    fresh.reconstruct.fresh_samples = true;
+    CHECK(denoised_hash(fresh) == reference);
+
+    auto frame_time = base;
+    frame_time.reconstruct.frame_time_ms = 7.0f;
+    CHECK(denoised_hash(frame_time) == reference);
+
+    // Nor does what the trace already restarts on.
+    auto bounces = base;
+    bounces.max_bounces += 1;
+    CHECK(denoised_hash(bounces) == reference);
 }
 
 // A scene layer that is authored but holds no geometry.

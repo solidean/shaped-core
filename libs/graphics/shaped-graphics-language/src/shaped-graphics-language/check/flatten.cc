@@ -688,6 +688,54 @@ struct flattener
         return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
     }
 
+    /// CHK-391: `value as texel[F]` of the texel type `type` and of another width: its leading components, or
+    /// all of them and the rest of (0, 0, 0, 1), from an operand that is evaluated once.
+    flat_expr_id texel_conversion(flat_expr_id value, type_id type, ast::expr_id id)
+    {
+        if (!is_valid(value))
+            return fail();
+        auto const value_type = entry.at(value).type;
+        auto const* const source = c.out.builtin_type_of(value_type);
+        auto const* const texel = c.out.builtin_type_of(type);
+        if (source == nullptr || texel == nullptr)
+            return fail();
+        auto const from_width = source->leaf_count;
+        auto const to_width = texel->leaf_count;
+        if (to_width < from_width)
+        {
+            auto letters = swizzle{.count = i8(to_width)};
+            for (auto i = 0; i < to_width; ++i)
+                letters.fields[i] = i8(i);
+            return swizzle_of(value, letters, type, id);
+        }
+
+        // a widened texel is a vector, whose fields are its component
+        auto const component = field_type(type, 0);
+        auto arguments = cc::vector<flat_expr_id>();
+        if (from_width == 1)
+            arguments.push_back(value);
+        else
+        {
+            auto const once = evaluate_once(value, "texel", id);
+            for (auto i = 0; i < from_width; ++i)
+            {
+                auto const operand = i == 0 ? once.first : again(once.later, id);
+                arguments.push_back(add_expr(component, id, flat_member{.object = operand, .member = i}));
+            }
+        }
+        for (auto i = from_width; i < to_width; ++i)
+        {
+            auto const fill = i == 3 ? 1 : 0;
+            if (texel->leaf_kind == value_kind::scalar_float)
+                arguments.push_back(add_expr(component, id, flat_literal{.value = f64(fill)}));
+            else
+                arguments.push_back(add_expr(
+                    component, id,
+                    flat_int_literal{.value = fill, .is_unsigned = texel->leaf_kind == value_kind::scalar_uint}));
+        }
+        return add_expr(type, id, flat_construct{.arguments = add_list(arguments)});
+    }
+
     flat_expr_id read_swizzle(swizzled const& s, type_id type, ast::expr_id id)
     {
         return swizzle_of(flatten_expr(s.operand), s.letters, type, id);
@@ -754,6 +802,14 @@ struct flattener
 
         if (e.node.is<ast::literal>())
             return flatten_number(id, type);
+        // CHK-394: an operator over number literals alone is the literal it folds to
+        if (e.node.is<ast::call>())
+        {
+            if (auto const n = c.number_of(file(), id); n.is_number)
+                return flatten_folded(id, type, n);
+            if (auto const b = c.comparison_of(file(), id); b.has_value())
+                return add_expr(type, id, flat_bool_literal{.value = b.value()});
+        }
         // a tuple or an object literal is the call it converts by (CHK-81)
         if ((e.node.is<ast::tuple>() || e.node.is<ast::object>()) && tables().call_at(id) >= 0)
             return flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)]);
@@ -849,6 +905,8 @@ struct flattener
         if (auto const* const cast = e.node.try_as<ast::cast>())
         {
             auto const value = flatten_expr(cast->value);
+            if (where.kind == target_kind::texel_conversion)
+                return texel_conversion(value, type, id);
             // A cast to the type the value already has is the value itself.
             if (where.kind != target_kind::overload)
                 return value;
@@ -930,6 +988,26 @@ struct flattener
         }
         auto const value = parse_plain_float(text);
         return value.has_value() ? literal(value.value()) : fail();
+    }
+
+    /// What an operator over number literals folded to, as the type it was checked as.
+    flat_expr_id flatten_folded(ast::expr_id id, type_id type, number_literal const& n)
+    {
+        auto const is_half = type == c.prelude_type(builtins::k_half);
+        auto const is_float = is_half || type == c.prelude_type(builtins::k_float);
+        if (n.is_integer && !is_float)
+        {
+            auto const is_unsigned
+                = type == c.prelude_type(builtins::k_uint) || type == c.prelude_type(builtins::k_ushort);
+            auto const v = n.integer;
+            if (is_unsigned ? v < 0 || v > 4294967295ll : v < -2147483647 - 1 || v > 2147483647)
+                return fail();
+            return add_expr(type, id, flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned});
+        }
+        if (!is_float)
+            return fail();
+        auto const v = n.is_integer ? f64(n.integer) : n.real;
+        return add_expr(type, id, flat_literal{.value = is_half ? f64(scalar::of_half(v).widened().as_float()) : v});
     }
 
     /// `[a, b, c]` of an array type, its elements in the order written (EVAL-91).
@@ -1115,7 +1193,7 @@ struct flattener
             payload,
         };
         auto const traced_ray = flat_traced_ray{.set = t.set, .ray = t.ray};
-        if (!cc::sequence{entry.traced_rays}.any([&](flat_traced_ray const& r) { return r == traced_ray; }))
+        if (!entry.traced_rays.values().any([&](flat_traced_ray const& r) { return r == traced_ray; }))
             entry.traced_rays.push_back(traced_ray);
         auto const traced = builtin_call(id, callee, values);
         if (is_local)
@@ -2915,9 +2993,10 @@ struct flattener
                 is_failed = true;
                 return;
             }
-            auto const value = flatten_expr(let->value);
+            // minted ahead of its value, so the name the program wrote is its own and a callee inlined there mints past it
             auto const local = add_local(let->is_mut ? local_kind::var : local_kind::let,
                                          c.text_of(file(), name->where), tables().type_at(let->pattern));
+            auto const value = flatten_expr(let->value);
             current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = local});
             if (let->is_mut)
                 add_stmt(from, flat_var{.local = local, .value = value});
@@ -3065,6 +3144,20 @@ void report_unroll(checker& c, flattener::unroll_report const& u)
 }
 } // namespace
 
+cc::set<cc::string> const* checker::module_names()
+{
+    if (out.module_names.empty() || module_names_for != out.symbols.size())
+    {
+        auto names = cc::make_shared<cc::set<cc::string>>();
+        for (auto const& s : out.symbols)
+            if (!s.name.empty())
+                (void)names->insert(s.name);
+        out.module_names.push_back(cc::move(names));
+        module_names_for = out.symbols.size();
+    }
+    return out.module_names.back().get();
+}
+
 void checker::flatten_test(i32 index)
 {
     // by value: flattening appends to the module's vectors
@@ -3084,9 +3177,7 @@ void checker::flatten_test(i32 index)
     // CHK-333: what the test lists, which its driver binds
     for (auto const binding : out.at(out.functions[out.at(test.symbol).info].bindings))
         f.entry.bindings.push_back(binding);
-    for (auto const& other : out.symbols)
-        if (!other.name.empty())
-            f.entry.names.reserve(other.name);
+    f.entry.names.also_taken = module_names();
     f.frames.push_back({.function = test.symbol, .file = test.file, .result = checked_module::void_type});
 
     auto const& body = ast_of(test.file).at(test.declaration).node.as<ast::test_decl>().body;
@@ -3188,10 +3279,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         f.entry.bindings.push_back(binding);
 
     // Every module-level name is taken, so no local can hide a type, a binding or a builtin an emitter writes.
+    f.entry.names.also_taken = module_names();
     f.entry.names.reserve(s.name);
-    for (auto const& other : out.symbols)
-        if (!other.name.empty())
-            f.entry.names.reserve(other.name);
 
     f.frames.push_back({.function = id, .file = s.file, .result = info.result});
     // CHK-326: a ray-tracing stage's one parameter of the target is its payload, `locals[0]`, which the stage writes

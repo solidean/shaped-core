@@ -6,10 +6,8 @@
 #include <clean-core/memory/allocation.hh>
 
 
-// TODO:
-// - to_string / to_debug_string, printing index 0 LEFTMOST (a bitset is an indexed bit array, not a number)
-// - adopting and extracting the underlying cc::allocation<u64>
-// - the mixed-size whole-set operations, if a caller ever really wants zero-extension
+// issue: feat-cc-bitset-to-string-and-allocation
+// Also not yet: the mixed-size whole-set operations, if a caller ever really wants zero-extension.
 
 
 /// Dynamically sized bit set: a runtime number of bits packed into heap-allocated u64 words.

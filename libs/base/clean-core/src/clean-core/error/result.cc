@@ -1,8 +1,20 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/platform/native.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/to_debug_string.hh>
 #include <clean-core/string/to_string.hh>
 
+namespace
+{
+/// `file:line - function` at FULL, as it always read; below it, what the level kept of the site.
+cc::string site_text(cc::source_location const& s)
+{
+    if constexpr (CC_SOURCE_SITES == 2)
+        return cc::format("{}:{} - {}", s.file_name(), s.line(), cc::demangle_symbol(s.function_name()));
+    else
+        return cc::describe_site(s);
+}
+} // namespace
 
 struct cc::any_error::context_node
 {
@@ -64,6 +76,32 @@ bool cc::any_error::is_empty() const
     return !_payload.is_valid();
 }
 
+cc::string_view cc::any_error::message() const
+{
+    return _payload.is_valid() ? cc::string_view(_payload->message) : cc::string_view();
+}
+
+cc::any_error cc::any_error::clone() const
+{
+    any_error copy;
+    if (!_payload.is_valid())
+        return copy;
+
+    auto& alloc = cc::default_node_allocator();
+    copy._payload = cc::node_allocation<payload>::create_from(alloc, _payload->message, _payload->site);
+    // the context chain in its own order, newest first
+    auto* tail = &copy._payload->ctx;
+    for (auto const* c = _payload->ctx.is_valid() ? _payload->ctx.ptr : nullptr; c != nullptr;
+         c = c->next.is_valid() ? c->next.ptr : nullptr)
+    {
+        *tail = cc::node_allocation<context_node>::create_from(alloc, c->message, c->site);
+        tail = &tail->ptr->next;
+    }
+    if (_payload->trace.is_valid())
+        copy._payload->trace = cc::node_allocation<cc::stacktrace>::create_from(alloc, *_payload->trace.ptr);
+    return copy;
+}
+
 cc::source_location cc::any_error::site() const
 {
     return _payload.is_valid() ? _payload->site : cc::source_location::current();
@@ -100,11 +138,7 @@ cc::string cc::any_error::to_string() const
     {
         auto const s = _payload->site;
         result += "  at ";
-        result += s.file_name();
-        result += ":";
-        result += cc::to_string(s.line());
-        result += " - ";
-        result += cc::demangle_symbol(s.function_name());
+        result += site_text(s);
         result += "\n";
     }
 
@@ -118,11 +152,7 @@ cc::string cc::any_error::to_string() const
             result += "  context: ";
             result += ctx_ptr->message;
             result += " (at ";
-            result += s.file_name();
-            result += ":";
-            result += cc::to_string(s.line());
-            result += " - ";
-            result += cc::demangle_symbol(s.function_name());
+            result += site_text(s);
             result += ")\n";
 
             ctx_ptr = ctx_ptr->next.is_valid() ? ctx_ptr->next.ptr : nullptr;

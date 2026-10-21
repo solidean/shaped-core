@@ -13,6 +13,11 @@ if(NOT (WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12))
     return()
 endif()
 
+# The per-example settings below name the example's target, which does not exist when examples are off.
+if(NOT SC_BUILD_EXAMPLES)
+    return()
+endif()
+
 # Its own gate passed, so the question left is which backend the build was ASKED for.
 # The viewer's default context is dx12's, so a build set to vulkan gets targets that say so, though the tracer itself runs there.
 sc_resolve_example_backend(_sv_backend _sv_mode SUPPORTS dx12)
@@ -20,7 +25,7 @@ if(_sv_mode STREQUAL "none")
     return()
 endif()
 if(_sv_mode STREQUAL "stub")
-    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals)
+    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals raster tg-objects)
         sc_add_example_backend_stub(shaped-viewer-${_stem}-example "${SC_EXAMPLE_BACKEND}" SUPPORTS dx12)
     endforeach()
     return()
@@ -39,6 +44,8 @@ sc_add_single_file_examples(shaped-viewer
     light-stage.cc
     drawings.cc
     decals.cc
+    raster.cc
+    tg-objects.cc
     LINK shaped-viewer
     PCH SG NEXUS
 )

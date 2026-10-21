@@ -434,8 +434,7 @@ TRACE_TEST("chrome_trace - sampled frames carry names and source locations")
         {
             cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
             CC_RECORD_MARK("work-begins");
-            // WORKAROUND: cc::function_ref cannot take a plain function portably yet; see libs/base/clean-core/docs/TODO.md.
-            run_until_sampled(20, [] { busy_round(); });
+            run_until_sampled(20, busy_round);
         });
 
     REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);
@@ -496,6 +495,8 @@ TRACE_TEST("chrome_trace - sampled frames carry names and source locations")
 
 TRACE_TEST("chrome_trace - a scope says where it was recorded")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     rec_fixture const fixture;
 
     auto const r = capture([] { CC_RECORD_SCOPE("located-scope"); });
@@ -571,8 +572,7 @@ TRACE_TEST("chrome_trace - a recording read back from bytes still resolves its o
         {
             cc::rec::sampling_scope const sampling({.rate_hz = 2000.0});
             CC_RECORD_MARK("work-begins");
-            // WORKAROUND: cc::function_ref cannot take a plain function portably yet; see libs/base/clean-core/docs/TODO.md.
-            run_until_sampled(20, [] { busy_round(); });
+            run_until_sampled(20, busy_round);
         });
 
     REQUIRE(raw.count_of_kind(cc::rec::event_kind::sample) > 0);

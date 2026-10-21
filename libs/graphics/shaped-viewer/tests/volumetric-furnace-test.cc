@@ -76,6 +76,9 @@ struct furnace_case
     /// Whether the object is lossless, and so whether the image must come back AT the environment rather than below it.
     bool lossless = true;
 
+    /// A lossy case's lower bound, where it has one, which then replaces the absorption checks.
+    float at_least = 0.0f;
+
     /// The traced image's extent, over the same view whatever it is, so a smaller one draws fewer paths at the same samples per pixel.
     ///
     /// Small, because this must also pass on WARP: a scattering interior is the most expensive thing the integrator does,
@@ -117,7 +120,8 @@ image_stats trace_furnace(sg::context& ctx,
     REQUIRE(permutation != nullptr);
 
     auto instances = cc::vector<sg::tlas_instance>();
-    instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+    instances.push_back(
+        sg::tlas_instance{.blas = sv_test::blas_of(resources, item.mesh), .instance_id = 0, .hit_group_offset = 0});
 
     auto hit_groups = cc::vector<sv::material_permutation const*>();
     hit_groups.push_back(permutation);
@@ -192,7 +196,7 @@ image_stats trace_furnace(sg::context& ctx,
         // Read here but asserted AFTER the list is submitted, which is not a style preference: a `REQUIRE` throws, and
         // unwinding past a recorded-but-unsubmitted command list asserts inside its destructor.
         // A second assertion while the first is unwinding is an immediate `abort`, which loses the message that would have
-        // said what went wrong — see the viewer TODO's entry on exactly this.
+        // said what went wrong — issue: bug-sv-assert-in-frame-loop-terminates.
         auto const ready = traced == sg::routine_outcome::executed;
 
         // Only the last frame is read: the target holds the running mean of every frame folded in so far, so the
@@ -248,7 +252,7 @@ image_stats trace_furnace(sg::context& ctx,
 ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform environment",
                      (sg::context_handle const& ctx_h))
 {
-    // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — see the viewer TODO for the evidence.
+    // KNOWN BROKEN on Windows on ARM, and skipped rather than worked around — bug-sv-woa-inline-readback-fastfail carries the evidence.
     //
     // The binary dies through `__fastfail` inside the idle drain, after a trivial dispatch whose
     // command list also recorded an inline readback.
@@ -257,8 +261,8 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     // These two are the only tests in sv that use `cmd.download`, and sv's own ../docs/structure.md already noted that path had
     // never been exercised here.
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
 
@@ -349,6 +353,19 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     absorbing.push_back(binding::of("transmission_scatter", tg::vec3f(0.4f, 0.4f, 0.4f)));
     cases.push_back({.name = "absorbing interior", .bindings = cc::move(absorbing), .lossless = false});
 
+    // Rough glass sends the sky through transmitted directions next-event estimation never samples, so they weigh 1.
+    // Weighed against next-event estimation it measures ~0.386; the bound sits between that and the ~0.420 it measures now.
+    // The rest of the loss is the rough transmission's uncompensated single-scattering GGX.
+    // Once that is compensated, this case is lossless and belongs with the others.
+    auto rough = cc::vector<binding>();
+    rough.push_back(binding::of("specular_ior", 1.5f));
+    rough.push_back(binding::of("specular_roughness", 0.5f));
+    rough.push_back(binding::of("transmission_weight", 1.0f));
+    cases.push_back({.name = "rough glass interior",
+                     .bindings = cc::move(rough),
+                     .lossless = false,
+                     .at_least = 0.81f * luminance_of(environment)});
+
     auto& lib = *sv::acquire_material_library().value();
     auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
     auto const positions = closed_cube(0.6f);
@@ -385,6 +402,8 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
 
             lossless_means.push_back(mean);
         }
+        else if (c.at_least > 0.0f)
+            CHECK(mean > c.at_least).context(c.name).dump("mean luminance", mean);
         else
         {
             // Absorption has to actually darken, or the medium is being skipped and every check above passes vacuously.

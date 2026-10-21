@@ -280,8 +280,8 @@ cc::result<dx12_raytracing_pipeline_handle> dx12_raytracing_pipeline::create(ID3
 
 cc::pinned_data<byte const> dx12_raytracing_pipeline::cached_pipeline_data() const
 {
-    // TODO: serialize the state object (ID3D12StateObjectProperties has no GetCachedBlob equivalent; would
-    // need collection state objects / add-to-state-object). Empty until then.
+    // Empty: ID3D12StateObjectProperties has no GetCachedBlob equivalent.
+    // issue: feat-sg-dx12-state-object-cached-blob
     return {};
 }
 } // namespace sg::backend::dx12

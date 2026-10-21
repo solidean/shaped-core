@@ -22,11 +22,11 @@ The worked examples are WGSL, since it is the strictest target: no `do … while
 * **LEGAL-7** The `end` of a `for` has no effect and reads no mutable local and no buffer element, since a target evaluates it before every iteration.
   It calls no builtin that takes derivatives either: after a divergent `break`, that re-test runs in part of a quad.
 * **LEGAL-55** An assignment whose place has an index with an effect has a value without one, since a target may write the value's effect first (EVAL-14).
-* **LEGAL-8** A tree that is core already is left as it is.
+* **LEGAL-8** A tree that is core already is left as it is, but for the let rules L1 and L2.
 * **LEGAL-9** An emitter refuses a tree that is not core with the error `not-core`, whose detail names the first violation; it never asserts.
 * **LEGAL-53** (V0) A core tree holds no `check`: each goes with its body, first, since no target writes a check or an `assert` (EVAL-75).
 * **LEGAL-52** (V1) A core tree holds no `void` local, and no `let`, `var`, assignment, `return` or read of a `void` value: what evaluating one does stays as an `eval`, and the value itself is gone.
-  It is the last rule, since the others introduce locals for results and a `void` result is one of them.
+  It follows every rule that introduces a local for a result, since a `void` result is one of them; only the let rules come after it.
 
 ## The table
 
@@ -65,7 +65,8 @@ One row per core construct, one column per target; GLSL has no emitter yet, and 
 * **LEGAL-45** A `case` becomes a `switch` when every pattern of every arm is such a literal, and a chain of `if` otherwise ([why](why/legalization.md#legal-45)).
   It runs between two passes of the expression rules: the first takes a `case` out of the block expression that held it, and the second lowers the conditions the chain writes.
 * **LEGAL-46** (C1) The chain binds the scrutinee to a `let`, and each arm is an `if` whose condition is its patterns compared with `==` and joined by `or`; the `default` arm is the last `else`.
-  It costs one `let`.
+  It costs one `let`, and none where the scrutinee is an immutable local, which each arm reads again.
+  A `bool` pattern is the scrutinee itself or its `not`, never `== true`.
 * **LEGAL-47** A pattern that has an effect is carried by the second pass: its block moves in front of the `if` that tests it.
   That `if` stands inside the branch that reaches it, so the pattern runs only where EVAL-68 says it runs.
 * **LEGAL-48** The chain captures no `break`, so an exit that crosses a `case` in that form costs nothing, and only the `switch` form is a construct X5 crosses.
@@ -291,6 +292,48 @@ for (var i: i32 = 0; i < 2; i++) {
     }
     total = total + weight;
 }
+```
+
+## Lets
+
+Inlining binds a callee's lets once per call, so a value the source names once is computed and named once per call.
+And it hands a callee its literal arguments, so what the callee computes from them is constant where the source was not: `0 / 4`, `(0 & 64) == 64`.
+Four rules run last, over the core tree, and are what keeps the text to one name per value and to no arithmetic on constants.
+A target's compiler folds the copies too: these rules are for the reader of the text, and for the footprint, which reads the same tree.
+
+* **LEGAL-58** (F1) A call of a pure builtin, a `not`, an `and` or an `or` whose operands are all literals, and whose value is an `int`, a `uint` or a `bool`, is that value's literal.
+  An immutable `let` of a literal counts as its literal inside such an expression, and keeps its name everywhere else.
+  The value is EVAL's, the interpreter's own evaluator's, so an integer wraps as it does at run time.
+  A float result is left to the target, which rounds each step itself, and so is a call that has no value for its arguments (EVAL-84).
+  A builtin that takes derivatives, reads memory, or exchanges values between invocations never folds.
+* **LEGAL-59** (F2) An `if` on a `bool` literal is the side it takes, in its place, and a `while` on `false` is nothing.
+  F1 runs first, so a branch on what it folded goes too, and then L2 drops what only the other side read.
+
+* **LEGAL-56** (L1) A let whose value repeats the value of a let in scope reads that let instead, and is gone.
+  The value must be the same wherever the invocation evaluates it.
+  It reads no `var` and no local anything writes through, no workgroup memory, and no resource the stage may write.
+  It calls no builtin that has an effect, takes derivatives, is a barrier, an atomic or a subgroup operation, or gives what differs between invocations.
+  It also reads something: a local, a binding or a sampler.
+  Two lets of literals alone name a number, and they keep their own names, since `metallic` and `roughness` may agree on `0.5`.
+* **LEGAL-60** (L3) A `let` whose value is a block's result, the `var` E1 declared in front of the block in the same list, is that `var` under the let's name.
+  It holds where nothing else reads the `var`, nothing writes it behind the `let`, and no `for`'s `end` reads the `let`, which LEGAL-7 keeps from a `var`.
+  So `let lit = shade(...)` reads as one `var lit` its branches assign, rather than `shade_result` and a copy of it.
+* **LEGAL-57** (L2) A let nothing reads is gone, and so is a let only it read.
+  Its value must have no effect, and must always have a value: an element, a buffer element, a load of `bytes` and a builtin that has none for some argument are kept (EVAL-84, EVAL-90).
+  So a read of a binding that only such a let made leaves the footprint with it.
+
+```wgsl
+// before L1 and L2: both calls of `tinted(ctx, …)` bind `scale`, and nothing reads `dead`
+let scale: f32 = ctx.exposure * 2.0;
+let r: f32 = ctx.red * scale;
+let scale_1: f32 = ctx.exposure * 2.0;
+let g: f32 = ctx.green * scale_1;
+let dead: vec4f = frame.unused * 2.0;
+
+// after
+let scale: f32 = ctx.exposure * 2.0;
+let r: f32 = ctx.red * scale;
+let g: f32 = ctx.green * scale;
 ```
 
 ## What a target's own analysis sees

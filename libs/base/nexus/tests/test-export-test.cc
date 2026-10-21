@@ -158,6 +158,8 @@ TEST("schedule - would_run honors buckets and disabled, filter_matches ignores t
 // whatever spelling the compiler was invoked with, an absolute path with backslashes included.
 TEST("schedule - a filter matching no test name falls back to the source file")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     auto const reg = make_axis_registry();
     auto const& alpha = reg.declarations[0];
     auto const& beta = reg.declarations[1];  // disabled

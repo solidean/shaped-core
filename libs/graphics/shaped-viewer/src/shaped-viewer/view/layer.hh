@@ -60,7 +60,7 @@ struct sv::layer
     /// scene_3d: geometry, lights, the environment a missed ray sees, and the trace's own knobs.
     ///
     /// A traced layer writes no meaningful alpha yet, so it is always opaque and is forced to `replace`.
-    /// Compositing one `over` another needs the raygen to write coverage into `.a` first (see libs/graphics/shaped-viewer/docs/TODO.md).
+    /// Compositing one `over` another needs the raygen to write coverage into `.a` first (issue: feat-sv-traced-layer-alpha).
     cc::vector<scene_item> items;
     cc::vector<scene_light> lights; ///< in the caller's order, which the GPU record does not have to keep
 
@@ -79,9 +79,6 @@ struct sv::layer
 
     /// scene_3d: drawings projected onto the traced surfaces, painted at every hit in the order they were added.
     cc::vector<decal_placement> decals;
-
-    /// scene_3d: whether anything drawn after the trace needs its primary-hit depth.
-    [[nodiscard]] bool needs_primary_depth() const { return !drawings.empty() || !annotations.empty(); }
 
     /// ui: which of the frame's registered draw callbacks fills this layer.
     u32 ui_callback = u32(-1);

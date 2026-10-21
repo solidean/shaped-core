@@ -178,7 +178,7 @@ The lock is not recursive, so the rule that remains is: never re-acquire the *sa
 The exclusive guard is an approximation of the model this actually wants, and the gap is a missing clean-core type:
 **executes that only read should run in parallel with each other**, while the read-only scope should hold a shared lock rather than none.
 A read-only routine like `sr::blit_routine` has no reason to serialize against another thread's `execute`, and `try_acquire`'s no-lock path is not the same thing as a shared one.
-Closing it needs a `cc::shared_mutex<T>` beside `cc::mutex<T>`; it is tracked in the [sg TODO](TODO.md).
+Closing it needs a `cc::shared_mutex<T>` beside `cc::mutex<T>`; it is tracked in [feat-sg-routine-shared-exclusive-lock](issues/feat-sg-routine-shared-exclusive-lock.md).
 
 Do not `clear()` / `evict()` a registry while another thread is still recording against the same context.
 

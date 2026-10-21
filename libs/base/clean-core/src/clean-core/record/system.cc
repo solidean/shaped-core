@@ -12,11 +12,8 @@
 #include <clean-core/record/impl/writer_tls.hh>
 #include <clean-core/record/writer.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
-
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 using namespace cc::primitive_defines;
 
@@ -275,11 +272,11 @@ void worker_body(double poll_interval_secs)
 }
 
 #if CC_HAS_THREADS
-std::thread g_worker;
+cc::native_thread g_worker;
 
 void start_worker_thread(double poll_interval_secs)
 {
-    g_worker = std::thread(worker_body, poll_interval_secs);
+    g_worker = cc::native_thread::start([poll_interval_secs] { worker_body(poll_interval_secs); });
 }
 
 void join_worker_thread()

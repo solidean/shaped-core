@@ -29,12 +29,10 @@ An operator over integer literals alone that only a float operator takes is an e
 So is `/` or `%` over them, although `int` has both (CHK-313); together they are the error half of the folding below.
 Literal types would refine that rather than replace it.
 
-**Folding what is literal alone.**
-A subtree of number literals and operators, with no call of a function, is folded in the front end into a new literal, and the language guarantees it.
-Anything touching a float literal becomes a float literal.
-`1 / 3` is then an error rather than a silent `0`: it is written `1.0 / 3`, `1 / 3.0` or `(1 as int) / 3`.
-Afterwards "what is the type of `1 + 2`" stops being a question, since no builtin operator ever sees a call of literals alone.
-Nothing folds yet; the folding is meant to run in 64-bit arithmetic first, where a literal is already held, with extended precision as the refinement.
+**Folding what is literal alone is decided** ([CHK-394](../semantics/checking.md#calls-and-overloads)).
+A prelude operator over number literals alone folds in the front end into a new literal, in 64-bit arithmetic, and anything touching a float literal becomes a float literal.
+`1 / 3` stays an error rather than a silent `0`: it is written `1.0 / 3`, `1 / 3.0` or `(1 as int) / 3`.
+Extended precision for the float half is the refinement left, and so is folding through a call such as `sqrt(2.0)`.
 
 ## What it touches
 

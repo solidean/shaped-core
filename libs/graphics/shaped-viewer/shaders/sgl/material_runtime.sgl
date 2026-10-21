@@ -102,6 +102,30 @@ fun corner_elements(ctx: shading_context) -> uint3:
     let base = ctx.primitive * 3
     return uint3(base, base + 1, base + 2)
 
+// A mesh attribute's frequency as data, for the one reader that is not generated per permutation: the cutout's.
+// `sv::material_opacity::frequency` writes these.
+const frequency_per_triangle = 0u
+const frequency_per_vertex = 1u
+const frequency_per_corner = 2u
+
+/// One float of a mesh attribute at the hit, numbered at `frequency`.
+fun load_f1_at(b: bytes, d: attribute_desc, frequency: uint, ctx: shading_context) -> float:
+    if frequency == frequency_per_triangle => return load_element_f1(b, d, ctx.primitive)
+    let e = if frequency == frequency_per_corner => corner_elements(ctx) else ctx.corner
+    return interpolate_f1(b, d, e, ctx.barycentrics)
+
+/// Two floats of a mesh attribute at the hit, numbered at `frequency` — a uv.
+fun load_f2_at(b: bytes, d: attribute_desc, frequency: uint, ctx: shading_context) -> float2:
+    if frequency == frequency_per_triangle => return load_element_f2(b, d, ctx.primitive)
+    let e = if frequency == frequency_per_corner => corner_elements(ctx) else ctx.corner
+    return interpolate_f2(b, d, e, ctx.barycentrics)
+
+/// Three floats of a mesh attribute at the hit, numbered at `frequency` — an emission color.
+fun load_f3_at(b: bytes, d: attribute_desc, frequency: uint, ctx: shading_context) -> float3:
+    if frequency == frequency_per_triangle => return load_element_f3(b, d, ctx.primitive)
+    let e = if frequency == frequency_per_corner => corner_elements(ctx) else ctx.corner
+    return interpolate_f3(b, d, e, ctx.barycentrics)
+
 /// The three vertex indices of triangle `primitive` on `inst`.
 ///
 /// The guard is load-bearing on the non-indexed path: a non-indexed mesh hands in a stand-in for `index_buffer` that has no elements to read.

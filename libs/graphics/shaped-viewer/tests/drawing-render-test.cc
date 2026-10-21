@@ -329,14 +329,16 @@ ASYNC_INVOCABLE_TEST("sv - a 3D drawing is hidden by traced geometry in front of
                                             .height = size[1],
                                             .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
     auto store = sv::view_store{};
-    REQUIRE(sv_test::frames_until_executed(ctx,
-                                           [&](sg::command_list& cmd)
-                                           {
-                                               resources.advance_to(ctx.current_epoch());
-                                               return sv::viewer_renderer::execute(
-                                                   cmd, def, plan, resources, store,
-                                                   output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
-                                           }));
+    // A debug build compiling the traced scene's permutations cold takes longer than the default deadline.
+    REQUIRE(sv_test::frames_until_executed(
+        ctx,
+        [&](sg::command_list& cmd)
+        {
+            resources.advance_to(ctx.current_epoch());
+            return sv::viewer_renderer::execute(cmd, def, plan, resources, store,
+                                                output.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1)));
+        },
+        120.0));
     (void)co_await ctx.idle_completion();
 
     auto read = ctx.create_command_list();

@@ -970,5 +970,5 @@ Down a chain past the inline depth cap that becomes a re-poll storm — measured
 * **Plain (non-async) arguments** in the variadic dependency form.
 * **Immovable `T` through `co_return`** — the coroutine layer moves its result through the promise, so an immovable result stays on the raw-frame emplace API.
 * **`async<void>`** — you spell `async<cc::unit>` today.
-  That is one corner of a wider question about `void` in the vocabulary types, tracked in [TODO](../TODO.md).
+  That is one corner of a wider question about `void` in the vocabulary types, tracked in [question-cc-regular-void-in-vocabulary-types](../issues/question-cc-regular-void-in-vocabulary-types.md).
 * **Deferred teardown** as a built-in — handing a handle to a reclaim thread already works at the user level.

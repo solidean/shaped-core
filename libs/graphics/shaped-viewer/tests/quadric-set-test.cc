@@ -1,6 +1,10 @@
 #include <clean-core/container/vector.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/scene/quadric_set.hh>
+#include <shaped-viewer/scene/triangle_geometry.hh>
+#include <typed-geometry/geometry/primitives/aabb.hh>
+#include <typed-geometry/geometry/primitives/tetrahedron.hh>
+#include <typed-geometry/linalg/cross.hh>
 #include <typed-geometry/linalg/vec_ops.hh>
 
 using namespace cc::primitive_defines;
@@ -159,4 +163,86 @@ TEST("sv::quadric_set carries its primitives in order")
 
     // And the cylinder's box is the tight one, so the set's extent is not inflated by a loose primitive.
     CHECK(near(prims[1].bounds.max[2], 2.0f));
+}
+
+namespace
+{
+bool is_sphere(sv::quadric_primitive const& p)
+{
+    return p.clip == sv::quadric3::everywhere();
+}
+
+// A sphere's center and radius, read off its box.
+tg::pos3f center_of(sv::quadric_primitive const& p)
+{
+    return p.bounds.min + (p.bounds.max - p.bounds.min) * 0.5f;
+}
+} // namespace
+
+static_assert(sv::has_tg_edges<tg::aabb3i> && sv::has_tg_vertices<tg::aabb3i> && sv::has_tg_faces<tg::aabb3i>);
+static_assert(sv::has_tg_vertices<tg::segment3f> && !sv::has_tg_edges<tg::segment3f>, "a segment is drawn as a line");
+static_assert(sv::has_tg_faces<tg::triangle3d> && sv::has_tg_faces<tg::quad3f>, "a face is its own one face");
+
+TEST("sv::quadric_set draws a tg object's edges, joined once per vertex")
+{
+    auto const box = tg::aabb3i(tg::pos3i(0, 0, 0), tg::pos3i(2, 2, 2));
+
+    // 12 open tubes, then one sphere per corner: the joints are the box's own 8 vertices, never one per edge end.
+    auto set = sv::quadric_set();
+    CHECK(set.add_edges(box, {.radius = 0.1f}) == 20);
+    auto const prims = set.primitives();
+    REQUIRE(prims.size() == 20);
+    for (auto i = 0; i < 12; ++i)
+    {
+        CHECK(!is_sphere(prims[i]));
+        CHECK(!prims[i].emits_clip_surface()); // open: the joint sphere is the cap
+    }
+    auto const corners = box.vertices();
+    for (auto i = 0; i < 8; ++i)
+    {
+        REQUIRE(is_sphere(prims[12 + i]));
+        CHECK(center_of(prims[12 + i]) == sv::impl::to_pos3f(corners[i]));
+        CHECK(near(prims[12 + i].bounds.max[0] - center_of(prims[12 + i])[0], 0.1f)); // the tube's radius: exactly round
+    }
+
+    // A larger vertex radius stands the corners out; without vertices, each tube is closed on its own.
+    auto big = sv::quadric_set();
+    (void)big.add_edges(box, {.radius = 0.1f, .vertex_radius = 0.3f});
+    CHECK(near(big.primitives()[12].bounds.max[0] - center_of(big.primitives()[12])[0], 0.3f));
+
+    auto bare = sv::quadric_set();
+    CHECK(bare.add_edges(box, {.vertices = false}) == 12);
+    CHECK(bare.primitives()[0].emits_clip_surface()); // flat ends by default
+}
+
+TEST("sv::quadric_set draws a tg object's vertices")
+{
+    auto const tet = tg::tetrahedron3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0), tg::pos3f(0, 0, 1));
+    auto set = sv::quadric_set();
+    CHECK(set.add_vertices(tet, {.radius = 0.05f}) == 4);
+    CHECK(center_of(set.primitives()[3]) == tet.pos3);
+
+    // a triangle's edges and corners: three of each
+    CHECK(set.add_edges(tg::triangle3f(tet.pos0, tet.pos1, tet.pos2)) == 6);
+}
+
+TEST("sv::triangle_geometry draws a tg object's faces")
+{
+    // an integer box: 6 quads, 2 triangles each, every one facing away from the center
+    auto const g = sv::triangle_geometry::create_from_faces(tg::aabb3i(tg::pos3i(0, 0, 0), tg::pos3i(1, 1, 1)));
+    REQUIRE(g.triangle_count() == 12);
+    auto const p = g.positions.span();
+    for (auto t = 0; t < 12; ++t)
+    {
+        auto const n = tg::dual(tg::cross(p[3 * t + 1] - p[3 * t], p[3 * t + 2] - p[3 * t]));
+        CHECK(tg::dot(n, p[3 * t] - tg::pos3f(0.5f, 0.5f, 0.5f)) > 0.0f);
+    }
+
+    // a range of objects, and faces that are objects themselves
+    auto tets = cc::vector<tg::tetrahedron3d>();
+    tets.push_back(tg::tetrahedron3d(tg::pos3d(0, 0, 0), tg::pos3d(1, 0, 0), tg::pos3d(0, 1, 0), tg::pos3d(0, 0, 1)));
+    tets.push_back(tets[0]);
+    CHECK(sv::triangle_geometry::create_from_faces(tets).triangle_count() == 8);
+    CHECK(sv::triangle_geometry::create_from_faces(tg::triangle3f()).triangle_count() == 1);
+    CHECK(sv::triangle_geometry::create_from_faces(tg::quad3f()).triangle_count() == 2);
 }

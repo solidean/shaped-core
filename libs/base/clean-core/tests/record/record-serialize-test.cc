@@ -15,10 +15,10 @@
 #include <clean-core/record/trace.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
@@ -87,6 +87,8 @@ REC_TEST("record/serialize - a recording survives a round trip through bytes")
 
 REC_TEST("record/serialize - the descriptor's whole context comes back, not just its name")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     rec_fixture const fixture(deterministic_config());
 
     auto const bytes = cc::rec::serialize(capture(&record_everything));
@@ -164,7 +166,7 @@ REC_TEST("record/serialize - several threads' streams survive together")
         scoped_listener const reg(rl);
 
         CC_RECORD_MARK("from-main");
-        std::thread worker(
+        auto worker = cc::native_thread::start(
             []
             {
                 cc::rec::set_current_thread_record_name("worker");
@@ -357,7 +359,7 @@ REC_TEST("record/crash - a quiescent dump falls back rather than waiting on a co
         scoped_listener const registered(blocker);
 
         CC_RECORD_MARK("while-the-consumer-is-stuck");
-        auto drainer = std::thread([] { cc::rec::flush_blocking(); });
+        auto drainer = cc::native_thread::start([] { cc::rec::flush_blocking(); });
         while (!blocker.entered.load(cc::memory_order_acquire))
             cc::this_thread_sleep_secs(0.001);
 

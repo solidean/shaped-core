@@ -20,6 +20,10 @@ using namespace cc::primitive_defines;
 
 namespace
 {
+/// The fixtures' buffer array, `inputs`, as an array declaration takes it.
+/// Spelled by hand: these layouts come from create_metal_binding_group_layout, which the by-name lookup does not see.
+constexpr auto k_inputs_array = sg::buffer_array_binding{.name = "inputs"};
+
 constexpr auto k_size = 4;
 
 /// One vertex of the fixture's quad: a clip-space position, then a colour — the layout `mesh.metal`'s `vertex_in`
@@ -296,7 +300,7 @@ ASYNC_TEST("sg metal - a draw reads the vertex buffer a dispatch in the same lis
     // this passing on an M4, because a four-thread dispatch finishes well before the pass it precedes.
     // So read a failure here as the dispatch-to-draw path being broken, not as the ordering being unprotected — what
     // would catch that needs a dispatch long enough to lose the race, which is a slow test rather than a sharp one.
-    // libs/graphics/shaped-graphics/docs/TODO.md carries it.
+    // issue: question-sg-metal-encoder-barrier-unproven
     auto emit = mtl::test::mesh_kernel("emit_quad_main");
     emit.bindings.push_back({
         .name = "vertices",
@@ -426,13 +430,15 @@ TEST("sg metal - a draw resolves its array declarations against the groups it bi
         scope.set_inline_constants(tint_constants{});
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
 
-        scope.declare_array_buffer_access("inputs", {});
+        auto unused = scope.declare_array_buffer_access(k_inputs_array, {});
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
+        unused.withdraw();
 
+        // Checked the first time it meets the group, which is the next draw.
         sg::array_buffer_access const out_of_range[] = {
             {.index = 4, .access = sg::access_flag::shader_read},
         };
-        scope.declare_array_buffer_access("inputs", out_of_range);
+        auto const bad = scope.declare_array_buffer_access(k_inputs_array, out_of_range);
         CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
     }
     ctx->drop_command_list(cc::move(cmd));
@@ -445,7 +451,7 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
         SKIP("no metal 4 device on this host");
 
     // A group bound in one scope must not still be bound in the next, or a draw that bound nothing resolves the arrays
-    // of a group it never saw — which is what `_group_arrays` outliving its scope would cause.
+    // of a group it never saw — which is what a slot outliving its scope would cause.
     auto bindings = cc::vector<sg::binding>();
     bindings.push_back({.name = "inputs", .space = 0, .index = 0, .count = 4, .type = sg::binding_type::buffer});
 
@@ -507,9 +513,10 @@ TEST("sg metal - a rendering scope leaves no bound-group state behind")
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
 
-        // Nothing this scope binds carries `inputs`, so a declaration naming it asserts unless a stale group does.
-        scope.declare_array_buffer_access("inputs", {});
-        CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
+        // A stale group would show the draw `inputs`, whose fifth element this declares, so the draw would assert.
+        sg::array_buffer_access const past_the_end[] = {{.index = 4, .access = sg::access_flag::shader_read}};
+        auto const declared = scope.declare_array_buffer_access(k_inputs_array, past_the_end);
+        scope.draw({.vertex_range = {.offset = 2, .size = 4}});
     }
     ctx->drop_command_list(cc::move(cmd));
 }
@@ -596,9 +603,10 @@ TEST("sg metal - a compute-bound group is not bound at the first draw of a rende
         scope.bind_vertex_buffer({.buffer = vertex_buffer, .stride_in_bytes = isize(sizeof(mesh_vertex))});
         scope.draw({.vertex_range = {.offset = 2, .size = 4}});
 
-        // Nothing this scope binds carries `inputs`, so a declaration naming it asserts unless a stale group does.
-        scope.declare_array_buffer_access("inputs", {});
-        CHECK_ASSERTS(scope.draw({.vertex_range = {.offset = 2, .size = 4}}));
+        // A stale group would show the draw `inputs`, whose fifth element this declares, so the draw would assert.
+        sg::array_buffer_access const past_the_end[] = {{.index = 4, .access = sg::access_flag::shader_read}};
+        auto const declared = scope.declare_array_buffer_access(k_inputs_array, past_the_end);
+        scope.draw({.vertex_range = {.offset = 2, .size = 4}});
     }
     ctx->drop_command_list(cc::move(cmd));
 }

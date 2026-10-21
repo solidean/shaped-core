@@ -412,6 +412,8 @@ r.or_throw();                             // -> T&& or throws cc::result_excepti
 r.with_context("while parsing");          // chain context (E = any_error); also with_context_lazy
 CC_RETURN_IF_ERROR(expr);                 // early-return the error from the current function
 // cc::any_error: with_context(msg), site(), to_string(), has_stacktrace() — move-only, type-erased.
+//   message() is the text alone, for a library's user; to_string() adds site, context and trace, for its developer.
+//   clone() is the one way to copy one; text of any kind is kept verbatim, any other type through its debug string.
 
 #include <clean-core/error/exception.hh>  // the blessed route to <exception> / <stdexcept>; declares nothing itself
 // Return a result; where something is genuinely exceptional (a lost device, or_throw), throw through this header.
@@ -768,15 +770,70 @@ cc::dedup_sorted_ex(start, size, range, cmp);   // -> isize surviving count; com
 cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -> bool prunes subranges (=> sort_at)
 ```
 
-## Sequence (lazy ranges — early prototype, see [sequence](docs/sequence.md))
+## Sequence (lazy ranges — see [sequence](docs/sequence.md), examples `clean-core/sequence-*`)
 
 ```cpp
-#include <clean-core/sequence/sequence.hh>   // cc::sequence<RangeT> — single-pass; non-copy/non-move
-cc::sequence{some_range}.count();            // use as a temporary; terminal ops consume the range
-cc::sequence{v}.count_if(pred);  .any(pred);  .all(pred);  .index_of(pred);  .find(pred);  // find needs stable elements
-cc::sequence{v}.accumulate(init, fn);  .each(fn);
-cc::sequence{v}.to_vector();  .to_container<C>();  .push_to(existing);
-// NOT implemented despite being declared: .sum() and .to_array(). map/filter/take/zip and the factories do not exist yet.
+// entry points: every container. values() references an lvalue and OWNS a temporary (never store a sequence)
+v.values();  v.indices();         // vector, array, small/fixed_vector, fixed_array, spans, ringbuffers
+m.keys();  m.values();            // map (keys().contains(k) is the map's lookup); set: s.values()
+make_vec().values();              // owns the vector: safe to name, first / to_vector / partition ... move elements out
+cc::iota(n);  cc::iota(a, b);     // integers; .contains(i) is a range check
+cc::zip(a, b, ...);               // containers or sequences, in step until the shortest ends
+cc::values_of(r);  cc::indices_of(r);   // contiguous ranges, C arrays; temporaries owned
+#include <clean-core/sequence/iterator_ranges.hh>  // opt-in (<iterator>): begin/end ranges, std::list, std::map, ...
+cc::repeat(x, n);  cc::single(x);  cc::empty_sequence<T>();
+cc::repeat(x);  cc::generate(f);  cc::iterate(init, f);   // INFINITE: count/sum/to_* static-assert, .take(n) first
+
+// terminal ops are &&-qualified: chain on the temporary, or cc::move(s).count() for a named one. single pass.
+.count();  .count_if(p);  .any(p);  .all(p);  .none(p);  .contains(x);  .each(f);  .consume();
+.index_of(p);                     // -> cc::optional<isize>
+.find_last(p);  .last_index_of(p);   // from the back; a predicate's index still counts from the front
+.equals(r);  .starts_with(r);  .mismatch(r);  .compare(r);   // r: any range; compare is lexicographic <=>
+.is_sorted();  .is_sorted_by(key);
+.min_max();  .try_min_max();      // cc::min_and_max<T>: auto [lo, hi] = ...
+.index_of_min();  .index_of_max();  .nth(i);  .try_nth(i);
+.min_ptr();  .max_ptr_by(key);    // -> pointer or nullptr when empty; borrowed elements only
+.sum_into(acc);  .min_into(acc);  .max_into(opt);  .min_ptr_into(p);  .max_ptr_by_into(p, key);  // fold several sequences
+.find(p);                         // -> pointer or nullptr; static-asserts borrowed elements (not on owning / by-value map)
+.try_fold(f);                     // f -> bool|void, true stops; -> whether it stopped
+.to_vector();  .to_array();  .to_fixed_array<N>();  .to_container<C>();  .push_to(c);   // needs vector.hh; a zip -> cc::tuple (needs tuple.hh)
+// EVERY callback, keys and predicates too, may take a leading isize (its position) and gets zip/window items SPREAD
+// spread wins where both fit: (isize i, auto w) over a zip of ints is (a, b); scan's f is f(acc, idx?, item)
+// count() over a sized map does NOT call the map; .consume() runs every element; inspect has no size, so it runs
+
+// lazy transformations
+.map(f);  .filter(p);  .flat_map(f);  .flatten();   // map keeps a reference result a reference (member projection)
+.take(n);  .skip(n);              // on a contiguous source: no new layer, skipped elements never evaluated
+.take_while(p);  .skip_while(p);
+.chain(other);                    // other: sequence or container; same element type, T& + T const& -> T const&
+.zip(others...);                  // callbacks take items SPREAD: .map([](int a, float b) { ... })
+.enumerate();                     // callbacks take (isize i, item)
+.pairwise();  .windows<N>();  .chunks<N>();   // packs, spread into callbacks: .pairwise().map([](int a, int b) {...})
+.step_by(k);  .take_last(n);  .skip_last(n);
+.filter_map(f);                   // f returns cc::optional<U> or U*: kept when engaged / non-null
+.scan(init, f);  .dedup();  .dedup_by(key);  .inspect(f);
+for (auto&& [a, b] : cc::zip(x, y)) ...   // range-for binds a zip's pack
+.reversed();                      // contiguous, iota, and map/filter/chain/zip over them; take/skip need a size
+.to_sorted_vector(cmp?);  .to_sorted_vector_by(key);   // cc::sort, NOT stable; include algorithm/sort.hh
+.to_grouped_map(key);             // cc::map<key, cc::vector<element>>, in sequence order
+.count_by(key);  .partition(p);  .to_map(key, value);  .to_set();
+.join(", ");                      // cc::string; needs string/format.hh
+cc::println("{:.2f}", v.values()); // [1.00, 2.50]: cc::format consumes a sequence, so only a temporary or cc::move(s)
+
+// needing a first element: x() only compiles on a NON-EMPTY sequence
+.assert_non_empty().sum();        // .sum() .min() .max() .average() .first() .last() .min_by(key) .max_by(key)
+if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value()) use(cc::move(s.value()).min());
+.sum_from(i64(0));                // any sequence; init's type is the accumulator, acc + x must keep it (no float->int)
+.min_or(x);  .try_min();  .first_or(x);  .try_first();  .try_last();   // any sequence; all return BY VALUE
+.sum(&particle::mass);            // x(f) is map(f).x(): sum / min / max / average of a projection
+// sum is decltype(x + x), so u8 sums as int; average is sum / n: f64 for integers, else / T::scalar_t
+.average_or(x);  .try_average();   // any sequence; all three take <AccT>: .average<f64>() sums floats in double
+// fixed_array / fixed_span with N > 0 are non-empty at compile time: fa.values().sum() needs no check
+// take / skip drop that (they may empty it) at any depth; over positions they evaluate nothing they drop
+// a map / filter_map whose lambda CAPTURES returns non-borrowed references: find() refuses; fn / member pointers are fine
+
+for (auto& x : v.values()) ...    // a pointer loop, same as `for (auto& x : v)`
+// range-for over a filter is external iteration and does not vectorize: a hot loop wants .filter(p).each(f)
 ```
 
 ## Threading
@@ -811,6 +868,13 @@ cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for th
                                           //   cc::thread_id::invalid (0) is the "no thread" sentinel
 cc::register_at_thread_exit(fn, userdata); // void(*)(void*), run at thread exit, last registered first; register from a COLD path
                                           //   the way a hot thread_local stays trivially destructible (MSVC/clang-cl guard every access to one that is not)
+
+#include <clean-core/thread/native_thread.hh> // the escape hatch: work goes to cc::async or a threaded_actor, never a raw thread
+auto t = cc::native_thread::start([&] { ... });              // an OS thread with an 8 MiB stack on EVERY platform (std::thread: 512 KiB on macOS)
+auto t = cc::native_thread::start(fn, {.name = "io", .stack_bytes = 16 << 20}); // named from inside, before the body runs
+t.join();                                 // required before destruction or reassignment — no detach; joinable() until then
+                                          // without threads: start runs the body inline, so join returns at once
+                                          // <thread> is denied repo-wide; yield/sleep are cc::this_thread_yield / cc::this_thread_sleep_secs
 
 #include <clean-core/thread/spin.hh>
 cc::spin_pause();                         // CPU spin-wait hint, for a SHORT bounded spin; never a substitute for blocking

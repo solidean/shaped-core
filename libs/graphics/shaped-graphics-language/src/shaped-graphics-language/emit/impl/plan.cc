@@ -250,8 +250,9 @@ struct planner
                     return false;
             return true;
         };
-        while (!is_free())
-            result += "_";
+        // one trailing underscore, then a number after it: a second underscore would make a name C++ reserves
+        for (auto suffix = 0; !is_free(); ++suffix)
+            result = suffix == 0 ? cc::format("{}_", name) : cc::format("{}_{}", name, suffix);
         return result;
     }
 
@@ -1006,6 +1007,13 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         result.stage_input_names.push_back(result.names.mint(cc::format("{}_in", local)));
         result.stage_input_bases.push_back(result.names.mint(cc::format("{}_base", local)));
     }
+    // the parameter stays in the signature, and the line that converts it is written where the tree reads it
+    result.stage_input_read = cc::vector<bool>::create_filled(e.stage_inputs.size(), false);
+    for (auto const& x : e.exprs)
+        if (auto const* const ref = x.node.try_as<check::flat_local_ref>())
+            for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
+                if (e.stage_inputs[i].local == ref->local)
+                    result.stage_input_read[i] = true;
     return result;
 }
 

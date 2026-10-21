@@ -922,8 +922,7 @@ void report_orphan_check(impl::check_result result, cc::string_view why)
     g_orphan_checks.fetch_add(1, cc::memory_order_relaxed);
 
     auto expanded = render_expanded(result);
-    cc::eprintln("nexus: unattributed check at {}:{}: {} ({})", result.location.file_name(), result.location.line(),
-                 expanded, why);
+    cc::eprintln("nexus: unattributed check at {}: {} ({})", nx::impl::site_text(result.location), expanded, why);
 
     g_orphan_errors.lock(
         [&](cc::vector<nx::test_error>& errors)
@@ -1908,8 +1907,8 @@ void nx::impl::report_check_result(check_result result)
     {
         // Recorded before the divert, so an off-thread failure reaches the test's `.ccrec` like any other.
         if (!result.passed && result.op != cmp_op::skip && is_outermost_execution())
-            CC_LOG_ERROR("check failed off-thread: {} — {} at {}:{}", result.expr, render_expanded(result),
-                         result.location.file_name(), result.location.line());
+            CC_LOG_ERROR("check failed off-thread: {} — {} at {}", result.expr, render_expanded(result),
+                         nx::impl::site_text(result.location));
 
         report_off_thread_check_result(ctx, cc::move(result));
         return;
@@ -1940,8 +1939,7 @@ void nx::impl::report_check_result(check_result result)
         // before this, which matters when one fuzz test evaluates tens of millions of them.
         // A nested run is excluded too — see g_execution_depth.
         if (is_outermost_execution())
-            CC_LOG_ERROR("check failed: {} — {} at {}:{}", result.expr, expanded, result.location.file_name(),
-                         result.location.line());
+            CC_LOG_ERROR("check failed: {} — {} at {}", result.expr, expanded, nx::impl::site_text(result.location));
 
         // Add test error
         ctx.errors.push_back(test_error{
@@ -3283,4 +3281,12 @@ u64 nx::test_seed()
 cc::random nx::test_random()
 {
     return cc::random(nx::test_seed());
+}
+
+cc::string nx::impl::site_text(cc::source_location const& location)
+{
+    if constexpr (CC_SOURCE_SITES == 2)
+        return cc::format("{}:{}", location.file_name(), location.line());
+    else
+        return cc::describe_site(location);
 }

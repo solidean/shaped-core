@@ -35,6 +35,39 @@ The driver is mechanism under `tools/dev/lib/` plus commands under `tools/dev/cm
   The `Check` type, the runner and the individual gates' machinery are all reusable.
 - Its own `CMakePresets.json`: the diag-launcher paths in ours are `${sourceDir}`-relative, so a consumer points them into the submodule.
 
+## Keeping the submodules current
+
+`uv run dev.py submodules sync` fast-forwards each submodule to the commit the superproject records for it, and no further.
+So the working tree matches what HEAD records: `git status` stays clean, and `check` tests what a push would carry.
+**It never touches local work**, so it is safe to run at any time, after every pull above all:
+
+| The submodule is | sync |
+|---|---|
+| declared but not checked out, as after a pull that adds it | initializes it at the recorded commit |
+| behind the recorded commit, on its tracked branch and clean | fast-forwards the branch to it |
+| behind the recorded commit, detached, as `git submodule update` leaves it | checks the tracked branch out and fast-forwards it, or detaches at the recorded commit when the branch is past it |
+| at the recorded commit | leaves it |
+| ahead of the recorded commit: local work, or a `--tip` | leaves it and says so; only a bump moves the pointer |
+| diverged from the recorded commit | refuses |
+| carrying uncommitted changes to tracked files | refuses |
+| recording a commit its remote lacks, as when a bump went out before the submodule's push | refuses |
+| on another branch | skips it |
+| a submodule of a submodule, not checked out | initializes it at the commit its parent records, at any depth |
+| a submodule of a submodule, checked out | leaves it alone |
+
+Untracked files do not count: a fast-forward never touches one, and git refuses rather than overwrite it.
+Nothing is ever reset, rebased or merged, and a refusal exits non-zero, naming what is in the way.
+
+**`--tip` goes to the head of the tracked branch instead**, the `branch =` the `.gitmodules` entry names.
+That is for starting work in a submodule, or for taking in what others pushed there before a bump.
+It refuses unpushed commits and skips a submodule without a `branch =`; otherwise it moves as the table says.
+A submodule past its pointer shows as modified in the superproject until a bump commits it.
+`--bump` implies `--tip` and commits each moved pointer in a commit of its own; a project's own rules on when to bump still apply.
+`--dry-run` reports what would move, and `sync <path>` limits it to some submodules.
+
+Set `update = merge` on each `.gitmodules` entry as well.
+Then a bare `git submodule update --remote` merges into the checked-out branch instead of detaching HEAD, so even the raw git command strands no commit.
+
 ## What does not carry over yet
 
 - `lint clang-tidy` runs `tools/lint/clang-tidy.py`, which roots itself at shaped-core and reads shaped-core's gate list.

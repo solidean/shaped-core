@@ -2,6 +2,7 @@
 
 #include <clean-core/common/utility.hh> // cc::move, for the frame a frame_scope adopts
 #include <clean-core/container/set.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/format.hh>
@@ -86,7 +87,7 @@ public:
     ///
     /// This is the part of "is the image finished" that accumulation cannot see.
     /// Such work changes a texture's contents rather than its id, so it never restarts a view's accumulation:
-    /// a caller waiting for a settled image has to watch this, `streaming_resources` AND `view_ref::accumulated_frames`.
+    /// a caller waiting for a settled image has to watch this, `streaming_resources` AND `view_ref::is_accumulation_converged`.
     [[nodiscard]] isize pending_resource_work() const;
 
     /// How many payloads are still streaming in — geometry, attributes, textures.
@@ -95,6 +96,11 @@ public:
     /// Landing restarts the accumulation, but an image can converge over the stand-ins before that, so a caller waiting
     /// for the finished image has to see this reach 0 as well.
     [[nodiscard]] isize streaming_resources() const;
+
+    /// What the user did since the previous frame, oldest first — every event, including those the built-in camera controllers already acted on.
+    /// Empty on a headless viewer, which polls nothing.
+    /// The span and the text inside it live until the next frame is acquired.
+    [[nodiscard]] cc::span<sr::input_event const> input_events() const;
 
     /// `sv::background_work` for the context this viewer draws on.
     /// What it covers follows the viewer's internals, which is why it says only "done" and never what the work was.
@@ -113,7 +119,7 @@ public:
     [[nodiscard]] window_ref window();
 
     /// A window by name.
-    /// Only the default window is presented today; see libs/graphics/shaped-viewer/docs/TODO.md for what a second one still needs.
+    /// Only the default window is presented today; issue: feat-sv-multi-window.
     [[nodiscard]] window_ref window(cc::string_view id);
 
     template <class Arg0, class... Args>
@@ -175,6 +181,15 @@ public:
     /// Re-registering the same name is how this is meant to be called — every frame, from the same place.
     void register_capture(cc::string_view name, cc::function_ref<void(capture_context const&)> body);
 
+    /// Says this frame's image is not the finished one, for a reason the viewer cannot see — a load of the caller's own.
+    ///
+    ///     if (!asset.is_ready()) f.hold_capture("the asset is loading");
+    ///
+    /// A capture does not settle on a held frame, and names `reason` if it runs out of time on one.
+    /// It holds THIS frame only, so a caller still waiting calls it again on the next.
+    /// On an interactive run it does nothing.
+    void hold_capture(cc::string_view reason);
+
     /// Flattens the frame into a render plan, records it and presents.
     /// Idempotent, and a no-op on a closed frame.
     void present();
@@ -192,6 +207,9 @@ private:
     friend class canvas_ref;
     friend class mesh_ref;
     friend class quadric_ref;
+    friend class vertices_ref;
+    friend class edges_ref;
+    friend class faces_ref;
     friend class light_ref;
 
     frame() = default; // a closed frame
@@ -246,6 +264,50 @@ private:
     /// Must run after the last authoring call and before the frame is flattened, which is why the viewer calls it rather
     /// than the sugar placing as it goes: a batch is one scene item, and it cannot be placed until it is complete.
     void _flush_immediate_quadrics();
+
+    /// Which part of a tg object an immediate shape draws.
+    enum class shape_kind : u8
+    {
+        vertices,
+        edges,
+        faces,
+    };
+
+    /// One `scene_ref::add_vertices` / `add_edges` / `add_faces` call, kept as its f32 geometry until the frame flushes.
+    ///
+    /// Its style and material stay writable until then, which is what the ref the call handed back writes.
+    /// The geometry is runs of the three pools below, so a call allocates nothing of its own.
+    struct immediate_shape
+    {
+        view_index view = view_index(0);
+        u32 layer = 0;
+        shape_kind kind = shape_kind::vertices;
+        material_id material = material_id::invalid;
+        vertex_style vertex = {}; // read for `vertices`
+        edge_style edge = {};     // read for `edges`
+        isize first_point = 0;
+        isize point_count = 0;
+        isize first_segment = 0;
+        isize segment_count = 0;
+        isize first_triangle = 0;
+        isize triangle_count = 0;
+    };
+
+    cc::vector<immediate_shape> _immediate_shapes;
+    cc::vector<tg::pos3f> _shape_points;
+    cc::vector<tg::segment3f> _shape_segments;
+    cc::vector<tg::triangle3f> _shape_triangles;
+
+    /// Records a shape and returns its index, which its ref names it by.
+    [[nodiscard]] u32 _add_immediate_shape(immediate_shape shape,
+                                           cc::span<tg::pos3f const> points,
+                                           cc::span<tg::segment3f const> segments,
+                                           cc::span<tg::triangle3f const> triangles);
+
+    /// Draws every recorded shape and clears them: vertices and edges into the immediate quadric batches, faces into one mesh per (view, layer, material).
+    /// Must run before `_flush_immediate_quadrics`, which places the batches this fills.
+    void _flush_immediate_shapes();
+
     layout_tree _nodes;              ///< the shared node pool every layout layer indexes into
     cc::vector<view_index> _windows; ///< each window's root view
     cc::vector<view_id> _window_ids;

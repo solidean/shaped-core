@@ -73,5 +73,6 @@
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/render_plan.hh>
 #include <shaped-viewer/rendering/shaders.hh>
+#include <shaped-viewer/rendering/stand_in_report.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
 #include <shaped-viewer/rendering/viewer_renderer.hh>

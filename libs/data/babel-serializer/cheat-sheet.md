@@ -166,6 +166,8 @@ cc::span<node_index const> cs = doc.children_of(doc.nodes[0]);
 cc::span<node_index const> rs = doc.nodes_of(doc.scenes[0]);
 accessor_index pos = doc.find_attribute(ps[0], "POSITION"); // invalid when absent
 cc::span<f32 const> lo = doc.min_of(doc.accessors[1]);      // empty when the file stated no bounds; also max_of
+cc::optional<tg::aabb3f> b = doc.bounds_of(doc.accessors[1]); // a vec3 accessor's stated bounds as a box: POSITION's mesh bounds
+tg::affine_transform3f xf = doc.nodes[0].local_transform();  // matrix or T * R * S, whichever the file used
 ```
 
 ```cpp

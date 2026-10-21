@@ -235,7 +235,8 @@ A high-resolution waitable timer floors near half a millisecond, and neither `ti
 For one frame's worth of ticks that is a couple of samples each, which is not a profile of anything.
 
 Two limits worth knowing.
-Only threads the recorder already knows are sampled, which a thread joins by recording anything at all — enumerating the process's OS threads instead is in the [TODO](../TODO.md).
+Only threads the recorder already knows are sampled, which a thread joins by recording anything at all.
+Enumerating the process's OS threads instead is [feat-cc-rec-sampler-os-thread-enumeration](../issues/feat-cc-rec-sampler-os-thread-enumeration.md).
 And there is no sampler at all without threads (`SC_THREADS=OFF`) or on a platform that cannot walk a foreign thread's stack; `is_sampling()` reports which you are in rather than pretending.
 
 ### Values, markers and stats
@@ -557,7 +558,8 @@ Everything ordered is ordered by **timestamp**, not by block, so a query means t
 A scope whose close is missing comes back with `is_open` set rather than being dropped — a truncated stream is the normal case here, not an error.
 
 Queries are linear scans.
-An index would be a hash from descriptor to offsets built on first use; nothing has needed one yet, and it is recorded in [TODO](../TODO.md) rather than built.
+An index would be a hash from descriptor to offsets built on first use.
+Nothing has needed one yet, and it is recorded as [perf-cc-rec-query-index](../issues/perf-cc-rec-query-index.md) rather than built.
 
 ### The assertion pattern
 
@@ -755,7 +757,7 @@ The size it saved does not pay for that.
 `stop_at_scope` leaves an instrumented stack at one or two frames, where an id is no smaller than the frames it replaces, so only a deep uninstrumented stack ever benefited.
 
 If sampled bytes do become the constraint, the shape to reach for is a stream-level dictionary that retention understands — not a sampler-local table.
-That is the open TODO entry; there is no reader-side indirection to keep working around until then.
+That is [feat-cc-rec-stack-dictionary](../issues/feat-cc-rec-stack-dictionary.md); there is no reader-side indirection to keep working around until then.
 
 **`cc::rec::hot_functions`** ([hot_functions.hh](../../src/clean-core/record/hot_functions.hh)) is the reduction that makes all of this usable without a viewer.
 It symbolizes every captured stack and folds them by function, into self time and inclusive time.

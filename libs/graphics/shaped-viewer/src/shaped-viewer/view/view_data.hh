@@ -129,9 +129,9 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (u64(13) << kind_shift) | u64(layer);
 }
 
-/// The clip-space depth of a traced layer's first primary hit per pixel, which the layer's 3D drawings are occluded by
-/// and its annotations probe.
-/// Declared only for a layer that holds either, and rewritten every frame the layer traces rather than averaged.
+/// The clip-space depth of a traced layer's first primary hit per pixel, which the layer's 3D drawings are occluded by,
+/// its annotations probe and a double-click picks the orbit centre from.
+/// Declared for every traced layer, and rewritten every frame the layer traces rather than averaged.
 [[nodiscard]] constexpr u64 primary_depth(u8 layer)
 {
     return (u64(14) << kind_shift) | u64(layer);
@@ -147,6 +147,27 @@ inline constexpr u64 caller_range_end = u64(1) << kind_shift;
     return (id >> kind_shift) == 1;
 }
 } // namespace sv::temporal_id
+
+namespace sv::impl
+{
+/// One G-buffer slot a raster layer writes beside its image: the id it is minted under, and the format it is allocated in.
+struct raster_slot
+{
+    u64 (*id)(u8 layer) = nullptr;
+    sg::pixel_format format = sg::pixel_format::undefined;
+};
+
+/// Every G-buffer slot a raster layer writes beside its image, each in the format `module raster`'s `targets` draws it in.
+/// `temporal_inputs_of` declares these, and `raster_routine` holds the formats to its pipelines' when it initializes.
+inline constexpr raster_slot raster_slots[] = {
+    {.id = temporal_id::normal_guide, .format = sg::pixel_format::rgba16_float},
+    {.id = temporal_id::depth_guide, .format = sg::pixel_format::r32_float},
+    {.id = temporal_id::albedo_guide, .format = sg::pixel_format::rgba16_float},
+    {.id = temporal_id::specular_albedo_guide, .format = sg::pixel_format::rgba16_float},
+    {.id = temporal_id::roughness_guide, .format = sg::pixel_format::r16_float},
+    {.id = temporal_id::motion_guide, .format = sg::pixel_format::rg32_float},
+};
+} // namespace sv::impl
 
 /// How often a view re-renders, as a fraction of the frame loop's rate.
 ///

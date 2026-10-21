@@ -58,10 +58,10 @@ def _profile_env_for(profraw: Path):
 # ---------------------------------------------------------------------------
 
 def pgo_instrument(
-    gen_preset: Preset, *, root: Path, mirror: bool = False, verbose: bool = False
+    gen_preset: Preset, *, root: Path, targets: list[str] | None = None, mirror: bool = False, verbose: bool = False
 ) -> list[StepResult]:
-    """Configure + build the instrumented (-fprofile-generate) preset."""
-    return run_build([gen_preset], None, root=root, mirror=mirror, verbose=verbose)
+    """Configure + build the instrumented (-fprofile-generate) preset; `targets` narrows the build, None builds all."""
+    return run_build([gen_preset], targets, root=root, mirror=mirror, verbose=verbose)
 
 
 def pgo_train(
@@ -118,9 +118,9 @@ def pgo_train(
 
 
 def pgo_optimize(
-    use_preset: Preset, *, root: Path, mirror: bool = False, verbose: bool = False
+    use_preset: Preset, *, root: Path, targets: list[str] | None = None, mirror: bool = False, verbose: bool = False
 ) -> list[StepResult]:
-    """Configure + build the optimized (-fprofile-use) preset.
+    """Configure + build the optimized (-fprofile-use) preset; `targets` narrows the build, None builds all.
 
     The SC_PGO_USE CMake side reads build/pgo/pgo.profdata; we pre-check it exists
     so the failure is a clear dev.py message rather than a configure-time fatal.
@@ -128,12 +128,12 @@ def pgo_optimize(
     profile = profile_path(root)
     if not profile.is_file():
         raise PgoError(f"PGO profile not found at {profile} — run: uv run dev.py pgo train")
-    return run_build([use_preset], None, root=root, mirror=mirror, verbose=verbose)
+    return run_build([use_preset], targets, root=root, mirror=mirror, verbose=verbose)
 
 
 def pgo_measure(
     baseline_preset: Preset, use_preset: Preset, binary_names: list[str], *, root: Path,
-    build_first: bool = True, timeout: float | None = None,
+    build_first: bool = True, targets: list[str] | None = None, timeout: float | None = None,
     mirror: bool = False, verbose: bool = False,
 ) -> dict:
     """Run the PGO benchmarks on baseline + pgo-use and diff the recorded metrics.
@@ -142,8 +142,8 @@ def pgo_measure(
     Returns {ok, baseline_preset, pgo_preset, metrics, baseline_count, pgo_count}.
     """
     if build_first:
-        run_build([baseline_preset], None, root=root, mirror=mirror, verbose=verbose)
-        pgo_optimize(use_preset, root=root, mirror=mirror, verbose=verbose)
+        run_build([baseline_preset], targets, root=root, mirror=mirror, verbose=verbose)
+        pgo_optimize(use_preset, root=root, targets=targets, mirror=mirror, verbose=verbose)
 
     base_metrics = perf.run_and_collect(
         baseline_preset, binary_names, root=root,
@@ -173,15 +173,15 @@ def pgo_measure(
 
 def pgo_run(
     gen_preset: Preset, use_preset: Preset, baseline_preset: Preset, binary_names: list[str], *,
-    root: Path, measure: bool = True, timeout: float | None = None,
+    root: Path, measure: bool = True, targets: list[str] | None = None, timeout: float | None = None,
     mirror: bool = False, verbose: bool = False,
 ) -> dict:
-    """Full pipeline: instrument → train → optimize → (measure).
+    """Full pipeline: instrument → train → optimize → (measure); `targets` narrows every build, None builds all.
 
     Returns {ok, train, measure}. Stops early (ok=False) if instrument, train, or
     optimize fails; `measure` is None when skipped or not reached.
     """
-    inst = pgo_instrument(gen_preset, root=root, mirror=mirror, verbose=verbose)
+    inst = pgo_instrument(gen_preset, root=root, targets=targets, mirror=mirror, verbose=verbose)
     if not all(s.ok for s in inst):
         return {"ok": False, "stage": "instrument", "train": None, "measure": None}
 
@@ -189,7 +189,7 @@ def pgo_run(
     if not train["ok"]:
         return {"ok": False, "stage": "train", "train": train, "measure": None}
 
-    opt = pgo_optimize(use_preset, root=root, mirror=mirror, verbose=verbose)
+    opt = pgo_optimize(use_preset, root=root, targets=targets, mirror=mirror, verbose=verbose)
     if not all(s.ok for s in opt):
         return {"ok": False, "stage": "optimize", "train": train, "measure": None}
 
@@ -197,6 +197,6 @@ def pgo_run(
     if measure:
         measure_result = pgo_measure(
             baseline_preset, use_preset, binary_names, root=root,
-            build_first=True, timeout=timeout, mirror=mirror, verbose=verbose,
+            build_first=True, targets=targets, timeout=timeout, mirror=mirror, verbose=verbose,
         )
     return {"ok": True, "stage": "done", "train": train, "measure": measure_result}

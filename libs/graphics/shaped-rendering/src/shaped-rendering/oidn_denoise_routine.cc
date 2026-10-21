@@ -6,7 +6,6 @@
 #include <shaped-rendering/impl/oidn_network.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
 #include <sr_sgl_shaders.hh>
-#include <sr_shaders.hh>
 
 namespace sr
 {
@@ -26,10 +25,9 @@ bool oidn_denoise_routine::is_available(sg::context const& ctx)
     if (!impl::oidn_weights_present())
         return false;
 
-    // Three of the shaders are HLSL, so on a backend its compiler does not serve the member is unsupported however many
-    // weights were fetched.
+    // On a backend no compiler of the library serves, the member is unsupported however many weights were fetched.
     for (auto const& asset :
-         {shaders::nn_conv.compute.main_cs, shaders::nn_input.compute.main_cs, shaders::nn_output.compute.main_cs,
+         {sgl_shaders::nn_conv.main_cs.asset, sgl_shaders::nn_io.input_cs.asset, sgl_shaders::nn_io.output_cs.asset,
           sgl_shaders::nn_pool.main_cs.asset, sgl_shaders::nn_upsample.main_cs.asset})
         if (asset == nullptr || !asset->can_acquire(ctx))
             return false;
@@ -44,7 +42,7 @@ cc::shared_async<cc::unit> oidn_denoise_routine::init(sg::routine_init_scope sco
     //
     // Lazily is not an option: a caller advancing an epoch every frame — which is every real frame loop — drives
     // nothing the compile could finish on, so a network built on first use can stay pending forever.
-    if (!co_await impl::oidn_prewarm_pipelines(ctx))
+    if (!co_await impl::oidn_prewarm_pipelines(ctx, params()))
         fail_init();
     co_return;
 }
@@ -66,7 +64,7 @@ reconstruct_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
     if (!required_guides(denoise_method::oidn).without(in.present_guides()).is_empty())
         return outcome_of(reconstruct_status::unsupported);
 
-    auto const self = try_acquire(cmd);
+    auto const self = try_acquire(cmd, in.output.format());
     if (self.is_pending())
         return outcome_of(reconstruct_status::pending);
     if (self.is_failed())
@@ -81,14 +79,14 @@ reconstruct_outcome oidn_denoise_routine::execute(sg::command_list& cmd,
     if (history._member_state != nullptr)
     {
         auto const& held = *static_cast<impl::oidn_network const*>(history._member_state.get());
-        if (held.size() != options.network || held.max_tile() != tile)
+        if (held.size() != options.network || held.max_tile() != tile || held.output_format() != in.output.format())
             history._member_state = nullptr;
     }
 
     if (history._member_state == nullptr)
     {
         auto fresh = std::make_shared<impl::oidn_network>();
-        if (!fresh->create(ctx, extent, tile, impl::oidn_network::k_tile_overlap, options.network))
+        if (!fresh->create(ctx, extent, tile, impl::oidn_network::k_tile_overlap, options.network, in.output.format()))
             return outcome_of(reconstruct_status::failed);
         history._member_state = cc::move(fresh);
     }

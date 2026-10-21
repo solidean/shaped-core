@@ -52,18 +52,18 @@ TEST("sgl emit - a local that is reserved in one target gets its underscore ther
     auto const hlsl = text_of(source, target::hlsl_dx12);
     CHECK(hlsl.contains("    const float3 filter = normalize(p.normal);\n"));
     CHECK(hlsl.contains("    const float mul_ = saturate(dot(filter, filter));\n"));
-    CHECK(hlsl.contains("    result.color = float4(filter.x, filter.y, filter.z, mul_);\n"));
+    CHECK(hlsl.contains("    result.color = float4(filter, mul_);\n"));
 
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("    let filter_: vec3f = normalize(p.normal);\n"));
     CHECK(wgsl.contains("    let mul: f32 = saturate(dot(filter_, filter_));\n"));
-    CHECK(wgsl.contains("    return frame(vec4f(filter_.x, filter_.y, filter_.z, mul));\n"));
+    CHECK(wgsl.contains("    return frame(vec4f(filter_, mul));\n"));
 
     // `filter` is an enum of the metal namespace, and `mul` is nothing there
     auto const msl = text_of(source, target::msl);
     CHECK(msl.contains("    const float3 filter_ = normalize(p.normal);\n"));
     CHECK(msl.contains("    const float mul = saturate(dot(filter_, filter_));\n"));
-    CHECK(msl.contains("    result.color = float4(filter_.x, filter_.y, filter_.z, mul);\n"));
+    CHECK(msl.contains("    result.color = float4(filter_, mul);\n"));
 }
 
 TEST("sgl emit - a name that only MSL reserves is renamed in MSL and nowhere else")
@@ -113,6 +113,48 @@ TEST("sgl emit - a reserved member is renamed, and its dx12 semantic still comes
     CHECK(wgsl.contains("    return pixel_input(constants.matrix * vec4f(v.point, 1.0));\n"));
 }
 
+TEST("sgl emit - mat4 of four columns is HLSL's constructor of four rows, transposed")
+{
+    auto const source = with_edges("@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                   "    let c = float4(p.position.x, 0.0, 0.0, 1.0)\n"
+                                   "    let m = mat4(c, c, c, c)\n"
+                                   "    return { color = m * c }\n");
+
+    CHECK(text_of(source, target::hlsl_dx12).contains("    const float4x4 m = transpose(float4x4(c, c, c, c));\n"));
+    CHECK(text_of(source, target::wgsl).contains("    let m: mat4x4f = mat4x4f(c, c, c, c);\n"));
+    CHECK(text_of(source, target::msl).contains("    const float4x4 m = float4x4(c, c, c, c);\n"));
+}
+
+TEST("sgl emit - a case on a bool local tests the local itself, with no copy and no `== true`")
+{
+    auto const source = with_edges("@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                   "    let lit = p.normal.x > 0.5\n"
+                                   "    let shade = case lit:\n"
+                                   "        true => p.normal.y\n"
+                                   "        false => p.normal.z\n"
+                                   "    return { color = float4(shade) }\n");
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(!wgsl.contains("case_value"));
+    CHECK(!wgsl.contains("== true"));
+    CHECK(wgsl.contains("    if lit {\n"));
+}
+
+TEST("sgl emit - a stage input nothing reads keeps its parameter, and has no line converting it")
+{
+    auto const source
+        = cc::string_view("binding work:\n"
+                          "    values: mut buffer[int]\n"
+                          "@compute(8) fun main_cs(@thread_id id: int3, @local_thread_index li: int){work}:\n"
+                          "    work.values[li] = 1\n");
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("@builtin(global_invocation_id) id_in: vec3u"));
+    CHECK(!wgsl.contains("let id: vec3i"));
+    CHECK(wgsl.contains("let li: i32 = i32(li_in);"));
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(!hlsl.contains("const int3 id ="));
+    CHECK(hlsl.contains("const int li = int(li_in);"));
+}
+
 TEST("sgl emit - an underscore that is taken already is minted past")
 {
     auto const source = with_edges("struct target_:\n"
@@ -128,8 +170,26 @@ TEST("sgl emit - an underscore that is taken already is minted past")
                                    "    }\n");
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("struct target_ {\n    x: f32,\n}\n"));
-    CHECK(wgsl.contains("struct target__1 {\n    @location(0) color: vec4f,\n}\n"));
-    CHECK(wgsl.contains("fn main_ps(p: pixel_input) -> target__1 {\n"));
+    // the number follows the underscore directly, since `__` makes a name C++ and so MSL reserves
+    CHECK(wgsl.contains("struct target_1 {\n    @location(0) color: vec4f,\n}\n"));
+    CHECK(wgsl.contains("fn main_ps(p: pixel_input) -> target_1 {\n"));
+}
+
+TEST("sgl emit - a member named like its reserved type takes a number, never a second underscore")
+{
+    auto const source = with_edges("struct ray:\n"
+                                   "    t: float\n"
+                                   "\n"
+                                   "struct shot:\n"
+                                   "    ray: ray\n"
+                                   "\n"
+                                   "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                   "    let s = shot(ray(p.normal.x))\n"
+                                   "    return { color = float4(s.ray.t) }\n");
+    // MSL reserves `ray`, so the type is `ray_`, and the member may not hide it (EMIT-138)
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    ray_ ray_1;\n"));
+    CHECK(!msl.contains("__"));
 }
 
 TEST("sgl emit - an entry point a target reserves is renamed there, and the text says what it is called")
@@ -313,7 +373,7 @@ TEST("sgl emit - a struct of the program is declared before its first use, and b
                         "    sun.power = 0.5;\n"));
     // a splatted value that is no local was bound to a temporary by the check pass, and it reads like any `let`
     CHECK(hlsl.contains("    const float3 splat = sun.towards;\n"));
-    CHECK(hlsl.contains("    result.color = float4(splat.x, splat.y, splat.z, sun.power);\n"));
+    CHECK(hlsl.contains("    result.color = float4(splat, sun.power);\n"));
 
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("struct light {\n    towards: vec3f,\n    power: f32,\n}\n"));

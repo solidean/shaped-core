@@ -229,14 +229,41 @@ struct writer
                 line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name, expr(arguments[i]).text));
     }
 
+    /// The vector local whose every field, in order, the arguments from `at` on are; none where they are not.
+    flat_expr_id spread_vector_at(cc::span<flat_expr_id const> arguments, isize at) const
+    {
+        auto const* const first = p.e.at(arguments[at]).node.try_as<flat_member>();
+        if (first == nullptr || first->is_swizzle() || first->member != 0)
+            return flat_expr_id::none;
+        auto const* const local = p.e.at(first->object).node.try_as<flat_local_ref>();
+        auto const& vector = p.m.at(p.e.at(first->object).type);
+        if (local == nullptr || !is_builtin_type(p.m, p.e.at(first->object).type) || !vector.has_swizzles)
+            return flat_expr_id::none;
+        auto const width = isize(vector.members.count);
+        if (width < 2 || at + width > arguments.size())
+            return flat_expr_id::none;
+        for (auto k = isize(1); k < width; ++k)
+        {
+            auto const* const m = p.e.at(arguments[at + k]).node.try_as<flat_member>();
+            auto const* const ref = m != nullptr ? p.e.at(m->object).node.try_as<flat_local_ref>() : nullptr;
+            if (ref == nullptr || m->is_swizzle() || m->member != k || ref->local != local->local)
+                return flat_expr_id::none;
+        }
+        return first->object;
+    }
+
     /// `is_broken` gives every argument a line of its own, which is how a struct built as a statement's value reads.
     rendered construct(flat_expr const& x, bool is_broken)
     {
         if (needs_member_assignment(x))
         {
             // A construction in the middle of an expression: every expression is pure, so building it first changes nothing.
-            auto name = p.names.mint(is_array(x.type) ? cc::string("array_value")
-                                                      : cc::format("{}_value", type_text(p, d, x.type)));
+            // a type a target renamed `ray_` takes no second underscore, which C++ reserves
+            auto const spelled = cc::string(type_text(p, d, x.type));
+            auto type = cc::string_view(spelled);
+            while (type.ends_with("_"))
+                type = type.subview({.start = 0, .end = type.size() - 1});
+            auto name = p.names.mint(is_array(x.type) ? cc::string("array_value") : cc::format("{}_value", type));
             build_struct(x, name);
             return {.text = cc::move(name)};
         }
@@ -248,18 +275,27 @@ struct writer
                 arguments.push_back(a);
         // a vector stays on its line: its arguments are short, and `vec3f(0.45, 0.8, -0.4)` is how a shader reads
         auto const is_split = is_broken && arguments.size() > 1 && !is_builtin_type(p.m, x.type);
+        auto const is_vector = is_builtin_type(p.m, x.type) && p.m.at(x.type).has_swizzles;
         auto text = cc::string(type_text(p, d, x.type));
         text += "(";
-        for (auto i = isize(0); i < arguments.size(); ++i)
+        for (auto i = isize(0), written = isize(0); i < arguments.size(); ++written)
         {
             if (is_split)
             {
-                text += i == 0 ? "\n" : ",\n";
+                text += written == 0 ? "\n" : ",\n";
                 indent(text, depth + 1);
             }
-            else if (i != 0)
+            else if (written != 0)
                 text += ", ";
+            // `..v` spread every field of a vector local: every target's vector takes the vector whole
+            if (auto const whole = is_vector ? spread_vector_at(arguments, i) : flat_expr_id::none; is_valid(whole))
+            {
+                text += expr(whole).text;
+                i += p.m.at(p.m.at(p.e.at(whole).type).members).size();
+                continue;
+            }
             text += expr(arguments[i]).text;
+            ++i;
         }
         if (is_split)
         {

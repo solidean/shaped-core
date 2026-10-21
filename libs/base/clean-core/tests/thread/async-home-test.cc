@@ -6,15 +6,13 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <nexus/test.hh>
 
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 using namespace cc::primitive_defines;
 
@@ -38,12 +36,12 @@ struct home_thread
     cc::atomic<u64> id = {0};
     cc::atomic<bool> stop = {false};
     cc::atomic<int> loops = {0}; // turns of the owner's pump loop, so a test can tell a pinned owner from a busy one
-    std::thread thread;
+    cc::native_thread thread;
 
     home_thread()
     {
         cc::atomic<bool> ready = {false};
-        thread = std::thread(
+        thread = cc::native_thread::start(
             [this, &ready]
             {
                 cc::thread_bound_scheduler h;
@@ -263,7 +261,7 @@ TEST("async home - a thread blocked on a graph still runs the steps homed to it"
     cc::atomic<int> result = {0};
     cc::atomic<u64> step_ran_on = {0};
     cc::atomic<u64> owner = {0};
-    std::thread t(
+    auto t = cc::native_thread::start(
         [&]
         {
             cc::thread_bound_scheduler home;
@@ -359,7 +357,7 @@ TEST("async home - a teardown that pumps its own home mid-cycle leaves the cycle
 
     cc::atomic<int> ran = {0};
     cc::atomic<bool> all_ready = {false};
-    std::thread t(
+    auto t = cc::native_thread::start(
         [&]
         {
             cc::thread_bound_scheduler home;
@@ -377,7 +375,7 @@ TEST("async home - a teardown that pumps its own home mid-cycle leaves the cycle
 
                 auto abandoned = cc::make_async_lazy_on(home, {.teardown = cc::async_teardown::at_home},
                                                         [p = pumps_on_destruction(&home, &late, &ran)] { return 1; });
-                std::thread([n = cc::move(abandoned)]() mutable { n = nullptr; }).join(); // queues the teardown here
+                cc::native_thread::start([n = cc::move(abandoned)]() mutable { n = nullptr; }).join(); // queues the teardown here
 
                 for (auto i = 0; i < 8; ++i)
                     nodes.push_back(cc::make_async_scheduled_on(home, count));
@@ -540,11 +538,11 @@ struct racing_pusher
 {
     cc::atomic<cc::async<cc::unit>*> pending = {nullptr};
     cc::atomic<bool> stop = {false};
-    std::thread thread;
+    cc::native_thread thread;
 
     racing_pusher()
     {
-        thread = std::thread(
+        thread = cc::native_thread::start(
             [this]
             {
                 auto round = 0;
@@ -596,7 +594,7 @@ TEST("async home - a push to a home always wakes its owner parked in a pool, how
     racing_pusher pusher;
 
     cc::atomic<int> completed = {0};
-    std::thread owner(
+    auto owner = cc::native_thread::start(
         [&]
         {
             cc::thread_bound_scheduler home;
@@ -622,9 +620,9 @@ TEST("async home - an owner that finds every participant slot taken still runs t
     // Nothing observable says the slots are taken, so this waits a moment for them to be claimed; a run that is too
     // slow for that exercises the ordinary participant path instead, which is still correct.
     auto const release = cc::make_async_manual<cc::unit>();
-    cc::vector<std::thread> blockers;
+    cc::vector<cc::native_thread> blockers;
     for (auto i = 0; i < 4; ++i)
-        blockers.push_back(std::thread(
+        blockers.push_back(cc::native_thread::start(
             [&]
             {
                 auto const held = cc::make_async_lazy([](cc::unit) { return 0; }, release);
@@ -634,7 +632,7 @@ TEST("async home - an owner that finds every participant slot taken still runs t
 
     // The fifth foreign thread owns a home: with no slot it must not take the fallback park that nothing would wake.
     cc::atomic<int> completed = {0};
-    std::thread owner(
+    auto owner = cc::native_thread::start(
         [&]
         {
             cc::thread_bound_scheduler home;

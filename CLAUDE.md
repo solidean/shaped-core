@@ -47,6 +47,8 @@ One-liner per library:
   So is `tg::f16` (`half_float`): IEEE binary16 with explicit conversions, and arithmetic correctly rounded once per operation.
   Geometric queries are **members** (`a.intersects(b)`, `p.distance_to(seg)`), and an object type is **maximal** — `aabb3` is the solid box, its surface is `aabb3_surface`.
   [docs/plans/geometry-query-matrix.md](libs/base/typed-geometry/docs/plans/geometry-query-matrix.md) is that layer; curves, symbolic and mesh are planned.
+  `camera/` is projections and views: `tg::perspective` is left-handed reverse-Z, and every other convention has an explicit name.
+  `tg::view_projection`'s `project` / `unproject` pair is specified by its round trip — [docs/modules/camera.md](libs/base/typed-geometry/docs/modules/camera.md).
   Namespace `tg`. Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/base/clean-net`** — networking: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev server.
@@ -171,13 +173,16 @@ One-liner per library:
   **Drawings are Slug shapes**: flat on a canvas, over a scene, as annotations — and as decals, which the tracer paints into the surfaces they are projected onto.
   [docs/canvas.md](libs/graphics/shaped-viewer/docs/canvas.md) is the design.
   [docs/asset-loading.md](libs/graphics/shaped-viewer/docs/asset-loading.md) is the design and the phasing.
+  **`shaped-view` is the standalone viewer** over all of it: models from the command line or dropped onto the window, side by side.
+  `uv run dev.py install shaped-view` makes it what a double-click on `.obj`, `.stl`, `.gltf` or `.glb` opens.
 
 Supporting directories:
 
 * **`tools/`** — `dev/` (Python build/test machinery behind [dev.py](dev.py);
   see [docs/dev-py-driver.md](docs/dev-py-driver.md)), `bin/` (checked-in binaries, e.g. `diag-launcher.exe`), `cmake/` (repo-wide build config modules), `lint/` (the clang-tidy gate whitelist),
   `shaped-linter/` (our own C++ linter — own lexer + parser, no LLVM; see [its readme](tools/shaped-linter/readme.md) — run via `dev.py lint shaped`),
-  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)), and `instruction-tracer/` (a C++ tool —
+  `review/` (the review tool behind [review.py](review.py) — see [its readme](tools/review/readme.md)),
+  `issues/` (the in-repo issue tracker behind `dev.py issues` — see [docs/guides/issue-tracking.md](docs/guides/issue-tracking.md)), and `instruction-tracer/` (a C++ tool —
   see [its readme](tools/instruction-tracer/readme.md) — that records what optimized code actually executed; drive it via `dev.py assembly trace`).
 * **`docs/`** — repo-wide docs; start at [docs/_index.md](docs/_index.md).
 * **`dev.py`**, **`CMakeLists.txt`**, **`CMakePresets.json`** — build entry points.
@@ -299,6 +304,12 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
   See [docs/platforms.md](docs/platforms.md#default-allocator-sc_mimalloc).
+* `SC_SOURCE_SITES` (default `FULL`; `OPAQUE`, `OFF`) is what a `cc::source_location` keeps → clean-core's `CC_SOURCE_SITES`: strings, the site's code address only, or nothing.
+  `OPAQUE` is for shipping: no source file or function in the binary, every site resolvable through the build's debug info; the `singlethreaded-*` presets build at it.
+  Whole-build, since it changes `cc::source_location`'s layout; see [docs/platforms.md](docs/platforms.md#source-sites-sc_source_sites).
+* `SC_FROZEN_SHADERS` (default OFF) is the shipping mode for shaders: no shader file read, no hot reload, and recorded bytecode embedded where an executable asks with `sc_embed_shader_bundle`.
+  A miss still compiles from the embedded sources, so DXC still ships; the `frozen-clang` preset sets it.
+  See [frozen-shaders](libs/graphics/shaped-shader-library/docs/frozen-shaders.md).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
   Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).
@@ -409,6 +420,8 @@ Invokable session tooling lives in [.claude/skills/](.claude/skills/). Worth cal
 
 * **`/building-and-testing`** — drive `dev.py` and the `repo_tools` `build_diag` / `test_diag` diagnostics.
   See [docs/guides/building-and-testing.md](docs/guides/building-and-testing.md).
+* **`/issue-tracking`** — file, find, claim and close issues: markdown files in any `docs/issues/` folder, driven by `dev.py issues`.
+  See [docs/guides/issue-tracking.md](docs/guides/issue-tracking.md).
 * **`/reworking-prose`** — rework the comments and docs around a topic wholesale, landing every rewrite in one `dev.py lint prose-apply` pass.
   Use it whenever prose findings pile up, a guideline changes, or a surface needs more documentation than it has.
 
@@ -513,9 +526,12 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | See external dependency pins     | `uv run dev.py deps list` (`--offline` for no network; [dependencies](docs/guides/dependencies.md)) |
 | Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
+| File, find or claim an issue     | `uv run dev.py issues new/list/known/claim` ([issue-tracking](docs/guides/issue-tracking.md); the `issue-tracking` skill) |
+| Browse and triage issues in a browser | `uv run dev.py issues serve` — edits write files only; the page's Commit & push is a separate step |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
-| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK) |
+| Update a consumer's submodules   | `uv run dev.py submodules sync [--tip \| --bump]` — to the recorded commits (or the branch heads), fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
+| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator, `install shaped-view` the model viewer a double-click opens) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

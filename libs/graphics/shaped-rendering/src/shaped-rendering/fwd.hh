@@ -24,8 +24,9 @@ enum class bc1_alpha : u8;              // what BC1 does with alpha: opaque, or 
 enum class bc_source_range : u8;        // the range BC4 / BC5 read their source in: 0..1 or -1..1
 struct bc_compress_options;             // bc_compress_routine's knobs
 class raster_box_filter_mipmap_routine; // the same, through the raster pipeline, for formats no typed UAV covers
-enum class mipmap_variant : u8;         // which entry point a texture shape mips through (the routine's parameter)
-struct mipmap_program;                  // one mipmap variant's group layout + compute pipeline
+enum class mipmap_variant : u8;         // which entry point a texture shape mips through
+struct mipmap_key;                      // a shape and the format it writes: the routine's parameter
+struct mipmap_program;                  // one mipmap key's group layout + compute pipeline
 
 // Reconstruction (see reconstruct.hh): one front routine over denoise and upscale members.
 enum class denoise_method : u8;      // which member runs, or automatic
@@ -109,6 +110,7 @@ struct text_event;
 struct mouse_move_event;
 struct mouse_button_event;
 struct mouse_wheel_event;
+struct file_drop_event;
 struct input_event;
 
 // Dear ImGui, drawn through sg.

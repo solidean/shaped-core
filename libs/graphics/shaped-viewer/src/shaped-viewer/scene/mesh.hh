@@ -8,6 +8,7 @@
 #include <shaped-viewer/scene/mesh_flags.hh>
 #include <shaped-viewer/scene/mesh_texture.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
+#include <shaped-viewer/scene/scene_item.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 #include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/transform/transform.hh>
@@ -45,6 +46,13 @@ struct sv::impl::mesh_gpu_slot
 
     /// Whether those resources had all reached the GPU, as of that placement.
     bool ready = false;
+
+    /// The scene item those resources resolved to, and the material id it was resolved from.
+    /// Placing the mesh again with the same material reuses it, rather than resolving the material, its shader and its instance afresh.
+    /// A material id names immutable contents, so the id is the whole key beside the resources.
+    /// A slot minted anew starts without one, so resources that changed always resolve again.
+    cc::optional<sv::scene_item> item;
+    material_id item_material = material_id::invalid;
 };
 
 /// One renderable mesh: geometry placed by a transform, drawn by a material, with everything that material may need

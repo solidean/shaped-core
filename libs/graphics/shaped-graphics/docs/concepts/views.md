@@ -19,7 +19,7 @@ Ranges passed to the factories are in **elements of `T`**.
 Shader reflection reports a binding's *layout and kind* — stride, size, structured/cbuffer/byteaddress — never a C++ type.
 So `T` is *validated* against reflection rather than replaced by it: `sizeof(T)` against the reflected stride, and the view kind against the reflected kind.
 Because the call site already fixed `T`, much of that check is compile-time.
-The validation itself is still deferred — see [TODO](../TODO.md).
+The validation itself is still deferred — see [feat-sg-view-reflection-validation](../issues/feat-sg-view-reflection-validation.md).
 
 **Constants blocks are stricter.**
 Constant buffers / UBOs have placement rules storage buffers do not, so `constants_buffer_view<T>` uses a tighter `constants_element` concept.

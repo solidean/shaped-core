@@ -1,9 +1,12 @@
 #include "emit-test-support.hh"
 
+#include <shaped-graphics-language/driver/compile_to_text.hh>
+
 using namespace sgl_test;
 using sgl::emit::target;
 
 // EMIT-150 and EMIT-151: a coherent member's declaration, an image's subscript, and an atomic image's update.
+// CHK-390 and CHK-391: a texel converted to another width, a swizzle where it narrows and a construction where it widens.
 
 namespace
 {
@@ -39,11 +42,44 @@ constexpr cc::string_view k_copy = "binding canvas:\n"
                                    "    canvas.weights[xy] += 0.5\n"
                                    "    canvas.layers[xy, layer = 2] = canvas.weights[xy]\n";
 
+/// A texel narrowed, and one widened from a buffer's element (CHK-391).
+constexpr cc::string_view k_texels = "binding io:\n"
+                                     "    source: texture_2d[float4]\n"
+                                     "    flags: buffer[uint2]\n"
+                                     "    narrow: out image_2d[.rg32_float]\n"
+                                     "    single: out image_2d[.r32_float]\n"
+                                     "    wide: out image_2d[.rgba32_uint]\n"
+                                     "\n"
+                                     "@compute(8, 8) fun convert(@thread_id id: int3){io}:\n"
+                                     "    let c = io.source.load(id.xy)\n"
+                                     "    io.narrow[id.xy] = c as texel[.rg32_float]\n"
+                                     "    io.single[id.xy] = c as texel[.r32_float]\n"
+                                     "    io.wide[id.xy] = io.flags[id.x] as texel[.rgba32_uint]\n";
+
+/// A store into the format the host picks, which is one texel per compile (CHK-390).
+constexpr cc::string_view k_picked = "@option const out_format: pixel_format = .rgba8_unorm\n"
+                                     "\n"
+                                     "binding io:\n"
+                                     "    source: texture_2d[float4]\n"
+                                     "    picked: out image_2d[out_format]\n"
+                                     "\n"
+                                     "@compute(8, 8) fun pick(@thread_id id: int3){io}:\n"
+                                     "    let c = io.source.load(id.xy)\n"
+                                     "    io.picked[id.xy] = c.xy as texel[out_format]\n";
+
 cc::string text_of(cc::string_view source, target t)
 {
     auto const e = emit_source(source, 0, t);
     CHECK(sgl::emit::dump_errors(e) == "");
     return e.text;
+}
+
+cc::string picked_text(cc::string_view format, target t)
+{
+    sgl::check::option_value const given[] = {{.name = "out_format", .value = cc::string(format)}};
+    auto const r = sgl::compile_to_text({.source = k_picked, .entry_point = "pick", .target = t, .options = given});
+    REQUIRE(r.has_value());
+    return r.value().text;
 }
 } // namespace
 
@@ -163,4 +199,39 @@ TEST("sgl emit - MSL fences a store to an image the entry point also reads, so t
     // HLSL and WGSL order one invocation's own accesses
     CHECK(!text_of(k_copy, target::hlsl_dx12).contains("fence"));
     CHECK(!text_of(k_copy, target::wgsl).contains("fence"));
+}
+
+TEST("sgl emit - a texel narrows by a swizzle and widens by the target's own vector, filled from (0, 0, 0, 1)")
+{
+    // CHK-391: the operand of a widening is bound once, and every component read from the local
+    auto const dx12 = text_of(k_texels, target::hlsl_dx12);
+    CHECK(dx12.contains("    io_narrow[id.xy] = c.xy;\n"));
+    CHECK(dx12.contains("    io_single[id.xy] = c.x;\n"));
+    CHECK(dx12.contains("    const uint2 texel = io_flags[id.x];\n"
+                        "    io_wide[id.xy] = uint4(texel, 0u, 1u);\n"));
+    CHECK(text_of(k_texels, target::hlsl_vulkan).contains("    io_wide[id.xy] = uint4(texel, 0u, 1u);\n"));
+
+    auto const wgsl = text_of(k_texels, target::wgsl);
+    CHECK(wgsl.contains("    textureStore(io_narrow, id.xy, vec4f(c.xy, 0.0, 0.0));\n"));
+    CHECK(wgsl.contains("    textureStore(io_single, id.xy, vec4f(c.x, 0.0, 0.0, 0.0));\n"));
+    CHECK(wgsl.contains("    let texel: vec2u = io_flags[id.x];\n"
+                        "    textureStore(io_wide, id.xy, vec4u(texel, 0u, 1u));\n"));
+
+    auto const msl = text_of(k_texels, target::msl);
+    CHECK(msl.contains("    io_narrow.write(float4(c.xy, 0.0, 0.0), uint2(id.xy));\n"));
+    CHECK(msl.contains("    io_single.write(float4(c.x, 0.0, 0.0, 0.0), uint2(id.xy));\n"));
+    CHECK(msl.contains("    io_wide.write(uint4(texel, 0u, 1u), uint2(id.xy));\n"));
+}
+
+TEST("sgl emit - a texel of an option's format is the texel of the format the compile gave")
+{
+    // CHK-390: widened for a four-channel format, on every target
+    CHECK(picked_text(".rgba8_unorm", target::hlsl_dx12).contains("    io_picked[id.xy] = float4(texel, 0.0, 1.0);\n"));
+    CHECK(picked_text(".rgba8_unorm", target::wgsl)
+              .contains("    textureStore(io_picked, id.xy, vec4f(texel, 0.0, 1.0));\n"));
+    // the value itself for a format of its own width, and its first component for a single channel
+    auto const same = picked_text(".rg32_float", target::hlsl_vulkan);
+    CHECK(same.contains("[[vk::image_format(\"rg32f\")]] RWTexture2D<float2> io_picked;\n"));
+    CHECK(same.contains("    io_picked[id.xy] = c.xy;\n"));
+    CHECK(picked_text(".r32_float", target::msl).contains("    io_picked.write(float4(c.xy.x, 0.0, 0.0, 0.0), "));
 }

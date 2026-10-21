@@ -22,6 +22,7 @@ struct manager_config;
 struct mesh_record;
 struct texture_record;
 struct attribute_record;
+struct value_summary; // what a texture's texels or an attribute's elements hold, for an emitter's selection weight
 struct instance_slot;
 struct instance_record;
 struct quadric_gpu;  // one quadric as the intersection shader reads it, by PrimitiveIndex() (resources/quadric_data.hh)
@@ -72,6 +73,7 @@ struct background;
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
+enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
 struct triangle_geometry;
@@ -81,6 +83,8 @@ struct quadric_hit;          // what a ray hit on one is: how far along, and the
 struct arrow_style;          // the three lengths an arrow is drawn from (scene/quadric.hh)
 enum class line_ends : u8;   // how a drawn segment is closed at its ends (scene/quadric.hh)
 struct line_style;           // how thick a line is drawn, and how its ends are closed
+struct vertex_style;         // how add_vertices draws an object's corners (scene/quadric.hh)
+struct edge_style;           // how add_edges draws an object's edges, and the joints between them
 struct quadric_set;          // a batch of quadrics drawn as one thing (scene/quadric_set.hh)
 struct resident_quadric_set; // that batch as resources
 enum class scalar_type : u8;
@@ -132,12 +136,17 @@ enum class attribute_interpolation : u8; // how a mesh-sourced attribute is blen
 struct material_signature_entry;         // one attribute a material type requires
 struct material_attribute_binding;       // one attribute a material overrides
 struct material_type;                    // a family of materials: signature + shader fragment
+struct material_type_description;        // what material_type::create builds one from, field by field
 struct material;                         // one instance of a type, with some attributes bound
 struct resolved_attribute;
 struct resolved_material;           // a type + material + mesh resolved down the frequency chain
 enum class material_slot_kind : u8; // what one field of a per-instance parameter block holds
 struct material_slot;
 struct material_parameter_layout; // the parameter block one permutation reads
+enum class material_value_kind : u32;
+struct material_opacity;         // where a permutation's cutout opacity lives, for the one generic reader
+struct material_emission_factor; // where one factor of a permutation's emission lives
+struct material_emission; // where a permutation's emission lives, which is what lets its instances light the scene
 struct generated_material_shader; // that permutation as an SGL hit group, plus its layout
 struct material_shader_options;
 class material_library;
@@ -213,6 +222,7 @@ class attribute_manager;
 // mismatch here links a TU that only saw this declaration against a symbol nobody defines.
 class gpu_resource_manager;
 class bound_resources; // the manager's tables, snapshotted and locked for one recording
+class declared_tables; // every table declared on one bind point, in force while it lives
 
 // render plan
 enum class draw_kind : u8;
@@ -249,9 +259,20 @@ struct layout_pipeline_key;
 // rendering
 struct material_permutation; // one permutation generated + compiled (resources/material_shader_cache.hh)
 class material_shader_cache;
-struct pt_light_table; // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
+struct pt_light_table;           // the lights one trace samples, grouped by path (rendering/pathtrace_routine.hh)
+enum class light_selection : u8; // how next-event estimation picks among a table's lights (rendering/pathtrace_routine.hh)
 struct pt_trace_desc;
+struct stand_in_report; // what a frame bound in place of permutations not compiled (rendering/stand_in_report.hh)
 class pathtrace_routine;
+struct wavefront_state;          // the wavefront tracer's path state for one view (rendering/traced_group.hh)
+struct wavefront_trace_desc;     // one wavefront frame (rendering/wavefront_routine.hh)
+enum class wavefront_stage : u8; // what a wavefront frame's timestamps divide it into (rendering/wavefront_routine.hh)
+struct wavefront_timing;         // one wavefront frame's stage timestamps (rendering/wavefront_routine.hh)
+class wavefront_routine;
+struct raster_gbuffer; // what a raster frame writes: the image and the primary hit's G-buffer (rendering/raster_routine.hh)
+struct raster_draw;       // one draw of a raster frame (rendering/raster_routine.hh)
+struct raster_frame_desc; // one raster frame (rendering/raster_routine.hh)
+class raster_routine;
 class view_renderer;
 class viewer_renderer;
 
@@ -275,7 +296,10 @@ class capture_session;
 
 // authoring handles (see refs.hh) — all non-owning {frame*, index} pairs
 class mesh_ref;
-class quadric_ref; // one quadric batch placed in a scene (refs.hh)
+class quadric_ref;  // one quadric batch placed in a scene (refs.hh)
+class vertices_ref; // an object's vertices added to a scene, restylable until the frame ends (refs.hh)
+class edges_ref;    // its edges, the same way
+class faces_ref;    // its faces, the same way
 class light_ref;
 class scene_ref;
 class canvas_ref; // a 2D layer of a view, where drawings are instanced in pixels (refs.hh)

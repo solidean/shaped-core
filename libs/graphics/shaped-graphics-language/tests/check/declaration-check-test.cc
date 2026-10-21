@@ -9,8 +9,8 @@ TEST("sgl check - a @builtin is keyed by its name, and an unknown name is unknow
     CHECK(reports_for("@builtin fun frobnicate(x: float) -> float\n") == "unknown-builtin user:[frobnicate] frobnicate\n");
 
     // The name of a builtin function declares no builtin struct, and the other way round.
-    auto const swapped = check_sources("", "@builtin struct dot\n@builtin fun mat4(v: dot) -> dot\n");
-    CHECK(reports_of(swapped) == "unknown-builtin user:[dot] dot\nunknown-builtin user:[mat4] mat4\n");
+    auto const swapped = check_sources("", "@builtin struct dot\n@builtin fun ray_query(v: dot) -> dot\n");
+    CHECK(reports_of(swapped) == "unknown-builtin user:[dot] dot\nunknown-builtin user:[ray_query] ray_query\n");
 
     // A builtin function is one OVERLOAD: its name together with its parameter types, as the registry holds them.
     CHECK(reports_for("@builtin fun dot(a: pos3, b: pos3) -> float\n") == "unknown-builtin user:[dot] dot(pos3, pos3)\n");

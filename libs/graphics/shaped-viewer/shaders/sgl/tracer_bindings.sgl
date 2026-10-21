@@ -38,9 +38,12 @@ struct light_record:
     cone_offset: float
     one_minus_cos_angular_radius: float
     link_mask: uint
-    pad0: float2
+    /// The probability next-event estimation picks this light, and the cumulative one up to and including it in the table's order.
+    /// `sv::pt_light_table::grouped` writes them, half by power and half uniformly over the lights with light to offer; 0 in both is a table that picks uniformly.
+    select_pdf: float
+    select_cdf: float
 
-/// `scene.instance` as `traced.instances` holds it, 32 bytes; the host fills it through `gpu_resource_manager::describe_instance`.
+/// `scene.instance` as `traced.instances` holds it, 112 bytes; `scene.instance` says who fills what.
 struct instance_record:
     param_buffer: uint
     param_offset: uint
@@ -48,7 +51,55 @@ struct instance_record:
     indices: uint
     is_indexed: uint
     link_mask: uint
-    padding: uint2
+    opacity_kind: uint
+    opacity_offset: uint
+    opacity_uv_offset: uint
+    opacity_frequency: uint
+    opacity_channel: uint
+    opacity_sampler: uint
+    opacity_transform: uint
+    opacity_cutoff: uint
+    shade_group: uint
+    emitter: uint
+    to_world_x: float4
+    to_world_y: float4
+    to_world_z: float4
+
+/// What next-event estimation reads of one emissive instance beyond its light record, as `traced.emitters` holds it, 80 bytes.
+/// The host fills it in `sv::view_renderer` through `sv::emitter_record_of`, one per record of path `scene.light_path_mesh`, in the order those records stand.
+struct emitter_record:
+    /// the row of `traced.instances` the emitter is
+    instance: uint
+    /// The `bindless.buffers` index of its mesh's area CDF, `sv::mesh_manager::acquire_emitter_cdf`'s.
+    /// A float per triangle, cumulative within its block of `emitter_block_size`, then one per block, cumulative over the mesh.
+    cdf: uint
+    triangle_count: uint
+    block_count: uint
+
+    /// Where the emission color lives in the instance's parameter block and how it is read — `sv::material_emission_factor` says per field.
+    /// `color_channels` packs the swizzle's three selectors a byte each, the first lowest.
+    /// The kinds are `scene.value_*`.
+    color_kind: uint
+    color_offset: uint
+    color_uv_offset: uint
+    color_frequency: uint
+    color_channels: uint
+    color_sampler: uint
+    color_transform: uint
+
+    /// The same for the scale, whose `scene.value_none` is a scale of 1; `scale_channel` is its one selector.
+    scale_kind: uint
+    scale_offset: uint
+    scale_uv_offset: uint
+    scale_frequency: uint
+    scale_channel: uint
+    scale_sampler: uint
+    scale_transform: uint
+    pad0: uint
+    pad1: uint
+
+/// How many triangles one block of an emitter's area CDF covers; `sv::emitter_cdf_block_size` restates it.
+const emitter_block_size = 256u
 
 /// The per-frame constants, 256 bytes; the host starts from `sv::default_frame_constants` (rendering/pathtrace_routine.hh).
 ///
@@ -66,7 +117,9 @@ struct frame_constants:
 
     /// How many lights `traced.lights` holds, and where each path's run starts in it, indexed by the `scene.light_path_*` values.
     light_count: uint
-    pad0: uint3
+    /// Where the emissive instances' records start in `traced.lights`: they follow every analytic light, and `traced.emitters` is indexed from here.
+    emitter_offset: uint
+    pad0: uint2
     path_offset: uint4
     path_count: uint4
 
@@ -83,7 +136,8 @@ struct frame_constants:
     /// whether to write `primary_depth`, at the camera's `near_plane`
     write_primary_depth: uint
     near_plane: float
-    split_pad: uint
+    /// whether every primary ray of the frame leaves from `jitter` inside its pixel, for an upscaler, rather than from a random point
+    fixed_jitter: uint
 
     /// the camera the previous frame of this layer was traced from, which motion vectors reproject into
     previous_camera: camera_record
@@ -92,9 +146,15 @@ struct frame_constants:
     decal_count: uint
     /// The angle one pixel spans at the image's center, in radians: a hit's footprint is this times its distance.
     pixel_spread: float
-    decal_pad: uint2
+    /// the frame's one sub-pixel offset while `fixed_jitter` is set, in [0, 1)
+    jitter: float2
 
-    reserved1: float4
+    /// The wavefront tracer's frame: the camera generation a path must have started under to count,
+    /// `wavefront_flag_*`, how many shading permutations the trace has, and the bounce Russian roulette starts after (0 for never).
+    generation: uint
+    wavefront_flags: uint
+    permutation_count: uint
+    roulette_after: uint
 
 /// One decal as `traced.decals` holds it, 96 bytes; the host fills it through `sv::impl::decal_record_of`.
 ///
@@ -124,6 +184,98 @@ struct decal_shape:
     glyph: uint2
     color: uint
     pad: uint3
+
+// ---- The wavefront tracer's state ----------------------------------------------------------------------------------------
+//
+// One element per path slot, and a slot is a pixel: persistent across frames, since a path may outlive one.
+// docs/wavefront.md is the design; shaders/sgl/tracer_wavefront.sgl the code that reads and writes these.
+
+/// Where a path's next segment starts, and which way it goes.
+struct path_ray:
+    origin: float3
+    direction: float3
+
+/// What a path carries between its segments besides its ray; `path_flag_*` say what `flags` holds.
+struct path_state:
+    throughput: float3
+    /// the density of the direction the last vertex sampled, for the MIS weight of a light the segment then reaches
+    prev_pdf: float
+    rng: uint
+    flags: uint
+    /// surface bounces taken
+    bounce: uint
+    /// scattering events taken
+    scatters: uint
+    /// the camera generation the path started under, `frame_constants::generation`
+    generation: uint
+    /// the primary ray's sub-pixel offset, which the motion guide reprojects
+    jitter: float2
+    /// how many fill draws the slot has made since its sample last started, which keeps each of them fresh
+    fill_draws: uint
+
+/// The medium a path's next segment travels through, and the wavelength it has collapsed onto (3 while it carries all three).
+struct path_medium:
+    sigma_t: float3
+    albedo: float3
+    g: float
+    channel: uint
+
+/// The radiance a path has gathered, and its specular share.
+struct path_light:
+    radiance: float3
+    specular: float3
+
+/// The nearest hit a path's segment reached, or `hit_none`.
+struct hit_record:
+    instance: uint
+    primitive: uint
+    kind: uint
+    t: float
+    barycentrics: float2
+    /// a quadric's object-space normal, which its intersection reported
+    normal: float3
+
+/// A next-event sample waiting for its visibility test: what it adds to its path's radiance if nothing is in the way.
+/// Two per slot, the light's and the environment's.
+struct shadow_ray:
+    origin: float3
+    distance: float
+    direction: float3
+    tested: uint
+    radiance: float3
+    specular: float3
+    /// what a cutout the ray crosses draws its coverage from, `cutout_seed` of the path's stream where shade drew the sample
+    seed: uint
+
+/// One pixel's tallies: since the estimate last restarted, this frame alone, and the guides of its primary hits.
+struct pixel_tally:
+    sum: float3
+    count: float
+    sum_specular: float3
+    frame_count: float
+    frame_sum: float3
+    guide_count: float
+    frame_sum_specular: float3
+    frame_primary_count: float
+    normal_sum: float3
+    depth_sum: float
+    albedo_sum: float3
+    roughness_sum: float
+    specular_albedo_sum: float3
+    /// the view depth of the first primary ray since the restart, `escaped_view_depth` where it escaped, and below 0 until one has
+    primary_view_depth: float
+    frame_motion: float2
+    /// every path's first secondary hit since the restart, per lobe: the distances summed and how many hit
+    hit_diffuse: float2
+    hit_specular: float2
+    /// every path's first secondary ray that escaped since the restart, per lobe
+    escaped: float2
+
+/// The workgroup counts an indirect dispatch reads, `sg::dispatch_args`.
+struct dispatch_args:
+    x: uint
+    y: uint
+    z: uint
 
 /// Every resource the pipeline's stages share — group 0.
 ///
@@ -168,18 +320,68 @@ binding traced:
     /// Every light the trace samples, grouped by path — what `sv::pt_light_table` builds.
     lights: buffer[light_record]
 
+    /// One per emissive instance among `lights`, in the order their records stand from `frame.emitter_offset`.
+    emitters: buffer[emitter_record]
+
     /// The clip-space depth of the first primary hit per pixel, 1 where it escaped, written while `frame.write_primary_depth` is set.
     primary_depth: out image_2d[.r32_float]
+
+    /// How many samples each pixel of `output` averages, written by the wavefront tracer while `frame.write_guides` is set; the megakernel's count is one for the image.
+    sample_counts: out image_2d[.r32_float]
 
     /// The decals every hit is painted with, `frame.decal_count` of them, and the shapes they cover in the atlas bound as `slug.tables`.
     decals: buffer[decal_record]
     decal_shapes: buffer[decal_shape]
+
+    // The wavefront tracer's state, one element per path slot; the megakernel binds stand-ins it never reads.
+    path_rays: mut buffer[path_ray]
+    path_states: mut buffer[path_state]
+    path_media: mut buffer[path_medium]
+    path_lights: mut buffer[path_light]
+    hits: mut buffer[hit_record]
+    /// two per slot: the light's sample at 2 * slot, the environment's at 2 * slot + 1
+    shadow_rays: mut buffer[shadow_ray]
+    tallies: mut buffer[pixel_tally]
+
+    /// The queues of slots between stages: two that alternate as a round's input and output, then the hits waiting to shade,
+    /// the same sorted by permutation, the slots with shadow rays to test, and the paths that finished.
+    queue_a: mut buffer[uint]
+    queue_b: mut buffer[uint]
+    queue_hits: mut buffer[uint]
+    queue_sorted: mut buffer[uint]
+    queue_shadow: mut buffer[uint]
+    queue_finished: mut buffer[uint]
+
+    /// How many each queue holds, then a count and a cursor per shading permutation — `counter_*` name the slots.
+    counters: mut buffer[atomic[uint]]
+    /// Where each permutation's range of `queue_sorted` starts.
+    shade_offsets: mut buffer[uint]
+
+/// The manager's bindless tables — group 1, which the host binds as the manager's own group.
+///
+/// This is THE declaration of them: `sv::gpu_resource_manager` lays its staging group out from this binding's reflection (resources/bindless_tables.hh).
+/// So a table's size is changed here, and the order must stay `sv::bindless_table`'s, which the host asserts.
+/// The material sampler palette sits here too, static samplers the host binds nothing for, because every pipeline that samples a material lists this group.
+binding bindless:
+    require binding_arrays
+
+    textures_1d: texture_1d[float4][64]
+    textures_1d_array: texture_1d_array[float4][32]
+    textures_2d: texture_2d[float4][4096]
+    textures_2d_array: texture_2d_array[float4][256]
+    textures_cube: texture_cube[float4][64]
+    textures_cube_array: texture_cube_array[float4][16]
+    textures_3d: texture_3d[float4][128]
+
+    /// Raw buffers: vertices, indices, attributes and parameter blocks, which a hit reads through `scene.instance`.
+    buffers: bytes[4096]
 
     // ---- The material sampler palette ----------------------------------------------------------------------------------
     //
     // Every texture a material samples goes through one of these, picked per texture by `sv::sgl_palette_sampler` (material/shader_generator.hh).
     // One per magnification filter and address mode of each axis: a hit samples level 0 explicitly, where only the magnification filter decides.
     // So the minification and mip filters, the third axis and the level clamps of an `sg::sampler` do not reach the palette; the generator's header says so at length.
+    // A raster pixel has derivatives, so there an entry's minification and mip filters, the same as its magnification filter, do apply.
 
     sampler palette_nearest_repeat_repeat:
         filter = .nearest
@@ -254,24 +456,6 @@ binding traced:
         address_u = .clamp_edge
         address_v = .clamp_edge
 
-/// The manager's bindless tables — group 1, which the host binds as the manager's own group.
-///
-/// This is THE declaration of them: `sv::gpu_resource_manager` lays its staging group out from this binding's reflection (resources/bindless_tables.hh).
-/// So a table's size is changed here, and the order must stay `sv::bindless_table`'s, which the host asserts.
-binding bindless:
-    require binding_arrays
-
-    textures_1d: texture_1d[float4][64]
-    textures_1d_array: texture_1d_array[float4][32]
-    textures_2d: texture_2d[float4][4096]
-    textures_2d_array: texture_2d_array[float4][256]
-    textures_cube: texture_cube[float4][64]
-    textures_cube_array: texture_cube_array[float4][16]
-    textures_3d: texture_3d[float4][128]
-
-    /// Raw buffers: vertices, indices, attributes and parameter blocks, which a hit reads through `scene.instance`.
-    buffers: bytes[4096]
-
 /// One path segment, in and out.
 ///
 /// The closest hit does the shading, so the payload carries the segment's RESULT rather than its surface.
@@ -306,7 +490,7 @@ struct surface_payload:
     albedo: float3
     /// normal-incidence specular reflectance (F0), for the specular guide
     specular_albedo: float3
-    /// perceptual roughness of the sharpest specular lobe
+    /// perceptual roughness for the denoiser's guide, the coat blended over the base
     roughness: float
 
     /// which lobe the continuation was drawn from, one of `openpbr.bsdf_lobe_*`
@@ -316,10 +500,37 @@ struct surface_payload:
     bsdf_pdf: float
     /// below 0 where the ray escaped
     hit_t: float
+    /// 1 where `direction` lies above the shading frame's horizon, the only directions next-event estimation samples.
+    /// Where it is 0, a light or the sky the continuation reaches is the BSDF's alone, at full weight.
+    nee_reachable: uint
+    /// The solid-angle density next-event estimation draws this hit's point with, from the ray's origin.
+    /// Negative where the instance is no light of the trace, and 0 where it is but next-event estimation cannot draw this point.
+    /// What the caller weighs `emission` by past the camera's ray.
+    light_pdf: float
+
+/// The wavefront's indirect-dispatch arguments, a group of their own: a dispatch may not read its counts from a buffer it binds writable.
+/// Only the small kernels that turn counts into arguments list it — `dispatch_*` name its records.
+binding dispatch:
+    args: mut buffer[dispatch_args]
+
+/// What one wavefront dispatch is told beside the frame: which of `queue_a` and `queue_b` it reads,
+/// which permutation's range it shades, whether a finished slot starts a new sample, and the image's size.
+/// `fill` is the share of free slots that start one, out of 65536.
+@inline binding wavefront_step:
+    parity: uint
+    permutation: uint
+    regenerate: uint
+    width: uint
+    height: uint
+    fill: uint
+    /// the samples a pixel stops at: a free slot whose pixel holds this many starts none, and 0 sets no limit
+    sample_target: uint
 
 /// A shadow ray reads only visibility: the caller seeds `visible` with 0, and the shadow miss sets it to 1.
 struct shadow_payload:
     visible: float
+    /// what a cutout the ray crosses draws its coverage from, `cutout_seed` of the path's stream — written by the caller only
+    seed: uint
 
 /// The tracer's two rays, in the order their miss shaders and hit records stand.
 rays path_rays:
@@ -329,7 +540,7 @@ rays path_rays:
 /// The payload the caller hands a surface ray, with every result zeroed until the miss or the closest hit writes it.
 fun surface_payload_for(rng: uint, sigma_t: float3, albedo: float3, g: float, channel: uint, last_bounce: uint) -> surface_payload:
     let zero = float3(0.0)
-    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0)
+    return surface_payload(rng, sigma_t, albedo, g, channel, last_bounce, zero, zero, zero, zero, zero, zero, zero, zero, 0.0, 0u, 0.0, 0.0, 0u, -1.0)
 
 /// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
 fun background_sh(){traced} -> float4[16]:

@@ -69,6 +69,8 @@ TEST("sr::layout_text - a size of zero lays out nothing")
     auto const l = sr::layout_text(plain(), "AB", {.size = 0});
     CHECK(l.glyphs.empty());
     CHECK(l.line_count == 0);
+    // a zero box, not tg's empty one, so a caller reading box.max as the extent sees nothing rather than -inf
+    CHECK(l.box == tg::aabb2f(tg::pos2f(0, 0), tg::pos2f(0, 0)));
 }
 
 TEST("sr::layout_text - size scales every distance")

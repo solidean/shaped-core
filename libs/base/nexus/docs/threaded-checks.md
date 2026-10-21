@@ -30,7 +30,7 @@ Reading that stack would bill those checks to the wrong test — silently, and o
 **A thread you start yourself carries nothing**, so say what it belongs to:
 
 ```cpp
-std::thread t(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
+auto t = cc::native_thread::start(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
 ```
 
 For a thread that is already running — a callback arriving on a library's own thread — capture on the test's thread and install on the other one:

@@ -49,7 +49,8 @@ Two values that could agree on the chosen inputs get a second quad with inputs t
 What metal still has to be shown doing:
 
 - **A discarded pixel still takes part in its quad's derivatives.**
-  WGSL demotes; MSL's `discard_fragment` may end the pixel, and the emulation SGL's TODO describes waits on the test on metal.
+  WGSL demotes; MSL's `discard_fragment` may end the pixel.
+  The emulation [feat-sgl-discard-helper-emulation](../../shaped-graphics-language/docs/issues/feat-sgl-discard-helper-emulation.md) describes waits on the test on metal.
 
 ## Geometry and tessellation stages
 
@@ -77,4 +78,4 @@ Metal runs tier-1 shaders too, SGL reaching it as MSL through slib's metal edge,
 - **Storage writes and atomics in a vertex stage** need a feature, `vertex_stores`, which WebGPU's core lacks.
 - **Unbounded binding arrays**, `T[]`, are SGL's spelling and `unsupported-yet`, since sg refuses a binding of count 0 on every backend.
 - **A footprint that names an array element**, `albedo[2]: read`, would let a pass skip `declare_array_texture_access` for a constant index.
-  SGL's footprint names the whole binding array today, which is correct and asks for the declaration every time.
+  SGL's footprint names the whole binding array today, which is correct and asks for a live declaration wherever the array is bound.

@@ -364,7 +364,8 @@ struct reference_roots
         return {.count = 1, .t0 = -evaluate(o0) / qb, .shifted_origin = o0};
     }
 
-    auto const t_closest = -2.0 * (tg::dot(d, a_mul(o0)) + tg::dot(b, d)) / (2.0 * qa);
+    // The closest approach to the primitive's origin, as `quadric.roots_of` takes it.
+    auto const t_closest = -tg::dot(o0, d) / tg::dot(d, d);
     auto const o = o0 + d * t_closest;
     auto const qb = 2.0 * (tg::dot(d, a_mul(o)) + tg::dot(b, d));
     auto const qc = evaluate(o);
@@ -400,8 +401,8 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)

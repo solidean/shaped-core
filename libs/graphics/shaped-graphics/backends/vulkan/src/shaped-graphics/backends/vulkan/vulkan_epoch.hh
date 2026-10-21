@@ -76,7 +76,7 @@ struct sg::backend::vulkan::vulkan_epoch_data
 /// A never-submitted list returns its pool straight to `free`, since the GPU never saw it.
 /// Guarded by a mutex because create / submit / drop are thread-safe.
 ///
-/// TODO: promote to a standalone object owning its own synchronization, with pools per queue once the epoch system grows multiple queues.
+/// Once the epoch system grows multiple queues, it wants promoting to a standalone object owning its own synchronization, with pools per queue once the epoch system grows multiple queues.
 struct sg::backend::vulkan::vulkan_command_pool_set
 {
     cc::vector<vulkan_command_pool> in_epoch; // captured by submitted lists this epoch

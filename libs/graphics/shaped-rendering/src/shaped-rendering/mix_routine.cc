@@ -1,32 +1,16 @@
 #include <clean-core/common/assert.hh>
-#include <clean-core/common/utility.hh>
-#include <clean-core/fwd.hh> // offsetof
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/impl/build_failure.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/mix_routine.hh>
-#include <sr_shaders.hh>
+#include <sr_sgl_shaders.hh>
 
 namespace sr
 {
 using impl::extent_of;
 using impl::is_set;
-
-namespace
-{
-/// The inline-constants block mix.hlsl declares, byte for byte.
-struct mix_constants_gpu
-{
-    f32 weight = 0.0f;
-    f32 _pad[3] = {};
-};
-
-static_assert(sizeof(mix_constants_gpu) == sizeof(sr::shaders::mix_constants),
-              "the mix constants are not the size mix.hlsl's block states");
-static_assert(offsetof(sr::shaders::mix_constants, weight) == offsetof(mix_constants_gpu, weight),
-              "weight moved in mix.hlsl");
-} // namespace
 
 cc::shared_async<cc::unit> mix_routine::init(sg::routine_init_scope scope)
 {
@@ -34,46 +18,22 @@ cc::shared_async<cc::unit> mix_routine::init(sg::routine_init_scope scope)
 
     // Cleared first, so a reload that fails to compile leaves nothing built against the previous shader.
     _group_layout = nullptr;
-    _pipeline = nullptr;
+    _pipeline = {};
 
-    auto const shader = sr::shaders::mix.compute.main_cs->acquire(ctx);
-    co_await cc::async_settled(shader);
-    auto const* const compiled = shader->try_value();
-    if (compiled == nullptr)
-    {
-        fail_init();
-        co_return;
-    }
-
-    auto const* const constants_binding = [&]() -> sg::binding const*
-    {
-        for (auto const& b : compiled->bindings)
-            if (b.type == sg::binding_type::constants_buffer)
-                return &b;
-        return nullptr;
-    }();
-    if (constants_binding == nullptr)
-    {
-        fail_init(); // a shader that reflects no constants block cannot be driven
-        co_return;
-    }
-
-    auto group_layout = ctx.cached.acquire_binding_group_layout<shaders::mix_bindings>();
-    auto const pipeline_layout
-        = ctx.cached.acquire_pipeline_layout({.groups = {group_layout}, .inline_constants = *constants_binding});
-
-    auto const pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = pipeline_layout});
+    auto const values = sgl_shaders::mix_options{.destination_format = params()};
+    auto const pipeline = sgl_shaders::mix.main_cs.acquire_pipeline(ctx, values);
     co_await cc::async_settled(pipeline);
-    auto const* const built = pipeline->try_value();
-    if (built == nullptr)
+    if (pipeline->try_value() == nullptr)
     {
-        fail_init();
+        impl::log_build_failure(pipeline, "mix", params());
+        fail_init(); // not pending: this will not come good until a reload, and a caller should be able to tell
         co_return;
     }
 
     // Both published together, after the build: readiness is what makes them visible to execute.
-    _group_layout = cc::move(group_layout);
-    _pipeline = *built;
+    _group_layout = ctx.cached.acquire_binding_group_layout(sgl_shaders::mix_images::declared_bindings(values),
+                                                            sgl_shaders::mix_images::declared_samplers());
+    _pipeline = pipeline;
     co_return;
 }
 
@@ -86,22 +46,25 @@ bool mix_routine::execute(sg::command_list& cmd, sg::texture_2d const& destinati
     CC_ASSERT(weight >= 0.0f && weight <= 1.0f, "a mix weight must be in [0, 1]");
 
     // Read-only: execute touches nothing init did not publish.
-    auto const self = try_acquire(cmd);
+    auto const self = try_acquire(cmd, destination.format());
     if (!self.is_ready())
+        return false;
+    auto const* const built = self->_pipeline != nullptr ? self->_pipeline->try_value() : nullptr;
+    if (built == nullptr || *built == nullptr)
         return false;
 
     auto& ctx = cmd.context();
     auto const extent = extent_of(destination);
 
     auto const group = ctx.transient.create_binding_group(cmd, self->_group_layout,
-                                                          shaders::mix_bindings{
-                                                              .gSource = source.as_texture_view(),
-                                                              .gDestination = destination.as_any_image_view(),
+                                                          sgl_shaders::mix_images{
+                                                              .source = source.as_texture_view(),
+                                                              .destination = destination.as_any_image_view(),
                                                           });
 
-    cmd.compute.bind_pipeline(*self->_pipeline);
-    cmd.compute.bind<shaders::mix_bindings>(*group);
-    cmd.compute.set_inline_constants(mix_constants_gpu{.weight = weight});
+    cmd.compute.bind_pipeline(**built);
+    cmd.compute.bind_group(0, *group);
+    cmd.compute.set_inline_constants(sgl_shaders::mix_constants{.weight = weight}.to_block());
     cmd.compute.dispatch_threads(extent[0], extent[1], 1);
     return true;
 }

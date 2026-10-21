@@ -246,17 +246,42 @@ struct async_promise : async_promise_return<T, E, std::is_same_v<T, cc::unit>>
 
     // The coroutine frame is the one allocation this layer adds over a lambda frame, so it goes to the same slab the node does.
     // node_allocation_free is stateless, which matters here: a coroutine is routinely destroyed on a different thread than the one that created it.
-    static constexpr isize frame_alignment = 16;
+    static constexpr isize min_frame_alignment = 16;
+
+    // A frame holds every local that spans a suspend, so it must be as aligned as the most aligned of them.
+    // Clang passes that alignment only under -fcoro-aligned-allocation, and calls the plain operator new otherwise, with no realignment.
+    // So the plain one aligns a frame to its whole size class: a frame's size is a multiple of its alignment, which then divides the class.
+    // Capped, because a page covers every alignas a frame has a reason to carry.
+    static constexpr isize max_frame_alignment = 4096;
+
+    [[nodiscard]] static isize frame_alignment_for(cc::node_class_index idx)
+    {
+        auto const class_bytes = isize(1) << isize(idx);
+        return class_bytes < max_frame_alignment ? class_bytes : max_frame_alignment;
+    }
 
     [[nodiscard]] static void* operator new(std::size_t n)
     {
-        auto const idx = cc::node_class_index_from_size_and_align(isize(n), frame_alignment);
-        return cc::default_node_allocator().allocate_node_bytes(idx, isize(n), frame_alignment);
+        auto const idx = cc::node_class_index_from_size_and_align(isize(n), min_frame_alignment);
+        return cc::default_node_allocator().allocate_node_bytes(idx, isize(n), frame_alignment_for(idx));
     }
     static void operator delete(void* p, std::size_t n)
     {
-        auto const idx = cc::node_class_index_from_size_and_align(isize(n), frame_alignment);
+        auto const idx = cc::node_class_index_from_size_and_align(isize(n), min_frame_alignment);
         cc::node_allocation_free(static_cast<byte*>(p), idx);
+    }
+
+    // Where the compiler does pass the frame's alignment, it is exact.
+    [[nodiscard]] static void* operator new(std::size_t n, std::align_val_t alignment)
+    {
+        auto const align = isize(alignment) > min_frame_alignment ? isize(alignment) : min_frame_alignment;
+        auto const idx = cc::node_class_index_from_size_and_align(isize(n), align);
+        return cc::default_node_allocator().allocate_node_bytes(idx, isize(n), align);
+    }
+    static void operator delete(void* p, std::size_t n, std::align_val_t alignment)
+    {
+        auto const align = isize(alignment) > min_frame_alignment ? isize(alignment) : min_frame_alignment;
+        cc::node_allocation_free(static_cast<byte*>(p), cc::node_class_index_from_size_and_align(isize(n), align));
     }
 
     /// Build the node and install this coroutine as its frame.
@@ -345,7 +370,17 @@ struct async_awaiter_value
 
     /// A reference INTO the dependency node's payload, so reading it copies nothing.
     /// It stays valid only while a handle keeps that node alive — binding `auto const&` to the result of awaiting a temporary dangles.
-    [[nodiscard]] U const& await_resume() const { return (*dep)->value(); }
+    [[nodiscard]] U const& await_resume() const
+        requires(!std::is_same_v<std::remove_const_t<U>, cc::unit>)
+    {
+        return (*dep)->value();
+    }
+    /// A unit carries nothing, so `co_await` on one is awaited for its completion alone, and discarding it is the point.
+    U const& await_resume() const
+        requires std::is_same_v<std::remove_const_t<U>, cc::unit>
+    {
+        return (*dep)->value();
+    }
 
 private:
     template <class P>
@@ -577,7 +612,16 @@ struct async_awaiter_run_on
         return inner.await_suspend(h);
     }
 
-    [[nodiscard]] U await_resume() { return child->take_value(); }
+    [[nodiscard]] U await_resume()
+        requires(!std::is_same_v<std::remove_const_t<U>, cc::unit>)
+    {
+        return child->take_value();
+    }
+    U await_resume() // a unit, as async_awaiter_value's
+        requires std::is_same_v<std::remove_const_t<U>, cc::unit>
+    {
+        return child->take_value();
+    }
 };
 
 template <class U>

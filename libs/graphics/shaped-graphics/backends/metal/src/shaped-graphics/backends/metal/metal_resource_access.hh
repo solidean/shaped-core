@@ -39,6 +39,7 @@ struct sg::backend::metal::metal_resource_access
         bool active = false;          // this slot's list has touched the buffer since it started tracking
         bool recorded = false;        // this slot's list has added the buffer to its finalize set (dedup)
         bool pending_barrier = false; // declared for the current op, awaiting the pre-op flush (per-op dedup)
+        bool array_member = false;    // an array application of this slot's list has tracked the resource
     };
 
     /// What previously-submitted lists left in flight, updated by every finalize in submission order.
@@ -71,12 +72,23 @@ struct sg::backend::metal::metal_resource_access
     /// Accumulate one declared access for the next op; emits nothing.
     /// Called once per binding, so a buffer bound several times to one op declares several times and `flush` merges
     /// them into a single barrier.
-    void declare(sg::command_list_slot slot, sg::pipeline_stage_flags stages, sg::access_flags access)
+    /// `from_array_application` marks the resource an array member of `slot`'s list.
+    /// Any write to a member is a member write, a render target's included, since no layout change here counts it instead.
+    sg::impl::member_track declare(sg::command_list_slot slot,
+                                   sg::pipeline_stage_flags stages,
+                                   sg::access_flags access,
+                                   bool from_array_application = false)
     {
         auto& s = slot_for(slot);
         if (!s.state.entry_begun)
             s.state.begin_entry(sg::texture_layout::general);
+        auto const found = sg::impl::member_track{
+            .member_write = s.array_member && sg::has_write_access(access),
+            .held_write = s.state.has_curr_writes() || s.state.has_pending_layout_change(),
+        };
         s.state.declare(stages, access);
+        s.array_member = s.array_member || from_array_application;
+        return found;
     }
 
     /// Test-and-set the per-op pending flag: true the first time since the last flush, false after.

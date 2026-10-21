@@ -77,8 +77,8 @@ ASYNC_INVOCABLE_TEST("sv - a decal paints the traced surface its projector reach
                      (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
 
     auto& ctx = *ctx_h;
@@ -116,7 +116,8 @@ ASYNC_INVOCABLE_TEST("sv - a decal paints the traced surface its projector reach
         REQUIRE(permutation != nullptr);
 
         auto instances = cc::vector<sg::tlas_instance>();
-        instances.push_back(sg::tlas_instance{.blas = mesh_rec->blas, .instance_id = 0, .hit_group_offset = 0});
+        instances.push_back(
+            sg::tlas_instance{.blas = sv_test::blas_of(resources, traced.mesh), .instance_id = 0, .hit_group_offset = 0});
         auto hit_groups = cc::vector<sv::material_permutation const*>();
         hit_groups.push_back(permutation);
 

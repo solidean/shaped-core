@@ -694,8 +694,16 @@ struct checker
     type_id check_function_call(function_scope& scope, ast::expr_id id, ast::call const& call, local_name const& local);
     /// The resource type a bare name in a type position names — a depth texture or a sampler — and `none` otherwise.
     [[nodiscard]] type_id resolve_resource_name(i32 file, ast::expr_id expr, cc::string_view text);
-    /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`; `none` where `node` heads with no texture or image name.
+    /// `texture_2d[float4]` or `image_2d[.rgba8_unorm]`, and the value type `texel[.rgba8_unorm]` (CHK-390); `none`
+    /// where `node` heads with none of those names.
     [[nodiscard]] type_id resolve_resource_applied(i32 file, ast::expr_id expr, ast::index const& node);
+    /// The position in `k_image_formats` an image's argument `argument` names, an enum case or a const of one
+    /// (CHK-200); -1 where it names none, which the caller reports, and `k_format_failed` where the const it names
+    /// failed, which was reported.
+    [[nodiscard]] i32 resolve_image_format(i32 file, ast::expr_id argument);
+    static constexpr i32 k_format_failed = -2;
+    /// `texel[F]`, the scalar or plain vector an image of format `F` loads and stores (CHK-390).
+    [[nodiscard]] type_id resolve_texel(i32 file, ast::expr_id expr, ast::index const& node);
     /// `mut` or `out` in front of `inner`, which only a buffer and an image take.
     [[nodiscard]] type_id qualify_resource(i32 file, ast::expr_id expr, type_id inner, ast::type_access access);
     /// The settings of a `sampler name:` block; a setting that is wrong is reported and left at its default.
@@ -851,6 +859,10 @@ struct checker
     void check_test(i32 index);
     /// The flat tree of test `index`, when it checked soundly and all it reaches inlines whole (flatten.cc).
     void flatten_test(i32 index);
+    /// Every module-level name as `out.symbols` now holds them, the last of `out.module_names`, made anew only when a
+    /// symbol joined since `module_names_for`.
+    [[nodiscard]] cc::set<cc::string> const* module_names();
+    isize module_names_for = -1;
     /// True where the parser or the AST pass reported an error inside `extent` of `file`.
     [[nodiscard]] bool has_syntax_error_in(i32 file, source_span extent) const;
     /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and
@@ -871,6 +883,13 @@ struct checker
     void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
     [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
+    /// The `as` overload visible from `file` that converts `from` to `to`, or `none` where there is no such conversion
+    /// (CHK-197).
+    [[nodiscard]] symbol_id conversion_of(i32 file, source_span where, type_id from, type_id to);
+    /// True where the type `type` of a cast is written `texel[F]`, which alone may change a width (CHK-392).
+    [[nodiscard]] bool is_texel_type_expr(i32 file, ast::expr_id type) const;
+    /// `x as texel[F]` of another type than the texel, `written` being its `texel[F]` (CHK-391, CHK-392).
+    [[nodiscard]] type_id check_texel_conversion(i32 file, ast::expr_id id, type_id from, type_id to, ast::expr_id written);
 
     // ---- statements and control flow (check_stmt.cc) ----------------------------------------------------------------
 
@@ -978,8 +997,13 @@ struct checker
     [[nodiscard]] bool holds(number_literal const& n, type_id to) const;
     /// The prelude's `float`, `int` or `uint` by name, as a literal's conversion knows them; `none` for another name.
     [[nodiscard]] type_id prelude_type(cc::string_view name) const;
-    /// What a number literal `expr` holds; `is_number` is false for any other expression.
+    /// What a number literal `expr` holds, or an operator over number literals alone folds to (CHK-394); `is_number`
+    /// is false for any other expression.
     [[nodiscard]] number_literal number_of(i32 file, ast::expr_id expr) const;
+    /// Whether the operator call `expr` resolved to a builtin of the prelude, which alone CHK-394 folds.
+    [[nodiscard]] bool calls_prelude_operator(i32 file, ast::expr_id expr) const;
+    /// What a comparison of number literals alone folds to (CHK-394); none for any other expression.
+    [[nodiscard]] cc::optional<bool> comparison_of(i32 file, ast::expr_id expr) const;
     /// The elements of tuple or object literal `expr`, checked where they are no literal themselves, into `literals`.
     [[nodiscard]] i32 shape_literal(function_scope& scope, ast::expr_id expr);
     /// Converts literal `expr`, shaped as `literal`, to `to` by a call of `to`'s name (CHK-81, CHK-85).

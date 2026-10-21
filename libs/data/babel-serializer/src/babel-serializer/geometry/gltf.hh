@@ -13,9 +13,11 @@
 #include <clean-core/streams/stream.hh> // cc::read_stream
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <typed-geometry/geometry/primitives/aabb.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/quat.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/transform/homogeneous_transform.hh>
 
 #include <type_traits>
 
@@ -427,11 +429,21 @@ struct babel::gltf::node
     /// exclusive, and this reader does not pick one for you.
     /// has_matrix true: `matrix` is authoritative and the TRS fields are at their defaults.
     /// has_matrix false: the TRS fields are authoritative and `matrix` is the identity.
+    /// `matrix`'s last row is (0, 0, 0, 1): read replaces a file's other last row and records the node as malformed.
     bool has_matrix = false;
     tg::mat4f matrix = tg::mat4f::identity;
     tg::vec3f translation = tg::vec3f::zero;
     tg::quat_f rotation = tg::quat_f::identity;
     tg::vec3f scale = tg::vec3f(1, 1, 1);
+
+    /// The local transform as one map, from whichever form the file used: `matrix`, or translation * rotation * scale.
+    /// Composing it down the scene graph, parent after child, places the node in the scene.
+    /// The rotation is normalized here, since exporters drift off unit length; `rotation` itself stays as the file had it.
+    [[nodiscard]] tg::affine_transform3f local_transform() const
+    {
+        return has_matrix ? tg::affine_transform3f::make_from_mat(matrix)
+                          : tg::affine_transform3f::make_trs(translation, rotation.normalized(), scale);
+    }
 
     /// KHR_lights_punctual: the light this node places, pointing down the node's -Z.
     light_index light = light_index::invalid;
@@ -775,6 +787,18 @@ public:
     {
         auto const half = isize(a.bound_count) / 2;
         return cc::span<f32 const>(accessor_bounds).subspan({.offset = isize(a.first_bound) + half, .size = half});
+    }
+
+    /// A vec3 accessor's stated bounds as a box: for `POSITION`, the mesh's bounds without touching a buffer byte.
+    /// Nothing when the file stated no bounds, when the accessor is not a vec3, or when it is normalized.
+    /// A normalized accessor states its bounds as the stored integers, not the positions they decode to (KHR_mesh_quantization).
+    [[nodiscard]] cc::optional<tg::aabb3f> bounds_of(accessor const& a) const
+    {
+        if (a.type != accessor_type::vec3 || a.bound_count != 6 || a.normalized)
+            return {};
+        auto const lo = this->min_of(a);
+        auto const hi = this->max_of(a);
+        return tg::aabb3f(tg::pos3f(lo[0], lo[1], lo[2]), tg::pos3f(hi[0], hi[1], hi[2]));
     }
 
     // accessor data

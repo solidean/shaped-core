@@ -287,7 +287,7 @@ arithmetic being right is not the same as it reaching the draw, and until viewpo
 
 Dragging a detached viewport window over another makes the dock-target markers drawn inside it lag the window, settling as soon as it stops.
 That is an ImGui docking-branch bug, not ours — it reproduces with upstream's own `example_win32_directx12` at the tag we vendor, with none of our code involved.
-See [TODO.md](TODO.md) for what was ruled out and how.
+[bug-imgui-viewport-dock-markers-lag-upstream](issues/bug-imgui-viewport-dock-markers-lag-upstream.md) has what was ruled out and how.
 
 ## Not wired yet
 

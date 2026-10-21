@@ -59,6 +59,8 @@ tg::dot(a, b);                             // T   — dot product
 tg::normalize(v);                          // vec — free form of v.normalized() (requires has_sqrt<T>)
 tg::any_orthogonal(v);                     // vec — perpendicular to v, any length, never near zero for a nonzero v
 tg::orthonormal_basis(n);                  // pair<vec3, vec3> {u, w}: (u, w, n) right-handed orthonormal; n MUST be unit
+tg::orthonormal_basis(n, up);              // the same with the roll fixed: w toward up. n = forward gives {right, up},
+                                           //   a camera frame in either handedness; up must not be parallel to n
 ```
 
 ## pos — point (affine arithmetic)
@@ -210,7 +212,10 @@ tg::similarity_transform3f::make_uniform_scaling(s);  // s must be POSITIVE; the
 tg::scaling_transform3f::make_scaling(vec);
 tg::rigid_transform3f::make_rotation(quat);           // D==3; make_rotation(angle) for D==2
 tg::affine_transform3f::make_from_linear_mat(mat3);
-tg::projective_transform3f::make_from_mat(mat4);      // projective only
+tg::projective_transform3f::make_from_mat(mat4);      // any homogeneous matrix
+tg::affine_transform3f::make_from_mat(mat4);          // last row MUST be exactly (0, 0, 0, 1); asserts otherwise
+tg::affine_transform3f::make_trs(t, quat, s);          // scale, then rotation, then translation: glTF / USD order;
+                                                       //   a negative scale mirrors; also on projective_transform3
 
 t.translation();  t.rotation();  t.uniform_scale();  t.scale();   // gated on the class
                                            // translation() is in TARGET space; scale() indexes SOURCE axes
@@ -242,6 +247,7 @@ a.composed(b);                             // applies b FIRST, then a — NO ope
                                            // opt-in per type; probe with requires { a.composed(b); }
 #include <typed-geometry/transform/compose.hh>
 tg::compose(a, b);                         // a.composed(b) if that exists, else tg::composed_transform<A,B>
+tg::compose(a, b, c, ...);                 // nested: compose(a, b, c)(x) == a(b(c(x))) — the LAST applies first
                                            // — a compile-time choice, so the return type says which
 tg::composed_transform<A, B>(outer, inner);  // stores both; applies `inner` first, then `outer`
                                            // composes ANY two transforms, at the cost of not fusing
@@ -264,11 +270,50 @@ t(obj);               // the call spelling of t.transform(obj) — application, 
 // `composed` is opt-in per transform type and IS probeable: requires { a.composed(b); }
 ```
 
+## camera — projections, views, project / unproject
+
+```cpp
+#include <typed-geometry/camera/camera.hh>
+// DEFAULT: left-handed, +y up, +z forward, D3D clip (x,y in [-1,1], +y up), REVERSE-Z (near -> 1, far -> 0)
+tg::perspective(fov, aspect, near);               // -> projective_transform3; no far = far plane at INFINITY
+tg::perspective(fov, aspect, near, far);          // fov is the full VERTICAL angle, aspect = width / height
+tg::perspective_off_center(l, r, b, t, near[, far]); // l..t are the extents ON THE NEAR PLANE
+tg::orthographic(w, h, near, far);                // -> signed_scaling_translation_transform3 (reverse-Z flips depth)
+tg::orthographic(view_space_aabb);                // the box becomes the clip volume
+// the zoo: <kind>_<lh|rh>_<reverse_z|zero_to_one|minus_one_to_one>, same overloads, e.g.
+tg::perspective_lh_zero_to_one(fov, aspect, near, far);  // classic D3D / Vulkan / Metal / WebGPU
+tg::perspective_rh_minus_one_to_one(fov, aspect, near, far); // classic OpenGL
+// an orthographic one is scaling_translation when depth keeps its direction, signed_ when it flips
+
+tg::look_at(eye, target, up = +y);                // -> rigid_transform3, world -> camera frame; LH: target on +z
+tg::look_to(eye, forward, up);  tg::look_at_rh(...); tg::look_to_rh(...); // RH: the camera looks down -z
+
+auto vp = tg::view_projection_f::make(view, projection, tg::clip_depth::zero_to_one); // depth defaults to reverse-Z
+vp.project(p);          // world pos -> NDC pos (p must be in front: w > 0)
+vp.project(seg / ray / line); // -> optional<segment3> in NDC: the VISIBLE part, clipped in homogeneous space
+vp.unproject(ndc_pos3); // -> world pos (not at an infinite far plane's depth)
+vp.unproject(ndc_xy);   // -> ray3, the PICK RAY: starts on the near plane, unit dir
+vp.unproject(ndc_seg);  // -> world segment
+vp.frustum();  vp.world_to_clip();  vp.clip_to_world();  vp.near_depth();  vp.far_depth();
+tg::ndc_from_pixel(pixel, size);  tg::pixel_from_ndc(ndc, size); // pixels: top-left origin, +y down; centers at +0.5
+```
+
+- **The depth convention is passed, not read off the matrix** — a zoo projection's caller passes the `clip_depth` its name states.
+- **`segment` / `triangle` `.transformed(projective)` assert every vertex is on one side of the projection** (one sign of w); `vp.project` is the spelling that clips.
+
 ## geometry primitives (each denotes a set of points)
 
 ```cpp
 #include <typed-geometry/geometry/primitives/aabb.hh>      // and box/triangle/segment/ray/line/plane/halfspace.hh
 tg::aabb<D,T>     {pos min, max}              // solid box {x : min <= x <= max}              — finite
+tg::aabb3f();  tg::aabb3f::empty;             // DEFAULT IS THE EMPTY BOX: min = +inf, max = -inf (highest/lowest for ints)
+b.is_empty();                                 //   min > max on some axis; a flat or point box is NOT empty
+                                              //   EVERY VERB answers for it in its dispatcher: meets nothing, holds
+                                              //   nothing, contained by all; distance / closest / separation ASSERT.
+                                              //   Measures assert; scaling transforms keep it empty, a rotating one asserts.
+                                              //   Test with is_empty(), never == (many boxes are empty)
+tg::aabb_of(p, tri, points, sphere, ...);     // the box around pos, anything with .bounds(), and ranges of either
+tg::aabb3f::of(...);                          //   same, naming the box type (converts scalars); nothing -> empty
 tg::aabb_boundary<D,T>                        // its faces; aabb3f_surface
 tg::box<D,DA,T>   {pos center; mat<D,DA> half_extents}  // {center + H*c : c in [-1,1]^D}; columns = half-axes,
                                               //   NOT necessarily orthogonal (any affine image of a box is a box)
@@ -287,6 +332,7 @@ tg::inf_cone<D,T> {pos apex; vec dir; angle opening_angle}  // single nappe, dir
 tg::frustum<3,T>  {plane planes[6]}           // left right bottom top near far, normals OUTWARD (inside: <= dist);
                                               //   .vertices() 8 corners (bit0 right, bit1 top, bit2 far); _boundary
 tg::frustum3d::make_from_view_projection(vp); // REVERSE-Z [0,1] (near -> 1); infinite far -> absent far plane
+                                              //   _zero_to_one / _minus_one_to_one twins; vp.frustum() picks
 f.has_far_plane();                            // false: planes[5] is {0, 0}; plane-only queries still work
                                               //   (contains, may_intersect vs a support object, ray intervals);
                                               //   vertices / volume / bounds / sampling and every support-based
@@ -344,7 +390,8 @@ seg.length();  tri.area();  tri.perimeter();  box.volume();   // by intrinsic di
 aabb3.area();  sphere3.area();          // a 3D SOLID's area() is its surface; a boundary answers only its own measure
                                         //   (sphere3f_surface has area(), no volume(); aabb2_boundary has length())
 o.centroid();  o.bounds();              // pos; aabb<D,T>
-o.vertices();  o.edges();               // cc::fixed_array — polytopes; vertices() also on segment and box, which have no edges()
+o.vertices();  o.edges();               // cc::fixed_array — polytopes, box and frustum too; segment has vertices() and no edges()
+o.faces();                               // aabb3 / box3 / frustum: 6 quads, wound counterclockwise from outside; tetrahedron: 4 triangles
 tri.normal();  tri.plane();             // 3D, unit, counter-clockwise; also box2in3.normal(), disk3.plane()
 o.any_point();                          // a point of the set (for a surface ON it, not the center)
 seg.unbounded();  ray.unbounded();      // the line through it
@@ -421,10 +468,12 @@ tg::traits::is_finite<ObjT>;               // bool — is the point set bounded?
 ```cpp
 #include <typed-geometry/scalar/scalar.hh>   // pulls in scalar/traits.hh + constants.hh
 tg::scalar_traits<T>;                     // specialize this to teach tg about a new scalar type
+tg::vec3f::scalar_t;                      // f32 — every value type (linalg, primitives, transforms) names its scalar
 tg::traits::has_sqrt<T>;  tg::traits::has_trigonometry<T>;   // inline constexpr bool flags
 tg::traits::has_abs<T>;  tg::traits::has_exponential<T>;  tg::traits::has_rounding<T>;
 tg::traits::has_pow2<T>;                  // the exact base-two family; f32/f64 only
 tg::traits::is_zero(x);  tg::traits::is_one(x);   // bool — routed through the trait (symbolic-friendly)
+tg::traits::lowest<T>();  tg::traits::highest<T>(); // the extremes of T's order: +-inf for floats and f16, the limits for ints / fixed_int
 tg::one<T>();                             // T   — multiplicative identity (always)
 tg::sqrt(x);                              // T   — requires has_sqrt<T>
 tg::abs(x);                               // T   — constexpr; requires has_abs<T> (integers too, not bool)
@@ -442,7 +491,7 @@ tg::scale_by_pow2(x, n);                  // (T, int) -> T          — x * 2^n 
 tg::exponent_of(x);                       // T -> int               — floor(log2(|x|)); x finite and non-zero
 tg::split_pow2(x);                        // T -> tg::pow2_split<T> {significand, exponent}
 tg::pi<T>;                                // inline constexpr T  (scalar/constants.hh)
-// scalars: f32/f64 have the lot (via std:: — see docs/TODO.md); all integer types except plain `char`
+// scalars: f32/f64 have the lot (via std:: — see docs/issues/perf-tg-std-math-routing.md); all integer types except plain `char`
 // get one/is_zero/is_one + abs (signed/unsigned char count; `char` does not); bool is special.
 // round/floor/ceil return T, not an int — narrow explicitly: int(tg::round(x)).
 // tg::abs on the most negative integer is UB — that value has no representable magnitude.
@@ -471,6 +520,7 @@ tg::div_trunc / mod_trunc / div_floor / mod_floor / div_ceil(a, b);  // same wid
 tg::div_mod_trunc(a, b); tg::div_mod_floor(a, b);          // -> {quotient, remainder} from one division
 tg::div_floor<fi32>(x, w); tg::div_ceil<fi32>(x, w);       // quotient known to fit fi32: udiv128 estimate + exact fix
 tg::div_floor_ceil<fi32>(x, w);                            // -> {floor, ceil}
+tg::ratio_to_f64(x, w); tg::ratio_to_f32(x, w);           // x / w correctly rounded (to nearest, ties to even); any widths
 x.to_f64(); x.to_f32(); fi128(2.5);                        // correctly rounded out; truncating in
 x.sign(); x.is_negative();                                 // int -1/0/+1 without a branch; bool
 u.count_leading_zeroes(); u.popcount(); u.bit_width();     // fixed_uint only; s.magnitude_bit_width() for signed
@@ -506,6 +556,7 @@ cc::format("{}", h);                               // shortest digits for f16: "
 #include <typed-geometry/transform/transform.hh> // curated: the transform type + its operations
 #include <typed-geometry/geometry/geometry.hh>   // curated: object_traits + primitives
 #include <typed-geometry/geometry/all.hh>        // everything in geometry
+#include <typed-geometry/camera/camera.hh>       // projections, views, view_projection
 #include <typed-geometry/all.hh>                 // everything; expensive
 ```
 

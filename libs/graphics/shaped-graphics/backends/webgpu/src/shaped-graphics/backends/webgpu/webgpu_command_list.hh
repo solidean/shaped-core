@@ -265,10 +265,11 @@ protected:
     void compute_dispatch(int x, int y, int z) override;
     void compute_dispatch_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes) override;
     void compute_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
-    void compute_declare_array_buffer_access(cc::string_view binding_name,
-                                             cc::span<sg::array_buffer_access const> elements) override;
-    void compute_declare_array_texture_access(cc::string_view binding_name,
-                                              cc::span<sg::array_texture_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_buffer_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_buffer_access const> elements) override;
+    [[nodiscard]] u32 compute_declare_array_texture_access(cc::string_view binding_name,
+                                                           cc::span<sg::array_texture_access const> elements) override;
+    void withdraw_array_declaration(u32 id) override;
 
     // Bodies in webgpu_command_list.raster.cc.
     void raster_begin_rendering(sg::rendering_info const& info) override;
@@ -277,10 +278,10 @@ protected:
     void raster_bind_group(int group_index, sg::binding_group const& group) override;
     void raster_bind_vertex_buffers(int first_slot, cc::span<sg::vertex_buffer_view const> views) override;
     void raster_bind_index_buffer(sg::index_buffer_view const& view) override;
-    void raster_declare_array_buffer_access(cc::string_view binding_name,
-                                            cc::span<sg::array_buffer_access const> elements) override;
-    void raster_declare_array_texture_access(cc::string_view binding_name,
-                                             cc::span<sg::array_texture_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_buffer_access(cc::string_view binding_name,
+                                                         cc::span<sg::array_buffer_access const> elements) override;
+    [[nodiscard]] u32 raster_declare_array_texture_access(cc::string_view binding_name,
+                                                          cc::span<sg::array_texture_access const> elements) override;
     void raster_set_viewport(sg::viewport const& vp) override;
     void raster_set_scissor(tg::aabb2i const& rect) override;
     void raster_set_stencil_reference(u32 reference) override;

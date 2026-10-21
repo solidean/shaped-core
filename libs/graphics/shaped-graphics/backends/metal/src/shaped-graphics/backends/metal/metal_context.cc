@@ -3,13 +3,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/exceptions.hh>
-
-#include <thread>
 
 namespace sg::backend::metal
 {
@@ -234,6 +233,7 @@ void metal_context::do_advance_epoch()
 sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
+    sg::impl::end_array_declarations_at_submit(*cmd);
     auto& list = static_cast<metal_command_list&>(*cmd);
     CC_ASSERT(list.created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in");
@@ -599,7 +599,7 @@ void metal_context::block_until_transfers_drained()
         while (still_pending())
         {
             if (!cc::thread_pump_all())
-                std::this_thread::yield();
+                cc::this_thread_yield();
         }
     };
 

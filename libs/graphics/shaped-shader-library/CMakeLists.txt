@@ -29,6 +29,7 @@ add_library(shaped-shader-library
     src/shaped-shader-library/shader_library.cc
     src/shaped-shader-library/impl/reload_watcher.cc
     src/shaped-shader-library/impl/sgl_emit_cache.cc
+    src/shaped-shader-library/impl/shader_bundle.cc
 )
 
 # Public headers (co-located in src/, grouped by topic).
@@ -57,6 +58,7 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/compiler/available_compilers.hh
     src/shaped-shader-library/compiler/shader_compiler.hh
     src/shaped-shader-library/shader_package.hh
+    src/shaped-shader-library/shader_bundle.hh
     src/shaped-shader-library/shader_asset.hh
     src/shaped-shader-library/shader_library.hh
     src/shaped-shader-library/pipeline.hh
@@ -65,7 +67,12 @@ target_sources(shaped-shader-library
     src/shaped-shader-library/impl/pipeline_fields.hh
     src/shaped-shader-library/impl/sgl_library.hh
     src/shaped-shader-library/impl/sgl_emit_cache.hh
+    src/shaped-shader-library/impl/shader_bundle.hh
 )
+
+# SC_FROZEN_SHADERS is the root CMakeLists' whole-build switch; an add_subdirectory consumer that never set it is not frozen.
+# Private: it changes what a library reads at run time, never a type a consumer sees.
+target_compile_definitions(shaped-shader-library PRIVATE SLIB_FROZEN_SHADERS=$<BOOL:${SC_FROZEN_SHADERS}>)
 
 # The OS file-watch backend behind real_filesystem::watch.
 # real_filesystem and these are the only files in slib that reach the OS.
@@ -170,6 +177,7 @@ if(SC_BUILD_TESTS)
         tests/filesystem/watch-test.cc
         tests/shader_library-test.cc
         tests/compile_source-test.cc
+        tests/shader_bundle-test.cc
         tests/hot_reload-test.cc
         tests/shader_package-test.cc
         tests/dxc_compiler-test.cc

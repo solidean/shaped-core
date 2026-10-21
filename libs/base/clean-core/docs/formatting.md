@@ -114,6 +114,10 @@ struct cc::custom::formatter<my_vec2>
 };
 ```
 
+**A formatter that consumes its argument declares `static constexpr bool consumes_argument = true;`**, as `cc::sequence`'s does.
+The argument must then be a non-const rvalue, a temporary or `cc::move(x)`, and a named one is a compile error rather than a silent use.
+`format` still receives it by const reference, and may cast that away, since the check guarantees the object is not const.
+
 Two helpers exist so a custom formatter can reuse the standard grammar rather than reimplement it:
 `cc::format_value(out, spec, v)` renders a built-in value at runtime, and `cc::validate_format_spec(spec)` checks the spec's syntax at compile time.
 Both come with `<clean-core/string/format.hh>`.

@@ -27,6 +27,7 @@ from pathlib import Path
 from tools import dev
 from tools.dev import console
 from tools.dev.lib.pipeline.benchmarks import collect_benchmarks, select_benchmarks, unselected_overreach
+from tools.dev.lib.pipeline.eligibility import nexus_filter
 
 from tools.dev.lib.toolchain import jsruntime as jsr
 
@@ -102,9 +103,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     # Discovered after the build: a first-time configure knows the target but has not linked its artifact yet.
     targets = ctx.discover(preset, None)
-    benchmarks = collect_benchmarks(preset, targets, root=ctx.root, binary_names=wanted,
-                                    launcher=jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args),
-                                                              dev.emsdk_env(args.emsdk_path)))
+    launcher = jsr.LazyLauncher(jsr.JsRuntimeRequest.from_args(args), dev.emsdk_env(args.emsdk_path))
+    benchmarks = collect_benchmarks(preset, targets, root=ctx.root, binary_names=wanted, launcher=launcher)
 
     if args.match is None:
         _print_listing(ctx, benchmarks, preset)
@@ -137,10 +137,18 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             if artifact is None:
                 ctx.die(f"target {target!r} has no built artifact for preset {preset.name!r}")
 
+            # A wasm artifact is a .js loader plus a .wasm, launched through the same runtime the listing used.
+            prefix: list[str] = []
+            if jsr.needs_launcher(preset.is_emscripten, artifact):
+                try:
+                    prefix = launcher.prefix()
+                except jsr.NotFound as e:
+                    ctx.die(str(e))
+
             # Each name is a substring filter within the bucket, which unselected_overreach has ruled safe above.
-            command = [str(artifact), "--benchmarks"]
+            command = [*prefix, str(artifact), "--benchmarks"]
             for b in by_target[target]:
-                command.append(b.name)
+                command.append(nexus_filter(b.name))
 
             # Suffixed per binary and per repeat, so several binaries or several runs never overwrite one another.
             if args.json:

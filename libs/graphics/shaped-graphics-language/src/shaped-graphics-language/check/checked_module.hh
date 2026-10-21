@@ -1,7 +1,9 @@
 #pragma once
 
+#include <clean-core/container/set.hh>
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/memory/shared_ptr.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics-language/builtins/registry.hh>
 #include <shaped-graphics-language/check/flat.hh>
@@ -164,6 +166,11 @@ struct sgl::check::checked_module
 
     /// In the order the demand-driven pass found them, which is deterministic and not source order.
     cc::vector<located_diagnostic> diagnostics;
+
+    /// Every module-level name, as each flat tree's mint takes it through `name_mint::also_taken` rather than a copy.
+    /// A tree keeps pointing at the set it was made with, so a set is never changed and a copy of the module shares it;
+    /// a symbol added later makes a new one, the last.
+    cc::vector<cc::shared_ptr<cc::set<cc::string>>> module_names;
 
     /// The registry every `builtin_id` and `builtin_type_id` in here is a position in.
     /// It must outlive the module; `builtins::default_registry()` lives as long as the process.
