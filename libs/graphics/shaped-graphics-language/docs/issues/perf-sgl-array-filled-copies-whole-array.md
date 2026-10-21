@@ -3,6 +3,8 @@ created: 2026-10-20
 priority: someday
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/flatten.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-21T19:50Z
 ---
 
 # `T[N].filled(v)` fills a temporary and copies the whole array into the local
