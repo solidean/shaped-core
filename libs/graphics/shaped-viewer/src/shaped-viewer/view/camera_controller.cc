@@ -100,8 +100,7 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
             return true;
         },
         [](sr::key_event const&) { return false; }, // keys and text belong to the fps controller, or to the caller
-        [](sr::text_event const&) { return false; },
-        [](sr::file_drop_event const&) { return false; });
+        [](sr::text_event const&) { return false; }, [](sr::file_drop_event const&) { return false; });
 }
 
 bool orbit_camera_controller::focus_on(tg::pos3d point)
