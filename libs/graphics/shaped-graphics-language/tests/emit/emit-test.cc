@@ -358,6 +358,20 @@ TEST("sgl emit - a hex literal stays hex, without its separators")
     }
 }
 
+TEST("sgl emit - a shift by a literal count needs no conversion and no mask")
+{
+    auto const source = cc::string_view("binding work:\n"
+                                        "    src: buffer[int]\n"
+                                        "    dst: mut buffer[int]\n"
+                                        "\n"
+                                        "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                                        "    let v = work.src[id.x]\n"
+                                        "    work.dst[id.x] = (v >> 12) + (v << 3) + (v >> id.x)\n");
+    // CHK-270 holds a literal count to 0 to 31 already
+    CHECK(text_of(source, target::wgsl).contains("(v >> 12u) + (v << 3u) + (v >> u32(id.x))"));
+    CHECK(text_of(source, target::msl).contains("(v >> 12) + as_type<int>(as_type<uint>(v) << 3u) + (v >> (id.x & 31))"));
+}
+
 TEST("sgl emit - parentheses follow the tree, and a negative literal needs none")
 {
     auto const source = with_edges("@pixel fun main_ps(p: pixel_input) -> frame:\n"

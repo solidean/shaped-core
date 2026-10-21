@@ -95,7 +95,8 @@ binding frame:
     auto const culled = text_of_entry(source, "culled", target::hlsl_dx12);
     CHECK(culled.contains("    RayQuery<RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> "
                           "q;\n"));
-    CHECK(culled.contains("CandidateType"));
+    // a comparison, which the `if` around it parenthesizes once
+    CHECK(culled.contains("if (q.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)\n"));
 
     // flags known only at run time leave the template empty, and both loops behind a branch on them
     auto const chosen = text_of_entry(source, "chosen", target::hlsl_dx12);

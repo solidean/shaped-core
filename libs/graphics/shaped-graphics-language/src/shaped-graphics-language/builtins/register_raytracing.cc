@@ -320,9 +320,9 @@ written write_query(call_context const& ctx)
     case query_op::proceed:
         return {.text = is_hlsl ? cc::format("{}.Proceed()", q) : cc::format("{}.next()", q)};
     case query_op::candidate_is_triangle:
-        return {.text = is_hlsl ? cc::format("({}.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)", q)
-                                : cc::format("({}.get_candidate_intersection_type() == intersection_type::triangle)", q),
-                .binds = precedence::primary};
+        return {.text = is_hlsl ? cc::format("{}.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE", q)
+                                : cc::format("{}.get_candidate_intersection_type() == intersection_type::triangle", q),
+                .binds = precedence::comparison};
     case query_op::commit_triangle:
         return {.text = is_hlsl ? cc::format("{}.CommitNonOpaqueTriangleHit()", q)
                                 : cc::format("{}.commit_triangle_intersection()", q)};
