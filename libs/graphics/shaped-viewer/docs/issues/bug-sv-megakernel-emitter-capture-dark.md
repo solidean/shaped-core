@@ -3,6 +3,8 @@ created: 2026-10-21
 refs:
   - test: "sv - the wavefront tracer traces and denoises the viewer's image"
   - file: libs/graphics/shaped-viewer/tests/denoise-view-test.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-21T16:04Z
 ---
 
 # A megakernel capture of the Cornell box lit by an emissive mesh once came out 38% dark on WARP
