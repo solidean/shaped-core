@@ -170,6 +170,8 @@ One-liner per library:
   **Drawings are Slug shapes**: flat on a canvas, over a scene, as annotations — and as decals, which the tracer paints into the surfaces they are projected onto.
   [docs/canvas.md](libs/graphics/shaped-viewer/docs/canvas.md) is the design.
   [docs/asset-loading.md](libs/graphics/shaped-viewer/docs/asset-loading.md) is the design and the phasing.
+  **`shaped-view` is the standalone viewer** over all of it: models from the command line or dropped onto the window, side by side.
+  `uv run dev.py install shaped-view` makes it what a double-click on `.obj`, `.stl`, `.gltf` or `.glb` opens.
 
 Supporting directories:
 
@@ -520,7 +522,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |
 | Update a consumer's submodules   | `uv run dev.py submodules sync [--tip \| --bump]` — to the recorded commits (or the branch heads), fast-forwards only, never touches local work ([consuming-shaped-core](docs/guides/consuming-shaped-core.md#keeping-the-submodules-current)) |
-| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator) |
+| Install a repo tool                  | `uv run dev.py install` (lists them; `install sgl-vscode` links the SGL extension, `install emsdk` the pinned Emscripten SDK, `install deno` the pinned deno, `install sde --archive <file>` Intel's CPU emulator, `install shaped-view` the model viewer a double-click opens) |
 | List presets / targets           | `uv run dev.py list-presets` / `list-targets`                     |
 | Pin a compiler version           | `uv run dev.py build --toolset <ver>` (`list-toolsets` shows them) |
 | Review a PR, a branch or a design | `uv run review.py init <name> --range A..B --goal <goal>` ([readme](tools/review/readme.md); the `reviewing-a-pr` skill drives it) |

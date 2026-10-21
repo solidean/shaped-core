@@ -1024,6 +1024,7 @@ frame.push_id(i) / frame.pop_id()                              // the same, expl
 frame.present()                                                // flatten + record + present; idempotent
                                                                //   a frame_scope's destructor is this call, and viewer::end_frame is too
 frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)
+frame.input_events() -> cc::span<sr::input_event const>        // this frame's input, the controllers' included; a file drop is is_file_drop()
 frame.background_work() -> cc::shared_async<cc::unit>          // settles once the background work so far is done, including process-wide compiles and cache writes; what it covers is internal
                                                                //   0 does NOT mean settled, and it never restarts accumulation: that work
                                                                //   changes a texture's contents, not its id, so accumulated_samples cannot see it
@@ -1047,6 +1048,7 @@ view.layout_rows(style) / .layout_columns(style) / .layout_grid(c, r, style) / .
 view.camera(cam)                                               // the caller owns it THIS frame: the controller leaves this view alone
 view.initial_camera(cam) / .initial_orbit(orbit) / .initial_fps(pose)
                                                                //   applied only the first time this id is seen
+view.reset_orbit(orbit)                                        // jumps the orbit controller there NOW; the user keeps orbiting from it
 view.camera_style(sv::camera_style::fly)                       // which built-in controller drives this view; orbit by default
                                                                //   RE-ASSERT every frame — dropping it hands the view back to orbit
                                                                //   the camera survives the switch: the incoming controller is re-seeded from it

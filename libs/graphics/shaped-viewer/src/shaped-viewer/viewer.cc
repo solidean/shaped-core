@@ -49,6 +49,7 @@ constexpr tg::vec4f clear_color = tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
         [](sr::mouse_move_event const& m) { return result_t(m.cursor_pos); },   //
         [](sr::mouse_button_event const& b) { return result_t(b.cursor_pos); }, //
         [](sr::mouse_wheel_event const& w) { return result_t(w.cursor_pos); },  //
+        [](sr::file_drop_event const& d) { return result_t(d.cursor_pos); },    //
         [](sr::key_event const&) { return result_t(); },                        //
         [](sr::text_event const&) { return result_t(); });
 }
@@ -390,6 +391,13 @@ isize viewer::pending_resource_work() const
 isize viewer::streaming_resources() const
 {
     return _impl->resources.settling_count();
+}
+
+cc::span<sr::input_event const> viewer::input_events() const
+{
+    if (_impl->window_system == nullptr)
+        return {};
+    return _impl->window_system->events();
 }
 
 cc::shared_async<cc::unit> viewer::background_work()

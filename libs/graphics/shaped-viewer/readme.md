@@ -60,6 +60,16 @@ uv run dev.py example shaped-viewer/hello-cube
 
 See [examples](../../../docs/guides/examples.md) for what an example is and how one is declared.
 
+## shaped-view, the standalone viewer
+
+[tools/shaped-view/](tools/shaped-view/shaped_view.cc) is a program rather than an example: it opens the model files on its command line, and every file dropped onto its window is placed beside the rest.
+On Windows `uv run dev.py install shaped-view` builds it with `release-clang`, copies it to `~/tools/shaped-view` and registers it for `.obj`, `.stl`, `.gltf` and `.glb`, so a double-click opens it.
+Installing again is the update, and `--uninstall` removes both the copy and the associations.
+
+```bash
+uv run dev.py run shaped-view model.obj other.glb   # straight from the build, without installing
+```
+
 ## More
 
 - [cheat-sheet.md](cheat-sheet.md) — the public API at a glance.
