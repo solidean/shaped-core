@@ -331,8 +331,9 @@ def default_sde_dir() -> Path:
 
 
 def sde_executable() -> Path | None:
-    """The installed `sde64`, which runs a 64-bit binary; None when it is not installed."""
-    exe = default_sde_dir() / ("sde64.exe" if platform.system() == "Windows" else "sde64")
+    """The installed launcher that runs a 64-bit binary, None when it is not installed."""
+    # The Windows kit has no sde64.exe: its sde.exe runs 64-bit programs too.
+    exe = default_sde_dir() / ("sde.exe" if platform.system() == "Windows" else "sde64")
     return exe if exe.is_file() else None
 
 
@@ -402,7 +403,7 @@ def _install_sde(args: argparse.Namespace, ctx: Context) -> None:
 
     exe = sde_executable()
     if exe is None:
-        ctx.die(f"{target_dir} holds no sde64 after unpacking {name}")
+        ctx.die(f"{target_dir} holds no SDE launcher after unpacking {name}")
     print(f"  {console.green('installed')} sde {version} at {exe}")
     print(console.dim(f"  e.g. {exe} -snb -- <program>: runs it as a Sandy Bridge, with AVX but no AVX2; `-help` lists the CPUs"))
 

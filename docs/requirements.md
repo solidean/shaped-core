@@ -214,7 +214,7 @@ uv run dev.py install sde                    # names the file and the page to do
 uv run dev.py install sde --archive <file>   # into ~/tools/sde, checked against the SHA-256 tools/sde.version pins
 ```
 
-Then `~/tools/sde/sde64 -snb -- <program>` runs a program as a Sandy Bridge, with AVX but no AVX2, and `-help` lists the CPUs.
+Then `~/tools/sde/sde64 -snb -- <program>` (`sde.exe` on Windows) runs a program as a Sandy Bridge, with AVX but no AVX2, and `-help` lists the CPUs.
 There are kits for Windows and Linux x86-64 only.
 
 ## What `dev.py doctor` validates
