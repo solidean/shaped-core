@@ -98,6 +98,12 @@ constexpr u32 glb_chunk_bin = 0x004E4942;  // 'B','I','N',0
         return cc::error("EXT_meshopt_compression: the view's extension did not parse");
     auto const& m = view.meshopt.value();
 
+    // the extension's own rule, checked before anything is allocated: the division first, so the product cannot overflow
+    if (m.count > view.byte_length / m.byte_stride || m.count * m.byte_stride != view.byte_length)
+        return cc::error(cc::format("EXT_meshopt_compression: {} elements of {} bytes are not the bufferView's {} "
+                                    "bytes",
+                                    m.count, m.byte_stride, view.byte_length));
+
     auto const* const source = c.doc.find(m.buffer);
     if (source == nullptr)
         return cc::error("EXT_meshopt_compression: names no buffer");
@@ -115,9 +121,8 @@ constexpr u32 glb_chunk_bin = 0x004E4942;  // 'B','I','N',0
 /// The extensions this reader implements through the same hooks a caller's use.
 [[nodiscard]] cc::span<gltf::extension const> builtin_extensions()
 {
-    static auto const meshopt = &decode_meshopt_view;
     static gltf::extension const builtins[] = {
-        {.name = "EXT_meshopt_compression", .decode_buffer_view = meshopt},
+        {.name = "EXT_meshopt_compression", .decode_buffer_view = decode_meshopt_view},
     };
     return builtins;
 }
@@ -792,6 +797,19 @@ public:
         for (auto const& e : opts.extensions)
             all.push_back(&e);
 
+        // every byte length is declared by the file, so the budget is checked before any decoder runs
+        auto meshopt_total = i64(0);
+        for (auto const& view : result.buffer_views)
+        {
+            if (!view.meshopt.has_value())
+                continue;
+            if (view.byte_length > opts.max_decoded_bytes - meshopt_total)
+                return cc::error(cc::format("glTF: EXT_meshopt_compression decodes to more than the {} bytes this read "
+                                            "allows",
+                                            opts.max_decoded_bytes));
+            meshopt_total += view.byte_length;
+        }
+
         for (auto i = isize(0); i < result.buffer_views.size(); ++i)
         {
             auto const carried = json::ref(&document, result.buffer_views[i].json_node)["extensions"];
@@ -1341,6 +1359,22 @@ public:
             if (img.buffer_view != gltf::buffer_view_index::invalid)
             {
                 auto const& view = result.buffer_views[isize(int(img.buffer_view))];
+
+                // the buffer holds what the extension stored, not the image
+                if (!view.decoded_by.empty())
+                {
+                    if (!view.decoded.has_value())
+                    {
+                        add_issue(gltf::issue_kind::unresolved, cc::format("image {} not loaded: its bufferView is "
+                                                                           "decoded by {}, which left it undecoded",
+                                                                           i, view.decoded_by));
+                        continue;
+                    }
+                    img.data = view.decoded.value();
+                    img.resolved = true;
+                    continue;
+                }
+
                 auto const& buf = result.buffers[isize(int(view.buffer))];
                 if (!buf.resolved)
                 {

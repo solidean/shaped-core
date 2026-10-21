@@ -229,6 +229,16 @@ Arrays, cube maps (partial legacy ones included) and volumes are laid out in fil
 - `[planned]` **the remaining DXGI formats** — 10:10:10:2, 11:11:10, 16-bit unorm, and the rest of the uncompressed table, each a mapping plus a texel decoder.
   Legacy files reach 10:10:10:2 and the 16-bit one- and two-channel ones already, through the bit-mask path; 11:11:10 is a float format and RGBA16 is 64 bits, which no 32-bit mask describes.
 
+### ktx2 [done]
+
+Low-level KTX 2.0 reader; see [ktx2.hh](../src/babel-serializer/image/ktx2.hh).
+Like `dds`, it reads over pinned bytes and hands back every mip level, array layer and cube face as a view of the input, with the format as Vulkan's `vkFormat`.
+A Zstandard or zlib supercompressed level is decoded into its own buffer instead, level by level on `read_options::scheduler`, bounded by `max_decoded_bytes`.
+
+- `[planned]` **Basis Universal transcoding** — BasisLZ and UASTC files are refused today, since babel carries no transcoder.
+- `[planned]` **a read-only `babel::image` entry** — mip 0, as DDS has.
+- `[planned]` **decoding a subresource through `bcn`**, as DDS does.
+
 ### tga [done]
 
 Low-level Truevision TARGA reader, fully native; see [tga.hh](../src/babel-serializer/image/tga.hh).
@@ -255,7 +265,7 @@ See [image.hh](../src/babel-serializer/image/image.hh).
 
 ### Other image formats [planned]
 
-`[planned]` further stb-supported containers (bmp / gif), KTX2, and `.exr`.
+`[planned]` further stb-supported containers (bmp / gif), and `.exr`.
 
 ## Aggregators
 

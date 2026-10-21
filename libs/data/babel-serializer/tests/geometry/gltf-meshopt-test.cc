@@ -166,6 +166,7 @@ struct packed_view
     i64 count = 0;
     char const* mode = "ATTRIBUTES";
     char const* filter = "NONE";
+    i64 byte_length = -1; // the bufferView's own byteLength; -1 means stride * count
 };
 
 /// A document whose bufferView i is `views[i]`, packed in buffer 0 (a data URI) over the fallback buffer 1.
@@ -180,7 +181,7 @@ cc::string meshopt_document(cc::span<packed_view const> views, cc::string_view a
         auto const at = packed.size();
         for (auto const b : *v.packed)
             packed.push_back(b);
-        auto const decoded = v.stride * v.count;
+        auto const decoded = v.byte_length >= 0 ? v.byte_length : v.stride * v.count;
         view_json += cc::format(
             R"({}{{"buffer": 1, "byteOffset": {}, "byteLength": {}{}, )"
             R"("extensions": {{"EXT_meshopt_compression": {{"buffer": 0, "byteOffset": {}, "byteLength": {}, )"
@@ -306,6 +307,31 @@ TEST("gltf meshopt - packed bytes that do not decode, or a broken extension, fai
     auto const r4 = gltf::read(cc::string_view(meshopt_document(bad_filter, "")));
     REQUIRE(r4.has_error());
     CHECK(r4.error().to_string().contains("attributes alone")).dump("error", r4.error().to_string());
+}
+
+TEST("gltf meshopt - a declared size beyond the decode budget fails before anything is allocated")
+{
+    // a few hundred bytes of JSON declaring 16 TiB
+    packed_view const huge[] = {{.packed = &vertices_packed, .stride = 16, .count = i64(1) << 40}};
+    auto const r1 = gltf::read(cc::string_view(meshopt_document(huge, "")));
+    REQUIRE(r1.has_error());
+    CHECK(r1.error().to_string().contains("more than the 1073741824 bytes")).dump("error", r1.error().to_string());
+
+    // the budget is the caller's to raise or lower
+    packed_view const plain[] = {{.packed = &vertices_packed, .stride = 16, .count = 4}};
+    auto const r2 = gltf::read(cc::string_view(meshopt_document(plain, "")), {.max_decoded_bytes = 63});
+    REQUIRE(r2.has_error());
+    CHECK(r2.error().to_string().contains("more than the 63 bytes")).dump("error", r2.error().to_string());
+    CHECK(gltf::read(cc::string_view(meshopt_document(plain, "")), {.max_decoded_bytes = 64}).has_value());
+}
+
+TEST("gltf meshopt - count times byteStride must be the bufferView's byteLength")
+{
+    packed_view const mismatched[] = {{.packed = &vertices_packed, .stride = 16, .count = 4, .byte_length = 32}};
+    auto const r = gltf::read(cc::string_view(meshopt_document(mismatched, "")));
+    REQUIRE(r.has_error());
+    CHECK(r.error().to_string().contains("4 elements of 16 bytes are not the bufferView's 32 bytes"))
+        .dump("error", r.error().to_string());
 }
 
 TEST("gltf meshopt - a view whose packed buffer was never resolved is an issue, and view_of says why")

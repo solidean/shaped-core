@@ -313,6 +313,16 @@ TEST("babel::ktx2 - a malformed file is an error naming what is wrong")
     CHECK(read(make_ktx2({.levels = 9}, one)).contains("levelCount 9"));
     CHECK(read(make_ktx2({.vk_format = u32(ktx2::format::bc1_rgba_unorm), .height = 0}, one)).contains("must be 2D"));
 
+    // a 3D array: this one's level is 2^68 bytes, which wraps an i64 to 0 and would let an empty level validate
+    auto const huge = ktx2_spec{.vk_format = u32(ktx2::format::r32g32b32a32_sfloat),
+                                .type_size = 4,
+                                .width = 65536,
+                                .height = 65536,
+                                .depth = 65536,
+                                .layers = 65536};
+    CHECK(
+        read(make_ktx2(huge, cc::vector<cc::vector<byte>>{cc::vector<byte>()})).contains("3D array textures are not read"));
+
     // a level of the wrong size, plain or by its index
     CHECK(read(make_ktx2({}, cc::vector<cc::vector<byte>>{counting(60, 0)})).contains("level 0 stores 60 bytes"));
     CHECK(read(make_ktx2({.scheme = ktx2::supercompression::zstd, .claimed_uncompressed = 32}, one))

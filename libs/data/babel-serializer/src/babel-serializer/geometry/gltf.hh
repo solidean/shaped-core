@@ -679,7 +679,7 @@ struct babel::gltf::data
 
     /// `extensionsUsed` / `extensionsRequired`, recorded verbatim.
     /// KHR_lights_punctual and EXT_meshopt_compression are the extensions this reader interprets.
-    /// Any other required one never reaches a caller unless it is one of `read_options::caller_extensions`: read fails
+    /// Any other required one never reaches a caller unless it is one of `read_options::extensions`: read fails
     /// on it, because the spec says a client that cannot support a required extension must refuse the file.
     cc::vector<cc::string> extensions_used;
     cc::vector<cc::string> extensions_required;
@@ -898,6 +898,12 @@ struct babel::gltf::read_options
     /// Keep the parsed JSON in data::json, for json_of to reach what this reader does not model.
     /// Off by default: the document costs about as much memory again as the parsed structure, for a reader that never asks.
     bool keep_json_document = false;
+
+    /// The most bytes the reader's own decoders may produce together; more is an error before anything is decoded.
+    /// Today that is EXT_meshopt_compression, whose few packed bytes can declare any size.
+    /// A caller's hooks allocate their own output, so they are not counted here.
+    /// The largest `i64` disables the check.
+    i64 max_decoded_bytes = i64(1) << 30;
 };
 
 namespace babel::gltf

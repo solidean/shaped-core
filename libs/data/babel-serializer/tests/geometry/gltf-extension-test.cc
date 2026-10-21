@@ -55,7 +55,8 @@ gltf::decoded_bytes fails(gltf::buffer_view_decode const&)
 }
 
 /// Three u32 XORed with 0x5A, in a data uri: the bytes VENDOR_xor's view decodes to 7, 8, 9.
-cc::string xor_document(cc::string_view view_extensions)
+/// `extra_members` is spliced into the top-level object, each member with its own leading comma.
+cc::string xor_document(cc::string_view view_extensions, cc::string_view extra_members = "")
 {
     auto plain = cc::vector<byte>();
     for (auto const v : {7u, 8u, 9u})
@@ -64,8 +65,8 @@ cc::string xor_document(cc::string_view view_extensions)
     return cc::format(R"({{"asset": {{"version": "2.0"}}, "extensionsUsed": ["VENDOR_xor"],
         "buffers": [{{"uri": "data:application/octet-stream;base64,{}", "byteLength": 12}}],
         "bufferViews": [{{"buffer": 0, "byteLength": 12, "extensions": {}}}],
-        "accessors": [{{"bufferView": 0, "componentType": 5125, "count": 3, "type": "SCALAR"}}]}})",
-                      babel::base64::encode(plain), view_extensions);
+        "accessors": [{{"bufferView": 0, "componentType": 5125, "count": 3, "type": "SCALAR"}}]{}}})",
+                      babel::base64::encode(plain), view_extensions, extra_members);
 }
 } // namespace
 
@@ -75,8 +76,7 @@ TEST("gltf extension - an accessor hook stands in for a bufferView, and view_of 
         "extensionsUsed": ["VENDOR_constant"], "extensionsRequired": ["VENDOR_constant"],
         "accessors": [{"componentType": 5126, "count": 4, "type": "VEC2", "extensions": {"VENDOR_constant": {"value": 2.5}}},
                       {"componentType": 5126, "count": 2, "type": "SCALAR"}]})");
-    auto hook = &constant_accessor;
-    gltf::extension const extensions[] = {{.name = "VENDOR_constant", .decode_accessor = hook}};
+    gltf::extension const extensions[] = {{.name = "VENDOR_constant", .decode_accessor = constant_accessor}};
     auto const doc = REQUIRED_VALUE(gltf::read(json, {.extensions = extensions}));
     CHECK(!doc.has_issues()).dump("issues", doc.issue_report());
 
@@ -93,8 +93,7 @@ TEST("gltf extension - an accessor hook stands in for a bufferView, and view_of 
 
 TEST("gltf extension - a buffer-view hook decodes the view, and its accessors read through it")
 {
-    auto hook = &xor_view;
-    gltf::extension const extensions[] = {{.name = "VENDOR_xor", .decode_buffer_view = hook}};
+    gltf::extension const extensions[] = {{.name = "VENDOR_xor", .decode_buffer_view = xor_view}};
     auto const doc = REQUIRED_VALUE(
         gltf::read(cc::string_view(xor_document(R"({"VENDOR_xor": {"key": 90}})")), {.extensions = extensions}));
     CHECK(doc.buffer_views[0].decoded_by == "VENDOR_xor");
@@ -105,10 +104,35 @@ TEST("gltf extension - a buffer-view hook decodes the view, and its accessors re
     CHECK(values[2] == 9);
 }
 
+TEST("gltf extension - an image in a decoded bufferView gets the decoded bytes")
+{
+    gltf::extension const extensions[] = {{.name = "VENDOR_xor", .decode_buffer_view = xor_view}};
+    auto const json
+        = xor_document(R"({"VENDOR_xor": {"key": 90}})", R"(, "images": [{"bufferView": 0, "mimeType": "image/png"}])");
+    auto const doc = REQUIRED_VALUE(gltf::read(cc::string_view(json), {.extensions = extensions}));
+    CHECK(!doc.has_issues()).dump("issues", doc.issue_report());
+
+    auto const& img = doc.images[0];
+    REQUIRE(img.resolved);
+    REQUIRE(img.data.size() == 12);
+    CHECK(u8(img.data[0]) == 7);
+    CHECK(u8(img.data[4]) == 8);
+    CHECK(u8(img.data[8]) == 9);
+}
+
+TEST("gltf extension - an image in a bufferView its hook left undecoded is an issue naming the extension")
+{
+    gltf::extension const extensions[] = {{.name = "VENDOR_xor", .decode_buffer_view = never_decodes}};
+    auto const json
+        = xor_document(R"({"VENDOR_xor": {"key": 90}})", R"(, "images": [{"bufferView": 0, "mimeType": "image/png"}])");
+    auto const doc = REQUIRED_VALUE(gltf::read(cc::string_view(json), {.extensions = extensions}));
+    CHECK(!doc.images[0].resolved);
+    CHECK(doc.issue_report().contains("image 0 not loaded: its bufferView is decoded by VENDOR_xor"));
+}
+
 TEST("gltf extension - a hook that leaves an element undecoded is an issue, and view_of refuses the element")
 {
-    auto hook = &never_decodes;
-    gltf::extension const extensions[] = {{.name = "VENDOR_xor", .decode_buffer_view = hook}};
+    gltf::extension const extensions[] = {{.name = "VENDOR_xor", .decode_buffer_view = never_decodes}};
     auto const doc = REQUIRED_VALUE(
         gltf::read(cc::string_view(xor_document(R"({"VENDOR_xor": {"key": 90}})")), {.extensions = extensions}));
     CHECK(doc.has_issue_of(gltf::issue_kind::unresolved));
@@ -122,14 +146,12 @@ TEST("gltf extension - a hook's error, or bytes of the wrong size, fail the read
 {
     auto const json = xor_document(R"({"VENDOR_xor": {"key": 90}})");
 
-    auto failing = &fails;
-    gltf::extension const failing_ext[] = {{.name = "VENDOR_xor", .decode_buffer_view = failing}};
+    gltf::extension const failing_ext[] = {{.name = "VENDOR_xor", .decode_buffer_view = fails}};
     auto const r1 = gltf::read(cc::string_view(json), {.extensions = failing_ext});
     REQUIRE(r1.has_error());
     CHECK(r1.error().to_string().contains("the vendor's data is corrupt"));
 
-    auto short_hook = &too_short;
-    gltf::extension const short_ext[] = {{.name = "VENDOR_xor", .decode_buffer_view = short_hook}};
+    gltf::extension const short_ext[] = {{.name = "VENDOR_xor", .decode_buffer_view = too_short}};
     auto const r2 = gltf::read(cc::string_view(json), {.extensions = short_ext});
     REQUIRE(r2.has_error());
     CHECK(r2.error().to_string().contains("decodes to 3 bytes"));
@@ -137,9 +159,8 @@ TEST("gltf extension - a hook's error, or bytes of the wrong size, fail the read
 
 TEST("gltf extension - one element decoded by two extensions fails the read")
 {
-    auto hook = &xor_view;
-    gltf::extension const extensions[]
-        = {{.name = "VENDOR_xor", .decode_buffer_view = hook}, {.name = "VENDOR_other", .decode_buffer_view = hook}};
+    gltf::extension const extensions[] = {{.name = "VENDOR_xor", .decode_buffer_view = xor_view},
+                                          {.name = "VENDOR_other", .decode_buffer_view = xor_view}};
     auto const json = xor_document(R"({"VENDOR_xor": {"key": 90}, "VENDOR_other": {"key": 1}})");
     auto const r = gltf::read(cc::string_view(json), {.extensions = extensions});
     REQUIRE(r.has_error());

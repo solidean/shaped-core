@@ -190,6 +190,9 @@ void read_dfd(cc::span<byte const> in, header const& h, data& out)
         return cc::error("ktx2: a cube map must be square and 2D");
     if (h.layer_count > max_layer_count)
         return cc::error(cc::format("ktx2: layerCount {} is past the {} babel reads", h.layer_count, max_layer_count));
+    // no API creates one, and only its level size can overflow an i64
+    if (h.pixel_depth > 0 && h.layer_count > 0)
+        return cc::error("ktx2: 3D array textures are not read");
 
     auto const max_level = max_level_of(cc::max(h.pixel_width, cc::max(h.pixel_height, h.pixel_depth)));
     if (h.level_count > u32(max_level + 1))
