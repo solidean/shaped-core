@@ -406,6 +406,34 @@ TEST("sgl check - an index the pass proves neither the same nor different is mar
              "  note user:[work.counts[0]] this value is read from work.counts, which the shader also writes\n");
 }
 
+TEST("sgl check - an index the legalizer pins is reported, and its mark suggested, as the access wrote it")
+{
+    auto const counted = [](cc::string_view index)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding mats:\n"
+                                      "    texs: texture_2d[float4][8]\n"
+                                      "\n"
+                                      "binding work:\n"
+                                      "    counts: mut buffer[int]\n"
+                                      "    values: mut buffer[float4]\n"
+                                      "\n"
+                                      "@compute(64) fun cs(@thread_id id: int3){{mats, work}}:\n"
+                                      "    work.values[id.x] = mats.texs[{}].load(int2(0, 0))\n",
+                                      index));
+    };
+    CHECK(counted("work.counts[0] % 8")
+          == "unproven-index user:[work.counts[0] % 8] an index into a binding array that the compiler cannot prove "
+             "the "
+             "same in every invocation: mark it `uniform (work.counts[0] % 8)` where it is, or `nonuniform "
+             "(work.counts[0] % 8)` where it may differ\n"
+             "  note user:[work.counts[0]] this value is read from work.counts, which the shader also writes\n");
+    CHECK(counted("id.x % 8")
+          == "non-uniform-index user:[id.x % 8] an index into a binding array that may differ between invocations: "
+             "mark it `nonuniform (id.x % 8)`, or make it the same in all of them\n"
+             "  note user:[id] this value comes from the stage input id\n");
+}
+
 TEST("sgl check - a `uniform` mark on an index the pass proves varying is refused")
 {
     auto const picked = [](cc::string_view index)

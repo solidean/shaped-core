@@ -892,8 +892,11 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   A mark stands only as the whole index into a binding array, `textures[nonuniform i]`; anywhere else, a `let` or an index into a value array included, it is `wrong-kind-of-name`.
   Neither is a keyword: each is a function of the prelude, written as a call without parentheses, which a program's own name of that spelling shadows.
 * **CHK-393** An index the pass does not prove uniform is **proven varying** where it comes from what the stage is handed (CHK-283), or from what a trace or a callable writes back.
-  It may come so through values, or through control flow that tests such a value.
-  Every other value CHK-283 counts non-uniform is **unproven**: a read of a `mut` buffer, a `mut` image or workgroup memory, and the result of an atomic or a subgroup operation.
+  It may come so through values, or through a `var` set under control flow that tests such a value.
+  A `let` is its value where it stands, so control flow it stands in leaves it as uniform as its value: an early `return` before `maps[draw.slot]` needs no mark.
+  Every other value CHK-283 counts non-uniform is **unproven**: a read of a `mut` buffer, a `mut` image or workgroup memory, and the result of an atomic.
+  So is what a subgroup agrees on, whatever it was given: a vote, a reduction and a broadcast, such as `subgroup_broadcast_first(id.x)`.
+  A scan, a shuffle and a quad operation give each invocation its own, and are as varying as what they were given.
 * **CHK-394** `uniform i` is the author's word that `i` is the same in every invocation where the pass cannot prove it, and every target writes it as the plain index (EMIT-121).
   On an index the pass proves varying it is `uniform-index-varies`.
   On one the pass proves uniform it costs nothing, and is no warning.

@@ -252,7 +252,10 @@ struct uniformity_pass
         if (is_judged && flow.is && is_reporting)
             violations.push_back({.call = id, .flow = flow});
         // CHK-377: what the subgroup agrees on may still differ between the subgroups of a workgroup
-        if (record->is_subgroup_operation && !result.is)
+        // CHK-393: so it is unproven however much its argument varied, and `uniform` may say it is the same
+        if (record->agrees_in_subgroup)
+            result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
+        else if (record->is_subgroup_operation && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
         // what another thread did to it first is what an atomic gives
         if (record->is_atomic && !result.is)
@@ -390,7 +393,8 @@ struct uniformity_pass
     {
         auto result = flow_out{.flow = flow};
         s.node.visit(
-            [&](flat_let const& l) { settle_local(l.local, value(l.value, flow), flow); },
+            // a `let` is its value where it stands, so it takes no control dependence; a `var` set in some branches does
+            [&](flat_let const& l) { settle_local(l.local, value(l.value, flow), divergence::none()); },
             [&](flat_var const& v) { settle_local(v.local, value(v.value, flow), flow); },
             [&](flat_assign const& a)
             {
@@ -570,9 +574,20 @@ void checker::judge_uniformity(flat_entry_point const& structured)
             written = e.at(e.at(index.node.as<flat_call>().arguments)[0]).from;
         // the index as the access writes it, rather than what an inlined callee made of it: `maps[slot_of(m)]`
         // an element a resource parameter stands for keeps the index its caller wrote, which is where the mark goes
+        // a pinned index leaves the element the origin of the call it is the receiver of: `maps[i % 16].load(xy)`
         auto const& element = e.at(f.element).from;
-        auto const* const subscript
-            = ast::is_valid(element.expr) ? ast_of(element.file).at(element.expr).node.try_as<ast::index>() : nullptr;
+        auto const* subscript = static_cast<ast::index const*>(nullptr);
+        for (auto x = element.expr; ast::is_valid(x) && subscript == nullptr;)
+        {
+            auto const& node = ast_of(element.file).at(x).node;
+            subscript = node.try_as<ast::index>();
+            if (auto const* const c = node.try_as<ast::call>())
+                x = c->callee;
+            else if (auto const* const m = node.try_as<ast::member>())
+                x = m->object;
+            else
+                x = ast::expr_id::none;
+        }
         if (subscript != nullptr && ast_of(element.file).at(subscript->arguments).size() == 1)
         {
             at = {.file = element.file, .expr = ast_of(element.file).at(subscript->arguments)[0].value};

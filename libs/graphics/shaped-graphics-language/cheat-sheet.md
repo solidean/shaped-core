@@ -633,7 +633,9 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **`bytes` / `mut bytes` is raw memory a 32-bit word at a time** (CHK-388): `b.load(off)`, `load2..4`, `b.store(off, uintN)`; `off` a multiple of 4.
   HLSL `ByteAddressBuffer`, else an array of words (EMIT-155); the host binds a `*_buffer_view<cc::byte>`.
 - **A binding array, `texture_2d[float4][64]`, needs `binding_arrays`** and is read by element alone (CHK-299).
-  An index the uniformity pass cannot prove uniform is `nonuniform i`, or it is `non-uniform-index`; a needless mark is a warning (CHK-300).
+  An index the uniformity pass proves uniform needs no mark (CHK-300); `nonuniform i` is an index that may vary, and `uniform i` the author's word that it does not.
+  Unmarked, a proven varying index is `non-uniform-index` and an unproven one `unproven-index`; `uniform` on a proven varying one is `uniform-index-varies` (CHK-393, CHK-394).
+  A helper's index is judged per call: one it reaches both ways is `mixed-index`, split in two or marked `nonuniform` (CHK-395); a needless `nonuniform` is a warning.
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.

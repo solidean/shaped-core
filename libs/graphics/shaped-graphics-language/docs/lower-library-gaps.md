@@ -22,3 +22,11 @@ A literal rounds from its exact `f64` value, since a detour through `f32` would 
 
 **Today:** `half_bits_of` and `float_of_half_bits` in `builtins/impl/soft_math.cc`, marked TEMPORARY.
 They round from `f32` and from `f64`, and keep subnormals, infinities and NaNs.
+
+### Whether a sequence holds a value
+
+**Wanted:** `contains(x)` on `cc::vector` and `cc::span`, which `vector.hh` already lists among its TODOs beside `find` and `count`.
+
+**Why:** the per-entry-point diagnostics keep sets of entry points as `cc::vector<symbol_id>`, short enough that a map is no better, and ask of them whether one is in.
+
+**Today:** `check::holds` in `check/checked_module.hh`, and the `is_in` lambda in `emit/impl/plan.cc`, the same loop twice.

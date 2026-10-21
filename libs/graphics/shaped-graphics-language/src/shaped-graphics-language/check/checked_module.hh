@@ -11,6 +11,7 @@
 namespace sgl::check
 {
 /// Whether `ids` holds `id`.
+// TEMPORARY: clean-core has no `contains` on a span yet (docs/lower-library-gaps.md)
 [[nodiscard]] inline bool holds(cc::span<symbol_id const> ids, symbol_id id)
 {
     for (auto const x : ids)

@@ -272,6 +272,9 @@ struct sgl::builtins::function_record
     /// Exchanges values between the invocations of a subgroup, so every one of them reaches the call or none does, and
     /// what it gives differs within a workgroup (CHK-377).
     bool is_subgroup_operation = false;
+    /// Of those, one whose result is the same in every invocation of the subgroup, a vote, a reduction or a broadcast,
+    /// so its value is unproven rather than varying whatever its argument is (CHK-393).
+    bool agrees_in_subgroup = false;
     /// A subgroup operation within a quad, which a compute stage forms along one axis (CHK-380).
     bool is_quad_operation = false;
     /// `workgroup_uniform_load`: a barrier whose argument is workgroup memory and whose result is uniform (CHK-374).

@@ -461,6 +461,9 @@ Unmarked, the varying call was refused; marked, the uniform call called the mark
 Judging each copy by its own call lets the helper stay unmarked wherever every call proves its index uniform, which is the common case.
 Where calls disagree, the compiler cannot pick for the author: writing the mark pays on every call, and leaving it out is wrong on some.
 So it names both calls and asks, and the explicit `nonuniform` is an answer, not a mistake to warn about.
+A `nonuniform` that wraps only the copies the pass cannot prove uniform would let one helper serve both calls with no split.
+It is not taken while the pass has known holes (the checking file's "Open"): the author's explicit mark would then be overridden by a proof that can be wrong.
+Once those close, it is the natural relaxation, and breaks no program.
 A needless mark is judged over every entry point of the program, since one shared helper must not warn in the compile of a shader whose sibling needs the mark.
 
 ## CHK-396

@@ -82,6 +82,42 @@ test slot_of(16u) == 15
     let k = work.counts[0] % 16
     work.results[id.x] = textures.maps[k].load(int2(0, 0))
 
+// a `let` is its value where it stands, so an early return, or a branch around it, leaves a uniform index uniform
+@compute(64) fun early_return_cs(@thread_id id: int3){textures, work, draw}:
+    if id.x > 3 => return
+    work.results[id.x] = textures.maps[draw.slot].load(int2(0, 0))
+
+@compute(64) fun branched_cs(@thread_id id: int3){textures, work, draw}:
+    if id.x > 3:
+        let k = draw.slot
+        work.results[id.x] = textures.maps[k].load(int2(0, 0))
+
+// a `var` set in only some branches is what differs
+@expect(error = "non-uniform-index")
+@compute(64) fun branch_set_cs(@thread_id id: int3){textures, work, draw}:
+    let mut k = draw.slot
+    if id.x > 3 => k = 0
+    work.results[id.x] = textures.maps[k].load(int2(0, 0))
+
+// what the subgroup agrees on is unproven, whatever it was given, so `uniform` may say it is the same
+@compute(64) fun broadcast_cs(@thread_id id: int3){textures, work}:
+    require subgroups
+    let k = subgroup_broadcast_first(id.x % 16)
+    work.results[id.x] = textures.maps[uniform k].load(int2(0, 0))
+
+@expect(error = "unproven-index")
+@compute(64) fun unmarked_broadcast_cs(@thread_id id: int3){textures, work}:
+    require subgroups
+    let k = subgroup_broadcast_first(id.x % 16)
+    work.results[id.x] = textures.maps[k].load(int2(0, 0))
+
+// a shuffle gives each invocation its own value, so what it was given still varies
+@expect(error = "uniform-index-varies")
+@compute(64) fun shuffled_cs(@thread_id id: int3){textures, work}:
+    require subgroups
+    let k = subgroup_shuffle_xor(id.x % 16, 1)
+    work.results[id.x] = textures.maps[uniform k].load(int2(0, 0))
+
 // a helper's index is judged by what each call reaching it passes
 fun sample_map(map: uint, uv: float2){textures} -> float4:
     return textures.maps[slot_of(map)].sample(uv, textures.s)
