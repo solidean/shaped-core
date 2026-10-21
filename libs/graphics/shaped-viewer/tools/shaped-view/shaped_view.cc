@@ -29,9 +29,8 @@ struct opened_file
 /// `a` grown to hold `b`.
 tg::aabb3f merged(tg::aabb3f const& a, tg::aabb3f const& b)
 {
-    return tg::aabb3f(
-        tg::pos3f(cc::min(a.min[0], b.min[0]), cc::min(a.min[1], b.min[1]), cc::min(a.min[2], b.min[2])),
-        tg::pos3f(cc::max(a.max[0], b.max[0]), cc::max(a.max[1], b.max[1]), cc::max(a.max[2], b.max[2])));
+    return tg::aabb3f(tg::pos3f(cc::min(a.min[0], b.min[0]), cc::min(a.min[1], b.min[1]), cc::min(a.min[2], b.min[2])),
+                      tg::pos3f(cc::max(a.max[0], b.max[0]), cc::max(a.max[1], b.max[1]), cc::max(a.max[2], b.max[2])));
 }
 
 /// The orbit that shows all of `box`, from the front-right and a little above.
@@ -48,7 +47,8 @@ sv::orbit_state orbit_around(tg::aabb3f const& box)
 }
 } // namespace
 
-APP("view", default_entry)
+// Waives nexus's log rule: a file that does not open or imports with issues is the user's news, never the program's failure.
+APP("view", default_entry, allow_logs(cc::rec::level::error))
 {
     // Declared before the files, so it outlives every load it started.
     auto const loader = sv::asset_loader();
@@ -98,8 +98,7 @@ APP("view", default_entry)
             // Its left side meets the row's end, it stands on y = 0, and it is centred on z = 0.
             auto const size = box.value().max - box.value().min;
             auto const gap = scene_bounds.has_value() ? 0.25f * cc::max(size[0], size[2]) : 0.0f;
-            auto const offset = tg::vec3f(row_end + gap - box.value().min[0],
-                                          -box.value().min[1],
+            auto const offset = tg::vec3f(row_end + gap - box.value().min[0], -box.value().min[1],
                                           -(box.value().min[2] + 0.5f * size[2]));
             file.offset = offset;
             row_end += gap + size[0];

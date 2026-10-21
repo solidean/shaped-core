@@ -301,6 +301,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
   See [docs/platforms.md](docs/platforms.md#default-allocator-sc_mimalloc).
+* `SC_FROZEN_SHADERS` (default OFF) is the shipping mode for shaders: no shader file read, no hot reload, and recorded bytecode embedded where an executable asks with `sc_embed_shader_bundle`.
+  A miss still compiles from the embedded sources, so DXC still ships; the `frozen-clang` preset sets it.
+  See [frozen-shaders](libs/graphics/shaped-shader-library/docs/frozen-shaders.md).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
   Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).

@@ -242,6 +242,15 @@ The targeted tests — rounding, signed zeros, the edge lanes, permute, the loop
 Only the test binary sees it, and the dispatched battery's kernel TUs through it, so it is no ODR hazard and may differ between targets.
 The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg and CI still build and run the full set.
 
+## Frozen shaders (`SC_FROZEN_SHADERS`)
+
+`SC_FROZEN_SHADERS` (default `OFF`) is the shipping mode for shaders, and reaches slib as `SLIB_FROZEN_SHADERS`, 0 or 1.
+On, no shader source is read from disk and nothing hot-reloads.
+An executable that calls `sc_embed_shader_bundle` also serves the bytecode a recording run of it compiled, and compiles the rest from its embedded sources.
+
+It is whole-build, set by the `frozen-*` presets, which is how `dev.py install shaped-view` builds the copy it installs.
+[frozen-shaders](../libs/graphics/shaped-shader-library/docs/frozen-shaders.md) is the design.
+
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
 `SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.

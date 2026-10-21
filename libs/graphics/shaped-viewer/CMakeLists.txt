@@ -218,6 +218,9 @@ if(SC_BUILD_TOOLS AND WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-d
     target_link_options(shaped-view PRIVATE "LINKER:/ENTRY:mainCRTStartup")
 
     sc_stage_runtime_dlls(shaped-view DLLS "$<TARGET_RUNTIME_DLLS:shaped-view>")
+
+    # What a frozen build serves without compiling; the install records it from an unfrozen run of the same commit.
+    sc_embed_shader_bundle(TARGET shaped-view)
 endif()
 
 # Test executable.

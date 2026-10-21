@@ -4,6 +4,11 @@ The copy lives in ~/tools/shaped-view rather than in a build directory.
 A file association pointing into build/ would break on a failed build, on a reconfigure, and whenever a running viewer locks the binary a rebuild wants to replace.
 Running the install again is the update.
 
+The copy is a frozen build (SC_FROZEN_SHADERS): it reads no shader file, and carries the bytecode its common cases need.
+That bytecode is recorded by running the frozen binary itself over a small corpus of models, then built in, so the build happens twice.
+A shader no recording reached still compiles at run time, from the sources the binary embeds —
+libs/graphics/shaped-shader-library/docs/frozen-shaders.md has the mechanism.
+
 The association is per user, under HKCU\\Software\\Classes, so it needs no admin rights.
 Windows lets no program make itself the default for an extension: the registration makes shaped-view a candidate,
 and choosing it once under "Open with", with "Always" ticked, is the step only the user can take.
@@ -27,10 +32,12 @@ from .context import Context
 NAME = "shaped-view"
 DESCRIPTION = "the standalone model viewer, registered for the formats it opens"
 
-# The preset the copy is built with when none is named: optimized, since nobody debugs the installed copy.
-_DEFAULT_PRESET = "release-clang"
+# The preset the copy is built with when none is named: optimized and frozen.
+_DEFAULT_PRESET = "frozen-clang"
 
 _TARGET = "shaped-view"
+# What the recording run opens: one file per common case, so what it compiles is what opening such a file needs.
+_CORPUS = Path("libs/graphics/shaped-viewer/tools/shaped-view/corpus")
 _PROG_ID = "ShapedCode.ShapedView"
 # What sv::asset_loader reads; asset_format_of_uri is the authority.
 _EXTENSIONS = (".obj", ".stl", ".gltf", ".glb")
@@ -67,6 +74,32 @@ def _head_commit(root: Path) -> str | None:
         return None
     result = subprocess.run([git, "-C", str(root), "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
     return result.stdout.strip() or None
+
+
+def _record_bundle(artifact: Path, preset: dev.Preset, ctx: Context) -> bool:
+    """Runs `artifact` headless over the corpus, writing what it compiled where sc_embed_shader_bundle reads it.
+
+    The recording goes to a staged file first, so a failed run leaves the last good bundle in place.
+    """
+    bundle = preset.build_dir / "shader-bundles" / f"{_TARGET}.slibbundle"
+    staged = bundle.with_name(bundle.name + ".new")
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    files = sorted(str(p) for p in (ctx.root / _CORPUS).iterdir() if p.suffix.lower() in _EXTENSIONS)
+    env = dict(os.environ,
+               SC_SHADER_RECORD=str(staged),
+               SC_CAPTURE="1",
+               SC_CAPTURE_OUT=str(bundle.parent / "recording.png"),
+               SC_CAPTURE_SIZE="640x360")
+    print(console.dim(f"  recording the shaders {len(files)} corpus files need"), flush=True)
+    result = subprocess.run([str(artifact), *files], env=env, capture_output=True, text=True, timeout=900)
+    if result.returncode != 0 or not staged.is_file():
+        print(f"  {console.yellow('warning')}: the recording run failed, so the copy compiles every shader at run time:",
+              file=sys.stderr)
+        print(console.dim((result.stdout + result.stderr).strip()), file=sys.stderr)
+        return False
+    os.replace(staged, bundle)
+    print(console.dim(f"  recorded {bundle.stat().st_size // 1024} KiB of shaders"), flush=True)
+    return True
 
 
 def _copy(artifact: Path, commit: str | None, ctx: Context) -> None:
@@ -183,16 +216,23 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     presets = ctx.resolve_presets(args.preset or [_DEFAULT_PRESET])
     preset = presets[0]
-    if not args.no_build:
-        results = dev.build([preset], [_TARGET], root=ctx.root, auto_configure=True,
-                            mirror=args.mirror_output, verbose=args.verbose, emsdk_path=None, keep_going=False)
-        if not all(r.ok for r in results):
-            ctx.fail_build(results, [preset])
 
-    targets = ctx.discover(preset)
-    artifact = next((t.artifact for t in targets if t.name == _TARGET and t.artifact), None)
-    if artifact is None or not artifact.is_file():
-        ctx.die(f"{_TARGET} has no built binary for preset {preset.name!r}; its build needs dx12, DXC and SDL3")
+    def build() -> Path:
+        if not args.no_build:
+            results = dev.build([preset], [_TARGET], root=ctx.root, auto_configure=True,
+                                mirror=args.mirror_output, verbose=args.verbose, emsdk_path=None, keep_going=False)
+            if not all(r.ok for r in results):
+                ctx.fail_build(results, [preset])
+        targets = ctx.discover(preset)
+        built = next((t.artifact for t in targets if t.name == _TARGET and t.artifact), None)
+        if built is None or not built.is_file():
+            ctx.die(f"{_TARGET} has no built binary for preset {preset.name!r}; its build needs dx12, DXC and SDL3")
+        return built
+
+    # Built, recorded with, and built again: the second build only embeds the new recording and relinks.
+    artifact = build()
+    if not args.no_build and _record_bundle(artifact, preset, ctx):
+        artifact = build()
 
     _copy(artifact, _head_commit(ctx.root), ctx)
     _register(_exe())
