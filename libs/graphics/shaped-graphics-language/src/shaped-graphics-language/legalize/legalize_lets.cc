@@ -5,8 +5,9 @@
 #include <shaped-graphics-language/legalize/impl/legalizer.hh>
 #include <shaped-graphics-language/legalize/impl/walk.hh>
 
-// Rules F1 (LEGAL-58) and F2 (LEGAL-59), then L1 (LEGAL-56) and L2 (LEGAL-57), after V1: what substitution made
-// constant, a branch on it, a let that repeats one in scope, and a let nothing reads.
+// Rules F1 (LEGAL-58) and F2 (LEGAL-59), then L3 (LEGAL-60), L1 (LEGAL-56), L2 (LEGAL-57) and L4 (LEGAL-61), after V1.
+// What substitution made constant, a branch on it, a block's result, a let that repeats one in scope, a let nothing reads,
+// and a struct read only field by field.
 
 using namespace sgl;
 using namespace sgl::check;
@@ -277,6 +278,12 @@ struct let_simplifier
     /// Per statement of the tree as it was given: whether L1 or L2 takes it out.
     cc::vector<bool> dropped;
     bool drops_any = false;
+    /// Per statement of the tree as it was given: what L4 writes in its place, empty where it stays.
+    cc::vector<stmt_list> expanded;
+    /// Per local: the lets L4 split it into, one per field; empty where it stays whole.
+    cc::vector<cc::vector<local_id>> split_fields;
+    /// Per local: whether a call writes through it or hands it on.
+    cc::vector<bool> written_by_call;
 
     struct available
     {
@@ -777,6 +784,266 @@ struct let_simplifier
         }
     }
 
+    /// Calls `visit` on every expression the statements of `range` that stay hold, operands included.
+    template <class Visit>
+    void visit_live(ast::range_of<flat_stmt_id> range, Visit&& visit, int depth) const
+    {
+        if (!is_known(e(), range) || depth > k_max_depth)
+            return;
+        auto const visit_expr = [&](this auto const& self, flat_expr_id id, int d) -> void
+        {
+            if (!is_known(e(), id) || d > k_max_depth)
+                return;
+            visit(id);
+            for_each_operand(e(), e().at(id), [&](flat_expr_id operand) { self(operand, d + 1); });
+        };
+        for (auto const id : e().at(range))
+        {
+            if (!is_known(e(), id) || is_dropped(id))
+                continue;
+            auto const& s = e().at(id);
+            for_each_expr_of(s, [&](flat_expr_id x) { visit_expr(x, 0); });
+            for_each_pattern_of(e(), s,
+                                [&](ast::range_of<flat_expr_id> patterns)
+                                {
+                                    if (is_known(e(), patterns))
+                                        for (auto const p : e().at(patterns))
+                                            visit_expr(p, 0);
+                                });
+            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { visit_live(inner, visit, depth + 1); });
+        }
+    }
+
+    /// Per local of a live tree: how often it is named, how often as an assignment's whole place, how often as the
+    /// object of a field read, and how often it is assigned.
+    struct uses
+    {
+        cc::vector<i32> refs;
+        cc::vector<i32> places;
+        cc::vector<i32> field_reads;
+        cc::vector<i32> assigns;
+
+        [[nodiscard]] static uses create(isize locals)
+        {
+            return {.refs = cc::vector<i32>::create_filled(locals, 0),
+                    .places = cc::vector<i32>::create_filled(locals, 0),
+                    .field_reads = cc::vector<i32>::create_filled(locals, 0),
+                    .assigns = cc::vector<i32>::create_filled(locals, 0)};
+        }
+    };
+
+    void count_assigns(ast::range_of<flat_stmt_id> range, uses& u, int depth) const
+    {
+        if (!is_known(e(), range) || depth > k_max_depth)
+            return;
+        for (auto const id : e().at(range))
+        {
+            if (!is_known(e(), id) || is_dropped(id))
+                continue;
+            auto const& s = e().at(id);
+            if (auto const* const assign = s.node.try_as<flat_assign>())
+            {
+                if (auto const root = root_local_of(e(), assign->place); is_known(e(), root))
+                    ++u.assigns[index_of(root)];
+                if (auto const* const ref = e().at(assign->place).node.try_as<flat_local_ref>();
+                    ref != nullptr && is_known(e(), ref->local))
+                    ++u.places[index_of(ref->local)];
+            }
+            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { count_assigns(inner, u, depth + 1); });
+        }
+    }
+
+    void count_uses(ast::range_of<flat_stmt_id> range, uses& u) const
+    {
+        count_assigns(range, u, 0);
+        visit_live(
+            range,
+            [&](flat_expr_id id)
+            {
+                auto const& node = e().at(id).node;
+                if (auto const* const ref = node.try_as<flat_local_ref>(); ref != nullptr && is_known(e(), ref->local))
+                    ++u.refs[index_of(ref->local)];
+                else if (auto const* const member = node.try_as<flat_member>();
+                         member != nullptr && !member->is_swizzle() && is_known(e(), member->object))
+                    if (auto const* const object = e().at(member->object).node.try_as<flat_local_ref>();
+                        object != nullptr && is_known(e(), object->local))
+                        ++u.field_reads[index_of(object->local)];
+            },
+            0);
+    }
+
+    /// The fields of the struct `construct` builds, where `local` may be split into them: a struct whose every field
+    /// has the type of the value building it.
+    [[nodiscard]] cc::optional<ast::range_of<member_info>> fields_of(local_id local, flat_expr_id construct) const
+    {
+        auto const type = e().at(local).type;
+        auto const* const c = e().at(construct).node.try_as<flat_construct>();
+        if (c == nullptr || !is_valid(type) || index_of(type) >= m().types.size()
+            || m().at(type).kind != type_kind::structure || !is_known(e(), c->arguments))
+            return cc::nullopt;
+        auto const members = m().at(type).members;
+        auto const arguments = e().at(c->arguments);
+        if (m().at(members).size() != arguments.size())
+            return cc::nullopt;
+        for (auto i = isize(0); i < arguments.size(); ++i)
+            if (e().at(arguments[i]).type != m().at(members)[i].type)
+                return cc::nullopt;
+        return members;
+    }
+
+    /// Replaces the statement `at`, which builds `local` from `construct`, by one let per field.
+    void split_at(flat_stmt_id at, local_id local, flat_expr_id construct, ast::range_of<member_info> members)
+    {
+        auto arguments = cc::vector<flat_expr_id>();
+        arguments.push_back_range(e().at(e().at(construct).node.as<flat_construct>().arguments));
+        auto fields = cc::vector<local_id>();
+        auto lets = stmt_list();
+        for (auto i = isize(0); i < arguments.size(); ++i)
+        {
+            // a field built from a local nothing writes is that local
+            if (auto const* const ref = e().at(arguments[i]).node.try_as<flat_local_ref>();
+                ref != nullptr && is_fixed(ref->local))
+            {
+                fields.push_back(ref->local);
+                continue;
+            }
+            auto const name = cc::string(m().at(members)[i].name);
+            auto const type = m().at(members)[i].type;
+            auto const field = out.add_local(local_kind::let, name, type);
+            fields.push_back(field);
+            lets.push_back(out.let(field, arguments[i]));
+        }
+        split_fields[index_of(local)] = cc::move(fields);
+        expanded[index_of(at)] = cc::move(lets);
+        drops_any = true;
+    }
+
+    /// Splits what `range` holds that `u` allows, at any depth.
+    void split_in(ast::range_of<flat_stmt_id> range, uses const& u, int depth)
+    {
+        if (!is_known(e(), range) || depth > k_max_depth)
+            return;
+        auto list = stmt_list();
+        list.push_back_range(e().at(range));
+        auto const only_fields_read = [&](local_id local)
+        {
+            auto const at = index_of(local);
+            return !written_by_call[at] && u.field_reads[at] > 0 && u.refs[at] - u.places[at] == u.field_reads[at];
+        };
+        for (auto i = isize(0); i < list.size(); ++i)
+        {
+            if (!is_known(e(), list[i]) || is_dropped(list[i]))
+                continue;
+            auto const& s = e().at(list[i]);
+            for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { split_in(inner, u, depth + 1); });
+
+            // a let of a construction
+            if (auto const* const let = s.node.try_as<flat_let>(); let != nullptr)
+            {
+                if (is_known(e(), let->local) && is_known(e(), let->value) && !e().at(let->local).is_mut
+                    && u.assigns[index_of(let->local)] == 0 && only_fields_read(let->local))
+                    if (auto const members = fields_of(let->local, let->value); members.has_value())
+                        split_at(list[i], let->local, let->value, members.value());
+                continue;
+            }
+
+            // a var given its one value by a construction later in the same list, and named nowhere before that
+            auto const* const var = s.node.try_as<flat_var>();
+            if (var == nullptr || is_valid(var->value) || !is_known(e(), var->local)
+                || u.assigns[index_of(var->local)] != 1 || !only_fields_read(var->local))
+                continue;
+            for (auto k = i + 1; k < list.size(); ++k)
+            {
+                if (!is_known(e(), list[k]))
+                    break;
+                auto const* const assign = e().at(list[k]).node.try_as<flat_assign>();
+                auto const* const place
+                    = assign != nullptr ? e().at(assign->place).node.try_as<flat_local_ref>() : nullptr;
+                if (place != nullptr && place->local == var->local)
+                {
+                    if (auto const members = fields_of(var->local, assign->value); members.has_value())
+                    {
+                        split_at(list[k], var->local, assign->value, members.value());
+                        drop(list[i]);
+                    }
+                    break;
+                }
+                auto between = uses::create(e().locals.size());
+                count_uses(out.stmt_list(cc::span<flat_stmt_id const>(&list[k], 1)), between);
+                if (between.refs[index_of(var->local)] > 0 || between.assigns[index_of(var->local)] > 0)
+                    break;
+            }
+        }
+    }
+
+    /// L4: a struct a let or a block's result var holds, read only field by field, is one let per field where it was
+    /// built, in the same order; each field read reads its field's let, and L2 then drops the fields nothing reads.
+    /// Every value stays where it was computed, so nothing that changes between the construction and a read matters.
+    void split_constructions(stmt_list const& body)
+    {
+        auto const range = out.stmt_list(body);
+        auto const n = e().locals.size();
+        auto u = uses::create(n);
+        count_uses(range, u);
+        written_by_call = cc::vector<bool>::create_filled(n, false);
+        for (auto const& x : e().exprs)
+        {
+            auto const* const call = x.node.try_as<flat_call>();
+            if (call == nullptr || !is_known(e(), call->arguments))
+                continue;
+            auto const* const record = m().builtin_function(call->intrinsic);
+            if (!call->is_pure || record == nullptr || record->takes_element || record->is_atomic
+                || record->writes_through != builtins::written_argument::none)
+                for (auto const a : e().at(call->arguments))
+                    if (auto const root = root_local_of(e(), a); is_known(e(), root))
+                        written_by_call[index_of(root)] = true;
+        }
+        split_fields = cc::vector<cc::vector<local_id>>::create_defaulted(n);
+        expanded = cc::vector<stmt_list>::create_defaulted(e().stmts.size());
+        split_in(range, u, 0);
+
+        auto reads = cc::vector<flat_expr_id>();
+        visit_live(
+            range,
+            [&](flat_expr_id id)
+            {
+                auto const* const member = e().at(id).node.try_as<flat_member>();
+                if (member == nullptr || member->is_swizzle() || !is_known(e(), member->object))
+                    return;
+                if (auto const* const object = e().at(member->object).node.try_as<flat_local_ref>();
+                    object != nullptr && is_known(e(), object->local) && index_of(object->local) < split_fields.size()
+                    && !split_fields[index_of(object->local)].empty())
+                    reads.push_back(id);
+            },
+            0);
+        for (auto const id : reads)
+        {
+            auto const& member = e().at(id).node.as<flat_member>();
+            auto const local = e().at(member.object).node.as<flat_local_ref>().local;
+            auto const field = split_fields[index_of(local)][member.member];
+            out.e.exprs[index_of(id)].node = flat_local_ref{.local = field};
+        }
+    }
+
+    /// `has_effect`, but for a call of a builtin that only reads, which an unread value lets go.
+    [[nodiscard]] bool has_effect_here(flat_expr_id id, int depth) const
+    {
+        if (!is_known(e(), id) || depth > k_max_depth)
+            return true;
+        auto const& x = e().at(id);
+        if (x.node.is<flat_block>() || x.node.is<flat_invalid>())
+            return true;
+        if (auto const* const call = x.node.try_as<flat_call>(); call != nullptr && !call->is_pure)
+        {
+            auto const* const record = m().builtin_function(call->intrinsic);
+            if (record == nullptr || !record->reads_only)
+                return true;
+        }
+        auto result = false;
+        for_each_operand(e(), x, [&](flat_expr_id operand) { result = result || has_effect_here(operand, depth + 1); });
+        return result;
+    }
+
     /// L2: a let nothing reads goes, with what it computed, until every let left is read or has an effect.
     void drop_unread(stmt_list const& body)
     {
@@ -793,7 +1060,7 @@ struct let_simplifier
                     continue;
                 auto const& let = e().at(id).node.as<flat_let>();
                 if (!is_known(e(), let.local) || reads[index_of(let.local)] > 0 || written[index_of(let.local)]
-                    || has_effect(e(), let.value) || may_be_undefined(let.value, 0))
+                    || has_effect_here(let.value, 0) || may_be_undefined(let.value, 0))
                     continue;
                 drop(id);
                 count_reads_of(let.value, reads, -1, 0);
@@ -830,6 +1097,11 @@ struct let_simplifier
         {
             if (is_dropped(id))
                 continue;
+            if (is_valid(id) && index_of(id) < expanded.size() && !expanded[index_of(id)].empty())
+            {
+                result.push_back_range(expanded[index_of(id)]);
+                continue;
+            }
             if (!is_known(e(), id) || depth > k_max_depth)
             {
                 result.push_back(id);
@@ -885,7 +1157,17 @@ stmt_list sgl::check::impl::simplify_lets(flat_builder& out, stmt_list const& un
     s.scan_body(whole, 0);
     s.apply_replacements();
     s.drop_unread(body);
-    if (!s.drops_any)
-        return body;
-    return s.rebuilt(body, 0);
+    auto const simplified = s.drops_any ? s.rebuilt(body, 0) : body;
+
+    // L4 after L3, whose merge is what leaves a block's result a var, and L2 again over the fields it made.
+    auto splitter = let_simplifier{.out = out};
+    splitter.find_written();
+    splitter.split_constructions(simplified);
+    if (!splitter.drops_any)
+        return simplified;
+    auto const split = splitter.rebuilt(simplified, 0);
+    auto again = let_simplifier{.out = out};
+    again.find_written();
+    again.drop_unread(split);
+    return again.drops_any ? again.rebuilt(split, 0) : split;
 }

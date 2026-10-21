@@ -285,6 +285,9 @@ struct sgl::builtins::function_record
     /// Where its argument at this position is a constant, the local its first argument names takes it into its type
     /// (`type_record::hlsl_flagged`); -1 for none.
     i32 flags_argument = -1;
+    /// Impure only for what its value depends on, with no effect: a call of it whose value nothing reads may go.
+    /// It stays impure, since moving it would read state that may have changed in between.
+    bool reads_only = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

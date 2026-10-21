@@ -693,6 +693,7 @@ void sgl::builtins::register_raytracing(registry& r)
             .features = check::feature_set(check::feature::ray_query),
             .declares_only = op == query_op::begin,
             .flags_argument = op == query_op::trace ? 6 : -1,
+            .reads_only = !advances && op != query_op::begin,
         });
     };
     add("fun ray_query_begin() -> ray_query", nothing, query_op::begin, "/// A query nothing traced yet.");

@@ -298,7 +298,7 @@ for (var i: i32 = 0; i < 2; i++) {
 
 Inlining binds a callee's lets once per call, so a value the source names once is computed and named once per call.
 And it hands a callee its literal arguments, so what the callee computes from them is constant where the source was not: `0 / 4`, `(0 & 64) == 64`.
-Four rules run last, over the core tree, and are what keeps the text to one name per value and to no arithmetic on constants.
+Five rules run last, over the core tree, and are what keeps the text to one name per value and to no arithmetic on constants.
 A target's compiler folds the copies too: these rules are for the reader of the text, and for the footprint, which reads the same tree.
 
 * **LEGAL-58** (F1) A call of a pure builtin, a `not`, an `and` or an `or` whose operands are all literals, and whose value is an `int`, a `uint` or a `bool`, is that value's literal.
@@ -320,7 +320,14 @@ A target's compiler folds the copies too: these rules are for the reader of the 
   So `let lit = shade(...)` reads as one `var lit` its branches assign, rather than `shade_result` and a copy of it.
 * **LEGAL-57** (L2) A let nothing reads is gone, and so is a let only it read.
   Its value must have no effect, and must always have a value: an element, a buffer element, a load of `bytes` and a builtin that has none for some argument are kept (EVAL-84, EVAL-90).
+  A builtin that only reads is no effect here, such as a ray query's read of its candidate: it is kept from moving, never from going.
   So a read of a binding that only such a let made leaves the footprint with it.
+* **LEGAL-61** (L4) A struct that is read only field by field is its fields: one `let` per field where it was built, in the same order, and each field read reads its field's `let`.
+  It holds for an immutable `let` of a construction, and for a `var` E1 declared whose one assignment, a construction in the same list, comes before anything names it.
+  A field built from a local nothing writes is that local, and no `let` of its own.
+  Every value stays where it was computed, so the rule needs nothing to hold of what happens between the construction and a read.
+  It runs after L3, which is what makes a block's result such a `var`, and L2 runs again behind it.
+  So a candidate that an any-hit reads one field of computes that field alone, not the fourteen the struct holds.
 
 ```wgsl
 // before L1 and L2: both calls of `tinted(ctx, …)` bind `scale`, and nothing reads `dead`

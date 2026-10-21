@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/prelude/raytracing.sgl
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-21T19:22Z
+closed: 2026-10-21
+resolution: fixed
 ---
 
 # A hit or a candidate is built field by field where one field is read

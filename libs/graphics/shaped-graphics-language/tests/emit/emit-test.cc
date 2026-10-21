@@ -72,7 +72,9 @@ TEST("sgl emit - a name that only MSL reserves is renamed in MSL and nowhere els
                                    "    fract: float\n"
                                    "\n"
                                    "@pixel fun main_ps(p: pixel_input) -> frame:\n"
-                                   "    let kernel = device(0.5)\n"
+                                   // written after it is built, so it stays a struct rather than its fields (LEGAL-61)
+                                   "    let mut kernel = device(0.5)\n"
+                                   "    if p.normal.x > 0.0 => kernel.fract = 0.25\n"
                                    "    return {\n"
                                    "        color = float4(kernel.fract, kernel.fract, kernel.fract, 1.0)\n"
                                    "    }\n");
@@ -84,7 +86,7 @@ TEST("sgl emit - a name that only MSL reserves is renamed in MSL and nowhere els
 
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("struct device {\n    fract: f32,\n}\n"));
-    CHECK(wgsl.contains("    let kernel: device = device(0.5);\n"));
+    CHECK(wgsl.contains("    var kernel: device = device(0.5);\n"));
 }
 
 TEST("sgl emit - a reserved member is renamed, and its dx12 semantic still comes from the name as written")
@@ -397,7 +399,9 @@ TEST("sgl emit - a struct of the program is declared before its first use, and b
                                    "    power: float\n"
                                    "\n"
                                    "@pixel fun main_ps(p: pixel_input) -> frame:\n"
-                                   "    let sun = light(normalize p.normal, 0.5)\n"
+                                   // written after it is built, so it stays a struct rather than its fields (LEGAL-61)
+                                   "    let mut sun = light(normalize p.normal, 0.5)\n"
+                                   "    if p.normal.x > 0.0 => sun.power = 1.0\n"
                                    "    return {\n"
                                    "        color = float4(..sun.towards, sun.power)\n"
                                    "    }\n");
@@ -413,10 +417,31 @@ TEST("sgl emit - a struct of the program is declared before its first use, and b
 
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("struct light {\n    towards: vec3f,\n    power: f32,\n}\n"));
-    CHECK(wgsl.contains("    let sun: light = light(\n"
+    CHECK(wgsl.contains("    var sun: light = light(\n"
                         "        normalize(p.normal),\n"
                         "        0.5\n"
                         "    );\n"));
+}
+
+TEST("sgl emit - a struct read only field by field is its fields")
+{
+    // LEGAL-61: no struct is built, and each field is computed where it was
+    auto const source = with_edges("struct light:\n"
+                                   "    towards: vec3\n"
+                                   "    power: float\n"
+                                   "\n"
+                                   "@pixel fun main_ps(p: pixel_input) -> frame:\n"
+                                   "    let sun = light(normalize p.normal, 0.5)\n"
+                                   "    return {\n"
+                                   "        color = float4(..sun.towards, sun.power)\n"
+                                   "    }\n");
+    for (auto const t : {target::hlsl_dx12, target::wgsl, target::msl})
+    {
+        auto const text = text_of(source, t);
+        CHECK(!text.contains("light sun"));
+        CHECK(!text.contains("sun: light"));
+        CHECK(text.contains("normalize(p.normal)"));
+    }
 }
 
 TEST("sgl emit - a vertex member whose name ends in a digit gets a semantic that does not")

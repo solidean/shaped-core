@@ -141,12 +141,15 @@ constexpr auto quiet_void_values = cc::string_view("struct tagged:\n"
                                                    "    let doubled = x * 2.0\n"
                                                    "fun unit(x: float) -> void => note x\n"
                                                    "fun keep(t: tagged, extra: void) -> float => t.v\n");
-constexpr auto void_values_body = cc::string_view("let u = unit p.a\n"
-                                                  "let w: void = u\n"
-                                                  "let mut y = p.b\n"
-                                                  "if w == void => y += 1.0\n"
-                                                  "let t = tagged(unit(p.b), p.a + y)\n"
-                                                  "let x = keep(t, t.tag)\n");
+constexpr auto void_values_body
+    = cc::string_view("let u = unit p.a\n"
+                      "let w: void = u\n"
+                      "let mut y = p.b\n"
+                      "if w == void => y += 1.0\n"
+                      "let mut t = tagged(unit(p.b), p.a + y)\n"
+                      // written after it is built, so it stays a struct rather than its fields (LEGAL-61)
+                      "if p.a > 2.0 => t.v = 0.5\n"
+                      "let x = keep(t, t.tag)\n");
 
 /// `bool` is a builtin enum: a `case` over one names its cases, and `bool.false` is a value like `mode.low`.
 constexpr auto bool_cases = cc::string_view("fun pick(b: bool) -> float:\n"
@@ -650,7 +653,7 @@ TEST("sgl source - void is written nowhere: no local, no field and no argument h
         CHECK(!text.contains(".tag"));
     }
     CHECK(function_text(quiet_void_values, void_values_body, sgl::emit::target::wgsl)
-              .contains("let t: tagged = tagged(p.a + y);\n"));
+              .contains("var t: tagged = tagged(p.a + y);\n"));
 }
 
 TEST("sgl source - a case of bool is the target's bool, never the int of an enum")

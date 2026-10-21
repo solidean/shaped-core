@@ -104,6 +104,31 @@ binding frame:
     CHECK(chosen.contains("CandidateType"));
 }
 
+TEST("sgl emit - an any hit that reads one field of its candidate reads that field alone")
+{
+    auto const source = cc::string_view(R"(require ray_query
+
+binding frame:
+    world: acceleration_structure[.triangles]
+    output: mut buffer[float]
+
+fun cutout(c: triangle_candidate) -> hit_decision:
+    if c.primitive_index == 1 => return hit_decision.ignore
+    return hit_decision.accept
+
+@compute(1) fun main(@thread_id id: int3){frame}:
+    let h = frame.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), cutout)
+    frame.output[id.x] = h.t
+)");
+    // LEGAL-61 splits the candidate, and L2 drops every read of the query no field it kept needs
+    auto const hlsl = text_of_entry(source, "main", target::hlsl_dx12);
+    CHECK(hlsl.contains("const int primitive_index = int(q.CandidatePrimitiveIndex());\n"));
+    CHECK(!hlsl.contains("CandidateObjectToWorld3x4"));
+    CHECK(!hlsl.contains("triangle_candidate c;"));
+    auto const msl = text_of_entry(source, "main", target::msl);
+    CHECK(!msl.contains("get_candidate_object_to_world_transform"));
+}
+
 TEST("sgl emit - a bitwise operand under another bitwise operator is parenthesized")
 {
     // DXC refuses `flags & 8 | 512` under `-Wbitwise-op-parentheses`, and WGSL takes no such operand at all
