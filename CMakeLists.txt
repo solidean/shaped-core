@@ -106,6 +106,12 @@ option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-c
 # Only the test binary sees it, so unlike the checks above it is no ODR hazard; the debug-nopch presets turn it on.
 option(SC_SIMD_EXHAUSTIVE_TESTS "Test clean-simd at every lane width, not one per element type" OFF)
 
+# Shaders come from the binary alone: no source directory is mounted over a package's embedded copy, and nothing hot-reloads.
+# An executable that calls sc_embed_shader_bundle serves what its recorded bundle holds without compiling it, and compiles
+# the rest from the embedded sources at run time.
+# A whole-build switch, set by the frozen-* presets; libs/graphics/shaped-shader-library/docs/frozen-shaders.md is the design.
+option(SC_FROZEN_SHADERS "Serve shaders from the binary alone: embedded sources and recorded bytecode, no disk, no reload" OFF)
+
 # Keep a frame pointer in every frame, so cc::capture_stack can walk the chain by chasing it — a few nanoseconds a
 # frame, against a microsecond for the table-driven unwind that is the only alternative.
 #

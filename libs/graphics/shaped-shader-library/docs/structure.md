@@ -162,10 +162,12 @@ The shape the seam is built for, and what is still `[planned]`:
 
 **Today [done]:** source embedding plus the baked source dir, mounted as an overlay — see [shaders.md](../../shaped-graphics/docs/shaders.md) for what that gives a consumer.
 
-**[planned] — precompiled bytecode.** A shipped binary still compiles at startup, so DXC ships with it.
-Building the bytecode at build time and embedding *that* would remove the compiler from a shipped build entirely.
-The natural shape: a build-time compile step whose output plugs into `ssc::dxc::shader_cache` as a `cc::key_value_provider` tier, with the embedded source staying as the fallback.
-DXC now runs on Windows and Linux both, so a cross-platform build can precompile SPIR-V anywhere and DXIL where the Windows SDK is — which is the same split a runtime compile already has.
+**[done] — recorded bytecode, in frozen builds.** `SC_FROZEN_SHADERS` mounts no source directory and reloads nothing.
+An executable carries a bundle a recording run (`SC_SHADER_RECORD`) wrote, keyed in front of every compiler, so a hit skips SGL's front end and DXC both.
+Anything the bundle misses compiles from the embedded sources, which is why DXC still ships — [frozen-shaders](frozen-shaders.md).
+
+**[planned] — no compiler in a shipped build.** That needs a bundle known to be complete, so a miss can be an error rather than a compile.
+For packages that is enumerable at build time; for run-time generated sources such as sv's material permutations it needs the permutation space stated, not reached by example.
 
 ## Reload
 

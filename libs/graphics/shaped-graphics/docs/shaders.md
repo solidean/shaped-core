@@ -151,11 +151,15 @@ A dev machine has the sources, so that mount answers and gets watched.
 A shipped binary does not, so the mount finds nothing and every read falls through to the embedded copy.
 Same code, same build, and nothing ever asks "am I installed".
 
-Shipping still compiles at startup, so DXC ships with the binary today.
+A shipped binary compiles at startup unless it is frozen, so DXC ships with it.
 On Windows with DXC, an **executable** that declares a package also gets `dxcompiler.dll` and `dxil.dll` staged beside it at build time.
 The import is load-time, so a binary that reaches DXC will not start without them.
 Declaring the package on a *library* target stages nothing — the executable that links it has to copy them itself.
-Precompiled bytecode — baked at build time and shipped instead of source — is [planned](../../shaped-shader-library/docs/structure.md).
+
+**A frozen build (`SC_FROZEN_SHADERS`) is the mode flag after all, for a program that ships.**
+It mounts no source directory and reloads nothing.
+It also serves what a recording run of the same program compiled from bytecode embedded in the executable, compiling only the rest.
+[slib's frozen-shaders](../../shaped-shader-library/docs/frozen-shaders.md) is the mechanism.
 
 ## Where shader sources come from
 

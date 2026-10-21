@@ -113,7 +113,7 @@ struct fly_camera
                 auto const limit = tg::angle_f::make_from_radians(1.5f); // keep just shy of straight up/down
                 pitch = pitch < -limit ? -limit : (pitch > limit ? limit : pitch);
             },
-            [](sr::mouse_wheel_event const&) {}, [](sr::text_event const&) {});
+            [](sr::mouse_wheel_event const&) {}, [](sr::text_event const&) {}, [](sr::file_drop_event const&) {});
     }
 
     /// Returns whether the camera moved this step, which is what restarts the accumulation.
