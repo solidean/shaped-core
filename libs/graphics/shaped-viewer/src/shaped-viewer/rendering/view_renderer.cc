@@ -536,7 +536,7 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     return h;
 }
 
-/// The random seed of the frame `slot` traces next, once `restarts` counts a frame that restarts the mean.
+/// The random seed of the frame `slot` traces next.
 ///
 /// Each restart draws a sequence of its own, so moving frames, every one a restart, do not all draw one.
 /// The restart and the frame within its run are mixed rather than spaced apart, since a run counts frames up to
@@ -546,6 +546,21 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
 {
     auto const seed = u32(cc::make_hash(slot.restarts, slot.accum_frame));
     return seed != 0 ? seed : 1;
+}
+
+/// Restarts `slot`'s mean for an image whose hash is now `hash`, moving on to the next random sequence where the last one drew samples.
+/// Not where it drew none, as after frames that declined to trace, nor where only the last frame traced through
+/// something still loading and `hash` is unchanged.
+/// A compile lasting seconds restarts thousands of times, and counting each would leave the image a converged mean lands on to the compile's timing.
+/// Called before `reset_hash` takes `hash`.
+void restart_for_image(impl::temporal_slot& slot, u64 hash)
+{
+    if (slot.drew_since_restart && slot.reset_hash != cc::combine_hash(hash, u64(1)))
+    {
+        ++slot.restarts;
+        slot.drew_since_restart = false;
+    }
+    impl::restart_accumulation(slot);
 }
 
 /// Bytes a texture of `size` in `format` costs, for the cache's budget.
@@ -637,6 +652,7 @@ constexpr u32 frame_count_cap = u32(1) << 30;
 /// A megakernel layer's frames therefore hold `samples_per_pixel` times however many it took to reach its target, the first that did included.
 void count_traced_frame(impl::temporal_slot& slot, render_settings const& settings)
 {
+    slot.drew_since_restart = true;
     slot.accum_frame = next_frame_count(slot);
     if (settings.mode == render_mode::megakernel)
         slot.samples = slot.accum_frame * megakernel_samples_per_frame(settings);
@@ -1228,7 +1244,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // The tracer publishes its own hash as this slot's reset rule: it covers the bytes actually uploaded, so it
     // cannot drift away from what the shader reads the way a hand-declared one could.
     if (slot->reset_hash != hash)
-        impl::restart_accumulation(*slot);
+        restart_for_image(*slot, hash);
     slot->reset_hash = hash;
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
@@ -1365,14 +1381,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
                                 : tr.resolution;
     auto const scaled = input_extent != tr.resolution;
 
-    // Only a full-size frame restarts the mean, so only it counts a restart; a scaled one seeds from its own count below.
-    // After the target's restart above, so a restart counted there draws a sequence of its own.
+    // A scaled frame seeds from its own count below.
     if (!scaled)
-    {
-        if (slot->accum_frame == 0)
-            ++slot->restarts;
         fc.rng_seed = seed_of(*slot);
-    }
     // A scaled frame is an image of its own rather than a sample of the mean, so it traces whatever the mean holds.
     auto const traces = samples || scaled;
 
@@ -1850,7 +1861,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // A fresh target holds no history, and a different image must not be averaged into the old one.
     if (acc.resized || slot.reset_hash != hash)
-        impl::restart_accumulation(slot);
+        restart_for_image(slot, hash);
     slot.reset_hash = hash;
 
     // As `trace`: a mean whose pixels all hold the cap is the image, and a frame there traces nothing.
@@ -1860,8 +1871,6 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".
     fc.accum_frame = slot.accum_frame;
-    if (slot.accum_frame == 0)
-        ++slot.restarts;
     fc.rng_seed = seed_of(slot);
 
     auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(

@@ -5,6 +5,8 @@ refs:
   - test: sv - a per-triangle lamp of two different triangles lights as two constant ones do
   - file: libs/graphics/shaped-viewer/tests/emitter-trace-test.cc
   - symbol: sv::seed_of
+closed: 2026-10-21
+resolution: fixed
 ---
 
 # A per-triangle lamp of two different triangles sometimes lights its box about 10% too dark
@@ -50,3 +52,9 @@ Per-frame logging masks the flake, which is what made it look timing-dependent: 
 Reverting `seed_of` is not the fix.
 4d142a489 seeded restarts apart because every moving frame, each a restart, otherwise drew the same sequence.
 The fix belongs either in the test, so that its result does not depend on the seed set it draws, or in what advances the restart count.
+
+## Resolution
+
+`restarts` now advances only where a restart for a different image ends a run that drew samples (`restart_for_image`).
+Frames that declined to trace and frames restarted only because their last frame traced through something loading no longer count.
+Every render of `emitter-trace-test.cc` then ends on 0 to 4 restarts rather than thousands, and 40 debug runs in a row passed.

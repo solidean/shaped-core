@@ -105,8 +105,12 @@ struct temporal_slot
     /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
     u32 scaled_frame = 0;
 
-    /// How many full-size frames of this accumulation slot's layer restarted its mean, which keeps each restart's random sequence apart.
+    /// How many runs of this accumulation slot's mean drew samples before a different image restarted it, which keeps each run's random sequence apart.
+    /// A run ended only because its last frame traced through something still loading is not counted, so the run after it repeats its sequence.
     u32 restarts = 0;
+
+    /// Whether a full-size frame traced through the sequence `restarts` picks, so the next restart for a different image moves on from it.
+    bool drew_since_restart = false;
 
     /// When the image last changed, on the steady clock; a move lasts `render_settings::motion_hold_ms` past it.
     f64 last_change_seconds = -1e30;
