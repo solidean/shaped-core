@@ -171,6 +171,8 @@ include(PGO)          # SC_PGO_*     — IR-based profile-guided optimization (c
 include(Emscripten)   # EMSCRIPTEN   — WASM feature + exception-mode knobs
 include(Simd)         # SC_X64_LEVEL — the x86-64 feature level every function may assume
 include(FloatingPoint) # no floating-point contraction, on every compiler
+include(LibcxxFloatH)  # Homebrew LLVM < 23 on Apple: libc++'s <float.h> against the macOS 27 SDK
+include(MacosSdk)      # macOS: the SDK on the command line, so it moves only with a reconfigure
 
 # Per-target precompiled headers.
 # Each library declares the tiers it owns with sc_declare_pch_tier() and applies them with sc_target_pch();

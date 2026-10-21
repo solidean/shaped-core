@@ -36,7 +36,7 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | Linux | x64 | Clang | 1 | CI — the deep Debug / RelWithDebInfo / Release matrix |
 | Linux | x64 | GCC 14 (13+) | 1 | CI |
 | Linux | arm64 | Clang | 1 | CI — `ubuntu-26.04-arm`, native arm64 |
-| macOS | arm64 | Homebrew LLVM (clang) | 1 | CI |
+| macOS | arm64 | Homebrew LLVM (clang) | 1 | CI — macOS 26.0 and later, the [deployment target](requirements.md#macos-deployment-target-and-sdk) the presets pin |
 | WebAssembly | wasm32 | Emscripten (Clang) | 1 | CI — single-threaded, no WebGPU; runs under Node |
 | iOS | arm64 | Apple Clang | 2 | CI — build-only (cross-compiled, not test-run) |
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
