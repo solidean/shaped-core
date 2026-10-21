@@ -161,6 +161,9 @@ void add_log_declaration(log_declaration declaration);
 /// Flushes the recorder once first.
 /// The outermost run also claims the unattributed records, and drops whatever no pass claimed.
 void judge_logs(nx::test_schedule_execution& result, bool outermost);
+
+/// Where a check, test or alias is, for a report: `file:line` at SC_SOURCE_SITES=FULL, cc::describe_site below it.
+[[nodiscard]] cc::string site_text(cc::source_location const& location);
 } // namespace nx::impl
 
 struct nx::test_schedule_execution

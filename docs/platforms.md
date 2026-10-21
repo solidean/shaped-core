@@ -36,7 +36,7 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | Linux | x64 | Clang | 1 | CI — the deep Debug / RelWithDebInfo / Release matrix |
 | Linux | x64 | GCC 14 (13+) | 1 | CI |
 | Linux | arm64 | Clang | 1 | CI — `ubuntu-26.04-arm`, native arm64 |
-| macOS | arm64 | Homebrew LLVM (clang) | 1 | CI |
+| macOS | arm64 | Homebrew LLVM (clang) | 1 | CI — macOS 26.0 and later, the [deployment target](requirements.md#macos-deployment-target-and-sdk) the presets pin |
 | WebAssembly | wasm32 | Emscripten (Clang) | 1 | CI — single-threaded, no WebGPU; runs under Node |
 | iOS | arm64 | Apple Clang | 2 | CI — build-only (cross-compiled, not test-run) |
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
@@ -126,6 +126,31 @@ There is no table-driven fallback off Windows, so the walk chases a chain that i
 Windows is unaffected either way, since it never used the chain.
 So `OFF` means "this build does not capture stacks on clang or GCC" — which is a real choice for a shipping target that wants the register back, and never a free one.
 Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to nothing on arm64, where macOS mandates the chain anyway.
+
+## Source sites (`SC_SOURCE_SITES`)
+
+`SC_SOURCE_SITES` picks what a binary says about its own source at each `cc::source_location` → clean-core's `CC_SOURCE_SITES`:
+
+| Level | Kept at a site | For |
+|---|---|---|
+| `FULL` (default) | file, line and function, as strings, as `std::source_location` keeps them | development |
+| `OPAQUE` | the site's code address, nothing else | a shipped binary that should name none of its source, yet whose reports stay resolvable |
+| `OFF` | nothing | a binary that should say nothing at all |
+
+The sites are every capture of `cc::any_error`, `cc::error`, `async_fail`, the `CC_ASSERT` family, `cc::rec` and nexus.
+Below `FULL`, `file_name()` and `function_name()` are `""` and `line()` and `column()` are 0, so code reading them still compiles.
+`CC_SITE_TEXT(text)` is `text` at `FULL` and `""` below it: always-on checks lose their condition text, and an unnamed `cc::rec` scope its default name.
+`cc::describe_site` prints a site at every level, `module+0xoffset` at `OPAQUE`.
+
+**An `OPAQUE` site resolves through the build's debug info**, offline: the PDB on Windows, the DWARF or split debug file elsewhere.
+`llvm-symbolizer --inlining --obj=<module>` on the module's address plus the offset names it, inlined sites included.
+The innermost frames are `source_location.hh`'s own, since the address is taken by an instruction inlined into the site; the first frame outside it is the site.
+On clang and GCC that instruction is one `lea` (`adr` on arm64), the cost of `std::source_location`'s capture; cl.exe has no inline assembly there, so it is a call.
+A site evaluated in a constant expression has no code address, so it is unnamed below `FULL`: `cc::rec`'s descriptors are the case.
+wasm has no address to take either, so there `OPAQUE` keeps nothing, as `OFF` does.
+
+A whole-build switch, never per-target: `cc::source_location`'s layout changes with it.
+The `singlethreaded-*` presets build at `OPAQUE`, so `check` exercises a level below `FULL`; a test reading what only `FULL` keeps skips below it.
 
 ## x86-64 feature level (`SC_X64_LEVEL`)
 

@@ -299,6 +299,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
   OFF points it at `cc::system_memory_resource` and links no mimalloc, which is what lets a sanitizer see through our allocations — so the `sanitize-*` presets set it OFF.
   Independent of `SANITIZE`, and no API or layout changes with it; only in-place resize does, since the system resource always declines.
   See [docs/platforms.md](docs/platforms.md#default-allocator-sc_mimalloc).
+* `SC_SOURCE_SITES` (default `FULL`; `OPAQUE`, `OFF`) is what a `cc::source_location` keeps → clean-core's `CC_SOURCE_SITES`: strings, the site's code address only, or nothing.
+  `OPAQUE` is for shipping: no source file or function in the binary, every site resolvable through the build's debug info; the `singlethreaded-*` presets build at it.
+  Whole-build, since it changes `cc::source_location`'s layout; see [docs/platforms.md](docs/platforms.md#source-sites-sc_source_sites).
 * `SC_CHECK_WIDE_ARITH` (default OFF) checks typed-geometry's `fixed_int` claims — a result width, a shift amount — at runtime → `TG_CHECK_WIDE_ARITH`.
   Off by default because they sit in predicate hot loops; the `debug-nopch` presets turn it on, so `check` exercises it.
   See [docs/platforms.md](docs/platforms.md#wide-arithmetic-checks-sc_check_wide_arith).

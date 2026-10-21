@@ -36,6 +36,7 @@ add_library(clean-core
     src/clean-core/platform/stack_capture.cc
     src/clean-core/platform/stacktrace.cc
     src/clean-core/platform/module_table.cc
+    src/clean-core/platform/source_location.cc
     src/clean-core/platform/symbolize.cc
     src/clean-core/platform/impl/text_file.cc
     src/clean-core/platform/impl/wasm_frames.cc
@@ -392,10 +393,15 @@ if(NOT DEFINED SC_THREADS)
     set(SC_THREADS ON)
 endif()
 
+# SC_SOURCE_SITES is the root CMakeLists' option, defaulted the same way for a standalone consumer.
+if(NOT DEFINED SC_SOURCE_SITES)
+    set(SC_SOURCE_SITES FULL)
+endif()
+
 # Define build configuration macros. These are the inputs macros.hh derives from; it owns the outputs
 # (CC_ASSERT_ENABLED, CC_HAS_THREADS). PUBLIC because they must agree across the whole build: consumers
 # branch on them, and CC_SINGLE_THREADED additionally changes struct layout (node_allocation's slab header),
-# so a target compiled without it could not share objects with one compiled with it.
+# so a target compiled without it could not share objects with one compiled with it; so does SC_SOURCE_SITES, cc::source_location's.
 target_compile_definitions(clean-core
     PUBLIC
     $<$<CONFIG:Debug>:CC_DEBUG>
@@ -404,6 +410,8 @@ target_compile_definitions(clean-core
     $<$<NOT:$<BOOL:${SC_THREADS}>>:CC_SINGLE_THREADED>
     $<$<NOT:$<BOOL:${SC_MIMALLOC}>>:CC_NO_MIMALLOC>
     $<$<BOOL:${SC_FRAME_POINTERS}>:CC_FRAME_POINTERS>
+    $<$<STREQUAL:${SC_SOURCE_SITES},OPAQUE>:CC_SOURCE_SITES_OPAQUE>
+    $<$<STREQUAL:${SC_SOURCE_SITES},OFF>:CC_SOURCE_SITES_OFF>
 )
 
 # Detect and link the correct library for std::stacktrace support.
@@ -557,6 +565,7 @@ if(SC_BUILD_TESTS)
         tests/platform/wasm-frames-test.cc
         tests/platform/stacktrace-test.cc
         tests/platform/symbolize-test.cc
+        tests/platform/source_location-test.cc
         tests/platform/system_info-test.cc
         tests/platform/cpu_features-test.cc
         tests/platform/system_identifier-test.cc
