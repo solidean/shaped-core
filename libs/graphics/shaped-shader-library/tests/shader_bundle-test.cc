@@ -89,3 +89,56 @@ TEST("slib - a bundle key ignores carriage returns and the order modules are lis
     CHECK(key("use a\nbody\n", {a, b}) != key("use a\nother\n", {a, b}));
     CHECK(key("use a\nbody\n", {a, b}) != key("use a\nbody\n", {a}));
 }
+
+TEST("slib - a bundled SGL shader skips the front end and the compiler both", exclusive("slib-shader-library"))
+{
+    // No compiler is registered, and the text is not SGL: a hit reaches neither.
+    slib::shader_library lib;
+
+    auto const source = cc::string_view("not SGL, so only a bundle can serve it");
+    auto const key = slib::impl::bundle_key(slib::shader_language::sgl, sg::shader_format::dxil,
+                                            sg::shader_stage::compute, "main", {}, {}, source, {});
+    auto* const bytes = new cc::vector<byte>(slib::impl::make_bundle(key, precompiled("sgl from the bundle")));
+    slib::register_shader_bundle(*bytes);
+
+    auto const node = lib.compile_source(source, sg::shader_stage::compute, "main", sg::shader_format::dxil,
+                                         {.language = slib::shader_language::sgl});
+    CHECK(fake_compiler::source_of(await(node)) == "sgl from the bundle");
+}
+
+TEST("slib - a key a bundle holds twice serves its first record", exclusive("slib-shader-library"))
+{
+    auto const key = slib::impl::bundle_key(slib::shader_language::hlsl, sg::shader_format::dxil,
+                                            sg::shader_stage::compute, "main", {}, {}, "a key recorded twice", {});
+
+    // A recording appends every compile it sees, so the second record arrives after the header of the first.
+    auto* const bytes = new cc::vector<byte>(slib::impl::make_bundle(key, precompiled("first")));
+    auto const second = slib::impl::make_bundle(key, precompiled("second"));
+    bytes->push_back_range(cc::span<byte const>(second).subspan(12)); // past the header
+    slib::register_shader_bundle(*bytes);
+
+    auto const found = slib::impl::find_bundled_shader(key);
+    REQUIRE(found.has_value());
+    CHECK(fake_compiler::source_of(found.value()) == "first");
+}
+
+TEST("slib - a bundle cut short serves the records before the cut", exclusive("slib-shader-library"))
+{
+    nx::expect_error("*does not parse*", nx::exactly(1));
+
+    auto const whole = slib::impl::bundle_key(slib::shader_language::hlsl, sg::shader_format::dxil,
+                                              sg::shader_stage::compute, "main", {}, {}, "a record before the cut", {});
+    auto const cut = slib::impl::bundle_key(slib::shader_language::hlsl, sg::shader_format::dxil,
+                                            sg::shader_stage::compute, "main", {}, {}, "a record the cut ends", {});
+
+    // What a recording leaves when its run dies mid-write: one record whole, then part of the next.
+    auto* const bytes = new cc::vector<byte>(slib::impl::make_bundle(whole, precompiled("whole")));
+    auto const partial = slib::impl::make_bundle(cut, precompiled("partial"));
+    bytes->push_back_range(cc::span<byte const>(partial).subspan({.offset = 12, .size = partial.size() - 12 - 1}));
+    slib::register_shader_bundle(*bytes);
+
+    auto const found = slib::impl::find_bundled_shader(whole);
+    REQUIRE(found.has_value());
+    CHECK(fake_compiler::source_of(found.value()) == "whole");
+    CHECK(!slib::impl::find_bundled_shader(cut).has_value());
+}

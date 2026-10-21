@@ -5,7 +5,7 @@ It is what a program is shipped as: `uv run dev.py install shaped-view` installs
 
 ```text
 SC_FROZEN_SHADERS=ON        no source directory mounted, no reload, sources from the embedded copy alone
-SC_SHADER_RECORD=<file>     a run writes every shader it is served or compiles into a bundle
+SC_SHADER_RECORD=<file>     a run compiles every shader, serving none from a bundle, and writes each into one
 sc_embed_shader_bundle      an executable carries the bundle; a request it holds compiles nothing
 ```
 
@@ -26,7 +26,8 @@ The switch is whole-build, set by the `frozen-*` presets, because it changes wha
 
 A bundle files each shader under a hash of everything that decides it, taken in `shader_library::_compile_text` before any compiler runs.
 That covers the language, format, stage, entry point, options and host namespace, plus the source text.
-It also holds `sgl::compiler_fingerprint()` and slib's own source fingerprint, so a bundle recorded at another commit simply misses.
+It also holds `sgl::compiler_fingerprint()` and slib's own source fingerprint, so an edit to SGL or slib misses.
+It holds nothing of DXC or `ssc::dxc`, so a bundle is only as current as the recording it came from — which is why a recording never serves from one.
 
 - **An SGL source is keyed before SGL's front end**, over its text and every module file it may `use`.
   A hit therefore skips the front end and DXC both.
@@ -40,11 +41,12 @@ A shader generated at run time — an sv material permutation, a hit group — g
 ## Recording
 
 `SC_SHADER_RECORD=<file>` makes a run write every shader it obtains, flushed record by record.
-A shader the embedded bundle served is written too.
-So a frozen build can record itself: entries it still uses carry over, and ones nothing asks for any more drop out.
+Such a run serves nothing from an embedded bundle and compiles every shader, so a frozen build can record itself.
+Its recording is then what this build compiles, never an entry carried forward from an older one under a key that did not change.
 
 The format is a header (`slibbndl`, then a version) and records of key, size and `sg::impl::encode_compiled_shader` bytes, all little-endian.
 A record that does not decode is a miss, since the codec refuses whatever it doubts.
+A bundle cut short serves the records before the cut and logs one error.
 
 ## Coverage
 

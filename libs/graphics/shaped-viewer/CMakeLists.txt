@@ -218,8 +218,14 @@ if(SC_BUILD_TOOLS AND WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-d
     target_link_options(shaped-view PRIVATE "LINKER:/ENTRY:mainCRTStartup")
 
     sc_stage_runtime_dlls(shaped-view DLLS "$<TARGET_RUNTIME_DLLS:shaped-view>")
+    # dxil.dll is loaded by dxcompiler rather than linked, so $<TARGET_RUNTIME_DLLS> never lists it.
+    sc_stage_runtime_dlls(shaped-view TAG shaped-view-dxc DLLS ${DXC_RUNTIME_DLLS})
 
-    # What a frozen build serves without compiling; the install records it from an unfrozen run of the same commit.
+    # Exactly what the install copies out of the output directory, which every other binary shares.
+    file(GENERATE OUTPUT "$<TARGET_FILE_DIR:shaped-view>/shaped-view.runtime-dlls"
+        CONTENT "$<JOIN:$<TARGET_RUNTIME_DLLS:shaped-view>;${DXC_RUNTIME_DLLS},\n>\n")
+
+    # What a frozen build serves without compiling; the install records it from a run of the frozen binary itself.
     sc_embed_shader_bundle(TARGET shaped-view)
 endif()
 

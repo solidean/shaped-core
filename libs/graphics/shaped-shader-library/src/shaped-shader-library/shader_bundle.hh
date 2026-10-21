@@ -14,6 +14,7 @@ namespace slib
 {
 /// Adds `bytes`, a bundle a recording run wrote, to what every shader_library serves without compiling.
 /// The bytes must outlive the process, which embedded data does: the code `sc_embed_shader_bundle` generates calls this before main.
-/// A bundle that does not parse is logged once and served from not at all.
+/// A bundle that does not parse to its end is logged once, and serves the records before the damage.
+/// A run that records serves from no bundle, so what it writes is what this build compiles.
 void register_shader_bundle(cc::span<byte const> bytes);
 } // namespace slib

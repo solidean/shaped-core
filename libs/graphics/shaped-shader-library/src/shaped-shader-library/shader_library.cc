@@ -522,7 +522,9 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         key = impl::bundle_key(language, format, stage, entry_point, options, host_namespace, source, module_files);
         if (auto bundled = impl::find_bundled_shader(key.value()); bundled.has_value())
         {
-            impl::record_shader(key.value(), bundled.value());
+            // The front end that says which modules a source uses never ran, so the hit depends on all of them, as its key does.
+            for (auto i = isize(0); i < modules.paths.size(); ++i)
+                outcome.dependencies.push_back({.path = modules.paths[i], .revision = modules.revisions[i]});
             outcome.shader = cc::make_async_from_value(cc::move(bundled.value()));
             return;
         }
@@ -661,7 +663,6 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         key = impl::bundle_key(language, format, stage, desc.entry_point, options, host_namespace, desc.source, {});
         if (auto bundled = impl::find_bundled_shader(key.value()); bundled.has_value())
         {
-            impl::record_shader(key.value(), bundled.value());
             outcome.shader = cc::make_async_from_value(cc::move(bundled.value()));
             return;
         }

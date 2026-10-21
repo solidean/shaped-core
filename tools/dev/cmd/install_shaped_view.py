@@ -10,8 +10,8 @@ A shader no recording reached still compiles at run time, from the sources the b
 libs/graphics/shaped-shader-library/docs/frozen-shaders.md has the mechanism.
 
 The association is per user, under HKCU\\Software\\Classes, so it needs no admin rights.
-Windows lets no program make itself the default for an extension: the registration makes shaped-view a candidate,
-and choosing it once under "Open with", with "Always" ticked, is the step only the user can take.
+It sets the per-user default, remembering the one it replaced so `--uninstall` restores it.
+An "Always" choice made in Explorer outranks that default, and only the user can change one, under "Open with".
 """
 
 from __future__ import annotations
@@ -41,6 +41,9 @@ _CORPUS = Path("libs/graphics/shaped-viewer/tools/shaped-view/corpus")
 _PROG_ID = "ShapedCode.ShapedView"
 # What sv::asset_loader reads; asset_format_of_uri is the authority.
 _EXTENSIONS = (".obj", ".stl", ".gltf", ".glb")
+_CLASSES = r"Software\Classes"
+# Where _register keeps each extension's default from before the install, under the ProgID that uninstall deletes.
+_PREVIOUS_DEFAULTS = f"{_PROG_ID}\\PreviousDefaults"
 
 
 def install_dir() -> Path:
@@ -84,6 +87,8 @@ def _record_bundle(artifact: Path, preset: dev.Preset, ctx: Context) -> bool:
     bundle = preset.build_dir / "shader-bundles" / f"{_TARGET}.slibbundle"
     staged = bundle.with_name(bundle.name + ".new")
     bundle.parent.mkdir(parents=True, exist_ok=True)
+    # A recording is created on its first shader, so a leftover from a failed run would pass for this run's.
+    staged.unlink(missing_ok=True)
     files = sorted(str(p) for p in (ctx.root / _CORPUS).iterdir() if p.suffix.lower() in _EXTENSIONS)
     env = dict(os.environ,
                SC_SHADER_RECORD=str(staged),
@@ -91,15 +96,51 @@ def _record_bundle(artifact: Path, preset: dev.Preset, ctx: Context) -> bool:
                SC_CAPTURE_OUT=str(bundle.parent / "recording.png"),
                SC_CAPTURE_SIZE="640x360")
     print(console.dim(f"  recording the shaders {len(files)} corpus files need"), flush=True)
-    result = subprocess.run([str(artifact), *files], env=env, capture_output=True, text=True, timeout=900)
-    if result.returncode != 0 or not staged.is_file():
-        print(f"  {console.yellow('warning')}: the recording run failed, so the copy compiles every shader at run time:",
+    try:
+        result = subprocess.run([str(artifact), *files], env=env, capture_output=True, text=True, timeout=900)
+        output = result.stdout + result.stderr
+        ok = result.returncode == 0 and staged.is_file()
+    except subprocess.TimeoutExpired as e:
+        output = f"no exit after {e.timeout:.0f} s"
+        ok = False
+    if not ok:
+        print(f"  {console.yellow('warning')}: the recording run failed, so the copy keeps the last good bundle:",
               file=sys.stderr)
-        print(console.dim((result.stdout + result.stderr).strip()), file=sys.stderr)
+        print(console.dim(output.strip()), file=sys.stderr)
         return False
     os.replace(staged, bundle)
     print(console.dim(f"  recorded {bundle.stat().st_size // 1024} KiB of shaders"), flush=True)
     return True
+
+
+def _retire(directory: Path) -> bool:
+    """Removes `directory` whole or not at all; false while a running viewer holds it.
+
+    Renamed aside first, since Windows refuses to rename a folder whose program is running, where a delete would get halfway.
+    """
+    if not directory.exists():
+        return True
+    retired = directory.with_name(directory.name + ".old")
+    shutil.rmtree(retired, ignore_errors=True)
+    try:
+        os.replace(directory, retired)
+    except OSError:
+        return False
+    shutil.rmtree(retired, ignore_errors=True)
+    return True
+
+
+def _runtime_dlls(artifact: Path, ctx: Context) -> list[Path]:
+    """The libraries the viewer loads, as its build lists them, out of an output directory every binary shares."""
+    manifest = artifact.parent / f"{_TARGET}.runtime-dlls"
+    if not manifest.is_file():
+        ctx.die(f"{manifest} is missing; build {_TARGET} again so configure writes it")
+    lines = manifest.read_text(encoding="utf-8").splitlines()
+    dlls = [artifact.parent / name for name in sorted({Path(line.strip()).name for line in lines if line.strip()})]
+    missing = [d.name for d in dlls if not d.is_file()]
+    if missing:
+        ctx.die(f"{', '.join(missing)} not staged beside {artifact}; build {_TARGET} again")
+    return dlls
 
 
 def _copy(artifact: Path, commit: str | None, ctx: Context) -> None:
@@ -110,30 +151,36 @@ def _copy(artifact: Path, commit: str | None, ctx: Context) -> None:
         shutil.rmtree(staged)
     staged.mkdir(parents=True)
 
-    # The output directory is shared with every other binary, so only the viewer and the libraries are taken from it.
     shutil.copy2(artifact, staged / artifact.name)
-    for dll in sorted(artifact.parent.glob("*.dll")):
+    for dll in _runtime_dlls(artifact, ctx):
         shutil.copy2(dll, staged / dll.name)
     if commit:
         (staged / ".commit").write_text(commit + "\n", encoding="utf-8")
 
-    if target.exists():
-        try:
-            shutil.rmtree(target)
-        except PermissionError:
-            shutil.rmtree(staged)
-            ctx.die(f"{target} is in use: close every shaped-view window, then install again")
+    if not _retire(target):
+        shutil.rmtree(staged)
+        ctx.die(f"{target} is in use: close every shaped-view window, then install again")
     os.replace(staged, target)
+
+
+def _value_of(path: str, name: str) -> str | None:
+    """A string value under HKCU\\Software\\Classes, or None where the key or the value is absent."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{_CLASSES}\\{path}") as key:
+            return winreg.QueryValueEx(key, name)[0]
+    except FileNotFoundError:
+        return None
 
 
 def _register(exe: Path) -> None:
     import winreg
 
     command = f'"{exe}" "%1"'
-    classes = r"Software\Classes"
 
     def set_value(path: str, name: str, value: str) -> None:
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, f"{classes}\\{path}") as key:
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, f"{_CLASSES}\\{path}") as key:
             winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
 
     set_value(_PROG_ID, "", "3D model")
@@ -147,6 +194,10 @@ def _register(exe: Path) -> None:
     for ext in _EXTENSIONS:
         set_value(f"{application}\\SupportedTypes", ext, "")
         set_value(f"{ext}\\OpenWithProgids", _PROG_ID, "")
+        # Remembered only when it is another program's, so a reinstall never records shaped-view as what came before it.
+        previous = _value_of(ext, "")
+        if previous and previous != _PROG_ID:
+            set_value(_PREVIOUS_DEFAULTS, ext, previous)
         # The per-user default, which is what opens the file wherever no "Always" choice in Explorer overrides it.
         set_value(ext, "", _PROG_ID)
 
@@ -156,18 +207,19 @@ def _register(exe: Path) -> None:
 def _unregister() -> None:
     import winreg
 
-    classes = r"Software\Classes"
+    # Read before the ProgID's tree, which holds them, is deleted.
+    previous = {ext: _value_of(_PREVIOUS_DEFAULTS, ext) for ext in _EXTENSIONS}
 
     def delete_tree(path: str) -> None:
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{classes}\\{path}", 0, winreg.KEY_ALL_ACCESS) as key:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{_CLASSES}\\{path}", 0, winreg.KEY_ALL_ACCESS) as key:
                 while True:
                     try:
                         child = winreg.EnumKey(key, 0)
                     except OSError:
                         break
                     delete_tree(f"{path}\\{child}")
-            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, f"{classes}\\{path}")
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, f"{_CLASSES}\\{path}")
         except FileNotFoundError:
             pass
 
@@ -175,14 +227,14 @@ def _unregister() -> None:
     delete_tree(f"Applications\\{_TARGET}.exe")
     for ext in _EXTENSIONS:
         try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{classes}\\{ext}", 0, winreg.KEY_ALL_ACCESS) as key:
-                # Only a default this install wrote is removed; another program's stays.
-                try:
-                    if winreg.QueryValueEx(key, "")[0] == _PROG_ID:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{_CLASSES}\\{ext}", 0, winreg.KEY_ALL_ACCESS) as key:
+                # Only a default this install wrote is touched, and it goes back to what it replaced; another program's stays.
+                if _value_of(ext, "") == _PROG_ID:
+                    if previous[ext]:
+                        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, previous[ext])
+                    else:
                         winreg.DeleteValue(key, "")
-                except FileNotFoundError:
-                    pass
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{classes}\\{ext}\\OpenWithProgids", 0,
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{_CLASSES}\\{ext}\\OpenWithProgids", 0,
                                 winreg.KEY_ALL_ACCESS) as key:
                 winreg.DeleteValue(key, _PROG_ID)
         except FileNotFoundError:
@@ -207,9 +259,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         _unregister()
         print(f"  removed the association of {', '.join(_EXTENSIONS)} with shaped-view")
         if install_dir().exists():
-            try:
-                shutil.rmtree(install_dir())
-            except PermissionError:
+            if not _retire(install_dir()):
                 ctx.die(f"{install_dir()} is in use: close every shaped-view window, then uninstall again")
             print(f"  removed {install_dir()}")
         return

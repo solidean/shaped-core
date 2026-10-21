@@ -23,6 +23,7 @@ using namespace cc::primitive_defines;
 // A bundle is a header, then records until the end: the key's low and high halves, the encoded shader's size, and its bytes.
 // Every number is little-endian, as sg's shader codec writes its own.
 // The same key may appear more than once, since a recording appends each compile it sees; the first one wins.
+// A record cut short ends the bundle there, and the records before it still count: a recording flushes each one whole.
 
 namespace
 {
@@ -65,7 +66,8 @@ void push_u64(cc::vector<byte>& out, u64 v)
     push_u32(out, u32(v >> 32));
 }
 
-/// Files the records of `bytes` into `shaders`; false where the bundle is not one this build reads.
+/// Files the records of `bytes` into `shaders`, up to the first one that does not parse.
+/// False where the bundle is not one this build reads, or is cut short.
 bool parse_bundle(cc::span<byte const> bytes, cc::map<cc::hash128, cc::span<byte const>>& shaders)
 {
     if (bytes.size() < k_header_size || cc::memcmp(bytes.data(), k_magic, sizeof(k_magic)) != 0
@@ -127,6 +129,12 @@ cc::mutex<recording>& the_recording()
         .path = cc::environment_variable("SC_SHADER_RECORD").value_or(cc::string()),
     });
     return instance;
+}
+
+/// Whether `SC_SHADER_RECORD` names a file, even one that could not be written.
+bool is_recording_requested()
+{
+    return the_recording().lock([](recording const& r) { return !r.path.empty(); });
 }
 
 void write_record(cc::hash128 key, sg::compiled_shader const& shader)
@@ -233,13 +241,18 @@ cc::hash128 slib::impl::bundle_key(shader_language language,
 
 cc::optional<sg::compiled_shader> slib::impl::find_bundled_shader(cc::hash128 key)
 {
+    // A recording compiles everything, so what it writes is what this build produces rather than what an older one did.
+    // A key covers neither DXC nor the code around it, so a bundle that served a recording would carry its entries forward forever.
+    if (is_recording_requested())
+        return {};
+
     auto const bytes = registry().lock(
         [&](bundle_registry& r) -> cc::optional<cc::span<byte const>>
         {
             for (auto const pending : r.pending)
                 if (!parse_bundle(pending, r.shaders))
-                    CC_LOG_ERROR("an embedded shader bundle does not parse, so the shaders it holds are compiled "
-                                 "instead");
+                    CC_LOG_ERROR("an embedded shader bundle does not parse to its end, so the shaders past the damage "
+                                 "are compiled instead");
             r.pending.clear();
 
             if (auto const* found = r.shaders.get_ptr(key))
@@ -256,11 +269,6 @@ cc::optional<sg::compiled_shader> slib::impl::find_bundled_shader(cc::hash128 ke
 bool slib::impl::is_recording_shaders()
 {
     return the_recording().lock([](recording const& r) { return !r.path.empty() && !r.failed; });
-}
-
-void slib::impl::record_shader(cc::hash128 key, sg::compiled_shader const& shader)
-{
-    write_record(key, shader);
 }
 
 sg::async_compiled_shader slib::impl::recorded_shader(cc::hash128 key, sg::async_compiled_shader built)

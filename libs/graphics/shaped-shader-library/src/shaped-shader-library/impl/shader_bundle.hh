@@ -22,14 +22,11 @@ namespace slib::impl
                                      cc::span<module_source const> modules);
 
 /// The shader a registered bundle holds under `key`, or nullopt.
+/// Always nullopt in a process that records, so a recording is what this build compiles.
 [[nodiscard]] cc::optional<sg::compiled_shader> find_bundled_shader(cc::hash128 key);
 
 /// Whether this process records what it compiles, which `SC_SHADER_RECORD` decides once.
 [[nodiscard]] bool is_recording_shaders();
-
-/// Writes `shader` to the recording under `key`, if this process records.
-/// A bundled shader is written too, so a frozen build recording itself keeps every entry it still uses and drops the rest.
-void record_shader(cc::hash128 key, sg::compiled_shader const& shader);
 
 /// `built`, which writes its shader to the recording under `key` once it settles; a failed compile is not written.
 [[nodiscard]] sg::async_compiled_shader recorded_shader(cc::hash128 key, sg::async_compiled_shader built);
