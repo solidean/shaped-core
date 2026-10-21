@@ -444,6 +444,24 @@ TEST("sgl emit - a struct read only field by field is its fields")
     }
 }
 
+TEST("sgl emit - a mutable array that starts filled is the one array the loop fills")
+{
+    // LEGAL-60: the `var` the fill's block fills is the local's own storage, with no copy behind the loop
+    auto const source = cc::string_view("binding work:\n"
+                                        "    dst: mut buffer[float]\n"
+                                        "\n"
+                                        "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                                        "    let mut arr = float[8].filled(0.0)\n"
+                                        "    arr[id.x % 8] = 1.0\n"
+                                        "    work.dst[id.x] = arr[3]\n");
+    auto const hlsl = text_of(source, target::hlsl_dx12);
+    CHECK(hlsl.contains("    float arr[8];\n    for (int i = 0; i < 8; ++i)\n    {\n        arr[i] = 0.0;\n    }\n"));
+    CHECK(!hlsl.contains("filled"));
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("    var arr: array<f32, 8>;\n"));
+    CHECK(!wgsl.contains("filled"));
+}
+
 TEST("sgl emit - a vertex member whose name ends in a digit gets a semantic that does not")
 {
     // HLSL reads `UV1` as the semantic `UV` at index 1, and dx12 refuses an input layout naming `UV1`.

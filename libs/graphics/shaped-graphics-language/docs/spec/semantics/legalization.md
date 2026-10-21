@@ -318,6 +318,8 @@ A target's compiler folds the copies too: these rules are for the reader of the 
 * **LEGAL-60** (L3) A `let` whose value is a block's result, the `var` E1 declared in front of the block in the same list, is that `var` under the let's name.
   It holds where nothing else reads the `var`, nothing writes it behind the `let`, and no `for`'s `end` reads the `let`, which LEGAL-7 keeps from a `var`.
   So `let lit = shade(...)` reads as one `var lit` its branches assign, rather than `shade_result` and a copy of it.
+  So is a `var` given such a value, and so is the `var` a block fills before it leaves with it, such as `T[N].filled(v)`'s.
+  So `let mut arr = float[8].filled(0.0)` is the one array the loop fills, rather than a filled one and a copy of it.
 * **LEGAL-57** (L2) A let nothing reads is gone, and so is a let only it read.
   Its value must have no effect, and must always have a value: an element, a buffer element, a load of `bytes` and a builtin that has none for some argument are kept (EVAL-84, EVAL-90).
   A builtin that only reads is no effect here, such as a ray query's read of its candidate: it is kept from moving, never from going.

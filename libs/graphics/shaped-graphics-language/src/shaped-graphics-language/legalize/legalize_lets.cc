@@ -693,30 +693,46 @@ struct let_simplifier
             if (!is_known(e(), list[i]))
                 continue;
             auto const& s = e().at(list[i]);
-            if (auto const* const var = s.node.try_as<flat_var>(); var != nullptr && !is_valid(var->value)
-                                                                   && is_known(e(), var->local)
-                                                                   && e().at(var->local).kind == local_kind::temporary)
+            // a block's result, or a var a block fills, such as `T[N].filled(v)`'s
+            if (auto const* const var = s.node.try_as<flat_var>();
+                var != nullptr && !is_valid(var->value) && is_known(e(), var->local)
+                && (e().at(var->local).kind == local_kind::temporary || e().at(var->local).kind == local_kind::var))
                 declared.push_back(var->local);
             for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { merge_results(inner, whole, depth + 1); });
 
-            auto const* const let = s.node.try_as<flat_let>();
-            if (let == nullptr || !is_known(e(), let->local) || e().at(let->local).kind != local_kind::let)
+            // A `let`, or a `var` given that value, which then fills the block's storage in place: `T[N].filled(v)`.
+            auto local = local_id::none;
+            auto value = flat_expr_id::none;
+            if (auto const* const let = s.node.try_as<flat_let>();
+                let != nullptr && is_known(e(), let->local) && e().at(let->local).kind == local_kind::let)
+            {
+                local = let->local;
+                value = let->value;
+            }
+            else if (auto const* const v = s.node.try_as<flat_var>(); v != nullptr && is_known(e(), v->local)
+                                                                      && is_valid(v->value)
+                                                                      && e().at(v->local).kind == local_kind::var)
+            {
+                local = v->local;
+                value = v->value;
+            }
+            if (!is_valid(local) || !is_known(e(), value))
                 continue;
-            auto const* const ref = e().at(let->value).node.try_as<flat_local_ref>();
+            auto const* const ref = e().at(value).node.try_as<flat_local_ref>();
             auto is_declared_here = false;
             for (auto const d : declared)
                 is_declared_here = is_declared_here || (ref != nullptr && d == ref->local);
-            if (!is_declared_here || e().at(ref->local).type != e().at(let->local).type)
+            if (!is_declared_here || e().at(ref->local).type != e().at(local).type)
                 continue;
             auto reads = isize(0);
             count_value_reads(whole, ref->local, reads, 0);
             auto is_written_after = false;
             for (auto k = i + 1; k < list.size() && !is_written_after; ++k)
                 is_written_after = writes_local(list[k], ref->local, 0);
-            if (reads != 1 || is_written_after || bounds_a_loop(whole, let->local, 0))
+            if (reads != 1 || is_written_after || bounds_a_loop(whole, local, 0))
                 continue;
-            replaced[index_of(let->local)] = ref->local;
-            out.e.locals[index_of(ref->local)].name = e().at(let->local).name;
+            replaced[index_of(local)] = ref->local;
+            out.e.locals[index_of(ref->local)].name = e().at(local).name;
             drop(list[i]);
         }
     }
