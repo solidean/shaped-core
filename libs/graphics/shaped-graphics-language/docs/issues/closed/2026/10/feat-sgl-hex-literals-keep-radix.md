@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/text_writer.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-21T18:11Z
+closed: 2026-10-21
+resolution: fixed
 ---
 
 # A hex literal is written in decimal

@@ -950,7 +950,9 @@ struct flattener
         switch (info.kind)
         {
         case constant_kind::integer:
-            return add_expr(type, from, flat_int_literal{.value = info.integer, .is_unsigned = info.is_unsigned});
+            return add_expr(
+                type, from,
+                flat_int_literal{.value = info.integer, .is_unsigned = info.is_unsigned, .is_hex = info.is_hex});
         case constant_kind::real:
             return add_expr(type, from, flat_literal{.value = info.real});
         case constant_kind::enum_case:
@@ -984,7 +986,9 @@ struct flattener
             auto const v = value.value();
             if (is_unsigned ? v < 0 || v > 4294967295ll : v < -2147483647 - 1 || v > 2147483647)
                 return fail();
-            return add_expr(type, id, flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned});
+            return add_expr(
+                type, id,
+                flat_int_literal{.value = i32(u32(v)), .is_unsigned = is_unsigned, .is_hex = is_hex_literal(text)});
         }
         auto const value = parse_plain_float(text);
         return value.has_value() ? literal(value.value()) : fail();

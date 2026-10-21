@@ -336,6 +336,28 @@ TEST("sgl emit - a float literal has a decimal point and reads back as the same 
     CHECK(wgsl.contains("c: f32 = saturate(2.5e-07);\n"));
 }
 
+TEST("sgl emit - a hex literal stays hex, without its separators")
+{
+    auto const source = cc::string_view("binding work:\n"
+                                        "    src: buffer[uint]\n"
+                                        "    dst: mut buffer[uint]\n"
+                                        "\n"
+                                        "const mask = 0xff00u\n"
+                                        "\n"
+                                        "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                                        "    let v = work.src[id.x]\n"
+                                        "    let w = (v & 0xffff'fffdu) | mask\n"
+                                        "    let s = (id.x & 0x2E74) - 16\n"
+                                        "    work.dst[id.x] = w + (s as uint)\n");
+    for (auto const t : {target::hlsl_dx12, target::wgsl, target::msl})
+    {
+        auto const text = text_of(source, t);
+        // EMIT-158: a const keeps its radix as a literal does
+        CHECK(text.contains("(v & 0xfffffffdu) | 0xff00u;\n"));
+        CHECK(text.contains("(id.x & 0x2e74) - 16;\n"));
+    }
+}
+
 TEST("sgl emit - parentheses follow the tree, and a negative literal needs none")
 {
     auto const source = with_edges("@pixel fun main_ps(p: pixel_input) -> frame:\n"

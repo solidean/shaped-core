@@ -468,6 +468,8 @@ struct sgl::check::constant_info
     i32 integer = 0;
     /// An `integer` of type `uint`, written with its suffix: `const mask = 0xff00u`.
     bool is_unsigned = false;
+    /// An `integer` written in hex, which the targets keep.
+    bool is_hex = false;
     f64 real = 0;
     /// A position in the `cases` of `type`, for an `enum_case`.
     i32 case_index = -1;

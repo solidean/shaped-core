@@ -1179,6 +1179,8 @@ void checker::compile_const(symbol_id id)
     auto const is_uint = written == prelude_type(builtins::k_uint);
     auto const is_float = written == prelude_type(builtins::k_float);
     auto const converts = (is_int || is_uint || is_float) && converted.is_number && holds(converted, written);
+    if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
+        info.is_hex = is_hex_literal(text_of(file, span_of(file, literal)));
 
     if (converts)
     {

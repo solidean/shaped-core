@@ -51,6 +51,9 @@ struct suffixed_number
 /// until the type it meets is known (CHK-61).
 [[nodiscard]] cc::optional<i64> parse_literal_integer(cc::string_view text);
 
+/// Whether the number literal `text` is written in hex, suffixed or not.
+[[nodiscard]] bool is_hex_literal(cc::string_view text);
+
 /// A name of the function being checked: its parameters, then the locals in scope, in source order.
 struct local_name
 {

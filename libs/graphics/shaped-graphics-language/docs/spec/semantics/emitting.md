@@ -316,6 +316,8 @@ binding affine:
 * **EMIT-68** Control flow is written by [the table of the core form](legalization.md#the-table), and a nested body is one level deeper.
 * **EMIT-69** The C-like targets put a brace on a line of its own and a condition in parentheses; WGSL puts the brace behind the head and writes the condition bare.
 * **EMIT-70** An `int` literal is its decimal text, and the one that does not fit behind a minus is `(-2147483647 - 1)`.
+* **EMIT-158** An integer literal or `const` written in hex stays hex, in lowercase and without its `'` separators, since a bit pattern reads as one only there.
+  A negative `int` is the exception and keeps its decimal text, as does a value an operator over literals folded to.
 * **EMIT-71** A `while` whose condition builds a struct member by member is written as a loop that tests at its top, so the struct is built before every test.
   So is one whose condition calls a builtin the target writes as statements of its own, such as HLSL's atomics or the uniform load of EMIT-149 outside WGSL.
 * **EMIT-78** A `switch` is the target's own, by the table of the core form, and a label is the constant of EMIT-76 where its value is a case and its decimal text otherwise.

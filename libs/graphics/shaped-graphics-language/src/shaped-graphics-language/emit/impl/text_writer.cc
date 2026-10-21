@@ -645,7 +645,10 @@ struct writer
             [&](flat_int_literal const& l)
             {
                 auto const is_wrapped = l.value == -2147483647 - 1;
-                auto text = l.is_unsigned ? cc::to_string(u32(l.value)) + "u" : int_literal_text(l.value);
+                auto text = l.is_hex && (l.is_unsigned || l.value >= 0)
+                              ? cc::format("{:#x}{}", u32(l.value), l.is_unsigned ? "u" : "")
+                          : l.is_unsigned ? cc::to_string(u32(l.value)) + "u"
+                                          : int_literal_text(l.value);
                 result = narrow(
                     {.text = cc::move(text), .binds = l.value < 0 && !is_wrapped ? level::unary : level::primary});
             },
