@@ -4,6 +4,8 @@ priority: someday
 refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/hlsl.cc
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/wgsl.cc
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-21T18:52Z
 ---
 
 # Small things the target text could spell better
