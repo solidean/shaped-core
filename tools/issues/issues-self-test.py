@@ -136,7 +136,9 @@ def test_check_finds_what_is_wrong(base: Path):
     write(a / "docs/issues/feat-child.md", issue_text("Child", "parent: feat-shiny", "blocked-by: [bug-ghost]"))
     write(a / "lib/docs/issues/bug-crash.md", issue_text("Twin"))
     write(a / "docs/issues/bug-notitle.md", "---\nclaimed-by: X\n---\n\nno title\n")
-    write(a / "docs/issues/bug-stale-ref.md", issue_text("Stale", "refs:", "  - file: src/lib.cc:3-9", "  - file: gone.cc"))
+    write(a / ".gitignore", "/fetched/\n")
+    write(a / "docs/issues/bug-stale-ref.md",
+          issue_text("Stale", "refs:", "  - file: src/lib.cc:3-9", "  - file: gone.cc", "  - file: fetched/sdk.h"))
     write(a / "src/use.cc", "// issue: bug-ghost\nx(); // TEMPORARY(bug-older)\n// issue: other:bug-unknown-repo\n")
     code, out, _ = cli(a, "check")
     assert code == 1
@@ -150,6 +152,7 @@ def test_check_finds_what_is_wrong(base: Path):
                      "src/use.cc:2: marker names bug-older, which is closed"):
         assert expected in out, f"missing {expected!r} in:\n{out}"
     assert "bug-unknown-repo" not in out, "a marker into a repository that is not checked out is not judged"
+    assert "fetched/sdk.h" not in out, "a ref to a path git ignores names a fetched file, which may be absent here"
 
 
 def test_claim_pushes_exactly_one_commit(base: Path):

@@ -211,6 +211,7 @@ An `<id>` may also be `repo:id`, a fragment unique among the ids, or the file's 
 
 `check` is a `dev.py check` gate.
 It holds the file name, location and frontmatter to this page, ids unique, `parent` and `blocked-by` and `issue` refs resolving, and an open issue's `file` refs existing.
+A `file` ref to a path git ignores passes even when absent: it names a fetched file, which this machine may not have.
 **A marker naming an unknown or a closed issue fails it**: a fixed issue's workaround or comment has to go with it.
 
 ## Without shaped-core
