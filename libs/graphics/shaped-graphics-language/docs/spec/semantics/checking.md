@@ -323,6 +323,7 @@ enum light_kind:
   Inside is from its keyword to the end of its body.
   One expected diagnostic usually brings others with it, and the test exists to show that the one it names is reported.
   An expectation none of them meets is `unmet-expectation`, and a test that expects a diagnostic is judged by that alone and never run.
+  A test with an unmet expectation reports what it took after all, since that is the likeliest reason, such as a parse error that kept the check from ever reaching what it names.
   A test that expects `.fail` passes where a check or an `assert` of its run is false, and one that expects `.assert` where its run stops at a false `assert`.
   Several of them on one test must all hold of its one run.
 
