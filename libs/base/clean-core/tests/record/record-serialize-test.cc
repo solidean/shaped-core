@@ -87,6 +87,8 @@ REC_TEST("record/serialize - a recording survives a round trip through bytes")
 
 REC_TEST("record/serialize - the descriptor's whole context comes back, not just its name")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     rec_fixture const fixture(deterministic_config());
 
     auto const bytes = cc::rec::serialize(capture(&record_everything));

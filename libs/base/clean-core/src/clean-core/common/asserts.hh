@@ -95,7 +95,7 @@ CC_COLD_FUNC void handle_assert_failure_sv(char const* expression, cc::string_vi
     {                                                                                           \
         if (!(cond)) [[unlikely]]                                                               \
         {                                                                                       \
-            ::cc::impl::handle_assert_failure_sv(#cond, msg, ::cc::source_location::current()); \
+            ::cc::impl::handle_assert_failure_sv(CC_SITE_TEXT(#cond), msg, ::cc::source_location::current()); \
             CC_BREAK_AND_ABORT();                                                               \
         }                                                                                       \
     } while (false)

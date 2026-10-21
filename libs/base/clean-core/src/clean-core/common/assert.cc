@@ -49,8 +49,10 @@ thread_local bool t_in_default_handler = false;
 // Default assertion handler implementation
 void default_assert_handler(cc::impl::assertion_info const& info)
 {
-    auto const location = cc::format("{}:{}:{} ({})", info.location.file_name(), info.location.line(),
-                                     info.location.column(), info.location.function_name());
+    // below FULL the column is gone with the rest, so describe_site prints what the level kept
+    auto const location = CC_SOURCE_SITES == 2 ? cc::format("{}:{}:{} ({})", info.location.file_name(), info.location.line(),
+                                                            info.location.column(), info.location.function_name())
+                                               : cc::describe_site(info.location);
 
     if (t_in_default_handler)
     {

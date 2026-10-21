@@ -143,7 +143,7 @@ extern "C" int raise(int);
     {                                                                                        \
         if (!(cond)) [[unlikely]]                                                            \
         {                                                                                    \
-            ::cc::impl::handle_assert_failure(#cond, msg, ::cc::source_location::current()); \
+            ::cc::impl::handle_assert_failure(CC_SITE_TEXT(#cond), msg, ::cc::source_location::current()); \
             CC_BREAK_AND_ABORT();                                                            \
         }                                                                                    \
     } while (false)

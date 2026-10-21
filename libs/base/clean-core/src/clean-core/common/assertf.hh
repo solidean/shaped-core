@@ -89,7 +89,7 @@
     {                                                                                                                  \
         if (!(cond)) [[unlikely]]                                                                                      \
         {                                                                                                              \
-            ::cc::impl::handle_assert_failure(#cond, ::cc::format(msg __VA_OPT__(, ) __VA_ARGS__).c_str_materialize(), \
+            ::cc::impl::handle_assert_failure(CC_SITE_TEXT(#cond), ::cc::format(msg __VA_OPT__(, ) __VA_ARGS__).c_str_materialize(), \
                                               ::cc::source_location::current());                                       \
             CC_BREAK_AND_ABORT();                                                                                      \
         }                                                                                                              \

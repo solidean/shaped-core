@@ -313,21 +313,23 @@
         {
             "name": "x64-windows-clang-ninja-singlethreaded",
             "displayName": "Single-threaded Clang (Ninja, Windows)",
-            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM; and SC_SOURCE_SITES=OPAQUE, so check exercises a level below FULL",
             "inherits": "x64-windows-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_THREADS": "OFF"
+                "SC_THREADS": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {
             "name": "x64-linux-clang-ninja-singlethreaded",
             "displayName": "Single-threaded Clang (Ninja, Linux)",
-            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM",
+            "description": "RelWithDebInfo build with SC_THREADS=OFF: no OS threads, as on WASM; and SC_SOURCE_SITES=OPAQUE, so check exercises a level below FULL",
             "inherits": "x64-linux-clang-ninja-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-                "SC_THREADS": "OFF"
+                "SC_THREADS": "OFF",
+                "SC_SOURCE_SITES": "OPAQUE"
             }
         },
         {

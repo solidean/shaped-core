@@ -495,6 +495,8 @@ TRACE_TEST("chrome_trace - sampled frames carry names and source locations")
 
 TRACE_TEST("chrome_trace - a scope says where it was recorded")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     rec_fixture const fixture;
 
     auto const r = capture([] { CC_RECORD_SCOPE("located-scope"); });
