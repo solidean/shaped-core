@@ -20,7 +20,5 @@ Each is small enough to go with whatever next touches the writer.
   So this is the trade EMIT-55 decided, to be reopened there rather than here.
 - WGSL converts `vec2f(vec2i(textureDimensions(t, 0)))` twice.
   The inner conversion is the size builtin's and the outer the program's `as`, so folding them couples the conversion's writer to what it converts.
-- A struct LEGAL-61 split into its fields is still declared, though nothing holds one any more.
-  `sgl emit - a struct read only field by field is its fields` shows it with `struct light`.
 
-Done: HLSL's doubled parentheses around a candidate's type test, and WGSL's `x >> u32(12)` with MSL's mask on a literal count.
+Done: HLSL's doubled parentheses around a candidate's type test, WGSL's `x >> u32(12)` with MSL's mask on a literal count, and the declaration of a struct LEGAL-61 split.

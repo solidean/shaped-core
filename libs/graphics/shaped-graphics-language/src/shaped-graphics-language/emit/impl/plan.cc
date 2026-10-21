@@ -6,6 +6,7 @@
 #include <shaped-graphics-language/emit/impl/layout.hh>
 #include <shaped-graphics-language/emit/reserved_words.hh>
 #include <shaped-graphics-language/legalize/core.hh>
+#include <shaped-graphics-language/legalize/impl/walk.hh>
 
 namespace
 {
@@ -925,6 +926,64 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
     v.file_samplers();
 }
 
+namespace
+{
+/// What the body reaches, which is all a text writes: the legalizer leaves the nodes it replaced behind, unreachable.
+struct live_nodes
+{
+    check::flat_entry_point const& e;
+    cc::vector<bool> exprs;
+    cc::vector<bool> locals;
+
+    void local(check::local_id id)
+    {
+        if (check::impl::is_known(e, id))
+            locals[check::index_of(id)] = true;
+    }
+
+    void expr(check::flat_expr_id id, int depth)
+    {
+        if (!check::impl::is_known(e, id) || depth > check::impl::k_max_depth || exprs[check::index_of(id)])
+            return;
+        exprs[check::index_of(id)] = true;
+        auto const& x = e.at(id);
+        if (auto const* const ref = x.node.try_as<check::flat_local_ref>())
+            local(ref->local);
+        if (auto const* const b = x.node.try_as<check::flat_block>())
+            body(b->body, depth + 1);
+        check::impl::for_each_operand(e, x, [&](check::flat_expr_id operand) { expr(operand, depth + 1); });
+    }
+
+    void body(ast::range_of<check::flat_stmt_id> range, int depth)
+    {
+        if (!check::impl::is_known(e, range) || depth > check::impl::k_max_depth)
+            return;
+        for (auto const id : e.at(range))
+        {
+            if (!check::impl::is_known(e, id))
+                continue;
+            auto const& s = e.at(id);
+            if (auto const* const let = s.node.try_as<check::flat_let>())
+                local(let->local);
+            else if (auto const* const var = s.node.try_as<check::flat_var>())
+                local(var->local);
+            else if (auto const* const f = s.node.try_as<check::flat_for>())
+                local(f->index);
+            check::impl::for_each_expr_of(s, [&](check::flat_expr_id x) { expr(x, depth + 1); });
+            check::impl::for_each_pattern_of(e, s,
+                                             [&](ast::range_of<check::flat_expr_id> patterns)
+                                             {
+                                                 if (check::impl::is_known(e, patterns))
+                                                     for (auto const p : e.at(patterns))
+                                                         expr(p, depth + 1);
+                                             });
+            check::impl::for_each_body_of(e, s,
+                                          [&](ast::range_of<check::flat_stmt_id> inner) { body(inner, depth + 1); });
+        }
+    }
+};
+} // namespace
+
 sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m, check::flat_entry_point const& e, target t)
 {
     auto result = plan{.m = m, .e = e, .which = t};
@@ -958,15 +1017,25 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
         if (e.entry_stage == stage::tessellation_evaluation && t.kind == type_kind::structure && local.type != e.input)
             p.need(local.type, struct_role::patch_constants);
     }
-    for (auto const& local : e.locals)
+    // Only what the body reaches: a struct the legalizer split into its fields is held by nothing the text writes.
+    auto live = live_nodes{.e = e,
+                           .exprs = cc::vector<bool>::create_filled(e.exprs.size(), false),
+                           .locals = cc::vector<bool>::create_filled(e.locals.size(), false)};
+    live.body(e.body, 0);
+    for (auto i = isize(0); i < e.locals.size(); ++i)
     {
+        auto const& local = e.locals[i];
+        if (!live.locals[i] && local.kind != check::local_kind::parameter)
+            continue;
         p.need(local.type, struct_role::plain);
         p.need_enum(local.type);
     }
-    for (auto const& x : e.exprs)
+    for (auto i = isize(0); i < e.exprs.size(); ++i)
     {
-        p.need(x.type, struct_role::plain);
-        p.need_enum(x.type);
+        if (!live.exprs[i])
+            continue;
+        p.need(e.exprs[i].type, struct_role::plain);
+        p.need_enum(e.exprs[i].type);
     }
     // EMIT-139: MSL sizes the ray data by every payload of the set, which each of its shaders must agree on
     if (t == target::msl)

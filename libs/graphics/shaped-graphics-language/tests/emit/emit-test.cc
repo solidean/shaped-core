@@ -166,7 +166,9 @@ TEST("sgl emit - an underscore that is taken already is minted past")
                                    "    color: float4\n"
                                    "\n"
                                    "@pixel fun main_ps(p: pixel_input) -> target:\n"
-                                   "    let t = target_(0.5)\n"
+                                   // written after it is built, so it stays a struct rather than its fields (LEGAL-61)
+                                   "    let mut t = target_(0.5)\n"
+                                   "    if p.normal.x > 0.0 => t.x = 0.25\n"
                                    "    return {\n"
                                    "        color = float4(..p.normal, t.x)\n"
                                    "    }\n");
@@ -440,6 +442,8 @@ TEST("sgl emit - a struct read only field by field is its fields")
         auto const text = text_of(source, t);
         CHECK(!text.contains("light sun"));
         CHECK(!text.contains("sun: light"));
+        // nothing the text writes holds one, so it is not declared either
+        CHECK(!text.contains("struct light"));
         CHECK(text.contains("normalize(p.normal)"));
     }
 }
@@ -635,8 +639,11 @@ TEST("sgl emit - a struct that shadows one of the prelude is written under a nam
                                  "fun dim(k: float) -> light:\n"
                                  "    return { b = k * 0.5 }\n"
                                  "@pixel fun main_ps(p: pixel_input) -> frame:\n"
-                                 "    let l = lit p.normal.x\n"
-                                 "    let m = dim l.a\n"
+                                 // each written after it is built, so it stays a struct rather than its fields (LEGAL-61)
+                                 "    let mut l = lit p.normal.x\n"
+                                 "    if p.normal.y > 0.0 => l.a = 0.25\n"
+                                 "    let mut m = dim l.a\n"
+                                 "    if p.normal.z > 0.0 => m.b = 0.25\n"
                                  "    return { color = float4(l.a, m.b, 0.0, 1.0) }\n");
     sources.push_back(user);
     auto const checked = check_files(sources);

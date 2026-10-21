@@ -69,6 +69,7 @@ struct target_ {
 
 * **EMIT-22** A struct of the program keeps its name, and a builtin type is spelled as its record says, which today is the table below.
 * **EMIT-23** A struct is declared after every struct it holds.
+  It is declared where something the body reaches holds one, or where a binding or the stage edge does: a struct LEGAL-61 split into its fields is declared nowhere.
 * **EMIT-106** A field of type `void` holds nothing, so no target declares it, and a construction writes no argument for it.
 * **EMIT-107** A struct whose every field is `void` is `unsupported`, since it would be a struct of no member, which WGSL has no spelling for.
 * **EMIT-118** An array is `array<T, N>` in WGSL and MSL, and in HLSL its element type with the lengths after the declared name, `float weights[3]`.
