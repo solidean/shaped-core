@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/emit/impl/hlsl.cc
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-21T18:31Z
+closed: 2026-10-21
+resolution: fixed
 ---
 
 # HLSL writes `RayQuery<RAY_FLAG_NONE>` where a trace's flags are constants

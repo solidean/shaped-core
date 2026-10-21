@@ -192,6 +192,8 @@ struct sgl::builtins::type_record
     cc::string hlsl;
     cc::string wgsl;
     cc::string msl;
+    /// The HLSL spelling of a local whose flags are known constants, as `RayQuery<RAY_FLAG_FORCE_OPAQUE>`; none where its type takes none.
+    cc::string (*hlsl_flagged)(u32 flags) = nullptr;
 
     /// HLSL packs by rows of 16: a value starts a fresh row when its alignment is 16, or when it does not fit the rest of this one.
     block_layout hlsl_layout;
@@ -280,6 +282,9 @@ struct sgl::builtins::function_record
     /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
     /// The call itself writes nothing, and a local it initializes is never copied.
     bool declares_only = false;
+    /// Where its argument at this position is a constant, the local its first argument names takes it into its type
+    /// (`type_record::hlsl_flagged`); -1 for none.
+    i32 flags_argument = -1;
 
     /// Read back from the signature by `finalize`.
     cc::string name;

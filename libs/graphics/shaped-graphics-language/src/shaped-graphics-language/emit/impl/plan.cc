@@ -1014,6 +1014,30 @@ sgl::emit::impl::plan sgl::emit::impl::make_plan(check::checked_module const& m,
             for (auto i = isize(0); i < e.stage_inputs.size(); ++i)
                 if (e.stage_inputs[i].local == ref->local)
                     result.stage_input_read[i] = true;
+
+    result.local_flags = cc::vector<cc::optional<u32>>::create_defaulted(e.locals.size());
+    auto flags_known = cc::vector<bool>::create_filled(e.locals.size(), true);
+    for (auto const& x : e.exprs)
+    {
+        auto const* const call = x.node.try_as<check::flat_call>();
+        auto const* const record = call != nullptr ? m.builtin_function(call->intrinsic) : nullptr;
+        if (record == nullptr || record->flags_argument < 0)
+            continue;
+        auto const arguments = e.at(call->arguments);
+        auto const* const target = e.at(arguments[0]).node.try_as<check::flat_local_ref>();
+        if (target == nullptr)
+            continue;
+        auto const at = index_of(target->local);
+        auto const* const k = e.at(arguments[record->flags_argument]).node.try_as<check::flat_int_literal>();
+        auto& flags = result.local_flags[at];
+        if (k == nullptr || (flags.has_value() && flags.value() != u32(k->value)))
+            flags_known[at] = false;
+        else
+            flags = u32(k->value);
+    }
+    for (auto i = isize(0); i < result.local_flags.size(); ++i)
+        if (!flags_known[i])
+            result.local_flags[i] = cc::nullopt;
     return result;
 }
 

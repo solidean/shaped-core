@@ -212,6 +212,9 @@ struct plan
     cc::vector<cc::string> stage_input_bases;
     /// Parallel to `e.stage_inputs`: whether the tree reads it, which a target's line that converts it waits for.
     cc::vector<bool> stage_input_read;
+    /// Parallel to `locals`: the constant flags every call with a `flags_argument` hands the local, which its type takes.
+    /// Empty where no call does, where one hands it flags that are no constant, or where two hand it different ones.
+    cc::vector<cc::optional<u32>> local_flags;
     /// Holds every name above and every reserved word of the target, and goes on from the tree's names and the builtins'.
     /// A writer mints what it still needs from here.
     check::name_mint names;

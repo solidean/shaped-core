@@ -801,11 +801,15 @@ struct writer
         auto const text = is_valid(value) && !declares_only ? expr(value, true).text : cc::string();
         auto declaration = cc::string();
         auto const dimensions = array_dimensions(p, local.type);
-        d.write_local(declaration, {.name = name,
-                                    .type = type_text(p, d, local.type),
-                                    .value = text,
-                                    .dimensions = dimensions,
-                                    .is_mut = is_mut || declares_only});
+        auto const* const type_record = p.m.builtin_type_of(local.type);
+        auto const& flags = p.local_flags[index_of(id)];
+        auto const type = declares_only && d.language() == builtins::language::hlsl && type_record != nullptr
+                               && type_record->hlsl_flagged != nullptr && flags.has_value()
+                            ? type_record->hlsl_flagged(flags.value())
+                            : cc::string(type_text(p, d, local.type));
+        d.write_local(
+            declaration,
+            {.name = name, .type = type, .value = text, .dimensions = dimensions, .is_mut = is_mut || declares_only});
         line(declaration);
     }
 

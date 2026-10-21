@@ -408,6 +408,9 @@ So `{float3; float}` is written with `packed_float3`: the `float` is at byte 12 
   `@group(3) @binding(17) var<storage, read> sg_acceleration_pool: array<vec4u>;` and `@group(3) @binding(18) var<uniform> sg_acceleration_roots: array<vec4u, 4>;`.
   The root of the entry point's k-th acceleration member (CHK-325) is `sg_acceleration_roots[k / 4][k % 4]`.
   So WGSL traces the first 16 acceleration members, and a trace of a later one is `too-many-acceleration-structures`.
+* **EMIT-159** HLSL's `RayQuery` takes a trace's flags as its template where they are a constant, each by its `RAY_FLAG_` name, and `RAY_FLAG_NONE` where they are not.
+  The template is ORed with the trace's own flags, so naming them there changes nothing but what a driver may specialize on.
+  Forced opaque, the native form only steps the query to its end, since the target commits every candidate itself and none is left to decide.
 * **EMIT-136** HLSL writes a ray-tracing stage as a library export named by its kind, `[shader("closesthit")]` over `void`, whose payload is an `inout` parameter.
   A triangle closest hit or any hit takes `BuiltInTriangleIntersectionAttributes` too.
   An any hit's decision ends the stage: `ignore` is `IgnoreHit()`, `accept_and_end_search` `AcceptHitAndEndSearch()`, and `accept` a plain `return`.

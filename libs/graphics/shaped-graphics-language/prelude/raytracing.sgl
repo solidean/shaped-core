@@ -630,11 +630,15 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let q = ray_query_begin()
     // a structure of triangles holds no box, and the target skips the procedural path whole
     ray_query_trace(q, world, r.origin, r.direction, r.t_min, r.t_max, flags | ray_flags.skip_procedural, mask)
-    while ray_query_proceed(q):
-        if ray_query_candidate_is_triangle(q):
-            let d = any_hit(candidate_of(q, r))
-            if d != hit_decision.ignore => ray_query_commit_triangle(q)
-            if d == hit_decision.accept_and_end_search => ray_query_abort(q)
+    // Forced opaque, every candidate is committed by the target itself, and the query is only stepped to its end.
+    if flags.has(ray_flags.force_opaque):
+        while ray_query_proceed(q) => continue
+    else:
+        while ray_query_proceed(q):
+            if ray_query_candidate_is_triangle(q):
+                let d = any_hit(candidate_of(q, r))
+                if d != hit_decision.ignore => ray_query_commit_triangle(q)
+                if d == hit_decision.accept_and_end_search => ray_query_abort(q)
     return committed_of(q, r)
 
 /// `flags` without the facing culls, which the target forbids beside `skip_triangles` and which mean nothing for a box.

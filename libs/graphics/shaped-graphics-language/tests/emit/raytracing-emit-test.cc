@@ -63,6 +63,46 @@ hit_group lit for rs:
               .contains("    float color : read(caller, closesthit, miss) : write(caller, closesthit, miss);\n"));
 }
 
+TEST("sgl emit - an inline trace's constant flags are the ray query's template, and forced opaque it decides nothing")
+{
+    auto const source = cc::string_view(R"(require ray_query
+
+binding frame:
+    world: acceleration_structure[.triangles]
+    output: mut buffer[float]
+
+@compute(1) fun opaque(@thread_id id: int3){frame}:
+    let h = frame.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), flags = ray_flags.force_opaque)
+    frame.output[id.x] = h.t
+
+@compute(1) fun culled(@thread_id id: int3){frame}:
+    let h = frame.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), flags = ray_flags.cull_back_facing)
+    frame.output[id.x] = h.t
+
+@compute(1) fun chosen(@thread_id id: int3){frame}:
+    let mut flags = ray_flags.force_opaque
+    if id.x == 0 => flags = ray_flags.none
+    let h = frame.world.trace(ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)), flags = flags)
+    frame.output[id.x] = h.t
+)");
+    // EMIT-159: the template is ORed with the trace's own flags, so naming the constant ones there changes nothing but what a driver may specialize on
+    auto const opaque = text_of_entry(source, "opaque", target::hlsl_dx12);
+    CHECK(opaque.contains("    RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> q;\n"));
+    // every candidate is opaque, so the query is only stepped to its end
+    CHECK(opaque.contains("    while (q.Proceed())\n    {\n        continue;\n    }\n"));
+    CHECK(!opaque.contains("CandidateType"));
+
+    auto const culled = text_of_entry(source, "culled", target::hlsl_dx12);
+    CHECK(culled.contains("    RayQuery<RAY_FLAG_CULL_BACK_FACING_TRIANGLES | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> "
+                          "q;\n"));
+    CHECK(culled.contains("CandidateType"));
+
+    // flags known only at run time leave the template empty, and both loops behind a branch on them
+    auto const chosen = text_of_entry(source, "chosen", target::hlsl_dx12);
+    CHECK(chosen.contains("    RayQuery<RAY_FLAG_NONE> q;\n"));
+    CHECK(chosen.contains("CandidateType"));
+}
+
 TEST("sgl emit - a bitwise operand under another bitwise operator is parenthesized")
 {
     // DXC refuses `flags & 8 | 512` under `-Wbitwise-op-parentheses`, and WGSL takes no such operand at all
