@@ -425,7 +425,7 @@ CC_RETURN_IF_ERROR(expr);                 // early-return the error from the cur
 
 ```cpp
 #include <clean-core/function/function_ref.hh>   // cc::function_ref<R(Args...)> — NON-owning, trivially copyable
-void process(cc::function_ref<int(int)> f);      // bind any lambda/fn-ptr/functor; must outlive the ref
+void process(cc::function_ref<int(int)> f);      // a function / fn-ptr is held by value; any other callable by reference, must outlive the ref
 f(42);  f.is_valid();  bool(f);
 
 #include <clean-core/function/unique_function.hh> // cc::unique_function<R(Args...)> — owning, MOVE-ONLY
@@ -1646,9 +1646,9 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
 - **Move-only types:** `unique_vector`, `unique_array`, `unique_function`,
   `any_error`, `allocation`, `node_allocation`. Plain `vector`/`array`/`string`
   copy *deeply* (value semantics) — reach for the `unique_*` variant to forbid copies.
-- **`function_ref` is non-owning** — the referenced callable must outlive it
-  (binding a temporary is UB). `CC_DEFER` captures by reference — keep captured
-  state alive.
+- **`function_ref` is non-owning** — a lambda or functor must outlive it (storing one bound to a temporary is UB).
+  A function or function pointer is held by value.
+- **`CC_DEFER` captures by reference** — keep captured state alive.
 - **`create_uninitialized` requires a trivial `T`.**
 - **`cc::tuple` and `cc::pair` default-construct their elements VALUE-initialized**, unlike `cc::vector`'s uninitialized resizes.
 - **`cc::variant` has no valueless state**, not even after `take<T>()` — that leaves a moved-from alternative behind, at the same index.
