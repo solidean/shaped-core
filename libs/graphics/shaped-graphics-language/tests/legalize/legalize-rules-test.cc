@@ -254,20 +254,19 @@ TEST("sgl legalize - X5: a leave that crosses one loop sets a flag, which is tes
              "    (print (lit 2.0 : float)))\n"
              "  (print (lit 3.0 : float))\n"
              "  (leave $root (lit 0.0 : float))\n");
+    // X7 then writes the `once` and the test that breaks out of it as a branch around what follows the loop
     CHECK(t.core()
           == "  (var:temporary found_left : bool = (lit false : bool))\n"
-             "  (once\n"
-             "    (loop $l\n"
-             "      (print (lit 1.0 : float))\n"
-             "      (if (local c : bool)\n"
-             "        (then\n"
-             "          (assign (local found_left : bool) = (lit true : bool))\n"
-             "          (break)))\n"
-             "      (break))\n"
-             "    (if (local found_left : bool)\n"
+             "  (loop $l\n"
+             "    (print (lit 1.0 : float))\n"
+             "    (if (local c : bool)\n"
              "      (then\n"
+             "        (assign (local found_left : bool) = (lit true : bool))\n"
              "        (break)))\n"
-             "    (print (lit 2.0 : float)))\n"
+             "    (break))\n"
+             "  (if (not (local found_left : bool) : bool)\n"
+             "    (then\n"
+             "      (print (lit 2.0 : float))))\n"
              "  (print (lit 3.0 : float))\n"
              "  (return (lit 0.0 : float))\n");
 }
@@ -299,25 +298,24 @@ TEST("sgl legalize - X5: a leave that crosses two loops is tested behind each of
              "      (leave $rows))\n"
              "    (print (lit 2.0 : float)))\n"
              "  (leave $root (lit 0.0 : float))\n");
+    // the test inside `rows` breaks a loop and stays; X7 takes the one behind it, which broke the `once`
     CHECK(t.core()
           == "  (var:temporary found_left : bool = (lit false : bool))\n"
-             "  (once\n"
-             "    (loop $rows\n"
-             "      (loop $columns\n"
-             "        (if (local c : bool)\n"
-             "          (then\n"
-             "            (assign (local found_left : bool) = (lit true : bool))\n"
-             "            (break)))\n"
-             "        (break))\n"
-             "      (if (local found_left : bool)\n"
+             "  (loop $rows\n"
+             "    (loop $columns\n"
+             "      (if (local c : bool)\n"
              "        (then\n"
+             "          (assign (local found_left : bool) = (lit true : bool))\n"
              "          (break)))\n"
-             "      (print (lit 1.0 : float))\n"
              "      (break))\n"
              "    (if (local found_left : bool)\n"
              "      (then\n"
              "        (break)))\n"
-             "    (print (lit 2.0 : float)))\n"
+             "    (print (lit 1.0 : float))\n"
+             "    (break))\n"
+             "  (if (not (local found_left : bool) : bool)\n"
+             "    (then\n"
+             "      (print (lit 2.0 : float))))\n"
              "  (return (lit 0.0 : float))\n");
 }
 
@@ -630,19 +628,18 @@ TEST("sgl legalize - X6 keeps away from a block that goes on behind its loop")
                   }),
         t.print(2.0),
     });
+    // X6 leaves the flag to X5, and X7 then writes the `once` as a branch around what the block runs behind its loop
     CHECK(t.core()
           == "  (var:temporary found_left : bool = (lit false : bool))\n"
-             "  (once\n"
-             "    (loop $rows\n"
-             "      (if (local c : bool)\n"
-             "        (then\n"
-             "          (assign (local found_left : bool) = (lit true : bool))\n"
-             "          (break)))\n"
-             "      (break))\n"
-             "    (if (local found_left : bool)\n"
+             "  (loop $rows\n"
+             "    (if (local c : bool)\n"
              "      (then\n"
+             "        (assign (local found_left : bool) = (lit true : bool))\n"
              "        (break)))\n"
-             "    (print (lit 1.0 : float)))\n"
+             "    (break))\n"
+             "  (if (not (local found_left : bool) : bool)\n"
+             "    (then\n"
+             "      (print (lit 1.0 : float))))\n"
              "  (print (lit 2.0 : float))\n"
              "  (return (lit 0.0 : float))\n");
 }

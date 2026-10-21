@@ -184,6 +184,10 @@ loop {
 * **LEGAL-33** X2 runs before X4 ([why](why/legalization.md#legal-33)).
 * **LEGAL-36** (X6) Where a loop is the last statement of block `$b`, a `leave $b` inside that loop is a leave of the loop: nothing of the block runs behind it.
   It costs nothing, and it runs before X2, which then finds a block without a leave ([why](why/legalization.md#legal-36)).
+* **LEGAL-62** (X7) A `once` whose every `break` stands at the end of a side of an `if` is its body, in its place: each such `if` takes what follows it into the side that runs on.
+  The test of X5's flag behind a loop is such an `if`, so `if found_left => break` and the tail behind it are `if not found_left` around that tail, and a guard is an `if` and an `else`.
+  It gives up where both sides run on into statements that follow, since it would write them twice, and where a `break` stands in a `switch`.
+  It runs after X5 over the core tree, and before the lets' rules, which then fold the test of a flag that is constant.
 * **LEGAL-34** What follows an exit in its list never runs and is dropped, and so is a `break` that ends the body of a `once`.
 * **LEGAL-35** Every name a rule introduces comes from the entry point's mint: `pick_result`, `x_before`, `and_result`, `search_left`, `rows_continued`.
 

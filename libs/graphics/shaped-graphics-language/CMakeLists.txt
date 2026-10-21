@@ -79,6 +79,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/legalize/legalize_exprs.cc
     src/shaped-graphics-language/legalize/legalize_erase.cc
     src/shaped-graphics-language/legalize/legalize_lets.cc
+    src/shaped-graphics-language/legalize/legalize_onces.cc
 
     src/shaped-graphics-language/interpret/interpret.cc
 

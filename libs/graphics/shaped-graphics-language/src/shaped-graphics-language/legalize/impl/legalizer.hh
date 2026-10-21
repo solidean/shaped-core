@@ -38,6 +38,10 @@ using stmt_list = cc::vector<flat_stmt_id>;
 /// Rule V1: no local, assignment or result of type void is left, and what evaluating one did stays as an `eval`.
 [[nodiscard]] stmt_list erase_void(flat_builder& out, stmt_list const& body);
 
+/// Rule X7, over a core body: a `once` whose every `break` can become a branch is its body, in place, and what follows
+/// each `break` is written into the side of its `if` that runs on; never into both, so nothing is written twice.
+[[nodiscard]] stmt_list dissolve_onces(flat_builder& out, stmt_list const& body);
+
 /// Rules F1, F2, L1 and L2, last, over a core body: what is constant is its literal, written in place, a branch on
 /// one is the side it takes, a let whose value repeats a let in scope reads that one instead, and a let nothing reads
 /// is gone where its value has no effect and always has a value.

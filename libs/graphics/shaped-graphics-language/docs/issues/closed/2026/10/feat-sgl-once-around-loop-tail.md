@@ -6,6 +6,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/legalization.md
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-21T20:21Z
+closed: 2026-10-21
+resolution: fixed
 ---
 
 # A once around a loop and the tail behind it could be an `if` on the flag

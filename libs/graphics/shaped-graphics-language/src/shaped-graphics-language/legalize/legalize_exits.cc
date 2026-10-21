@@ -681,5 +681,5 @@ flat_entry_point sgl::check::legalize(checked_module const& m,
     auto const without_blocks = lower_expressions(out, options);
     auto const without_leaves = lower_exits(out, without_blocks, options);
     auto const without_void = erase_void(out, without_leaves);
-    return compacted(m, out.e, simplify_lets(out, without_void));
+    return compacted(m, out.e, simplify_lets(out, dissolve_onces(out, without_void)));
 }
