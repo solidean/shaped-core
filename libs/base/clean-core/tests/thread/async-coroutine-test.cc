@@ -148,6 +148,56 @@ TEST("async coroutine - parks on a manual dependency and resumes after the push"
     CHECK(*co->try_value() == 42);
 }
 
+namespace
+{
+struct alignas(64) cache_line_local
+{
+    int value = 0;
+};
+
+struct alignas(256) wide_local
+{
+    int value = 0;
+};
+
+/// Holds an over-aligned local across a suspend, so it lives in the coroutine frame; yields -1 if it is misaligned there.
+template <class Local>
+cc::shared_async<int> coro_over_aligned(cc::shared_async<int> dep)
+{
+    auto local = Local();
+    local.value = co_await dep;
+    co_return reinterpret_cast<isize>(&local) % isize(alignof(Local)) == 0 ? local.value : -1;
+}
+} // namespace
+
+// A frame holds every local that spans a suspend, so the frame must be as aligned as its most aligned local.
+// A frame allocated at a fixed 16 bytes left an alignas(64) worker misaligned in solidean's export, which UBSan caught.
+// Many frames are alive at once, so a correct answer cannot come from one lucky allocation.
+TEST("async coroutine - an over-aligned local stays aligned in the frame")
+{
+    auto const ext = cc::make_async_manual<int>();
+    auto coros = cc::vector<cc::shared_async<int>>();
+    for (auto i = 0; i < 16; ++i)
+    {
+        coros.push_back(coro_over_aligned<cache_line_local>(ext));
+        coros.push_back(coro_over_aligned<wide_local>(ext));
+    }
+
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope scope(sched);
+    for (auto const& co : coros)
+        co->schedule();
+    sched.drain();
+    ext->push_value(7);
+    sched.drain();
+
+    for (auto const& co : coros)
+    {
+        REQUIRE(co->is_ready());
+        CHECK(*co->try_value() == 7);
+    }
+}
+
 ASYNC_TEST("async coroutine - async_yield reschedules and resumes")
 {
     auto steps = 0;
