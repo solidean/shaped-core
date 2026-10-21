@@ -438,3 +438,23 @@ TEST("async-ambient - a scheduled-but-undriven node keeps its context alive")
     CHECK(*warm->try_value() == value_a);
     cc::impl::async_ambient_release(held);
 }
+
+// A test body may itself be running inside a poll, so the depths are taken relative to where it starts.
+TEST("async-ambient - poll depth counts the polls a thread is nested in")
+{
+    auto const base = cc::async_poll_depth();
+    CHECK(cc::async_is_polling() == (base > 0));
+
+    auto const inner = cc::make_async_lazy<int>([] { return cc::async_poll_depth(); });
+    CHECK(cc::async_blocking_get(inner) == base + 1);
+
+    // a node blocking inside its own poll drives the next one a level deeper still: how a foreign node lands in a blocked call
+    auto const outer = cc::make_async_lazy<int>(
+        []
+        {
+            auto const nested = cc::make_async_lazy<int>([] { return cc::async_poll_depth(); });
+            return cc::async_blocking_get(nested);
+        });
+    CHECK(cc::async_blocking_get(outer) == base + 2);
+    CHECK(cc::async_poll_depth() == base);
+}

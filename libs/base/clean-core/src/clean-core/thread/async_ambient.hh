@@ -232,6 +232,14 @@ namespace cc
 {
     return impl::async_tls().poll_depth > 0;
 }
+
+/// How many polls the calling thread is inside, nested; 0 outside any.
+/// A thread blocked on a node helps the pool, so it may poll an unrelated node inside its own: one level deeper than where it blocked.
+/// A consumer keeping per-call state in a thread_local compares depths to tell its own nested call from such a foreign one.
+[[nodiscard]] inline int async_poll_depth()
+{
+    return impl::async_tls().poll_depth;
+}
 } // namespace cc
 
 /// A chain head captured from one thread so it can be re-installed on another, retained for as long as it is held.

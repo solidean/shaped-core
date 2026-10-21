@@ -1068,6 +1068,8 @@ cc::async_ambient_install_scope const i(h); // install it there for a block; tak
 h.reset();                       // drop the hold now. NOT `h = {}`: a default-constructed handle captures again
 cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
                                  // or escape a worker thread and terminate — the question before reporting by throw
+cc::async_poll_depth();          // how many polls this thread is nested in: a thread blocked on a node polls others one
+                                 // level deeper, so a thread_local per-call state compares depths to spot a foreign call
 // DRIVE-SITE: a subtree driven from one work item is billed to that item's context, and an inline-driven dep
 // inherits its driver's. A node stores it only as a resume token, written once when it is queued/parked/yielded —
 // never by a thread merely WAKING it, so a shared dep completing under B cannot contaminate A's continuation.
