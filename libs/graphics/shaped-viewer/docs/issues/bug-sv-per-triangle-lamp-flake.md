@@ -27,3 +27,10 @@ Repeat with `uv run dev.py test "a per-triangle lamp of two different" --repeat 
 
 Seen twice in `dev.py check`'s `debug-nopch-clang` leg on 2026-10-20, on main, with the same value both times: block (1, 0) channel 0 holds 2.3049817 and channel 1 2.5153303.
 So the dark state looks like one fixed wrong answer rather than noise, and both times the next run of the test step passed.
+
+## A second test in the same dark state
+
+`denoise-view-test.cc`'s "the wavefront tracer traces and denoises the viewer's image" failed on CI's Windows Clang WARP leg on 2026-10-21 (run 39599242298).
+Its megakernel capture of the Cornell box, lit by an emissive-mesh lamp alone, averaged 11.33 against the wavefront's 18.31.
+So here the megakernel is the side that went dark, by about 38%, with no per-triangle emission involved — any emissive-mesh lamp may reach the state.
+The capture settled in well under its timeout, so it was not an image written short of its samples.
