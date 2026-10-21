@@ -27,3 +27,26 @@ Repeat with `uv run dev.py test "a per-triangle lamp of two different" --repeat 
 
 Seen twice in `dev.py check`'s `debug-nopch-clang` leg on 2026-10-20, on main, with the same value both times: block (1, 0) channel 0 holds 2.3049817 and channel 1 2.5153303.
 So the dark state looks like one fixed wrong answer rather than noise, and both times the next run of the test step passed.
+
+## Findings, 2026-10-21
+
+The image is a function of the restart count alone, and the count is what varies from run to run.
+Logging `slot.restarts` at each render's 32nd frame over 60 runs, every pair of renders that ended on the same count gave the same block value to the bit (3252, 3490, 3190, 3041 and 3114 each twice).
+The per-triangle render ends between about 2900 and 4300 restarts, the constant one between 700 and 1000.
+Every frame shaded while a permutation or an emitter is pending restarts the mean, and a debug build compiles for seconds.
+So each run draws one of a few thousand seed sets, and 2.3049817 is the image of one of them, which is why it recurs.
+
+The failing image holds a single firefly rather than a bias: pixel (13, 3) on the lamp's edge, its excess triangle 0's emission about 585 times over.
+Other failures were fireflies in the reference instead, which reads as the per-triangle image being too dark.
+At 512 samples an 8% block tolerance cannot absorb one such sample, so the test fails for whichever seed sets land one.
+
+Ruled out along the way, each by experiment:
+* A pending frame inside the final run: no render's final 32 frames held one, failing runs included.
+* Concurrency between tests: the test fails alone, under `--jobs 1` too, and no render saw the epoch move between recording and submit.
+* Name collisions in the shared material library, and the area CDF, which is area-only and built in the same list ahead of the trace.
+
+Per-frame logging masks the flake, which is what made it look timing-dependent: it changes how many pending frames there are.
+
+Reverting `seed_of` is not the fix.
+4d142a489 seeded restarts apart because every moving frame, each a restart, otherwise drew the same sequence.
+The fix belongs either in the test, so that its result does not depend on the seed set it draws, or in what advances the restart count.
