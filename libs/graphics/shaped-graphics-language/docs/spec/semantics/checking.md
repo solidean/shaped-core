@@ -872,6 +872,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-287** `xs[i]` is an element of an array, and `xs[i, j]` is `xs[i][j]`: one index per dimension, at most as many as the array has.
   An index is an `int` or a `uint`, into an array, a binding array and a buffer alike, since every target indexes by either; any other type is `type-mismatch`.
 * **CHK-309** An index that is an `int` or `uint` literal, or names an `int` or `uint` `const`, lies in `0 ..< N` for its dimension's length `N`, or it is `invalid-constant-argument`.
+  So does an index that any expression of constants folds to, `xs[1 + 2]` or `xs[uint(3)]`, judged where the tree is folded (CHK-311), since WGSL refuses one past the end when it creates the shader.
   An index computed at run time is not judged here.
 * **CHK-288** `xs.length` is an array's length, an `int` constant, and the one member an array has; it is never assigned.
 * **CHK-289** `T[N].filled(v)` is an array of `T[N]` whose every element is `v`, which converts to `T` as an argument does.

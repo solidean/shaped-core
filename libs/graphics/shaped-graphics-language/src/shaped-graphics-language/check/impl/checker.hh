@@ -784,8 +784,8 @@ struct checker
         type_id type = type_id::none;
     };
     [[nodiscard]] local_only_found local_only_path(type_id type) const;
-    /// CHK-391: refuses each value of function bodies alone a struct crossing a stage edge holds.
-    void judge_edge_local_only(i32 file, source_span where, type_id type);
+    /// CHK-391: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
+    bool judge_edge_local_only(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
     /// `unused-require` for every `require` of a body that nothing needed (CHK-265).

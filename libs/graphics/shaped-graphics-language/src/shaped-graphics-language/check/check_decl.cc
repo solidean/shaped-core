@@ -699,7 +699,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                                is_workgroup ? "workgroup memory"
                                : is_buffer  ? "a buffer's element"
                                             : "a constant block",
-                               found.path.starts_with(":") ? cc::string()
+                               // a member that is one itself is named, as a deeper one is by its path
+                               found.path.starts_with(":") ? cc::format(", as its member {}", name)
                                                            : cc::format(", {}{}", out.name_of(root), found.path),
                                found.reason));
                 type = checked_module::error_type;
@@ -1943,16 +1944,17 @@ void checker::judge_entry_point(symbol_id id)
                            workgroup_bytes, k_portable_workgroup_bytes));
 
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
+    // CHK-391 first: a value of function bodies alone is what the detail names, rather than an array holding it
     for (auto const& parameter : parameters)
         if (parameter.input == stage_input::none)
         {
-            judge_edge_arrays(file, where, parameter.type);
+            if (!judge_edge_local_only(file, where, parameter.type))
+                judge_edge_arrays(file, where, parameter.type);
             judge_edge_16_bit(file, where, parameter.type);
-            judge_edge_local_only(file, where, parameter.type);
         }
-    judge_edge_arrays(file, where, info.result);
+    if (!judge_edge_local_only(file, where, info.result))
+        judge_edge_arrays(file, where, info.result);
     judge_edge_16_bit(file, where, info.result);
-    judge_edge_local_only(file, where, info.result);
 
     // CHK-301 to CHK-306: the geometry and the tessellation stages take arrays of vertices, and are judged apart
     if (info.entry_stage == stage::geometry || info.entry_stage == stage::tessellation_control

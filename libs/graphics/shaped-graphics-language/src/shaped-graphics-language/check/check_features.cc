@@ -185,7 +185,13 @@ checker::local_only_found checker::local_only_path(type_id type) const
                                                                     .type = type};
     auto const& t = out.at(type);
     if (t.kind == type_kind::array || t.kind == type_kind::buffer)
-        return local_only_path(t.element);
+    {
+        // an array of one is named whole, `ms: mat3[2]`, so the path keeps the length the member was declared with
+        auto inner = local_only_path(t.element);
+        if (t.kind == type_kind::array && inner.path.starts_with(":"))
+            inner.path = cc::format(": {}", out.name_of(type));
+        return inner;
+    }
     if (t.kind != type_kind::structure)
         return {};
     for (auto const& m : out.at(t.members))
@@ -198,7 +204,7 @@ checker::local_only_found checker::local_only_path(type_id type) const
     return {};
 }
 
-void checker::judge_edge_local_only(i32 file, source_span where, type_id type)
+bool checker::judge_edge_local_only(i32 file, source_span where, type_id type)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it
     while (type != checked_module::error_type && out.builtin_type_of(type) == nullptr
@@ -206,11 +212,14 @@ void checker::judge_edge_local_only(i32 file, source_span where, type_id type)
         type = out.at(type).element;
     if (type == checked_module::error_type || out.builtin_type_of(type) != nullptr
         || out.at(type).kind != type_kind::structure)
-        return;
-    if (auto const found = local_only_path(type); !found.path.empty())
-        unsupported(file, where,
-                    cc::format("a {} crossing a stage edge, in {}{}, which only a function body holds, since {}",
-                               out.name_of(found.type), out.name_of(type), found.path, found.reason));
+        return false;
+    auto const found = local_only_path(type);
+    if (found.path.empty())
+        return false;
+    unsupported(file, where,
+                cc::format("a {} crossing a stage edge, in {}{}, which only a function body holds, since {}",
+                           out.name_of(found.type), out.name_of(type), found.path, found.reason));
+    return true;
 }
 
 void checker::mark_requires_used(cc::span<symbol_id const> functions, feature_set features)
