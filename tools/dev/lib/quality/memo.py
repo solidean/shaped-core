@@ -83,10 +83,9 @@ def file_ids(root: Path) -> dict[str, str] | None:
     return ids
 
 
-def environment_stamp() -> str:
-    """What a test's result depends on beyond its own bytes: the platform, and the GPU driver where one can be asked."""
-    parts = [platform.platform(), platform.machine()]
-    parts.append(gpu_driver_version() or "")
+def environment_stamp(gpu_driver: str) -> str:
+    """What a test's result depends on beyond its own bytes: the platform, and the GPU driver."""
+    parts = [platform.platform(), platform.machine(), gpu_driver]
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()[:16]
 
 
@@ -97,12 +96,12 @@ def gpu_driver_version() -> str | None:
             out = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
                  "(Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name + ' ' + $_.DriverVersion }) -join ';'"],
-                capture_output=True, text=True, timeout=20)
+                capture_output=True, text=True, timeout=60)
             return out.stdout.strip() or None if out.returncode == 0 else None
         smi = shutil.which("nvidia-smi")
         if smi:
             out = subprocess.run([smi, "--query-gpu=driver_version", "--format=csv,noheader"],
-                                 capture_output=True, text=True, timeout=20)
+                                 capture_output=True, text=True, timeout=60)
             return out.stdout.strip() or None if out.returncode == 0 else None
         nvidia = Path("/sys/module/nvidia/version")
         if nvidia.is_file():
@@ -174,9 +173,20 @@ class CheckMemo:
     # -- tests -------------------------------------------------------------
 
     def _environment(self) -> str:
+        """The environment stamp, with the driver string remembered in the cache.
+
+        The probe is a subprocess that can time out on a loaded machine, and an empty answer would change every test key without a driver changing.
+        So a failed probe reuses the last answer, and only a probe that answers differently moves the stamp.
+        """
         if self._env is None:
             with profile.span("environment stamp", type="probe"):
-                self._env = environment_stamp()
+                driver = gpu_driver_version()
+            if driver is None:
+                driver = str(self._data.get("gpu_driver", ""))
+            elif driver != self._data.get("gpu_driver"):
+                self._data["gpu_driver"] = driver
+                self._save()
+            self._env = environment_stamp(driver)
         return self._env
 
     def test_key(self, preset_name: str, artifact: Path) -> str | None:
