@@ -360,3 +360,44 @@ TEST("threaded check - a REQUIRE on an attributed bare thread records instead of
 }
 
 #endif
+
+// A fuzz capture belongs to the test that installed it.
+// A thread blocked inside it polls other work, another test's body among it, whose checks are that test's and not the sink's.
+// Running an inner registry under the outer test's capture is that shape without the race.
+TEST("check capture - another test's checks under a capture reach their own test", no_scheduler)
+{
+    auto sink = nx::impl::check_capture_sink();
+    nx::test_registry reg;
+    reg.add_declaration("nested_body", {}, [] { CHECK(true); });
+    auto schedule = nx::test_schedule::create({}, reg);
+
+    auto total_checks = -1;
+    auto failed_tests = -1;
+    {
+        nx::impl::scoped_check_capture const capture(sink);
+        auto const exec = nx::execute_tests(schedule, {});
+        total_checks = int(exec.count_total_checks());
+        failed_tests = int(exec.count_failed_tests());
+    }
+
+    CHECK(sink.executed == 0); // the nested test's check was not the capturing test's to take
+    CHECK(total_checks == 1);  // it counted for the nested test, which therefore has a check
+    CHECK(failed_tests == 0);
+}
+
+TEST("check capture - a capture installed under another takes over until it ends, then gives the outer one back")
+{
+    auto outer = nx::impl::check_capture_sink();
+    auto inner = nx::impl::check_capture_sink();
+    {
+        nx::impl::scoped_check_capture const outer_capture(outer);
+        {
+            nx::impl::scoped_check_capture const inner_capture(inner);
+            CHECK(true);
+        }
+        CHECK(true);
+    }
+
+    CHECK(inner.executed == 1);
+    CHECK(outer.executed == 1);
+}

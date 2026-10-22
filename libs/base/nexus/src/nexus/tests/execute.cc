@@ -502,6 +502,8 @@ cc::mutex<cc::vector<cc::unique_ptr<test_context>>> g_leaked_contexts;
 // When non-null, check results are tallied here instead of being recorded on the active test
 // (see nx::impl::scoped_check_capture). Only the innermost installed sink is active.
 thread_local nx::impl::check_capture_sink* g_check_capture = nullptr;
+// The test that installed g_check_capture, or null where none runs; only its checks are captured.
+thread_local void const* g_check_capture_owner = nullptr;
 
 // Does one scope (a single filter path) permit `section_name` opening at the current section path?
 bool scope_allows(cc::span<test_section* const> curr_section,
@@ -1506,15 +1508,16 @@ nx::impl::raii_section_opener::~raii_section_opener()
 }
 
 nx::impl::scoped_check_capture::scoped_check_capture(check_capture_sink& sink)
+  : _previous_sink(g_check_capture), _previous_owner(g_check_capture_owner)
 {
-    // Nesting is not supported: a flat pointer keeps the hot path cheap, and the fuzz engine never nests captures.
-    CC_ASSERT(g_check_capture == nullptr, "nested check captures are not supported");
     g_check_capture = &sink;
+    g_check_capture_owner = current_context();
 }
 
 nx::impl::scoped_check_capture::~scoped_check_capture()
 {
-    g_check_capture = nullptr;
+    g_check_capture = _previous_sink;
+    g_check_capture_owner = _previous_owner;
 }
 
 nx::impl::scoped_test_check_divert::scoped_test_check_divert(async_check_capture_sink& sink) : _ctx(current_context())
@@ -1836,7 +1839,8 @@ void nx::impl::report_check_result(check_result result)
     // Capture mode: a tool such as the fuzz engine is driving user code that is expected to fail often.
     // Tally the outcome and suppress both the host-test side effects and the control-flow throws (REQUIRE/SKIP).
     // One failing operation then neither aborts nor pollutes the host test.
-    if (g_check_capture != nullptr)
+    // Only the capturing test's own checks: another test's body polled on this thread while it blocks is not its to swallow.
+    if (g_check_capture != nullptr && current_context() == g_check_capture_owner)
     {
         auto& sink = *g_check_capture;
         ++sink.executed;
