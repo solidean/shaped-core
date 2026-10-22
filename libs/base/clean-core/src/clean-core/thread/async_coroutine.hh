@@ -357,16 +357,18 @@ struct async_awaiter_value
         auto& p = h.promise();
         CC_ASSERT(p.ctx != nullptr, "co_await outside of a compute step");
 
+        if (!p.ctx->require(*dep))
+        {
+            p.suspend_on(this, &check<P>);
+            return true;
+        }
+        // Ready includes failed, and only a ready node is final: checked before require(), a failure landing in between would resume us onto value().
         if ((*dep)->has_error())
         {
             p.fail_with((*dep)->propagate_error());
             return true; // stay suspended: the frame destroys us and propagates
         }
-        if (p.ctx->require(*dep))
-            return false; // already ready — no suspension at all
-
-        p.suspend_on(this, &check<P>);
-        return true;
+        return false; // ready with a value: no suspension at all
     }
 
     /// A reference INTO the dependency node's payload, so reading it copies nothing.
