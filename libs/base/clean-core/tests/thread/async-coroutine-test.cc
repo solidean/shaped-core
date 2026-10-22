@@ -615,6 +615,44 @@ TEST("async coroutine - a coroutine fan-out tree is correct on a pool")
     CHECK(cc::async_blocking_get_on(pool, coro_sum_tree(10)) == 1024);
 }
 
+namespace
+{
+cc::shared_async<int> coro_await(cc::shared_async<int> dep)
+{
+    co_return co_await dep;
+}
+
+cc::shared_async<int> coro_count_failed(cc::vector<cc::shared_async<int>> awaiters)
+{
+    auto failed = 0;
+    for (auto const& a : awaiters)
+        if ((co_await cc::async_as_result(a)).has_error())
+            ++failed;
+    co_return failed;
+}
+} // namespace
+
+// A dependency can fail on another thread between an awaiter's check for a failure and its check for readiness.
+// Ready then includes failed, so an awaiter that checked in that order resumed and read the value of a failed node.
+// The window is a few instructions, so this races many awaiters against the failure, round after round.
+TEST("async coroutine - a dependency failing while it is awaited on a pool fails every awaiter")
+{
+    cc::async_thread_pool pool;
+    auto const rounds = nx::is_thorough() ? 20000 : 2000;
+    for (auto round = 0; round < rounds; ++round)
+    {
+        auto const dep = cc::make_async_manual<int>();
+        auto awaiters = cc::vector<cc::shared_async<int>>();
+        for (auto i = 0; i < 8; ++i)
+        {
+            awaiters.push_back(coro_await(dep));
+            awaiters.back()->schedule_on(pool);
+        }
+        dep->push_error(cc::async_error::make_error(cc::any_error("failed while awaited")));
+        REQUIRE(cc::async_blocking_get_on(pool, coro_count_failed(cc::move(awaiters))) == 8);
+    }
+}
+
 ASYNC_TEST("async coroutine - async_take moves a move-only value out of the node")
 {
     auto const make = []() -> cc::shared_async<cc::unique_ptr<int>> { co_return cc::make_unique<int>(42); };
