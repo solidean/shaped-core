@@ -1544,7 +1544,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (traces)
         slot->stand_in_hash = stand_ins.hash;
     if (traces && (stand_ins.pending || resolved.emitters_pending))
+    {
         slot->reset_hash = cc::combine_hash(hash, u64(1));
+        ++slot->loading_frames;
+    }
 
     // A scaled frame is no sample of the mean, which the next still frame restarts at full size.
     if (traces && !scaled)
@@ -1935,7 +1938,10 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     if (traced == sg::routine_outcome::executed)
         slot.stand_in_hash = stand_ins.hash;
     if (traced == sg::routine_outcome::executed && (stand_ins.pending || resolved.emitters_pending))
+    {
         slot.reset_hash = cc::combine_hash(hash, u64(1));
+        ++slot.loading_frames;
+    }
     if (traced == sg::routine_outcome::executed)
         count_traced_frame(slot, scene->settings);
     return slot.texture;

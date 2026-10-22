@@ -24,6 +24,13 @@
 class sv::view_store
 {
 public:
+    /// See `history_of`.
+    struct accumulation_history
+    {
+        u32 restarts = 0;
+        u32 loading_frames = 0;
+    };
+
     view_store();
 
     /// Reclaim what has gone idle or over budget, then advance to `epoch`.
@@ -57,6 +64,12 @@ public:
     /// Defaults to the first traced layer's accumulator, which is the one a single-layer view has.
     /// For tests and debug overlays — the trace needs none of it.
     [[nodiscard]] u32 accumulated_frames(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
+
+    /// What one accumulation slot of `id` went through: how often its random sequence moved on, and how many of its
+    /// frames traced through something still loading. Zero for a slot that was never seen.
+    /// A converged image is a function of the restart count, and the loading frames are what make it vary with compile
+    /// timing, so this is what a test reads to tell two runs apart without logging every frame, which changes the timing.
+    [[nodiscard]] accumulation_history history_of(view_id id, u64 temporal_id = temporal_id::accumulation(0)) const;
 
     /// The fewest samples per pixel across every traced layer of `id`, and 0 for a view with none.
     /// See `impl::min_accumulated_samples`, which is the rule.
