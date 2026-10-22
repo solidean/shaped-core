@@ -232,9 +232,10 @@ phrase_pattern compile_phrase(cc::string_view notation)
             pattern.steps.push_back({.kind = phrase_step::step_kind::not_followed_by,
                                      .alternatives = split_alternatives(word.subview({.start = 1, .end = word.size()}))});
         else if (word[0] == '[' && word[word.size() - 1] == ']')
-            pattern.steps.push_back({.kind = phrase_step::step_kind::token,
-                                     .optional = true,
-                                     .alternatives = split_alternatives(word.subview({.start = 1, .end = word.size() - 1}))});
+            pattern.steps.push_back(
+                {.kind = phrase_step::step_kind::token,
+                 .optional = true,
+                 .alternatives = split_alternatives(word.subview({.start = 1, .end = word.size() - 1}))});
         else
             pattern.steps.push_back({.kind = phrase_step::step_kind::token, .alternatives = split_alternatives(word)});
     }
@@ -275,9 +276,8 @@ cc::vector<source_span> find_phrases(prose_block const& block, cc::span<phrase_p
         auto last = tokens[matched_end - 1].end - 1;
         while (joined.line_of[last] != joined.line_of[first])
             --last;
-        found.push_back({.file_id = file_id,
-                         .byte_begin = joined.source_offset[first],
-                         .byte_end = joined.source_offset[last] + 1});
+        found.push_back(
+            {.file_id = file_id, .byte_begin = joined.source_offset[first], .byte_end = joined.source_offset[last] + 1});
         ti = matched_end;
     }
     return found;
