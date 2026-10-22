@@ -376,6 +376,7 @@ uv run dev.py check --commit <rev>   # check a commit or range instead
 uv run dev.py check --since <rev>    # everything changed since <rev>, working tree included
 uv run dev.py check crossrefs  # run just one (or several) checks by name
 uv run dev.py check --list     # list the registered checks
+uv run dev.py check --push     # pull, check what the push sends, push; re-checks only what a merge can break
 ```
 
 ### The default scope is the branch, not the working tree
@@ -531,6 +532,25 @@ On failure it prints the `test_diag` selector, same as `dev.py test`.
 Windows has no sanitizer leg — see [Sanitizers](#sanitizers) for why.
 
 New gates plug into the check registry in [cmd/check.py](../../tools/dev/cmd/check.py) without changing the command surface.
+
+### `check --push`: pull, check, push, bounded
+
+`uv run dev.py check --fix --push` is the pull, check, push chain as one command, and it is the one that should end a piece of work.
+It knows its own verdict, so there is no wrapper exit code to misread and no push after a check that was not read.
+
+1. It refuses a dirty working tree.
+   What gets pushed is commits, and this is also what keeps an edit out of a running check.
+2. It fetches, and merges `origin/<branch>` when it moved; a conflict stops it with the merge in progress, as git would leave it.
+3. It runs the full registry with selection, scoped to what the push would send: everything since `origin/<branch>`.
+4. It pushes.
+   A rejected push means `origin/<branch>` moved during the check, so it pulls again and continues at 5.
+5. After that merge it builds everything, since a changed signature on one side and a new caller on the other fail here, and runs only the test binaries both sides reach.
+   Each side was checked alone already; the intersection is where the merge is new, and it is usually empty.
+   No static gate reruns: theirs was linted by them.
+6. Three rounds, then it stops and says the branch is busy.
+
+Under `--fix`, a rewrite stops before the push with a request to commit it; nothing is committed on the tool's own initiative.
+It takes no scope flag and no gate name: what the push sends is the scope, and the whole registry is the gate.
 
 ### Re-checking a commit or a range
 

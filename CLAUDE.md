@@ -259,6 +259,8 @@ Linting the first one calibrates the rest.
 [docs/guides/prose.md](docs/guides/prose.md) is the workflow around it, including what `--fix` will and won't do for you.
 
 **Before pushing, run `uv run dev.py check --fix`** — the pre-push gate, and manual rather than a git hook.
+`uv run dev.py check --fix --push` is that gate plus the pull and the push as one command, and the way to end a piece of work;
+it refuses a dirty tree, re-checks only what a merge can break, and gives up after three rounds.
 It runs the clang-tidy gates, shaped-linter, clang-format, a full-repo cross-reference check, then the test suite; `--no-test` skips that tail and `--list` shows the registry.
 The order is a correctness property rather than a listing convention, and [Pre-commit checks](docs/guides/building-and-testing.md#pre-commit-checks) says why.
 
@@ -470,6 +472,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
   A push to `main` rejected as non-fast-forward is the same case: pull, resolve, push again.
 * **Commits are grouped by topic, and one may be partially broken.** A commit that does not compile on its own is fine.
 * **Before every push, `uv run dev.py check --fix` must pass.** Not a git hook — manual.
+  `uv run dev.py check --fix --push` runs it and pushes in one go, once the user has asked for the push.
   It is the local gate that makes skipping CI cheap, so it is not skipped.
   Its default scope is everything since the merge base with `origin/main`, so on `main` it covers exactly the unpushed commits.
 * **An agent never pushes on its own initiative.** A push needs the user's intent: ask, or wait until told to push.

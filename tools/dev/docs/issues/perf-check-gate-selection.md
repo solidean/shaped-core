@@ -64,7 +64,7 @@ Prose counts for the prose gates only.
 A file nobody can attribute, or a change to `tools/cmake`, the presets or the root build files, selects everything and says so.
 The rules narrow; they never guess.
 
-### Thorough tests opt in, per test, with author-written triggers
+### Thorough tests opt in, per test, with author-written triggers (done)
 
 A thorough test runs under `check` only when it declares what it reruns on, and only when that matches the change.
 The declaration sits on the test, since a test has granular provenance: a boolean fuzzer names the one file implementing "M cut S", a viewer sweep names its surface tree.
@@ -92,7 +92,7 @@ One well-balanced build instead of several fighting ones, the shape the test gat
 `example`, `benchmark` and `test --target` built target by target, so ninja loaded the graph once per target and walked each critical path with the rest of the machine idle.
 Done: one step is the default, and the itemized per-target mode the opt-in; `build_diag` reads per-compile sidecars, so diagnosis loses nothing.
 
-### `check --push`: pull, check, push, bounded
+### `check --push`: pull, check, push, bounded (done)
 
 The pull is implied by correctness, and the push is what the flag adds.
 dev.py knows its own verdict, which removes a documented failure mode: a check run through a wrapper reports the wrapper's exit code.
@@ -120,5 +120,7 @@ Not the first step; it is what makes the push loop nearly free.
 
 ## Open
 
-- The exact sidecar field and nexus API for a thorough test's triggers.
 - Whether the four test presets run concurrently once builds are centralized, and how the GPU tag then limits the test scheduler.
+- `submodules-self-test` took 148 s inside the concurrent pool against 79 s alone; it is selected only by `tools/dev` changes now, and is worth a look of its own.
+- `shaped-viewer-test` behind `nx::is_thorough()` on debug-nopch, with a `rerun_on` for its surface tree.
+- Memoized gate results, keyed on the hash of what a gate watches.
