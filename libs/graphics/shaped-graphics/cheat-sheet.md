@@ -105,6 +105,8 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | subgroups (wave / SIMD-group ops in compute and pixel; dx12 WaveOps, webgpu needs subgroups)
                                                    //   | device_coherence (globallycoherent / coherent(device); false on webgpu)
                                                    //   | image_atomics (atomics on r32 integer images; false on webgpu)
+                                                   //   | helper_lane_query (a pixel stage can tell a helper; SGL's strong
+                                                   //     compare-exchange in a pixel stage needs it; false on webgpu)
                                                    //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),

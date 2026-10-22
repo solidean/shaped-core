@@ -183,9 +183,18 @@ struct flattener
         }
         if (entry.entry_stage == stage::none)
             return;
-        if (auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
-            record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
+        auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
+        if (record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
             quad_calls.push_back({.file = file(), .call = call, .callee = callee});
+        // EMIT-159: what only a pixel stage needs of the device, which every target then judges alike
+        if (record != nullptr && entry.entry_stage == stage::pixel && !record->pixel_features.is_empty())
+        {
+            auto within = cc::vector<symbol_id>();
+            for (auto const& fr : frames)
+                within.push_back(fr.function);
+            feature_uses.push_back(
+                {.file = file(), .call = call, .features = record->pixel_features, .within = cc::move(within)});
+        }
         auto const& s = c.out.at(callee);
         if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
             stage_violations.push_back({.file = file(), .call = call, .callee = callee});

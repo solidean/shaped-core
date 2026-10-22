@@ -625,8 +625,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   Both are relaxed: publishing what a claim guards needs a barrier.
   Atomics stand in pixel, compute, raygen, miss, closest-hit and callable stages; in an any hit or an intersection they are `stage-not-allowed` (CHK-398).
   In a pixel stage a helper's atomics store nothing and read garbage; the strong loop skips one in MSL (EMIT-158).
-  WebGPU refuses a pixel stage's `compare_exchange_strong` (EMIT-159): WGSL cannot tell a helper, so write the weak one in a loop, or use compute.
-  A test fails a weak one spuriously the first time each call meets `e` (EVAL-98), so a missing retry loop fails its test.
+  A pixel stage's `compare_exchange_strong` needs `require helper_lane_query` (EMIT-159), which WebGPU lacks: there, write the weak one in a loop, or use compute.
+  A test fails a weak one spuriously every other time each call meets `e`, the first time first (EVAL-98), so a missing retry loop fails its test.
 - **`img[xy]` is the image's `load`, and `img[xy] = v` its `store`** (CHK-367): the check pass records the call at the subscript, and `m.texel_stores` holds each assignment's.
   `@atomic` on a `mut` image of `.r32_uint` or `.r32_sint` makes `img[xy]` an atomic, `img[xy].max(v)` (CHK-372), which the flat tree calls as the prelude's internal `texel_max`.
   `@coherent` on a `mut buffer` or image is `globallycoherent` in HLSL and `coherent(device)` in MSL (CHK-368); both features are WGSL's `target-lacks-feature`.

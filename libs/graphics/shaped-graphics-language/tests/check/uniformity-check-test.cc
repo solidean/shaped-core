@@ -215,7 +215,9 @@ TEST("sgl check - an index read from a compare-exchange is marked nonuniform")
 TEST("sgl check - a pixel stage samples with derivatives after a strong compare-exchange")
 {
     // its loop leaves every pixel of the quad where it found it, and only helpers skip it (EMIT-158)
-    CHECK(reports_for("binding material:\n"
+    CHECK(reports_for("require helper_lane_query\n"
+                      "\n"
+                      "binding material:\n"
                       "    @sampler(smp) albedo: texture_2d[float4]\n"
                       "    smp: sampler\n"
                       "    claims: mut buffer[atomic[uint]]\n"

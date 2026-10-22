@@ -121,6 +121,11 @@ enum class sg::feature
     /// D3D12 requires typed UAV atomics on r32 formats and Vulkan requires storage-image atomics on them, Metal has them from Apple7.
     /// WebGPU has no image atomics.
     image_atomics,
+
+    /// A pixel shader may tell a helper invocation from a real one, which SGL's strong compare-exchange needs there (EMIT-159).
+    /// D3D12 and Vulkan need no test, since their compare-exchange is strong already; Metal has `simd_is_helper_thread()`.
+    /// WGSL has no such test.
+    helper_lane_query,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -154,8 +159,9 @@ inline constexpr feature k_all_features[] = {
     feature::subgroups,
     feature::device_coherence,
     feature::image_atomics,
+    feature::helper_lane_query,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::image_atomics) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::helper_lane_query) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -207,6 +213,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "device_coherence";
     case feature::image_atomics:
         return "image_atomics";
+    case feature::helper_lane_query:
+        return "helper_lane_query";
     }
     return "";
 }

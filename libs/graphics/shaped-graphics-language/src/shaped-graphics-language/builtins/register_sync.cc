@@ -155,6 +155,13 @@ constexpr atomic_info k_atomics[] = {
     return op == atomic_op::compare_exchange_strong || op == atomic_op::compare_exchange_weak;
 }
 
+/// EMIT-159: a pixel stage's strong loop must keep a helper invocation out, which needs the target to tell one.
+[[nodiscard]] check::feature_set strong_pixel_features(atomic_op op)
+{
+    return op == atomic_op::compare_exchange_strong ? check::feature_set(check::feature::helper_lane_query)
+                                                    : check::feature_set();
+}
+
 constexpr cc::string_view k_atomics_hlsl[] = {
     "InterlockedAdd", "InterlockedMin", "InterlockedMax",      "InterlockedAnd",
     "InterlockedOr",  "InterlockedXor", "InterlockedExchange", "InterlockedCompareExchange",
@@ -246,7 +253,7 @@ written write_exchange(call_context const& ctx,
         result.lines.push_back(cc::format("let {}: {} = {};", expected_name, t, expected));
         result.lines.push_back(cc::format("let {}: {} = {};", desired_name, t, desired));
         result.lines.push_back(cc::format("var {}: {};", before, t));
-        // a pixel stage's is refused (EMIT-159), since WGSL cannot keep a helper out of this loop
+        // a pixel stage's needs helper_lane_query, which WGSL lacks (EMIT-159), since it cannot keep a helper out of this loop
         result.lines.push_back("loop {");
         result.lines.push_back(cc::format("    let {} = atomicCompareExchangeWeak({}, {}, {});", exchanged, place_name,
                                           expected_name, desired_name));
@@ -658,6 +665,7 @@ void sgl::builtins::register_sync(registry& r)
                           .msl_names = k_atomics_msl},
                 .is_atomic = true,
                 .gives_prelude_struct = info.op == atomic_op::compare_exchange_weak,
+                .pixel_features = strong_pixel_features(info.op),
             });
         }
     }
@@ -704,6 +712,7 @@ void sgl::builtins::register_sync(registry& r)
                               .hlsl_names = k_atomics_hlsl},
                     .is_atomic = true,
                     .gives_prelude_struct = info.op == atomic_op::compare_exchange_weak,
+                    .pixel_features = strong_pixel_features(info.op),
                 });
             }
         }

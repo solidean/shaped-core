@@ -54,6 +54,7 @@ binding pixel_claims:
 // A helper's atomics store nothing and read what they please, so the strong compare-exchange's loop must not trap one.
 // The slots of column 0 stay 0, every other slot holds its pixel's tag plus one, and the draw ends.
 @pixel fun claiming_ps(p: tagged){pixel_claims} -> tag_target:
+    require helper_lane_query
     let x = p.position.x
     if x < 1.0 => discard
     let slot = (p.position.x as int) + 4 * (p.position.y as int)

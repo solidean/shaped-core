@@ -286,6 +286,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | a subgroup operation, `@subgroup_size`, `@subgroup_invocation_id` | `sg::feature::subgroups`, WebGPU's `subgroups` |
 | `@coherent` on a member ([Coherent memory](#coherent-memory)) | `sg::feature::device_coherence`, which WebGPU lacks |
 | `@atomic` on an image member ([Atomics](#atomics)) | `sg::feature::image_atomics`, which core WebGPU lacks |
+| `compare_exchange_strong` in a pixel stage ([Atomics](#atomics)) | `sg::feature::helper_lane_query`, which WebGPU lacks |
 
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.
@@ -477,7 +478,8 @@ Its caveats are the other atomics' and a few of its own:
 * A helper invocation of a pixel stage, one that runs for derivatives or after a `discard`, stores nothing, and what its atomics read is undefined.
   So a helper's `old` and `exchanged` mean nothing, and a weak form's retry loop must not trust them.
   The strong form's loop skips a helper in MSL, and HLSL's has none.
-  WGSL cannot tell a helper, so WebGPU refuses a pixel stage's strong compare-exchange as `target-lacks-feature`: a weak one in a retry loop, or a compute stage, is the way there.
+  So a pixel stage that reaches the strong form needs `helper_lane_query`, on every target, and WebGPU lacks it since WGSL cannot tell a helper.
+  There, a weak one in a retry loop, or a compute stage, is the way.
 * The result of either is non-uniform (CHK-283): an index taken from it into a binding array is `nonuniform`, and a barrier under a branch on it is refused.
   The strong form's loop is the target's, and leaves the control flow as uniform as it found it, so a barrier after the call is fine.
 * A test runs one invocation, which no other ever races ([EVAL-98](semantics/evaluation.md#errors-of-the-program)).

@@ -268,4 +268,6 @@ Bounding the loop would end it, at the price of a strong compare-exchange that m
 So WebGPU refuses the pixel stage instead, and the shader says what it means.
 A weak compare-exchange in a retry loop of its own puts the loop in the shader's hands, where a helper's meaningless result is the shader's to handle.
 A compute stage has no helpers, so it takes the strong one on WebGPU as everywhere.
-The refusal is per target and per stage, as EMIT-122's is, since no `require` names what WebGPU lacks here, and every other target writes the stage.
+The refusal is a feature, `helper_lane_query`, rather than a rule of the WGSL emitter, so it holds on every target, as EMIT-13 asks.
+A pixel stage without the `require` is refused on the dev box at its line, and one with it is refused on WebGPU by name.
+Once WebGPU can tell a helper, sg reports the feature there and nothing else changes.
