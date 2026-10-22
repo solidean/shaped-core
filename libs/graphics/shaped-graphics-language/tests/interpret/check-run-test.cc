@@ -126,6 +126,23 @@ TEST("sgl run - a failure in a loop of the test keeps the loop's variable, and t
     CHECK(o.failures[2].loop_values[0].leaves[0].as_int() == 4);
 }
 
+TEST("sgl run - a weak compare-exchange fails spuriously unless the driver asks for every one to be strong")
+{
+    // EVAL-98: one that meets `expected` fails the first time, so a check that it stored fails by default
+    auto const checked = check_sources(read_prelude(), "@workgroup binding counters:\n"
+                                                       "    slot: atomic[uint]\n"
+                                                       "test:\n"
+                                                       "    counters.slot.store(0u)\n"
+                                                       "    counters.slot.compare_exchange_weak(0u, 7u).exchanged\n"
+                                                       "    counters.slot.load() == 7u\n");
+    auto const spurious = run_test(checked, 0);
+    CHECK(spurious.status == run_status::ok);
+    CHECK(spurious.failures.size() == 2);
+    auto const strong = run_test(checked, 0, {.fails_weak_exchanges = false});
+    CHECK(strong.status == run_status::ok);
+    CHECK(strong.failures.empty());
+}
+
 TEST("sgl run - an assert is no part of what a target writes, and the two forms agree without it")
 {
     auto const checked

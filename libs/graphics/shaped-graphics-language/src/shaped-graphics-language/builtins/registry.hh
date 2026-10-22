@@ -258,8 +258,9 @@ struct sgl::builtins::function_record
     /// Updates its first argument, an atomic, in one step (EVAL-93): the evaluator is given the atomic's value and then
     /// the other arguments, and gives what the atomic holds after; the call gives what it held before, or nothing.
     bool is_atomic = false;
-    /// Gives a struct of `core.sgl`, which no registry type names: the check pass resolves it as it resolves the
-    /// prelude, and the interpreter builds the value itself, which only an atomic's weak compare-exchange does so far.
+    /// Gives a struct the registry declares as prelude text, which no registry type names: the check pass resolves it as
+    /// it resolves the prelude, and the interpreter builds the value itself, which only an atomic's weak
+    /// compare-exchange does so far.
     bool gives_prelude_struct = false;
     /// Takes a number literal only at its default type, as `as` does, so `T(x)` never reaches a conversion `x as T`
     /// has not (CHK-390).

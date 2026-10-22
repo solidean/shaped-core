@@ -96,5 +96,6 @@ A run is one invocation, so nothing ever races its compare-exchange, and a weak 
 A shader that forgot the retry loop would then pass every test and fail on a GPU, where WGSL and MSL may fail it spuriously.
 So the interpreter fails it on purpose, deterministically: a test that passes holds a loop that retries, and a test that fails names the call.
 Failing every other attempt rather than only the first exercises the retry each time a probing loop meets an empty slot, not only at the first.
-A source call rather than an expression of the flat tree is what counts, so a helper inlined in two places fails in each the same way.
+A source call rather than an expression of the flat tree is what counts, so a helper inlined in two places shares one count.
+Its missing retry still fails, wherever it first meets `expected`, and how often a helper is inlined never changes a test's verdict.
 Random failures would find more orderings, at the price of a test that passes on one run and fails on the next.

@@ -15,7 +15,7 @@ Each thing below is what one target or another lacks, so each comes back behind 
 |---|---|---|
 | float atomics, `atomic[float].add` | WGSL; vulkan needs `shaderBufferFloat32AtomicAdd` | an sg feature, refused by the check pass where it is not granted |
 | 64-bit atomics | WGSL | an sg feature over `atomic[long]` and `atomic[ulong]`, once SGL has 64-bit integers, named as `short` and `ushort` are |
-| a vertex stage's atomics and stores | WebGPU; vulkan needs `vertexPipelineStoresAndAtomics` | `vertex_stores`, lifting `@stages(.pixel, .compute)` from the builtins |
+| a vertex stage's atomics and stores | WebGPU; vulkan needs `vertexPipelineStoresAndAtomics` | `vertex_stores`, adding `.vertex` to the atomics' `@stages` |
 | orderings stronger than relaxed | WGSL, which has relaxed alone | acquire and release as named arguments, once a shader needs orderings rather than the coherence `@coherent` gives |
 
 The compare-exchange has left the incubator, as a strong and a weak form ([bindings.md](../bindings.md#atomics), [EMIT-157](../semantics/emitting.md#types)).

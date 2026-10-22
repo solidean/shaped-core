@@ -636,8 +636,8 @@ void sgl::builtins::register_sync(registry& r)
                       "    exchanged: bool");
 
     r.add_comment("// Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.\n"
-                  "// Each is relaxed, and each but a store gives the value before; a vertex, an any-hit and an "
-                  "intersection stage have none (CHK-296).");
+                  "// Each is relaxed, and each but a store gives the value before; only the stages its `@stages` "
+                  "names take one (CHK-296).");
     for (auto const is_signed : {false, true})
     {
         auto const t = is_signed ? "int" : "uint";

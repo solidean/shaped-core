@@ -2439,7 +2439,7 @@ struct exchange_result[T]:
     exchanged: bool
 
 // Atomics, called as methods of the atomic they update: `stats.hits[0].add(1)`.
-// Each is relaxed, and each but a store gives the value before; a vertex, an any-hit and an intersection stage have none (CHK-296).
+// Each is relaxed, and each but a store gives the value before; only the stages its `@stages` names take one (CHK-296).
 /// Adds `v`, wrapping, and gives the value before.
 @builtin @stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable) fun add(a: mut atomic[uint], v: uint) -> uint
 /// Subtracts `v`, wrapping, and gives the value before.
