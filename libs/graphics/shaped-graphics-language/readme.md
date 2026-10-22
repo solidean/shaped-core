@@ -29,6 +29,9 @@ SGL's job is to leave it nothing that blocks them: no copy it cannot see through
 Where SGL falls short of that, it is a bug of the compiler and is filed under [docs/issues/](docs/issues/) as `perf-sgl-*`.
 What a target lacks is the exception: WGSL's emulated ray tracing pays for being software, and that cost is the polyfill's, not SGL's.
 
+`uv run dev.py benchmark "sr - SGL against the HLSL it was ported from"` measures it on dx12, with sr's shaders against the hand-written HLSL they were ported from.
+On an RTX 5070 Ti in October 2026 SGL took 0.99x to 1.00x the HLSL's GPU time for à-trous, 0.99x for the network's convolution, and 1.02x for SVGF's filter.
+
 ## Where to look
 
 * **To write SGL**: [docs/spec/](docs/spec/_index.md) is the language, and [sgl-cube](../../../examples/graphics/sgl-cube/shaders/cube.sgl) is a shader that draws.
