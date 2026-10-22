@@ -1,4 +1,5 @@
 #include <clean-core/common/time.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/exception.hh> // std::exception, to classify one that escaped a compute frame
 #include <clean-core/error/exception_base.hh>
 #include <clean-core/memory/node_allocation.hh>
@@ -883,6 +884,15 @@ bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), vo
     return false;
 }
 
+namespace
+{
+// A teardown that drops the last reference to another node queues it here instead of tearing it down inside its own.
+// A parked frame holds the node it awaits, so a chain of parked coroutines would otherwise tear down as one recursion per link.
+// The outermost teardown on the thread drains the queue before it returns, so a drop still finishes everything it releases.
+thread_local bool t_tearing_down = false;
+thread_local cc::vector<cc::async_node_base*> t_teardown_queue;
+} // namespace
+
 bool cc::async_node_base::destroy_payload()
 {
     // The homed test rides on the word teardown reads anyway.
@@ -890,7 +900,22 @@ bool cc::async_node_base::destroy_payload()
     auto const s = async_node_state((w & state_mask) >> state_shift);
     if ((w & homed_bit) != 0) [[unlikely]]
         return teardown_payload_or_defer(s);
+
+    if (t_tearing_down)
+    {
+        // Queued, the queue owns the strong owners' collective weak count, as a home does for a deferred teardown.
+        // The sole-owner fast path leaves the counts reading (1,1); nothing can race the store, as there.
+        if ((_counts.load(cc::memory_order_acquire) >> 32) != 0)
+            _counts.store(cc::fused_refcount::weak_unit, cc::memory_order_relaxed);
+        t_teardown_queue.push_back(this);
+        return true;
+    }
+
+    t_tearing_down = true;
     teardown_payload_as(s);
+    while (!t_teardown_queue.empty())
+        impl::async_run_deferred_teardown(t_teardown_queue.pop_back()); // may queue more
+    t_tearing_down = false;
     return false;
 }
 

@@ -548,6 +548,39 @@ TEST("async coroutine - a coroutine parked forever is torn down with the node")
     CHECK(destroyed == 1); // the frame destroys the suspended coroutine, which destroys its locals
 }
 
+namespace
+{
+/// A link of a chain `n` coroutines long, each parked on the next, the last on `bottom`.
+cc::shared_async<int> parked_chain(int n, cc::shared_async<int> bottom, int* destroyed)
+{
+    auto const probe = destruction_probe(destroyed);
+    if (n == 0)
+        co_return co_await bottom;
+    co_return co_await parked_chain(n - 1, cc::move(bottom), destroyed);
+}
+} // namespace
+
+// Each parked frame holds the next node, so tearing one down drops the last reference to the next.
+// A consumer's surface tree walks parked this way 1000 deep, and their teardown recursed until the stack overflowed.
+TEST("async coroutine - a chain of 200000 parked coroutines tears down without recursing per link")
+{
+    auto destroyed = 0;
+    {
+        auto const ext = cc::make_async_manual<int>();
+        auto co = parked_chain(200'000, ext, &destroyed);
+
+        cc::singlethreaded_scheduler sched;
+        cc::async_worker_scope scope(sched);
+        co->schedule();
+        sched.drain();
+        CHECK(!co->is_ready());
+        CHECK(destroyed == 0);
+
+        co = {};
+        CHECK(destroyed == 200'001); // every link, before the drop returned
+    }
+}
+
 // ============================================================================
 // on a real pool
 // ============================================================================
