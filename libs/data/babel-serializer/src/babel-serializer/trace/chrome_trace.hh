@@ -45,8 +45,8 @@ struct babel::chrome_trace::write_options
     ///
     /// A sample is a stack at an instant and a viewer draws spans, so consecutive samples sharing a frame become one
     /// span over it — the usual flame-graph reconstruction.
-    /// They are emitted on the sampled thread's OWN track, inside its recorded scopes, which is the point of having
-    /// both: the scopes give the structure somebody named, and the samples give what was happening inside it.
+    /// They are emitted on the sampled thread's OWN track, inside its recorded scopes, so the two combine:
+    /// the scopes give the structure somebody named, and the samples give what was happening inside it.
     /// The frames are ADDRESSES, because nothing here symbolizes; a span is named by its hexadecimal address.
     bool include_samples = true;
 

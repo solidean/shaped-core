@@ -4,8 +4,8 @@ Every check here is advisory, never a failure.
 The repo configures, builds and passes its whole suite with none of it, because clean-net degrades rather than
 disappearing: a build with no TLS still declares `cnet::tls_connect`, and `cnet::tls_is_supported()` answers at
 runtime instead.
-That is what makes a gap invisible until an HTTPS request fails for a reason nobody expected — naming the cost is the
-whole point of these lines.
+That is what makes a gap invisible until an HTTPS request fails for a reason nobody expected, and these checks name
+that cost.
 
 Each check mirrors one thing the build already decides, and the mirror must stay exact:
 the `CNET_HAS_TLS` gate in libs/base/clean-net/CMakeLists.txt, the vendored pin in extern/mbedtls/dependency.yml, and

@@ -80,7 +80,7 @@ TEST("async - many independent asyncs fan out across the pool", nx::config::no_s
     CHECK(cc::async_blocking_get_on(pool, root) == i64(n) * (n - 1) / 2);
 }
 
-// Gated: the whole point is that a SECOND thread supplies the value the first is parked on.
+// Gated, because a SECOND thread must supply the value the first is parked on.
 // With one thread the graph parks on a manual node nobody can ever push, which is exactly what blocking_get's is_ready() assert reports.
 // That is a different contract, covered by async-test.cc's no-progress tests.
 #if CC_HAS_THREADS
@@ -434,7 +434,7 @@ TEST("async - a node woken across threads still runs under its own ambient conte
      nx::config::no_scheduler,
      exclusive("cc-compute-async-pool"))
 {
-    // Needs real threads: the point is that the context comes from the node's own arm and never from the worker
+    // Needs real threads: it checks that the context comes from the node's own arm and never from the worker
     // that happens to pick it up, so the dependent must be re-polled somewhere other than where it parked.
     cc::async_thread_pool pool(4);
     cc::scoped_compute_async_scheduler as_compute(pool);
@@ -562,7 +562,7 @@ TEST("async - a pool releases a finished graph's value", nx::config::no_schedule
     auto owned = std::make_shared<int>(7);
     CHECK(owned.use_count() == 1);
 
-    // The pool OUTLIVES the graph, which is the whole point: checking after the pool dies proves nothing, since its
+    // The pool OUTLIVES the graph, because checking after the pool dies proves nothing, since its
     // queue is released with it either way.
     // It is the COMPUTE scheduler too, because that is what a scheduled async submits itself to at creation — the
     // shape every `cached.acquire_*` in shaped-graphics has.

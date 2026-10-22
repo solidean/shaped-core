@@ -102,7 +102,7 @@ The parser recognizes only what the rules need, and skips everything else as opa
 [parser.cc](../src/shaped-linter/parse/parser.cc) documents each judgement at the code that makes it.
 What follows is the design claim behind that code, not a second copy of it.
 
-**The scope distinction is the whole point.**
+**The parse exists to give every declaration its scope.**
 Every declaration node carries a `decl_scope` — `record_scope`, `namespace_scope`, or `function_scope` — so a rule never has to work out where it is.
 Only a real parse can do that, and only a real parse tells a declaration apart from a constructor's mem-initializer or an aggregate at a call site.
 That is the entire reason a linter this small carries a parser at all.

@@ -86,7 +86,8 @@ nx::args_builder build_lint_cli(options& opts, cc::vector<cc::string_view>& trai
         .name = "shaped-linter",
         .description = "a self-contained C++ custom linter for shaped-core",
         .help = "Lints our own rules (default-init-assignment, qualified-primitive, no-flow-prose, "
-                "no-long-prose-line) using a lexer and parser built here — no LLVM or libclang.",
+                "no-long-prose-line, no-whole-point, no-why-it-matters, and more) using a lexer and parser built "
+                "here — no LLVM or libclang.",
     });
 
     args.positional("FILE", opts.files, {.desc = "source files to lint"});

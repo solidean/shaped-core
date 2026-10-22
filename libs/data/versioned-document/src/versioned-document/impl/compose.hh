@@ -46,7 +46,7 @@ struct composed_document
 
 /// Composes `entities` across `layers`, given bottom-first, with a higher layer replacing a lower one per PROPERTY PATH.
 ///
-/// **Replacement is per path, and it is the whole point.** A higher layer holding `transform/position` must not shadow a
+/// **Replacement is per path.** A higher layer holding `transform/position` must not shadow a
 /// lower layer's `transform/rotation`, or an override would freeze every sibling property at the moment it was made.
 /// Where a layer does win a path, its **entire** writer list replaces the lower one — so a multi-value inside that layer
 /// survives and reaches the policy exactly as it would without layering, and conflicts stay layer-local.

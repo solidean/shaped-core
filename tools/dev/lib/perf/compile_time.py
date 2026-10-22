@@ -158,8 +158,8 @@ def _trace_flags(family: str) -> list[str]:
 
 
 # Per-header self time below this is dropped from `headers`, with the total kept as `headers_omitted_s`.
-# A top-N cap would be the obvious alternative and is the wrong one: aggregating cost across every TU is the
-# whole point of the per-header table, and a cap silently truncates the long tail that aggregation sums up.
+# A top-N cap would be the obvious alternative and is the wrong one: the per-header table aggregates cost across
+# every TU, and a cap silently truncates the long tail that aggregation sums up.
 _HEADER_FLOOR_S = 0.0005
 
 
@@ -368,7 +368,7 @@ def measure_tus(
 ) -> list[Record]:
     """Measure each TU twice: as-is, and reduced to its preprocessor directives.
 
-    Both run back to back on the same machine state, which is the point.
+    Both run back to back on the same machine state.
     Comparing a full TU against an includes-only TU from two separate invocations would be swamped by the ~8 % run-to-run variance a build shows.
     """
     out: list[Record] = []

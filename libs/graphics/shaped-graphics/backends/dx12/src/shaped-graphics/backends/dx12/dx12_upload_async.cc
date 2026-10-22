@@ -402,8 +402,8 @@ private:
     // promise a completion V and carry a reverse wait that could depend on V.
     // The hoisted Wait would then sit ahead of the very copy whose signal it needs — the copy-actor deadlock.
     //
-    // Two eligibility rules keep that true INDEPENDENT of the order jobs are packed in, which matters now that the
-    // order is no longer submission order:
+    // Two eligibility rules keep that true INDEPENDENT of the order jobs are packed in, since that order is no
+    // longer submission order:
     //  - a job whose reverse token is still pending may not join a window that has already finished an upload;
     //  - once such a job IS in the open window, no other job may join, so no other job's completion can land beside
     //    its wait.

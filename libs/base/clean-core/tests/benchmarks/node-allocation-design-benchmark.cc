@@ -1,7 +1,7 @@
 // Node-allocation DESIGN benchmark: the fast-path variants, side by side.
 //
 // Each variant is a self-contained mini-slab-allocator implemented inline below, with only the hot path real; refill and drain-underflow route through bench_design::cold_refill.
-// The point is to compare the *instruction mix* of each lock-removal strategy on whatever machine you run it on, which is the whole reason to ship all the code.
+// Shipping all the code lets anyone compare the *instruction mix* of each lock-removal strategy on whatever machine they run it on.
 // See libs/base/clean-core/docs/systems/node-allocation.md.
 //
 // cold_refill is an opaque out-of-TU call on purpose, and node-allocation-design-refill.hh says why.

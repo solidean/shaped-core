@@ -95,7 +95,7 @@ namespace cc
 /// Loopback is kept rather than filtered: it carries real traffic on a machine talking to itself, and a caller that
 /// does not want it has `is_loopback` to say so.
 ///
-/// **Filter pseudo-interfaces are excluded**, which matters more than it sounds.
+/// **Filter pseudo-interfaces are excluded.**
 /// Windows stacks one per NDIS lightweight filter on every adapter, each reporting the adapter's own counters, so a
 /// single NIC shows up four times on an ordinary desktop and a sum over interfaces quadruples the machine's traffic.
 [[nodiscard]] cc::vector<cc::network_interface> enumerate_network_interfaces();

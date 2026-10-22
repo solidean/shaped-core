@@ -43,7 +43,7 @@ Two operations bridge to C:
   It is non-const, may allocate, and may move a small string to the heap — `size()` does not change.
 * `c_str_if_terminated()` is a const inspection: it returns the pointer when a `'\0'` already happens to sit at `size()`, and `nullptr` otherwise.
 
-The pattern is to try the const one first and materialize only on failure, which matters most for a string you only have a `const&` to, where materializing means copying.
+The pattern is to try the const one first and materialize only on failure; for a string you only have a `const&` to, materializing means copying.
 `string::create_copy_c_str_materialized(sv)` builds such a copy in one step and guarantees `c_str_if_terminated()` succeeds on it.
 
 Call these immediately before the C call and never store the result.

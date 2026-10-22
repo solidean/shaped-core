@@ -24,7 +24,7 @@ using namespace cc::primitive_defines;
 // CPU-only tests for the asset importer.
 //
 // No GPU and no filesystem: every document is built in memory, and the uri path runs through a resolver the test
-// installs — which is the whole point of the loader holding no device and opening no file.
+// installs, which the loader allows by holding no device and opening no file.
 
 namespace
 {
@@ -750,8 +750,8 @@ TEST("sv::asset - an async load lands whole, and its materials are minted where 
     CHECK(pending.is_ready());
     CHECK(!pending.has_error());
 
-    // The same asset the synchronous path produces, materials included — which is the point of splitting the import
-    // rather than only moving it.
+    // The same asset the synchronous path produces, materials included, because the import is split rather than only
+    // moved.
     REQUIRE(pending.meshes().size() == 2);
     CHECK(pending.meshes()[0].name == "red");
     CHECK(pending.data().material("red") != sv::material_id::invalid);

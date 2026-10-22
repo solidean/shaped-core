@@ -384,7 +384,7 @@ The caller can, which is the same reason sv keeps its accumulators in its per-vi
   Nothing would free a stream, since a routine still cannot see a viewport close.
   Either the caller calls a release it will eventually forget, or every closed view leaks its images until the context dies.
   It also puts a map lookup on the render path, and a lock the moment two views are recorded from two threads.
-  The caller-owned object frees itself, which is the whole point.
+  The caller-owned object, by contrast, frees itself.
 - **Members registering themselves with the front through an interface, in place of the enum and its switch.**
   It would make adding a member a one-file change, and it would cost the two preference orders their readability — they become data spread across members, or a priority number each one asserts.
   It also turns which members exist into a runtime fact, so the `CC_UNREACHABLE` that catches a member added to the support query and forgotten in the switch has nothing to fire on.

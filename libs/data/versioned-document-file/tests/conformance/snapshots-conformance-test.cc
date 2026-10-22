@@ -293,7 +293,7 @@ INVOCABLE_TEST("vdoc::file - a pruned op is unverifiable and a corrupt one is a 
 
     auto const reopened = open_or_fail(*medium);
 
-    // Both outcomes appear, and they are DIFFERENT outcomes — which is the whole point of asserting them together.
+    // Both outcomes appear, and they are DIFFERENT outcomes, so they are asserted together.
     CHECK(reopened->report().contains(load_issue_kind::op_hash_mismatch));
     CHECK(reopened->report().count_of(load_issue_kind::op_hash_mismatch) == 1);
 

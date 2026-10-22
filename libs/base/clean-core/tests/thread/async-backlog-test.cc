@@ -283,7 +283,7 @@ TEST("async_backlog - a live backlog is findable by name, and a destroyed one is
         CHECK(probe.outstanding == 0);
     }
 
-    // Unregistered on destruction, which is the part that matters: a report walking a dangling entry is worse than
+    // Unregistered on destruction, because a report walking a dangling entry is worse than
     // one reporting nothing.
     CHECK(probe_registry(name).found == 0);
 }

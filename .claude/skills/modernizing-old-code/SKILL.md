@@ -113,4 +113,4 @@ It lives in `memory/` next to the `node_allocation` it wraps, not in `container/
 ## Keep this current
 
 Every time you port something and hit a difference that isn't listed above, add it to the Gotchas section.
-This list is the whole point of the skill: it should get more complete with each migration.
+The skill is mostly this list, so it should get more complete with each migration.

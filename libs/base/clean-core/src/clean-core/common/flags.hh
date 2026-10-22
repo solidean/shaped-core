@@ -54,7 +54,7 @@ struct cc::flags
 
     /// A flag value as storage bits — the one place the two encodings differ.
     ///
-    /// The declared storage may be narrower than the enum's underlying type, which is the whole point of declaring it,
+    /// The declared storage may be narrower than the enum's underlying type, to keep the flag set small,
     /// so a value that does not fit must be caught here rather than silently losing its high bits.
     /// A negative value fails the same check: it converts to a huge unsigned one, which fits neither encoding.
     [[nodiscard]] static constexpr storage_type bits_of(EnumT v)

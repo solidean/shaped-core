@@ -101,6 +101,10 @@ Concretely:
 - **Cut ruthlessly.** Short lines are not the goal, concision is.
   A long comment split across many lines is still a long comment.
   If it explains several unrelated concerns, split it or move the rationale to a higher-level doc.
+- **Say the consequence, never that something matters.**
+  `which is the whole point`, `This matters because`, `, which matters` and their kin assert weight instead of showing it.
+  `Allocation-free, so a handler builds no vector` carries the reason in the words the declaration spent on itself.
+  shaped-linter's `no-whole-point` and `no-why-it-matters` flag the stock phrases.
 
 ---
 
@@ -516,7 +520,7 @@ Each explicit UB usage must be heavily documented and justified.
   The implicit conversion to `isize` is fine; the cast is pure noise.
   If a linter complains, turn that check off in [.clang-tidy](../.clang-tidy) with a rationale comment — don't decorate every call site.
   The cast belongs only inside arithmetic a library performs for its callers — `offset * isize(sizeof(T))` in a container header.
-  There the signedness of the whole expression is the point.
+  There it keeps the whole expression signed.
 - Avoid "magic sentinels" like `-1` for invalid states.
   Prefer `optional` or `variant` unless there's a justified performance or memory reason.
 - Give each distinct index / handle / id role its own strong enum:

@@ -18,7 +18,7 @@ TEST("rec/quantity - bytes take binary prefixes")
     CHECK(cc::rec::format_quantity(1536, cc::rec::unit_bytes) == "1.50 KiB");
     CHECK(cc::rec::format_quantity(1024.0 * 1024 * 1024, cc::rec::unit_bytes) == "1.00 GiB");
 
-    // 1000 is not a kilobyte here, which is the entire point of prefix_base being 1024 for this unit.
+    // 1000 is not a kilobyte here, because prefix_base is 1024 for this unit.
     CHECK(cc::rec::format_quantity(1000, cc::rec::unit_bytes) == "1000 B");
 }
 

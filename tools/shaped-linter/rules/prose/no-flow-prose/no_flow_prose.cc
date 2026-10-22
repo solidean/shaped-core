@@ -29,7 +29,7 @@ constexpr cc::string_view k_rationale
 //
 //   - a word of one letter          `e.g. foo`, `i.e. bar` — by far the commonest false positive
 //   - a word of only digits         `12. list item` — an ordered-list marker, not a sentence
-//   - a known abbreviation          `etc.`, `incl.`, `vs.`, `cf.`, `resp.`, `al.`
+//   - a known abbreviation          `etc.`, `incl.`, `vs.`, `cf.`, `resp.`, `al.`, `wrt.`, German `USt-IdNr.`
 //   - an odd number of backticks    inside inline code, where `f(x). y` is a code sample, not prose
 //
 // Known to survive, and accepted: an abbreviation outside the list, and a sentence ending on a quoted or
@@ -46,7 +46,7 @@ bool is_abbreviation(cc::string_view word)
 {
     // Earned one at a time from a real false positive on this tree — `incl.` alone accounted for 13.
     static constexpr cc::string_view known[]
-        = {"etc", "vs", "cf", "al", "resp", "approx", "fig", "vol", "incl", "excl"};
+        = {"etc", "vs", "cf", "al", "resp", "approx", "fig", "vol", "incl", "excl", "wrt", "IdNr"};
     for (auto const w : known)
         if (word == w)
             return true;

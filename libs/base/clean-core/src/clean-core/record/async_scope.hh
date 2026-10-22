@@ -35,8 +35,8 @@ CC_ASYNC_AMBIENT_TAG(async_scope_tag)
 /// The ambient tag a trace id installs under.
 ///
 /// The value is the id's BIT PATTERN stored in the pointer slot, not a pointer to it.
-/// A trace id is 64 bits and so is the slot, so this needs no allocation and no lifetime — which matters, because the
-/// link routinely outlives the scope object that pushed it.
+/// A trace id is 64 bits and so is the slot, so this needs no allocation and no lifetime, and the
+/// link may outlive the scope object that pushed it, as it routinely does.
 CC_ASYNC_AMBIENT_TAG(trace_tag)
 
 /// The ambient tag an owner id installs under; the value is the id's bit pattern, as for `trace_tag`.
@@ -140,7 +140,7 @@ namespace cc::rec
 ///   co_await load_meshes();                        // still attributed, on whichever worker runs it
 ///   auto const id = cc::rec::current_trace_id();   // to relate this operation to another
 ///
-/// Unlike CC_RECORD_SCOPE this may cross a suspend — that is the entire point.
+/// Unlike CC_RECORD_SCOPE this may cross a suspend.
 #define CC_RECORD_ASYNC_SCOPE(name_)                                                      \
     CC_REC_DEFINE_ASYNC_SCOPE_DESCS(cc_rec_async_desc_, cc_rec_async_end_desc_, (name_)); \
     auto const cc_rec_async_scope_                                                        \

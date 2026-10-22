@@ -196,7 +196,7 @@ void f(cc::u32 x);
 
 ## Negatives — the look-alikes that must stay quiet
 
-The bare spelling is the whole point of the rule.
+The rule fires on the bare spelling only.
 
 ```cpp ~[qualified-primitive]
 namespace cc { void f(u32 a, isize b, byte c, nullptr_t d); }

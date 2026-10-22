@@ -131,7 +131,7 @@ A claim is `claimed-by` and `claimed-at` in the frontmatter, in a commit of its 
 Unpushed local commits and uncommitted changes to other files stay where they are.
 An issue file not yet committed anywhere is added by its claim commit, so filing and claiming is one step.
 
-**A claim or release commit is exempt from the pre-push gate**: it changes one issue file, and pushing it alone is the point.
+**A claim or release commit is exempt from the pre-push gate**: it changes one issue file, and its push carries nothing else.
 Everything else still goes through the repository's gate.
 
 An agent claims on someone's behalf: `--as "Claude (for <name>)"`.

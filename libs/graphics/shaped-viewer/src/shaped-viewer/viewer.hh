@@ -28,7 +28,7 @@ struct sv::viewer_config
     /// Runs with no window, no swapchain and no present: the frame is composited into an offscreen texture and left
     /// there, `width` x `height`.
     ///
-    /// It needs no display and no window backend, which is the point — this is what a capture run uses.
+    /// It needs no display and no window backend, so a capture run uses it.
     /// The frame API is unchanged either way: `frame::viewport_size` reports the offscreen size and nothing hands out
     /// a swapchain, so an authoring body cannot tell the difference.
     /// A headless loop is ended by `request_close` alone, since there is no window to close.

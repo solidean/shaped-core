@@ -201,7 +201,7 @@ Metal reports a command buffer's completion by calling back on a dispatch queue 
 An unthreaded Apple build would therefore run sg's completion work on a second thread, in a build that has compiled its locks out.
 MTL4 offers no pollable substitute: command-buffer errors reach us through that callback and nowhere else.
 
-The refusal is keyed on the **target**, not the host, and that distinction is the point.
+The refusal is keyed on the **target**, not the host.
 A Mac cross-compiling to wasm is not an Apple target, so the `emscripten-*` presets stay single-threaded and configure fine from macOS — which is how a Mac exercises the unthreaded mode.
 
 No API appears or disappears with it.

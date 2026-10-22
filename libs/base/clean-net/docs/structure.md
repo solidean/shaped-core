@@ -114,7 +114,7 @@ A connect waiting on name resolution is sitting on the resolver's own worker thr
 stopping and that operation settles when the worker next looks — which is after `stop()` has returned.
 So a caller who wants to observe the answer has to let that thread run: `cc::thread_pump_all()` in a loop, not a read
 straight after the call.
-It matters under load more than it looks, because the worker competes with everything else the machine is doing.
+Under load the wait grows, because the worker competes with everything else the machine is doing.
 
 Two tests assumed otherwise and were flaky for it (`connect-test.cc`).
 **Open question, not settled here:** whether stopping twice in a row can genuinely lose an answer, or whether every

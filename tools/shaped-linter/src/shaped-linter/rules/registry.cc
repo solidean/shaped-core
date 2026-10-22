@@ -10,6 +10,8 @@
 #include <rules/prose/no-bare-todo/no_bare_todo.hh>
 #include <rules/prose/no-flow-prose/no_flow_prose.hh>
 #include <rules/prose/no-long-prose-line/no_long_prose_line.hh>
+#include <rules/prose/no-whole-point/no_whole_point.hh>
+#include <rules/prose/no-why-it-matters/no_why_it_matters.hh>
 
 namespace scl
 {
@@ -26,6 +28,8 @@ cc::span<rule const> all_rules()
         v.push_back(no_bare_todo_rule());
         v.push_back(no_flow_prose_rule());
         v.push_back(no_long_prose_line_rule());
+        v.push_back(no_whole_point_rule());
+        v.push_back(no_why_it_matters_rule());
 
         // A rationale is mandatory — the reporter leads every group with it, mirroring the gate culture.
         for (auto const& r : v)

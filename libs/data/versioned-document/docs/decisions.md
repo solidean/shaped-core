@@ -83,7 +83,7 @@ An application that wants collision-free keys puts a uuid in the string.
 An application that wants a well-known entity it can address directly uses a name, and gets a quasi-singleton for free.
 Both are legitimate, and a library-imposed 128-bit key would take the second away while giving the first nothing it cannot already have.
 
-Strings also make documents readable in a dump and writable by hand, which matters more than it sounds like for a test-driven library.
+Strings also make documents readable in a dump and writable by hand, which a test-driven library leans on.
 
 **Reopen when:** interning turns out not to make id comparison cheap enough for the query paths, which would be a clean-core problem before it was a `vdoc` problem.
 
@@ -561,7 +561,7 @@ Relaxing it to an upsert would let an ordinary publish rewrite a stored op — o
 A dedicated verb also buys a guarantee an upsert cannot: the fill is scoped to rows whose payload is NULL, so it **cannot damage a good row even when called wrongly**.
 
 **Reopen when:** nothing.
-The asymmetry is the point: emptying and filling are both narrow, and appending stays unable to destroy.
+Emptying and filling are both narrow, and appending stays unable to destroy.
 
 ### A skeleton's parents are covered by no hash, so integration compares them explicitly
 

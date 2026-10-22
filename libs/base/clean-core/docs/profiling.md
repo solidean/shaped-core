@@ -93,7 +93,7 @@ A **snapshot** is the current reading of something that exists whether or not yo
 Summing snapshots is meaningless; averaging them is not.
 
 An **accumulate** is a delta to add up: bytes uploaded, cache hits, tasks finished.
-Summing them is the whole point.
+Summing them gives the total.
 
 Values are `f64` only, which also covers every integer up to 2^53 — one numeric type means a listener can graph anything without a type switch.
 
@@ -140,7 +140,7 @@ cc::rec::sampling_scope const s({.rate_hz = 1000.0});
 ```
 
 A sample stops at the innermost open scope, so a sample inside instrumented code is often one address — the scope stack already names everything below it.
-That is the point, and it is why scopes and sampling are worth having together rather than as alternatives.
+So scopes and sampling are worth having together rather than as alternatives.
 
 ## Looking at it
 

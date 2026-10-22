@@ -206,7 +206,7 @@ CC_DONT_INLINE i64 serial_reduce(cc::span<i32 const> d)
 }
 
 // Mirrors async_tree's shape: two recursive calls per internal node, a trivial leaf.
-// So the comparison is per-node call overhead vs per-node scheduling overhead, which is the point of the case.
+// So the case compares per-node call overhead against per-node scheduling overhead.
 CC_DONT_INLINE i64 serial_tree(int depth)
 {
     if (depth == 0)

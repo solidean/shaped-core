@@ -220,7 +220,7 @@ A reader replaying the anchored thread in order reaches the sample with the trac
 The scope stack is the half that matters: a sample stops at `current_scope_frame()`, and the frames below it are exactly what that stack names.
 
 So a sample taken inside instrumented code is **short on purpose** — often a single address — and splicing supplies the rest.
-That cuts the walk and the payload by the same factor, which matters most for sampling, the one thing that can flood the stream.
+That cuts the walk and the payload by the same factor, and sampling, the one thing that can flood the stream, gains the most.
 
 The order the sampler obeys is not negotiable: take the registry lock, suspend, read the anchor and walk into a fixed buffer, resume, and only then write.
 A suspended thread may hold the allocator's lock or the pool's, so allocating or writing before the resume hangs on a lock its owner cannot release.
@@ -278,7 +278,7 @@ So a megabyte of mesh or framebuffer data costs the stream sixteen bytes, and a 
 
 **Opt-in per type, through `cc::rec::pinnable_traits`.**
 Pinning is a promise about lifetime and immutability that only a type's author can make, so nothing is pinnable by accident.
-`cc::pinned_data<T>` is pinnable out of the box, which is the whole point of that type.
+`cc::pinned_data<T>` is pinnable out of the box, since that type exists to make the promise.
 
 **The bytes must not change while any recording holding them is alive.**
 Nothing copies them, so a mutation after the fact rewrites history instead of being recorded as a second value.
@@ -298,7 +298,7 @@ Its value must be fixed-size — a scalar, an enum, a pointer or a literal — b
 
 The two stat kinds are not interchangeable, and picking the wrong one produces a plausible graph of the wrong thing.
 A snapshot is the current reading of something that exists whether or not you look; summing snapshots is meaningless.
-An accumulate is a delta, and summing is the whole point.
+An accumulate is a delta, and summing gives the total.
 
 Values are `f64` only, which also covers every integer up to 2^53.
 That is a deliberate cap: one numeric type means a listener graphs anything without a type switch.
@@ -324,7 +324,7 @@ CC_RECORD_RELATION(cc::rec::relation_same_key_as, a, b, c);   // n-ary
 CC_RECORD_RELATION_MANY(type, discovered_members);            // a runtime member list
 ```
 
-**Naming the trace is the point.**
+**A trace gets a name, not only an id.**
 A bare id is an opaque number, and a viewer showing `0x0800000000000003` helps nobody, so a scope names the trace and mints its id.
 
 **A relation type is a static object, not an enum**, for the same reason a `cc::rec::unit` is: an enum of relation kinds is always missing the case the next consumer needs.
@@ -661,7 +661,7 @@ A stack on every error is affordable; a stack on every warning is not.
 
 A capture can also stop early, at `cc::rec::current_scope_frame()`.
 Everything below the frame that opened the innermost profiling scope is what the scope stack already names, so walking it again spends time and payload on a fact the stream carries.
-That matters most for sampling, where it shortens the stacks rather than just the walk.
+Sampling gains the most, since there it shortens the stacks rather than just the walk.
 The scope guard stores that frame next to the depth it already touches, so the early-out costs one store per scope.
 
 Emscripten has no walkable native stack and returns an empty capture; `cc::stack_capture_available()` says which you are in.
@@ -682,7 +682,7 @@ An unresolved frame keeps its address rather than acquiring a confident wrong na
 ### Changing what the sampler does, while it does it
 
 The whole `sampling_config` is re-read once per tick, so `cc::rec::reconfigure_sampling` takes effect within one interval and nothing needs the sampler stopped.
-That matters beyond convenience: a stop-and-restart loses every sample in the gap, which is exactly the stretch somebody turning a knob is looking at.
+A stop-and-restart would lose every sample in the gap, which is exactly the stretch somebody turning a knob is looking at.
 
 ```cpp
 cc::rec::reconfigure_sampling({.rate_hz = 2000.0});                  // a slider in a profiler window

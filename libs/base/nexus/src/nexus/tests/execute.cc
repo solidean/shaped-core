@@ -1940,7 +1940,7 @@ void nx::impl::report_check_result(check_result result)
         // under test recorded around it — which is what a failing run's .ccrec is for.
         //
         // Only FAILURES reach here: a passing check returns above, and the fuzz engine's capture sink diverts long
-        // before this, which matters when one fuzz test evaluates tens of millions of them.
+        // before this, so a fuzz test evaluating tens of millions of them never pays for it.
         // A nested run is excluded too — see g_execution_depth.
         if (is_outermost_execution())
             CC_LOG_ERROR("check failed: {} — {} at {}", result.expr, expanded, nx::impl::site_text(result.location));

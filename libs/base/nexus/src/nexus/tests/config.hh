@@ -237,7 +237,7 @@ constexpr struct
 
 // An example demonstrates an API in practice rather than pinning an invariant, and is swept only via --examples.
 // Naming it exactly also runs it, as long as no bucket flag was given; like a manual test it otherwise stays out of automatic runs.
-// Its body needs no CHECK at all — being free of the testable-only bias is the point — but a CHECK that fails still fails.
+// Its body needs no CHECK at all, so it is free of the testable-only bias, but a CHECK that fails still fails.
 // EXAMPLE in test.hh is the macro.
 constexpr struct
 {
@@ -296,7 +296,7 @@ constexpr auto exclusive(char const* tag = nullptr)
 // Its body is driven directly, in schedule order, alongside the other tests asking for the same.
 //
 // Required by a test that stands up its own cc scheduler, or that nests an nx::execute_tests run — neither may sit under the run's own.
-// Touching an async without one then asserts, which is the point: this is how a test proves it owns that decision.
+// Touching an async without one then asserts, so a test proves it owns that decision.
 // Not the way to ask for the main thread: nx::main_thread says that, and says the thing that gets checked.
 constexpr struct
 {

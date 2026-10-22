@@ -251,8 +251,7 @@ public:
     ///
     /// For a caller that needs residency before it can proceed and has no frame loop to wait for — a test tracing a
     /// scene it just built, or a tool doing one pass over an asset.
-    /// A viewer never calls this: letting the transfers run at their own pace is the whole point, and a placeholder
-    /// covers the gap.
+    /// A viewer never calls this: it lets the transfers run at their own pace, and a placeholder covers the gap.
     void wait_for_pending_uploads();
 
     /// How many payloads are still in flight, across every manager.

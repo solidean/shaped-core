@@ -494,7 +494,7 @@ void cc::install_crash_handler()
 #if !CC_CRASH_HANDLER_SANITIZED
     install_platform_handlers();
 
-    // Reserved now rather than when something goes wrong, which is the whole point: the collector and its handler
+    // Reserved now rather than when something goes wrong, because the collector and its handler
     // both run in a process that is already in trouble, and neither may allocate.
     cc::impl::install_posix_thread_stack_reporter();
 #endif

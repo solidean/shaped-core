@@ -30,7 +30,7 @@ metal_context::metal_context(MTL::Device* device,
     _feedback = std::make_shared<metal_feedback_sink>(*this);
 
     // The listener the completion-signal waiter arms its notifications on.
-    // Its default queue is Apple's, which is the point: a handler must run even in a build with no threads of ours.
+    // Its default queue is Apple's, so a handler runs even in a build with no threads of ours.
     _completion.listener = MTL::SharedEventListener::alloc()->init();
 }
 

@@ -787,7 +787,7 @@ REC_TEST("record/value - a literal costs the stream its address, a runtime strin
     CHECK(rec.first_text("buffered").value() == "from a buffer");
     CHECK(rec.first_text("runtime").value() == "built at runtime");
 
-    // ... but the encodings differ, which is the whole point.
+    // ... but the encodings differ.
     auto const type_of = [&](cc::string_view name)
     {
         auto found = cc::rec::type_code::none;

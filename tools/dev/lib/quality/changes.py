@@ -218,7 +218,7 @@ def _warn_on_drift(root: Path, head: str, selected: set[Path]) -> None:
 def _since_files(root: Path, base: str) -> list[Path]:
     """Files that differ from `base` on disk — the branch's commits and its uncommitted edits together.
 
-    `git diff <base>` with no second revision compares against the WORKING TREE, which is the whole point: one listing
+    `git diff <base>` with no second revision compares against the WORKING TREE, so one listing
     covers both halves, so nothing falls between "already committed" and "not committed yet".
     Untracked files are added separately, since a diff cannot see them.
     """

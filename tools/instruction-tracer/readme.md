@@ -165,7 +165,7 @@ instructions: 8
 
 A source heading appears only where the location changes, so straight-line code stays dense.
 
-**The annotations are the point.**
+**Every branch is annotated with where it went.**
 They are derived from where the CPU actually went next, not from decoding the branch target — so they are exact even where static disassembly has to guess:
 
 ```

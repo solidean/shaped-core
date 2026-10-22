@@ -191,7 +191,7 @@ struct counting_actor : cc::threaded_actor_impl<int>
 
 TEST("cc::threaded_actor - an unthreaded actor is driven without being named", main_thread, exclusive())
 {
-    // The whole point of the registry: nothing here mentions the actor, and its message still gets dispatched.
+    // Nothing here mentions the actor, and the registry still gets its message dispatched.
     auto const baseline = cc::registered_thread_pump_count();
     auto actor = cc::make_threaded_actor<counting_actor>();
     actor->start(cc::threaded_actor_mode::unthreaded);

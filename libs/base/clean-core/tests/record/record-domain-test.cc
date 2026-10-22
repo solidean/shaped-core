@@ -130,7 +130,7 @@ REC_TEST("record/assert - a failing assertion is recorded as an error")
         //   the process-wide fallback, for every other thread -> cleared here, which REC_TEST's exclusivity makes safe
         //
         // Nothing aborts: handle_assert_failure_sv only REPORTS, and the abort lives at the macro's call site.
-        // It does print an assertion block to stderr, which is the point of the change — the wording says so, since
+        // It does print an assertion block to stderr, on purpose — the wording says so, since
         // an unexplained one in a passing run reads like a failure.
         cc::impl::scoped_fallback_assertion_handler const no_fallback(nullptr);
 

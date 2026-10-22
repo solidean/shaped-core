@@ -390,7 +390,7 @@ bool vdoc::op_graph::skeletonize(op_id const& id)
     if (o == nullptr)
         return false;
 
-    // The child index is untouched on purpose: a skeleton keeps every edge, and that is the whole point of it.
+    // The child index is untouched on purpose: a skeleton keeps every edge.
     o->payload = {};
     return true;
 }

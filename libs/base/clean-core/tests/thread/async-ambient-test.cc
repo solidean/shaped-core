@@ -75,7 +75,7 @@ TEST("async-ambient - two consumers compose in one chain")
     cc::async_ambient_scope const outer(tag_a(), &value_a);
     cc::async_ambient_scope const inner(tag_b(), &value_b);
 
-    // The head is inner's, and a lookup for the outer consumer still finds it — that is the whole point of the chain.
+    // The head is inner's, and a lookup for the outer consumer still finds it through the chain.
     CHECK(cc::async_current_ambient() == inner.link());
     CHECK(cc::async_ambient_lookup_ptr(tag_a()) == &value_a);
     CHECK(cc::async_ambient_lookup_ptr(tag_b()) == &value_b);

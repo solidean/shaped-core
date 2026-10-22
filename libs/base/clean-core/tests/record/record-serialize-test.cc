@@ -477,7 +477,7 @@ REC_TEST("record/crash - the dump sees events no listener ever drained")
     cc::rec::install_crash_dump({.path = path, .arena_bytes = 2 << 20});
 
     // No listener is registered and nothing is flushed, so a recording would have caught none of this.
-    // The dump reads the chunks directly, which is the whole point on a path where nothing is going to run again.
+    // The dump reads the chunks directly, so it sees them anyway on a path where nothing is going to run again.
     CC_RECORD_MARK("never-drained");
 
     REQUIRE(cc::rec::write_dump_now(cc::rec::dump_mode::constrained).has_value());
@@ -586,7 +586,7 @@ REC_TEST("record/serialize - a loaded recording symbolizes its own stacks")
         SKIP("this build captured no frames");
 
     // Every frame resolves at least to a module and an offset, which comes from the TABLE rather than from anything
-    // this process has loaded — the whole point of carrying it.
+    // this process has loaded, so a reader needs nothing from the process that wrote it.
     CHECK(with_module == frames);
 }
 

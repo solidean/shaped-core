@@ -23,7 +23,7 @@ constexpr isize view_entry_budget = 256;
 
 view_store::view_store()
 {
-    // The two tiers are the point: a view's textures are megabytes and its identity is a handful of bytes, so they
+    // Two tiers, because a view's textures are megabytes and its identity a handful of bytes, so they
     // must not expire on the same schedule.
     _entries.set_limits({.max_idle_frames_payload = view_payload_idle_frames,
                          .max_idle_frames_entry = view_idle_frames,

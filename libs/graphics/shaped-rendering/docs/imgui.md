@@ -213,7 +213,7 @@ Three things are worth knowing:
 - **A wheel event deliberately carries no position.**
   imgui already has the cursor from the motion events, and with `ConfigInputTrickleEventQueue` (imgui's default) a position change followed by a wheel is split across two frames —
   restating it would delay every scroll by a frame.
-  A *button* event does send its position, because there the trickle is the point: the click lands at the position it happened at.
+  A *button* event does send its position, because there the trickle makes the click land at the position it happened at.
 
 Ask `wants_keyboard()` / `wants_mouse()` before acting on the same input yourself, or a camera will spin while the user drags a slider.
 

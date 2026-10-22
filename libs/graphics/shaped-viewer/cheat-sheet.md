@@ -264,7 +264,7 @@ A `final` texture binding stops it even when its own sample was skipped, so the 
 A candidate that cannot be used is skipped rather than fatal: a mesh attribute at the wrong format, or a texture whose `uv_attribute` the mesh does not carry, simply loses its turn.
 So every declaration resolves to something and a mesh carrying none of what a type asks for still draws.
 
-**The two keys are the point.**
+**Resolution yields two keys.**
 `permutation_key` covers only the SHAPE of the resolution, plus the type's hash — so gold and copper share one generated shader.
 That shape is which rank won, the geometric frequency, the uv attribute, the sampler, and the read part of the channel swizzle.
 `parameter_key` covers the resolved values (constant bytes, texture ids and the channels they are read through, each mesh attribute's hash and id).
@@ -295,7 +295,7 @@ auto const plaster = lib.register_type(sv::material_type::create({.name = "plast
                                                                   .opacity_attribute = "opacity"}));
 ```
 - **An acquire creates the buffer and hands the payload to `ctx.stream`; it does not upload.**
-  `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.
+  `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait, because that wait is what turns a big asset from slow into a stall.
   The buffer exists immediately, so a descriptor naming it is always valid; only its contents are in flight.
 - **A record's state advances where the settle pass runs, never where the transfer finishes.**
   So `residency` is deterministic under test, and `record_pending_work` is what turns a landed transfer into a `complete` record.
@@ -978,7 +978,7 @@ c.begin_frame(tick, on_release)      // on_release frees the payload AND clears 
 sv::impl::keyed_cache_limits         // { i64 max_idle_frames_payload, max_idle_frames_entry; isize max_payload_bytes, max_entries; }
 ```
 
-The two thresholds are the point: a view's textures are megabytes and go after ~60 idle frames, while the identity behind them costs a few dozen bytes and survives ~240.
+Two thresholds, because a view's textures are megabytes and go after ~60 idle frames, while the identity behind them costs a few dozen bytes and survives ~240.
 That only works because the release hook clears the textures alone — a demotion that reset the record would take the camera with it.
 
 `sg::render_routine::evict` no longer reaches an accumulated image, since none live on a routine.

@@ -97,7 +97,7 @@ uv run dev.py test shaped-graphics-dx12-test --repeat 100
 Runs the same selection up to N times and **stops at the first failing iteration**, naming it.
 Build and target discovery happen once, so an iteration costs only the binaries — far cheaper than a shell loop around `dev.py`.
 
-Stopping on failure is the point, not a convenience.
+Stopping on failure keeps the evidence of that failure on disk.
 Run logs and JUnit XML are written per target and **overwritten every run**, so a loop that keeps going destroys the evidence of the failure it just found.
 Halting leaves that iteration's `run-logs/` and `*.results.xml` exactly as the failing run left them, which is what `test_diag` and `--mirror-test-output` then read.
 
@@ -390,7 +390,7 @@ A gate scoped to dirty files alone *empties as you work*: commit, and the workin
 That is precisely the run that matters — the one before pushing — and it was the one saying least.
 
 The consequence to know is that `check` re-examines files you committed earlier on the branch, so a rule that changed since then surfaces now rather than never.
-That is the point, and it is also why the first `check` on an old branch can report more than you expect.
+That is by design, and it is also why the first `check` on an old branch can report more than you expect.
 
 `--dirty-only` is the tight edit loop's scope and is still what `dev.py lint` and `dev.py format` default to; `--all` is the whole tree; `--since <rev>` picks a different base.
 **There is no working-tree fallback.**
@@ -731,7 +731,7 @@ A trace has **two processes**, because the two halves of a run are shaped differ
 
 The two are always allocated independently, so a compile edge is never pushed down a row by the step that spawned it, and either block can be collapsed in the viewer to look at the other.
 
-Every track is **strictly ordered** in the emitted trace, which matters more than it sounds.
+Every track is **strictly ordered** in the emitted trace.
 A viewer nests two slices on one track the moment they overlap by a single microsecond, drawing the second as a sub-row of the first.
 One rounding artefact therefore turns a clean lane into a staircase that reads as a broken layout.
 Timestamps come from a monotonic counter anchored once to the wall clock, rather than from the system clock.

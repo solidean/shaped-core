@@ -31,7 +31,7 @@ session, but still report anything high-leverage elsewhere.
   leaned on but verified via passing tests or inference rather than a stated
   guarantee (flag as latent risk).
 
-## Discipline (this matters more than coverage)
+## Discipline over coverage
 
 - **Not exhaustive — sparse output is the goal.**
   Two sharp findings beat eight padded ones.

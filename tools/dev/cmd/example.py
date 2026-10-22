@@ -165,7 +165,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     # The exact name alone, which reaches an example outside the swept bucket.
     # With --examples it would be a substring sweep, so `sponza` would also run `sponza-evening` and every other name containing it.
-    # Mirrored, because watching the example run is the entire point of the command.
+    # Mirrored, so the example's output shows while it runs.
     result = dev.run_step(
         [*launcher, str(artifact), nexus_filter(example.name), *program_args],
         step_type="example", name=example.target,

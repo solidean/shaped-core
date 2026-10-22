@@ -122,7 +122,7 @@ Inline code is skipped: an odd number of backticks before the dot means we are i
 a call like `f(x). g(y)` in the middle of a line
 ````
 
-A stop *after* a code span still fires, which is the point of counting rather than ignoring backticks.
+A stop *after* a code span still fires, because the backticks are counted rather than ignored.
 
 ````md [no-flow-prose] path="x.md"
 this is `cc::vector`, done. And here is the next point.

@@ -226,7 +226,7 @@ An earlier revision of this design gave quadrics frequencies of their own — `p
 The clip slab makes the second nearly free: it is offset rather than centered, so it carries the axis WITH its sign, and the
 blend parameter falls out of the same evaluation the intersection already does.
 
-It was dropped, and the reason is the whole point of the section above.
+It was dropped for the reason the section above gives.
 A per-end frequency forks the generated body — one material would no longer produce one shader body for both geometries — and
 that property is worth more today than a gradient along an edge.
 `per_quadric` itself was redundant the moment `per_triangle` was read as "one value per element of the geometry's own primitive

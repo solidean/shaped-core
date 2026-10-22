@@ -663,7 +663,7 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
             .context(cc::format("{} chose {}x{} tiles", label, tiled.tile_counts()[0], tiled.tile_counts()[1]));
         CHECK(tiled.tile_overlap() == sr::impl::oidn_network::k_tile_overlap).context(label);
 
-        // The whole point of tiling, restated as a number: the tensors are sized by the tile, not by the image.
+        // Tiling restated as a number: the tensors are sized by the tile, not by the image.
         CHECK(tiled.feature_bytes() < whole.feature_bytes())
             .context(cc::format("{}: tiled {} bytes vs whole {} bytes", label, tiled.feature_bytes(),
                                 whole.feature_bytes()));

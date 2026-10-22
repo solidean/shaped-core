@@ -413,7 +413,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
     co_await cc::async_settled(sv::background_work(ctx));
     CHECK(traced_before_timeout);
 
-    // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.
+    // Nothing at the requested path, because that absence is what dev.py reads as a failed capture.
     CHECK(cc::file_read_stream_adapter::open(path).has_error());
 
     // And the partial is a complete file, decodable, so it is worth opening.

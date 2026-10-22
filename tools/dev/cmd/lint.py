@@ -95,7 +95,7 @@ def run_clang_tidy(
     if limit is not None:
         argv += ["--limit", str(limit)]
 
-    # clang-tidy diagnostics are the point, so mirror the child live; run_step still captures the log.
+    # The clang-tidy diagnostics are the run's output, so mirror the child live; run_step still captures the log.
     result = dev.run_step(
         argv, step_type="lint", name="clang-tidy",
         build_dir=preset.build_dir, cwd=ctx.root, mirror=True, verbose=verbose,
@@ -138,7 +138,7 @@ def run_shaped_linter(
         print(dev.console.green("shaped-linter: nothing to lint (no sources in scope)"), file=sys.stderr)
         return True
 
-    # A scoped run is line-exact for prose, and docs/guides/prose.md says why that matters.
+    # A scoped run is line-exact for prose; docs/guides/prose.md has the reason.
     # A spec file rather than argv, since the run already batches to stay under the command-line limit.
     changed_lines_spec: Path | None = None
     if scope is not None:

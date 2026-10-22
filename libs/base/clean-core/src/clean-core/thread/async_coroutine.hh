@@ -246,7 +246,7 @@ struct async_promise : async_promise_return<T, E, std::is_same_v<T, cc::unit>>
     using error_type = E;
 
     // The coroutine frame is the one allocation this layer adds over a lambda frame, so it goes to the same slab the node does.
-    // node_allocation_free is stateless, which matters here: a coroutine is routinely destroyed on a different thread than the one that created it.
+    // node_allocation_free is stateless, so a coroutine may be destroyed on a different thread than the one that created it, as it routinely is.
     static constexpr isize min_frame_alignment = 16;
 
     // A frame holds every local that spans a suspend, so it must be as aligned as the most aligned of them.
@@ -376,7 +376,7 @@ struct async_awaiter_value
     {
         return (*dep)->value();
     }
-    /// A unit carries nothing, so `co_await` on one is awaited for its completion alone, and discarding it is the point.
+    /// A unit carries nothing, so `co_await` on one is awaited for its completion alone, and its result is meant to be discarded.
     U const& await_resume() const
         requires std::is_same_v<std::remove_const_t<U>, cc::unit>
     {

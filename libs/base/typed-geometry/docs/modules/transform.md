@@ -264,7 +264,7 @@ Public is right here, and not a violation of the private-plus-friend rule below.
 That rule exists so a transform cannot quietly override the answer for an object it was not written for.
 `composed_transform` gives exactly the answer its parts give, for anything they can answer for.
 
-The return type is the whole point: it says at compile time whether you got a fused transform or a pair.
+The return type says at compile time whether you got a fused transform or a pair.
 The cost of the pair is real — an object is transformed twice and passes through whatever intermediate type the inner step produced — so `compose` reaches for the fused form first, always.
 
 **There is deliberately no `operator*`.** A transform is applied, not multiplied, and once `*` means composition a reader expects `t * p` to mean application — which tg does not have, on purpose.

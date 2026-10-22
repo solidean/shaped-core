@@ -15,7 +15,7 @@ sc_target_pch(shaped-graphics SG)
 sc_target_pch(clean-core-test CC_STD NEXUS)
 ```
 
-That a tier's headers live next to the target that owns them is the point.
+A tier's headers live next to the target that owns them.
 A list of `clean-core/container/*.hh` kept centrally would be a file nobody editing clean-core ever opens, and it would rot within a release.
 The one exception is `STD`, which names standard headers and belongs to no library, so it stays in the module.
 

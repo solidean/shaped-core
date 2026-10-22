@@ -74,7 +74,7 @@ namespace vdoc_test
 /// The deliberately stupid reference: a writer survives unless some OTHER writer of the same path descends from it.
 ///
 /// This is what the real pass is checked against.
-/// It is exponentially worse and obviously correct, which is the point: the snapshot cache is checked against the real
+/// It is exponentially worse and obviously correct, because the snapshot cache is checked against the real
 /// pass, so the real pass needs an oracle of its own.
 ///
 /// **An abstention is a writer for dominance and not for the result.** It supersedes what it descends from exactly as a

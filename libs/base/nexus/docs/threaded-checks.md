@@ -13,8 +13,7 @@ The API is in the [cheat-sheet](../cheat-sheet.md#checks-off-the-tests-own-threa
 
 It is printed the moment it happens and summarized at the end as `N check(s) ran outside any test context`, and the run's exit code says so even when every test is green.
 
-That is deliberate, and it is the whole point of the change.
-A check nobody counts is worse than a missing one: it reads as coverage, runs green forever, and the day it starts failing nothing notices.
+It fails on purpose, since a check nobody counts is worse than a missing one: it reads as coverage, runs green forever, and the day it starts failing nothing notices.
 
 ## Where attribution comes from
 

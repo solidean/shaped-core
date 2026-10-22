@@ -14,7 +14,7 @@ using namespace cc::primitive_defines;
 
 // Testing a stack walk without symbols.
 //
-// Nothing here may name a function, because the whole point of cc::capture_stack is that it never asks who a return
+// Nothing here may name a function, because cc::capture_stack never asks who a return
 // address belongs to.
 // So the assertions are structural: a deeper capture extends a shallower one, a recursive call site repeats, skipping
 // drops exactly what it says, and a stop frame yields a prefix.

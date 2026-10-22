@@ -71,7 +71,7 @@ If they match, the history is correct — no trust in the sender at any point.
 - **The batch is a set.** Every op is verified before any of it is applied, so a partial or hostile set leaves the replica exactly as it was rather than half-integrated.
 
 A skeleton cannot be *offered*: an empty payload has nothing to verify, and it is refused as malformed rather than quietly accepted as an op with no writes.
-A skeleton the replica *holds* is filled in, which is the whole point — and it needs its own verb, because adding an op is idempotent by id and therefore leaves a skeleton a skeleton.
+A skeleton the replica *holds* is filled in, and that needs its own verb, because adding an op is idempotent by id and therefore leaves a skeleton a skeleton.
 
 One integrity claim content addressing cannot make becomes checkable exactly here.
 A skeleton's parents were never covered by any hash, so a corrupted parent list is undetectable while the op sits in storage.

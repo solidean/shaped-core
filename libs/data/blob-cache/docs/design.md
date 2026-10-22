@@ -58,7 +58,7 @@ A caller that wants a fixed-size key hashes its own inputs and passes the digest
 `(namespace, key, version)` maps to one committed object until that entry is evicted.
 A second `put` under a live key stores nothing and reports `already_present`.
 
-This matters most where it is least expected.
+The rule covers a case that is easy to miss.
 Two processes may compute the same key at once and legitimately produce *different* bytes — two ZIP archives of the same files differing only in their embedded timestamps, say.
 Either is a valid answer for the logical key.
 What must not happen is the mapping flapping between them depending on who wrote last.
@@ -246,4 +246,4 @@ That is what lets the same code drive a threaded and an unthreaded store: the di
 * **Streaming public APIs** — chunking is an internal persistence detail today, and the seam for streaming later.
 * **A public delete beyond `invalidate` / `clear`** — `version` covers most invalidation, and expiry and collection
   cover the rest.
-* **Exact accounting after every mutation** — approximate is the point.
+* **Exact accounting after every mutation** — the accounting is approximate by design.

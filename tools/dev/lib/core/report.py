@@ -242,7 +242,7 @@ def summarize_check_timing(
 
     `check` is the longest thing anyone runs here, and until now it reported only a total — so "it takes forever" could
     not be turned into "which preset, and was it the build or the tests".
-    That is the whole point of this: it is a measurement, not a gate, and it never changes the verdict.
+    This answers that: it is a measurement, not a gate, and it never changes the verdict.
 
     A preset whose tests exceed `slow_test_s` is called out, because a suite that slow is a bug report waiting to be
     written rather than a fact about the machine.

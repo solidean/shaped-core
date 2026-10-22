@@ -144,7 +144,7 @@ namespace cc::impl
 {
 /// Runs `fn` holding the process-global DbgHelp lock, or returns false without running it.
 ///
-/// **Never waits**, which is the whole point.
+/// **Never waits.**
 /// The crash handler walks threads it has SUSPENDED, and a suspended thread that owned this lock would never release
 /// it -- so waiting here would turn an occasional race into a guaranteed hang, on the one path whose job is to
 /// report what went wrong.

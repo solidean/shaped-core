@@ -263,8 +263,7 @@ EXAMPLE("babel-serializer/chrome-trace", nx::config::owns_recorder)
     cc::println("  {} event(s) from example.assets", captured.from_domain(&example_assets::g_rec_domain).event_count());
 
     // The same samples the trace shows, reduced to where the time actually went.
-    // That reduction is the point: a sampled recording is answerable without opening a viewer, which is what lets a
-    // test assert on it.
+    // With it a sampled recording is answerable without opening a viewer, so a test can assert on it.
     auto const hot = cc::rec::hot_functions(captured);
     if (hot.sample_count > 0)
     {

@@ -196,7 +196,7 @@ TEST("threaded check - a node of one test driven inside another is never billed 
                             sched.drain(); // runs producer's node here, on consumer's thread
                         });
 
-    // Serialized on purpose: the point is that consumer drives the node AFTER producer has finished.
+    // Serialized so that consumer drives the node AFTER producer has finished.
     // Run in parallel the two overlap, the node is billed to a still-live producer, and there is no orphan to observe.
     nx::test_schedule_config config;
     config.jobs = 1;

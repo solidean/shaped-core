@@ -99,7 +99,7 @@ Two kinds of fence on the transfer queue, both signaled per window:
 
 **Completion is per resource, not per system**, and that follows directly from out-of-order selection.
 "Signal the highest value I finished" is only exact where completion order matches reservation order.
-That is guaranteed inside a family and deliberately broken across families — overtaking an unrelated blocked upload is the point.
+That is guaranteed inside a family and deliberately broken across families, so an upload can overtake an unrelated blocked one.
 One shared counter therefore reports a low-numbered upload complete the moment any higher-numbered one finishes.
 A reader then stops waiting for a copy that has not run.
 So the **timeline is the family**: [`dx12_completion_group`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_completion_group.hh), one per resource per direction.

@@ -8,7 +8,7 @@
 using namespace cc::primitive_defines;
 
 // The layout hashes are pure CPU value functions over sg-level inputs — no device, no backend.
-// That is the point of them: they have to mean the same thing in a process that has no GPU at all.
+// So they mean the same thing in a process that has no GPU at all.
 
 namespace
 {

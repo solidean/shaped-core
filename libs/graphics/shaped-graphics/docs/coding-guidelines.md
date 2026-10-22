@@ -105,7 +105,7 @@ One hierarchy keeps the state in one place, at the cost of a base coupled to its
 A backend type carries a redundant backend prefix ("smurf naming") **and** lives in a per-backend namespace: `sg::backend::dx12::dx12_context`, `sg::backend::vulkan::vulkan_command_list`.
 
 **Why** (not obvious): the `dx12_` / `vulkan_` prefix makes every symbol of one backend greppable in a single search, and the namespace keeps same-role types from clashing.
-The usual "don't stutter the namespace in the type name" advice does not apply — here the stutter is the point.
+The usual "don't stutter the namespace in the type name" advice does not apply — here the stutter buys the single-search grep.
 
 ## Duplicate across backends rather than abstract
 

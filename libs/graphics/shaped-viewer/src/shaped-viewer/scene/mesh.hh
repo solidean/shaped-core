@@ -109,7 +109,7 @@ struct sv::mesh
     /// What placing this mesh produced — see `impl::mesh_gpu_slot`.
     ///
     /// Mutable because placing a mesh READS it: `scene_ref::add_mesh` takes a `mesh const&`, and an asset hands out
-    /// `mesh const&`, while the whole point of the slot is to remember what that placement produced.
+    /// `mesh const&`, while the slot exists to remember what that placement produced.
     /// Not thread-safe, like the rest of the authoring API — a mesh is placed from the thread that owns the frame.
     mutable impl::mesh_gpu_slot cache;
 

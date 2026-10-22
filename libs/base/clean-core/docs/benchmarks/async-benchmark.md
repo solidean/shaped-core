@@ -131,7 +131,8 @@ For 64 B of storage plus an alloc *and* a dealloc, that is not alarming.
 ### Homes
 
 Homes were required to cost an unhomed node nothing measurable, so the same two probes were traced before and after they landed.
-Both runs are `relwithdebinfo-clang` on an AMD Ryzen 9 7950X3D, since the tracer needs a PDB; the absolute counts differ from the table above for that reason, and the delta is the point.
+Both runs are `relwithdebinfo-clang` on an AMD Ryzen 9 7950X3D, since the tracer needs a PDB.
+The absolute counts differ from the table above for that reason, so only the delta between the two columns carries over.
 
 | probe | before homes | after homes |
 |---|---|---|

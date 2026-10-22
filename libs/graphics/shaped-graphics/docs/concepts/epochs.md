@@ -12,7 +12,7 @@ The token is also a **timeline value**: the backend owns one **epoch fence** on 
 > So once the fence's completed value reaches `N`, every GPU operation from epoch `N` has finished, and everything epoch `N` owns is safe to reclaim.
 
 Because both the counter and the fence are monotonic, "has epoch `N` finished?" is a single integer compare.
-That is the point: lifetime questions for thousands of resources collapse into one fence read per epoch instead of one fence per resource.
+So lifetime questions for thousands of resources collapse into one fence read per epoch instead of one fence per resource.
 
 Alongside it, [`sg::submission_token`](../../src/shaped-graphics/fwd.hh) is a **finer-grained** per-command-list value on a second direct-queue fence.
 It answers "is *this one* list done?" rather than "is the whole frame done?".
@@ -100,13 +100,13 @@ A lost device settles every outstanding node as an error, since its fences jump 
 
 `in_flight_epoch_count()` is the depth those decisions are made against: 0 means the GPU has caught up with everything closed so far.
 
-This matters beyond tidiness because **the browser cannot block at all**.
+Settling on their own is more than tidiness, because **the browser cannot block at all**.
 A promise settles only after the current task's stack unwinds, so a loop waiting on a callback has taken the only thread that callback could run on.
 `ctx.execution()` reports which world a context is in (`sg::execution_model`), and it is a property of the target rather than a caller's choice.
 
 ## `idle_completion()`: everything drained
 
-`idle_completion()` waits on three things, and the order is the point:
+`idle_completion()` waits on three things, in this order:
 
 1. **Wait out every submission.** The GPU has finished everything recorded so far.
 2. **Drain every transfer actor.** A readback the GPU finished still has to be copied into the caller's destination, and only the actor does that — so draining first would let a copy land behind us.

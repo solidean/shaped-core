@@ -80,7 +80,7 @@ REC_TEST("record/trace - a scope mints and names its trace, and restores what wa
         {
             CC_RECORD_MARK("before");
             {
-                // Naming it is the point: a bare id is an opaque number, useless in a viewer.
+                // Named, because a bare id is an opaque number, useless in a viewer.
                 CC_RECORD_ASYNC_SCOPE("handle-request");
                 outer_id = cc::rec::current_trace_id();
                 CHECK(outer_id != cc::rec::trace_id::none);

@@ -20,8 +20,8 @@ enum class sv::material_slot_kind : sv::u8
 
 /// One field of the per-instance parameter block a permutation reads.
 ///
-/// The generated shader loads it at `offset` and the CPU fills it at `offset`, and both come from the same layout — which is the
-/// point of handing the layout back alongside the source rather than letting each side compute it.
+/// The generated shader loads it at `offset` and the CPU fills it at `offset`, and both come from the same layout, because the
+/// layout is handed back alongside the source rather than computed by each side.
 struct sv::material_slot
 {
     /// which attribute this serves; a texture's uv descriptor is named `"<attribute>.uv"`

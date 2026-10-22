@@ -94,7 +94,7 @@ Correctness never depends on the gate; only speed does.
 
 An apply does not consume a pair of ops; it consumes a **`change_set`** — the property paths that have to be re-interpreted — and the op chain is one way to produce one.
 
-That matters because a chain is not the only thing that knows a delta.
+A change set rather than an op pair, because a chain is not the only thing that knows a delta.
 A source written directly knows its own, and a composition of several sources knows the union of theirs, and neither can be phrased as "from this op to that one".
 
 A change set carries a **granularity**: property, component or entity.

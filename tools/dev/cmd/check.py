@@ -205,7 +205,7 @@ def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | No
         # The binding pass exists twice -- in C++ for the runtime rewriter, in Python for the shader-package
         # generator -- and one shared corpus is what keeps the two agreeing.
         #
-        # BOTH halves run here, which is the point: a gate that ran only one would let a divergence through and
+        # BOTH halves run here, since a gate that ran only one would let a divergence through and
         # leave it to the test suite, and the suite is the thing this gate runs ahead of.
         # The C++ half runs shaped-shader-library-test, which the gate declares in `builds` and the runner built ahead.
         # Not fixable and not scopable, so fix and scope are ignored.

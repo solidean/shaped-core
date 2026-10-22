@@ -337,7 +337,7 @@ REC_TEST("record/query - decimating says what it no longer knows")
     CHECK(thinned.count("old") == 0);
     CHECK(thinned.count("recent") == 1);
 
-    // The whole point: the result reports the span it threw away rather than pretending nothing happened there.
+    // The result reports the span it threw away rather than pretending nothing happened there.
     CHECK(thinned.count_of_kind(cc::rec::event_kind::dropped_span) == 1);
 
     isize reported = 0;

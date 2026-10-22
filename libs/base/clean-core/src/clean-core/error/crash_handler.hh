@@ -38,7 +38,7 @@ void install_crash_handler();
 
 /// Write this thread's stacktrace and every other thread's, now, with nothing having crashed.
 ///
-/// **The other threads are the point**, and they are the whole reason this exists separately from `cc::stacktrace`:
+/// **It exists separately from `cc::stacktrace` for the other threads**:
 /// in a deadlock or a wait that never finished, the thread that noticed is never the one that matters.
 /// Reaching them means suspending and walking each on Windows, and signalling each to unwind itself on Linux, neither
 /// of which `std::stacktrace` can do -- so the other threads are reported on those two, and the calling one everywhere.

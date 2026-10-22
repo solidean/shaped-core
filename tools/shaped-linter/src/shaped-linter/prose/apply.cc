@@ -211,7 +211,7 @@ void validate_rewrite(planned_rewrite const& rewritten,
     if (language != source_language::markdown)
         check_code_unchanged(rewritten, original, language, out.errors);
 
-    // Runs even after a code-changed error: the point is to report everything wrong in one pass.
+    // Runs even after a code-changed error, so one pass reports everything wrong.
     collect_new_prose(rewritten, sources, out.findings);
 }
 

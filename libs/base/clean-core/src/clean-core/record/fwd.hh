@@ -151,7 +151,7 @@ enum class cc::rec::overflow_policy : cc::u8
     /// The dev default, so nothing goes missing while you are looking for it, at the cost of perturbing the timing.
     backpressure,
     /// Grow past the budget without bound.
-    /// The test default, where the whole run is expected to fit and completeness is the point.
+    /// The test default, where the whole run is expected to fit and nothing may go missing.
     grow_unbounded,
 };
 

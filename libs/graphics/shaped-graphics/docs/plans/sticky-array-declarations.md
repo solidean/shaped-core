@@ -709,7 +709,7 @@ A pass declaring its bindless table asserted on a frame whose materials bound on
 P1 and P2 are this alternative's cheap half, and they landed first.
 The rest — running the range and vacancy asserts once per group, dropping the per-declare heap copies — is part of this plan.
 Each is a constant factor on an O(elements × ops) term: even halving the per-element cost leaves tens of ms on a moving Sponza frame.
-It still matters for the first application, every `cover_all`, every writing declaration, and every scalar binding.
+It still speeds up the first application, every `cover_all`, every writing declaration, and every scalar binding.
 
 ## Decisions
 

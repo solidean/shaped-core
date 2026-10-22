@@ -276,7 +276,7 @@ TEST("sv::generate_material_shader - the permutation split holds at the level of
     auto const copper = sv::generate_material_shader(
         sv::resolve_material(type, sv::material::create("copper", sv::material_type_id(0), copper_b), mesh));
 
-    // The whole point: two materials differing only in their constants generate BYTE-IDENTICAL source.
+    // Two materials differing only in their constants generate BYTE-IDENTICAL source.
     CHECK(gold.source == copper.source);
     CHECK(gold.key == copper.key);
 

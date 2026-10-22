@@ -57,7 +57,7 @@ void metal_swapchain::recreate(tg::vec2i size)
     }
 
     // Headless: ordinary render targets standing in for back buffers.
-    // They carry copy_src as well, because the whole point of a headless chain is that the presented image stays
+    // They carry copy_src as well, because a headless chain exists to keep the presented image
     // readable — a null target would only prove the calls did not crash.
     for (auto i = 0; i < _desc.buffer_count; ++i)
     {

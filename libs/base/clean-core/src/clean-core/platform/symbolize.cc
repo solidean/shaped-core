@@ -96,7 +96,7 @@ cc::mutex<dbghelp_access>& dbghelp_lock()
     if (path.size() < 3 || path[1] != ':')
         return true;
 
-    // A mount-table lookup, and deliberately not a file open — the point is to answer without touching the network.
+    // A mount-table lookup rather than a file open, so it answers without touching the network.
     char const root[4] = {path[0], ':', '\\', '\0'};
     auto const type = ::GetDriveTypeA(root);
     return type == DRIVE_FIXED || type == DRIVE_REMOVABLE || type == DRIVE_RAMDISK || type == DRIVE_CDROM;
