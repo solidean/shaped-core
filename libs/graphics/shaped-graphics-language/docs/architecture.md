@@ -212,6 +212,8 @@ A fence that holds a `test` runs it as well.
 **The corpus is how the language's semantics are tested**: one `.sgl` file per topic under `tests/corpus/`, found when the test binary runs, so a new file needs no C++ and no CMake.
 A file passes when it checks with no diagnostic at all, every test in it passes, and every entry point it declares is written for every target.
 A rule is best stated as a test of a corpus file; a C++ `TEST` is for what SGL cannot say, which today is bindings, resources and the emitted text.
+A C++ test that compares a whole emitted text or tree dump uses `sgl_test::check_golden(actual, expected, label)`, since no log shows a long one whole.
+Where it differs, the failure names a file of the text as it is now and one of the C++ literals that replace `expected`.
 A corpus file is written the way SGL is meant to be written, since it is also what a reader learns the language from.
 An arrow body leaves its return type to inference, and a written `-> T` stays only where the written type is what a test is about.
 Rules have stable ids and are never renumbered; a new rule is appended.

@@ -112,6 +112,10 @@ struct temporal_slot
     /// Whether a full-size frame traced through the sequence `restarts` picks, so the next restart for a different image moves on from it.
     bool drew_since_restart = false;
 
+    /// How many frames of this slot traced through a stand-in or an emitter still loading, each of which restarts the mean behind it.
+    /// Nothing decides by it: it is how a test tells a mean that waited on a compile from one that did not.
+    u32 loading_frames = 0;
+
     /// When the image last changed, on the steady clock; a move lasts `render_settings::motion_hold_ms` past it.
     f64 last_change_seconds = -1e30;
 

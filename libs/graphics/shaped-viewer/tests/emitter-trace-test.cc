@@ -181,6 +181,11 @@ cc::shared_async<cc::vector<tg::vec3f>> render(sg::context& ctx,
             auto out = cc::vector<tg::vec3f>();
             for (auto const& p : pixels.value())
                 out.push_back(tg::vec3f(p[0], p[1], p[2]));
+            // The seed moves on per change of the image, never per frame a compile lasted, so a compile's timing
+            // cannot pick the mean this converges to: thousands of loading frames still make a handful of restarts.
+            auto const history = store.history_of(v.id);
+            CHECK(history.restarts < 16)
+                .context(cc::format("{} restarts over {} loading frames", history.restarts, history.loading_frames));
             (void)co_await cc::async_settled(sv::background_work(ctx));
             co_return out;
         }
