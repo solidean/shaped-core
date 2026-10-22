@@ -41,7 +41,7 @@ Tests, 423 s over 84 runs:
 
 ## Design (settled 2026-10-22)
 
-### Gates declare what they watch, and there is no default
+### Gates declare what they watch, and there is no default (done)
 
 Every gate in the registry carries either `watches=[globs]` or an explicit `always=True`, and the registry refuses to load one with neither.
 "Always run" is the correct default and a bad one for performance, so it is a decision the gate spells out rather than one it falls into.
@@ -76,7 +76,7 @@ Riding thorough tests on the binary-level graph rule was considered and rejected
 A thorough test with no declaration runs only under `--thorough`.
 Independently, `shaped-viewer-test` on debug-nopch is a quarter of the whole test tail and belongs behind `nx::is_thorough()` today.
 
-### Gates run concurrently, with exclusion declared
+### Gates run concurrently, with exclusion declared (done, the GPU tag unused so far)
 
 The nexus model: concurrent by default, so an issue surfaces sooner, with opt-outs.
 The fixing gates keep their order and run after the read-only ones have reported.

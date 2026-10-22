@@ -52,8 +52,10 @@ from .lib.quality.changes import (
     changed_line_ranges,
     format_changed_line_spec,
     resolve_range,
+    touched_paths,
 )
-from .lib.quality.checks import Check, list_checks, run_checks
+from .lib.quality.checks import Check, CheckRegistryError, list_checks, run_checks, select_checks, validate_checks
+from .lib.quality.watch import Watch, tracked_files
 from .lib.quality.crossrefs import CrossRefResult, check_crossrefs
 from .lib.quality.format import (
     FormatResult,
@@ -111,11 +113,17 @@ __all__ = [
     "mark_build",
     "harvest_build_jobs",
     "Check",
+    "CheckRegistryError",
     "list_checks",
     "run_checks",
+    "select_checks",
+    "validate_checks",
+    "Watch",
+    "tracked_files",
     "ChangeScope",
     "ChangeScopeError",
     "changed_files",
+    "touched_paths",
     "changed_line_ranges",
     "format_changed_line_spec",
     "resolve_range",

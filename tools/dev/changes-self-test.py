@@ -31,7 +31,10 @@ from tools.dev.lib.quality.changes import (  # noqa: E402
     changed_line_ranges,
     format_changed_line_spec,
     resolve_range,
+    touched_paths,
 )
+from tools.dev.lib.quality.checks import Check, CheckRegistryError  # noqa: E402
+from tools.dev.lib.quality.watch import Watch  # noqa: E402
 
 VERBOSE = "-v" in sys.argv
 
@@ -187,6 +190,52 @@ def test_working_tree_scope_still_covers_dirty_and_untracked(root: Path) -> None
         (root / "fresh.md").unlink()
 
 
+def test_touched_paths_keep_deletions_and_both_names_of_a_rename(root: Path) -> None:
+    # Runs after the rename-and-delete commit: selection must see what a linter drops, since a deleted file under a
+    # watched tree is a reason to run the gate.
+    touched = set(touched_paths(root, ChangeScope("HEAD")))
+    assert {"renamed.md", "b.md"} <= touched, touched
+    assert "a.md" in touched or "renamed.md" in touched, touched
+
+
+def test_touched_paths_in_the_working_tree_include_a_deletion(root: Path) -> None:
+    write(root, "fresh.md", "brand new\n")
+    (root / "root.md").unlink()
+    try:
+        touched = set(touched_paths(root, ChangeScope()))
+        assert {"fresh.md", "root.md"} <= touched, touched
+    finally:
+        git(root, "checkout", "--", "root.md")
+        (root / "fresh.md").unlink()
+
+
+def test_watch_globs_are_gitignore_shaped(root: Path) -> None:
+    w = Watch.of(["**/*.cc", "tools/review/**", "docs/guides/prose.md", "libs/*/x/*.hh"])
+    assert w.matches("a.cc") and w.matches("libs/base/clean-core/src/a.cc")
+    assert not w.matches("a.cch") and not w.matches("a.cc/b")
+    assert w.matches("tools/review/x/y.py") and not w.matches("tools/reviewer/x.py")
+    assert w.matches("docs/guides/prose.md") and not w.matches("docs/guides/prose.md.bak")
+    assert w.matches("libs/base/x/a.hh") and not w.matches("libs/base/y/x/a.hh")
+    bare = Watch.of(["tools/review"])
+    assert bare.matches("tools/review") and bare.matches("tools/review/a.py") and not bare.matches("tools/reviewer")
+    assert w.dead_patterns(["a.cc", "tools/review/x"]) == ["docs/guides/prose.md", "libs/*/x/*.hh"]
+    assert w.touched_by(["a.cc", "b.md"]) == ["a.cc"]
+
+
+def test_a_check_declares_watches_or_always_and_never_both(root: Path) -> None:
+    run = lambda **kw: True  # noqa: E731
+    Check("w", "", False, run, watches=("x/**",))
+    Check("a", "", False, run, always=True)
+    for kwargs in ({}, {"watches": ("x",), "always": True}, {"watches": ()}):
+        try:
+            Check("bad", "", False, run, **kwargs)
+        except CheckRegistryError:
+            continue
+        raise AssertionError(f"Check(**{kwargs}) should have raised CheckRegistryError")
+    assert Check("a", "", False, run, always=True).touched_by(["p"]) == ["p"]
+    assert Check("w", "", False, run, watches=("x/**",)).touched_by(["x/p", "y/p"]) == ["x/p"]
+
+
 def test_resolve_range_expands_a_single_commit_to_its_first_parent(root: Path) -> None:
     head = git(root, "rev-parse", "HEAD")
     parent = git(root, "rev-parse", "HEAD^")
@@ -206,6 +255,7 @@ def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     # The history-mutating tests run last, so the shared fixture stays the documented shape for the rest.
     order = ["test_deletions_are_dropped_and_renames_yield_the_new_path",
+             "test_touched_paths_keep_deletions_and_both_names_of_a_rename",
              "test_line_ranges_are_numbered_against_the_head_commit",
              "test_pure_deletion_marks_the_surviving_line_above"]
     tests.sort(key=lambda t: order.index(t.__name__) + 1 if t.__name__ in order else 0)

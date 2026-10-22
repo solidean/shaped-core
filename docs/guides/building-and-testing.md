@@ -395,7 +395,19 @@ That is the point, and it is also why the first `check` on an old branch can rep
 **There is no working-tree fallback.**
 With no merge base to find — `main` with no `origin/main`, say — `check` refuses and asks for one of those flags rather than quietly inspecting less.
 
-Registered checks, **in the order they run**:
+### A gate runs when the change touches what it watches
+
+Every gate declares what it is about: `watches`, a set of repo-relative globs, or `always`, for a gate whose inputs are the whole tree.
+The registry refuses a gate with neither, and one with both.
+"Always run" is the safe default and the slow one, so a gate states it rather than falls into it.
+A gate runs when a path the scope touched matches one of its globs, deletions and the old name of a rename included.
+`check --list` prints what each watches, and a run names every gate it skipped, so a wrong rule is visible rather than silent.
+A glob that matches no tracked file is an error: the file it named has moved, and the gate would otherwise stop running without anyone noticing.
+
+`--all` runs everything, and so does naming a gate on the command line.
+CI runs everything, which is where a missing rule is caught.
+
+Registered checks (`check --list` shows what each watches); the fixers run in this order under `--fix`:
 
 | Check        | What it does                                                                   | `--fix`? |
 |--------------|--------------------------------------------------------------------------------|----------|
@@ -412,7 +424,7 @@ Registered checks, **in the order they run**:
 `check` is the longest command here, so it reports where the time went rather than only a total.
 
 ```raw
-static gates: lint 57.0 s, shaped-lint 2.7 s, format 906 ms, crossrefs 1.5 s  (total 62.2 s)
+static gates: lint 57.0 s, shaped-lint 2.7 s, format 906 ms, crossrefs 1.5 s  (work 62.2 s)
 
 timing, per preset:
   relwithdebinfo-clang  build    2.0 s   test   72.5 s  (18 binaries)
@@ -422,17 +434,30 @@ timing, per preset:
   total 332.5 s across 4 preset(s)
 ```
 
-One line for the static gates, and one per preset for the build-and-test tail split into its two halves.
+One line for the static gates, whose total is work rather than wall clock since they ran together, and one per preset for the build-and-test tail split into its two halves.
 Neither changes the verdict — they are a measurement of the run that just happened.
 
 A preset whose tests exceed the budget in `tools/dev/cmd/check.py` is called out by name.
 The budget is a ceiling a run must not cross rather than a target it should hit: tighten it as the suite gets faster, and never raise it to silence a warning.
 
-**That order is a correctness property, not a listing convention.**
+### Concurrent by default, ordered where a gate writes
+
+The static gates are independent, so the read-only ones run at the same time.
+Under `--fix` the gates that write run after them, serially and in registry order: a fixer's rewrite is what the later ones must see.
+Without `--fix` nothing writes, so every static gate is read-only and they all run together.
+A gate that must not overlap another declares an `exclusive` tag, `"gpu"` for anything that opens a device, and gates sharing a tag take turns.
+Mirrored or verbose output would interleave into noise, so `--mirror-output` and `--verbose` runs stay serial.
+
+**The fixer order is a correctness property, not a listing convention.**
 A lint fix is a byte-range edit — dropping a `cc::` qualifier shortens a line and strands the continuation lines aligned under where it used to end.
 A clang-tidy fix can also land in a header the commit had not otherwise touched, which `format` only sees as dirty once that write has happened.
 Running `format` after both fixers is what makes `check --fix` one finished pass instead of a pass plus "now go run format".
-Naming checks explicitly does not change it: `check format lint` runs `lint` first, same as the full gate.
+Naming checks explicitly does not change it: `check format lint --fix` runs `lint` first, same as the full gate.
+
+**A gate never builds for itself.**
+A gate that needs a target declares it in `builds`, and the runner builds every selected gate's targets in one invocation before any gate runs.
+Two ninja processes in one build directory fight over the cores and over ninja's own bookkeeping, so one balanced build stands ahead of the gates instead.
+A failed build fails the gates that declared it and no other.
 
 `lint` runs the clang-tidy gates via [tools/lint/clang-tidy.py](../../tools/lint/clang-tidy.py).
 The gates are a strict, must-be-zero whitelist in [tools/lint/clang-tidy-gates.yml](../../tools/lint/clang-tidy-gates.yml).
@@ -449,11 +474,10 @@ Its scope is `libs/`, `docs/`, `tools/`, `.claude/` and the root meta files.
 These rot silently, because a moved file breaks links in *other*, untouched files, so the scan is always full-repo and `--all` does not affect it.
 It reports each offender as `file:line: reason`.
 
-**`shader-grammar` builds a target even under `--no-test`.**
-It is the one gate that is not purely static.
+**`shader-grammar` runs a test binary even under `--no-test`.**
 The binding pass exists twice — in C++ for the runtime rewriter, in Python for the package generator — and one shared corpus is what keeps the two agreeing.
 Running only the Python half would let a divergence through to the suite, which is the thing this gate runs ahead of.
-So it builds `shaped-shader-library-test` and runs the corpus case, `--no-test` or not.
+So it declares `shaped-shader-library-test` in `builds` and runs the corpus case, `--no-test` or not.
 It also fails when that case runs zero times: it selects one test by name, and a runner given a name that matches nothing exits 0.
 
 **`fixed-int-gen` is a generated-file gate that runs before `format`, and needs no build.**
@@ -462,16 +486,16 @@ The step runs the generator with `--check`, or `--write` under `--fix`, and pass
 The generator formats its own output with it, so a regenerated file is already what `format` would leave, and standing ahead of `format` is the ordinary place for a fixer.
 [its docstring](../../libs/base/typed-geometry/tools/gen-fixed-int.py) has the rule that picks what is generated.
 
-**`sgl-prelude` builds a target too, and it is the one fixer that stands behind `format`.**
+**`sgl-prelude` needs the `sgl` tool, and it is the one fixer that stands behind `format`.**
 SGL's builtins live in a C++ registry, and `libs/graphics/shaped-graphics-language/prelude/builtins.sgl` is that registry written out and committed.
 slib's `libs/graphics/shaped-shader-library/src/shaped-shader-library/impl/pipeline_fields.hh` is the prelude's mirror of sg's raster pipeline description, written out the same way.
-The step builds the `sgl` tool and runs `sgl prelude --check` and `sgl pipeline-fields --check` on the two files; under `--fix` it runs `--write` instead.
+The step declares `sgl` in `builds` and runs `sgl prelude --check` and `sgl pipeline-fields --check` on the two files; under `--fix` it runs `--write` instead.
 Standing behind `format` breaks nothing: `builtins.sgl` is SGL, which no other gate reads, and the C++ file opens with `// clang-format off`, so the ordering argument above does not reach either.
-It sits with `shader-grammar` for the reason that one does — it needs a build, so every static gate runs first.
 Where the tool cannot be built — `SC_BUILD_TOOLS` off, or an emscripten preset — the step says so and passes, and the library's own test still compares the two texts.
 [adding-a-builtin.md](../../libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md) is what the registry is.
 
 `test` is the slow tail and runs **only after the static checks pass** — no point building a tree that already fails a cheap lint — and `--no-test` skips it.
+It is an `always` gate: which binaries a change selects is its own question, answered inside it.
 It builds and runs the suite across five build variants:
 
 - **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and **precompiled headers off**

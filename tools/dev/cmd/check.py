@@ -173,8 +173,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         #
         # BOTH halves run here, which is the point: a gate that ran only one would let a divergence through and
         # leave it to the test suite, and the suite is the thing this gate runs ahead of.
-        # The C++ half costs a build of shaped-shader-library-test, so this step is no longer build-free -- it
-        # is placed after every static gate and before `test` for that reason.
+        # The C++ half runs shaped-shader-library-test, which the gate declares in `builds` and the runner built ahead.
         # Not fixable and not scopable, so fix and scope are ignored.
         runner = ctx.root / "libs" / "graphics" / "shaped-shader-library" / "cmake" / "binding-grammar-self-test.py"
         result = dev.run_step(
@@ -195,12 +194,6 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             return False
 
         presets = ctx.resolve_presets([ctx.default_preset_name()])
-        builds = dev.build(presets, ["shaped-shader-library-test"], root=ctx.root, auto_configure=True,
-                           mirror=mirror, verbose=verbose)
-        if not all(r.ok for r in builds):
-            dev.report.print_build_failure(builds, presets, ctx.root)
-            return False
-
         records = dev.test(
             presets, ["shaped-shader-library-test"], root=ctx.root,
             test_name="the binding corpus parses as it says it does",
@@ -222,8 +215,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
     def check_sgl_prelude(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # SGL's builtins live in a C++ registry, and prelude/builtins.sgl is that registry written out and committed.
         # slib's impl/pipeline_fields.hh is the prelude's mirror of sg's raster pipeline description, written out the same way.
-        # The `sgl` tool compares each pair, so this gate builds it -- like `shader-grammar`, and placed beside it for
-        # the same reason: after every static gate, before `test`.
+        # The `sgl` tool compares each pair, so this gate declares it in `builds` and the runner built it ahead.
         # --fix rewrites the file instead.
         # That fixer stands behind `format` and breaks nothing by it: what it writes is SGL, which no other gate reads,
         # so the ordering argument about fixers and `format` does not reach it.
@@ -244,11 +236,6 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             dev.ui.write_line(f"sgl-prelude: skipped -- preset {preset.name!r} {reason}; "
                               f"the shaped-graphics-language tests compare the same texts")
             return True
-
-        builds = dev.build(presets, ["sgl"], root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
-        if not all(r.ok for r in builds):
-            dev.report.print_build_failure(builds, presets, ctx.root)
-            return False
 
         artifact = next((t.artifact for t in ctx.discover(preset) if t.name == "sgl" and t.artifact), None)
         if artifact is None:
@@ -279,7 +266,7 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
     def check_sgl_vscode_bundle(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # The SGL VS Code extension commits its esbuild bundle, so users link the folder without an `npm install`.
         # This gate rebuilds the bundle from the pinned lockfile and compares bytes; --fix copies the fresh one over.
-        # It runs only when the scope touches the bundle's inputs, since `npm ci` is slow and nothing else feeds them.
+        # Its `watches` are the bundle's inputs, since `npm ci` is slow and nothing else feeds them.
         import os
         import shutil
         import tempfile
@@ -287,11 +274,6 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
 
         extension = ctx.root / "libs" / "graphics" / "shaped-graphics-language" / "tools" / "vscode-extension"
         committed = extension / "dist" / "extension.js"
-        if scope is not None:
-            inputs = [extension / "src", extension / "package.json", extension / "package-lock.json", committed]
-            touched = any(p == i or p.is_relative_to(i) for p in dev.changed_files(ctx.root, scope) for i in inputs)
-            if not touched:
-                return True
 
         # emsdk bundles a node and its npm, which is how a machine without a system node still runs this gate.
         # `npm.cmd` by name on Windows: the extensionless `npm` beside it is a shell script CreateProcess cannot start.
@@ -337,7 +319,6 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         # A library that commits what its generator writes: the generator compares (or, under --fix, rewrites) them
         # itself, and formats with the repo's clang-format, so it runs before `format` and what it writes is already
         # what `format` would leave.
-        # A second or two of Python, so it runs whatever the scope.
         def run(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
             from tools.dev.lib.quality.format import find_clang_format
 
@@ -394,55 +375,101 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
         dev.report.summarize_check_timing(presets, results, records, slow_test_s=_SLOW_TEST_BUDGET_S)
         return ok
 
-    # ORDER IS LOAD-BEARING: every fixing gate runs before `format`, so what they rewrite is formatted in the same pass.
+    # ORDER IS LOAD-BEARING among the fixers: under --fix they run in this order, after the read-only gates, so what
+    # they rewrite is formatted in the same pass.
+    # Every gate says what it is about: `watches` are the globs a change must touch for it to run, `always` is the
+    # explicit opt-out of selection for a gate whose inputs are the whole tree.
     # docs/guides/building-and-testing.md has the argument.
+    cxx = ("**/*.cc", "**/*.hh")
     return [
         dev.Check("lint", "clang-tidy gates on what this branch changed (--dirty-only, --commit or --all to rescope)",
-                  True, check_lint),
+                  True, check_lint,
+                  watches=(*cxx, "tools/lint/**", "**/.clang-tidy")),
         dev.Check("shaped-lint", "shaped-linter's own rules on what this branch changed in code and prose "
                                  "(--dirty-only, --commit or --all to rescope)",
-                  True, check_shaped_lint),
+                  True, check_shaped_lint,
+                  watches=(*cxx, "**/*.md", "**/*.py", "**/.shaped-lint.yml", "tools/shaped-linter/**")),
         dev.Check("sgl-vscode-bundle",
                   "the SGL VS Code extension's committed dist/extension.js is what esbuild makes of its sources "
                   "(--fix rebuilds it)",
-                  True, check_sgl_vscode_bundle),
+                  True, check_sgl_vscode_bundle,
+                  watches=("libs/graphics/shaped-graphics-language/tools/vscode-extension/**",)),
         dev.Check("fixed-int-gen",
                   "typed-geometry's generated fixed_int headers and golden tests are what gen-fixed-int.py writes "
                   "(--fix regenerates them)",
-                  True, committed_codegen("fixed-int-gen", Path("libs/base/typed-geometry/tools/gen-fixed-int.py"))),
+                  True, committed_codegen("fixed-int-gen", Path("libs/base/typed-geometry/tools/gen-fixed-int.py")),
+                  watches=("libs/base/typed-geometry/**",)),
         dev.Check("simd-gen",
                   "clean-simd's generated register and fixed layers are what gen-simd.py writes (--fix regenerates them)",
-                  True, committed_codegen("simd-gen", Path("libs/base/clean-simd/tools/gen-simd.py"))),
+                  True, committed_codegen("simd-gen", Path("libs/base/clean-simd/tools/gen-simd.py")),
+                  watches=("libs/base/clean-simd/**",)),
         dev.Check("format", "clang-format our C++ sources, last so it formats what the linters fixed "
                             "(--dirty-only, --commit or --all to rescope)",
-                  True, check_format),
-        dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs),
+                  True, check_format,
+                  watches=(*cxx, "**/.clang-format")),
+        # A moved or deleted file breaks links in files the change never touched, so no glob can narrow this.
+        dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs, always=True),
         dev.Check("deps-licenses", "verify docs/licenses/ matches the extern/ manifests, and each license is on the allowlist",
-                  False, check_deps_licenses),
+                  False, check_deps_licenses,
+                  watches=("extern/**", "docs/licenses/**", "tools/dev/**")),
         dev.Check("dev-selftest", "dev.py's own self-tests (job profile, change scope, progress region, dependency manifests, "
                                   "clean-simd's link-map check)",
-                  False, check_dev_selftest),
+                  False, check_dev_selftest,
+                  watches=("dev.py", "tools/dev/**", "extern/**", "libs/base/clean-simd/tools/**")),
+        # An issue marker can sit in any source file, and a deleted file anywhere can break a ref in an untouched issue.
         dev.Check("issues", "every issue file and every issue marker in the code is valid (docs/guides/issue-tracking.md)",
-                  False, check_issues),
+                  False, check_issues, always=True),
         dev.Check("issues-selftest", "run the issue tracker's own suite (claims against a real remote, check, known, close)",
-                  False, check_issues_selftest),
+                  False, check_issues_selftest,
+                  watches=("tools/issues/**", "tools/dev/cmd/issues.py")),
         dev.Check("review", "run the review tool's own suite (coverage math, change identity, the entry grammar)",
-                  False, check_review),
+                  False, check_review,
+                  watches=("tools/review/**", "review.py")),
         dev.Check("shader-grammar",
                   "run the shared binding corpus against both halves of the binding pass",
-                  False, check_shader_grammar),
+                  False, check_shader_grammar,
+                  watches=("libs/graphics/shaped-shader-library/**",),
+                  builds=("shaped-shader-library-test",)),
         dev.Check("sgl-prelude",
                   "SGL's prelude/builtins.sgl and slib's impl/pipeline_fields.hh are what `sgl` generates (--fix rewrites them)",
-                  True, check_sgl_prelude),
+                  True, check_sgl_prelude,
+                  watches=("libs/graphics/shaped-graphics-language/**", "libs/graphics/shaped-shader-library/**",
+                           "libs/graphics/shaped-graphics/**"),
+                  builds=("sgl",)),
         dev.Check("test",
                   "build + run the full suite on the debug, default, release, single-threaded "
                   "(and where supported, sanitizer) presets",
-                  False, check_tests, requires_green=True),
+                  False, check_tests, requires_green=True, always=True),
     ]
 
 
+def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
+    """The one build the runner makes ahead of the gates, on the default preset.
+
+    A target the preset does not configure (SC_BUILD_TOOLS off, say) is left out rather than failing the build; the gate that wanted it reports its own skip.
+    """
+
+    def build(targets: list[str]) -> bool:
+        presets = ctx.resolve_presets([ctx.default_preset_name()])
+        known = {t.name for t in ctx.discover(presets[0])}
+        wanted = [t for t in targets if t in known]
+        if not wanted:
+            return True
+        results = dev.build(presets, wanted, root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
+        if not all(r.ok for r in results):
+            dev.report.print_build_failure(results, presets, ctx.root)
+            return False
+        return True
+
+    return build
+
+
 def run(args: argparse.Namespace, ctx: Context) -> None:
-    checks = _build_checks(ctx)
+    try:
+        checks = _build_checks(ctx)
+        dev.validate_checks(checks, root=ctx.root)
+    except dev.CheckRegistryError as e:
+        ctx.die(str(e))
     if args.list:
         dev.list_checks(checks)
         sys.exit(0)
@@ -486,8 +513,23 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         except dev.ChangeScopeError as e:
             ctx.die(str(e))
 
+    # A gate named on the command line runs whatever the change touched; the registry walk is what selection narrows.
+    skipped: list[dev.Check] = []
+    if not args.names:
+        try:
+            chosen, paths = dev.select_checks(selected, root=ctx.root, scope=scope)
+        except dev.ChangeScopeError as e:
+            ctx.die(str(e))
+        skipped = [c for c in selected if c not in chosen]
+        selected = chosen
+        if paths is not None:
+            dev.ui.write_line(console.dim(
+                f"check: {len(paths)} changed path(s) select {len(selected)} of {len(selected) + len(skipped)} gates"))
+
     ok = dev.run_checks(
         selected, fix=args.fix, scope=scope,
         mirror=args.mirror_output, verbose=args.verbose, no_test=args.no_test,
+        build=_build_for_gates(ctx, mirror=args.mirror_output, verbose=args.verbose),
+        skipped=skipped,
     )
     sys.exit(0 if ok else 1)

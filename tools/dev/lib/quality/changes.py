@@ -246,6 +246,43 @@ def changed_files(root: Path, scope: ChangeScope) -> list[Path]:
     return _revision_files(root, base, head)
 
 
+def touched_paths(root: Path, scope: ChangeScope) -> list[str]:
+    """Every path the scope touched, deletions included, as repo-relative POSIX names.
+
+    `changed_files` is what a linter reads, so it drops what no longer exists.
+    Selection asks a different question: a deleted or renamed file under a watched tree is a reason to run the gate, not a file to inspect.
+    The old name of a rename is included for the same reason.
+    """
+    if scope.since is not None:
+        if _rev_parse(root, scope.since) is None:
+            raise ChangeScopeError(f"{scope.since!r} does not name a commit")
+        names = set(_split_z(_git_or_raise(root, ["diff", "--name-only", "-z", scope.since])))
+        untracked = _git(root, ["ls-files", "--others", "--exclude-standard", "-z"], timeout=30)
+        if untracked is not None and untracked.returncode == 0:
+            names |= set(_split_z(untracked.stdout))
+        return sorted(names)
+    if scope.is_working_tree:
+        out = _git(root, ["status", "--porcelain", "--untracked-files=all", "-z"], timeout=30)
+        if out is None or out.returncode != 0:
+            return []
+        names = set()
+        # `-z` porcelain: a rename is two NUL-separated entries, the new path first (after the status), then the old.
+        entries = _split_z(out.stdout)
+        i = 0
+        while i < len(entries):
+            entry = entries[i]
+            status, path = entry[:2], entry[3:]
+            names.add(path)
+            if "R" in status or "C" in status:
+                i += 1
+                if i < len(entries):
+                    names.add(entries[i])
+            i += 1
+        return sorted(names)
+    base, head = resolve_range(root, scope.revision)
+    return sorted(set(_split_z(_git_or_raise(root, ["diff", "--name-only", "-z", base, head]))))
+
+
 # A hunk header names the post-image side as `+<start>[,<count>]`, and `-U0` makes every hunk a bare change.
 _HUNK_RE = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
