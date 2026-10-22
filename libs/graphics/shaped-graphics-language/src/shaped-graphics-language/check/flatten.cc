@@ -878,6 +878,12 @@ struct flattener
                 return tables().call_at(id) >= 0 && !c.out.at(object_type).is_atomic
                          ? flatten_bound_call(id, type, c.out.call_records[tables().call_at(id)])
                          : fail();
+            // CHK-395: a lane of a vector is an element of it, which every target subscripts as it does an array
+            if (auto const lane = is_valid(object_type) ? c.lane_type_of(object_type) : type_id::none;
+                is_valid(lane) && arguments.size() == 1)
+                return add_expr(
+                    lane, id,
+                    flat_element{.object = flatten_expr(indexed->object), .index = flatten_expr(arguments[0].value)});
             // CHK-287: one element per index, `grid[i, j]` being `grid[i][j]`
             if (is_valid(object_type) && c.out.at(object_type).kind == type_kind::array)
             {

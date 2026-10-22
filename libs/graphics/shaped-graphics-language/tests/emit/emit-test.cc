@@ -362,6 +362,28 @@ TEST("sgl emit - a hex literal stays hex, without its separators")
     }
 }
 
+TEST("sgl emit - a vector's lane is the target's own subscript, read and written")
+{
+    auto const source = cc::string_view("binding work:\n"
+                                        "    src: buffer[float4]\n"
+                                        "    idx: buffer[int]\n"
+                                        "    dst: mut buffer[float]\n"
+                                        "\n"
+                                        "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                                        "    let v = work.src[id.x]\n"
+                                        "    let i = work.idx[id.x]\n"
+                                        "    let mut w = v\n"
+                                        "    w[i] = 2.0\n"
+                                        "    work.dst[id.x] = v[i] + w[(i + 1) % 4]\n");
+    // CHK-395: no chain of branches stands in for the lane, on any target
+    for (auto const t : {target::hlsl_dx12, target::wgsl, target::msl})
+    {
+        auto const text = text_of(source, t);
+        CHECK(text.contains("    w[i] = 2.0;\n"));
+        CHECK(text.contains("v[i] + w[(i + 1) % 4];\n"));
+    }
+}
+
 TEST("sgl emit - a shift by a literal count needs no conversion and no mask")
 {
     auto const source = cc::string_view("binding work:\n"
