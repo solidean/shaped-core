@@ -1118,6 +1118,7 @@ protected:
     // internal
 private:
     void unsubscribe_all_slow(); // non-empty walk behind unsubscribe_all's inline empty-guard
+    void abandon_running_deps(); // a parked node torn down: the deps it leaves running go to cc::async_abandoned_work
     /// 0 when this thread may not run the node; 1 when it may and the node is unhomed; otherwise the node's home word.
     /// A home word is never 0 or 1, since the scheduler pointer is 64-aligned and non-null.
     u64 try_begin_running();

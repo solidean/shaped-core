@@ -4,6 +4,7 @@
 #include <clean-core/error/exception_base.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/impl/async_parker.hh>
 #include <clean-core/thread/impl/async_tls.hh>
@@ -818,6 +819,19 @@ void cc::async_node_base::unsubscribe_all_slow()
         });
 }
 
+CC_COLD_FUNC void cc::async_node_base::abandon_running_deps()
+{
+    // Scheduled or running, a dep keeps itself alive until it settles, so the weak entry waits for all of it.
+    // A parked dep is held elsewhere, or torn down after this node and its own deps judged the same way.
+    deps().for_each(
+        [](impl::async_dep_entry e)
+        {
+            auto const ds = e.dep()->load_state(cc::memory_order_acquire);
+            if (ds == async_node_state::scheduled || ds == async_node_state::running)
+                impl::async_track_abandoned(e.dep());
+        });
+}
+
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
     lock_scope g(this);
@@ -945,6 +959,9 @@ CC_FORCE_INLINE void cc::async_node_base::teardown_payload_as(async_node_state c
         // Strong-0, so nothing races the read: a never-resolved homed node stops counting against its home.
         auto* const home
             = (s != async_node_state::external_pending && is_homed()) ? impl::async_home_of(home_word()) : nullptr;
+        // A parked node's deps outlive it, and one still running is then awaited by nobody.
+        if (s == async_node_state::blocked && !deps().empty()) [[unlikely]]
+            abandon_running_deps();
         unsubscribe_all();
         destroy_frame();                  // a never-resolved frame (dropped cold, or parked) — a plain ~F, so
                                           // no re-entrancy contract applies here; it just releases its captures

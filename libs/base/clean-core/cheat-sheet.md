@@ -1052,6 +1052,7 @@ co_await cc::async_settled(backlog.settled());           // pinned at the CALL; 
 cc::async_backlog::settled(span_of_backlog_ptrs);        // several at once — list UPSTREAM first (compile before its store)
 backlog.outstanding_count();                             // started + unsettled; racy, diagnostics/tests
 backlog.tracked_count();                                 // entries held, live or not; tracking compacts, so bounded without settling
+cc::async_abandoned_work();                                // process-wide: async_all's members left running on a failure, a torn-down parked node's running deps
 // COLD nodes are neither waited for nor started. A manual node its producer ABANDONS keeps a settled() parked forever.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.

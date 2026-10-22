@@ -6,6 +6,7 @@
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/record/impl/writer_tls.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_backlog.hh>
 
 #include <coroutine>
 
@@ -460,6 +461,7 @@ struct async_awaiter_all
 
 private:
     /// False once a failed dependency has written the promise's failure slot.
+    /// The members still running are then abandoned, so they go to cc::async_abandoned_work.
     template <class P>
     bool collect_failure(P& p) const
     {
@@ -476,6 +478,8 @@ private:
                     }
                 };
                 (one(*ds), ...);
+                if (!ok)
+                    (async_abandoned_work().track(*ds), ...);
             },
             deps);
         return ok;
@@ -525,6 +529,9 @@ private:
             if (d->has_error())
             {
                 p.fail_with(d->propagate_error());
+                // the members still running are abandoned, so they go to cc::async_abandoned_work
+                for (auto const& other : deps)
+                    async_abandoned_work().track(other);
                 return false;
             }
         return true;

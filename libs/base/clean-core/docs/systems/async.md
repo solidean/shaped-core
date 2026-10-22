@@ -862,6 +862,12 @@ co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs
 
 A backlog answers "is it done", not "whose is it": work it tracks still carries the context of whatever started it, which is what attributes its logging and profiling.
 
+**`cc::async_abandoned_work()` is the one backlog the runtime fills itself**, with work an awaiter stopped waiting for.
+`cc::async_all` returns on its first failed member, and the members still running go there.
+So do the scheduled or running deps of a parked node torn down because its last handle dropped.
+Both are cold paths: a successful `async_all`, a completion and a poll never touch it.
+A component whose teardown must know that nothing it started still runs settles it after its own backlog, since abandoned work is otherwise awaited by nobody.
+
 ## Ambient context
 
 One opaque word rides the graph, so code anywhere inside a frame can ask **"which logical task is this work part of?"**.
