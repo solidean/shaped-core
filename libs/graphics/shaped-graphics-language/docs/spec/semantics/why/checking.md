@@ -725,3 +725,5 @@ DXR and Vulkan may run it more than once for one candidate, unless the geometry 
 An intersection runs as often as the traversal reaches its box, which the acceleration structure's build decides.
 So a counter in either holds a number no spec defines, and one that differs between devices and between builds of one structure.
 Every target compiles the atomic itself in all six stages, so the refusal is SGL's, and its detail says why rather than only that the stage is left out.
+An inline trace runs the same two decisions inside a loop of its own stage, as often as the same traversal asks, so the rule follows the decision rather than the entry point.
+A traversal-cost heat map is the one use of that undefined number, and it would come back as a relaxation that breaks no program.

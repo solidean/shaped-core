@@ -408,4 +408,53 @@ TEST("sgl check - an atomic in an any hit or an intersection counts what travers
             .context(call);
     }
     CHECK(reports_for(counting("any_hit", "counted.counts[0].add(1u)")).starts_with("stage-not-allowed"));
+    CHECK(reports_for(counting("any_hit", "counted.counts[0].add(1u)"))
+              .contains("so the atomic add would run a number of times no spec defines"));
+}
+
+TEST("sgl check - an atomic in a decision an inline trace calls is refused as one in an any hit or an intersection")
+{
+    // CHK-398: the traversal decides how often its loop calls the decision, whichever stage holds the loop
+    constexpr auto scene = "require ray_query\n"
+                           "require image_atomics\n"
+                           "struct sphere_attributes:\n    t: float\n"
+                           "binding scene:\n"
+                           "    triangles: acceleration_structure[.triangles]\n"
+                           "    boxes: acceleration_structure[.procedural]\n"
+                           "    counts: mut buffer[atomic[uint]]\n"
+                           "    @atomic depth: mut image_2d[.r32_uint]\n"
+                           "    hits: mut buffer[uint]\n";
+    auto const traced = [&](cc::string_view decision, cc::string_view trace)
+    {
+        return reports_for(cc::format("{}{}"
+                                      "@compute(64) fun tracer(@thread_id id: int3){{scene}}:\n"
+                                      "    let r = ray(origin = pos3(id.x as float, 0.0, -1.0), direction = vec3(0.0, "
+                                      "0.0, "
+                                      "1.0))\n"
+                                      "    scene.hits[id.x] = if {} => 1u else 0u\n",
+                                      scene, decision, trace));
+    };
+    constexpr auto any_hit = "fun cutout(c: triangle_candidate){scene} -> hit_decision:\n"
+                             "    scene.counts[0].add(1u)\n"
+                             "    return hit_decision.accept\n";
+    CHECK(traced(any_hit, "scene.triangles.trace(r, cutout).is_hit")
+              .contains("stage-not-allowed user:[scene.counts[0].add(1u)] an inline trace of tracer calls this as its "
+                        "any-hit decision, which runs an implementation-defined number of times"));
+    // an image's texel atomic is named as the program wrote it
+    constexpr auto texel = "fun cutout(c: triangle_candidate){scene} -> hit_decision:\n"
+                           "    scene.depth[int2(0, 0)].max(3u)\n"
+                           "    return hit_decision.accept\n";
+    CHECK(traced(texel, "scene.triangles.trace(r, cutout).is_hit")
+              .contains("so the atomic max would run a number of times no spec defines"));
+    constexpr auto intersection = "fun sphere(b: procedural_box){scene} -> report[sphere_attributes]:\n"
+                                  "    scene.counts[1].add(1u)\n"
+                                  "    return report.none()\n";
+    CHECK(traced(intersection, "scene.boxes.trace(r, sphere).is_hit")
+              .contains("an inline trace of tracer calls this as its intersection decision, which runs as often as "
+                        "the traversal reaches its box"));
+    // the same function called plainly, as no decision, counts what its caller decides
+    constexpr auto plain = "fun bump(){scene} -> bool:\n"
+                           "    scene.counts[0].add(1u)\n"
+                           "    return true\n";
+    CHECK(traced(plain, "bump()") == "");
 }

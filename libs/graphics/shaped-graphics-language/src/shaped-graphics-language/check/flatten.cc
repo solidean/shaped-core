@@ -63,6 +63,8 @@ struct stage_violation
     symbol_id callee = symbol_id::none;
     /// The call written in the tree's own body that reaches it, the call itself where it stands there.
     call_site written = {};
+    /// `any_hit` or `intersection` for an atomic in a decision an inline trace inlined (CHK-398); `none` otherwise.
+    stage decision = stage::none;
 };
 
 /// Reads the checked ASTs through the side tables and writes the STRUCTURED form of one entry point's flat tree.
@@ -78,6 +80,8 @@ struct flattener
 {
     checker const& c;
     cc::vector<stage_violation> stage_violations;
+    /// The decision an inline trace's loop is calling while its body is inlined: `any_hit` or `intersection` (CHK-398).
+    stage inlined_decision = stage::none;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
     /// A test's calls of a subgroup operation, which a run of one invocation has no subgroup for (CHK-379).
@@ -186,6 +190,9 @@ struct flattener
         auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
         if (record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
             quad_calls.push_back({.file = file(), .call = call, .callee = callee});
+        // CHK-398: a decision runs as often as the traversal asks it, whichever stage's loop asks
+        if (record != nullptr && record->is_atomic && inlined_decision != stage::none)
+            stage_violations.push_back({.file = file(), .call = call, .callee = callee, .decision = inlined_decision});
         // EMIT-159: what only a pixel stage needs of the device, which every target then judges alike
         if (record != nullptr && entry.entry_stage == stage::pixel && !record->pixel_features.is_empty())
         {
@@ -1731,9 +1738,17 @@ struct flattener
     {
         // by value: flattening below may push closures, and the vector moves
         auto const f = closures[handed];
+        // CHK-398: a function handed a candidate or a box is a decision the traversal calls in its loop
+        auto const outer_decision = inlined_decision;
+        auto decision = outer_decision;
+        if (!values.empty() && is_valid(values[0]))
+            if (auto const d = decision_of(entry.at(values[0]).type); d != stage::none)
+                decision = d;
         if (is_valid(f.function))
         {
+            inlined_decision = decision;
             auto const inlined = inline_bound(id, f.function, values, slots, argument_closures);
+            inlined_decision = outer_decision;
             return add_expr(type, id, flat_block{.label = inlined.label, .body = inlined.body});
         }
         auto const& lambda_ast = c.ast_of(f.file);
@@ -1775,9 +1790,24 @@ struct flattener
                           .chain = f.chain,
                           .bound = cc::move(bound),
                           .bindings = f.bindings});
+        inlined_decision = decision;
         auto const value = flatten_expr(l.body.value);
+        inlined_decision = outer_decision;
         frames.remove_back();
         return value;
+    }
+
+    /// `any_hit` for a candidate, `intersection` for a box: what a decision of that parameter is to the traversal.
+    [[nodiscard]] stage decision_of(type_id type) const
+    {
+        if (!is_valid(type) || type == checked_module::error_type || c.out.at(type).kind != type_kind::structure)
+            return stage::none;
+        auto const& s = c.out.at(c.out.at(type).symbol);
+        if (!c.is_prelude_file(s.file))
+            return stage::none;
+        if (s.name == "triangle_candidate" || s.name == "procedural_candidate")
+            return stage::any_hit;
+        return s.name == "procedural_box" ? stage::intersection : stage::none;
     }
 
     /// `a < b <= c` is `a < b and b <= c` with `b` evaluated once, and the `and` keeps `c` unevaluated where it must.
@@ -3346,22 +3376,31 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     for (auto const& v : f.stage_violations)
     {
-        // CHK-398: an atomic counts its stage's invocations, which traversal decides for these two
+        // CHK-398: an atomic runs as often as its function, which traversal decides for a decision
         auto const* const record = out.builtin_function(out.at(v.callee).intrinsic);
         auto const is_atomic = record != nullptr && record->is_atomic;
-        if (is_atomic && info.entry_stage == stage::any_hit)
+        auto const decision = v.decision != stage::none ? v.decision : info.entry_stage;
+        // an image's texel atomic is the prelude's internal `texel_max`, which the program wrote as `.max`
+        auto written = cc::string_view(out.at(v.callee).name);
+        if (written.starts_with("texel_"))
+            written = written.subview(6);
+        auto const what = v.decision != stage::none
+                            ? cc::format("an inline trace of {} calls this as its {} decision", s.name,
+                                         decision == stage::any_hit ? "any-hit" : "intersection")
+                            : cc::format("{} is an {} entry point", s.name, check::stage_name(decision));
+        if (is_atomic && decision == stage::any_hit)
             report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-                   cc::format("{} is an any_hit entry point, which runs an implementation-defined number of times: for "
-                              "candidates the traversal later rejects, and more than once per candidate unless the "
-                              "geometry sets NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of; so the "
-                              "atomic {} would count something no spec defines",
-                              s.name, out.at(v.callee).name));
-        else if (is_atomic && info.entry_stage == stage::intersection)
+                   cc::format("{}, which runs an implementation-defined number of times: for candidates the traversal "
+                              "later rejects, and more than once per candidate unless the geometry sets "
+                              "NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of; so the atomic {} "
+                              "would "
+                              "run a number of times no spec defines",
+                              what, written));
+        else if (is_atomic && decision == stage::intersection)
             report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-                   cc::format("{} is an intersection entry point, which runs as often as the traversal reaches its "
-                              "box, an implementation-defined number of times; so the atomic {} would count something "
-                              "no spec defines",
-                              s.name, out.at(v.callee).name));
+                   cc::format("{}, which runs as often as the traversal reaches its box, an implementation-defined "
+                              "number of times; so the atomic {} would run a number of times no spec defines",
+                              what, written));
         else
             report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                    cc::format("{} is a {} entry point, and {} is @stages without it", s.name,

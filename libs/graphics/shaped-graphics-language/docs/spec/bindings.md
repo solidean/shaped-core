@@ -427,6 +427,7 @@ Its operations are builtins that take it first, called as methods: `add`, `subtr
 Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
 A pixel and a compute stage take them, and so do the ray-tracing stages that run once per launch, ray or call: a raygen, a miss, a closest hit and a callable.
 An any hit and an intersection run as often as the traversal decides, so an atomic there counts something no spec defines, and is `stage-not-allowed` (CHK-398).
+So is one in a decision an inline trace calls, in any stage.
 The host holds a buffer of atomics as the plain integers it is.
 Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
 

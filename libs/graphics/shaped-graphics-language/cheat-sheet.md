@@ -623,7 +623,7 @@ ops[i](mut v)                                            // raygen, miss, closes
   `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-157).
   `compare_exchange_weak(e, d)` gives `exchange_result[T]`: `old`, and `exchanged`, the only proof it stored; retry while `old == e and not exchanged`.
   Both are relaxed: publishing what a claim guards needs a barrier.
-  Atomics stand in pixel, compute, raygen, miss, closest-hit and callable stages; in an any hit or an intersection they are `stage-not-allowed` (CHK-398).
+  Atomics stand in pixel, compute, raygen, miss, closest-hit and callable stages; in an any hit or an intersection, or a decision an inline trace calls, they are `stage-not-allowed` (CHK-398).
   In a pixel stage a helper's atomics store nothing and read garbage; the strong loop skips one in MSL (EMIT-158).
   A pixel stage's `compare_exchange_strong` needs `require helper_lane_query` (EMIT-159), which WebGPU lacks: there, write the weak one in a loop, or use compute.
   A test fails a weak one spuriously every other time each call meets `e`, the first time first (EVAL-98), so a missing retry loop fails its test.

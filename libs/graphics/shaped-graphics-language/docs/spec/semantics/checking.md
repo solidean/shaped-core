@@ -928,7 +928,8 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-296** `atomic[T]` is an atomic of `uint` or `int`, and of any other `T` `wrong-kind-of-name`.
   It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
   Its builtins are `@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)`.
-* **CHK-398** An atomic's builtin reached from an `@any_hit` or an `@intersection` entry point is `stage-not-allowed`, whose detail says how often that stage runs ([why](why/checking.md#chk-398)).
+* **CHK-398** An atomic's builtin reached from a traversal's decision is `stage-not-allowed`, whose detail says how often the decision runs ([why](why/checking.md#chk-398)).
+  A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
 * **CHK-297** An expression of an atomic's type stands only as a builtin's argument; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
   A local, a parameter or a field of an atomic's type is `wrong-kind-of-name` as well.
