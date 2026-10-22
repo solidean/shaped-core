@@ -11,7 +11,7 @@ refs:
 
 `dev.py check --fix` runs every gate and the whole suite on four presets, whatever the change touched.
 A docs-only commit, or a new issue file, pays the same 12 minutes as a change to clean-core.
-Solidean will hit the same wall, so the design below is meant to transfer: nothing in it is shaped-core specific.
+A downstream consumer will hit the same wall, so the design below is meant to transfer: nothing in it is shaped-core specific.
 
 ## Measured (2026-10-22, Windows, Ryzen 9 5900X, 24 threads)
 
