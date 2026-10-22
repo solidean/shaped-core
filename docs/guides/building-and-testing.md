@@ -533,6 +533,17 @@ Windows has no sanitizer leg — see [Sanitizers](#sanitizers) for why.
 
 New gates plug into the check registry in [cmd/check.py](../../tools/dev/cmd/check.py) without changing the command surface.
 
+### A gate that passed before on identical inputs is skipped
+
+Selection asks whether a change could affect a gate; the memo asks whether the gate already passed on exactly these inputs.
+A watched gate is keyed on the content id of every tracked file its globs match, a dirty file hashed from disk, plus a stamp naming its tool, so a clang-format upgrade is a new key.
+A test binary is keyed per preset on the hash of its artifact, which already folds in every source it compiled from.
+The platform and the GPU driver version are part of that key too, because a driver update is the change git never sees.
+A gate or binary whose key matches a recorded pass is skipped and named; a failure forgets the pass.
+An `always` gate and a thorough trigger are never memoized, and `--all` or a gate named on the command line bypasses the reads.
+The cache is `build/check-memo.json`, and deleting it can never affect correctness: a miss is a run.
+This is what makes a second `check` after a docs tweak, a flaky test or a no-op merge cost only what changed.
+
 ### `check --push`: pull, check, push, bounded
 
 `uv run dev.py check --fix --push` is the pull, check, push chain as one command, and it is the one that should end a piece of work.
@@ -551,6 +562,9 @@ It knows its own verdict, so there is no wrapper exit code to misread and no pus
 
 Under `--fix`, a rewrite stops before the push with a request to commit it; nothing is committed on the tool's own initiative.
 It takes no scope flag and no gate name: what the push sends is the scope, and the whole registry is the gate.
+
+`--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own ahead of the check, so the push that resolves them is the one that closes them.
+If the check fails, nothing closes; [issue-tracking.md](issue-tracking.md#closed) has the rule.
 
 ### Re-checking a commit or a range
 

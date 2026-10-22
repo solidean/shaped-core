@@ -34,6 +34,7 @@ from tools.dev.lib.quality.changes import (  # noqa: E402
     touched_paths,
 )
 from tools.dev.lib.quality.checks import Check, CheckRegistryError  # noqa: E402
+from tools.dev.lib.quality.memo import CheckMemo, file_ids  # noqa: E402
 from tools.dev.lib.quality.test_selection import select_test_binaries_for_change  # noqa: E402
 from tools.dev.lib.quality.watch import Watch  # noqa: E402
 from tools.dev.lib.project.graph import TargetGraph  # noqa: E402
@@ -276,6 +277,54 @@ def test_test_selection_narrows_and_never_guesses(root: Path) -> None:
     both = Watch.of(["tools/dev/run.py"])
     sel = select_test_binaries_for_change(g, ["tools/dev/run.py"], cands, build_inputs=both, prose=prose)
     assert sel.everything, "a build input wins over prose"
+
+
+def test_memo_keys_a_gate_on_what_it_watches_and_nothing_else(root: Path) -> None:
+    memo = CheckMemo(root, root / "build" / "memo.json")
+    w = Watch.of(["a.md"])
+    key = memo.gate_key("g", w, None)
+    assert key is not None and memo.gate_key("g", w, None) == key, "stable across calls"
+    assert memo.gate_key("h", w, None) != key, "the gate's name is part of the key"
+    assert memo.gate_key("g", w, lambda: "tool 2") != key, "and so is the tool stamp"
+    assert not memo.gate_passed_before("g", key)
+    memo.record_gate("g", key)
+    assert memo.gate_passed_before("g", key)
+    assert CheckMemo(root, root / "build" / "memo.json").gate_passed_before("g", key), "it survives a reload"
+    assert not CheckMemo(root, root / "build" / "memo.json", read=False).gate_passed_before("g", key), "unless reads are off"
+
+    write(root, "root.md", "one\ntwo\nthree\nchanged\n")
+    try:
+        memo.invalidate_files()
+        assert memo.gate_key("g", w, None) == key, "an unwatched edit changes nothing"
+        write(root, "a.md", "alpha\nbeta\nedited\n")
+        memo.invalidate_files()
+        edited = memo.gate_key("g", w, None)
+        assert edited != key, "a watched edit changes the key"
+        assert not memo.gate_passed_before("g", edited)
+        ids = file_ids(root)
+        assert ids is not None and ids["a.md"].startswith("disk:"), "a dirty file is hashed from disk"
+    finally:
+        git(root, "checkout", "--", "root.md", "a.md")
+    memo.invalidate_files()
+    assert memo.gate_key("g", w, None) == key, "and reverting restores it"
+    memo.forget_gate("g")
+    assert not memo.gate_passed_before("g", key)
+
+
+def test_memo_keys_a_test_binary_on_its_artifact(root: Path) -> None:
+    memo = CheckMemo(root, root / "build" / "memo2.json")
+    exe = root / "build" / "fake-test.exe"
+    exe.parent.mkdir(exist_ok=True)
+    exe.write_bytes(b"v1")
+    assert memo.tests_passed_before("p", [("fake-test", exe)]) == set()
+    memo.record_tests("p", [("fake-test", exe)], [])
+    assert memo.tests_passed_before("p", [("fake-test", exe)]) == {"fake-test"}
+    assert memo.tests_passed_before("q", [("fake-test", exe)]) == set(), "per preset"
+    exe.write_bytes(b"v2")
+    assert memo.tests_passed_before("p", [("fake-test", exe)]) == set(), "a rebuilt artifact is a new key"
+    memo.record_tests("p", [("fake-test", exe)], [])
+    memo.record_tests("p", [], ["fake-test"])
+    assert memo.tests_passed_before("p", [("fake-test", exe)]) == set(), "a failure forgets the pass"
 
 
 def test_resolve_range_expands_a_single_commit_to_its_first_parent(root: Path) -> None:

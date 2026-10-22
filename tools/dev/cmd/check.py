@@ -47,6 +47,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--push", action="store_true",
                    help="Pull, check what the push would send, push; a rejected push pulls again and re-checks only "
                         "what the merge can break, up to three rounds. Needs a clean working tree.")
+    p.add_argument("--closes", metavar="ID[,ID]", default=None,
+                   help="With --push: close these issues in a commit of their own ahead of the check, so the push "
+                        "that resolves them is the one that closes them; nothing closes if the check fails.")
+    p.add_argument("--resolution", choices=("fixed", "wontfix", "duplicate", "obsolete"), default="fixed",
+                   help="How --closes closes them (default: fixed)")
     return p
 
 
@@ -77,12 +82,29 @@ def _branch_base(ctx: Context) -> str | None:
     return None
 
 
-def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | None = None) -> list[dev.Check]:
+def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | None = None,
+                  memo: dev.CheckMemo | None = None) -> list[dev.Check]:
     """The pre-commit registry: project policy for which gates exist.
 
     `merge_sides` is check --push's later rounds: the paths this push changes and the paths a pull just brought in.
     The test gate then runs only the binaries both sides reach, since each side was checked on its own already and the merge is what is new.
+    `memo` lets the test gate skip a binary that passed before on an identical artifact, and record each pass.
     """
+
+    def clang_tidy_stamp() -> str:
+        import subprocess as sp
+        exe = dev.resolve_tool("clang-tidy", "CLANG_TIDY", ctx.root / "build")
+        if not exe:
+            return ""
+        try:
+            return sp.run([str(exe), "--version"], capture_output=True, text=True, timeout=20).stdout.strip()
+        except (OSError, sp.SubprocessError):
+            return ""
+
+    def clang_format_stamp() -> str:
+        from tools.dev.lib.quality.format import clang_format_version, find_clang_format
+        exe = find_clang_format()
+        return f"{exe} {clang_format_version(exe)}" if exe else ""
 
     def check_format(*, fix: bool, scope: dev.ChangeScope | None, mirror: bool, verbose: bool) -> bool:
         # --fix rewrites in place; without it clang-format only reports.
@@ -388,10 +410,32 @@ def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | No
             dev.ui.write_line("test: no test binary can be affected by this change")
             return True
 
-        records = dev.test(
-            presets, names, root=ctx.root,
-            test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
-        ) if names else []
+        # Per preset, since the memo answers per artifact: a binary that passed before on identical bytes is skipped
+        # on that preset alone, and a pass or failure is recorded the same way.
+        records: list[dict] = []
+        for preset in presets:
+            to_run = list(names)
+            artifacts: dict[str, Path] = {}
+            if memo is not None and names:
+                artifacts = {t.name: t.artifact for t in ctx.discover(preset) if t.name in names and t.artifact}
+                done = memo.tests_passed_before(preset.name, artifacts.items())
+                if done:
+                    dev.ui.write_line(console.dim(
+                        f"test: {preset.name}: {len(done)} of {len(names)} binaries passed before on identical artifacts"))
+                to_run = [n for n in names if n not in done]
+            if not to_run:
+                continue
+            preset_records = dev.test(
+                [preset], to_run, root=ctx.root,
+                test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
+            )
+            records += preset_records
+            if memo is not None:
+                memo.record_tests(
+                    preset.name,
+                    [(r["name"], artifacts[r["name"]]) for r in preset_records if r["returncode"] == 0 and r["name"] in artifacts],
+                    [r["name"] for r in preset_records if r["returncode"] != 0],
+                )
         ok = dev.report.summarize_tests(records, presets, ctx.root, table=False) if names else True
 
         # The thorough tests the change declared itself about, at full strength and on the default preset alone.
@@ -422,9 +466,11 @@ def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | No
     # docs/guides/building-and-testing.md has the argument.
     cxx = ("**/*.cc", "**/*.hh")
     return [
+        # The build files too: a flag change relints, cheaply, since the scope then holds no .cc of its own.
         dev.Check("lint", "clang-tidy gates on what this branch changed (--dirty-only, --commit or --all to rescope)",
                   True, check_lint,
-                  watches=(*cxx, "tools/lint/**", "**/.clang-tidy")),
+                  watches=(*cxx, "tools/lint/**", "**/.clang-tidy", "**/CMakeLists.txt", "**/*.cmake", "CMakePresets.json"),
+                  stamp=clang_tidy_stamp),
         dev.Check("shaped-lint", "shaped-linter's own rules on what this branch changed in code and prose "
                                  "(--dirty-only, --commit or --all to rescope)",
                   True, check_shaped_lint,
@@ -446,7 +492,7 @@ def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | No
         dev.Check("format", "clang-format our C++ sources, last so it formats what the linters fixed "
                             "(--dirty-only, --commit or --all to rescope)",
                   True, check_format,
-                  watches=(*cxx, "**/.clang-format")),
+                  watches=(*cxx, "**/.clang-format"), stamp=clang_format_stamp),
         # A moved or deleted file breaks links in files the change never touched, so no glob can narrow this.
         dev.Check("crossrefs", "validate doc<->code cross-references repo-wide", False, check_crossrefs, always=True),
         dev.Check("deps-licenses", "verify docs/licenses/ matches the extern/ manifests, and each license is on the allowlist",
@@ -593,6 +639,8 @@ def _run_push(args: argparse.Namespace, ctx: Context) -> None:
     if _git(ctx, "status", "--porcelain", "--untracked-files=all").stdout.strip():
         ctx.die("check --push needs a clean working tree: what it pushes is commits, and a check must not race an edit; "
                 "commit or stash first")
+    if args.closes:
+        _commit_closes(ctx, [i.strip() for i in args.closes.split(",") if i.strip()], args.resolution)
 
     remote_ref = f"origin/{branch}"
     rounds = 3
@@ -618,16 +666,17 @@ def _run_push(args: argparse.Namespace, ctx: Context) -> None:
         if base is None:
             ctx.die(f"check --push found no base for {branch!r}: fetch origin so origin/{ctx.policy.default_branch} exists")
         scope = dev.ChangeScope(since=base)
+        memo = _memo(ctx, read=True)
         if round_no == 1:
             mine = dev.touched_paths(ctx.root, scope)
-            checks = _build_checks(ctx)
-            ok = _run_gates(args, ctx, checks, scope)
+            checks = _build_checks(ctx, memo=memo)
+            ok = _run_gates(args, ctx, checks, scope, memo=memo)
         else:
             theirs = dev.touched_paths(ctx.root, dev.ChangeScope(f"{seen_remote}..{remote_sha}"))
             dev.ui.write_line(console.dim(
                 f"check --push: round {round_no}, {len(theirs)} path(s) came in since the last check"))
-            checks = _build_checks(ctx, merge_sides=(mine, theirs))
-            ok = _run_gates(args, ctx, [c for c in checks if c.name == "test"], scope, named=True)
+            checks = _build_checks(ctx, merge_sides=(mine, theirs), memo=memo)
+            ok = _run_gates(args, ctx, [c for c in checks if c.name == "test"], scope, named=True, memo=memo)
         if not ok:
             sys.exit(1)
         if _git(ctx, "status", "--porcelain").stdout.strip():
@@ -645,8 +694,35 @@ def _run_push(args: argparse.Namespace, ctx: Context) -> None:
     ctx.die(f"origin/{branch} moved {rounds} times while checking; it is busy, run check --push again in a moment")
 
 
+def _memo(ctx: Context, *, read: bool) -> dev.CheckMemo:
+    return dev.CheckMemo(ctx.root, ctx.root / "build" / "check-memo.json", read=read)
+
+
+def _commit_closes(ctx: Context, ids: list[str], resolution: str) -> None:
+    """Close each issue and commit the closes as one commit on top of HEAD, ahead of the check.
+
+    The tree is clean here, so everything the closes dirty (the moved files, and every link that pointed at them) is theirs to commit.
+    An unknown or already closed id stops before the check, so a mistake fails cheaply.
+    The commit is part of what the push sends, so the issues gate validates it like any other.
+    """
+    for issue_id in ids:
+        closed = subprocess.run(["uv", "run", "dev.py", "issues", "close", issue_id, "--resolution", resolution],
+                                cwd=str(ctx.root), capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if closed.returncode != 0:
+            ctx.die(f"could not close {issue_id}:\n{(closed.stdout + closed.stderr).strip()}")
+        dev.ui.write_line(console.dim(closed.stdout.strip()))
+    if _git(ctx, "add", "-A").returncode != 0:
+        ctx.die("git add failed after closing the issues")
+    subject = f"issues: close {', '.join(ids)} ({resolution})"
+    body = "Resolved by the commits pushed with this one."
+    committed = _git(ctx, "commit", "-q", "-m", subject, "-m", body)
+    if committed.returncode != 0:
+        ctx.die(f"git commit failed after closing the issues:\n{(committed.stdout + committed.stderr).strip()}")
+    dev.ui.write_line(console.dim(f"check --push: committed `{subject}`"))
+
+
 def _run_gates(args: argparse.Namespace, ctx: Context, selected: list[dev.Check], scope: dev.ChangeScope | None,
-               *, named: bool = False) -> bool:
+               *, named: bool = False, memo: dev.CheckMemo | None = None) -> bool:
     """Select from `selected` by what `scope` touched, unless `named`, then run them and return the verdict."""
     ctx.warn_known_issues(ctx.resolve_presets(None))
     skipped: list[dev.Check] = []
@@ -665,7 +741,7 @@ def _run_gates(args: argparse.Namespace, ctx: Context, selected: list[dev.Check]
         selected, fix=args.fix, scope=scope,
         mirror=args.mirror_output, verbose=args.verbose, no_test=args.no_test,
         build=_build_for_gates(ctx, mirror=args.mirror_output, verbose=args.verbose),
-        skipped=skipped,
+        skipped=skipped, memo=memo,
     )
 
 
@@ -691,8 +767,10 @@ def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
+    # A deliberate full run (--all) and a gate named on the command line bypass the memo's reads; both still record.
+    memo = _memo(ctx, read=not (args.all or bool(args.names)))
     try:
-        checks = _build_checks(ctx)
+        checks = _build_checks(ctx, memo=memo)
         dev.validate_checks(checks, root=ctx.root)
     except dev.CheckRegistryError as e:
         ctx.die(str(e))
@@ -741,5 +819,5 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             ctx.die(str(e))
 
     # A gate named on the command line runs whatever the change touched; the registry walk is what selection narrows.
-    ok = _run_gates(args, ctx, selected, scope, named=bool(args.names))
+    ok = _run_gates(args, ctx, selected, scope, named=bool(args.names), memo=memo)
     sys.exit(0 if ok else 1)

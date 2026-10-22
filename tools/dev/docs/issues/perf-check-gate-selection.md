@@ -11,7 +11,7 @@ refs:
 
 `dev.py check --fix` runs every gate and the whole suite on four presets, whatever the change touched.
 A docs-only commit, or a new issue file, pays the same 12 minutes as a change to clean-core.
-Solidean will hit the same wall, so the design below is meant to transfer: nothing in it is shaped-core specific.
+A downstream consumer will hit the same wall, so the design below is meant to transfer: nothing in it is shaped-core specific.
 
 ## Measured (2026-10-22, Windows, Ryzen 9 5900X, 24 threads)
 
@@ -113,7 +113,7 @@ dev.py knows its own verdict, which removes a documented failure mode: a check r
 Under `--fix`, a rewrite that touches files stops before the push and asks for a commit.
 Nothing is committed on the tool's own initiative.
 
-### Later: memoize gate results
+### Later: memoize gate results (done)
 
 With selection against the branch base in place, the same machinery can key a gate's result on the hash of its watched inputs, so a rerun after a no-op merge or a docs tweak skips what already passed.
 Not the first step; it is what makes the push loop nearly free.
@@ -123,4 +123,3 @@ Not the first step; it is what makes the push loop nearly free.
 - Whether the four test presets run concurrently once builds are centralized, and how the GPU tag then limits the test scheduler.
 - `submodules-self-test` took 148 s inside the concurrent pool against 79 s alone; it is selected only by `tools/dev` changes now, and is worth a look of its own.
 - `shaped-viewer-test` behind `nx::is_thorough()` on debug-nopch, with a `rerun_on` for its surface tree.
-- Memoized gate results, keyed on the hash of what a gate watches.
