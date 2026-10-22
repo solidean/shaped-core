@@ -271,11 +271,19 @@ fun mixed_hit.procedural(self) => procedural_of_mixed(self)
 
 // ---- the transforms of a hit, typed by what they move ---------------------------------------------------------------
 
-@internal fun apply_rows(x: float4, y: float4, z: float4, p: float3, w: float) -> float3:
+@internal fun apply_point(x: float4, y: float4, z: float4, p: float3) -> float3:
     return float3(
-        x.x * p.x + x.y * p.y + x.z * p.z + x.w * w
-        y.x * p.x + y.y * p.y + y.z * p.z + y.w * w
-        z.x * p.x + z.y * p.y + z.z * p.z + z.w * w
+        x.x * p.x + x.y * p.y + x.z * p.z + x.w
+        y.x * p.x + y.y * p.y + y.z * p.z + y.w
+        z.x * p.x + z.y * p.y + z.z * p.z + z.w
+    )
+
+/// The rows without their translation, which a direction never takes: no `w * 0.0` a compiler cannot fold away.
+@internal fun apply_vector(x: float4, y: float4, z: float4, v: float3) -> float3:
+    return float3(
+        x.x * v.x + x.y * v.y + x.z * v.z
+        y.x * v.x + y.y * v.y + y.z * v.z
+        z.x * v.x + z.y * v.y + z.z * v.z
     )
 
 @internal fun apply_transposed(x: float4, y: float4, z: float4, n: float3) -> float3:
@@ -287,12 +295,12 @@ fun mixed_hit.procedural(self) => procedural_of_mixed(self)
 
 /// An object-space point of the hit's instance, in world space.
 fun triangle_hit.to_world(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space direction, in world space: the linear part alone.
 fun triangle_hit.to_world(self, v: vec3) -> vec3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z), 0.0)
+    let m = apply_vector(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space normal, in world space: by the inverse transpose, so it stays perpendicular to the surface.
@@ -302,32 +310,32 @@ fun triangle_hit.normal_to_world(self, n: vec3) -> vec3:
 
 /// A world-space point, in the hit's object space.
 fun triangle_hit.to_object(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// A world-space direction, in the hit's object space.
 fun triangle_hit.to_object(self, v: vec3) -> vec3:
-    let m = apply_rows(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z), 0.0)
+    let m = apply_vector(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space point of the candidate's instance, in world space.
 fun triangle_candidate.to_world(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space direction of the candidate's instance, in world space.
 fun triangle_candidate.to_world(self, v: vec3) -> vec3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z), 0.0)
+    let m = apply_vector(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space point of the hit's instance, in world space.
 fun procedural_hit.to_world(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space direction, in world space: the linear part alone.
 fun procedural_hit.to_world(self, v: vec3) -> vec3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z), 0.0)
+    let m = apply_vector(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space normal, in world space: by the inverse transpose, so it stays perpendicular to the surface.
@@ -337,22 +345,22 @@ fun procedural_hit.normal_to_world(self, n: vec3) -> vec3:
 
 /// A world-space point, in the hit's object space.
 fun procedural_hit.to_object(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// A world-space direction, in the hit's object space.
 fun procedural_hit.to_object(self, v: vec3) -> vec3:
-    let m = apply_rows(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z), 0.0)
+    let m = apply_vector(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space point of the hit's instance, in world space.
 fun mixed_hit.to_world(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space direction, in world space: the linear part alone.
 fun mixed_hit.to_world(self, v: vec3) -> vec3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z), 0.0)
+    let m = apply_vector(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space normal, in world space: by the inverse transpose, so it stays perpendicular to the surface.
@@ -362,22 +370,22 @@ fun mixed_hit.normal_to_world(self, n: vec3) -> vec3:
 
 /// A world-space point, in the hit's object space.
 fun mixed_hit.to_object(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// A world-space direction, in the hit's object space.
 fun mixed_hit.to_object(self, v: vec3) -> vec3:
-    let m = apply_rows(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z), 0.0)
+    let m = apply_vector(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space point of the candidate's instance, in world space.
 fun procedural_candidate.to_world(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space point of the box's instance, in world space.
 fun procedural_box.to_world(self, p: pos3) -> pos3:
-    let m = apply_rows(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z), 1.0)
+    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 // ---- the trace ------------------------------------------------------------------------------------------------------
@@ -846,30 +854,42 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let mut owners = int[64].filled(-1)
     let mut top = 1
     let mut is_done = false
+    // The instance the walk is in, -1 for the TLAS and -2 before the first node, and what it computed of it.
+    // A walk pops one instance's nodes one after another, since a TLAS leaf pushes the BLAS roots it lets in on top.
+    let mut current = -2
+    let mut region = root
+    let mut o = origin
+    let mut d = direction
+    let mut inverse = float3(0.0, 0.0, 0.0)
+    let mut instance = uint4(0, 0, 0, 0)
+    let mut instance_unit: uint = 0
+    let mut to_object_x = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_object_y = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_object_z = float4(0.0, 0.0, 0.0, 0.0)
     while top > 0 and not is_done:
         top -= 1
         let owner = owners[top]
         let node = nodes[top]
 
-        // the region, and the ray in its space
-        let mut region = root
-        let mut o = origin
-        let mut d = direction
-        let mut instance = uint4(0, 0, 0, 0)
-        let mut instance_unit: uint = 0
-        if owner >= 0:
-            instance_unit = header.y + 7 * (owner as uint)
-            instance = acceleration_pool_load(instance_unit + 6)
-            region = instance.x
-            let x = pool_float4(acceleration_pool_load(instance_unit))
-            let y = pool_float4(acceleration_pool_load(instance_unit + 1))
-            let z = pool_float4(acceleration_pool_load(instance_unit + 2))
-            o = apply_rows(x, y, z, origin, 1.0)
-            d = apply_rows(x, y, z, direction, 0.0)
+        // the region and the ray in its space change only where the walk crosses into another instance
+        if owner != current:
+            current = owner
+            region = root
+            o = origin
+            d = direction
+            if owner >= 0:
+                instance_unit = header.y + 7 * (owner as uint)
+                instance = acceleration_pool_load(instance_unit + 6)
+                region = instance.x
+                to_object_x = pool_float4(acceleration_pool_load(instance_unit))
+                to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
+                to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
+                o = apply_point(to_object_x, to_object_y, to_object_z, origin)
+                d = apply_vector(to_object_x, to_object_y, to_object_z, direction)
+            inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
 
         let lo = acceleration_pool_load(region + 1 + 2 * node)
         let hi = acceleration_pool_load(region + 2 + 2 * node)
-        let inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
         if not is_box_entered(pool_float3(lo), pool_float3(hi), o, inverse, r.t_min, best.t) => continue
 
         if (hi.w & 2147483648) == 0:
@@ -923,9 +943,9 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 pool_float4(acceleration_pool_load(instance_unit + 3))
                 pool_float4(acceleration_pool_load(instance_unit + 4))
                 pool_float4(acceleration_pool_load(instance_unit + 5))
-                pool_float4(acceleration_pool_load(instance_unit))
-                pool_float4(acceleration_pool_load(instance_unit + 1))
-                pool_float4(acceleration_pool_load(instance_unit + 2))
+                to_object_x
+                to_object_y
+                to_object_z
             )
             let mut decision = hit_decision.accept
             if not is_opaque:
@@ -972,29 +992,42 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let mut owners = int[64].filled(-1)
     let mut top = 1
     let mut is_done = false
+    // The instance the walk is in, -1 for the TLAS and -2 before the first node, and what it computed of it.
+    // A walk pops one instance's nodes one after another, since a TLAS leaf pushes the BLAS roots it lets in on top.
+    let mut current = -2
+    let mut region = root
+    let mut o = origin
+    let mut d = direction
+    let mut inverse = float3(0.0, 0.0, 0.0)
+    let mut instance = uint4(0, 0, 0, 0)
+    let mut instance_unit: uint = 0
+    let mut to_object_x = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_object_y = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_object_z = float4(0.0, 0.0, 0.0, 0.0)
     while top > 0 and not is_done:
         top -= 1
         let owner = owners[top]
         let node = nodes[top]
 
-        let mut region = root
-        let mut o = origin
-        let mut d = direction
-        let mut instance = uint4(0, 0, 0, 0)
-        let mut instance_unit: uint = 0
-        if owner >= 0:
-            instance_unit = header.y + 7 * (owner as uint)
-            instance = acceleration_pool_load(instance_unit + 6)
-            region = instance.x
-            let x = pool_float4(acceleration_pool_load(instance_unit))
-            let y = pool_float4(acceleration_pool_load(instance_unit + 1))
-            let z = pool_float4(acceleration_pool_load(instance_unit + 2))
-            o = apply_rows(x, y, z, origin, 1.0)
-            d = apply_rows(x, y, z, direction, 0.0)
+        // the region and the ray in its space change only where the walk crosses into another instance
+        if owner != current:
+            current = owner
+            region = root
+            o = origin
+            d = direction
+            if owner >= 0:
+                instance_unit = header.y + 7 * (owner as uint)
+                instance = acceleration_pool_load(instance_unit + 6)
+                region = instance.x
+                to_object_x = pool_float4(acceleration_pool_load(instance_unit))
+                to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
+                to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
+                o = apply_point(to_object_x, to_object_y, to_object_z, origin)
+                d = apply_vector(to_object_x, to_object_y, to_object_z, direction)
+            inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
 
         let lo = acceleration_pool_load(region + 1 + 2 * node)
         let hi = acceleration_pool_load(region + 2 + 2 * node)
-        let inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
         if not is_box_entered(pool_float3(lo), pool_float3(hi), o, inverse, r.t_min, best.t) => continue
 
         if (hi.w & 2147483648) == 0:
@@ -1037,9 +1070,9 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 pool_float4(acceleration_pool_load(instance_unit + 3))
                 pool_float4(acceleration_pool_load(instance_unit + 4))
                 pool_float4(acceleration_pool_load(instance_unit + 5))
-                pool_float4(acceleration_pool_load(instance_unit))
-                pool_float4(acceleration_pool_load(instance_unit + 1))
-                pool_float4(acceleration_pool_load(instance_unit + 2))
+                to_object_x
+                to_object_y
+                to_object_z
             )
             let reported = intersection(b)
             if reported.t < r.t_min or reported.t > best.t or not reported.is_hit => continue
@@ -1077,29 +1110,42 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
     let mut owners = int[64].filled(-1)
     let mut top = 1
     let mut is_done = false
+    // The instance the walk is in, -1 for the TLAS and -2 before the first node, and what it computed of it.
+    // A walk pops one instance's nodes one after another, since a TLAS leaf pushes the BLAS roots it lets in on top.
+    let mut current = -2
+    let mut region = root
+    let mut o = origin
+    let mut d = direction
+    let mut inverse = float3(0.0, 0.0, 0.0)
+    let mut instance = uint4(0, 0, 0, 0)
+    let mut instance_unit: uint = 0
+    let mut to_object_x = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_object_y = float4(0.0, 0.0, 0.0, 0.0)
+    let mut to_object_z = float4(0.0, 0.0, 0.0, 0.0)
     while top > 0 and not is_done:
         top -= 1
         let owner = owners[top]
         let node = nodes[top]
 
-        let mut region = root
-        let mut o = origin
-        let mut d = direction
-        let mut instance = uint4(0, 0, 0, 0)
-        let mut instance_unit: uint = 0
-        if owner >= 0:
-            instance_unit = header.y + 7 * (owner as uint)
-            instance = acceleration_pool_load(instance_unit + 6)
-            region = instance.x
-            let x = pool_float4(acceleration_pool_load(instance_unit))
-            let y = pool_float4(acceleration_pool_load(instance_unit + 1))
-            let z = pool_float4(acceleration_pool_load(instance_unit + 2))
-            o = apply_rows(x, y, z, origin, 1.0)
-            d = apply_rows(x, y, z, direction, 0.0)
+        // the region and the ray in its space change only where the walk crosses into another instance
+        if owner != current:
+            current = owner
+            region = root
+            o = origin
+            d = direction
+            if owner >= 0:
+                instance_unit = header.y + 7 * (owner as uint)
+                instance = acceleration_pool_load(instance_unit + 6)
+                region = instance.x
+                to_object_x = pool_float4(acceleration_pool_load(instance_unit))
+                to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
+                to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
+                o = apply_point(to_object_x, to_object_y, to_object_z, origin)
+                d = apply_vector(to_object_x, to_object_y, to_object_z, direction)
+            inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
 
         let lo = acceleration_pool_load(region + 1 + 2 * node)
         let hi = acceleration_pool_load(region + 2 + 2 * node)
-        let inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
         if not is_box_entered(pool_float3(lo), pool_float3(hi), o, inverse, r.t_min, best.t) => continue
 
         if (hi.w & 2147483648) == 0:
@@ -1144,9 +1190,9 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                     pool_float4(acceleration_pool_load(instance_unit + 3))
                     pool_float4(acceleration_pool_load(instance_unit + 4))
                     pool_float4(acceleration_pool_load(instance_unit + 5))
-                    pool_float4(acceleration_pool_load(instance_unit))
-                    pool_float4(acceleration_pool_load(instance_unit + 1))
-                    pool_float4(acceleration_pool_load(instance_unit + 2))
+                    to_object_x
+                    to_object_y
+                    to_object_z
                 )
                 let reported = intersection(b)
                 if reported.t < r.t_min or reported.t > best.t or not reported.is_hit => continue
@@ -1189,9 +1235,9 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 pool_float4(acceleration_pool_load(instance_unit + 3))
                 pool_float4(acceleration_pool_load(instance_unit + 4))
                 pool_float4(acceleration_pool_load(instance_unit + 5))
-                pool_float4(acceleration_pool_load(instance_unit))
-                pool_float4(acceleration_pool_load(instance_unit + 1))
-                pool_float4(acceleration_pool_load(instance_unit + 2))
+                to_object_x
+                to_object_y
+                to_object_z
             )
             let mut decision = hit_decision.accept
             if not is_opaque => decision = any_hit(candidate_of_triangle_hit(hit))

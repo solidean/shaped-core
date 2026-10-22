@@ -5,6 +5,8 @@ refs:
   - file: libs/graphics/shaped-graphics-language/prelude/raytracing.sgl
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-22T04:12Z
+closed: 2026-10-22
+resolution: fixed
 ---
 
 # The emulated trace transforms its ray into the instance at every node it pops
