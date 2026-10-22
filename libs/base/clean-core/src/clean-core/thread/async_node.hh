@@ -1081,7 +1081,8 @@ protected:
     void teardown_payload();
 
     /// The strong-0 entry: teardown_payload, except that a homed node's teardown goes to its home when its options ask for at_home and the home accepts it.
-    /// Returns true when deferred, which transfers the strong owners' collective weak count to the home.
+    /// A node released by another node's teardown on the same thread is queued, and the outermost teardown runs it before returning: a chain of parked frames tears down in a loop, not a recursion.
+    /// Returns true when deferred, which transfers the strong owners' collective weak count to the home or the queue.
     bool destroy_payload();
 
     // shared helpers for the typed node
