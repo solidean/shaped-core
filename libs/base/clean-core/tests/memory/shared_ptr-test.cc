@@ -4,6 +4,8 @@
 #include <clean-core/thread/native_thread.hh>
 #include <nexus/test.hh>
 
+#include <type_traits>
+
 
 using namespace cc::primitive_defines;
 
@@ -406,6 +408,100 @@ TEST("shared_ptr - strong-only traits: no weak, destroy + free together")
     }
     CHECK(only_strong::torn == 1);
     CHECK(only_strong::freed == 1);
+}
+
+// ============================================================================
+// const elements: a view of a non-const payload, sharing the Traits of the plain element
+// ============================================================================
+
+// Adding const is a conversion, removing it is not, for shared and weak handles alike.
+static_assert(std::is_constructible_v<cc::shared_ptr<int const>, cc::shared_ptr<int> const&>);
+static_assert(std::is_constructible_v<cc::shared_ptr<int const>, cc::shared_ptr<int>&&>);
+static_assert(!std::is_constructible_v<cc::shared_ptr<int>, cc::shared_ptr<int const> const&>);
+static_assert(!std::is_constructible_v<cc::shared_ptr<int>, cc::shared_ptr<int const>&&>);
+static_assert(std::is_constructible_v<cc::weak_ptr<int const>, cc::shared_ptr<int> const&>);
+static_assert(!std::is_constructible_v<cc::weak_ptr<int>, cc::weak_ptr<int const> const&>);
+// the default Traits of a const element are the plain element's
+static_assert(std::is_same_v<cc::shared_ptr<int const>, cc::shared_ptr<int const, cc::default_shared_traits<int>>>);
+
+TEST("shared_ptr - default traits: a const element made directly, copied, destroyed once")
+{
+    tracked::reset();
+    {
+        auto p = cc::make_shared<tracked const>(4);
+        static_assert(std::is_same_v<decltype(p), cc::shared_ptr<tracked const>>);
+        CHECK(p->value == 4);
+        CHECK(tracked::live == 1);
+        {
+            auto q = p; // NOLINT(performance-unnecessary-copy-initialization): the copy is the shared-ownership subject
+            CHECK(q.get() == p.get());
+        }
+        CHECK(tracked::destroyed == 0);
+    }
+    CHECK(tracked::live == 0);
+    CHECK(tracked::destroyed == 1);
+}
+
+TEST("shared_ptr - default traits: adding const by copy and by move, weak and lock on the const view")
+{
+    tracked::reset();
+    cc::weak_ptr<tracked const> w;
+    {
+        auto p = cc::make_shared<tracked>(5);
+        cc::shared_ptr<tracked const> c = p;
+        CHECK(c.get() == p.get());
+        auto const moved = cc::shared_ptr<tracked const>(cc::move(p));
+        CHECK(!p.is_valid());
+        CHECK(moved.get() == c.get());
+
+        w = c;
+        auto l = w.lock();
+        REQUIRE(l.is_valid());
+        CHECK(l->value == 5);
+    } // every strong owner gone, const or not -> destroyed once; storage lingers for w
+    CHECK(tracked::destroyed == 1);
+    CHECK(!w.lock().is_valid());
+    w = nullptr; // last weak -> storage freed
+}
+
+TEST("shared_ptr - intrusive: a const element counts through its members, upcast to a const base")
+{
+    node_base::reset();
+    {
+        auto p = cc::make_shared<node_derived const, node_traits>(6);
+        CHECK(p->value == 6);
+        CHECK(p->strong.load() == 1);
+        {
+            auto q = p; // NOLINT(performance-unnecessary-copy-initialization): the copy is what bumps the refcount
+            CHECK(p->strong.load() == 2);
+        }
+        CHECK(p->strong.load() == 1);
+
+        cc::shared_ptr<node_base const, node_traits> b = p; // upcast and const together, the same control
+        CHECK(p->strong.load() == 2);
+        cc::weak_ptr<node_base const, node_traits> w = b;
+        CHECK(p->weak.load() == 2);
+        auto l = w.lock();
+        REQUIRE(l.is_valid());
+        CHECK(l.get() == b.get());
+    }
+    CHECK(node_base::payload_torn == 1);
+    CHECK(node_base::freed == 1);
+}
+
+TEST("shared_ptr - intrusive: a mutable handle converts to a const one, and the last one destroys")
+{
+    node_base::reset();
+    {
+        auto d = cc::make_shared<node_derived, node_traits>(8);
+        cc::shared_ptr<node_derived const, node_traits> c = d;
+        CHECK(d->strong.load() == 2);
+        d = nullptr; // the const view is now the only owner
+        CHECK(c->strong.load() == 1);
+        CHECK(node_base::payload_torn == 0);
+    }
+    CHECK(node_base::payload_torn == 1);
+    CHECK(node_base::freed == 1);
 }
 
 // ============================================================================

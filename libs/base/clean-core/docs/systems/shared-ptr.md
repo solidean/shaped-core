@@ -49,6 +49,15 @@ Neither hatch adopts an arbitrary raw pointer.
 Upcasts to a base with the **same** Traits are allowed; aliasing or projecting to a subobject is deferred rather than planned.
 `weak_ptr` needs a Traits with `supports_weak`, and a strong-only Traits static-asserts.
 
+**A const element is a view, never a const object.**
+- `make_shared<T const>` constructs a plain `T`, so every payload is a non-const object, however a handle sees it.
+- A handle passes its Traits the pointer with const removed; that is defined only because of the line above, so a Traits never sees const.
+- So counts may be members of the payload, as an intrusive Traits has them, without `mutable`.
+- The default Traits are keyed on the element without const: `shared_ptr<T const>` uses `default_shared_traits<T>`, which static-asserts an unqualified `T`.
+  Adding const, `shared_ptr<T>` to `shared_ptr<T const>`, is then the same-Traits upcast; removing it does not compile.
+- A custom Traits is named explicitly, so it is already the same type for `T` and `T const`.
+- Were a second way to make a node ever added, it would have to keep this: a payload made const would turn a Traits' writes to member counts into undefined behaviour.
+
 ## Why the rest of the repo is still on std::shared_ptr
 
 Not an oversight, and worth knowing before "migrating" anything:

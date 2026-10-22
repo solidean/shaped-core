@@ -5,7 +5,7 @@
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/atomic.hh> // cc::atomic — plain loads/stores without threads
 
-#include <type_traits> // std::is_convertible_v
+#include <type_traits> // std::is_convertible_v, std::remove_cv_t
 
 // cc::shared_ptr<T, Traits> / cc::weak_ptr<T, Traits> — an 8 B, single-pointer, INTRUSIVE-refcount handle pair.
 // The handle stores exactly the payload pointer, so get() is a no-op, and the counts live in the SAME node, located by a Traits type.
@@ -46,11 +46,24 @@
 //
 // Create only via cc::make_shared<T, Traits>(...): a node is born owned, strong = 1.
 // Upcasts to a base with the SAME Traits are allowed; aliasing/projection to a subobject is not (deferred).
+//
+// A const element is a view, never a const object: make_shared<T const> constructs a plain T.
+// So every payload is a non-const object, and a handle passes the Traits its pointer with const removed, which is defined for that reason.
+// A Traits therefore never sees const, whether its counts trail the payload or are members of it.
+// The default Traits are keyed on the element without const, so shared_ptr<T> -> shared_ptr<T const> is the same-Traits upcast;
+// a custom Traits is named explicitly and already the same type for both.
 
 namespace cc::impl
 {
 template <class Traits>
 inline constexpr bool shared_traits_can_defer_destroy = requires { requires Traits::can_defer_destroy; };
+
+/// The pointer a handle passes its Traits: const removed, which is defined because every payload is a non-const object (see above).
+template <class T>
+[[nodiscard]] std::remove_cv_t<T>* shared_traits_ptr(T* p)
+{
+    return const_cast<std::remove_cv_t<T>*>(p);
+}
 } // namespace cc::impl
 
 /// What dropping a strong reference leaves for the caller to do, in this order.
@@ -118,6 +131,10 @@ static_assert(cc::atomic<u64>::is_always_lock_free, "fused refcounts need a lock
 template <class T>
 struct cc::default_shared_traits
 {
+    static_assert(!std::is_const_v<T> && !std::is_volatile_v<T>,
+                  "default_shared_traits is keyed on the element without const: a T const handle uses "
+                  "default_shared_traits<T>");
+
     struct control
     {
         cc::atomic<u64> counts; // fused strong:weak — see cc::fused_refcount
@@ -169,12 +186,12 @@ namespace cc
 template <class T, class Traits>
 struct weak_ptr;
 
-template <class T, class Traits = default_shared_traits<T>, class... Args>
+template <class T, class Traits = default_shared_traits<std::remove_cv_t<T>>, class... Args>
 [[nodiscard]] shared_ptr<T, Traits> make_shared(Args&&... args);
 
 } // namespace cc
 
-template <class T, class Traits = cc::default_shared_traits<T>>
+template <class T, class Traits = cc::default_shared_traits<std::remove_cv_t<T>>>
 struct cc::shared_ptr
 {
     // ctors / dtor
@@ -218,26 +235,27 @@ public:
     {
         if (_ptr != nullptr)
         {
-            auto const r = Traits::release_strong(_ptr);
+            auto* const p = impl::shared_traits_ptr(_ptr);
+            auto const r = Traits::release_strong(p);
             if (r.destroy)
             {
                 if constexpr (impl::shared_traits_can_defer_destroy<Traits>)
                 {
                     // Deferred: whoever took the teardown now owns the collective weak count and frees through it.
-                    if (Traits::destroy_object(_ptr))
+                    if (Traits::destroy_object(p))
                     {
                         _ptr = nullptr;
                         return;
                     }
                 }
                 else
-                    Traits::destroy_object(_ptr);
+                    Traits::destroy_object(p);
                 bool do_free = r.free;
                 if constexpr (Traits::supports_weak)
                     if (!do_free) // release the strong owners' collective weak count — only AFTER teardown
-                        do_free = Traits::release_weak(_ptr);
+                        do_free = Traits::release_weak(p);
                 if (do_free)
-                    Traits::free_storage(_ptr);
+                    Traits::free_storage(p);
             }
             _ptr = nullptr;
         }
@@ -273,7 +291,7 @@ public:
         shared_ptr r;
         r._ptr = p;
         if (p != nullptr)
-            Traits::inc_strong(p);
+            Traits::inc_strong(impl::shared_traits_ptr(p));
         return r;
     }
 
@@ -301,7 +319,7 @@ private:
     void inc()
     {
         if (_ptr != nullptr)
-            Traits::inc_strong(_ptr);
+            Traits::inc_strong(impl::shared_traits_ptr(_ptr));
     }
 
     T* _ptr = nullptr;
@@ -314,7 +332,7 @@ private:
     friend shared_ptr<U, Tr> make_shared(Args&&...);
 };
 
-template <class T, class Traits = cc::default_shared_traits<T>>
+template <class T, class Traits = cc::default_shared_traits<std::remove_cv_t<T>>>
 struct cc::weak_ptr
 {
     static_assert(Traits::supports_weak, "weak_ptr requires a Traits with supports_weak == true");
@@ -356,8 +374,8 @@ public:
 
     void reset()
     {
-        if (_ptr != nullptr && Traits::release_weak(_ptr))
-            Traits::free_storage(_ptr);
+        if (_ptr != nullptr && Traits::release_weak(impl::shared_traits_ptr(_ptr)))
+            Traits::free_storage(impl::shared_traits_ptr(_ptr));
         _ptr = nullptr;
     }
 
@@ -366,7 +384,7 @@ public:
     /// Try to obtain a strong handle; empty if the object has already been destroyed.
     [[nodiscard]] shared_ptr<T, Traits> lock() const
     {
-        if (_ptr != nullptr && Traits::try_lock_strong(_ptr))
+        if (_ptr != nullptr && Traits::try_lock_strong(impl::shared_traits_ptr(_ptr)))
             return shared_ptr<T, Traits>::adopt(_ptr);
         return {};
     }
@@ -390,7 +408,7 @@ public:
         weak_ptr r;
         r._ptr = p;
         if (p != nullptr)
-            Traits::inc_weak(p);
+            Traits::inc_weak(impl::shared_traits_ptr(p));
         return r;
     }
 
@@ -417,7 +435,7 @@ private:
     void inc()
     {
         if (_ptr != nullptr)
-            Traits::inc_weak(_ptr);
+            Traits::inc_weak(impl::shared_traits_ptr(_ptr));
     }
 
     T* _ptr = nullptr;
@@ -432,14 +450,16 @@ namespace cc
 
 /// Create a T in one slab-allocated node (sized by the Traits: T plus a trailing control block by default, or
 /// the object itself for intrusive control) with strong = 1. The only way to construct a shared_ptr.
+/// A const T is constructed as a plain T and handed out as a view: every payload is a non-const object (see the header).
 template <class T, class Traits, class... Args>
 [[nodiscard]] shared_ptr<T, Traits> make_shared(Args&&... args)
 {
-    constexpr isize sz = Traits::node_size(isize(sizeof(T)), isize(alignof(T)));
-    constexpr isize al = Traits::node_align(isize(alignof(T)));
+    using object_t = std::remove_cv_t<T>;
+    constexpr isize sz = Traits::node_size(isize(sizeof(object_t)), isize(alignof(object_t)));
+    constexpr isize al = Traits::node_align(isize(alignof(object_t)));
     constexpr auto idx = cc::node_class_index_from_size_and_align(sz, al);
     auto* raw = cc::default_node_allocator().allocate_node_bytes(idx, sz, al);
-    T* const p = new (cc::placement_new, raw) T(cc::forward<Args>(args)...);
+    object_t* const p = new (cc::placement_new, raw) object_t(cc::forward<Args>(args)...);
     Traits::init_control(p);
     return shared_ptr<T, Traits>::adopt(p);
 }
