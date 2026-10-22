@@ -140,14 +140,25 @@ An agent claims on someone's behalf: `--as "Claude (for <name>)"`.
 
 **A leftover claim whose work has landed may be cleared by anyone, without asking.**
 Nothing clears a claim automatically in every case, so a claim outlives its work: a closed issue still carrying `claimed-by`, or an open one whose resolving commit is already in the history.
-When the commit history shows that closing, remove the claim: `issues release <id> --force` on an open issue, the two lines by hand on a closed one.
+When the commit history shows that closing, remove the claim: `issues release <id> --force` on an open issue.
+A close ends the claim itself, so a closed issue carrying one predates that rule; remove the two lines by hand.
 
 By hand: edit the two lines, commit only that file, push.
 
 ### Closed
 
-**An issue closes in the commit that resolves it**, never on its own.
-`issues close <id> [--resolution fixed]` adds `closed` and `resolution`, moves the file to `closed/<yyyy>/<mm>/` with `git mv`, and commits nothing.
+**An issue closes in the push that resolves it**, never on its own, and the preferred spelling is the push's:
+
+```bash
+uv run dev.py check --fix --push --closes <id>[,<id>] [--resolution fixed]
+```
+
+It closes each issue in a commit of its own on top of the fix, ahead of the check, so the close is part of what the push sends and the issues gate validates it.
+If the check fails, nothing closes and nothing is pushed.
+Coupling the close to the push is what keeps a claim from outliving its work: the moment the fix is real is the moment the issue ends.
+
+`issues close <id> [--resolution fixed]` is the same close by hand, for a close that belongs inside a larger commit.
+It adds `closed` and `resolution`, ends the claim, moves the file to `closed/<yyyy>/<mm>/` with `git mv`, and commits nothing.
 It rewrites the moved file's own relative links, and every markdown link in the repository that pointed at it.
 
 `issues reopen <id>` moves it back.

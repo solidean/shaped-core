@@ -47,6 +47,11 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--push", action="store_true",
                    help="Pull, check what the push would send, push; a rejected push pulls again and re-checks only "
                         "what the merge can break, up to three rounds. Needs a clean working tree.")
+    p.add_argument("--closes", metavar="ID[,ID]", default=None,
+                   help="With --push: close these issues in a commit of their own ahead of the check, so the push "
+                        "that resolves them is the one that closes them; nothing closes if the check fails.")
+    p.add_argument("--resolution", choices=("fixed", "wontfix", "duplicate", "obsolete"), default="fixed",
+                   help="How --closes closes them (default: fixed)")
     return p
 
 
@@ -634,6 +639,8 @@ def _run_push(args: argparse.Namespace, ctx: Context) -> None:
     if _git(ctx, "status", "--porcelain", "--untracked-files=all").stdout.strip():
         ctx.die("check --push needs a clean working tree: what it pushes is commits, and a check must not race an edit; "
                 "commit or stash first")
+    if args.closes:
+        _commit_closes(ctx, [i.strip() for i in args.closes.split(",") if i.strip()], args.resolution)
 
     remote_ref = f"origin/{branch}"
     rounds = 3
@@ -689,6 +696,29 @@ def _run_push(args: argparse.Namespace, ctx: Context) -> None:
 
 def _memo(ctx: Context, *, read: bool) -> dev.CheckMemo:
     return dev.CheckMemo(ctx.root, ctx.root / "build" / "check-memo.json", read=read)
+
+
+def _commit_closes(ctx: Context, ids: list[str], resolution: str) -> None:
+    """Close each issue and commit the closes as one commit on top of HEAD, ahead of the check.
+
+    The tree is clean here, so everything the closes dirty (the moved files, and every link that pointed at them) is theirs to commit.
+    An unknown or already closed id stops before the check, so a mistake fails cheaply.
+    The commit is part of what the push sends, so the issues gate validates it like any other.
+    """
+    for issue_id in ids:
+        closed = subprocess.run(["uv", "run", "dev.py", "issues", "close", issue_id, "--resolution", resolution],
+                                cwd=str(ctx.root), capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if closed.returncode != 0:
+            ctx.die(f"could not close {issue_id}:\n{(closed.stdout + closed.stderr).strip()}")
+        dev.ui.write_line(console.dim(closed.stdout.strip()))
+    if _git(ctx, "add", "-A").returncode != 0:
+        ctx.die("git add failed after closing the issues")
+    subject = f"issues: close {', '.join(ids)} ({resolution})"
+    body = "Resolved by the commits pushed with this one."
+    committed = _git(ctx, "commit", "-q", "-m", subject, "-m", body)
+    if committed.returncode != 0:
+        ctx.die(f"git commit failed after closing the issues:\n{(committed.stdout + committed.stderr).strip()}")
+    dev.ui.write_line(console.dim(f"check --push: committed `{subject}`"))
 
 
 def _run_gates(args: argparse.Namespace, ctx: Context, selected: list[dev.Check], scope: dev.ChangeScope | None,

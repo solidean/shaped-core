@@ -563,6 +563,9 @@ It knows its own verdict, so there is no wrapper exit code to misread and no pus
 Under `--fix`, a rewrite stops before the push with a request to commit it; nothing is committed on the tool's own initiative.
 It takes no scope flag and no gate name: what the push sends is the scope, and the whole registry is the gate.
 
+`--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own ahead of the check, so the push that resolves them is the one that closes them.
+If the check fails, nothing closes; [issue-tracking.md](issue-tracking.md#closed) has the rule.
+
 ### Re-checking a commit or a range
 
 Dirty-only is exactly right *before* a commit and useless *after* one.

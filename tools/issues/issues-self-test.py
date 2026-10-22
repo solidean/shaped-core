@@ -312,13 +312,16 @@ def test_serve_edits_files_and_pushes_on_request(base: Path):
 def test_close_moves_and_relinks(base: Path):
     a, _ = setup(base)
     write(a / "docs/notes.md", "See [the crash](issues/bug-crash.md#repro) and [shiny](issues/feat-shiny.md).\n")
-    write(a / "docs/issues/feat-shiny.md", issue_text("Shiny", "parent: epic-big") + "Related: [notes](../notes.md).\n")
+    write(a / "docs/issues/feat-shiny.md",
+          issue_text("Shiny", "parent: epic-big", "claimed-by: Alice", "claimed-at: 2026-03-01T09:00Z")
+          + "Related: [notes](../notes.md).\n")
     write(a / "docs/issues/epic-big.md", issue_text("Big"))
     code, _, err = cli(a, "close", "feat-shiny", "--date", "2026-03-05", "--resolution", "obsolete")
     assert code == 0, err
     moved = a / "docs/issues/closed/2026/03/feat-shiny.md"
     text = moved.read_text(encoding="utf-8")
     assert "closed: 2026-03-05\nresolution: obsolete" in text and "[notes](../../../../notes.md)" in text, text
+    assert "claimed-by" not in text and "claimed-at" not in text, "closing ends the claim: " + text
     notes = (a / "docs/notes.md").read_text(encoding="utf-8")
     assert "(issues/bug-crash.md#repro)" in notes and "(issues/closed/2026/03/feat-shiny.md)" in notes, notes
     assert cli(a, "check")[0] == 0

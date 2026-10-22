@@ -847,7 +847,8 @@ def cmd_close(ws: Workspace, args: argparse.Namespace) -> int:
         raise IssueError("--date is yyyy-mm-dd")
     year, month = date[:4], date[5:7]
     new_path = issue.repo.root / issue.scope / "docs" / "issues" / "closed" / year / month / f"{issue.id}.md"
-    _move(ws, issue, new_path, {"closed": date, "resolution": args.resolution})
+    # The claim ends with the work: a closed issue still carrying one is the leftover the guide tells people to clear.
+    _move(ws, issue, new_path, {"closed": date, "resolution": args.resolution, "claimed-by": None, "claimed-at": None})
     print(f"closed {issue.qid} as {args.resolution}: {ws.show_path(new_path)}")
     print("commit it together with the change that resolves it", file=sys.stderr)
     return 0
