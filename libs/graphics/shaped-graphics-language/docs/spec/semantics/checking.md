@@ -582,8 +582,10 @@ fun shade(k: float) -> float:
   So a default on a mut parameter is `default-not-allowed-here`, at the declaration.
   The argument is a place by the rules of an assignment's left side, or `not-assignable`, and its type is the parameter's exactly, so its chain has length 0.
   Its indices are evaluated once, where the call binds it, and the body reads and writes that one place wherever it names the parameter.
-  A call that a candidate would match but for one mark is `no-matching-overload`, and its detail names the parameter and says whether it takes the mark.
+  A call that a candidate would match but for its marks is `no-matching-overload`, and its detail names each parameter and says whether it takes the mark.
   That is a mark missing on an argument of a mut parameter's type exactly, or one written on an argument of another parameter.
+  Where the argument a mark is missing on is no place this rule takes, the detail says why it is none instead, since the mark would fix nothing.
+  Several marks, and a dot call, which has nowhere to write one, are shown as the whole call written with every mark right: `twice(mut v)`.
 * **CHK-70** A candidate **matches** when it binds, and each argument converts to its parameter's type by a **conversion chain**.
   An argument of the parameter's type does so by a chain of length 0, and so does one a pattern parameter takes (CHK-194, CHK-207); a literal converts by CHK-81 or CHK-253.
 * **CHK-253** A number literal converts to a numeric type that holds it: by a chain of length 0 to its default type, and of length 1 to any other ([why](why/checking.md#chk-253)).
@@ -671,6 +673,7 @@ The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2
   It is a function like any other, so `cond.select(a, b)` is the same call (CHK-247).
   The condition stands first, where WGSL writes it last.
   A call whose arguments would match with the last one moved to the front is `no-matching-overload`, and its detail says the condition comes first.
+  It names the candidate those arguments convert to by the shortest chains: `select(1, 2, c)` is `select(bool, int, int)`.
 
 ```sgl sketch
 fun shade(uv: float2, id: int3, a: float3, b: float3) -> float3:

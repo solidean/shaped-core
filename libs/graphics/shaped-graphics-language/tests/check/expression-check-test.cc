@@ -354,6 +354,21 @@ TEST("sgl check - a call one `mut` mark away from a candidate says which paramet
     // a mark that would not make the call match is not the reason, and is not named
     CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut n = 1\n    twice(n)\n    return 1.0\n", twice))
           == "no-matching-overload user:[twice(n)] twice(int)\n");
+
+    // a mark is no fix for what is no place, so the detail says why it is none
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    twice(v + 1.0)\n    return v\n", twice))
+              .contains("x is a mut parameter, so its argument is a place marked `mut`, and `v + 1.0` is none: only a "
+                        "local, or a member of one, is a place"));
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let k = 1.0\n    twice(k)\n    return k\n", twice))
+              .contains("and `k` is none: k is immutable; `let mut` declares a local an assignment may name"));
+    // every mark that is off is named, in the one call that has them all
+    CHECK(reports_for("fun both(x: mut float, y: mut float):\n    x = y\n\n"
+                      "fun f() -> float:\n    let mut a = 1.0\n    let mut b = 2.0\n    both(a, b)\n    return a\n")
+              .contains("x and y are mut parameters, so their arguments are places marked `mut`, as in "
+                        "`both(mut a, mut b)`"));
+    // a dot call has no place for the mark, so the fix is the free call
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    v.twice()\n    return v\n", twice))
+              .contains("x is a mut parameter, so its argument is a place marked `mut`, as in `twice(mut v)`"));
 }
 
 TEST("sgl check - a select written with its condition last says the condition comes first")
@@ -365,6 +380,9 @@ TEST("sgl check - a select written with its condition last says the condition co
     CHECK(body_reports("let b = c > c\nreturn select(c, c, b).x\n")
               .contains("its condition comes first, as in select(bool3, float3, float3)"));
     CHECK(body_reports("let b = k > 0.0\nreturn select(b, 1.0, 2.0)\n") == "");
+    // the candidate the arguments convert to most directly, not merely the first that takes them
+    CHECK(body_reports("let b = k > 0.0\nreturn select(1, 2, b) as float\n")
+              .contains("its condition comes first, as in select(bool, int, int)"));
 }
 
 TEST("sgl check - the side tables name what an editor asks for")

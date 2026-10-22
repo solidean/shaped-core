@@ -1496,7 +1496,7 @@ type_id checker::resolve_overload(function_scope& scope,
         else
             report(diagnostic_kind::no_matching_overload, file, where,
                    cc::format("{}{}", call_text(file, spelling, arguments),
-                              miss_hint(file, candidates, arguments, spelling)));
+                              miss_hint(scope, callee, candidates, arguments, spelling)));
         return error_type;
     }
     auto const best = best_of(cc::move(matches));
@@ -1770,16 +1770,23 @@ void checker::note_near_misses(i32 file,
     }
 }
 
-cc::string checker::miss_hint(i32 file,
+cc::string checker::miss_hint(function_scope& scope,
+                              ast::expr_id callee,
                               cc::span<symbol_id const> candidates,
                               call_arguments const& arguments,
                               cc::string_view spelling)
 {
+    auto const file = scope.file;
     auto const is_condition = [&](type_id type)
     {
         auto const* const record = out.builtin_type_of(type);
         return record != nullptr && record->leaf_kind == value_kind::boolean;
     };
+    // a dot call writes its receiver ahead of the name, where no mark can stand
+    auto const is_dot_call = ast::is_valid(callee) && ast_of(file).at(callee).node.is<ast::member>();
+    auto const argument_text = [&](isize i) { return text_of(file, span_of(file, arguments.written[i].expr)); };
+    auto rotated_chain = i32(-1);
+    auto rotated_types = cc::vector<type_id>();
     for (auto const candidate : candidates)
     {
         if (out.at(candidate).state != symbol_state::checked)
@@ -1796,30 +1803,88 @@ cc::string checker::miss_hint(i32 file,
         auto const bound = bind_arguments(parameters, arguments);
         if (bound.failure == miss_reason::none)
         {
-            auto flipped = isize(-1);
-            auto is_one_mark_away = true;
-            for (auto p = isize(0); is_one_mark_away && p < parameters.size(); ++p)
+            auto flipped = cc::vector<isize>();
+            auto is_marks_away = true;
+            for (auto p = isize(0); is_marks_away && p < parameters.size(); ++p)
             {
                 auto const i = bound.slots[p];
                 if (i < 0)
                     continue;
                 if (parameters[p].is_mut != arguments.written[i].is_mut)
                 {
-                    is_one_mark_away = arguments.types[i] == parameters[p].type;
-                    flipped = flipped < 0 ? p : flipped;
+                    is_marks_away = arguments.types[i] == parameters[p].type;
+                    flipped.push_back(p);
                 }
                 else
-                    is_one_mark_away = chain_of(file, parameters[p], arguments, i).has_value();
+                    is_marks_away = chain_of(file, parameters[p], arguments, i).has_value();
             }
-            if (is_one_mark_away && flipped >= 0)
+            if (is_marks_away && !flipped.empty())
             {
-                auto const& p = parameters[flipped];
-                auto const argument = text_of(file, span_of(file, arguments.written[bound.slots[flipped]].expr));
-                if (p.is_mut)
-                    return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, as in `mut "
-                                      "{}`",
-                                      p.name, argument);
-                return cc::format(": {} is no mut parameter, so its argument takes no `mut`", p.name);
+                // a missing mark is the fix only where what it would mark is a place a body could assign
+                for (auto const p : flipped)
+                {
+                    auto why = cc::string();
+                    if (parameters[p].is_mut
+                        && !judge_place(scope, arguments.written[bound.slots[p]].expr, "a mut argument", &why))
+                        return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, and `{}` "
+                                          "is none: {}",
+                                          parameters[p].name, argument_text(bound.slots[p]), why);
+                }
+                if (flipped.size() == 1 && !is_dot_call)
+                {
+                    auto const& p = parameters[flipped[0]];
+                    if (p.is_mut)
+                        return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, as in "
+                                          "`mut {}`",
+                                          p.name, argument_text(bound.slots[flipped[0]]));
+                    return cc::format(": {} is no mut parameter, so its argument takes no `mut`", p.name);
+                }
+
+                // several marks, or a dot call, are shown as the whole call written with every mark right
+                auto missing = cc::vector<cc::string_view>();
+                auto extra = cc::vector<cc::string_view>();
+                auto is_toggled = cc::vector<bool>::create_filled(arguments.written.size(), false);
+                for (auto const p : flipped)
+                {
+                    (parameters[p].is_mut ? missing : extra).push_back(parameters[p].name);
+                    is_toggled[bound.slots[p]] = true;
+                }
+                auto const listed = [](cc::span<cc::string_view const> names)
+                {
+                    auto text = cc::string();
+                    for (auto i = isize(0); i < names.size(); ++i)
+                    {
+                        if (i > 0)
+                            text += i + 1 == names.size() ? " and " : ", ";
+                        text += names[i];
+                    }
+                    return text;
+                };
+                auto call = cc::format("{}(", spelling);
+                for (auto i = isize(0); i < arguments.written.size(); ++i)
+                {
+                    if (i > 0)
+                        call += ", ";
+                    if (!arguments.names[i].empty())
+                        call += cc::format("{} = ", arguments.names[i]);
+                    if (arguments.written[i].is_mut != is_toggled[i])
+                        call += "mut ";
+                    call += argument_text(i);
+                }
+                call += ")";
+                auto said = cc::vector<cc::string>();
+                if (!missing.empty())
+                    said.push_back(
+                        missing.size() == 1
+                            ? cc::format("{} is a mut parameter, so its argument is a place marked `mut`", missing[0])
+                            : cc::format("{} are mut parameters, so their arguments are places marked `mut`",
+                                         listed(missing)));
+                if (!extra.empty())
+                    said.push_back(
+                        extra.size() == 1
+                            ? cc::format("{} is no mut parameter, so its argument takes no `mut`", extra[0])
+                            : cc::format("{} are no mut parameters, so their arguments take no `mut`", listed(extra)));
+                return cc::format(": {}, as in `{}`", said.size() == 1 ? said[0] : said[0] + "; " + said[1], call);
             }
         }
 
@@ -1828,19 +1893,28 @@ cc::string checker::miss_hint(i32 file,
         if (n >= 2 && isize(parameters.size()) == n && is_condition(parameters[0].type) && arguments.names.size() == n
             && arguments.types[n - 1] == parameters[0].type)
         {
+            // the candidate the moved arguments convert to most directly is the one the call meant
             auto is_rotated = true;
+            auto total = i32(0);
             for (auto i = isize(0); is_rotated && i < n; ++i)
-                is_rotated = arguments.names[i].empty() && !arguments.written[i].is_mut && !parameters[i].is_mut
-                          && chain_of(file, parameters[i], arguments, i == 0 ? n - 1 : i - 1).has_value();
-            if (is_rotated)
             {
-                auto types = cc::vector<type_id>();
+                auto const chain = arguments.names[i].empty() && !arguments.written[i].is_mut && !parameters[i].is_mut
+                                     ? chain_of(file, parameters[i], arguments, i == 0 ? n - 1 : i - 1)
+                                     : cc::nullopt;
+                is_rotated = chain.has_value();
+                total += chain.has_value() ? chain.value() : 0;
+            }
+            if (is_rotated && (rotated_chain < 0 || total < rotated_chain))
+            {
+                rotated_chain = total;
+                rotated_types.clear();
                 for (auto const& p : parameters)
-                    types.push_back(p.type);
-                return cc::format(": its condition comes first, as in {}", signature_text(spelling, types));
+                    rotated_types.push_back(p.type);
             }
         }
     }
+    if (rotated_chain >= 0)
+        return cc::format(": its condition comes first, as in {}", signature_text(spelling, rotated_types));
     return {};
 }
 

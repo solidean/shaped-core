@@ -1010,7 +1010,8 @@ struct checker
     /// The length of the chain that converts written argument `i` to `parameter`; nothing where it does not convert.
     [[nodiscard]] cc::optional<i32> chain_of(i32 file, parameter const& taking, call_arguments const& arguments, isize i);
     /// Whether `expr`, already checked, names a place a body could assign, reporting why not; `what` names the use.
-    bool judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what);
+    /// With `quiet_why`, nothing is reported, and why not is written there instead.
+    bool judge_place(function_scope& scope, ast::expr_id expr, cc::string_view what, cc::string* quiet_why = nullptr);
     /// The chain of tuple or object literal `literal` to `to`: one more than its call's longest (CHK-84).
     [[nodiscard]] cc::optional<i32> literal_chain(i32 file, type_id to, i32 literal);
     /// The functions of the name of the struct `to` visible from `file`, its synthesized constructor among them.
@@ -1052,7 +1053,9 @@ struct checker
     /// A candidate that a `mut` mark alone keeps from matching names the mark (CHK-316).
     /// One whose first parameter is a condition, and that the arguments would match with the last one moved to the
     /// front, says that the condition comes first, as WGSL's `select` does not have it (CHK-365).
-    [[nodiscard]] cc::string miss_hint(i32 file,
+    /// A missing mark is named only where its argument is a place, and several marks or a dot call show the whole call.
+    [[nodiscard]] cc::string miss_hint(function_scope& scope,
+                                       ast::expr_id callee,
                                        cc::span<symbol_id const> candidates,
                                        call_arguments const& arguments,
                                        cc::string_view spelling);
