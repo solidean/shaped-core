@@ -171,7 +171,7 @@ cc::shared_async<int> coro_over_aligned(cc::shared_async<int> dep)
 } // namespace
 
 // A frame holds every local that spans a suspend, so the frame must be as aligned as its most aligned local.
-// A frame allocated at a fixed 16 bytes left an alignas(64) worker misaligned in solidean's export, which UBSan caught.
+// A frame allocated at a fixed 16 bytes left an alignas(64) worker misaligned in a consumer's export, which UBSan caught.
 // Many frames are alive at once, so a correct answer cannot come from one lucky allocation.
 TEST("async coroutine - an over-aligned local stays aligned in the frame")
 {

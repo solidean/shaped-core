@@ -15,7 +15,7 @@ The frame's output is `bgra8_unorm` for the window and the headless capture alik
 The layout pass writes the traced `rgba32_float` accumulation into it unchanged: `view_ps` and `wipe_ps` in `layout.sgl` return the sample times the tint.
 So the stored bytes are linear radiance, quantized by the fixed-function float-to-unorm conversion, and shown as if they were sRGB.
 
-What that does to an image, seen in solidean's example captures (`examples/shaped/first-boolean`):
+What that does to an image, seen in a consumer's example captures:
 
 - **Banding in dark gradients.** A linear encoding spends very few of its 256 codes on the dark end, so a navy `sv::background::gradient` steps visibly.
 - **Everything reads darker and harsher than its radiance**, so a scene's lights and albedos get tuned against the missing curve, and retuned once it lands.

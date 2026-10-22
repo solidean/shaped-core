@@ -51,7 +51,7 @@ tags: [dev.py]
 parent: epic-test-driver
 blocked-by: [feat-other-thing]
 refs:
-  - test: solidean-bvh-viewer-example
+  - test: app-viewer-example
   - file: tools/dev/cmd/test.py:120-140
   - symbol: dev.test
 claimed-by: Philip Trettner
@@ -60,7 +60,7 @@ claimed-at: 2026-10-16T14:03Z
 
 # `dev.py test <pattern>` crashes on an unbuilt matching binary
 
-`test "kernels"` also matched `solidean-bvh-viewer-example`, which is not built without `SOL_VIEWER` …
+`test "kernels"` also matched `app-viewer-example`, which is not built without `APP_VIEWER` …
 ```
 
 **The title is the body's first line, `# <title>`, and is the only thing an issue needs.**
@@ -180,16 +180,16 @@ Each git repository is its own tracker: its issues, its ids, its integration bra
 `.issues.toml` at a repository's root configures it, every key optional:
 
 ```toml
-name = "solidean"                                      # how other repositories qualify its ids (default: its directory's name)
+name = "app"                                           # how other repositories qualify its ids (default: its directory's name)
 branch = "main"                                        # the integration branch claims push to
 remote = "origin"
-submodules = ["extern/surrat", "extern/solidean-api"]  # listed, searched and checked with this one by default
+submodules = ["extern/engine", "extern/api"]           # listed, searched and checked with this one by default
 exclude = ["tools/issues/issues-self-test.py"]         # paths never read as issues or scanned for markers
 ```
 
 A submodule's integration branch is its own `.issues.toml`'s, else the `branch =` its superproject's `.gitmodules` records, else its remote's default.
 
-**From a superproject, a submodule's issue is `<name>:<id>`**: `surrat:bug-<slug>`, and the same in a marker or a ref.
+**From a superproject, a submodule's issue is `<name>:<id>`**: `engine:bug-<slug>`, and the same in a marker or a ref.
 A bare id resolves in the issue's own repository first.
 `--with-submodules` reaches every checked-out submodule, `--top-only` none.
 Claiming a submodule's issue pushes to the submodule's remote.
