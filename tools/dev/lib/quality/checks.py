@@ -17,6 +17,7 @@ from pathlib import Path
 from ..core import console, profile, ui
 from ..core.report import fmt_dur
 from .changes import ChangeScope, touched_paths
+from .memo import CheckMemo
 from .watch import Watch, tracked_files
 
 
@@ -44,6 +45,10 @@ class Check:
     #: Targets this gate needs built, on the default preset.
     #: The runner builds every selected gate's targets in one invocation before any gate runs, so a gate never builds on its own.
     builds: tuple[str, ...] = ()
+
+    #: Names the tool this gate runs with, for the memo: a verdict from an older clang-format is no verdict on this one.
+    #: A watched gate without one is keyed on its files alone.
+    stamp: Callable[[], str] | None = None
 
     _watch: Watch | None = field(default=None, init=False, repr=False, compare=False)
 
@@ -110,6 +115,7 @@ def run_checks(
     no_test: bool,
     build: Callable[[list[str]], bool] | None = None,
     skipped: list[Check] | None = None,
+    memo: CheckMemo | None = None,
 ) -> bool:
     """Run the selected checks and print a verdict; return True if all passed.
 
@@ -120,6 +126,7 @@ def run_checks(
     A `requires_green` check runs last, only if no static gate failed and `no_test` is False: there is no point building and testing a tree that already fails a cheap lint.
     `scope` is handed to every check identically; a check that is always repo-wide ignores it.
     `skipped` is reported, so a gate selection is visible rather than silent.
+    `memo` skips a watched gate that passed before on identical inputs, and records each pass; an `always` gate is never memoized.
     """
     failed: list[str] = []
     timings: list[tuple[str, float]] = []
@@ -130,6 +137,17 @@ def run_checks(
         ui.write_line(console.dim(f"--- skipped {c.name} (nothing it watches changed) ---"))
 
     static = [c for c in selected if not c.requires_green]
+
+    # Keyed before anything runs, so a fixer's rewrite cannot make a later gate look already-passed.
+    keys: dict[str, str | None] = {}
+    if memo is not None:
+        for c in static:
+            keys[c.name] = memo.gate_key(c.name, c._watch, c.stamp)
+    done = [c for c in static if memo is not None and memo.gate_passed_before(c.name, keys.get(c.name))]
+    for c in done:
+        ui.write_line(console.dim(f"--- skipped {c.name} (passed before on identical inputs) ---"))
+    static = [c for c in static if c not in done]
+
     writers = [c for c in static if fix and c.supports_fix]
     readers = [c for c in static if c not in writers]
 
@@ -149,6 +167,21 @@ def run_checks(
 
     # The gate list is known upfront, so the region can say which gate of how many is running.
     with ui.phase("check", total=len(selected)) as gates:
+        for c in done:
+            gates.advance(c.name)
+
+        def remember(c: Check, ok: bool) -> None:
+            if memo is None or c.requires_green:
+                return
+            if not ok:
+                memo.forget_gate(c.name)
+                return
+            # A writer may have rewritten what it watches, so its pass is keyed on the files as they are now.
+            if c in writers:
+                memo.invalidate_files()
+                memo.record_gate(c.name, memo.gate_key(c.name, c._watch, c.stamp))
+            else:
+                memo.record_gate(c.name, keys.get(c.name))
 
         def run_one(c: Check) -> None:
             if c.name in unbuilt:
@@ -175,6 +208,7 @@ def run_checks(
                 timings.append((c.name, time.monotonic() - started))
                 if not ok:
                     failed.append(c.name)
+                remember(c, ok)
 
         # Mirrored output from several gates at once would interleave into noise, so those runs stay serial.
         workers = 1 if (mirror or verbose) else max(1, len(readers))
