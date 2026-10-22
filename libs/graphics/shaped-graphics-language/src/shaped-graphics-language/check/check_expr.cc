@@ -193,9 +193,11 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     auto const kind = out.at(object).kind;
     if (kind == type_kind::image)
         return check_texel(scope, id, node, object);
+    if (auto const lane = lane_type_of(object); is_valid(lane))
+        return check_lane(scope, node, object, lane);
     if (kind != type_kind::buffer && kind != type_kind::array)
     {
-        unsupported(file, where, "a subscript on anything but a buffer, an image or an array");
+        unsupported(file, where, "a subscript on anything but a buffer, an image, an array or a vector");
         return error_type;
     }
 
@@ -259,6 +261,31 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
         }
     }
     return result;
+}
+
+type_id checker::check_lane(function_scope& scope, ast::index const& node, type_id vector, type_id lane)
+{
+    // CHK-395: one int, which picks the lane `v[i]` is, and a constant one names a lane the vector has
+    auto const file = scope.file;
+    auto const arguments = ast_of(file).at(node.arguments);
+    if (arguments.size() != 1 || !arguments[0].name.empty() || arguments[0].is_splat)
+    {
+        report(diagnostic_kind::wrong_kind_of_name, file, span_of(file, node.object),
+               cc::format("{} takes one index, the lane: `v[i]`", out.name_of(vector)));
+        return error_type;
+    }
+    auto const& a = arguments[0];
+    auto const int_type = type_of_builtin(builtins::k_int, file, span_of(file, a.value));
+    auto const index = check_expr(scope, a.value);
+    if (index != error_type && index != int_type)
+        report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
+               cc::format("a vector is indexed by an int, and this is a {}", out.name_of(index)));
+    auto const lanes = i32(out.at(out.at(vector).members).size());
+    if (auto const at = index == int_type ? constant_index(file, a.value) : cc::optional<i32>();
+        at.has_value() && (at.value() < 0 || at.value() >= lanes))
+        report(diagnostic_kind::invalid_constant_argument, file, span_of(file, a.value),
+               cc::format("{} is no lane of {}, whose lanes are 0 ..< {}", at.value(), out.name_of(vector), lanes));
+    return lane;
 }
 
 type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image)
@@ -931,6 +958,19 @@ swizzle checker::swizzle_of(type_id object, cc::string_view name) const
         result.fields[i] = i8(found);
     }
     return result;
+}
+
+type_id checker::lane_type_of(type_id object) const
+{
+    if (object == error_type || out.at(object).kind != type_kind::structure || !out.at(object).has_swizzles)
+        return type_id::none;
+    auto const fields = out.at(out.at(object).members);
+    if (fields.empty())
+        return type_id::none;
+    for (auto const& f : fields)
+        if (f.type != fields[0].type)
+            return type_id::none;
+    return fields[0].type;
 }
 
 cc::string checker::why_no_swizzle(type_id object, cc::string_view name) const

@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-rendering/shaders/compression/bc.sgl
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-22T05:23Z
+closed: 2026-10-22
+resolution: fixed
 ---
 
 # A vector cannot be subscripted by a value known only at run time

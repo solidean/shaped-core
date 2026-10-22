@@ -660,6 +660,9 @@ struct checker
     [[nodiscard]] cc::string vector_name_of(type_id element, isize count) const;
     /// The swizzle `name` is of a value of `object`, a count of zero where it is none (CHK-385).
     [[nodiscard]] swizzle swizzle_of(type_id object, cc::string_view name) const;
+    /// The type of one lane of `object` where it is a vector a subscript reads a lane of: a swizzled struct whose every
+    /// field has one type (CHK-395); `none` for any other type.
+    [[nodiscard]] type_id lane_type_of(type_id object) const;
     /// What an unknown member of a `@swizzle` struct says about its letters; empty for any other type.
     [[nodiscard]] cc::string why_no_swizzle(type_id object, cc::string_view name) const;
     /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
@@ -882,6 +885,8 @@ struct checker
     /// `img[xy]`, a texel of `image`: the `load` it reads as, or the place an assignment stores to (CHK-367); or the
     /// atomic of an `@atomic` image's texel (CHK-373).
     [[nodiscard]] type_id check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image);
+    /// `v[i]`, one lane of the vector `vector`, of type `lane` (CHK-395).
+    [[nodiscard]] type_id check_lane(function_scope& scope, ast::index const& node, type_id vector, type_id lane);
     /// The `store` of an assignment to the texel `check_texel` left in `texel_place`, with `value` of `type` stored.
     void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
