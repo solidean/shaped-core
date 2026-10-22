@@ -63,13 +63,17 @@ def print_build_failure(results: list[StepResult], presets: list[Preset], root: 
 
 
 def summarize_build(
-    build_steps: list[StepResult], built_files: int, presets: list[Preset]
+    build_steps: list[StepResult], built_files: int, presets: list[Preset], *, targets: int | None
 ) -> None:
-    """Print the success summary for a build phase (callers handle failures)."""
+    """Print the success summary for a build phase (callers handle failures).
+
+    `targets` is how many were asked for, since one step builds them all; None means the whole project.
+    """
     total_s = sum(r.duration_s for r in build_steps)
+    what = f"{targets} target(s)" if targets is not None else "all targets"
     ui.write_line(
         console.green(
-            f"\nBuilt {built_files} file(s) across {len(build_steps)} target(s), "
+            f"\nBuilt {built_files} file(s) for {what}, "
             f"{len(presets)} preset(s) in {fmt_dur(total_s)}."
         ))
 

@@ -88,9 +88,9 @@ Two ninja processes in one build directory oversubscribe the cores and share `.n
 A gate declares `builds=[targets]`; the runner collects every selected gate's targets per preset into one `dev.build` call, and the gates run against a tree that is already built.
 One well-balanced build instead of several fighting ones, the shape the test gate already has.
 
-`dev.build` has `one_step` for exactly this, and only `build --files` uses it.
-`example`, `benchmark` and `test --target` build target by target, so ninja loads the graph once per target and walks each critical path with the rest of the machine idle.
-One step becomes the default, and the itemized per-target mode the opt-in; `build_diag` reads per-compile sidecars, so diagnosis loses nothing.
+`dev.build` had `one_step` for exactly this, and only `build --files` used it.
+`example`, `benchmark` and `test --target` built target by target, so ninja loaded the graph once per target and walked each critical path with the rest of the machine idle.
+Done: one step is the default, and the itemized per-target mode the opt-in; `build_diag` reads per-compile sidecars, so diagnosis loses nothing.
 
 ### `check --push`: pull, check, push, bounded
 
