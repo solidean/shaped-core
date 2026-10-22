@@ -265,6 +265,30 @@ TEST("export - test listing JSON reports eligibility and metadata for every test
     CHECK(entry_named(tests, "gamma")["bucket"].as_string() == "manual");
 }
 
+TEST("export - test listing JSON carries each test's thorough triggers")
+{
+    nx::test_registry reg;
+    reg.add_declaration("plain", {}, [] {});
+    auto triggered = nx::config::cfg{.thorough_only = true};
+    nx::config::rerun_on("libs/base/clean-core/src/clean-core/vector.hh").apply(triggered);
+    nx::config::rerun_on("libs/base/nexus/**").apply(triggered);
+    reg.add_declaration("soak", triggered, [] {});
+
+    char const* const args[] = {"prog"};
+    auto const doc = babel::json::read(nx::write_test_listing_json("s", config_from(args), reg)).value();
+    auto const tests = doc.root()["tests"];
+
+    // A test with no trigger says so with an empty array, so a reader never has to probe for the field.
+    CHECK(entry_named(tests, "plain")["thorough_only"].as_bool(true) == false);
+    CHECK(entry_named(tests, "plain")["rerun_on"].size() == 0);
+
+    auto const soak = entry_named(tests, "soak");
+    CHECK(soak["thorough_only"].as_bool());
+    REQUIRE(soak["rerun_on"].size() == 2);
+    CHECK(soak["rerun_on"][0].as_string() == "libs/base/clean-core/src/clean-core/vector.hh");
+    CHECK(soak["rerun_on"][1].as_string() == "libs/base/nexus/**");
+}
+
 TEST("export - test listing JSON reports aliases and counts a filter-matched alias as eligible")
 {
     nx::test_registry reg;

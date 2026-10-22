@@ -2535,6 +2535,8 @@ cc::shared_async<cc::unit> make_test_node(nx::test_execution* execution,
     auto const& test_config = execution->instance.declaration->test_config;
     CC_ASSERT(test_config.exclusion_tag_count <= nx::config::max_exclusion_tags,
               "a test asked for more exclusion tags than nx::config::max_exclusion_tags holds");
+    CC_ASSERT(test_config.rerun_on_count <= nx::config::max_rerun_on_globs, "a test asked for more rerun_on globs than "
+                                                                            "nx::config::max_rerun_on_globs holds");
 
     cc::vector<cc::async_mutex<cc::unit>*> tag_locks;
     {

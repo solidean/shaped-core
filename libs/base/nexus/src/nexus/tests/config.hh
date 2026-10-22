@@ -54,6 +54,8 @@ namespace nx::config
 // The most exclusion tags one test may carry.
 // A raw array of literals rather than a container: cfg stays trivially copyable, and config.hh stays the light header every test TU includes.
 inline constexpr int max_exclusion_tags = 4;
+// The most rerun_on globs one test may carry, an array for the same reason.
+inline constexpr int max_rerun_on_globs = 4;
 } // namespace nx::config
 
 struct nx::config::cfg
@@ -81,6 +83,12 @@ struct nx::config::cfg
     char const* exclusion_tags[max_exclusion_tags] = {};
     int exclusion_tag_count = 0;
     bool exclusive_global = false; // excludes every other test, not just fellow tag holders
+
+    // Globs over repo-relative paths: a change touching one makes `dev.py check` run this test at full strength.
+    // Opt-in per test and read by dev.py from the test listing, never by the runner itself.
+    // `rerun_on_count` counts what was asked for, like exclusion_tag_count.
+    char const* rerun_on_globs[max_rerun_on_globs] = {};
+    int rerun_on_count = 0;
 
     // Bucket this test's cc::rec events so nx::test_recording() can read them back.
     // OFF by default, because attribution is paid per test whether or not the test ever asks — see
@@ -172,6 +180,29 @@ constexpr struct
 {
     void apply(cfg& result) const { result.thorough_only = true; }
 } thorough_only;
+
+// `dev.py check` runs this test at full strength (--thorough) whenever the change touches `glob`.
+//
+// A repo-relative path or glob, gitignore-shaped: `**` crosses directories, `*` and `?` do not, and a bare path is one file or one tree.
+// Opt-in per test, written by the author who knows what the test is about: a boolean fuzzer names the one file implementing the cut it exercises,
+// a viewer sweep names its surface tree.
+// A thorough test without one is never run by `check`, only by --thorough.
+// `check` refuses a glob matching no tracked file, so a moved file cannot silently disarm the rule.
+// Repeat it for several.
+constexpr auto rerun_on(char const* glob)
+{
+    struct trigger
+    {
+        char const* glob;
+        void apply(cfg& result) const
+        {
+            if (result.rerun_on_count < max_rerun_on_globs)
+                result.rerun_on_globs[result.rerun_on_count] = glob;
+            ++result.rerun_on_count; // counted even when it does not fit, so the overflow is reportable
+        }
+    };
+    return trigger{glob};
+}
 
 // A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.
 // It runs when a filter names it exactly, or when the runner is put in manual mode via --manual.

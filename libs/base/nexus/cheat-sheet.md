@@ -89,6 +89,11 @@ TEST("corpus soak", thorough_only) { }   // skipped (a passing SKIP) unless --th
                                          //   version. Also honoured on an INVOCABLE_TEST, whatever its driver holds
 ```
 
+```cpp
+TEST("corpus soak", thorough_only,                  // `dev.py check` runs this test with --thorough whenever the change
+     rerun_on("libs/x/src/x/cut.cc"))               //   touches the glob; opt-in per test, a glob matching nothing is an error
+```
+
 A flag, not a bucket: the test runs either way, and `manual` is not where a thorough test goes.
 [docs/test-runtime.md](docs/test-runtime.md) has the rules.
 

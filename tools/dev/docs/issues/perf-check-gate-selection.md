@@ -52,7 +52,7 @@ An issue file or a doc selects the prose and reference checks only; `tools/revie
 `--all` and CI run everything, which is where a missing rule is caught.
 Red CI is fixed afterwards by policy, so a slightly higher chance of it is a fair trade for ten minutes per push.
 
-### Default tests are selected from the CMake graph, not from hand-written paths
+### Default tests are selected from the CMake graph, not from hand-written paths (done)
 
 A test binary reruns when any source of any target in its transitive link closure changed.
 The CMake file API lists every target's sources and dependencies, so the rule is exact and never rots.

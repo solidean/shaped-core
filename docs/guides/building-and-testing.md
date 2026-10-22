@@ -495,7 +495,27 @@ Where the tool cannot be built — `SC_BUILD_TOOLS` off, or an emscripten preset
 [adding-a-builtin.md](../../libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md) is what the registry is.
 
 `test` is the slow tail and runs **only after the static checks pass** — no point building a tree that already fails a cheap lint — and `--no-test` skips it.
-It is an `always` gate: which binaries a change selects is its own question, answered inside it.
+It is an `always` gate: which binaries a change selects is its own question, answered inside it from the CMake graph.
+
+**Which test binaries run comes from the CMake File API, not from paths anyone writes down.**
+Every preset is built in full, so a compile break anywhere still fails; the selection is what *runs*.
+A changed file belongs to the targets that list it as a source, or else to every target defined in the deepest directory whose CMakeLists contains it.
+The directory fallback is what catches a shader file or a corpus no target lists.
+The test binaries among those targets' transitive dependents are the ones that run, and the rest are named as skipped.
+A clean-core edit runs everything, a shaped-viewer edit runs its own binary, and a moved file moves in the reply too, so nothing rots.
+
+Two policies in [cmd/check.py](../../tools/dev/cmd/check.py) say what the graph cannot.
+A **build input** (a `CMakeLists.txt`, a `.cmake`, the presets, the harness files that run the tests) feeds every target, so it runs every binary.
+**Prose** (a `.md`, `docs/`, the rest of `dev.py`, the review and issue tools) is read by no test, so it runs none.
+A changed file that is neither and that no target owns runs everything, and the run says which file made it; the rules narrow, they never guess.
+`--all` runs everything.
+
+**A thorough test runs when the change touches what it declared with `rerun_on`.**
+`check` never runs a thorough test on the graph's say-so, since a clean-core edit would then run every thorough test in the repo.
+A test opts in with `nx::config::rerun_on("<glob>")`, written by its author: a fuzzer names the one file implementing what it exercises, a viewer sweep names its surface tree.
+dev.py reads the triggers from each binary's `--list-tests-json` listing, runs the matching tests by name with `--thorough` on the default preset alone, and fails if fewer ran than were selected.
+A glob matching no tracked file is an error, so a moved file cannot silently disarm the rule.
+[test-runtime.md](../../libs/base/nexus/docs/test-runtime.md) has the declaration.
 It builds and runs the suite across five build variants:
 
 - **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and **precompiled headers off**

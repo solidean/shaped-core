@@ -34,7 +34,9 @@ from tools.dev.lib.quality.changes import (  # noqa: E402
     touched_paths,
 )
 from tools.dev.lib.quality.checks import Check, CheckRegistryError  # noqa: E402
+from tools.dev.lib.quality.test_selection import select_test_binaries_for_change  # noqa: E402
 from tools.dev.lib.quality.watch import Watch  # noqa: E402
+from tools.dev.lib.project.graph import TargetGraph  # noqa: E402
 
 VERBOSE = "-v" in sys.argv
 
@@ -234,6 +236,46 @@ def test_a_check_declares_watches_or_always_and_never_both(root: Path) -> None:
         raise AssertionError(f"Check(**{kwargs}) should have raised CheckRegistryError")
     assert Check("a", "", False, run, always=True).touched_by(["p"]) == ["p"]
     assert Check("w", "", False, run, watches=("x/**",)).touched_by(["x/p", "y/p"]) == ["x/p"]
+
+
+def _graph() -> TargetGraph:
+    # core <- geo <- render <- render-test; core-test on core; a shader file under render's directory, no target lists it.
+    g = TargetGraph()
+    g.owners = {"libs/core/src/a.cc": {"core"}, "libs/geo/src/g.cc": {"geo"}, "libs/render/src/r.cc": {"render"},
+                "libs/render/tests/t.cc": {"render-test"}, "libs/core/tests/t.cc": {"core-test"}}
+    g.defined_in = {"libs/core": {"core"}, "libs/core/tests": {"core-test"}, "libs/geo": {"geo"},
+                    "libs/render": {"render", "render-test"}}
+    g.dependents = {"core": {"geo", "core-test"}, "geo": {"render"}, "render": {"render-test"},
+                    "render-test": set(), "core-test": set()}
+    return g
+
+
+def test_target_graph_attributes_by_source_then_by_deepest_directory(root: Path) -> None:
+    g = _graph()
+    assert g.owners_of("libs/core/src/a.cc") == {"core"}
+    assert g.owners_of("libs/render/shaders/x.sgl") == {"render", "render-test"}
+    assert g.owners_of("libs/core/tests/data.bin") == {"core-test"}, "the deepest directory wins"
+    assert g.owners_of("tools/x.py") is None
+    assert g.affected({"core"}) == {"core", "geo", "render", "render-test", "core-test"}
+    assert g.affected({"geo"}) == {"geo", "render", "render-test"}
+
+
+def test_test_selection_narrows_and_never_guesses(root: Path) -> None:
+    g = _graph()
+    cands = ["core-test", "render-test"]
+    inputs = Watch.of(["**/CMakeLists.txt"])
+    prose = Watch.of(["**/*.md", "tools/dev/**"])
+    sel = select_test_binaries_for_change(g, ["libs/geo/src/g.cc"], cands, build_inputs=inputs, prose=prose)
+    assert sel.binaries == ["render-test"] and sel.skipped == ["core-test"] and not sel.everything
+    sel = select_test_binaries_for_change(g, ["docs/a.md", "tools/dev/x.py"], cands, build_inputs=inputs, prose=prose)
+    assert sel.binaries == [] and not sel.everything, "prose selects nothing"
+    sel = select_test_binaries_for_change(g, ["libs/geo/CMakeLists.txt"], cands, build_inputs=inputs, prose=prose)
+    assert sel.everything and sel.binaries == cands and "build input" in sel.reasons[0]
+    sel = select_test_binaries_for_change(g, ["mystery.bin"], cands, build_inputs=inputs, prose=prose)
+    assert sel.everything and "no target owns mystery.bin" in sel.reasons
+    both = Watch.of(["tools/dev/run.py"])
+    sel = select_test_binaries_for_change(g, ["tools/dev/run.py"], cands, build_inputs=both, prose=prose)
+    assert sel.everything, "a build input wins over prose"
 
 
 def test_resolve_range_expands_a_single_commit_to_its_first_parent(root: Path) -> None:

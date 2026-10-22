@@ -54,7 +54,9 @@ from .lib.quality.changes import (
     resolve_range,
     touched_paths,
 )
+from .lib.project.graph import TargetGraph
 from .lib.quality.checks import Check, CheckRegistryError, list_checks, run_checks, select_checks, validate_checks
+from .lib.quality.test_selection import TestSelection, select_test_binaries_for_change
 from .lib.quality.watch import Watch, tracked_files
 from .lib.quality.crossrefs import CrossRefResult, check_crossrefs
 from .lib.quality.format import (
@@ -120,6 +122,9 @@ __all__ = [
     "validate_checks",
     "Watch",
     "tracked_files",
+    "TargetGraph",
+    "TestSelection",
+    "select_test_binaries_for_change",
     "ChangeScope",
     "ChangeScopeError",
     "changed_files",

@@ -12,7 +12,11 @@ import sys
 from pathlib import Path
 
 from tools import dev
-from tools.dev import console
+from tools.dev import Watch, console
+from tools.dev.lib.pipeline.eligibility import nexus_filter, query_listing
+from tools.dev.lib.toolchain import jsruntime as jsr
+
+from .test import THOROUGH_TIMEOUT_FACTOR
 
 from . import args as a
 from . import issues
@@ -364,11 +368,35 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
             print(console.red("No test binaries found (expected '*-test' executables)"), file=sys.stderr)
             return False
 
+        # Everything is built above, so a compile break anywhere still fails here; the selection is what RUNS.
+        candidates = [t.name for t in test_targets]
+        names = _select_test_binaries(ctx, presets[0], scope, candidates)
+        thorough = _thorough_triggers(ctx, presets[0], scope, candidates)
+        if not names and not thorough:
+            dev.ui.write_line("test: no test binary can be affected by this change")
+            return True
+
         records = dev.test(
-            presets, [t.name for t in test_targets], root=ctx.root,
+            presets, names, root=ctx.root,
             test_name=None, timeout=60.0, write_xml=True, mirror=mirror, verbose=verbose,
-        )
-        ok = dev.report.summarize_tests(records, presets, ctx.root, table=False)
+        ) if names else []
+        ok = dev.report.summarize_tests(records, presets, ctx.root, table=False) if names else True
+
+        # The thorough tests the change declared itself about, at full strength and on the default preset alone.
+        # Counted rather than trusted: a filter that matches nothing exits 0, and a renamed test would otherwise pass unrun.
+        for binary, tests in thorough.items():
+            dev.ui.write_line(console.dim(f"test: {binary} --thorough for {len(tests)} test(s) that rerun on this change"))
+            thorough_records = dev.test(
+                presets[:1], [binary], root=ctx.root, test_name=None,
+                extra_args=["--thorough", *(nexus_filter(t) for t in tests)],
+                timeout=60.0 * THOROUGH_TIMEOUT_FACTOR, write_xml=True, mirror=mirror, verbose=verbose,
+            )
+            ran = sum(r["junit"]["tests"] for r in thorough_records if r.get("junit"))
+            if ran < len(tests):
+                dev.ui.write_line(console.red(f"test: {binary} ran {ran} of the {len(tests)} thorough test(s) selected by name"))
+                ok = False
+            ok = dev.report.summarize_tests(thorough_records, presets[:1], ctx.root, table=False) and ok
+            records += thorough_records
 
         # After the verdict, and never part of it: this is a measurement of the run that just happened.
         # `check` is the longest command anyone here runs, and a single total cannot say which preset or which half.
@@ -441,6 +469,75 @@ def _build_checks(ctx: Context) -> list[dev.Check]:
                   "(and where supported, sanitizer) presets",
                   False, check_tests, requires_green=True, always=True),
     ]
+
+
+# A change to one of these feeds every target, so it runs every test binary.
+_BUILD_INPUTS = Watch.of([
+    "**/CMakeLists.txt", "**/*.cmake", "CMakePresets.json", "tools/cmake/**",
+    # The harness files that run the tests, as opposed to the rest of dev.py, which the dev-selftest gate covers.
+    "tools/dev/lib/pipeline/test.py", "tools/dev/cmd/test.py", "tools/dev/cmd/check.py",
+])
+
+# A change to one of these is read by no test, so it runs none.
+# A file under a library that is not listed here still counts as that library, however it is named.
+_PROSE = Watch.of([
+    "**/*.md", "docs/**", ".claude/**", ".github/**",
+    "dev.py", "review.py", "tools/dev/**", "tools/review/**", "tools/issues/**", "tools/lint/**",
+    "**/.shaped-lint.yml", "**/.clang-format", "**/.clang-tidy", ".clangd", ".gitignore", ".gitattributes", ".editorconfig",
+])
+
+
+def _thorough_triggers(ctx: Context, preset: dev.Preset, scope: dev.ChangeScope | None,
+                       candidates: list[str]) -> dict[str, list[str]]:
+    """Per binary, the tests whose `rerun_on` globs the change touched, from each binary's own listing.
+
+    A glob matching no tracked file is an error: the file it named has moved, and the test would otherwise stop running without anyone noticing.
+    A whole-tree scope selects none, since `--thorough` is the spelling for every thorough test.
+    """
+    if scope is None:
+        return {}
+    paths = dev.touched_paths(ctx.root, scope)
+    tracked = dev.tracked_files(ctx.root)
+    targets = {t.name: t for t in ctx.discover(preset)}
+    launcher = jsr.LazyLauncher(None, None)
+    chosen: dict[str, list[str]] = {}
+    dead: list[str] = []
+    for name in candidates:
+        listing = query_listing(preset, targets[name], test_name=None, extra_args=[], root=ctx.root, launcher=launcher)
+        if listing is None:
+            continue
+        for test in listing.tests:
+            globs = list(test.get("rerun_on") or [])
+            if not globs:
+                continue
+            watch = Watch.of(globs)
+            dead += [f"  {name}: {test['name']!r}: {g!r}" for g in watch.dead_patterns(tracked)] if tracked else []
+            if watch.touched_by(paths):
+                chosen.setdefault(name, []).append(str(test["name"]))
+    if dead:
+        ctx.die("check: these rerun_on globs match no tracked file, so the rule is stale:\n" + "\n".join(dead))
+    return chosen
+
+
+def _select_test_binaries(ctx: Context, preset: dev.Preset, scope: dev.ChangeScope | None, candidates: list[str]) -> list[str]:
+    """The test binaries the scope's change can affect, from the preset's target graph; all of them for a whole-tree scope.
+
+    Reports what it skipped and, when it runs everything, which file made it.
+    """
+    if scope is None:
+        return candidates
+    paths = dev.touched_paths(ctx.root, scope)
+    graph = dev.TargetGraph.load(preset.build_dir, preset.build_type, root=ctx.root)
+    selection = dev.select_test_binaries_for_change(graph, paths, candidates, build_inputs=_BUILD_INPUTS, prose=_PROSE)
+    if selection.everything:
+        shown = "; ".join(selection.reasons[:3]) + (" ..." if len(selection.reasons) > 3 else "")
+        dev.ui.write_line(console.dim(f"test: every binary runs: {shown}"))
+    else:
+        dev.ui.write_line(console.dim(
+            f"test: {len(paths)} changed path(s) select {len(selection.binaries)} of {len(candidates)} test binaries"))
+        for name in selection.skipped:
+            dev.ui.write_line(console.dim(f"--- skipped {name} (the change cannot reach it) ---"))
+    return selection.binaries
 
 
 def _build_for_gates(ctx: Context, *, mirror: bool, verbose: bool):
