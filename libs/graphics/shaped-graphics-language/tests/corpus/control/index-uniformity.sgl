@@ -92,7 +92,7 @@ test slot_of(16u) == 15
         let k = draw.slot
         work.results[id.x] = textures.maps[k].load(int2(0, 0))
 
-// a `var` set in only some branches is what differs
+// a `let mut` assigned in only some branches is what differs
 @expect(error = "non-uniform-index")
 @compute(64) fun branch_set_cs(@thread_id id: int3){textures, work, draw}:
     let mut k = draw.slot

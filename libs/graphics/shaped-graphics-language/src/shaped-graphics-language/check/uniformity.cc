@@ -393,7 +393,8 @@ struct uniformity_pass
     {
         auto result = flow_out{.flow = flow};
         s.node.visit(
-            // a `let` is its value where it stands, so it takes no control dependence; a `var` set in some branches does
+            // a `let` is its value where it stands, so it takes no control dependence; a `var`, a `let mut` assigned in
+            // some branches, does
             [&](flat_let const& l) { settle_local(l.local, value(l.value, flow), divergence::none()); },
             [&](flat_var const& v) { settle_local(v.local, value(v.value, flow), flow); },
             [&](flat_assign const& a)
