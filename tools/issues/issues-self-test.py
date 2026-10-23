@@ -147,8 +147,30 @@ def test_claim_refuses_an_issue_check_would_fail(base: Path):
     code, _, err = cli(a, "claim", "feat-ahead")
     assert code == 2 and "refs file src/not-yet.cc, which does not exist" in err and "without the gate" in err, err
     assert git(remote, "rev-parse", "main") == before, "nothing was pushed"
+    # present here but not on the remote: every other checkout would fail the gate, so the claim judges the remote's tree
     write(a / "src/not-yet.cc", "x\n")
     code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 2 and "refs file src/not-yet.cc, which does not exist" in err, err
+    git(a, "add", "src/not-yet.cc")
+    git(a, "commit", "-q", "-m", "the file")
+    code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 2 and "refs file src/not-yet.cc" in err, "committed but not pushed is still missing on the remote"
+    git(a, "push", "-q", "origin", "main")
+    code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 0, err
+
+
+def test_claim_refuses_a_parent_only_this_checkout_has(base: Path):
+    a, _ = setup(base)
+    write(a / "docs/issues/epic-local.md", issue_text("Only here"))
+    assert cli(a, "new", "feat", "child", "--parent", "epic-local")[0] == 0
+    assert cli(a, "check")[0] == 0, "the checkout itself is consistent"
+    code, _, err = cli(a, "claim", "feat-child")
+    assert code == 2 and "parent epic-local does not exist" in err, err
+    git(a, "add", "docs/issues/epic-local.md")
+    git(a, "commit", "-q", "-m", "the epic")
+    git(a, "push", "-q", "origin", "main")
+    code, _, err = cli(a, "claim", "feat-child")
     assert code == 0, err
 
 

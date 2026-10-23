@@ -134,8 +134,9 @@ An issue file not yet committed anywhere is added by its claim commit, so filing
 
 **A claim or release commit is exempt from the pre-push gate**: it changes one issue file, and its push carries nothing else.
 Everything else still goes through the repository's gate.
-**A claim runs `check` on the issue it pushes instead, and refuses on any problem.**
-The usual catch is a `file` ref to code not written yet: claim first without it, and add the ref with the code.
+**A claim runs `check` on the issue it pushes instead, against the remote commit it pushes onto, and refuses on any problem.**
+That commit plus the claim is what every other checkout gets, so an issue or file that exists only locally is missing there.
+The usual catches are a `file` ref to code not written yet, and a `parent` not pushed yet: push those first, or add the ref later.
 
 An agent claims on someone's behalf: `--as "Claude (for <name>)"`.
 `issues release <id>` removes a claim the same way, and `--force` takes over or releases someone else's.
