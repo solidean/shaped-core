@@ -657,7 +657,7 @@ bool oidn_network::execute(sg::command_list& cmd,
                                       .target = output.as_any_image_view()});
 
     // One pass per tile, each writing only its interior.
-    // The tensors are reused across tiles, which is the point: they are sized for one tile and never for the image.
+    // The tensors are reused across tiles, so they are sized for one tile and never for the image.
     for (auto ty = 0; ty < _tile_counts[1]; ++ty)
         for (auto tx = 0; tx < _tile_counts[0]; ++tx)
         {

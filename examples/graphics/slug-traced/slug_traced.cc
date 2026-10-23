@@ -512,7 +512,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
         co_await ctx->epochs_in_flight_completion(2);
         ++frames;
 
-        if (capture.active && frames >= capture.accumulate_frames)
+        if (capture.active && frames >= capture.accumulate)
         {
             auto const writing = sr::write_capture_image_async(*ctx, capture_target, capture.output_path);
             co_await cc::async_settled(writing);

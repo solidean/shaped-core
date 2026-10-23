@@ -394,7 +394,7 @@ TEST("cnet - wake ends a wait that would otherwise sit there")
     r.wake();
 
     auto const before = clk.now_ns();
-    CHECK(r.wait(30000) == 0); // nothing pending, so nothing completes -- the point is that it returns at all
+    CHECK(r.wait(30000) == 0); // nothing pending, so nothing completes -- this checks only that it returns at all
     auto const elapsed_ms = (clk.now_ns() - before) / (1000 * 1000);
 
     // Thirty seconds of slack against an expected zero, so this pins the mechanism without pinning the schedule.

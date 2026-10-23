@@ -7,6 +7,7 @@
 #include <nexus/test.hh>
 #include <versioned-document/incremental_parse.hh>
 #include <versioned-document/op_builder.hh>
+#include <versioned-document/raw_document.hh>
 
 /// The incremental apply, measured against the full re-parse it exists to avoid.
 ///
@@ -167,6 +168,13 @@ namespace
     return vdoc::parse(graph.materialize(at), policy, report);
 }
 
+/// `raw` parsed from scratch, plus the report that goes with it.
+[[nodiscard]] document parse_raw(vdoc::raw_document const& raw, vdoc::parse_policy const& policy, parse_report& report)
+{
+    report.clear();
+    return vdoc::parse(raw, policy, report);
+}
+
 /// Every change the summary names, as a flat sorted list a test can compare.
 [[nodiscard]] cc::vector<cc::string> summary_lines(change_summary const& s)
 {
@@ -211,14 +219,24 @@ TEST("vdoc - a fast apply and a full re-parse agree, over the whole corpus")
     {
         auto const policy = vdoc::default_parse_policy::create_with_registry(registry);
 
-        for (auto const& to : c.ops)
+        auto raws = cc::vector<vdoc::raw_document>();
+        for (auto const& op : c.ops)
+            raws.push_back(c.graph.materialize(op));
+
+        for (auto to_index = isize(0); to_index < c.ops.size(); ++to_index)
         {
+            auto const& to = c.ops[to_index];
             auto const* const o = c.graph.find(to);
             if (o->parents.empty())
                 continue;
 
-            for (auto const& from : c.ops)
+            // the slow path is the one that is right by construction, so it is worth naming
+            auto oracle_report = parse_report();
+            auto const oracle = parse_raw(raws[to_index], policy, oracle_report);
+
+            for (auto from_index = isize(0); from_index < c.ops.size(); ++from_index)
             {
+                auto const& from = c.ops[from_index];
                 if (from == to)
                     continue;
 
@@ -230,19 +248,16 @@ TEST("vdoc - a fast apply and a full re-parse agree, over the whole corpus")
                 auto fast_stats = vdoc::incremental_apply_stats();
                 auto slow_stats = vdoc::incremental_apply_stats();
 
-                auto const fast = vdoc::apply(parse_at(c.graph, from, policy, fast_report), c.graph, from, to, policy,
-                                              fast_report, fast_changes, {}, &fast_stats);
+                auto const fast = vdoc::apply(parse_raw(raws[from_index], policy, fast_report), c.graph, from, to,
+                                              policy, fast_report, fast_changes, {}, &fast_stats);
 
-                auto const slow = vdoc::apply(parse_at(c.graph, from, policy, slow_report), c.graph, from, to, policy,
+                auto const slow = vdoc::apply(parse_raw(raws[from_index], policy, slow_report), c.graph, from, to, policy,
                                               slow_report, slow_changes, {.force_full_reparse = true}, &slow_stats);
 
                 CHECK(same_surface(fast, slow));
                 CHECK(same_diagnostics(fast_report, slow_report));
                 CHECK(!slow_stats.took_fast_path);
-
-                // and the slow path is the one that is right by construction, so it is worth naming
-                auto oracle_report = parse_report();
-                CHECK(same_surface(fast, parse_at(c.graph, to, policy, oracle_report)));
+                CHECK(same_surface(fast, oracle));
 
                 ever_fast = ever_fast || fast_stats.took_fast_path;
                 ever_slow = ever_slow || !fast_stats.took_fast_path;

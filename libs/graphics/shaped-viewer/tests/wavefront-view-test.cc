@@ -1,14 +1,18 @@
 #include "viewer_test_env.hh"
 
 #include <babel-serializer/image/image.hh>
+#include <clean-core/common/macros.hh> // CC_ARCH_ARM64
 #include <clean-core/common/time.hh>
 #include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
+#include <clean-core/record/event_view.hh>
 #include <clean-core/record/log.hh> // CC_LOG_INFO
+#include <clean-core/record/recording.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
+#include <nexus/rec.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-viewer/all.hh>
@@ -19,44 +23,40 @@ using namespace cc::primitive_defines;
 // The wavefront tracer against the megakernel through the whole viewer, on what wavefront-trace-test.cc does not reach:
 // quadrics, which the wavefront intersects in its extend stage and shades with their own kernels, and decals painted at hits.
 //
-// Both captures are means of many frames, compared block by block, so what is left between them is Monte Carlo noise.
+// Both captures are means of the same samples per pixel, compared block by block, so what is left between them is Monte Carlo noise.
 
 namespace
 {
 constexpr auto k_size = tg::vec2i(96, 64);
 constexpr int k_block = 8;
 
-/// Captures the Cornell box with three spheres and a decal on its back wall, traced in `mode` for `accumulate` frames.
-/// PNG, so nothing but the tracer's own noise separates two captures.
-cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode, cc::string const& path, int accumulate)
+/// The Cornell box with three spheres and a decal on its back wall, built once and placed into a view every frame.
+struct parity_scene
 {
-    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
-    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
-    auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
-    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", k_size[0], k_size[1]));
-    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", accumulate));
-    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
+    sv_test::lit_cornell_box lit;
+    sv::drawing square;
+    sv::camera camera;
 
-    auto const box = sv_test::make_cornell_box();
-    auto const mesh = sv_test::as_mesh("cornell box", box.positions, box.materials);
-
-    auto square = sv::drawing();
-    square.add_fill(sv::path::rectangle(tg::aabb2f(tg::pos2f(-0.3f, -0.3f), tg::pos2f(0.3f, 0.3f))),
-                    {.color = tg::vec4f(1, 0, 0, 1)});
-
-    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
-    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
-
-    auto const loop_start = cc::current_time_steady_secs();
-    for (auto f : sv::interactive(ctx, "sv-test/wavefront-parity"))
+    [[nodiscard]] static parity_scene create()
     {
-        auto view = f.window().view();
-        view.camera(camera);
-        f.register_capture("front", [](sv::capture_context const&) {});
+        auto const box = sv_test::make_cornell_box();
+        // Lit by its own lamp, an emissive mesh, which is the box's only light: both tracers sample it.
+        auto out = parity_scene{.lit = sv_test::as_lit_meshes(box, 4.0f),
+                                .square = sv::drawing(),
+                                .camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)}};
+        out.square.add_fill(sv::path::rectangle(tg::aabb2f(tg::pos2f(-0.3f, -0.3f), tg::pos2f(0.3f, 0.3f))),
+                            {.color = tg::vec4f(1, 0, 0, 1)});
+        out.camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+        return out;
+    }
 
+    /// Places the scene in `view`, traced in `mode`.
+    void place(sv::view_ref view, sv::render_mode mode) const
+    {
+        view.camera(camera);
         auto scene = view.add_scene();
-        scene.add_mesh(mesh);
-        scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(4);
+        scene.add_mesh(lit.enclosure);
+        scene.add_mesh(lit.lamp);
         scene.add_sphere(tg::sphere3f(tg::pos3f(-0.45f, -0.65f, 0.2f), 0.35f));
         scene.add_sphere(tg::sphere3f(tg::pos3f(0.45f, -0.7f, -0.2f), 0.3f));
         scene.add_sphere(tg::sphere3f(tg::pos3f(0.0f, 0.3f, 0.5f), 0.2f));
@@ -67,8 +67,30 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode,
                                  .scale = 1,
                                  .depth = 0.5f});
         scene.settings({.samples_per_pixel = 4, .mode = mode});
+    }
+};
 
-        REQUIRE(cc::current_time_steady_secs() - loop_start < 50.0);
+/// Captures the parity scene traced in `mode` at `accumulate` samples per pixel.
+/// PNG, so nothing but the tracer's own noise separates two captures.
+cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode, cc::string const& path, int accumulate)
+{
+    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
+    auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
+    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", k_size[0], k_size[1]));
+    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, cc::format("{}", accumulate));
+    // A capture that runs first in its process compiles every wavefront kernel cold, which an unoptimized build's SGL
+    // compiler takes about a minute for, before the first of its frames.
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "120");
+
+    auto const scene = parity_scene::create();
+    auto const loop_start = cc::current_time_steady_secs();
+    for (auto f : sv::interactive(ctx, "sv-test/wavefront-parity"))
+    {
+        f.register_capture("front", [](sv::capture_context const&) {});
+        scene.place(f.window().view(), mode);
+
+        REQUIRE(cc::current_time_steady_secs() - loop_start < 110.0);
     }
     co_await cc::async_settled(sv::background_work(ctx));
 }
@@ -96,6 +118,7 @@ cc::shared_async<cc::unit> capture_scene(sg::context& ctx, sv::render_mode mode,
             sum += f64(img.pixels[(y * img.width + x) * img.channels + c]);
     return sum / f64(k_block * k_block);
 }
+
 } // namespace
 
 ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and decals", (sg::context_handle const& ctx_h))
@@ -122,8 +145,9 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
     auto const reference_path = cc::format("{}/sv-parity-megakernel.png", cc::temp_directory_path());
     auto const traced_path = cc::format("{}/sv-parity-wavefront.png", cc::temp_directory_path());
 
-    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 48);
-    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 96);
+    // The same samples per pixel for both, so the noise left between them is the same: 48 megakernel frames of 4.
+    co_await capture_scene(ctx, sv::render_mode::megakernel, reference_path, 192);
+    co_await capture_scene(ctx, sv::render_mode::wavefront, traced_path, 192);
 
     auto const reference = read_png(reference_path);
     auto const traced = read_png(traced_path);

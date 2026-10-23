@@ -207,7 +207,8 @@ template <class RangeT, class CompareF>
     return true;
 }
 
-/// True when `values` is ordered by `compare`. Runs in O(n).
+/// True when `values` is ordered by `compare`.
+/// Runs in O(n).
 template <class RangeT, class CompareF = cc::default_less>
 [[nodiscard]] constexpr bool is_sorted(RangeT&& values, CompareF&& compare = {})
 {

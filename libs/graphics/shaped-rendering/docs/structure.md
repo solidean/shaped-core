@@ -31,7 +31,7 @@ This is where the graphics family meets the operating system.
 sr::window_system      [done]  platform init + the event pump; creates windows; main-thread bound, one per process
 sr::window             [done]  one OS window: native handle, pixel size, minimized state, latched close request
 multiple windows       [done]  per-window state and id-keyed dispatch; wsys->windows() enumerates them
-sr::input_event        [done]  keyboard (physical + character), text/IME, mouse move/button/wheel, relative mode
+sr::input_event        [done]  keyboard (physical + character), text/IME, mouse move/button/wheel, file drops, relative mode
                                one globally-ordered stream per frame, drained through wsys->events()
 sr::cursor_shape       [done]  the pointer's shape, set on the system (process-global, like the platform's)
 clipboard              [done]  get/set text on the system clipboard

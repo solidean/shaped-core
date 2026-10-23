@@ -3,13 +3,11 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <nexus/test.hh>
 
-#if CC_HAS_THREADS
-#include <thread>
-#endif
 
 // The registry is what a threadless build's blocking waits rely on, so the invariants pinned here are the ones a
 // deadlock would violate: a sweep reaches everybody, it never re-enters a pump, and a registration that dies stops
@@ -193,7 +191,7 @@ struct counting_actor : cc::threaded_actor_impl<int>
 
 TEST("cc::threaded_actor - an unthreaded actor is driven without being named", main_thread, exclusive())
 {
-    // The whole point of the registry: nothing here mentions the actor, and its message still gets dispatched.
+    // Nothing here mentions the actor, and the registry still gets its message dispatched.
     auto const baseline = cc::registered_thread_pump_count();
     auto actor = cc::make_threaded_actor<counting_actor>();
     actor->start(cc::threaded_actor_mode::unthreaded);
@@ -311,7 +309,7 @@ TEST("cc::thread_pump_all - a thread parked in a pool never runs a pump", main_t
         });
 
     // Delivered from a thread of its own, and announced, so a pool that swept on a pump signal would have its chance.
-    auto poster = std::thread(
+    auto poster = cc::native_thread::start(
         [&]
         {
             cc::thread_pump_notify();
@@ -343,7 +341,7 @@ TEST("cc::threaded_actor - a post to an unthreaded actor wakes a blocking drive 
     actor->start(cc::threaded_actor_mode::unthreaded);
 
     auto const reply = cc::make_async_manual<int>();
-    auto poster = std::thread([&] { (void)actor->enqueue_message(echo{.value = 41, .reply = reply}); });
+    auto poster = cc::native_thread::start([&] { (void)actor->enqueue_message(echo{.value = 41, .reply = reply}); });
 
     auto driver = cc::singlethreaded_scheduler();
     auto const scope = cc::async_worker_scope(driver);

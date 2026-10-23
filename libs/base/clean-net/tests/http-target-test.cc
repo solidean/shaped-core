@@ -108,7 +108,7 @@ TEST("cnet - a redirect is followed by resolving against the URL that was reques
 {
     auto const target = http_target::parse("https://example.com/a/b?q=1").value();
 
-    // The whole point of keeping the cc::uri rather than only its pieces: RFC 3986 reference resolution is what a
+    // The target keeps the cc::uri rather than only its pieces because RFC 3986 reference resolution is what a
     // Location header needs, and it is not something worth writing twice.
     auto const relative = target.url.resolve("../c").value();
     auto const followed = http_target::from_uri(relative).value();

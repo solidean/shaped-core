@@ -480,7 +480,7 @@ Per the repo's living-libraries rule, what belongs lower than sv:
   This is also what unblocks babel's own `load_mesh`.
 - **`tg::aabb3f` from glTF accessor bounds.**
   babel now answers it: `doc.bounds_of(accessor)` returns the stated bounds as a `tg::aabb3f`.
-  `min_of` / `max_of` hand back untyped spans today, and this design makes the typed box load-bearing.
+  `min_of` / `max_of` hand back untyped spans today, and this design relies on the typed box.
 - **A virtual filesystem in clean-core.** Our resolver hook is a deliberate intermediate for it.
 - **An mmap-backed `cc::pinned_data`.**
   The other half of babel's zero-copy story, and what would make a large `.glb` touch its vertex bytes only when read.

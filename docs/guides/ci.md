@@ -99,8 +99,8 @@ If SDL ever demands another, the error names the package group — the authorita
 
 Without them nothing breaks: [extern/sdl3](../../extern/sdl3/CMakeLists.txt) checks first and bows out, and
 `SC_HAS_SDL3` reports OFF so the rest of sr still builds.
-That is the point of installing them — otherwise the window and input tests would silently vanish from the
-Linux runs rather than fail, which is the worst of both.
+Installing them keeps the window and input tests in the Linux runs; without them those tests would silently
+vanish rather than fail, which is the worst of both.
 
 The same applies to a developer machine: a Linux checkout without those packages configures and builds fine,
 it just has no `sr::window`.

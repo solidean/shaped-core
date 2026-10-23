@@ -709,7 +709,7 @@ The item needed to say the templated version must keep passing the index.
 **The failure is counting from a grep's output rather than from the set the claim is about** — comments, files outside the population, the same file twice.
 One draft carried three wrong counts, and the argument each supported was correct all three times; the finding survives, the credibility does not.
 **Either enumerate the set in the comment, or drop the number.**
-A list of nine paths is checkable and self-correcting while you write it; where a count really is the point, produce it with a command whose output you paste.
+A list of nine paths is checkable and self-correcting while you write it; where the reader needs the count itself, produce it with a command whose output you paste.
 
 ### A number carried out of its source is restated as the quantity it measures
 

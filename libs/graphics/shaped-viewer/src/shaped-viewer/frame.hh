@@ -2,6 +2,7 @@
 
 #include <clean-core/common/utility.hh> // cc::move, for the frame a frame_scope adopts
 #include <clean-core/container/set.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/format.hh>
@@ -86,7 +87,7 @@ public:
     ///
     /// This is the part of "is the image finished" that accumulation cannot see.
     /// Such work changes a texture's contents rather than its id, so it never restarts a view's accumulation:
-    /// a caller waiting for a settled image has to watch this, `streaming_resources` AND `view_ref::accumulated_frames`.
+    /// a caller waiting for a settled image has to watch this, `streaming_resources` AND `view_ref::is_accumulation_converged`.
     [[nodiscard]] isize pending_resource_work() const;
 
     /// How many payloads are still streaming in — geometry, attributes, textures.
@@ -95,6 +96,11 @@ public:
     /// Landing restarts the accumulation, but an image can converge over the stand-ins before that, so a caller waiting
     /// for the finished image has to see this reach 0 as well.
     [[nodiscard]] isize streaming_resources() const;
+
+    /// What the user did since the previous frame, oldest first — every event, including those the built-in camera controllers already acted on.
+    /// Empty on a headless viewer, which polls nothing.
+    /// The span and the text inside it live until the next frame is acquired.
+    [[nodiscard]] cc::span<sr::input_event const> input_events() const;
 
     /// `sv::background_work` for the context this viewer draws on.
     /// What it covers follows the viewer's internals, which is why it says only "done" and never what the work was.

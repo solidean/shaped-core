@@ -248,7 +248,7 @@ public:
     // Every resource this list has tracked, so submit can finalize each slot and drop can discard it.
     // Public so the context can walk it at submit; deduplicated by mark_recorded.
     //
-    // Owning, and that is the point: a transient resource is released the moment its handle leaves scope, which for
+    // Owning, because a transient resource is released the moment its handle leaves scope, which for
     // a per-frame depth buffer is normally before the list is submitted.
     // The per-slot access state lives on the resource, so finalize would then run on a freed object.
     cc::vector<vulkan_buffer_handle> _touched_buffers;

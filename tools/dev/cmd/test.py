@@ -173,7 +173,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             ctx.die(diag)
 
     # Repeat runs the SAME selection again — build and discovery above happen once, so an iteration costs only the binaries.
-    # It stops at the first failure rather than tallying a rate: the run that failed is then the one whose logs and XML are still on disk, which is the whole point.
+    # It stops at the first failure rather than tallying a rate, so the run that failed is the one whose logs and XML are still on disk.
     repeat = max(1, args.repeat)
     for iteration in range(1, repeat + 1):
         if repeat > 1:

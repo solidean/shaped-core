@@ -26,7 +26,7 @@ one draw per triangle item ─▶ environment where nothing was drawn
   Only the pass's own depth is reversed: `primary_depth` stays `1 - near / depth`, so nothing that reads it changes.
 - **The environment** is a fullscreen pass on the far plane, at depth 0 and tested `greater_equal`, so it lands only where no surface was drawn.
 - **Every frame is final.**
-  The layer's accumulation slot is set to `accumulation_frame_cap` the frame it lands, so `view_ref::is_accumulation_converged` holds at once and a capture finishes on its first drawn frame.
+  The layer's accumulation slot holds `accumulation_sample_cap` samples the frame it lands, so `view_ref::is_accumulation_converged` holds at once and a capture finishes on its first drawn frame.
   A frame drawn through a stand-in for a material still compiling is not final: it restarts next frame, as a trace with such a stand-in does.
   A stand-in for a material that failed for good is final, since it is the image the layer will keep drawing.
 - **Nothing denoises.** `render_settings::reconstruct` is ignored, and neither the denoised slot nor the frame-samples slots are declared.
@@ -74,6 +74,7 @@ A generated load names the group that holds its sampler, a raster pipeline binds
 Everything after the material is shared code too:
 
 - `openpbr.shading_frame` builds the shading frame — authored frame, normal map, anisotropy, coat normal — for a hit and a pixel alike; it was lifted out of `tracer.shade_sampled` for this.
+  It turns an authored frame to the side the turned geometric normal is on, and leans a normal the viewer is behind, or barely sees, toward the viewer.
 - `openpbr.bsdf_prepare` and `openpbr.bsdf_eval` are the closure and its evaluation.
 - `tracer.decal_reach` and `tracer.paint_decal_shape` paint the decals; `tracer.apply_decals` and `raster.apply_decals` are the two loops over them.
 - The face normal is the triangle's own, from its corners, turned toward the viewer as `tracer.shade_triangle` turns it.

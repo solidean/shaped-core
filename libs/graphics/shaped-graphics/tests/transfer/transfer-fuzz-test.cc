@@ -21,7 +21,7 @@ using namespace cc::primitive_defines;
 // The `trace` below drops its open command list in its destructor and move-assignment, so the engine's discarded replays never leak a list onto the shared context.
 // The ops that wait for the GPU are async ops, awaited by the engine one step at a time, so nothing here blocks.
 //
-// The full search is a thorough-run cost: on vulkan nearly all of it is synchronization validation, which is the point of running it there.
+// The full search is a thorough-run cost: on vulkan nearly all of it is synchronization validation, which is what it runs there for.
 // A default run narrows the seed count instead of dropping the layer, so every backend still sees random op sequences under its own checks.
 
 ASYNC_INVOCABLE_TEST("sg - upload download fuzz test", (sg::context_handle const& ctx))

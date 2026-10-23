@@ -14,7 +14,7 @@ refs:
 `flush_barriers` emits on whichever encoder is open, clamped to the stages that encoder accepts, and every encoder publishes its work as it closes.
 So a dependency crossing an encoder boundary is carried by that publish plus the queue wait the next encoder opens with, rather than by the encoder-scoped barrier that cannot reach across one.
 
-**What is not established is that the pair is load-bearing.**
+**What is not established is that the pair is needed.**
 `sg metal - a draw reads the vertex buffer a dispatch in the same list wrote` covers the path and passes with the publish removed.
 A four-thread dispatch finishes well before the pass it precedes on an M4.
 A test that would catch the ordering needs a dispatch long enough to lose the race, which trades a sharp test for a slow one.

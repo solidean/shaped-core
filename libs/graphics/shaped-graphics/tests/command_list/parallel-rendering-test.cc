@@ -3,11 +3,12 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 
@@ -83,11 +84,11 @@ ASYNC_INVOCABLE_TEST("sg - command lists recorded in parallel render to shared t
                                                              .height = k_extent,
                                                              .usage = sg::texture_usage::depth_stencil});
 
-        auto threads = cc::vector<std::thread>::create_with_capacity(k_threads);
+        auto threads = cc::vector<cc::native_thread>::create_with_capacity(k_threads);
         cc::atomic<int> ready = 0;
         cc::atomic<int> failed_creates = 0;
         for (auto i = 0; i < k_threads; ++i)
-            threads.emplace_back(
+            threads.push_back(cc::native_thread::start(
                 [&, i]
                 {
                     auto cmd = ctx->create_command_list();
@@ -100,7 +101,7 @@ ASYNC_INVOCABLE_TEST("sg - command lists recorded in parallel render to shared t
                     // Lined up, so the threads reach the shared targets' first view of the epoch together.
                     ++ready;
                     while (ready.load() < k_threads)
-                        std::this_thread::yield();
+                        cc::this_thread_yield();
 
                     {
                         auto pass = cmd->raster.render_to(
@@ -117,7 +118,7 @@ ASYNC_INVOCABLE_TEST("sg - command lists recorded in parallel render to shared t
                         ctx->drop_command_list(cc::move(cmd));
                     else
                         (void)ctx->submit_command_list(cc::move(cmd));
-                });
+                }));
         for (auto& t : threads)
             t.join();
         REQUIRE(failed_creates.load() == 0).context(cc::format("frame {}", frame));

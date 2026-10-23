@@ -42,7 +42,7 @@ from sgl_description import MODULE as SGL_MODULE, SGL_STAGES, DescriptionError, 
 import sgl_host_code  # noqa: E402
 
 # How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
-# initializer has to follow the declaration order, so the order here is load-bearing.
+# initializer has to follow the declaration order, so the order here is fixed.
 SAMPLER_FIELDS: tuple[tuple[str, str], ...] = (
     ("min_filter", "sg::sampler_filter::{}"),
     ("mag_filter", "sg::sampler_filter::{}"),

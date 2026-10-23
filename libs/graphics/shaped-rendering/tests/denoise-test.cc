@@ -293,7 +293,7 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member",
     CHECK(support.svgf);
     CHECK(sr::resolve_denoise_method(ctx, on_a_mean, sr_test::every_guide()) == sr::denoise_method::atrous);
 
-    // WHICH temporal member depends on the machine, which is the whole point of `automatic`: a vendor member outranks
+    // WHICH temporal member `automatic` picks depends on the machine: a vendor member outranks
     // the native one where its SDK was fetched and the adapter carries it, and svgf is what everything else gets.
     // Asserting `svgf` outright would have been a test that passes only where no vendor member is present.
     //

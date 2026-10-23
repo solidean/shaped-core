@@ -847,7 +847,8 @@ def cmd_close(ws: Workspace, args: argparse.Namespace) -> int:
         raise IssueError("--date is yyyy-mm-dd")
     year, month = date[:4], date[5:7]
     new_path = issue.repo.root / issue.scope / "docs" / "issues" / "closed" / year / month / f"{issue.id}.md"
-    _move(ws, issue, new_path, {"closed": date, "resolution": args.resolution})
+    # The claim ends with the work: a closed issue still carrying one is the leftover the guide tells people to clear.
+    _move(ws, issue, new_path, {"closed": date, "resolution": args.resolution, "claimed-by": None, "claimed-at": None})
     print(f"closed {issue.qid} as {args.resolution}: {ws.show_path(new_path)}")
     print("commit it together with the change that resolves it", file=sys.stderr)
     return 0
@@ -930,7 +931,9 @@ def _check_issue(ws: Workspace, issue: Issue) -> list[tuple[int, str]]:
         if kind == "file" and not issue.closed:
             rel, first, last = _file_ref(value)
             target = issue.repo.root / rel
-            if not target.exists():
+            # A path git ignores is fetched or generated, so it may be absent on this machine and present on the next.
+            ignored = not target.exists() and _git(issue.repo.root, "check-ignore", "-q", rel, check=False).returncode == 0
+            if not target.exists() and not ignored:
                 problems.append((line("refs"), f"refs file {rel}, which does not exist"))
             elif first is not None:
                 count = len(target.read_text(encoding="utf-8", errors="replace").splitlines()) if target.is_file() else 0

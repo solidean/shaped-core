@@ -643,6 +643,15 @@ void window_system::poll_events()
             break;
         }
 
+        // SDL owns the path only until the next pump, so it is copied rather than referenced.
+        // A drop of text rather than a file is SDL_EVENT_DROP_TEXT, which nothing asks for yet.
+        case SDL_EVENT_DROP_FILE:
+            if (event.drop.data != nullptr)
+                _events.push_back({.window = window_from_id(event.drop.windowID),
+                                   .payload = file_drop_event{.path = cc::string(event.drop.data),
+                                                              .cursor_pos = tg::pos2f(event.drop.x, event.drop.y)}});
+            break;
+
         case SDL_EVENT_QUIT:
             _is_quit_requested = true;
             // A system quit is a request to close everything.

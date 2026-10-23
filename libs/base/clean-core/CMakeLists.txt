@@ -36,6 +36,7 @@ add_library(clean-core
     src/clean-core/platform/stack_capture.cc
     src/clean-core/platform/stacktrace.cc
     src/clean-core/platform/module_table.cc
+    src/clean-core/platform/source_location.cc
     src/clean-core/platform/symbolize.cc
     src/clean-core/platform/impl/text_file.cc
     src/clean-core/platform/impl/wasm_frames.cc
@@ -92,6 +93,7 @@ add_library(clean-core
     src/clean-core/container/byte_stream_builder.cc
     src/clean-core/container/key_value_cache.cc
     src/clean-core/thread/thread.cc
+    src/clean-core/thread/native_thread.cc
     src/clean-core/thread/threaded_actor.cc
     src/clean-core/thread/thread_pump.cc
     src/clean-core/thread/async_parker.cc
@@ -283,6 +285,7 @@ target_sources(clean-core
     src/clean-core/thread/atomic.hh
     src/clean-core/thread/mutex.hh
     src/clean-core/thread/thread.hh
+    src/clean-core/thread/native_thread.hh
     src/clean-core/thread/thread_pump.hh
     src/clean-core/thread/threaded_actor.hh
     src/clean-core/thread/async_node.hh
@@ -336,7 +339,7 @@ if(SC_MIMALLOC)
     target_link_libraries(clean-core PRIVATE mimalloc)
 endif()
 
-# std::thread / pthread_setname_np (cc::threaded_actor, cc::set_current_thread_name) need the
+# pthread_create / pthread_setname_np (cc::native_thread, cc::set_current_thread_name) need the
 # platform threads library on POSIX; a no-op on Windows. PUBLIC so consumers link it transitively.
 find_package(Threads REQUIRED)
 target_link_libraries(clean-core PUBLIC Threads::Threads)
@@ -390,10 +393,15 @@ if(NOT DEFINED SC_THREADS)
     set(SC_THREADS ON)
 endif()
 
+# SC_SOURCE_SITES is the root CMakeLists' option, defaulted the same way for a standalone consumer.
+if(NOT DEFINED SC_SOURCE_SITES)
+    set(SC_SOURCE_SITES FULL)
+endif()
+
 # Define build configuration macros. These are the inputs macros.hh derives from; it owns the outputs
 # (CC_ASSERT_ENABLED, CC_HAS_THREADS). PUBLIC because they must agree across the whole build: consumers
 # branch on them, and CC_SINGLE_THREADED additionally changes struct layout (node_allocation's slab header),
-# so a target compiled without it could not share objects with one compiled with it.
+# so a target compiled without it could not share objects with one compiled with it; so does SC_SOURCE_SITES, cc::source_location's.
 target_compile_definitions(clean-core
     PUBLIC
     $<$<CONFIG:Debug>:CC_DEBUG>
@@ -402,6 +410,8 @@ target_compile_definitions(clean-core
     $<$<NOT:$<BOOL:${SC_THREADS}>>:CC_SINGLE_THREADED>
     $<$<NOT:$<BOOL:${SC_MIMALLOC}>>:CC_NO_MIMALLOC>
     $<$<BOOL:${SC_FRAME_POINTERS}>:CC_FRAME_POINTERS>
+    $<$<STREQUAL:${SC_SOURCE_SITES},OPAQUE>:CC_SOURCE_SITES_OPAQUE>
+    $<$<STREQUAL:${SC_SOURCE_SITES},OFF>:CC_SOURCE_SITES_OFF>
 )
 
 # Detect and link the correct library for std::stacktrace support.
@@ -555,6 +565,7 @@ if(SC_BUILD_TESTS)
         tests/platform/wasm-frames-test.cc
         tests/platform/stacktrace-test.cc
         tests/platform/symbolize-test.cc
+        tests/platform/source_location-test.cc
         tests/platform/system_info-test.cc
         tests/platform/cpu_features-test.cc
         tests/platform/system_identifier-test.cc
@@ -670,6 +681,7 @@ if(SC_BUILD_TESTS)
         tests/thread/atomic-test.cc
         tests/thread/chase_lev_deque-test.cc
         tests/thread/mutex-test.cc
+        tests/thread/native_thread-test.cc
         tests/thread/thread-test.cc
         tests/thread/thread_pump-test.cc
         tests/thread/threaded_actor-test.cc

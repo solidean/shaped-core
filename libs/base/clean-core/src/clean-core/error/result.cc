@@ -1,8 +1,20 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/platform/native.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/to_debug_string.hh>
 #include <clean-core/string/to_string.hh>
 
+namespace
+{
+/// `file:line - function` at FULL, as it always read; below it, what the level kept of the site.
+cc::string site_text(cc::source_location const& s)
+{
+    if constexpr (CC_SOURCE_SITES == 2)
+        return cc::format("{}:{} - {}", s.file_name(), s.line(), cc::demangle_symbol(s.function_name()));
+    else
+        return cc::describe_site(s);
+}
+} // namespace
 
 struct cc::any_error::context_node
 {
@@ -126,11 +138,7 @@ cc::string cc::any_error::to_string() const
     {
         auto const s = _payload->site;
         result += "  at ";
-        result += s.file_name();
-        result += ":";
-        result += cc::to_string(s.line());
-        result += " - ";
-        result += cc::demangle_symbol(s.function_name());
+        result += site_text(s);
         result += "\n";
     }
 
@@ -144,11 +152,7 @@ cc::string cc::any_error::to_string() const
             result += "  context: ";
             result += ctx_ptr->message;
             result += " (at ";
-            result += s.file_name();
-            result += ":";
-            result += cc::to_string(s.line());
-            result += " - ";
-            result += cc::demangle_symbol(s.function_name());
+            result += site_text(s);
             result += ")\n";
 
             ctx_ptr = ctx_ptr->next.is_valid() ? ctx_ptr->next.ptr : nullptr;

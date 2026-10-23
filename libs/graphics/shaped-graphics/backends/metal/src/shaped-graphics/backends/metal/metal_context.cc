@@ -3,13 +3,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/exceptions.hh>
-
-#include <thread>
 
 namespace sg::backend::metal
 {
@@ -31,7 +30,7 @@ metal_context::metal_context(MTL::Device* device,
     _feedback = std::make_shared<metal_feedback_sink>(*this);
 
     // The listener the completion-signal waiter arms its notifications on.
-    // Its default queue is Apple's, which is the point: a handler must run even in a build with no threads of ours.
+    // Its default queue is Apple's, so a handler runs even in a build with no threads of ours.
     _completion.listener = MTL::SharedEventListener::alloc()->init();
 }
 
@@ -610,7 +609,7 @@ void metal_context::block_until_transfers_drained()
         while (still_pending())
         {
             if (!cc::thread_pump_all())
-                std::this_thread::yield();
+                cc::this_thread_yield();
         }
     };
 

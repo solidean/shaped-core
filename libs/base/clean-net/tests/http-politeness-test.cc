@@ -55,7 +55,7 @@ bool pump_for(cc::function_ref<bool()> done, f64 budget_secs = 5.0)
 
 /// Give something a chance to happen, for a test that expects it not to.
 ///
-/// A round count is right here: the point is to hand the machinery every opportunity and then assert nothing moved.
+/// A round count is right here, because the test hands the machinery every opportunity and then asserts nothing moved.
 bool pump_briefly(cc::function_ref<bool()> done, i32 rounds = 200)
 {
     CC_RECORD_SCOPE("cnet_test.pump_briefly");
@@ -72,7 +72,7 @@ bool pump_briefly(cc::function_ref<bool()> done, i32 rounds = 200)
 
 /// A client that answers from a script and counts what it was asked.
 ///
-/// It never touches a connection, which is the point: politeness and retries are policy, and this is what policy
+/// It never touches a connection, because politeness and retries are policy, and this is what policy
 /// looks like with the protocol taken away.
 struct scripted_client final : http_client
 {

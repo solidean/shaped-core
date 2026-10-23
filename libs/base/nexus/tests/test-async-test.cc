@@ -92,7 +92,7 @@ TEST("async test - a graph that resolves to an error fails the test, without pro
     CHECK(exec.orphan_checks == 0);
 
     // The wrapper resolves to a VALUE whatever the graph did, so the failure stays this test's.
-    // ../docs/parallel-execution.md has why that is load-bearing rather than tidiness.
+    // ../docs/parallel-execution.md has why that is for correctness, not tidiness.
     auto const& errors = exec.executions[0].root.errors;
     REQUIRE(errors.size() >= 1);
     CHECK(errors[0].expanded.contains("deliberate"));

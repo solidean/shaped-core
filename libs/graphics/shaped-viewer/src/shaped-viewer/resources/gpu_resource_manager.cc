@@ -340,7 +340,7 @@ void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_re
 
     // The bytes are the epoch's, the buffer is not.
     // In the steady state they come out identical, and skipping the copy is what keeps the upload path quiet — the buffer's
-    // own descriptor never moves either way, which is the part that matters for the group's snapshot.
+    // own descriptor never moves either way, so the group's snapshot stays valid.
     auto const unchanged = bytes.size() == r.uploaded.size()
                         && (bytes.empty() || cc::memcmp(bytes.data(), r.uploaded.data(), size_t(bytes.size())) == 0);
     if (!bytes.empty() && !unchanged)
@@ -384,7 +384,7 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
             .is_indexed = 0u,
             .link_mask = ~0u,
             .shade_group = 0,
-            .pad = 0};
+            .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 }
 
 shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
@@ -413,7 +413,7 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
                 .is_indexed = (!pending && m.is_indexed) ? 1u : 0u,
                 .link_mask = ~0u,
                 .shade_group = 0,
-                .pad = 0};
+                .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 
     _upload_parameters(cmd, r);
 
@@ -426,7 +426,7 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
             .is_indexed = m.is_indexed ? 1u : 0u,
             .link_mask = ~0u,
             .shade_group = 0,
-            .pad = 0};
+            .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 }
 
 bool gpu_resource_manager::attributes_resident(instance_id instance)
@@ -637,7 +637,8 @@ sv::resident_mesh const& gpu_resource_manager::create_mesh(sv::mesh const& data)
                                 .bounds = box,
                                 .triangle_count = data.geometry.triangle_count(),
                                 .vertex_count = data.geometry.vertex_count()},
-                  .content = content};
+                  .content = content,
+                  .item = {}};
 
     data.cache.ready = _is_resident(data.cache.resources);
     return data.cache.resources;
@@ -662,7 +663,22 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::resident_mesh const& mes
 
 scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
 {
-    return acquire_scene_item(create_mesh(mesh));
+    auto const& resident = create_mesh(mesh);
+
+    // `create_mesh` mints the slot anew when an id it names or the content behind one changes, which drops the item with it.
+    // It re-reads the material in place, so the material is the one key checked here.
+    auto& slot = mesh.cache;
+    if (slot.item.has_value() && slot.item_material == resident.material)
+    {
+        auto item = slot.item.value();
+        item.transform = resident.transform;
+        return item;
+    }
+
+    auto const item = acquire_scene_item(resident);
+    slot.item = item;
+    slot.item_material = resident.material;
+    return item;
 }
 
 scene_item gpu_resource_manager::acquire_scene_item(sv::resident_quadric_set const& set)

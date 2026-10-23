@@ -55,7 +55,9 @@ struct check_capture_sink
     cc::string first_message;    // expanded message of the first failure, if any
 };
 
-// RAII installer for a capture sink (thread-local, one active at a time).
+// RAII installer for a capture sink, thread-local, capturing only the checks of the test that installed it.
+// A thread blocked inside a capture polls other work, another test's body among it; that body's checks reach its own test.
+// Such a body may install a capture of its own, which replaces this one until it ends.
 struct scoped_check_capture
 {
     explicit scoped_check_capture(check_capture_sink& sink);
@@ -65,6 +67,10 @@ struct scoped_check_capture
     scoped_check_capture& operator=(scoped_check_capture const&) = delete;
     scoped_check_capture(scoped_check_capture&&) = delete;
     scoped_check_capture& operator=(scoped_check_capture&&) = delete;
+
+private:
+    check_capture_sink* _previous_sink = nullptr;
+    void const* _previous_owner = nullptr;
 };
 
 // Forward declarations

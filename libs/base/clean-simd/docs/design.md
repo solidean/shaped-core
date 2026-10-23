@@ -1,7 +1,6 @@
 # clean-simd design
 
 The decisions behind clean-simd, each with the reason it was taken and what would reopen it.
-clean-simd is the successor of ember-core's shaped-simd; where a decision reverses one of shaped-simd's, the entry says so.
 
 ## The driving consumer
 
@@ -25,7 +24,7 @@ It names the best kernel the TU's flags allow, and there is no default argument:
 On clang and GCC an intrinsic compiles only in a function whose target includes its ISA.
 A template instantiation takes its target from where the template is *defined*, not from where it is called.
 So each kernel's generated header is guarded by `CIMD_HAS_<KERNEL>`, and naming an unavailable kernel is a `static_assert` in the primary template.
-MSVC accepts any intrinsic anywhere, which is how shaped-simd looked portable from Windows: it forced `-mavx2` PUBLIC on every consumer, which defeated its own template parameter.
+MSVC accepts any intrinsic anywhere, so a build on Windows alone does not show a kernel compiled outside its target.
 
 ## Runtime dispatch
 
@@ -127,7 +126,6 @@ A mask has `& | ^ ~`, `select`, `bits`, `any`, `all`, `none` and `from_bits` —
 That is what lets the `avx512` kernel keep it in a k-register.
 Measured with clang under `-march=x86-64-v4`, `mask.select(v, 0)` compiles to one zero-masked move, while `v & mask` has to rebuild a vector from the k-register first (`vpmovm2d`).
 On AVX2 both are the same `vandps`.
-shaped-simd allowed `value & mask` by bit cast, and porting it means rewriting each such site as a select.
 
 `any()` sits beside `bits()` because NEON has no movemask: `bits()` costs about four instructions there and "any lane set" one `vmaxvq`.
 
@@ -146,7 +144,7 @@ So the generator classes a negated compare by the compare it negates, and `u64 <
 Where a shorter form exists the tables use it instead: unsigned `<=` on x86 is `max(a, b) == b` wherever an unsigned max exists, from SSE2 for 8-bit lanes and SSE4.1 for 16- and 32-bit.
 
 [op-matrix.md](op-matrix.md) is the derived result for every element.
-A hand-written list can drift: shaped-simd's cheat sheet promised an `i64 *` its generator never emitted.
+A hand-written list can drift from what the generator emits.
 
 **Scalars broadcast from exactly the element type.**
 `v * 2.f` works; `v * 2.0` and `f32x8<K>(1)` do not compile, so a `double` never sneaks in as a silent conversion.
@@ -180,7 +178,6 @@ They belong in the register tables like every other operation, which is what wil
 
 `tools/gen-simd.py` writes `src/clean-simd/generated/`, on the pattern of typed-geometry's `gen-fixed-int.py`: a uv script, run by hand, with `--check` wired into `dev.py check`.
 The kernel tables live beside it in `tools/gen_simd/`, one module per instruction-set family.
-shaped-simd's generator was a 5.8k-line Rust crate that nothing checked was current; its intrinsic database is what carried over.
 
 ## Build floors
 

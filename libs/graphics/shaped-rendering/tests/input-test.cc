@@ -36,7 +36,7 @@ TEST("sr - key modifiers combine and test as a bit set", main_thread)
 TEST("sr - window system creation reports whether a backend exists", main_thread, exclusive("sr-window-system"))
 {
     // The API is here either way; only the answer changes.
-    // A caller writes this once and it compiles in both builds, which is the point of not gating the types on SR_HAS_WINDOW.
+    // The types are not gated on SR_HAS_WINDOW, so a caller writes this once and it compiles in both builds.
     auto const created = sr::window_system::try_create({.headless = true});
 
 #if SR_HAS_WINDOW

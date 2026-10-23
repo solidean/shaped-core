@@ -75,7 +75,7 @@ TEST("async-ambient - two consumers compose in one chain")
     cc::async_ambient_scope const outer(tag_a(), &value_a);
     cc::async_ambient_scope const inner(tag_b(), &value_b);
 
-    // The head is inner's, and a lookup for the outer consumer still finds it — that is the whole point of the chain.
+    // The head is inner's, and a lookup for the outer consumer still finds it through the chain.
     CHECK(cc::async_current_ambient() == inner.link());
     CHECK(cc::async_ambient_lookup_ptr(tag_a()) == &value_a);
     CHECK(cc::async_ambient_lookup_ptr(tag_b()) == &value_b);
@@ -437,4 +437,24 @@ TEST("async-ambient - a scheduled-but-undriven node keeps its context alive")
     }
     CHECK(*warm->try_value() == value_a);
     cc::impl::async_ambient_release(held);
+}
+
+// A test body may itself be running inside a poll, so the depths are taken relative to where it starts.
+TEST("async-ambient - poll depth counts the polls a thread is nested in")
+{
+    auto const base = cc::async_poll_depth();
+    CHECK(cc::async_is_polling() == (base > 0));
+
+    auto const inner = cc::make_async_lazy<int>([] { return cc::async_poll_depth(); });
+    CHECK(cc::async_blocking_get(inner) == base + 1);
+
+    // a node blocking inside its own poll drives the next one a level deeper still: how a foreign node lands in a blocked call
+    auto const outer = cc::make_async_lazy<int>(
+        []
+        {
+            auto const nested = cc::make_async_lazy<int>([] { return cc::async_poll_depth(); });
+            return cc::async_blocking_get(nested);
+        });
+    CHECK(cc::async_blocking_get(outer) == base + 2);
+    CHECK(cc::async_poll_depth() == base);
 }

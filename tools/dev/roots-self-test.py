@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.dev.lib.core.layout import ExtraRoot, Layout  # noqa: E402
 from tools.dev.lib.quality.changes import ChangeScope  # noqa: E402
 from tools.dev.lib.quality.crossrefs import check_crossrefs  # noqa: E402
-from tools.dev.lib.quality.format import discover_lint_files, lint_changed_line_ranges  # noqa: E402
+from tools.dev.lib.quality.format import discover_lint_files, lint_changed_line_ranges, prose_only_lint_files  # noqa: E402
 from tools.dev.lib.quality.roots import glob_matches  # noqa: E402
 
 VERBOSE = "-v" in sys.argv
@@ -152,12 +152,16 @@ def test_full_lint_takes_the_selected_kinds_and_prunes_junk(base: Path) -> None:
     assert "extern/api/docs/guide.md" in files, files
     assert "extern/api/src/gen.md" not in files, "excluded by the layout"
     assert "extern/api/build/out.md" not in files, "a junk directory below the root is pruned"
-    assert "extern/api/tool.py" not in files, "`prose` takes markdown alone"
+    assert "extern/api/tool.py" in files, "`prose` takes the comments of code too"
+    assert prose_only_lint_files(w.parent, discover_lint_files(w.parent, scope=None, layout=LAYOUT), layout=LAYOUT), \
+        "and only the prose rules run over them"
 
     code = replace(BASE_LAYOUT, extra_roots=(replace(API, checks=("code",)),))
     files = w.rel(discover_lint_files(w.parent, scope=None, layout=code))
     assert "extern/api/tool.py" in files, files
     assert "extern/api/README.md" not in files, files
+    assert not prose_only_lint_files(w.parent, discover_lint_files(w.parent, scope=None, layout=code), layout=code), \
+        "`code` runs every rule"
 
     assert not any(f.startswith("extern/") for f in w.rel(discover_lint_files(w.parent, scope=None, layout=BASE_LAYOUT)))
 

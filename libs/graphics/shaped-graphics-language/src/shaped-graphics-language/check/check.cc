@@ -263,6 +263,11 @@ cc::optional<f64> impl::parse_plain_float(cc::string_view text)
     return cc::from_string<f64>(plain);
 }
 
+bool impl::is_hex_literal(cc::string_view text)
+{
+    return text.starts_with("0x");
+}
+
 cc::optional<i64> impl::parse_literal_integer(cc::string_view text)
 {
     auto at = isize(0);

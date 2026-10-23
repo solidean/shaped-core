@@ -159,7 +159,8 @@ template <class EnumT, cc::isize Bits>
 struct cc::flags;
 ```
 
-The anchor is the last directive at conditional depth **0**, not the last `#include`. A prologue that opens
+The anchor is the last directive at conditional depth **0**, not the last `#include`.
+A prologue that opens
 `#if CC_HAS_THREADS` and reaches the code without closing it still gets the directive — placed before the
 conditional, where it holds for every configuration rather than for one branch.
 
@@ -196,7 +197,7 @@ void f(cc::u32 x);
 
 ## Negatives — the look-alikes that must stay quiet
 
-The bare spelling is the whole point of the rule.
+The rule fires on the bare spelling only.
 
 ```cpp ~[qualified-primitive]
 namespace cc { void f(u32 a, isize b, byte c, nullptr_t d); }

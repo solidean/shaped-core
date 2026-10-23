@@ -46,7 +46,52 @@ void place_instance_record(shaders::tracer::instance_record& record,
                            material_opacity const& opacity);
 
 static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table has one slot per light_path");
+
+/// The path of an emissive instance's light record, `scene.light_path_mesh`: one past every `light_path`, since no `sv::light` takes it.
+/// Its records stand after every analytic one, from `frame_constants::emitter_offset`.
+inline constexpr u32 light_path_mesh = 4;
+
+namespace impl
+{
+/// Where one permutation's shading stands for the integrator that traces it: its hit group, or its shade kernel.
+enum class permutation_state
+{
+    pending, ///< still compiling; a trace shades through the stand-in meanwhile
+    ready,
+    failed, ///< settled without a value, and will until a reload; a trace shades through the stand-in for good
+};
+
+/// The state of `p`'s hit group, starting its compile if nobody has yet.
+/// The cache hands the node back cold, so polling alone would watch one that never starts.
+/// Started on the context's backlog, since nothing awaits it: `sv::background_work` is what a caller ending a run awaits.
+/// A compile that failed is logged once, since the stand-in that replaces it says nothing of why.
+[[nodiscard]] permutation_state hit_group_state(sg::context& ctx, material_permutation const* p);
+} // namespace impl
+
+/// What an instance record's `emitter` holds where the instance lights nothing, `scene.no_offset`.
+inline constexpr u32 no_emitter = 0xffffffffu;
+
+/// What next-event estimation reads of an emissive instance beyond its light record, `traced.emitters`' element.
+///
+/// `instance` is the instance's row of the instance table, and `cdf` the bindless index of its mesh's area CDF over `triangle_count` triangles in `block_count` blocks.
+/// `emission` is the permutation the instance shades with, whose factors `tracer.emitter_radiance` reads at the sampled point.
+[[nodiscard]] shaders::tracer::emitter_record emitter_record_of(u32 instance,
+                                                                u32 cdf,
+                                                                u32 triangle_count,
+                                                                u32 block_count,
+                                                                material_emission const& emission);
 } // namespace sv
+
+/// How next-event estimation picks among a table's lights.
+enum class sv::light_selection : sv::u8
+{
+    /// Half in proportion to each light's power, and half uniformly over the lights with light to offer.
+    /// Within the power half the distant lights, which have no power, share it half and half with the local ones where both have light.
+    /// The uniform half is what keeps a dim light near a shading point from being starved, since power knows nothing of distance.
+    power,
+    /// Every light alike, which the records say by leaving their selection probabilities 0.
+    uniform,
+};
 
 /// The lights one trace samples, grouped by path — what `pt_trace_desc::lights` holds and the frame block's table indexes.
 ///
@@ -58,14 +103,18 @@ static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table 
 /// carry an index across from one to the other.
 struct sv::pt_light_table
 {
-    /// grouped by path in `light_path` order, each run keeping the order the lights were given in
+    /// Grouped by path in `light_path` order, each run keeping the order the lights were given in.
+    /// The emissive instances' records are last.
     cc::vector<shaders::tracer::light_record> records;
-    u32 path_offset[4] = {};
-    u32 path_count[4] = {};
+    /// Indexed by path, `light_path_mesh` included; the frame block carries the first four, and the fifth's offset as `emitter_offset`.
+    u32 path_offset[5] = {};
+    u32 path_count[5] = {};
 
-    [[nodiscard]] static pt_light_table grouped(cc::span<shaders::tracer::light_record const> lights);
+    /// Also writes each record's selection probability and the cumulative one, in the order the table keeps, or 0 in both for `light_selection::uniform`.
+    [[nodiscard]] static pt_light_table grouped(cc::span<shaders::tracer::light_record const> lights,
+                                                light_selection selection = light_selection::power);
 
-    /// Writes the count and the per-path table into `fc`.
+    /// Writes the count, the per-path table and where the emissive instances' records start into `fc`.
     void describe_in(shaders::tracer::frame_constants& fc) const;
 };
 
@@ -139,6 +188,11 @@ struct sv::pt_trace_desc
     /// The routine binds a zeroed stand-in for it, since a binding cannot be empty.
     sg::buffer<shaders::tracer::light_record> lights;
 
+    /// One record per light of path `light_path_mesh` in `lights`, in their order — `traced.emitters`.
+    /// Null means none, and then `lights` holds no such record; the routine binds a zeroed stand-in.
+    /// Every instance record whose `emitter` names one of them must be the row its `emitter_record::instance` names.
+    sg::buffer<shaders::tracer::emitter_record> emitters;
+
     /// The permutations this trace's instances shade with, one hit group each, in hit-group index order.
     ///
     /// `sg::tlas_instance::hit_group_offset` indexes exactly this list, so the caller has already fixed the order and
@@ -200,11 +254,12 @@ struct sv::pt_trace_desc
 /// A caller's `hit_group_offset` counts two records per permutation and is rewritten to that permutation's row.
 /// A permutation whose hit group has not compiled is substituted by `fallback` or `quadric_fallback`, by its kind.
 ///
-/// The raygen bounces each ray and estimates direct light at every hit by next-event estimation toward two sources: one light,
-/// picked uniformly from the trace's, and the SH environment.
+/// The raygen bounces each ray and estimates direct light at every hit by next-event estimation toward two sources:
+/// one light, picked half by power and half uniformly (`pt_light_table`), and the SH environment.
 /// **Both are gathered by balance-heuristic multiple importance sampling** against the BSDF-sampled bounce ray.
 /// The environment pairs with that ray escaping, a light with it crossing that light, which is analytic and so is intersected
 /// rather than traced.
+/// A bounce ray next-event estimation could not have drawn, one that transmitted or left a medium scatter, takes the full weight.
 /// The light half is what keeps a near-smooth surface usable: light sampling alone has to carry the whole GGX peak there.
 /// `samples_per_pixel` paths per pixel accumulate in one dispatch.
 /// `execute` may build a pipeline, so it takes the exclusive acquire — two traces on one context serialize on this routine.

@@ -451,8 +451,8 @@ public:
     ///
     /// The returned pointer is valid only until the next non-const operation.
     ///
-    /// Try this before materializing, which matters most for a string you only hold by const reference,
-    /// where materializing means copying:
+    /// Try this before materializing; for a string you only hold by const reference,
+    /// materializing means copying:
     ///   if (auto* cstr = str.c_str_if_terminated())
     ///       some_c_function(cstr);
     ///   else

@@ -118,9 +118,14 @@ It established three of the rules in [coding-guidelines.md](coding-guidelines.md
   It chose OpenPBR over metallic-roughness precisely because those five land on `transmission_*`, `coat_*` and `fuzz_*` natively.
   None of them cross today, so that payoff is unrealised and every sv import says so in its issues.
   Typed fields on `material` rather than raw JSON, since the set is small, stable and specified.
-- `[planned]` **extensions / extras raw access** — a `read_options{ bool keep_json_document; }` plus an optional `json::document` member and a per-object `i32 json_node`.
-  Deliberately not in v1: retaining the whole JSON document alongside the parsed structure doubles memory against read-once-into-a-native-structure.
-  A stored `json::ref` would also dangle across a `cc::move(data)`.
+- `[done]` **`EXT_meshopt_compression`**: a compressed bufferView is decoded during read, over the vendored meshoptimizer decoders, and `view_of` reads it like any other.
+- `[done]` **extensions / extras raw access**: `read_options::keep_json_document` keeps `data::json`, every element records its `json_node`, and `data::json_of(element)` is the ref.
+  Opt-in, since the document costs about as much memory again as the parsed structure.
+  A stored `json::ref` dangles across a `cc::move(data)`; `json_of` called afresh does not.
+- `[done]` **registered extensions**: `read_options::extensions` names the extensions a caller implements, so a file may require them.
+  One that changes bytes registers a hook for bufferViews, accessors or both, and `view_of` reads what it decoded.
+  EXT_meshopt_compression runs through the same hooks, as the reader's own registration.
+  Images, textures and materials have no hooks: an extension on them adds information, which the caller reads through `json_of`.
 - `[done]` **a node's composed local transform** — `node::local_transform()`, matrix or TRS as one `tg::affine_transform3f`.
   The reader still stores `matrix` or TRS in whichever form the file used; `local_transform()` composes it on demand.
 - `[planned]` **writer**.
@@ -224,6 +229,16 @@ Arrays, cube maps (partial legacy ones included) and volumes are laid out in fil
 - `[planned]` **the remaining DXGI formats** — 10:10:10:2, 11:11:10, 16-bit unorm, and the rest of the uncompressed table, each a mapping plus a texel decoder.
   Legacy files reach 10:10:10:2 and the 16-bit one- and two-channel ones already, through the bit-mask path; 11:11:10 is a float format and RGBA16 is 64 bits, which no 32-bit mask describes.
 
+### ktx2 [done]
+
+Low-level KTX 2.0 reader; see [ktx2.hh](../src/babel-serializer/image/ktx2.hh).
+Like `dds`, it reads over pinned bytes and hands back every mip level, array layer and cube face as a view of the input, with the format as Vulkan's `vkFormat`.
+A Zstandard or zlib supercompressed level is decoded into its own buffer instead, level by level on `read_options::scheduler`, bounded by `max_decoded_bytes`.
+
+- `[planned]` **Basis Universal transcoding** — BasisLZ and UASTC files are refused today, since babel carries no transcoder.
+- `[planned]` **a read-only `babel::image` entry** — mip 0, as DDS has.
+- `[planned]` **decoding a subresource through `bcn`**, as DDS does.
+
 ### tga [done]
 
 Low-level Truevision TARGA reader, fully native; see [tga.hh](../src/babel-serializer/image/tga.hh).
@@ -250,7 +265,7 @@ See [image.hh](../src/babel-serializer/image/image.hh).
 
 ### Other image formats [planned]
 
-`[planned]` further stb-supported containers (bmp / gif), KTX2, and `.exr`.
+`[planned]` further stb-supported containers (bmp / gif), and `.exr`.
 
 ## Aggregators
 

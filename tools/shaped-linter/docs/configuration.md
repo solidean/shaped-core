@@ -55,7 +55,7 @@ The policy it carries is unknown, so every verdict taken against it would be a g
 | `files` | no | glob or list of globs; the entry applies only to these |
 | `exclude-files` | no | glob or list of globs; the entry does not apply to these |
 
-The `reason` is mandatory because it is the whole point of the file.
+The `reason` is mandatory because it is what the finding tells a reader.
 `<mutex> is not blessed here` teaches a reader nothing; `use clean-core/thread/mutex.hh` teaches them what to do.
 
 **Globs** understand `?` (one character), `*` (a run of them) and `**` (a run that crosses `/`); a trailing `/` is shorthand for the subtree.

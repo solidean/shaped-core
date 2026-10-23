@@ -8,6 +8,8 @@
 
 TEST("assertions - failing assertion calls handler with correct payload")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     cc::optional<cc::impl::assertion_info> captured;
     // CAREFUL: brittle with respect to formatting, but it should be fine.
     int const test_line = __LINE__ + 11; // line where CC_ASSERT_ALWAYS is called
@@ -168,6 +170,8 @@ TEST("assertions - scoped_assertion_handler pops on scope exit even when handler
 
 TEST("assertions - multiple failures produce independent reports")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     cc::vector<cc::impl::assertion_info> captures;
     int const line1 = __LINE__ + 12;
     int const line2 = __LINE__ + 18;

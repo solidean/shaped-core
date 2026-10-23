@@ -33,7 +33,7 @@ The [readme](../readme.md#file-organization) has the per-folder table, the inclu
 
 ## Concepts
 
-Deep-dives on cross-cutting sg mechanisms — the load-bearing design decisions behind a topic.
+Deep-dives on cross-cutting sg mechanisms — the design decisions a topic rests on.
 A concept doc answers "what is this and why is it shaped this way?".
 It is not the full API — that is the [cheat-sheet](../cheat-sheet.md) — and not the roadmap, which is [structure](structure.md).
 Where a concept doc has a per-backend section, it sits at the end, so the body stays backend-neutral.

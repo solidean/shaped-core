@@ -191,7 +191,8 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   It fails with what the server printed when nothing answers within ten seconds; that output is otherwise in `.serve.log` in the review folder.
 - **The page can close its own server**, with `Close server` in the toolbar, and `review stop <name>` does it from a terminal.
   An agent starts `serve` in the background, so there is no window to interrupt — without either of those the only way out is finding the process.
-- The first run pays a `uv` resolve for `pygments` and `markdown-it-py`. That is the dependency cost, and it is cached afterwards.
+- The first run pays a `uv` resolve for `pygments` and `markdown-it-py`.
+  That is the dependency cost, and it is cached afterwards.
 
 **`Send to Claude` shows the round before it sends it.**
 An ask counts as answered on its first selection, so a checkbox left untaken reads exactly like one nobody saw.

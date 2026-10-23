@@ -276,7 +276,7 @@ namespace cc
 
 /// The first parameter named `name` in `query`, comparing the name percent-encoded as written.
 ///
-/// Allocation-free, which is the point: a route handler looking for one parameter should not build a vector.
+/// Allocation-free, so a route handler looking for one parameter builds no vector.
 /// Absent when no parameter has that name; present and empty when it was written `name` or `name=`.
 [[nodiscard]] cc::optional<cc::string_view> find_query_parameter(cc::string_view query, cc::string_view name);
 

@@ -88,24 +88,24 @@ TEST("sgl emit - a one-value constructor and a scalar beside a vector are each t
 TEST("sgl emit - an if that is a value is a local each branch assigns, and only the taken branch runs")
 {
     auto const hlsl = text_of(k_vectors, target::hlsl_dx12);
-    CHECK(hlsl.contains("    float if_result;\n"
+    // the result is the let's own local, named after it (LEGAL-60)
+    CHECK(hlsl.contains("    float tone;\n"
                         "    if (v.x > 0.5)\n"
                         "    {\n"
-                        "        if_result = sqrt(v.x);\n"
+                        "        tone = sqrt(v.x);\n"
                         "    }\n"
                         "    else\n"
                         "    {\n"
-                        "        if_result = v.y;\n"
-                        "    }\n"
-                        "    const float tone = if_result;\n"));
+                        "        tone = v.y;\n"
+                        "    }\n"));
+    CHECK(!hlsl.contains("if_result"));
     auto const wgsl = text_of(k_vectors, target::wgsl);
-    CHECK(wgsl.contains("    var if_result: f32;\n"
+    CHECK(wgsl.contains("    var tone: f32;\n"
                         "    if v.x > 0.5 {\n"
-                        "        if_result = sqrt(v.x);\n"
+                        "        tone = sqrt(v.x);\n"
                         "    } else {\n"
-                        "        if_result = v.y;\n"
-                        "    }\n"
-                        "    let tone: f32 = if_result;\n"));
+                        "        tone = v.y;\n"
+                        "    }\n"));
 }
 
 TEST("sgl emit - an if value on a constant is the taken branch's expression, with no local")

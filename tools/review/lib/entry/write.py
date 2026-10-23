@@ -207,7 +207,7 @@ def render_front(front: dict[str, str]) -> str:
 def compose(front: dict[str, str], blocks: list[str]) -> str:
     """Build a whole entry from scratch, for a generated one only.
 
-    Never used on a file a human or an agent authored — see the module docstring for why that matters.
+    Never used on a file a human or an agent authored — the module docstring has the reason.
     """
     body = "\n\n".join(block.strip() for block in blocks if block.strip())
     return f"{render_front(front)}\n\n{body}\n"

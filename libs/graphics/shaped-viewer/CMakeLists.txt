@@ -40,7 +40,9 @@ add_library(shaped-viewer
     src/shaped-viewer/interactive.cc
     src/shaped-viewer/capture.cc
     src/shaped-viewer/viewer.cc
+    src/shaped-viewer/impl/wavefront_pacing.cc
     src/shaped-viewer/resources/resource_managers.cc
+    src/shaped-viewer/resources/value_summary.cc
     src/shaped-viewer/resources/bindless_tables.cc
     src/shaped-viewer/resources/gpu_resource_manager.cc
     src/shaped-viewer/rendering/pathtrace_routine.cc
@@ -51,6 +53,7 @@ add_library(shaped-viewer
     src/shaped-viewer/rendering/layout_routine.cc
     src/shaped-viewer/rendering/depth_fill_routine.cc
     src/shaped-viewer/rendering/view_renderer.cc
+    src/shaped-viewer/rendering/impl/emitters.cc
     src/shaped-viewer/rendering/viewer_renderer.cc
     src/shaped-viewer/rendering/shaders.cc
     src/shaped-viewer/resources/material_shader_cache.cc
@@ -120,6 +123,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/impl/content_hash.hh
     src/shaped-viewer/impl/keyed_cache.hh
     src/shaped-viewer/impl/view_state.hh
+    src/shaped-viewer/impl/wavefront_pacing.hh
     src/shaped-viewer/resources/resource_managers.hh
     src/shaped-viewer/resources/bindless_tables.hh
     src/shaped-viewer/resources/gpu_resource_manager.hh
@@ -168,6 +172,7 @@ target_compile_options(shaped-viewer
 )
 
 # sv's shader package: the path tracer (tracer_pipeline.sgl over module `tracer`, shaders/sgl), the raster path (raster_pass.sgl over module `raster`) and the compositing passes.
+# emitter_cdf.sgl builds an emissive mesh's area CDF, which the tracer's light sampler reads.
 # Module `tracer` is exported because a material's hit group, generated and compiled at run time, lists its bindings and traces its rays.
 # Module `raster` is exported for the same reason: a material's pixel shader is generated too, and lists its bindings and writes its targets.
 # The fullscreen blit lives in shaped-rendering (sr::blit_routine).
@@ -189,12 +194,40 @@ sc_add_shader_package(
         raster_pass.sgl:*
         layout.sgl:*
         depth_fill.sgl:*
+        emitter_cdf.sgl:*
 )
 
 # The examples corpus: the viewer as a caller actually reaches for it.
 # The subdirectory gates itself on the window + dx12 + DXC combination an example needs, and
 # sc_add_single_file_examples is a no-op when SC_BUILD_EXAMPLES is off.
 add_subdirectory(examples)
+
+# shaped-view: the standalone viewer a file association opens, which `uv run dev.py install shaped-view` registers.
+# Gated as the examples are, since it traces on the default dx12 context and reaches DXIL through DXC.
+if(SC_BUILD_TOOLS AND WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
+    add_executable(shaped-view
+        tools/shaped-view/main.cc
+        tools/shaped-view/shaped_view.cc
+    )
+    sc_nexus_binary(shaped-view KINDS tool)
+    target_link_libraries(shaped-view PRIVATE shaped-viewer nexus)
+    sc_target_pch(shaped-view SG NEXUS)
+
+    # A windowed program: opened from Explorer, a console subsystem binary would bring a console window up beside it.
+    set_target_properties(shaped-view PROPERTIES WIN32_EXECUTABLE TRUE)
+    target_link_options(shaped-view PRIVATE "LINKER:/ENTRY:mainCRTStartup")
+
+    sc_stage_runtime_dlls(shaped-view DLLS "$<TARGET_RUNTIME_DLLS:shaped-view>")
+    # dxil.dll is loaded by dxcompiler rather than linked, so $<TARGET_RUNTIME_DLLS> never lists it.
+    sc_stage_runtime_dlls(shaped-view TAG shaped-view-dxc DLLS ${DXC_RUNTIME_DLLS})
+
+    # Exactly what the install copies out of the output directory, which every other binary shares.
+    file(GENERATE OUTPUT "$<TARGET_FILE_DIR:shaped-view>/shaped-view.runtime-dlls"
+        CONTENT "$<JOIN:$<TARGET_RUNTIME_DLLS:shaped-view>;${DXC_RUNTIME_DLLS},\n>\n")
+
+    # What a frozen build serves without compiling; the install records it from a run of the frozen binary itself.
+    sc_embed_shader_bundle(TARGET shaped-view)
+endif()
 
 # Test executable.
 # The vocabulary test needs no device and runs everywhere; the GPU tests drive a dx12 WARP/hardware context
@@ -216,13 +249,15 @@ if(SC_BUILD_TESTS)
         tests/drawing-test.cc
         tests/decal-test.cc
         tests/view-convergence-test.cc
+        tests/wavefront-pacing-test.cc
         tests/bindless-tables-test.cc
         tests/material-resolution-test.cc
         tests/material-shader-generator-test.cc
         tests/material-shader-compile-test.cc
         tests/material-shader-cache-test.cc
+        tests/emitter-test.cc
+        tests/value-summary-test.cc
         tests/asset-loading-test.cc
-        tests/wavefront-pacing-test.cc
     )
     # Over three times sg's WARP allowance: an unoptimized build runs the suite for five to six minutes, nearly all of it
     # the SGL compiler, unoptimized, compiling each test's material permutations afresh.
@@ -259,6 +294,7 @@ if(SC_BUILD_TESTS)
             tests/volumetric-furnace-test.cc
             tests/accumulated-mean-test.cc
             tests/cutout-trace-test.cc
+            tests/emitter-trace-test.cc
             tests/wavefront-trace-test.cc
             tests/wavefront-view-test.cc
             tests/raster-test.cc

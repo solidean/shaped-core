@@ -181,7 +181,8 @@ public:
     void set_blend_constants(tg::vec4f constants);
     /// Writes inline constants into the bound pipeline layout's inline_constants block.
     void set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset = {});
-    /// POD convenience: bit-copies `value`. `T` must be trivially copyable, size a multiple of 4 bytes.
+    /// POD convenience: bit-copies `value`.
+    /// `T` must be trivially copyable, size a multiple of 4 bytes.
     template <class T>
     void set_inline_constants(T const& value, cc::optional<isize> offset = {})
     {

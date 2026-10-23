@@ -78,7 +78,7 @@ A path selector scopes it by where the change landed; a commit spec scopes it by
 Both together intersect, so "the sweep, but only under `libs/`" is one claim rather than two.
 A commit's contribution is carried exactly the same way a commit-local hunk is, so a bulk claim is exact rather than approximate.
 
-The reason is mandatory, and that is the point.
+The reason is mandatory.
 It forces the agent to say why it is not reading them, instead of quietly not reading them.
 
 ## Which commits a change spans

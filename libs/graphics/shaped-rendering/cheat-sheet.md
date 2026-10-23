@@ -84,7 +84,7 @@ wsys->has_clipboard_text();
 for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
 {
     e.window;                          // -> sr::window*, null if none was focused
-    e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event>
+    e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event, file_drop_event>
 
     e.payload.visit(                   // THE way to consume an event; every handler must return the same type
         [&](sr::key_event const& k)
@@ -100,10 +100,14 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
             m.is_held(sr::mouse_button::right);   // buttons held during the motion: END A DRAG ON IT TOO,
                                                   // a release outside an uncaptured window never arrives
         },
-        [](auto const&) {});           // catch-all; SPELL ALL FIVE instead and a new event kind fails to compile here
+        [&](sr::file_drop_event const& d)
+        {
+            d.path;                               // cc::string — one event per dropped file
+        },
+        [](auto const&) {});           // catch-all; SPELL ALL SIX instead and a new event kind fails to compile here
 
-    e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel too) — for predicates, and loops that `continue`
-    e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_* too)
+    e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel/_file_drop too) — for predicates, and loops that `continue`
+    e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_*/_file_drop too)
 }
 
 win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)
@@ -179,7 +183,8 @@ Gotchas:
 - **One call, inside the scope.** Textures, geometry upload and draws all happen in `execute()`.
   `render_viewports` is the opposite — it opens its own scopes and submits, so never call it inside one.
 - **Viewports change what a coordinate means.** Mouse positions and `ImGui::SetNextWindowPos` become
-  desktop-space, not main-window-relative; offset by `ImGui::GetMainViewport()->Pos`. An `input_event` must
+  desktop-space, not main-window-relative; offset by `ImGui::GetMainViewport()->Pos`.
+  An `input_event` must
   name its `window` for `process_event` to translate it.
 - **Viewports make `update_viewports()` mandatory every frame.**
   Skip it and imgui stops hit-testing the mouse entirely — nothing hovers.
@@ -209,14 +214,14 @@ sr::capture_request_env_var        // "SC_CAPTURE" — on means HEADLESS: render
 sr::capture_name_env_var           // "SC_CAPTURE_NAME"       — which named capture; unset is the program's default view
 sr::capture_output_env_var         // "SC_CAPTURE_OUT"        — where the image goes; the extension picks jpg or png
 sr::capture_size_env_var           // "SC_CAPTURE_SIZE"       — "<width>x<height>"
-sr::capture_accumulate_env_var     // "SC_CAPTURE_ACCUMULATE" — frames to be satisfied for; what "satisfied" means is the program's
+sr::capture_accumulate_env_var     // "SC_CAPTURE_ACCUMULATE" — what to accumulate, in the program's unit (sv: samples per pixel; a raster app: frames)
 sr::capture_timeout_env_var        // "SC_CAPTURE_TIMEOUT"    — seconds before it gives up
 
 auto const req = sr::capture_request::from_environment();  // -> capture_request; every var, defaults for the unset
 req.active                         // -> bool; everything below is meaningless when false
 req.name / req.output_path         // -> cc::string
 req.size                           // -> tg::vec2i, default 1920x1080
-req.accumulate_frames              // -> u32, default 60
+req.accumulate                     // -> u32, default 60, in the program's own unit
 req.timeout_seconds                // -> double, default 60, spent against req.clock_seconds
 req.clock_seconds                  // -> double (*)(), default cc::current_time_steady_secs; a test swaps in a clock it advances
 
@@ -436,7 +441,7 @@ auto const out = sr::reconstruct_routine::execute(cmd,     // -> sr::reconstruct
     {.color = noisy,                                       // linear HDR, TRACED extent; its alpha rides through unless upscaled
      .guides = {.albedo = a, .normal = n, .depth = d, .motion = m, .jitter = jitter, .view_to_clip = proj},
      .output = image,                                      // OUTPUT extent, image usage, never the same texture as color
-     .sample_count = spp * accumulated_frames},            // spatial members back off as it grows; 0 means 1
+     .sample_count = samples_per_pixel},                   // the mean's fewest samples a pixel; spatial members back off as it grows; 0 means 1
                                                             //   .sample_counts = a float texture of the count per pixel, which wins where set
     history, settings);
 out.status                                                 // denoised | pending | unsupported | failed — output untouched unless denoised

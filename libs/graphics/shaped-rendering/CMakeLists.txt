@@ -327,6 +327,7 @@ if(SC_BUILD_TESTS)
     add_executable(shaped-rendering-test
         tests/main.cc
         tests/smoke-test.cc
+        tests/capture-request-test.cc
         tests/input-test.cc
         tests/window-test.cc
         tests/window-manual-test.cc
@@ -465,6 +466,29 @@ if(SC_BUILD_TESTS)
         else()
             target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
         endif()
+    endif()
+
+    # SGL against the hand-written HLSL each of these shaders was ported from, timed on a dx12 device.
+    # The HLSL is kept under tests/bench/shaders as it stood before the port, and nothing but the benchmark reads it.
+    if(_sr_test_backends AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
+        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-hlsl-benchmark.cc)
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_bench_hlsl_shaders
+            NAMESPACE  sr_bench::hlsl
+            SOURCE_DIR tests/bench/shaders
+            LANGUAGE   hlsl
+            SHADERS
+                atrous_denoise.hlsl:compute:main_cs
+                atrous_denoise.hlsl:binding:atrous_bindings
+                atrous_denoise.hlsl:constants:gConstants
+                svgf_atrous.hlsl:compute:main_cs
+                svgf_atrous.hlsl:binding:svgf_atrous_bindings
+                svgf_atrous.hlsl:constants:gConstants
+                nn_conv.hlsl:compute:main_cs
+                nn_conv.hlsl:binding:nn_conv_bindings
+                nn_conv.hlsl:constants:gConstants
+        )
     endif()
 
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.

@@ -76,6 +76,9 @@ struct furnace_case
     /// Whether the object is lossless, and so whether the image must come back AT the environment rather than below it.
     bool lossless = true;
 
+    /// A lossy case's lower bound, where it has one, which then replaces the absorption checks.
+    float at_least = 0.0f;
+
     /// The traced image's extent, over the same view whatever it is, so a smaller one draws fewer paths at the same samples per pixel.
     ///
     /// Small, because this must also pass on WARP: a scattering interior is the most expensive thing the integrator does,
@@ -350,6 +353,19 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
     absorbing.push_back(binding::of("transmission_scatter", tg::vec3f(0.4f, 0.4f, 0.4f)));
     cases.push_back({.name = "absorbing interior", .bindings = cc::move(absorbing), .lossless = false});
 
+    // Rough glass sends the sky through transmitted directions next-event estimation never samples, so they weigh 1.
+    // Weighed against next-event estimation it measures ~0.386; the bound sits between that and the ~0.420 it measures now.
+    // The rest of the loss is the rough transmission's uncompensated single-scattering GGX.
+    // Once that is compensated, this case is lossless and belongs with the others.
+    auto rough = cc::vector<binding>();
+    rough.push_back(binding::of("specular_ior", 1.5f));
+    rough.push_back(binding::of("specular_roughness", 0.5f));
+    rough.push_back(binding::of("transmission_weight", 1.0f));
+    cases.push_back({.name = "rough glass interior",
+                     .bindings = cc::move(rough),
+                     .lossless = false,
+                     .at_least = 0.81f * luminance_of(environment)});
+
     auto& lib = *sv::acquire_material_library().value();
     auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
     auto const positions = closed_cube(0.6f);
@@ -386,6 +402,8 @@ ASYNC_INVOCABLE_TEST("sv - a lossless interior is invisible under a uniform envi
 
             lossless_means.push_back(mean);
         }
+        else if (c.at_least > 0.0f)
+            CHECK(mean > c.at_least).context(c.name).dump("mean luminance", mean);
         else
         {
             // Absorption has to actually darken, or the medium is being skipped and every check above passes vacuously.

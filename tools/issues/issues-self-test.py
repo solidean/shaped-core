@@ -136,7 +136,9 @@ def test_check_finds_what_is_wrong(base: Path):
     write(a / "docs/issues/feat-child.md", issue_text("Child", "parent: feat-shiny", "blocked-by: [bug-ghost]"))
     write(a / "lib/docs/issues/bug-crash.md", issue_text("Twin"))
     write(a / "docs/issues/bug-notitle.md", "---\nclaimed-by: X\n---\n\nno title\n")
-    write(a / "docs/issues/bug-stale-ref.md", issue_text("Stale", "refs:", "  - file: src/lib.cc:3-9", "  - file: gone.cc"))
+    write(a / ".gitignore", "/fetched/\n")
+    write(a / "docs/issues/bug-stale-ref.md",
+          issue_text("Stale", "refs:", "  - file: src/lib.cc:3-9", "  - file: gone.cc", "  - file: fetched/sdk.h"))
     write(a / "src/use.cc", "// issue: bug-ghost\nx(); // TEMPORARY(bug-older)\n// issue: other:bug-unknown-repo\n")
     code, out, _ = cli(a, "check")
     assert code == 1
@@ -150,6 +152,7 @@ def test_check_finds_what_is_wrong(base: Path):
                      "src/use.cc:2: marker names bug-older, which is closed"):
         assert expected in out, f"missing {expected!r} in:\n{out}"
     assert "bug-unknown-repo" not in out, "a marker into a repository that is not checked out is not judged"
+    assert "fetched/sdk.h" not in out, "a ref to a path git ignores names a fetched file, which may be absent here"
 
 
 def test_claim_pushes_exactly_one_commit(base: Path):
@@ -309,13 +312,16 @@ def test_serve_edits_files_and_pushes_on_request(base: Path):
 def test_close_moves_and_relinks(base: Path):
     a, _ = setup(base)
     write(a / "docs/notes.md", "See [the crash](issues/bug-crash.md#repro) and [shiny](issues/feat-shiny.md).\n")
-    write(a / "docs/issues/feat-shiny.md", issue_text("Shiny", "parent: epic-big") + "Related: [notes](../notes.md).\n")
+    write(a / "docs/issues/feat-shiny.md",
+          issue_text("Shiny", "parent: epic-big", "claimed-by: Alice", "claimed-at: 2026-03-01T09:00Z")
+          + "Related: [notes](../notes.md).\n")
     write(a / "docs/issues/epic-big.md", issue_text("Big"))
     code, _, err = cli(a, "close", "feat-shiny", "--date", "2026-03-05", "--resolution", "obsolete")
     assert code == 0, err
     moved = a / "docs/issues/closed/2026/03/feat-shiny.md"
     text = moved.read_text(encoding="utf-8")
     assert "closed: 2026-03-05\nresolution: obsolete" in text and "[notes](../../../../notes.md)" in text, text
+    assert "claimed-by" not in text and "claimed-at" not in text, "closing ends the claim: " + text
     notes = (a / "docs/notes.md").read_text(encoding="utf-8")
     assert "(issues/bug-crash.md#repro)" in notes and "(issues/closed/2026/03/feat-shiny.md)" in notes, notes
     assert cli(a, "check")[0] == 0

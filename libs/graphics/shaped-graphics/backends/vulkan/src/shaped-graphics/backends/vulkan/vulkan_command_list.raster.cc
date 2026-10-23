@@ -43,7 +43,7 @@ namespace
 }
 
 /// The attachment load operation a target's begin-op asks for.
-/// `discard` is DONT_CARE, which is the point of having it: the contents become undefined rather than being loaded.
+/// `discard` is DONT_CARE, so the contents become undefined rather than being loaded.
 [[nodiscard]] VkAttachmentLoadOp to_vk_load_op(sg::target_op op)
 {
     switch (op)

@@ -5,6 +5,9 @@
 #include <clean-core/container/map.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/span.hh> // cc::span
+#include <clean-core/container/vector.hh>
+#include <clean-core/error/optional.hh>
+#include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
@@ -13,8 +16,10 @@
 #include <shaped-viewer/resources/impl/lru_pool.hh>
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/resources/resource_data.hh>
+#include <shaped-viewer/resources/value_summary.hh>
 #include <shaped-viewer/scene/mesh_attribute.hh> // attribute_format / attribute_frequency, which a record carries
 #include <typed-geometry/geometry/primitives/aabb.hh>
+#include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/pos.hh>
 
 /// How much a resource manager may keep resident, and how long an unused resource lingers.
@@ -59,6 +64,18 @@ enum class sv::residency : sv::u8
     failed,
 };
 
+namespace sv
+{
+/// How many triangles one block of an emitter's area CDF covers — `tracer.emitter_block_size` and shaders/emitter_cdf.sgl's `block_size`.
+inline constexpr u32 emitter_cdf_block_size = 256;
+
+/// How many blocks an area CDF over `triangle_count` triangles holds.
+[[nodiscard]] constexpr u32 emitter_cdf_block_count(isize triangle_count)
+{
+    return u32((triangle_count + isize(emitter_cdf_block_size) - 1) / isize(emitter_cdf_block_size));
+}
+} // namespace sv
+
 /// One uploaded mesh: its geometry buffers, and the BLAS built from them once something traces it.
 ///
 /// **The BLAS is built on demand**, by the first trace that reaches the mesh through `mesh_manager::acquire_blas`.
@@ -88,9 +105,31 @@ struct sv::mesh_record
     /// Null until a trace asks `mesh_manager::acquire_blas` for it.
     sg::blas_handle blas;
 
+    /// The object-space surface area, summed over the triangles on the acquire that uploaded them.
+    /// What an emissive instance's selection weight starts from, so it is known before any CDF is built.
+    f32 surface_area = 0;
+
+    /// The area CDF next-event estimation picks one of the mesh's triangles by, null until a trace asks `mesh_manager::acquire_emitter_cdf` for it.
+    /// A mesh no emissive instance places never gets one.
+    /// `triangle_count + emitter_cdf_block_count(triangle_count) + 1` floats, laid out as shaders/emitter_cdf.sgl says.
+    sg::buffer<f32> emitter_cdf;
+
+    /// One placement's world area, as `mesh_manager::acquire_world_area` sums it on the GPU.
+    struct world_area
+    {
+        /// The linear map it is the area under, which is the whole key: a translation moves no area.
+        tg::mat3f linear;
+        /// The GPU's sums until they land, then nothing.
+        sg::data_future<f32> pending;
+        cc::optional<f32> area;
+    };
+
+    /// The placements asked for most recently, the most recently asked last and at most `mesh_manager::max_world_areas` of them.
+    cc::vector<world_area> world_areas;
+
     /// The object-space box, when the payload declared one — the summary half of the record.
     ///
-    /// It outlives the payload, which is the point: a pending mesh is drawn as the shared placeholder box scaled onto
+    /// It outlives the payload, so a pending mesh is drawn as the shared placeholder box scaled onto
     /// this, and a mesh whose bounds nobody stated is skipped instead, since guessing an extent would place it wrong.
     cc::optional<tg::aabb3f> bounds;
 };
@@ -150,6 +189,28 @@ public:
     /// The first call charges the BLAS's size to the budget.
     [[nodiscard]] sg::blas_handle const& acquire_blas(sg::command_list& cmd, mesh_id id);
 
+    /// `id`'s area CDF, built onto `cmd` from the mesh's own buffers the first time a caller asks and held from then on.
+    ///
+    /// Null while the two kernels that build it are still compiling, and for good once they failed to, which is logged once:
+    /// an emissive instance of the mesh then lights nothing that frame, and its emission reaches the camera alone.
+    /// `id` must be `complete`, for the reason `acquire_blas` gives; no ray tracing is needed.
+    /// The first build charges the CDF's size to the budget.
+    [[nodiscard]] sg::buffer<f32> const* acquire_emitter_cdf(sg::command_list& cmd, mesh_id id);
+
+    /// False once the kernels behind `acquire_emitter_cdf` failed to build, after which no CDF ever will be.
+    [[nodiscard]] bool can_build_emitter_cdfs() const { return !_cdf_failed; }
+
+    /// The most placements of one mesh `acquire_world_area` keeps, the one asked for least recently dropped first.
+    /// Generous, since one lamp mesh is often placed many times over, and a placement dropped before its sum lands is summed again.
+    static constexpr isize max_world_areas = 64;
+
+    /// `id`'s exact world area under `linear`, or none until the GPU's sum has landed.
+    ///
+    /// The first ask for a placement records the sum onto `cmd` and reads it back; a later one returns it once it landed.
+    /// Only a placement that is not a similarity needs it, since `impl::world_area_of` is exact for one.
+    /// `id` must be `complete`, for the reason `acquire_blas` gives, and none ever lands once the kernels failed to build.
+    [[nodiscard]] cc::optional<f32> acquire_world_area(sg::command_list& cmd, mesh_id id, tg::mat3f const& linear);
+
     /// Blocks until every queued transfer has landed, then finishes them all.
     ///
     /// For a caller with no frame loop to drain the queue — a test tracing what it just built, or a one-pass tool.
@@ -182,7 +243,15 @@ private:
     /// Its contents are never read — it exists only so the trace's binding group is complete.
     [[nodiscard]] sg::buffer<u32> _acquire_index_stand_in(sg::command_list& cmd);
 
+    /// Whether the kernels of shaders/emitter_cdf.sgl are built, starting them on first use; polled, never waited on.
+    [[nodiscard]] bool _emitter_cdf_kernels_ready();
+
     sg::context& _ctx;
+    sg::async_compute_pipeline _cdf_blocks;
+    sg::async_compute_pipeline _cdf_total;
+    sg::async_compute_pipeline _world_blocks;
+    sg::async_compute_pipeline _world_total;
+    bool _cdf_failed = false;
     sg::buffer<u32> _index_stand_in;
     sg::blas_handle _placeholder_blas;
     sg::buffer<tg::pos3f> _placeholder_vertices;
@@ -216,7 +285,7 @@ struct sv::quadric_set_record
     sg::blas_handle blas;
 
     /// The extent in the batch's own frame, when the payload declared one — the summary half of the record.
-    /// It outlives the payload, which is the point: a pending batch is drawn as the placeholder box scaled onto this, and one
+    /// It outlives the payload, so a pending batch is drawn as the placeholder box scaled onto this, and one
     /// whose bounds nobody stated is skipped instead, since guessing an extent would place it wrong.
     cc::optional<tg::aabb3f> bounds;
 };
@@ -294,6 +363,11 @@ struct sv::attribute_record
     attribute_format format = attribute_format::of_scalar(scalar_type::f32);
     attribute_frequency frequency = attribute_frequency::per_vertex;
     isize element_count = 0;
+
+    /// What the elements hold, read at the acquire that uploaded them; empty for a format other than f32 lanes.
+    /// An emissive instance whose emission reads this attribute is weighed by its mean.
+    /// It is no light at all only where the summary is exact and dark throughout; past the elements a summary reads whole, it stays a light.
+    cc::optional<value_summary> summary;
 };
 
 /// Hands out `attribute_id`s for arbitrary mesh attributes, with LRU budgeting (see resource_budget).
@@ -352,6 +426,12 @@ struct sv::texture_record
 
     /// Whether `texture` is the BC7 encoding that replaced what was uploaded.
     bool compressed = false;
+
+    /// What the smallest level the acquire supplied holds, as the sampler reads it; empty for a format `summarize_texels` does not decode.
+    /// Only a summary of the base level read whole is exact, since a smaller level's range need not bound the base's.
+    /// `replace_with_compressed` makes it inexact, since it summarizes the pixels before their lossy encoding.
+    /// An emissive instance whose emission samples this texture is weighed by its mean.
+    cc::optional<value_summary> summary;
 };
 
 /// Hands out `texture_id`s and owns the texture behind each, with LRU budgeting (see resource_budget).

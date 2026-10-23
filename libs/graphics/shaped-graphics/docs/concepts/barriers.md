@@ -6,7 +6,8 @@ Access is inferred from the operation, and the concurrency model lets several co
 
 ## Access is inferred, not declared
 
-There is no public `declare_access`. What a resource is used as follows from the operation:
+There is no public `declare_access`.
+What a resource is used as follows from the operation:
 
 - `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source.
 - `cmd.copy` ⇒ `copy_read` on src plus `copy_write` on dst, and a self-copy is one combined access.
@@ -188,7 +189,7 @@ barriers go into the small command buffer prepended to the same `vkQueueSubmit`,
 Whole-image rather than per-subresource, because a list that uses one mip leaves the others where `vkCreateImage` left
 them while the tracker would say otherwise.
 
-Claiming at submit rather than at record is the load-bearing part: a list that recorded second can submit first.
+Claiming at submit rather than at record is required: a list that recorded second can submit first.
 
 **An async upload can claim it too**, and on a fresh texture it usually does: whoever enqueues first wins.
 It claims under the submission lock a list submit takes, and before returning it submits the one barrier on the

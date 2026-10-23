@@ -14,7 +14,7 @@ using namespace cc::primitive_defines;
 // These are the cases that were the gate while neither backend could hold them.
 // An async transfer runs on a queue that cannot settle a layout for itself.
 // So a list that left the texture somewhere else made the copy illegal on dx12 and unverifiable on vulkan.
-// Both edges are the point — a transfer composing after a list, and a list composing after a transfer — because each
+// Both edges are tested — a transfer composing after a list, and a list composing after a transfer — because each
 // is carried by a different half of the per-resource stamps.
 // The forward edge read through an INLINE readback is the one case still missing here.
 // issue: bug-sg-pure-layout-transition-empty-scope carries it with what it is waiting on.

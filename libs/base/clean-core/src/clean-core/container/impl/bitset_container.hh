@@ -8,7 +8,7 @@
 
 // The shared surface of cc::bitset and cc::fixed_bitset, plus the bit proxy and the index ranges both hand out.
 //
-// Everything works one WORD at a time, which is the whole point of the type: a query over 4096 bits touches 64 words.
+// Everything works one WORD at a time, so a query over 4096 bits touches 64 words.
 // The word type is a template parameter rather than a fixed u64, because that is what lets fixed_bitset<8> be one byte.
 //
 // The derived type owns the storage and supplies, publicly or as a friend:

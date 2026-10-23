@@ -325,6 +325,8 @@ struct result;
 //
 
 enum class thread_id : u64; // a thread's identity, compared for equality only (thread/thread.hh)
+struct native_thread;
+struct native_thread_config;
 
 template <class T>
 struct mutex;

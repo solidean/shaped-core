@@ -84,24 +84,10 @@ void report_frame(DWORD64 address, SYMBOL_INFO* sym, IMAGEHLP_LINE64* line) noex
     std::fputc('\n', stderr);
 }
 
-void walk_thread(HANDLE thread) noexcept
+/// Walks `thread` from `ctx`, which the walk consumes, and reports its first `head` frames.
+/// With `tail` > 0 it walks on to the bottom, up to a bound, and also reports the last `tail` frames and the depth: an overflowed stack's recursion shows at the top, its entry at the bottom.
+void walk_frames(HANDLE thread, CONTEXT& ctx, int head, int tail) noexcept
 {
-    if (SuspendThread(thread) == static_cast<DWORD>(-1))
-    {
-        std::fputs("    <could not suspend this thread>\n", stderr);
-        return;
-    }
-
-    CONTEXT ctx;
-    cc::memset(&ctx, 0, sizeof(ctx));
-    ctx.ContextFlags = CONTEXT_FULL;
-    if (!GetThreadContext(thread, &ctx))
-    {
-        std::fputs("    <could not read this thread's context>\n", stderr);
-        ResumeThread(thread);
-        return;
-    }
-
     STACKFRAME64 frame;
     cc::memset(&frame, 0, sizeof(frame));
 #if defined(_M_ARM64) || defined(__aarch64__)
@@ -129,36 +115,106 @@ void walk_thread(HANDLE thread) noexcept
     cc::memset(&line, 0, sizeof(line));
     line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
 
-    for (int depth = 0; depth < k_max_frames; ++depth)
+    // the last `tail` frames, in a ring, since the depth is only known at the bottom
+    constexpr int k_max_tail = 16;
+    constexpr int k_max_depth = 1 << 20;
+    DWORD64 ring[k_max_tail] = {};
+    tail = tail < k_max_tail ? tail : k_max_tail;
+    auto const bound = tail > 0 ? k_max_depth : head;
+    int depth = 0;
+    for (; depth < bound; ++depth)
     {
         if (!StackWalk64(machine, GetCurrentProcess(), thread, &frame, &ctx, nullptr, SymFunctionTableAccess64,
                          SymGetModuleBase64, nullptr))
             break;
         if (frame.AddrPC.Offset == 0)
             break;
-        report_frame(frame.AddrPC.Offset, sym, &line);
+        if (depth < head)
+            report_frame(frame.AddrPC.Offset, sym, &line);
+        else
+            ring[(depth - head) % k_max_tail] = frame.AddrPC.Offset;
     }
+    if (tail == 0 || depth <= head)
+        return;
 
-    ResumeThread(thread);
+    auto const beyond = depth - head; // frames past the head, of which the ring holds the last min(beyond, k_max_tail)
+    auto const shown = beyond < tail ? beyond : tail;
+    std::fprintf(stderr, "    ... %d frames ...\n", beyond - shown);
+    for (int i = beyond - shown; i < beyond; ++i)
+        report_frame(ring[i % k_max_tail], sym, &line);
+    std::fprintf(stderr, "    (%s%d frames in all)\n", depth == bound ? "at least " : "", depth);
 }
 
-void report_other_thread_stacks() noexcept
+void walk_thread(HANDLE thread) noexcept
 {
-    auto const self = GetCurrentThreadId();
-    auto const snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snapshot == INVALID_HANDLE_VALUE)
+    if (SuspendThread(thread) == static_cast<DWORD>(-1))
     {
-        std::fputs("\n<could not enumerate threads>\n", stderr);
+        std::fputs("    <could not suspend this thread>\n", stderr);
         return;
     }
 
+    CONTEXT ctx;
+    cc::memset(&ctx, 0, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_FULL;
+    if (!GetThreadContext(thread, &ctx))
+    {
+        std::fputs("    <could not read this thread's context>\n", stderr);
+        ResumeThread(thread);
+        return;
+    }
+    walk_frames(thread, ctx, k_max_frames, 0);
+    ResumeThread(thread);
+}
+
+// The thread that reports a stack overflow, parked from install on: the overflowed thread has no stack left to report on.
+DWORD g_reporter_id = 0;
+
+/// Walks every thread of this process but this one and `skip`, which the caller reports itself; inside the DbgHelp guard, symbols initialized.
+void walk_other_threads(HANDLE snapshot, DWORD skip) noexcept
+{
+    auto const self = GetCurrentThreadId();
     THREADENTRY32 entry;
     cc::memset(&entry, 0, sizeof(entry));
     entry.dwSize = sizeof(entry);
 
     bool any = false;
     int reported = 0;
+    for (BOOL ok = Thread32First(snapshot, &entry); ok; ok = Thread32Next(snapshot, &entry))
+    {
+        if (entry.th32OwnerProcessID != GetCurrentProcessId() || entry.th32ThreadID == self
+            || entry.th32ThreadID == skip || entry.th32ThreadID == g_reporter_id)
+            continue;
+        if (reported++ >= k_max_threads)
+        {
+            std::fprintf(stderr, "\n<more threads follow; stopped after %d>\n", k_max_threads);
+            break;
+        }
 
+        if (!any)
+        {
+            std::fputs("\nother threads:\n", stderr);
+            any = true;
+        }
+        std::fprintf(stderr, "  thread %lu:\n", entry.th32ThreadID);
+
+        auto const thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE,
+                                       entry.th32ThreadID);
+        if (thread == nullptr)
+        {
+            std::fputs("    <could not open this thread>\n", stderr);
+            continue;
+        }
+        walk_thread(thread);
+        CloseHandle(thread);
+    }
+    if (!any)
+        std::fputs("\nother threads: none\n", stderr);
+}
+
+/// Runs `walk` inside the DbgHelp guard with symbols initialized; false if another thread holds the guard.
+template <class F>
+bool with_symbols(F&& walk) noexcept
+{
     // Everything below calls DbgHelp, on threads this loop SUSPENDS.
     //
     // cc::symbolizer serializes its own DbgHelp calls behind a process-global lock, and this must not simply take it:
@@ -169,7 +225,7 @@ void report_other_thread_stacks() noexcept
     // the report says so and stops.
     //
     // A narrowing rather than a guarantee: DbgHelp entered by anything that is not cc::symbolizer is invisible here.
-    auto const walked = cc::impl::with_dbghelp_if_free(
+    return cc::impl::with_dbghelp_if_free(
         [&]
         {
             // Inside the guard, because these are DbgHelp calls like any other.
@@ -177,44 +233,22 @@ void report_other_thread_stacks() noexcept
             // the overwhelmingly common case where the process never crashes at all.
             SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_UNDNAME);
             SymInitialize(GetCurrentProcess(), nullptr, TRUE);
-
-            for (BOOL ok = Thread32First(snapshot, &entry); ok; ok = Thread32Next(snapshot, &entry))
-            {
-                if (entry.th32OwnerProcessID != GetCurrentProcessId() || entry.th32ThreadID == self)
-                    continue;
-                if (reported++ >= k_max_threads)
-                {
-                    std::fprintf(stderr, "\n<more threads follow; stopped after %d>\n", k_max_threads);
-                    break;
-                }
-
-                if (!any)
-                {
-                    std::fputs("\nother threads:\n", stderr);
-                    any = true;
-                }
-                std::fprintf(stderr, "  thread %lu:\n", entry.th32ThreadID);
-
-                auto const thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION,
-                                               FALSE, entry.th32ThreadID);
-                if (thread == nullptr)
-                {
-                    std::fputs("    <could not open this thread>\n", stderr);
-                    continue;
-                }
-                walk_thread(thread);
-                CloseHandle(thread);
-            }
-
+            walk();
             // Also inside: this tears down the session cc::symbolizer shares, so it must not race one.
             SymCleanup(GetCurrentProcess());
         });
+}
 
-    if (!walked)
+void report_other_thread_stacks() noexcept
+{
+    auto const snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+    {
+        std::fputs("\n<could not enumerate threads>\n", stderr);
+        return;
+    }
+    if (!with_symbols([&] { walk_other_threads(snapshot, 0); }))
         std::fputs("\nother threads: <not walked; another thread is inside the symbolizer>\n", stderr);
-    else if (!any)
-        std::fputs("\nother threads: none\n", stderr);
-
     CloseHandle(snapshot);
 }
 
@@ -233,6 +267,13 @@ void report_other_thread_stacks() noexcept
 
 #endif
 
+void run_hooks() noexcept
+{
+    for (int i = 0; i < g_hook_count; ++i)
+        if (g_hooks[i] != nullptr)
+            g_hooks[i]();
+}
+
 // Shared best-effort reporter: a banner, the reason, registered context, then a stacktrace of this thread and of
 // every other one.
 // Uses stdio (not std::cerr) to keep the crash path as small as possible.
@@ -243,9 +284,7 @@ void report_stacks(char const* banner, char const* reason) noexcept
     std::fputs(reason, stderr);
     std::fputc('\n', stderr);
 
-    for (int i = 0; i < g_hook_count; ++i)
-        if (g_hooks[i] != nullptr)
-            g_hooks[i]();
+    run_hooks();
 
 #if CC_HAS_STACKTRACE
     std::fputs("\nstacktrace (faulting thread):\n", stderr);
@@ -304,12 +343,85 @@ char const* seh_reason(unsigned long code) noexcept
     }
 }
 
+// A stack overflow is reported by the parked reporter thread: the filter runs on the overflowed stack, with a few KiB left, and reporting there overflows again.
+// The overflowed thread only hands over its id and context, then waits; the reporter walks it from that context.
+HANDLE g_overflow_request = nullptr;
+HANDLE g_overflow_done = nullptr;
+LONG g_overflow_claimed = 0;
+DWORD g_overflow_thread = 0;
+CONTEXT g_overflow_context;
+
+void report_overflow() noexcept
+{
+    std::fputs("\n===================== fatal crash =====================\n", stderr);
+    std::fputs("reason: stack overflow\n", stderr);
+    run_hooks();
+
+    std::fprintf(stderr, "\nstacktrace (faulting thread %lu, walked by the crash reporter):\n", g_overflow_thread);
+    auto const thread = OpenThread(THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, g_overflow_thread);
+    auto const snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    auto const walked = with_symbols(
+        [&]
+        {
+            if (thread != nullptr)
+                walk_frames(thread, g_overflow_context, 48, 16);
+            else
+                std::fputs("    <could not open the faulting thread>\n", stderr);
+            if (snapshot != INVALID_HANDLE_VALUE)
+                walk_other_threads(snapshot, g_overflow_thread);
+        });
+    if (!walked)
+        std::fputs("    <not walked; another thread is inside the symbolizer>\n", stderr);
+    if (snapshot != INVALID_HANDLE_VALUE)
+        CloseHandle(snapshot);
+    if (thread != nullptr)
+        CloseHandle(thread);
+
+    cc::rec::report_thread_scopes("stack overflow");
+    std::fputs("=======================================================\n", stderr);
+    std::fflush(stderr);
+}
+
+DWORD WINAPI reporter_main(void*) noexcept
+{
+    WaitForSingleObject(g_overflow_request, INFINITE);
+    report_overflow();
+    SetEvent(g_overflow_done);
+    return 0;
+}
+
 LONG WINAPI seh_filter(EXCEPTION_POINTERS* info) noexcept
 {
     unsigned long const code
         = (info != nullptr && info->ExceptionRecord != nullptr) ? info->ExceptionRecord->ExceptionCode : 0;
+    if (code == EXCEPTION_STACK_OVERFLOW && info->ContextRecord != nullptr && g_reporter_id != 0
+        && GetCurrentThreadId() != g_reporter_id)
+    {
+        if (InterlockedExchange(&g_overflow_claimed, 1) != 0)
+            Sleep(INFINITE); // another thread's overflow is being reported, and the process ends after it
+        g_overflow_thread = GetCurrentThreadId();
+        g_overflow_context = *info->ContextRecord;
+        SetEvent(g_overflow_request);
+        WaitForSingleObject(g_overflow_done, INFINITE);
+        return EXCEPTION_EXECUTE_HANDLER;
+    }
     report_crash(seh_reason(code));
     return EXCEPTION_EXECUTE_HANDLER; // let the process terminate
+}
+
+/// Starts the parked reporter thread, with a stack of its own for the report; without it an overflow is reported in place, as any fault.
+void start_overflow_reporter() noexcept
+{
+    g_overflow_request = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    g_overflow_done = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (g_overflow_request == nullptr || g_overflow_done == nullptr)
+        return;
+    DWORD id = 0;
+    auto const thread = CreateThread(nullptr, 1 << 20, reporter_main, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, &id);
+    if (thread == nullptr)
+        return;
+    CloseHandle(thread);
+    g_reporter_id = id;
 }
 
 void abort_handler(int) noexcept
@@ -321,6 +433,7 @@ void abort_handler(int) noexcept
 
 void install_platform_handlers() noexcept
 {
+    start_overflow_reporter();
     SetUnhandledExceptionFilter(seh_filter);
     std::signal(SIGABRT, abort_handler);
 }
@@ -381,7 +494,7 @@ void cc::install_crash_handler()
 #if !CC_CRASH_HANDLER_SANITIZED
     install_platform_handlers();
 
-    // Reserved now rather than when something goes wrong, which is the whole point: the collector and its handler
+    // Reserved now rather than when something goes wrong, because the collector and its handler
     // both run in a process that is already in trouble, and neither may allocate.
     cc::impl::install_posix_thread_stack_reporter();
 #endif

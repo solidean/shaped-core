@@ -465,7 +465,7 @@ Small, and each costs a build cycle to rediscover.
   See [prose](../../../../docs/guides/prose.md).
 - **A test name containing a comma needs the comma escaped** on the command line (`dev.py test 'sg - a\, b'`), because
   a filter argument is comma-separated the way Catch2's is.
-  It matters here because an exact name is the only thing that selects a test a disabled driver would otherwise skip.
+  And here an exact name is the only thing that selects a test a disabled driver would otherwise skip.
 
 ---
 

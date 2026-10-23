@@ -28,7 +28,7 @@ struct sv::viewer_config
     /// Runs with no window, no swapchain and no present: the frame is composited into an offscreen texture and left
     /// there, `width` x `height`.
     ///
-    /// It needs no display and no window backend, which is the point — this is what a capture run uses.
+    /// It needs no display and no window backend, so a capture run uses it.
     /// The frame API is unchanged either way: `frame::viewport_size` reports the offscreen size and nothing hands out
     /// a swapchain, so an authoring body cannot tell the difference.
     /// A headless loop is ended by `request_close` alone, since there is no window to close.
@@ -152,6 +152,9 @@ private:
 
     /// The payloads still streaming in, as a const query — `frame::streaming_resources`'s answer.
     [[nodiscard]] isize streaming_resources() const;
+
+    /// The last poll's events, empty when headless — `frame::input_events`'s answer.
+    [[nodiscard]] cc::span<sr::input_event const> input_events() const;
 
     /// `frame::background_work`'s answer.
     [[nodiscard]] cc::shared_async<cc::unit> background_work();

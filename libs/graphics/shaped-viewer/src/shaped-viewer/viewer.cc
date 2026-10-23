@@ -6,6 +6,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/stat.hh>
 #include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh> // cc::thread_pump_all
@@ -48,6 +49,7 @@ constexpr tg::vec4f clear_color = tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
         [](sr::mouse_move_event const& m) { return result_t(m.cursor_pos); },   //
         [](sr::mouse_button_event const& b) { return result_t(b.cursor_pos); }, //
         [](sr::mouse_wheel_event const& w) { return result_t(w.cursor_pos); },  //
+        [](sr::file_drop_event const& d) { return result_t(d.cursor_pos); },    //
         [](sr::key_event const&) { return result_t(); },                        //
         [](sr::text_event const&) { return result_t(); });
 }
@@ -389,6 +391,13 @@ isize viewer::pending_resource_work() const
 isize viewer::streaming_resources() const
 {
     return _impl->resources.settling_count();
+}
+
+cc::span<sr::input_event const> viewer::input_events() const
+{
+    if (_impl->window_system == nullptr)
+        return {};
+    return _impl->window_system->events();
 }
 
 cc::shared_async<cc::unit> viewer::background_work()
@@ -875,6 +884,11 @@ void viewer::finish_frame(frame& f)
     def.views = f._views;
     def.nodes = f._nodes;
 
+    // A capture asks every traced view for its samples and no more, so a traced layer stops where the image is taken.
+    // Also while work is owed: what the views hold then is thrown away once it drains, so tracing on past the target buys nothing.
+    if (im.capture != nullptr && !im.capture->is_done())
+        def.sample_target = im.capture->request().accumulate;
+
     // A canvas places its drawings in logical pixels, so it takes the content scale of the display the window is on —
     // the one whose rectangle holds the window's top-left corner, which is also where a new window opens.
     if (im.window != nullptr && im.window_system != nullptr)
@@ -1182,18 +1196,20 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     auto any_traced = false;
     auto views_converged = true;
     auto lowest = u32(0);
+    auto short_pixels = u32(0);
     for (auto const& tr : plan.traces)
     {
         if (!tr.refresh)
             continue;
 
         if (!any_traced)
-            lowest = im.views.min_accumulated_frames(tr.id);
+            lowest = im.views.min_accumulated_samples(tr.id);
         else
-            lowest = cc::min(lowest, im.views.min_accumulated_frames(tr.id));
+            lowest = cc::min(lowest, im.views.min_accumulated_samples(tr.id));
+        short_pixels += im.views.pixels_short_of_target(tr.id);
 
         any_traced = true;
-        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate_frames);
+        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate);
     }
 
     // Payloads still streaming count as owed work too: until they land their meshes are traced as placeholder boxes, and
@@ -1202,6 +1218,19 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     // A frame whose body says its image is not the finished one owes work the viewer cannot see, such as a load of its own.
     auto const held = session.take_hold();
     auto const owed = im.resources.pending_work_count() + im.resources.settling_count() + (held.empty() ? 0 : 1);
+
+    // Owed work that drains restarts every traced view, so the image is traced against the final resources and nothing before them.
+    // Work landing in place keeps a texture's id, and pixels that had already stopped at the target would otherwise keep
+    // samples of what it replaced.
+    // A frame tracing nothing has no samples to throw away, so it settles at once.
+    // Nor does a run out of time: it writes what it has on this frame, where a restart would defer the write and leave it a frame's samples.
+    if (session.note_owed_work(owed) && !plan.traces.empty() && !session.is_out_of_time())
+    {
+        for (auto const& tr : plan.traces)
+            im.views.restart_accumulation(tr.id);
+        return;
+    }
+
     auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran);
     if (!settled && !session.is_out_of_time())
         return;
@@ -1213,12 +1242,17 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     // succeeded, so an unsettled image left at that path would be refreshed over the committed reference.
     auto const path = session.settled_before_writing() ? cc::string(session.request().output_path)
                                                        : sv::impl::partial_capture_path(session.request().output_path);
+    // A wavefront layer names how many pixels hold its floor down, since one stalled pixel stalls the whole capture.
     if (!session.settled_before_writing())
-        CC_LOG_WARNING("capture: giving up after {}s at {}/{} accumulated frames{} — writing what it has to {}, and "
+        CC_LOG_WARNING("capture: giving up after {}s at {}/{} samples per pixel{}{} — writing what it has to {}, and "
                        "nothing to {}",
-                       session.elapsed_seconds(), lowest, session.request().accumulate_frames,
+                       session.elapsed_seconds(), lowest, session.request().accumulate,
+                       short_pixels == 0 ? cc::string() : cc::format(", {} pixels short of it", short_pixels),
                        held.empty() ? cc::string() : cc::format(", held for {}", held), path,
                        session.request().output_path);
+
+    // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
+    CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
 
     auto const failure = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
     if (failure.has_error())

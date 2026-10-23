@@ -14,6 +14,7 @@
 #include <babel-serializer/image/hdr.hh>
 #include <babel-serializer/image/image.hh>
 #include <babel-serializer/image/jpg.hh>
+#include <babel-serializer/image/ktx2.hh>
 #include <babel-serializer/image/pfm.hh>
 #include <babel-serializer/image/png.hh>
 #include <babel-serializer/image/tga.hh>

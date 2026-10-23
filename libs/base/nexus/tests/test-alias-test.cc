@@ -70,6 +70,8 @@ TEST("aliases - setup API selects invocables by decayed signature and records al
 
 TEST("aliases - an alias named after a test takes that test's location, so a file filter reaches it")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     nx::test_registry reg;
     add_invocable(reg, "child", [&](int) { CHECK(true); });
     reg.add_declaration("drv", {}, [&] {});

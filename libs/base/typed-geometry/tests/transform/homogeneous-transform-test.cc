@@ -128,7 +128,7 @@ TEST("tg homogeneous_transform - factories and accessors")
 
 TEST("tg homogeneous_transform - a positive class rejects a non-positive factor")
 {
-    // the whole point of the flag: without negative_scaling the factors are a promise the
+    // without negative_scaling the factors are a promise the
     // factories enforce, which is what lets aabb and sphere skip their sign handling
     SECTION("uniform")
     {

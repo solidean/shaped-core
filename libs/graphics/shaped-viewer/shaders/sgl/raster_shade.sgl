@@ -90,7 +90,7 @@ fun corner_of(vertex: int){drawn, tracer.bindless, draw} -> varyings:
 fun pixel_context(p: varyings){drawn, tracer.bindless} -> material.shading_context:
     let inst = scene.instance(..drawn.instances[p.instance as int])
     let indices = inst.indices as int
-    return material.make_context(inst, tracer.bindless.buffers[nonuniform indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
+    return material.make_context(inst, tracer.bindless.buffers[indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
 
 /// Whether a cutout material removes this pixel, read through `tracer.instance_opacity` as the tracer's any-hit reads it.
 ///
@@ -114,18 +114,20 @@ fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: 
             tracer.paint_decal_shape(mut surface, d, drawn.decal_shapes[first + k], at, footprint, fade)
 
 /// What arrives along `wi` with radiance-times-solid-angle `incoming` and leaves toward the viewer, BSDF and cosine folded in.
-fun reflected(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, wi: float3, incoming: float3) -> float3:
+/// `n` is the geometric normal turned toward the viewer.
+/// Light reaches only its side, wherever the shading normal leans.
+fun reflected(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, wi: float3, incoming: float3) -> float3:
     let wi_local = openpbr.to_local(f, wi)
-    if wi_local.z <= 0.0 => return float3(0.0)
+    if wi_local.z <= 0.0 or dot(wi, n) <= 0.0 => return float3(0.0)
     return openpbr.bsdf_eval(b, wo_local, wi_local) * incoming * wi_local.z
 
-/// Direct light from `l` at `p`, unoccluded, through the closure `b` in frame `f`.
+/// Direct light from `l` at `p`, unoccluded, through the closure `b` in frame `f` over the face whose turned geometric normal is `n`.
 ///
 /// The same quantity the tracer's next-event estimate converges to there, before its shadow ray: evaluated rather than sampled.
 /// A point and a parallel light are exact.
 /// A rect is integrated over a fixed `area_grid` by `area_grid` grid of points on it, which is exact in the limit and close for a light not much nearer than its own size.
 /// A distant disc is its center direction, carrying the whole solid angle the disc subtends.
-fun direct_light(l: scene.light, b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3) -> float3:
+fun direct_light(l: scene.light, b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3) -> float3:
     if l.path == scene.light_path_area:
         let mut sum = float3(0.0)
         let cells = area_grid as float
@@ -141,21 +143,21 @@ fun direct_light(l: scene.light, b: openpbr.bsdf, f: openpbr.frame, wo_local: fl
                 if cos_light <= 0.0 => continue
                 // The solid angle one grid cell subtends, which the tracer's area-to-solid-angle density divides by.
                 let solid_angle = l.area * cos_light / (dist2 * cells * cells)
-                sum += reflected(b, f, wo_local, wi, l.emission * scene.light_cone(l, cos_light) * solid_angle)
+                sum += reflected(b, f, n, wo_local, wi, l.emission * scene.light_cone(l, cos_light) * solid_angle)
         return sum
 
     if l.path == scene.light_path_point:
         let to_light = l.position - p
         let dist2 = max(dot(to_light, to_light), 1e-12)
         let wi = to_light / sqrt(dist2)
-        return reflected(b, f, wo_local, wi, l.emission * (scene.light_cone(l, dot(l.normal, -wi)) / dist2))
+        return reflected(b, f, n, wo_local, wi, l.emission * (scene.light_cone(l, dot(l.normal, -wi)) / dist2))
 
     if l.path == scene.light_path_distant_point:
-        return reflected(b, f, wo_local, -l.normal, l.emission)
+        return reflected(b, f, n, wo_local, -l.normal, l.emission)
 
     // scene.light_path_distant_disc: radiance over the cone it subtends
     let solid_angle = 2.0 * pt.pi * l.one_minus_cos_angular_radius
-    return reflected(b, f, wo_local, -l.normal, l.emission * solid_angle)
+    return reflected(b, f, n, wo_local, -l.normal, l.emission * solid_angle)
 
 /// The environment's light at a surface, unoccluded: the SH's irradiance through the diffuse albedo, and its radiance about the mirror direction through the specular one.
 ///
@@ -207,10 +209,10 @@ fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surfac
     let wo_local = openpbr.to_local(shading, v)
 
     let mut color = b.emission
-    // A grazing pixel whose shading frame turned away has no hemisphere to light.
+    // `shading_frame` leaves the viewer in front of the frame, so only a degenerate input fails this.
     if wo_local.z > 0.0:
         for i in 0 ..< (f.light_count as int):
-            color += direct_light(scene.light(..drawn.lights[i]), b, shading, wo_local, p.world)
+            color += direct_light(scene.light(..drawn.lights[i]), b, shading, n, wo_local, p.world)
         color += ambient(surface, shading.n, v) * occlusion
 
     let prev = scene.camera(..f.previous_camera)

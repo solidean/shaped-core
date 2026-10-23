@@ -107,7 +107,7 @@ public:
     /// Unlike prepare() and execute() this opens its own rendering scopes and submits its own command lists, so it must NOT be called inside one.
     /// Nor while the main window's list is open: submitting a viewport's list then makes the two concurrent.
     /// The font atlas both sample is reverted to its canonical layout at every viewport submit, which is a barrier per frame for nothing.
-    /// Record the main window's list after this returns — only the present order is load-bearing.
+    /// Record the main window's list after this returns — only the present order is constrained.
     ///
     /// A no-op while multi-viewport is off.
     /// Viewport swapchains use a bgra8_unorm target, independent of whatever format the caller's main swapchain has.

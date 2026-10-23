@@ -17,7 +17,8 @@ struct scl::source_span
     bool empty() const { return byte_end <= byte_begin; }
     u32 size() const { return byte_end > byte_begin ? byte_end - byte_begin : 0; }
 
-    /// The smallest span covering both `a` and `b`. They must share a file_id.
+    /// The smallest span covering both `a` and `b`.
+    /// They must share a file_id.
     static source_span join(source_span a, source_span b)
     {
         return {

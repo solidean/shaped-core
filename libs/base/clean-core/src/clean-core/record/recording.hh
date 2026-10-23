@@ -104,7 +104,7 @@ struct cc::rec::decimation_options
 ///     {.max_secs = 30, .max_bytes = 128 << 20}       // the last 30s, and never more than 128 MB
 ///     {.guaranteed_secs = 20, .max_bytes = 64 << 20} // the last 20s WHATEVER it costs, then 64 MB for the rest
 ///
-/// The difference is which one yields when they conflict, and that is the whole point of having both.
+/// The difference is which one yields when they conflict, so having both lets a caller choose.
 struct cc::rec::retention_policy
 {
     /// Never evicted to satisfy `max_bytes`, however large it grows.

@@ -51,6 +51,13 @@ cc::string partial_capture_path(cc::string_view path)
     return cc::format("{}.partial{}", path.subview({.offset = 0, .size = dot}), path.subview(dot));
 }
 
+bool capture_session::note_owed_work(isize owed)
+{
+    auto const drained = _owing && owed == 0;
+    _owing = owed > 0;
+    return drained;
+}
+
 bool capture_session::is_settled(bool views_converged, bool any_traced, isize pending_work, bool traces_ran) const
 {
     // Post-load work changes a texture's contents rather than its id, so it never restarts a view's accumulation.

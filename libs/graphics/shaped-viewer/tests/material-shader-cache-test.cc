@@ -108,8 +108,8 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - the fallback stands in for a p
     auto lib = sv::material_library::create();
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
-    auto const broken = lib.register_type(
-        sv::material_type::create("broken", cc::move(signature), "surface.nonsense = not_a_function(roughness)\n"));
+    auto const broken = lib.register_type(sv::material_type::create(
+        {.name = "broken", .signature = cc::move(signature), .shader = "surface.nonsense = not_a_function(roughness)\n"}));
     auto const id = lib.acquire(sv::material::create("broken", broken, {}));
 
     auto const& bad = cache.acquire(sv::resolve_material(lib, id, make_mesh()));

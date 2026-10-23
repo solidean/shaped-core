@@ -26,6 +26,9 @@ using crash_context_hook = void (*)() noexcept;
 /// Reaching them means suspending each in turn and walking it with DbgHelp on Windows, and asking each to unwind itself through a signal on Linux.
 /// Elsewhere only the faulting thread is reported, and a core dump carries the rest.
 ///
+/// On Windows a stack overflow is reported by a thread parked for it at install, since the overflowed stack has no room left for the report.
+/// It walks the faulting thread from the fault's context: the top frames, where the recursion shows, the bottom ones and the depth.
+///
 /// Idempotent — installing more than once is harmless.
 /// Implemented per platform (Windows SEH plus SIGABRT, POSIX signals); a best-effort no-op where unsupported.
 ///
@@ -35,7 +38,7 @@ void install_crash_handler();
 
 /// Write this thread's stacktrace and every other thread's, now, with nothing having crashed.
 ///
-/// **The other threads are the point**, and they are the whole reason this exists separately from `cc::stacktrace`:
+/// **It exists separately from `cc::stacktrace` for the other threads**:
 /// in a deadlock or a wait that never finished, the thread that noticed is never the one that matters.
 /// Reaching them means suspending and walking each on Windows, and signalling each to unwind itself on Linux, neither
 /// of which `std::stacktrace` can do -- so the other threads are reported on those two, and the calling one everywhere.

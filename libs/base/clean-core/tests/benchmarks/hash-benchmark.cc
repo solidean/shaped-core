@@ -4,7 +4,7 @@
 // against the raw xxHash entry points they call (XXH3_64bits_withSeed / XXH3_128bits_withSeed).
 //
 // cc::blake3 rides along in the same table, next to the XXH3 columns rather than in a benchmark of its own.
-// That comparison is the point: BLAKE3 is the cryptographic hash content addressing needs, it costs several times
+// They share a table because BLAKE3 is the cryptographic hash content addressing needs, it costs several times
 // what XXH3 does, and libs/data/versioned-document/docs/decisions.md attaches a standing reservation to exactly
 // that ratio.
 // Measuring both here is what keeps the ratio a number in the repo rather than a claim in a document.

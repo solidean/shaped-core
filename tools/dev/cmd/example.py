@@ -20,6 +20,7 @@ from pathlib import Path
 from tools import dev
 from tools.dev import console
 from tools.dev.lib.pipeline.captures import IMAGE_MECHANISMS, SIDECAR_NAME, SidecarError, captures_for
+from tools.dev.lib.pipeline.eligibility import nexus_filter
 from tools.dev.lib.pipeline.examples import (capture_directory, collect_examples, is_example_target,
                                              resolve_example, select_examples)
 
@@ -58,7 +59,7 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--capture-size", metavar="WxH",
                    help="Override the resolution the sidecar declares")
     p.add_argument("--capture-accumulate", metavar="N", type=int,
-                   help="Override the accumulated-frame target the sidecar declares")
+                   help="Override the accumulation target the sidecar declares, in the example's own unit (samples per pixel for sv)")
     p.add_argument("--capture-timeout", metavar="SECS", type=float,
                    help="Override the timeout the sidecar declares")
     p.add_argument("--update-captures", nargs="?", const="", metavar="MATCH",
@@ -164,9 +165,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
 
     # The exact name alone, which reaches an example outside the swept bucket.
     # With --examples it would be a substring sweep, so `sponza` would also run `sponza-evening` and every other name containing it.
-    # Mirrored, because watching the example run is the entire point of the command.
+    # Mirrored, so the example's output shows while it runs.
     result = dev.run_step(
-        [*launcher, str(artifact), example.name, *program_args],
+        [*launcher, str(artifact), nexus_filter(example.name), *program_args],
         step_type="example", name=example.target,
         build_dir=preset.build_dir, cwd=_working_directory(ctx, example), env=env,
         timeout=args.timeout if args.timeout else None,
@@ -303,7 +304,7 @@ def _capture_one(ctx: Context, preset, example, artifact: Path, capture, args: a
     directory = image.parent
 
     result = dev.run_step(
-        [str(artifact), example.name],
+        [str(artifact), nexus_filter(example.name)],
         step_type="example", name=f"{example.target}-capture",
         build_dir=preset.build_dir, cwd=_working_directory(ctx, example),
         env={**os.environ, **_capture_environment(capture, image, args)},

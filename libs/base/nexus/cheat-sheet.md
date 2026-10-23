@@ -89,6 +89,11 @@ TEST("corpus soak", thorough_only) { }   // skipped (a passing SKIP) unless --th
                                          //   version. Also honoured on an INVOCABLE_TEST, whatever its driver holds
 ```
 
+```cpp
+TEST("corpus soak", thorough_only,                  // `dev.py check` runs this test with --thorough whenever the change
+     rerun_on("libs/x/src/x/cut.cc"))               //   touches the glob; opt-in per test, a glob matching nothing is an error
+```
+
 A flag, not a bucket: the test runs either way, and `manual` is not where a thorough test goes.
 [docs/test-runtime.md](docs/test-runtime.md) has the rules.
 
@@ -279,7 +284,7 @@ SKIP();  SKIP("not implemented yet");    // skip the test (a pass, but named by 
 CHECK(x);                                  \ on a pool worker: counted against the test that scheduled the node
 
 \ A thread you start yourself carries nothing, so wrap its work:
-std::thread t(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
+auto t = cc::native_thread::start(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
 auto captured = nx::capture_current_test(); \ for a thread already running: capture here, install there
 nx::test_thread_scope const s(captured);    \ ... on that thread
 ```

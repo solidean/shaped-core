@@ -176,7 +176,6 @@ private:
     /// space reads instead of the motion guide alone.
     /// `sample_counts` is the mean's count per pixel where its pixels differ, and null where one count holds for the image.
     [[nodiscard]] static sr::reconstruct_status _denoise(sg::command_list& cmd,
-                                                         render_settings const& settings,
                                                          denoise_schedule const& schedule,
                                                          impl::temporal_slot const& accumulator,
                                                          denoise_slots const& ds,

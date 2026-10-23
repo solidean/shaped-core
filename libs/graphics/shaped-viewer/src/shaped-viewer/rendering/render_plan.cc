@@ -628,7 +628,7 @@ bool render_plan::validate() const
                 continue;
             }
 
-            // The whole point of the post-order append: a source is finished before anything samples it.
+            // The post-order append finishes a source before anything samples it.
             if (d.primary.kind == draw_source_kind::target && d.primary.index >= t)
                 return false;
             if (d.kind == draw_kind::wipe && d.secondary.kind == draw_source_kind::target && d.secondary.index >= t)

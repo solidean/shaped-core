@@ -106,7 +106,7 @@ bool app::begin_frame()
 {
     // A capture has no window to close, so this is where the run ends: `end_frame` writes the image on the last
     // frame it draws, and the next call through here stops the loop.
-    if (_capture.active && _captured_frames >= _capture.accumulate_frames)
+    if (_capture.active && _captured_frames >= _capture.accumulate)
         return false;
 
     if (_win->is_close_requested())
@@ -204,7 +204,7 @@ cc::shared_async<cc::unit> app::draw_and_present(vdoc::document const& doc,
     //
     // No convergence to wait for here: this is a raster pass, so the image is finished the moment it is drawn, and
     // the frame count exists to let imgui settle its layout rather than to let an estimator converge.
-    if (_captured_frames < _capture.accumulate_frames)
+    if (_captured_frames < _capture.accumulate)
         co_return;
 
     // Settled and then read in place: the result is move-only, so awaiting it for its value would copy it.

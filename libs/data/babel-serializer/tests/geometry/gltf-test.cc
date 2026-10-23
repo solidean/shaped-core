@@ -922,3 +922,46 @@ TEST("gltf - KHR_lights_punctual lights and the nodes that place them")
         "nodes": [{"extensions": {"KHR_lights_punctual": {"light": -2}}}]})"))
               .has_error());
 }
+
+// Extensions the reader does not model
+// -------------------------------------------------------------------------------------------------
+
+TEST("gltf - a vendor extension reads through json_of, on the element that carries it")
+{
+    auto const json = cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["VENDOR_tint"],
+        "materials": [{"name": "plain"},
+                      {"name": "tinted", "extensions": {"VENDOR_tint": {"strength": 0.25}}, "extras": {"note": "x"}}],
+        "meshes": [{"primitives": [{"attributes": {}, "extensions": {"VENDOR_tint": {"strength": 0.5}}}]}]})");
+    // without the option the document is not kept, and no element reaches its JSON
+    auto const lean = REQUIRED_VALUE(babel::gltf::read(json));
+    CHECK(!lean.json_of(lean.materials[1]).is_valid());
+    CHECK(!lean.json_root().is_valid());
+
+    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.keep_json_document = true}));
+    REQUIRE(doc.materials.size() == 2);
+
+    CHECK(!doc.json_of(doc.materials[0])["extensions"].is_valid());
+    auto const tint = doc.json_of(doc.materials[1])["extensions"]["VENDOR_tint"];
+    CHECK(tint["strength"].as_double() == 0.25);
+    CHECK(doc.json_of(doc.materials[1])["extras"]["note"].as_string() == "x");
+
+    auto const& prim = doc.primitives_of(doc.meshes[0])[0];
+    CHECK(doc.json_of(prim)["extensions"]["VENDOR_tint"]["strength"].as_double() == 0.5);
+    CHECK(doc.json_root()["extensionsUsed"][0].as_string() == "VENDOR_tint");
+
+    // an element built by hand has no object in the document
+    CHECK(!doc.json_of(babel::gltf::material()).is_valid());
+}
+
+TEST("gltf - a registered extension may be required, and its use is no issue")
+{
+    auto const json = cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["VENDOR_tint"], "extensionsRequired": ["VENDOR_tint"]})");
+    CHECK(babel::gltf::read(json).has_error());
+
+    // no hook: an extension that only adds information, which the caller reads through json_of
+    babel::gltf::extension const mine[] = {{.name = "VENDOR_tint"}};
+    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.extensions = mine}));
+    CHECK(!doc.has_issues()).dump("issues", doc.issue_report());
+}

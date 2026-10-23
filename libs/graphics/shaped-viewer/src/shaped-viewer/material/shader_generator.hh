@@ -20,8 +20,8 @@ enum class sv::material_slot_kind : sv::u8
 
 /// One field of the per-instance parameter block a permutation reads.
 ///
-/// The generated shader loads it at `offset` and the CPU fills it at `offset`, and both come from the same layout — which is the
-/// point of handing the layout back alongside the source rather than letting each side compute it.
+/// The generated shader loads it at `offset` and the CPU fills it at `offset`, and both come from the same layout, because the
+/// layout is handed back alongside the source rather than computed by each side.
 struct sv::material_slot
 {
     /// which attribute this serves; a texture's uv descriptor is named `"<attribute>.uv"`
@@ -50,10 +50,10 @@ struct sv::material_parameter_layout
     i32 size_bytes = 0;
 };
 
-/// How an instance's cutout opacity is read — `scene.opacity_*` in shaders/sgl/scene_items.sgl.
-enum class sv::material_opacity_kind : sv::u32
+/// How a value of a material is read — the cutout opacity, or a factor of the emission; `scene.value_*` in shaders/sgl/scene_items.sgl.
+enum class sv::material_value_kind : sv::u32
 {
-    none = 0,      ///< never cuts out
+    none = 0,      ///< not read: the consumer's identity value
     constant = 1,  ///< a value of the parameter block
     attribute = 2, ///< a mesh attribute, through the block's descriptor of it
     texture = 3,   ///< a texture channel, sampled through the block's uv descriptor
@@ -69,7 +69,7 @@ struct sv::material_opacity
     /// What an offset holds when it names no slot.
     static constexpr u32 no_offset = 0xffffffffu;
 
-    material_opacity_kind kind = material_opacity_kind::none;
+    material_value_kind kind = material_value_kind::none;
 
     /// The opacity's own slot: the constant, the attribute descriptor, or the texture index.
     u32 offset = no_offset;
@@ -92,7 +92,38 @@ struct sv::material_opacity
     /// The cutoff's constant slot, where the type declares one; a cutoff above 0 thresholds, and 0 leaves coverage.
     u32 cutoff = no_offset;
 
-    [[nodiscard]] bool can_cut_out() const { return kind != material_opacity_kind::none; }
+    [[nodiscard]] bool can_cut_out() const { return kind != material_value_kind::none; }
+};
+
+/// Where one factor of a permutation's emission lives in its parameter block — the emission counterpart of `material_opacity`.
+///
+/// Each field means what `material_opacity`'s of the same name does, and `channels` is the swizzle's first three selectors.
+struct sv::material_emission_factor
+{
+    material_value_kind kind = material_value_kind::none;
+    u32 offset = material_opacity::no_offset;
+    u32 uv_offset = material_opacity::no_offset;
+    u32 frequency = 0;
+    u32 channels[3] = {0, 1, 2};
+    u32 sampler = 0;
+    u32 transform = material_opacity::no_offset;
+
+    [[nodiscard]] bool is_constant() const { return kind == material_value_kind::constant; }
+};
+
+/// Where a permutation's emission lives: its color, and the scale applied to it, as the type declares them.
+///
+/// **This is what decides whether an instance may light the scene**: only a type declaring `emission_color_attribute` has one.
+/// The emitted radiance is `max(0, scale) * max(0, color)`, and a `scale` of kind `none` is a scale of 1.
+/// A constant reads its value out of the instance's block at `offset`, which is per instance rather than per permutation.
+/// `tracer.emitter_radiance` reads every kind, through the `emitter_record` that `sv::emitter_record_of` fills from this.
+struct sv::material_emission
+{
+    material_emission_factor color;
+    material_emission_factor scale;
+
+    /// Whether the type declares where its emission comes from at all.
+    [[nodiscard]] bool declares() const { return color.kind != material_value_kind::none; }
 };
 
 /// A material permutation as an SGL hit group, plus the parameter layout it reads.
@@ -116,11 +147,14 @@ struct sv::generated_material_shader
     /// Where this permutation's cutout opacity lives, and `none` where it cannot cut out.
     ///
     /// It can cut out where its type declares an `opacity_attribute` and something other than the signature's own default supplied it.
-    /// Both halves are load-bearing: an any-hit otherwise runs at every intersection to reject nothing, and costs the instance
+    /// Both halves are needed: an any-hit otherwise runs at every intersection to reject nothing, and costs the instance
     /// the hardware's opaque fast path to do it.
     /// `view_renderer` turns `opacity.can_cut_out()` into `sg::tlas_instance::opaque_override`, so it decides whether the
     /// any-hit can be invoked at all rather than only whether one is compiled.
     material_opacity opacity;
+
+    /// Where this permutation's emission lives, and `declares()` false where its type declares none.
+    material_emission emission;
 
     /// What the compile is cached on: the resolution's shape and the geometry it is spelled for (see `material_shader_key`).
     cc::hash128 key;

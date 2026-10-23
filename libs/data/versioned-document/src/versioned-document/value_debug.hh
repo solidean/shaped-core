@@ -16,7 +16,7 @@ namespace vdoc
 {
 /// Renders `v` as JSON-ish text.
 ///
-/// - `bytes` becomes `bytes(<hex>)`, which no JSON reader would accept, and that is the point.
+/// - `bytes` becomes `bytes(<hex>)`, which no JSON reader would accept, so the output is never mistaken for JSON.
 /// - a string escapes `"`, `\`, and every byte outside printable ASCII as `\xNN`, so the output stays printable
 ///   even though the codec never validates that a string is UTF-8.
 /// - `-0.0` prints as `-0.0`, and a NaN whose payload is not the canonical quiet one prints as `NaN(0x...)`.

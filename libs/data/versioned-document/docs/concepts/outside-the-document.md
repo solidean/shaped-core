@@ -13,4 +13,4 @@ Outside it, and deliberately:
 
 [Snapshots](snapshots.md) belong to the same family and are worth naming separately, because they look like state and are not.
 A snapshot is a cached materialization, derived from ops that are still there, and safe to drop at any moment.
-The one exception is a snapshot a prune made load-bearing, which is the point at which it stops being derived — see [pruning and recovery](pruning-and-recovery.md).
+The one exception is a snapshot a prune made required, which is the point at which it stops being derived — see [pruning and recovery](pruning-and-recovery.md).

@@ -71,7 +71,7 @@ If they match, the history is correct — no trust in the sender at any point.
 - **The batch is a set.** Every op is verified before any of it is applied, so a partial or hostile set leaves the replica exactly as it was rather than half-integrated.
 
 A skeleton cannot be *offered*: an empty payload has nothing to verify, and it is refused as malformed rather than quietly accepted as an op with no writes.
-A skeleton the replica *holds* is filled in, which is the whole point — and it needs its own verb, because adding an op is idempotent by id and therefore leaves a skeleton a skeleton.
+A skeleton the replica *holds* is filled in, and that needs its own verb, because adding an op is idempotent by id and therefore leaves a skeleton a skeleton.
 
 One integrity claim content addressing cannot make becomes checkable exactly here.
 A skeleton's parents were never covered by any hash, so a corrupted parent list is undetectable while the op sits in storage.
@@ -85,7 +85,7 @@ An op that **forks below** a still-required snapshot presents a writer the empti
 So such a batch is refused.
 
 But completing that snapshot's ancestry retires the question entirely: once every op behind it has its payload again, a replay reproduces exactly what the snapshot holds.
-The snapshot stops being load-bearing, and is **demoted** to a droppable cache and unpinned.
+The snapshot stops being required, and is **demoted** to a droppable cache and unpinned.
 
 So a fork is refused only while the hole is still there, and sending the rest of the ancestry in the same batch is what makes it acceptable.
 That is what makes this a boundary rather than a ban.

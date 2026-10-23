@@ -10,7 +10,7 @@
 // Written against the hand-rolled parser BEFORE it moved onto nx::args, so this file is the contract the
 // migration had to satisfy rather than a description of what it happens to do now.
 //
-// It matters more than an ordinary suite: C++ TestMate drives this surface, and a regression here is an
+// C++ TestMate drives this surface, so a regression here is an
 // IDE that silently stops discovering tests rather than a red test.
 // libs/base/nexus/docs/catch2-runner-compat.md is the prose half.
 
@@ -272,7 +272,7 @@ TEST("test cli - the generated help still identifies the binary to C++ TestMate"
 {
     auto const help = nx::test_schedule_config::cli_help_text();
 
-    // Load-bearing: the extension scans --help output for this string, and without it an IDE silently
+    // The extension scans --help output for this string, and without it an IDE silently
     // discovers no tests at all.
     // libs/base/nexus/docs/catch2-runner-compat.md is the contract.
     CHECK(help.contains("Compatible with Catch2 v3.11.0"));
@@ -280,7 +280,7 @@ TEST("test cli - the generated help still identifies the binary to C++ TestMate"
 
 TEST("test cli - help describes the flags the parser actually has")
 {
-    // The whole point of generating it: the block this replaced listed no flags whatsoever.
+    // Generated, because the block this replaced listed no flags whatsoever.
     auto const help = nx::test_schedule_config::cli_help_text();
 
     for (auto const* const flag : {"--manual", "--pgo-benchmarks", "--benchmarks", "--examples", "--jobs",

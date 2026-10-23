@@ -7,13 +7,14 @@
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/vulkan/vulkan_forward_waits.hh>
 #include <shaped-graphics/transfer/stream_source.hh>
 
 #include <atomic>
-#include <thread>
 
 using namespace cc::primitive_defines;
 
@@ -95,7 +96,7 @@ ASYNC_TEST("sg vulkan - a device create waits for a stream a submitted list is w
 
         auto created = std::atomic<bool>(false);
         auto finished = std::atomic<bool>(false);
-        auto creator = std::thread(
+        auto creator = cc::native_thread::start(
             [&]
             {
                 second = sg::backend::vulkan::test::make_context();
@@ -105,7 +106,7 @@ ASYNC_TEST("sg vulkan - a device create waits for a stream a submitted list is w
 
         // Waits for the creating thread to reach its barrier, which it cannot leave while the source withholds its bytes.
         while (sg::backend::vulkan::device_driver_barriers_up() == 0 && !finished.load(std::memory_order_acquire))
-            std::this_thread::yield();
+            cc::this_thread_yield();
         CHECK(!finished.load(std::memory_order_acquire));
 
         opener->release();

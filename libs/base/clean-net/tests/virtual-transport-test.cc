@@ -14,8 +14,8 @@ using namespace cnet;
 
 // The transport with no network under it: the same stream_listener and stream_connection a socket would have handed back,
 // answered in this process.
-// Every test runs unthreaded, and the ones that wait on something use a manual clock -- which is the point of the
-// whole exercise, since nothing here can be slow or machine-dependent.
+// Every test runs unthreaded, and the ones that wait on something use a manual clock, so nothing here can be slow
+// or machine-dependent.
 
 namespace
 {
@@ -224,7 +224,7 @@ CNET_IO_TEST("cnet - a virtual half-close leaves the answer coming")
     CHECK(ended->is_ready());
     CHECK(ended->try_error() != nullptr);
 
-    // The other direction is untouched, which is the whole point of half-closing.
+    // Half-closing leaves the other direction untouched.
     auto const answer = cc::string_view("the answer");
     CHECK(peer->send(bytes_of(answer))->try_error() == nullptr);
 

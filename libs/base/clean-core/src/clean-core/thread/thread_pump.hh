@@ -12,7 +12,7 @@
 // actors it happens to know about.
 // With threads, a thread parked in a pool is not such a loop, and never sweeps; see register_thread_pump.
 //
-// That is the point: individual pumping is a deadlock waiting to happen.
+// Running the whole registry avoids individual pumping, which is a deadlock waiting to happen.
 // A wait can only drain what its own library can name, so the next actor added below it, or beside it, deadlocks a build
 // with no threads and passes every threaded test.
 //

@@ -196,7 +196,8 @@ Selecting a nonsensical axis, `.slices` on a non-array say, is a compile error r
 A `view_range` is `{ int start = 0; int count = -1 }` where `count < 0` means "to the end", so the whole-axis default is `{}`.
 
 - **Natural views** — the texture's own dimension: `as_texture_view(params = {})` on any shape,
-  `as_image_view<Format>(params = {})` where `!Traits::is_multisampled`. The params carry the in-dimension
+  `as_image_view<Format>(params = {})` where `!Traits::is_multisampled`.
+  The params carry the in-dimension
   sub-selection: a mip range (texture) or single mip (image), an array-slice range, a cube range, or a
   3D depth-slice window (`depth_slices`, D3D12's `FirstWSlice`/`WSize` — tracked outside the subresource
   range since a whole 3D mip is one subresource for hazard purposes).

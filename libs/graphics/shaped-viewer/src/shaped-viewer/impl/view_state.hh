@@ -1,37 +1,25 @@
 #pragma once
 
 #include <clean-core/container/map.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
+#include <shaped-graphics/bytes_future.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/impl/wavefront_pacing.hh>
 #include <shaped-viewer/layout/layout_tree.hh>
 #include <shaped-viewer/rendering/traced_group.hh>
-#include <shaped-viewer/rendering/wavefront_routine.hh> // wavefront_timing, held by value
+#include <shaped-viewer/rendering/wavefront_routine.hh>
 #include <shaped-viewer/view/camera.hh>
 #include <shaped-viewer/view/camera_controller.hh>
+#include <shaped-viewer/view/render_settings.hh> // sv::accumulation_sample_cap
 #include <typed-geometry/linalg/pos.hh>
 #include <typed-geometry/linalg/vec.hh>
 
 namespace sv::impl
 {
-/// How a still wavefront frame fits its time budget: a smoothed estimate of one round's GPU time, and the frames whose
-/// timestamps have not landed yet.
-struct wavefront_pacing
-{
-    /// GPU seconds per round, or 0 before any frame has been measured.
-    f64 seconds_per_round = 0.0;
-
-    /// One traced frame, kept until its timestamps land.
-    struct pending
-    {
-        wavefront_timing timing;
-        i32 rounds = 0;
-    };
-    cc::vector<pending> in_flight;
-};
-
 /// One temporal resource a view keeps across frames, and how far whatever writes it has run.
 ///
 /// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
@@ -57,11 +45,31 @@ struct temporal_slot
     /// every single frame, which looks exactly like the temporal reuse never having been wired up.
     u64 declared_hash = 0;
 
+    /// How many frames the mean holds, which the denoiser's hand-off and the trace's seed read.
     u32 accum_frame = 0;
 
     /// What the last frame of this accumulation slot's layer bound in place of permutations not compiled, as `stand_in_report::hash`.
     /// The next frame's image hash folds it in, which is what restarts the image when the set changes, and only then.
     u64 stand_in_hash = 0;
+
+    /// The fewest samples per pixel the mean is known to hold, which is what convergence is asked of.
+    ///
+    /// A megakernel layer counts `samples_per_pixel` per frame, and a raster layer `sv::accumulation_sample_cap` once a frame lands.
+    /// A wavefront layer's pixels finish different numbers of paths, so it is raised as each frame's floor reads back, a frame or more late.
+    /// 0 whenever `accum_frame` is: `restart_accumulation` resets both.
+    u32 samples = 0;
+
+    /// The samples per pixel this layer stops at, as the frame that last decided whether to trace took it.
+    /// The smaller of `sv::accumulation_sample_cap` and `viewer_definition::sample_target` where that is set; `is_accumulation_converged` takes reaching it as stopped.
+    u32 sample_target = accumulation_sample_cap;
+
+    /// How many pixels held fewer samples than the trace's target as of the last wavefront floor that landed, and 0 for any other layer.
+    /// What a capture that gives up names, since one stalled pixel holds the whole floor down.
+    u32 pixels_short = 0;
+
+    /// The wavefront frames' sample floors still in flight, oldest first, all of the paths' current generation.
+    /// A restart drops them, since they count samples of the image it threw away.
+    cc::vector<sg::data_future<u32>> sample_floors;
 
     /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
     ///
@@ -91,14 +99,25 @@ struct temporal_slot
     cc::optional<wavefront_state> scaled_paths;
 
     /// Whether the last frame of this accumulation slot's layer was traced at the upscaler's input extent.
-    /// The next frame is full-size and restarts whenever the image did not change since, so this is what ends a move.
+    /// The next frame is full-size and restarts once the move's hold has passed, so this is what ends a move.
     bool traced_scaled = false;
 
     /// How many frames were traced at the input extent, which picks each one's jitter and random sequence.
     u32 scaled_frame = 0;
 
-    /// How many full-size frames of this accumulation slot's layer restarted its mean, which keeps each restart's random sequence apart.
+    /// How many runs of this accumulation slot's mean drew samples before a different image restarted it, which keeps each run's random sequence apart.
+    /// A run ended only because its last frame traced through something still loading is not counted, so the run after it repeats its sequence.
     u32 restarts = 0;
+
+    /// Whether a full-size frame traced through the sequence `restarts` picks, so the next restart for a different image moves on from it.
+    bool drew_since_restart = false;
+
+    /// How many frames of this slot traced through a stand-in or an emitter still loading, each of which restarts the mean behind it.
+    /// Nothing decides by it: it is how a test tells a mean that waited on a compile from one that did not.
+    u32 loading_frames = 0;
+
+    /// When the image last changed, on the steady clock; a move lasts `render_settings::motion_hold_ms` past it.
+    f64 last_change_seconds = -1e30;
 
     /// The jitter the last of those frames was traced at, which the upscaler reads beside this frame's.
     tg::vec2f last_jitter = tg::vec2f(0, 0);
@@ -209,6 +228,9 @@ struct view_state
     u64 last_refresh_frame = 0;
 };
 
+/// Starts `slot`'s mean over: no frames, no samples, and no sample floor of the old image still to land.
+void restart_accumulation(temporal_slot& slot);
+
 // -- Folding over a view's traced layers.
 //
 // One rule in one place, because the alternative already went wrong: `view_ref::accumulated_frames` read
@@ -225,24 +247,20 @@ struct view_state
 /// One still wavefront layer's share of `budget_ms`, split evenly among `still_layers` of them; 0 for no budget.
 [[nodiscard]] f32 wavefront_budget_share(f32 budget_ms, isize still_layers);
 
-/// The most rounds a budget gives a still frame, however cheap a round measured.
-inline constexpr i32 max_budgeted_rounds = 64;
-
-/// How many rounds a still frame runs: `rounds_per_frame`, or as many as fit `budget_ms` at `seconds_per_round`, between 1 and `max_budgeted_rounds`.
-/// `rounds_per_frame` stands until a round is measured, and always where the budget is 0.
-[[nodiscard]] i32 still_rounds_for(i32 rounds_per_frame, f32 budget_ms, f64 seconds_per_round);
-
-/// The lowest accumulated-frame count across every traced layer of `state`, and 0 when it has none.
+/// The fewest samples per pixel across every traced layer of `state`, and 0 when it has none.
 ///
 /// The lowest rather than the first: a view converges when its slowest layer does.
-[[nodiscard]] u32 min_accumulated_frames(view_state const& state);
+[[nodiscard]] u32 min_accumulated_samples(view_state const& state);
 
-/// Whether every traced layer of `state` has reached `frames`, or has stopped climbing and never will.
+/// How many pixels across every traced layer of `state` held fewer samples than their trace's target, as last read back.
+[[nodiscard]] u32 pixels_short_of_target(view_state const& state);
+
+/// Whether every traced layer of `state` holds `samples` per pixel, or has stopped climbing and never will.
 ///
-/// An unset `frames` asks only the second question — has this view finished as far as it can.
-/// The cap matters because it is reachable: a caller asking for more frames than `sv::accumulation_frame_cap` would
+/// An unset `samples` asks only the second question — has this view finished as far as it can.
+/// The cap matters because it is reachable: a caller asking for more samples than `sv::accumulation_sample_cap` would
 /// otherwise wait on a counter that stopped moving, which is a capture burning its whole timeout on an image that
 /// was already as converged as it gets.
 /// False for a view with no traced layer at all, since nothing there has converged.
-[[nodiscard]] bool is_accumulation_converged(view_state const& state, cc::optional<u32> frames);
+[[nodiscard]] bool is_accumulation_converged(view_state const& state, cc::optional<u32> samples);
 } // namespace sv::impl

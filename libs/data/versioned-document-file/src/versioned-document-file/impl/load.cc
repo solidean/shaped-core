@@ -184,7 +184,7 @@ cc::result<cc::unit> load(store_reader& reader, store& target)
             // leaves the asset with no declared dependencies, exactly as an absent one would.
             // The cost of that is a reclamation that collects more than it had to, never a wrong idea of what the
             // asset IS.
-            // Dropping the asset instead would turn an advisory field into a load-bearing one.
+            // Dropping the asset instead would turn an advisory field into an authoritative one.
             auto const deps = vdoc::try_decode(row.deps.value());
             if (deps.has_error() || deps.value().kind() != vdoc::value_kind::array)
             {

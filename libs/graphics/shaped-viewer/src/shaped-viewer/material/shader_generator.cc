@@ -249,9 +249,13 @@ enum class load_shape
 
 /// The load of mesh attribute `binding` through the descriptor named `desc`, as a float expression of `components` lanes.
 /// It reads the buffer through a local `<desc>_buffer`, since only a name may stand as a non-uniform index.
-[[nodiscard]] cc::string mesh_load(mesh_attribute_binding const& binding, cc::string_view desc, int components, bool rotates)
+[[nodiscard]] cc::string mesh_load(mesh_attribute_binding const& binding,
+                                   cc::string_view desc,
+                                   int components,
+                                   bool rotates,
+                                   cc::string_view mark)
 {
-    auto const buffer = cc::format("tracer.bindless.buffers[nonuniform {}_buffer]", desc);
+    auto const buffer = cc::format("tracer.bindless.buffers[{}{}_buffer]", mark, desc);
     if (shape_of(binding.frequency) == load_shape::flat)
         return cc::format("material.load_element_{}({}, {}, {})", load_suffix(components), buffer, desc,
                           element_expression(binding.frequency));
@@ -261,7 +265,7 @@ enum class load_shape
                       element_expression(binding.frequency));
 }
 
-/// What differs between the stages a material's body is spelled for: how a texture picks its level.
+/// What differs between the stages a material's body is spelled for: how a texture picks its level, and whether an index is marked.
 ///
 /// Everything else — the loads, the fragment, the bindless tables and the sampler palette among them — is the same text for a traced hit and a rasterized pixel.
 struct body_spelling
@@ -269,13 +273,16 @@ struct body_spelling
     /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
     /// A pixel's cutout does not read through these loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0 as a hit does.
     bool explicit_level = true;
+    /// What an index into a bindless table is written behind: `nonuniform ` at a hit, where the lanes of a wave hit
+    /// different instances, and nothing in a pixel, whose instance is `@per_draw` (`raster.varyings`).
+    cc::string_view mark = "nonuniform ";
 };
 
 /// The spelling a hit group and a wavefront shade kernel read their attributes in.
 constexpr auto traced_spelling = body_spelling{};
 
 /// The spelling a raster pixel stage reads its attributes in.
-constexpr auto raster_spelling = body_spelling{.explicit_level = false};
+constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = ""};
 
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
@@ -301,7 +308,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
         auto const& s = slot_for(layout, index, material_slot_kind::constant);
         auto const load = components == 1 ? cc::string("load") : cc::format("load{}", components);
         auto const raw
-            = cc::format("tracer.bindless.buffers[nonuniform block].{}(ctx.param_offset + {}u)", load, s.offset);
+            = cc::format("tracer.bindless.buffers[{}block].{}(ctx.param_offset + {}u)", spelling.mark, load, s.offset);
         auto value = raw;
         if (a.format.scalar == scalar_type::f32)
             value = cc::format("reinterpret_as_float({})", raw);
@@ -315,13 +322,13 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
     {
         auto const& s = slot_for(layout, index, material_slot_kind::attribute_descriptor);
         cc::format_append(out,
-                          "    let desc = material.load_attribute_desc(tracer.bindless.buffers[nonuniform block], "
+                          "    let desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
                           "ctx.param_offset + {}u)\n",
-                          s.offset);
+                          spelling.mark, s.offset);
         out += "    let desc_buffer = desc.buffer as int\n";
         auto const rotates = a.interpolation == attribute_interpolation::rotation;
         cc::format_append(out, "    return {}\n",
-                          as_format(mesh_load(*a.attribute, "desc", components, rotates), a.format));
+                          as_format(mesh_load(*a.attribute, "desc", components, rotates, spelling.mark), a.format));
         break;
     }
 
@@ -331,20 +338,19 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
         auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
         auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
         cc::format_append(out,
-                          "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[nonuniform block], "
+                          "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
                           "ctx.param_offset + {}u)\n",
-                          uv_slot.offset);
+                          spelling.mark, uv_slot.offset);
         out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
         // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
-        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false));
-        cc::format_append(
-            out, "    let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + {}u) as int\n",
-            tex.offset);
+        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling.mark));
+        cc::format_append(out, "    let image = tracer.bindless.buffers[{}block].load(ctx.param_offset + {}u) as int\n",
+                          spelling.mark, tex.offset);
         // An explicit level where there are no derivatives, at a hit.
         // The texel is named because a constant selector reads it twice.
-        cc::format_append(
-            out, "    let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, tracer.bindless.{}{})\n",
-            sgl_palette_sampler(a.sample->sampler), spelling.explicit_level ? ", level = 0.0" : "");
+        cc::format_append(out, "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
+                          spelling.mark, sgl_palette_sampler(a.sample->sampler),
+                          spelling.explicit_level ? ", level = 0.0" : "");
 
         auto value = texel_expression(a.sample->swizzle, a.format);
 
@@ -354,11 +360,11 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
             auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
             auto const lanes = component_swizzle(components);
             cc::format_append(out,
-                              "    let scale = reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4("
-                              "ctx.param_offset + {}u))\n"
-                              "    let bias = reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4("
-                              "ctx.param_offset + {}u))\n",
-                              tf.offset, tf.offset + 16);
+                              "    let scale = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
+                              "ctx.param_offset + {1}u))\n"
+                              "    let bias = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
+                              "ctx.param_offset + {2}u))\n",
+                              spelling.mark, tf.offset, tf.offset + 16);
             value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
         }
         cc::format_append(out, "    return {}\n", as_format(cc::move(value), a.format));
@@ -427,19 +433,19 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
 
         case material_frequency::material:
         case material_frequency::mesh_instance:
-            out.kind = material_opacity_kind::constant;
+            out.kind = material_value_kind::constant;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
             break;
 
         case material_frequency::mesh_attribute:
-            out.kind = material_opacity_kind::attribute;
+            out.kind = material_value_kind::attribute;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
             out.frequency = frequency_code(a.attribute->frequency);
             break;
 
         case material_frequency::material_texture:
         case material_frequency::mesh_texture_binding:
-            out.kind = material_opacity_kind::texture;
+            out.kind = material_value_kind::texture;
             out.offset = u32(slot_for(layout, i32(i), material_slot_kind::texture_index).offset);
             out.uv_offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
             out.frequency = frequency_code(a.uv->frequency);
@@ -471,6 +477,65 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
                            r.type->name, a.name);
     }
     return out;
+}
+
+/// Where attribute `name` of `r` lives in `layout`, read as one factor of the emission; `none` where `name` is empty.
+///
+/// Unlike the opacity, a value at `material_type` frequency counts: the signature's default is a real emission.
+/// A default of zero is what keeps an instance from qualifying as a light at all.
+[[nodiscard]] material_emission_factor emission_factor_of(resolved_material const& r,
+                                                          material_parameter_layout const& layout,
+                                                          cc::string_view name)
+{
+    auto out = material_emission_factor();
+    if (name.empty())
+        return out;
+
+    for (auto i = 0; i < r.attributes.size(); ++i)
+    {
+        auto const& a = r.attributes[i];
+        if (a.name != name)
+            continue;
+
+        switch (a.frequency)
+        {
+        case material_frequency::material_type:
+        case material_frequency::material:
+        case material_frequency::mesh_instance:
+            out.kind = material_value_kind::constant;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::constant).offset);
+            break;
+
+        case material_frequency::mesh_attribute:
+            out.kind = material_value_kind::attribute;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.attribute->frequency);
+            break;
+
+        case material_frequency::material_texture:
+        case material_frequency::mesh_texture_binding:
+            out.kind = material_value_kind::texture;
+            out.offset = u32(slot_for(layout, i32(i), material_slot_kind::texture_index).offset);
+            out.uv_offset = u32(slot_for(layout, i32(i), material_slot_kind::attribute_descriptor).offset);
+            out.frequency = frequency_code(a.uv->frequency);
+            for (auto c = 0; c < 3; ++c)
+                out.channels[c] = channel_code(a.sample->swizzle.components[c]);
+            out.sampler = palette_index(a.sample->sampler);
+            if (!a.sample->transform.is_identity(a.format.component_count()))
+                out.transform = u32(slot_for(layout, i32(i), material_slot_kind::sample_transform).offset);
+            break;
+        }
+    }
+    return out;
+}
+
+/// Where `r`'s emission lives in `layout`, as its type declares it.
+[[nodiscard]] material_emission emission_of(resolved_material const& r, material_parameter_layout const& layout)
+{
+    if (!r.type->declares_emission())
+        return {};
+    return {.color = emission_factor_of(r, layout, r.type->emission_color_attribute),
+            .scale = emission_factor_of(r, layout, r.type->emission_scale_attribute)};
 }
 
 /// The header every generated source of one permutation opens with: what it is, what it requires, and the modules it joins.
@@ -539,6 +604,19 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
         src += "\n";
         line_start = line_end + 1;
     }
+
+    // A type declaring its emission has it written here, after the fragment, from the declared attributes alone.
+    // That is the value the light sampler reads as well, so the two strategies weighed against each other see one emission.
+    // A traced spelling samples a texture at level 0, the level `tracer.emission_factor` reads too; a raster pixel's level is no light strategy.
+    if (r.type->declares_emission())
+    {
+        src += "\n    // --- the declared emission ---\n";
+        cc::format_append(src, "    surface.emission_color = max(float3(0.0), {})\n", r.type->emission_color_attribute);
+        if (r.type->emission_scale_attribute.empty())
+            src += "    surface.emission_luminance = 1.0\n";
+        else
+            cc::format_append(src, "    surface.emission_luminance = max(0.0, {})\n", r.type->emission_scale_attribute);
+    }
     src += "    return surface\n\n";
 
     // The tangent frame is the one supplied attribute the shading itself asks after, and a type that declares none supplies none.
@@ -602,12 +680,14 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
 
     // The cutout test twice, since an any hit takes the payload of the one ray type its record serves.
     // Neither reads the material's code: opacity comes through the instance's record, the same for every material.
-    src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload, @launch_id id: "
-           "int3){tracer.traced, tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, id, tracer.candidate_opacity(c))\n\n";
-    src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload, @launch_id id: "
-           "int3){tracer.traced, tracer.bindless} -> hit_decision:\n"
-           "    return tracer.cutout(c, id, tracer.candidate_opacity(c))\n\n";
+    // Each draws from its payload: a surface ray from the path's stream as the ray left, a shadow ray from the seed its caller wrote.
+    src += "@any_hit fun sv_any_hit(c: triangle_candidate, p: mut tracer.surface_payload){tracer.traced, "
+           "tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, tracer.cutout_seed(p.rng, tracer.cutout_ray_surface), "
+           "tracer.candidate_opacity(c))\n\n";
+    src += "@any_hit fun sv_shadow_any_hit(c: triangle_candidate, p: mut tracer.shadow_payload){tracer.traced, "
+           "tracer.bindless} -> hit_decision:\n"
+           "    return tracer.cutout(c, p.seed, tracer.candidate_opacity(c))\n\n";
     src += "hit_group sv_material for path_rays:\n"
            "    surface = (closest_hit = sv_closest_hit, any_hit = sv_any_hit)\n"
            "    occlusion = (any_hit = sv_shadow_any_hit)\n";
@@ -760,6 +840,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
 
     auto layout = build_layout(r);
     auto const opacity = opacity_of(r, layout);
+    auto const emission = emission_of(r, layout);
 
     auto source = generate_hit_group(r, layout, opts.kind, opacity.can_cut_out());
     auto shade_source = generate_shade_kernel(r, layout, opts.kind);
@@ -770,6 +851,7 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
             .raster_source = cc::move(raster_source),
             .layout = cc::move(layout),
             .opacity = opacity,
+            .emission = emission,
             .key = material_shader_key(r.permutation_key, opts)};
 }
 } // namespace sv

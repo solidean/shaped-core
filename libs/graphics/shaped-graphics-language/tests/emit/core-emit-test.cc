@@ -117,6 +117,13 @@ flat_entry_point structured_search(checked_module const& m)
 }
 } // namespace
 
+TEST("sgl test support - a golden's literals are one per line, escaped, and end in a line break where the text does")
+{
+    CHECK(sgl_test::golden_literals("a\n  b \"c\" \\d\n", "    ") == "\"a\\n\"\n    \"  b \\\"c\\\" \\\\d\\n\"");
+    CHECK(sgl_test::golden_literals("tail", "    ") == "\"tail\"");
+    CHECK(sgl_test::golden_literals("", "    ") == "");
+}
+
 TEST("sgl emit - every core construct is written in every target")
 {
     auto const checked = flat_test_module();
@@ -293,59 +300,52 @@ TEST("sgl emit - a structured tree is legalized and then written: a value block 
     auto const core = legalize(m, structured);
     REQUIRE(is_core(m, core));
     CHECK(dump(interpret(m, core, test_inputs(m))) == dump(interpret(m, structured, test_inputs(m))));
-    CHECK(function_text(m, core, sgl::emit::target::wgsl)
-          == "@fragment\n"
-             "fn shade(p: frag) -> target_ {\n"
-             "    var weight: f32 = 1.0;\n"
-             "    var search_result: f32;\n"
-             "    var search_left: bool = false;\n"
-             "    loop {\n"
-             "        for (var i: i32 = 0; i < 8; i++) {\n"
-             "            weight = weight * p.a;\n"
-             "            if weight < 0.125 {\n"
-             "                search_result = weight;\n"
-             "                search_left = true;\n"
-             "                break;\n"
-             "            }\n"
-             "        }\n"
-             "        if search_left {\n"
-             "            break;\n"
-             "        }\n"
-             "        search_result = 0.0;\n"
-             "        break;\n"
-             "    }\n"
-             "    let shade_1: f32 = search_result;\n"
-             "    return target_(vec4f(shade_1, shade_1, shade_1, 1.0));\n"
-             "}\n");
-    CHECK(function_text(m, core, sgl::emit::target::hlsl_dx12)
-          == "target shade(frag p)\n"
-             "{\n"
-             "    float weight = 1.0;\n"
-             "    float search_result;\n"
-             "    bool search_left = false;\n"
-             "    do\n"
-             "    {\n"
-             "        for (int i = 0; i < 8; ++i)\n"
-             "        {\n"
-             "            weight = weight * p.a;\n"
-             "            if (weight < 0.125)\n"
-             "            {\n"
-             "                search_result = weight;\n"
-             "                search_left = true;\n"
-             "                break;\n"
-             "            }\n"
-             "        }\n"
-             "        if (search_left)\n"
-             "        {\n"
-             "            break;\n"
-             "        }\n"
-             "        search_result = 0.0;\n"
-             "    } while (false);\n"
-             "    const float shade_1 = search_result;\n"
-             "    target result;\n"
-             "    result.color = float4(shade_1, shade_1, shade_1, 1.0);\n"
-             "    return result;\n"
-             "}\n");
+    // X7 writes the `once` and the test behind the loop as a branch around the fallback
+    sgl_test::check_golden(function_text(m, core, sgl::emit::target::wgsl),
+                           "@fragment\n"
+                           "fn shade(p: frag) -> target_ {\n"
+                           "    var weight: f32 = 1.0;\n"
+                           "    var shade_1: f32;\n"
+                           "    var search_left: bool = false;\n"
+                           "    for (var i: i32 = 0; i < 8; i++) {\n"
+                           "        weight = weight * p.a;\n"
+                           "        if weight < 0.125 {\n"
+                           "            shade_1 = weight;\n"
+                           "            search_left = true;\n"
+                           "            break;\n"
+                           "        }\n"
+                           "    }\n"
+                           "    if !search_left {\n"
+                           "        shade_1 = 0.0;\n"
+                           "    }\n"
+                           "    return target_(vec4f(shade_1, shade_1, shade_1, 1.0));\n"
+                           "}\n",
+                           "value-block-wgsl");
+    sgl_test::check_golden(function_text(m, core, sgl::emit::target::hlsl_dx12),
+                           "target shade(frag p)\n"
+                           "{\n"
+                           "    float weight = 1.0;\n"
+                           "    float shade_1;\n"
+                           "    bool search_left = false;\n"
+                           "    for (int i = 0; i < 8; ++i)\n"
+                           "    {\n"
+                           "        weight = weight * p.a;\n"
+                           "        if (weight < 0.125)\n"
+                           "        {\n"
+                           "            shade_1 = weight;\n"
+                           "            search_left = true;\n"
+                           "            break;\n"
+                           "        }\n"
+                           "    }\n"
+                           "    if (!search_left)\n"
+                           "    {\n"
+                           "        shade_1 = 0.0;\n"
+                           "    }\n"
+                           "    target result;\n"
+                           "    result.color = float4(shade_1, shade_1, shade_1, 1.0);\n"
+                           "    return result;\n"
+                           "}\n",
+                           "value-block-hlsl");
 }
 
 TEST("sgl emit - a print is unsupported in every target, and the error does not depend on the target")

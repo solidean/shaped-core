@@ -26,7 +26,7 @@ The top-level `fwd.hh` only aggregates them, so include a single module's when t
 ## Module docs
 
 One doc per module under [modules/](modules/), answering **"what belongs here?"** and **"why is it this way?"**.
-Motivation, scope, and the load-bearing decisions, in the spirit of an ADR — not a cheat sheet, and not the roadmap.
+Motivation, scope, and the decisions the design rests on, in the spirit of an ADR — not a cheat sheet, and not the roadmap.
 Add one when a module lands, and cover the big rationales there; the small ones stay in source comments.
 
 - [modules/scalar](modules/scalar.md) — the scalar seam, `angle`, which types count as scalars.
