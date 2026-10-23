@@ -800,31 +800,34 @@ struct let_simplifier
         }
     }
 
+    /// Calls `visit` on `id` and every operand below it.
+    template <class Visit>
+    void visit_expr(flat_expr_id id, Visit& visit, int depth) const
+    {
+        if (!is_known(e(), id) || depth > k_max_depth)
+            return;
+        visit(id);
+        for_each_operand(e(), e().at(id), [&](flat_expr_id operand) { visit_expr(operand, visit, depth + 1); });
+    }
+
     /// Calls `visit` on every expression the statements of `range` that stay hold, operands included.
     template <class Visit>
     void visit_live(ast::range_of<flat_stmt_id> range, Visit&& visit, int depth) const
     {
         if (!is_known(e(), range) || depth > k_max_depth)
             return;
-        auto const visit_expr = [&](this auto const& self, flat_expr_id id, int d) -> void
-        {
-            if (!is_known(e(), id) || d > k_max_depth)
-                return;
-            visit(id);
-            for_each_operand(e(), e().at(id), [&](flat_expr_id operand) { self(operand, d + 1); });
-        };
         for (auto const id : e().at(range))
         {
             if (!is_known(e(), id) || is_dropped(id))
                 continue;
             auto const& s = e().at(id);
-            for_each_expr_of(s, [&](flat_expr_id x) { visit_expr(x, 0); });
+            for_each_expr_of(s, [&](flat_expr_id x) { visit_expr(x, visit, 0); });
             for_each_pattern_of(e(), s,
                                 [&](ast::range_of<flat_expr_id> patterns)
                                 {
                                     if (is_known(e(), patterns))
                                         for (auto const p : e().at(patterns))
-                                            visit_expr(p, 0);
+                                            visit_expr(p, visit, 0);
                                 });
             for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { visit_live(inner, visit, depth + 1); });
         }

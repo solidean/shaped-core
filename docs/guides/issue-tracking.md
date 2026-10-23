@@ -113,6 +113,7 @@ A marker counts for its whole file, since it sits above the code it marks rather
 ### Open
 
 `issues new <type> <slug> [--in <dir>]` writes `<dir>/docs/issues/<type>-<slug>.md` and commits nothing.
+`<dir>` is the owner, so a `docs/` folder is refused, since it would file into `docs/docs/issues/`; `--force` overrides that.
 By hand: create the file.
 
 ### Claimed — pushed at once
@@ -133,6 +134,8 @@ An issue file not yet committed anywhere is added by its claim commit, so filing
 
 **A claim or release commit is exempt from the pre-push gate**: it changes one issue file, and its push carries nothing else.
 Everything else still goes through the repository's gate.
+**A claim runs `check` on the issue it pushes instead, and refuses on any problem.**
+The usual catch is a `file` ref to code not written yet: claim first without it, and add the ref with the code.
 
 An agent claims on someone's behalf: `--as "Claude (for <name>)"`.
 `issues release <id>` removes a claim the same way, and `--force` takes over or releases someone else's.
@@ -209,7 +212,7 @@ Claiming a submodule's issue pushes to the submodule's remote.
 
 | Command | Does |
 |---|---|
-| `new <type> <slug>` | create an issue: `--in`, `-t`, `--body`, `--priority`, `--tag`, `--parent`, `--ref kind:value` |
+| `new <type> <slug>` | create an issue: `--in`, `-t`, `--body`, `--priority`, `--tag`, `--parent`, `--ref kind:value`, `--force` |
 | `list` | open issues, epics' children indented: `--type`, `--tag`, `--in`, `--repo`, `--claimed`, `--unclaimed`, `--mine`, `--stale`, `--closed`, `--all`, `-g` |
 | `show <id>` | the issue; an epic also counts its children |
 | `known <query>` | the issues a file, line, test, symbol or text belongs to; exit code 1 when none |
