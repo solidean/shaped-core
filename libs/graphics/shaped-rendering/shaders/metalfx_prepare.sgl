@@ -1,5 +1,5 @@
-// sr's guides in the forms MetalFX's temporal scaler reads.
-// Paired with sr::metalfx_upscale_routine.
+// sr's guides in the forms MetalFX's scalers read, the temporal one and the denoised one.
+// Built by sr::impl::metalfx_passes, for both sr::metalfx_upscale_routine and sr::metalfx_rr_routine.
 //
 // Depth: sr's linear view depth as an inverted depth with an infinite far plane, `near / depth`, which the scaler reads with `depthReversed`; a miss becomes 0, the far plane.
 // The upscaler only compares depths, and the denoised scaler is handed a projection built to match, so any positive near plane works; a surface nearer than it lands past 1.

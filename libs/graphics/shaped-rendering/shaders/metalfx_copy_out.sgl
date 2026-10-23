@@ -1,6 +1,6 @@
-// MetalFX's upscaled image copied into the caller's output, for sr::metalfx_upscale_routine.
+// MetalFX's result copied into the caller's output, built by sr::impl::metalfx_passes for both MetalFX routines.
 // MetalFX writes only to a texture it may render to and write from a shader, so an output without both usages gets an image of the routine's own that has them.
-// This copies it across; the routine compiles one variant per output format it stages.
+// This copies it across; metalfx_passes compiles one variant per output format it stages.
 
 require extended_image_formats
 
