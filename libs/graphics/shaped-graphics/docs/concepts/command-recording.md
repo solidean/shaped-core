@@ -95,7 +95,8 @@ An epoch advance does **not** deliver a download — it drains the GPU, and the 
 2. **A list cannot span epochs** — enforced per list, and in aggregate at `advance_epoch`.
 3. **Recording is single-threaded per list**; concurrent lists are fine and each takes its own access-tracking slot.
 4. **Access is inferred, not declared**, except where sg cannot see into the code and the caller says what it will do.
-   Array/bindless elements are declared per dispatch or draw via `declare_array_*_access` and accounted for, and foreign code declares what it touches when it opens a `dx12_native_scope`.
+   Array/bindless elements are declared per dispatch or draw via `declare_array_*_access` and accounted for.
+   Foreign code declares what it touches when it opens a `dx12_native_scope` or a `metal_native_scope`.
 5. **A scope is pinned to its list** — no copy, no move, no independent lifetime.
 6. **Draws require an open rendering scope**, and `begin_rendering` / `end_rendering` must balance.
 

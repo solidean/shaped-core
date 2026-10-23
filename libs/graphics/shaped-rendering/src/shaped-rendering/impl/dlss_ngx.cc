@@ -400,8 +400,10 @@ bool dlss_evaluate(sg::command_list& cmd, dlss_stream& stream, dlss_eval_desc co
     eval.pInNormals = native.resource(desc.normal.raw());
     eval.pInRoughness = native.resource(desc.roughness.raw());
 
-    eval.InJitterOffsetX = desc.jitter[0];
-    eval.InJitterOffsetY = desc.jitter[1];
+    // sr's jitter is where the sample lies; NGX's offset is the one that moves it back to the pixel centre.
+    // dlss-rr-jitter-test's sign comparison is what settles it: 0.046 against 0.242 the other way, on an RTX 5070 Ti.
+    eval.InJitterOffsetX = -desc.jitter[0];
+    eval.InJitterOffsetY = -desc.jitter[1];
     eval.InReset = desc.reset ? 1 : 0;
 
     // Already in input pixels, which is what NGX wants and what the motion guide is specified in.

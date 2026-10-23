@@ -17,10 +17,12 @@ This is the design, including the parts not built yet.
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12 | done, SDK fetched on request |
 | `fsr_rr` | temporal, split-signal | dx12 | planned |
 | `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
+| `metalfx_rr` | temporal, upscales | Apple GPUs that run MetalFX's MTL4 denoised scaler; metal | done |
 
 | upscaler | kind | where it runs | status |
 |---|---|---|---|
 | `fsr` | temporal, upscales, does not denoise | any GPU; dx12 and vulkan on Windows builds; not WARP | done |
+| `metalfx` | temporal, upscales, does not denoise | Apple GPUs that run MetalFX's MTL4 scaler; metal | done |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**
 The temporal ones work from about one sample per pixel, but only if every pixel's motion is known.
@@ -54,6 +56,10 @@ Asking matters most in the case that looks like it needs no answer: a member thi
 A caller who scaled by a ratio of their own would then trace at half resolution for a call about to be refused, and composite that half-resolution image into a full-resolution target.
 The ratio itself comes from `reconstruct_settings::scale`.
 `reconstruct_settings::quality` separately picks the network NGX runs, so the two are independent knobs here and `scale` alone decides the extents.
+
+**Its jitter is the Halton sequence, and NGX's offset is the negation of sr's.**
+FSR and MetalFX each settled theirs by a comparison against a flipped run, and dlss-rr-jitter-test is that comparison for `dlss_rr`.
+On an RTX 5070 Ti (dx12, DLSS 310.9.1) the negated jitter scores 0.046, against 0.242 with sr's passed through.
 
 **NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
 It compiles nothing at run time, owns no device memory and records nothing.
@@ -154,7 +160,8 @@ The fp16 and wave64 variants AMD tunes for are a follow-up: [perf-fsr-fp16-wave6
 
 **One offset per frame.**
 An upscaler reconstructs from where each frame's samples landed, so every sample of a frame has to land at the same offset from its pixel's centre.
-`sr::reconstruct_jitter` hands out FSR's Halton sequence, and a tracer uses it in place of a random position inside the pixel while an upscaler runs.
+`sr::reconstruct_jitter` hands out the upscaler's sequence, and a tracer uses it in place of a random position inside the pixel while an upscaler runs.
+FSR answers its own; every member that leaves the sequence to its caller — both MetalFX members and `dlss_rr` — gets a Halton (2, 3) one, `impl/jitter_sequence.hh`.
 It answers (0, 0) when nothing upscales, so a tracer may always ask.
 
 **An upscaled image's alpha is the upscaler's.**
@@ -172,6 +179,51 @@ FSR keeps two full images at the output extent and about a dozen at the traced o
   [bug-warp-fsr-shading-change-pyramid-crash](issues/bug-warp-fsr-shading-change-pyramid-crash.md) records what bisecting it established.
 - It runs on vulkan too, through a patch that gives each of AMD's register classes its own SPIR-V binding range.
   [debt-fsr-spirv-binding-patch](issues/debt-fsr-spirv-binding-patch.md) has what replaces it.
+
+## The MetalFX upscaler
+
+**Apple's temporal upscaler, encoded into sg's own command buffer.**
+MetalFX's MTL4 scaler encodes encoders of its own, so it runs inside sg's Metal native scope and meets sg's encoders at the scope's fence.
+The scaler waits for that fence and updates it when its `fence` is set to it.
+Everything Metal and MetalFX stays in `impl/metalfx_backend.cc`, linked where the Metal backend is built (`SR_HAS_METALFX`); the routine exists everywhere and reports `unsupported` off Metal.
+
+**The inputs meet MetalFX's conventions in one SGL pass, and sr's guides stay as they are.**
+- Depth: `near / depth`, as FSR's, read with `depthReversed`.
+  The upscaler only compares depths, and the denoised scaler is handed a projection built to match, so any positive near plane works; a surface nearer than it lands past 1.
+- Motion: repacked into `rg16_float`; MetalFX's vectors point to where a pixel was, so `motionVectorScale` is -1.
+- Jitter: MetalFX's offset is the negation of sr's, which metalfx-test's sign comparison measured (0.044 against 0.181 the other way).
+- Exposure: `reconstruct_settings::exposure` goes into the one `r16_float` texel MetalFX reads it from.
+
+**It writes only to a texture it may both render to and write from a shader.**
+An output without both `image` and `render_target` usage gets an image of the routine's own, carried across after.
+An `image` output gets a compute copy, compiled for `rgba16_float` and `rgba32_float`; a `render_target` one is drawn in by `sr::blit_routine`, one pipeline per format.
+The blit stages in the output's format when that is `rgba16_float` or `rgba32_float`, and in `rgba16_float` otherwise, since MetalFX writes the staged image as an image and sRGB cannot be one.
+The scaler is created for that staged format, and the blit, drawing through a render target, writes any renderable format, sRGB included.
+The blit is asked for before anything is recorded, so a call that finds it still compiling is `pending` with MetalFX's history untouched.
+An output with neither is refused.
+
+**Its jitter is FSR's sequence**: Halton (2, 3) over 8 times the square of the ratio, since MetalFX leaves the sequence to the caller.
+`automatic` picks it over FSR wherever it runs, as the device's own upscaler; the two never both run on one context today.
+A history switched between the two upscalers starts over, since each one's state is its own type.
+
+## The MetalFX denoised scaler
+
+**`metalfx_rr` is MetalFX's `MTL4FXTemporalDenoisedScaler`: one pass that denoises and upscales, the counterpart of `dlss_rr`.**
+It runs as the upscaler does, through the native scope and the same SGL pass for depth, motion and exposure, with the same conventions for each.
+`impl/metalfx_passes` holds what the two share: that pass, the copy for an output it cannot render to, and the images around the scaler.
+
+**It reads the guides `dlss_rr` does**: both albedos, the world-space normal, the roughness, depth and motion, at the input extent.
+It is created for every texture's format, so a guide in a new format builds a new scaler; it takes the formats it is handed, `rgba32_float` ones included.
+It also reads the camera: `world_to_view` from the guides, and a projection made from `view_to_clip`'s x and y rows with the depth SGL wrote, `near / depth` along whichever axis the caller looks down.
+
+**The scene's detail belongs in the albedo.**
+On metalfx-test's stripes as albedo under lighting that is off by up to 30% per sample, 32 frames upscaled 2x end at an error of 0.091 against the scene, and 0.088 without the noise.
+The same stripes as lighting under a white albedo come out at 0.235: it takes detail the albedo does not explain for noise.
+
+**`automatic` ranks it after `dlss_rr`**, so a caller feeding fresh frames with every guide gets it on Metal.
+`reconstruct_jitter` answers the Halton sequence whenever it runs at a smaller extent, as for every member that upscales by itself; at the native extent it runs too, and the jitter is 0.
+
+**Next on Metal**: MetalFX's frame interpolator, through the same scope.
 
 ## The OIDN member
 
@@ -341,7 +393,7 @@ webgpu keeps compiling per format, since WGSL has no such image.
 **Explicit means explicit.**
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
-`dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
+`dlss_rr`, `metalfx_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
 
 **`automatic` walks what the caller can feed, not only what the device can run.**
 A member is skipped when its `required_guides` are not in the `available_guides` the caller passed, because `execute` would refuse it for exactly that and write nothing.
@@ -350,7 +402,7 @@ Resolving on device support alone picks the best member the hardware has and the
 `oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 The upscaler resolves after the denoiser, and the same way.
-`automatic` is `fsr` where it runs and the scale is below native, and `none` otherwise; a named upscaler runs at a native scale too, as anti-aliasing.
+`automatic` is `metalfx` where it runs, else `fsr` where that does, when the scale is below native, and `none` otherwise; a named upscaler runs at a native scale too, as anti-aliasing.
 A denoiser that upscales by itself has no upscaler behind it, and `denoiser = none` with an upscaler set upscales alone.
 An upscaler requires the depth and motion guides, and a call without them reports `unsupported`.
 

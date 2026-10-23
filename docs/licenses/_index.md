@@ -19,7 +19,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [LZ4](https://github.com/lz4/lz4) | v1.10.0 | `BSD-2-Clause` | clean-core — cc::compress / cc::decompress, the LZ4 algorithm | [lz4.txt](lz4.txt) |
 | [mbedtls](https://www.trustedfirmware.org/projects/mbed-tls) | v3.6.7 | `Apache-2.0` | clean-net — the TLS handshake and record layer behind cnet's TLS connections | [mbedtls.txt](mbedtls.txt) |
 | [meshoptimizer](https://github.com/zeux/meshoptimizer) | v1.3 | `MIT` | babel-serializer — the decoders behind babel::gltf's EXT_meshopt_compression | [meshoptimizer.txt](meshoptimizer.txt) |
-| [metal-cpp](https://developer.apple.com/metal/cpp/) | release/metal-cpp_macOS26.4_iOS26.4 | `Apache-2.0` | shaped-graphics-metal — the whole backend, which speaks Metal through this rather than through Objective-C++ | [metal-cpp.txt](metal-cpp.txt) |
+| [metal-cpp](https://developer.apple.com/metal/cpp/) | release/metal-cpp_macOS26.4_iOS26.4 | `Apache-2.0` | shaped-graphics-metal — the whole backend, which speaks Metal through this rather than through Objective-C++; shaped-rendering's MetalFX members, through metal-cpp-metalfx | [metal-cpp.txt](metal-cpp.txt) |
 | [mimalloc](https://github.com/microsoft/mimalloc) | v3.5.3 | `MIT` | clean-core — the default general memory resource | [mimalloc.txt](mimalloc.txt) |
 | [NRD](https://github.com/NVIDIA-RTX/NRD) | v4.17.3 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::nrd_denoise_routine (the vendor-neutral split-signal member) | [nrd.txt](nrd.txt) |
 | [ShaderMake](https://github.com/NVIDIA-RTX/ShaderMake) | 18f5a344e7ca8fa65daaf079d07bc8ce38453e05 | `MIT` | extern/nrd — the tool NRD's build compiles its shaders with | [shadermake.txt](shadermake.txt) |

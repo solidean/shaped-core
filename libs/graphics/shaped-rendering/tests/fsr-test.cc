@@ -1,4 +1,5 @@
 #include "shader_fixtures.hh"
+#include "upscale_scene.hh"
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
@@ -9,7 +10,6 @@
 #include <shaped-rendering/atrous_denoise_routine.hh>
 #include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/reconstruct.hh>
-#include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/scalar.hh>
 
 #include <type_traits>
@@ -29,67 +29,7 @@ static_assert(std::is_nothrow_move_constructible_v<sr::upscale_history>, "a hist
 
 namespace
 {
-constexpr int k_in = 32;
-constexpr int k_out = 64;
-
-constexpr auto image_usage
-    = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::copy_dst | sg::texture_usage::copy_src;
-
-/// The scene: stripes near the input's resolution limit, crossed by one hard diagonal edge, in [0, 1] on both axes.
-/// Detail an upscaler can only recover from jittered frames.
-[[nodiscard]] f32 scene(f32 u, f32 v)
-{
-    auto const stripes = 0.5f + 0.4f * tg::sin(tg::angle_f::make_from_degree(u * 360.0f * 11.0f));
-    return u + v < 1.0f ? stripes : 0.15f + 0.6f * stripes;
-}
-
-/// One traced frame: every pixel sampled once at its centre plus `jitter`, the scene shifted right by `shift` input pixels.
-[[nodiscard]] cc::vector<tg::vec4f> trace(tg::vec2f jitter, f32 shift)
-{
-    auto pixels = cc::vector<tg::vec4f>();
-    for (auto y = 0; y < k_in; ++y)
-        for (auto x = 0; x < k_in; ++x)
-        {
-            auto const u = (f32(x) + 0.5f + jitter[0] - shift) / f32(k_in);
-            auto const v = (f32(y) + 0.5f + jitter[1]) / f32(k_in);
-            auto const s = scene(u, v);
-            pixels.push_back(tg::vec4f(s, s, s, 1));
-        }
-    return pixels;
-}
-
-/// The scene at the output's pixel centres, shifted as the last traced frame was.
-[[nodiscard]] f32 rmse_against_scene(cc::span<tg::vec4f const> pixels, f32 shift)
-{
-    // A border of four output pixels is left out: an upscaler has nothing to reconstruct an edge pixel from but clamps.
-    auto sum = 0.0f;
-    auto count = 0;
-    for (auto y = 4; y < k_out - 4; ++y)
-        for (auto x = 4; x < k_out - 4; ++x)
-        {
-            auto const u = (f32(x) + 0.5f) / f32(k_out) - shift / f32(k_in);
-            auto const v = (f32(y) + 0.5f) / f32(k_out);
-            auto const d = pixels[y * k_out + x][0] - scene(u, v);
-            sum += d * d;
-            ++count;
-        }
-    return tg::sqrt(sum / f32(count));
-}
-
-void upload(sg::command_list& cmd, sg::texture_2d const& tex, cc::span<tg::vec4f const> pixels)
-{
-    cmd.upload.bytes_to_texture(tex.raw(), pixels.as_bytes());
-}
-
-[[nodiscard]] cc::vector<tg::vec4f> filled(int size, tg::vec4f value)
-{
-    return cc::vector<tg::vec4f>::create_filled(size * size, value);
-}
-
-[[nodiscard]] sg::texture_2d make_image(sg::context& ctx, int size, sg::pixel_format format)
-{
-    return ctx.persistent.create_texture_2d({.format = format, .width = size, .height = size, .usage = image_usage});
-}
+using namespace sr_test::upscale_scene;
 
 cc::shared_async<cc::unit> prewarm(sg::context& ctx)
 {

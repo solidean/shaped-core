@@ -28,12 +28,13 @@ enum class sr::denoise_method : sg::u8
     none,
     automatic, ///< the best member this context supports, preferring the temporal ones while a caller runs temporally
 
-    atrous,  ///< edge-avoiding à-trous wavelet filter; spatial, native
-    svgf,    ///< à-trous plus reprojected history; temporal, native
-    oidn,    ///< Intel Open Image Denoise; spatial
-    dlss_rr, ///< NVIDIA DLSS Ray Reconstruction; temporal
-    fsr_rr,  ///< AMD FSR Ray Regeneration; temporal
-    nrd,     ///< NVIDIA Real-Time Denoisers (REBLUR); temporal, and runs on any dx12 adapter
+    atrous,     ///< edge-avoiding à-trous wavelet filter; spatial, native
+    svgf,       ///< à-trous plus reprojected history; temporal, native
+    oidn,       ///< Intel Open Image Denoise; spatial
+    dlss_rr,    ///< NVIDIA DLSS Ray Reconstruction; temporal
+    fsr_rr,     ///< AMD FSR Ray Regeneration; temporal
+    nrd,        ///< NVIDIA Real-Time Denoisers (REBLUR); temporal, and runs on any dx12 adapter
+    metalfx_rr, ///< Apple MetalFX's temporal denoised scaler; temporal, Metal only
 
     count_
 };
@@ -70,7 +71,8 @@ enum class sr::upscale_method : sg::u8
     none,
     automatic, ///< the best upscaler this context supports, and none while the scale is native
 
-    fsr, ///< AMD FSR 3.1's analytic upscaler; runs on any GPU
+    fsr,     ///< AMD FSR 3.1's analytic upscaler; runs on any GPU
+    metalfx, ///< Apple MetalFX's temporal upscaler; Metal only
 
     count_
 };
@@ -112,7 +114,7 @@ struct sr::reconstruct_settings
     denoise_method denoiser = denoise_method::automatic;
 
     /// Runs behind the denoiser whenever the input extent is smaller than the output's.
-    /// Ignored for a denoiser that upscales by itself (`dlss_rr`).
+    /// Ignored for a denoiser that upscales by itself (`dlss_rr`, `metalfx_rr`).
     /// `none` with a denoiser of `none` is a call with nothing to do; either one alone is fine.
     upscale_method upscaler = upscale_method::automatic;
     render_scale_preset scale = render_scale_preset::native;
@@ -183,7 +185,7 @@ struct sr::reconstruct_guides
     tg::mat4f previous_view_to_clip = tg::mat4f::identity;
 
     /// The camera itself, which a member reprojecting in world space needs beside the projection.
-    /// nrd only; the other members work from the motion guide alone.
+    /// nrd and metalfx_rr (this frame's only); the other members work from the motion guide alone.
     tg::mat4f world_to_view = tg::mat4f::identity;
     tg::mat4f previous_world_to_view = tg::mat4f::identity;
 };
@@ -317,11 +319,12 @@ public:
 
 private:
     friend class fsr_upscale_routine;
+    friend class metalfx_upscale_routine;
     friend class reconstruct_routine;
 
-    /// Brings this to the two extents, keeping the upscaler's state only if neither changed.
+    /// Brings this to the two extents and `upscaler`, keeping the upscaler's state only if none of them changed.
     /// Returns whether the call starts from no history, and consumes a pending `reset`.
-    bool _prepare(tg::vec2i input_extent, tg::vec2i output_extent);
+    bool _prepare(tg::vec2i input_extent, tg::vec2i output_extent, upscale_method upscaler);
 
     /// The upscaler's own per-stream object — for FSR, its context and every image it created.
     /// Type-erased so this header names no SDK type; it must hold only what is safe to drop mid-frame.
@@ -330,6 +333,9 @@ private:
     tg::vec2i _input_extent = tg::vec2i(0, 0);
     tg::vec2i _output_extent = tg::vec2i(0, 0);
     bool _reset_requested = false;
+
+    /// The upscaler `_state` belongs to, since each one's state is its own type.
+    upscale_method _upscaler = upscale_method::none;
 
     /// The denoiser whose output the front last upscaled, so that switching it restarts this history too.
     denoise_method _source_denoiser = denoise_method::none;
@@ -389,7 +395,7 @@ public:
     [[nodiscard]] tg::vec2i extent() const { return _extent; }
 
     /// The output extent this was built for, or 0x0 while empty.
-    /// Equal to `extent()` for every member that does not upscale, which is every member but `dlss_rr` today.
+    /// Equal to `extent()` for every member that does not upscale, which is every member but `dlss_rr` and `metalfx_rr`.
     [[nodiscard]] tg::vec2i output_extent() const { return _output_extent; }
 
 private:
@@ -399,6 +405,7 @@ private:
     friend class oidn_denoise_routine;
     friend class reconstruct_routine;
     friend class dlss_rr_routine;
+    friend class metalfx_rr_routine;
 
     /// Brings this to `method` at this pair of extents, dropping everything if any of the three changed.
     /// Returns whether the call starts from no history.
@@ -451,8 +458,10 @@ struct sr::reconstruct_support
     bool dlss_rr = false;
     bool fsr_rr = false;
     bool nrd = false;
+    bool metalfx_rr = false;
 
     bool fsr = false;
+    bool metalfx = false;
 
     [[nodiscard]] bool supports(denoise_method m) const;
     [[nodiscard]] bool supports(upscale_method m) const;

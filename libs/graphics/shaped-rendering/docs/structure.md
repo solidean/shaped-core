@@ -110,6 +110,9 @@ sr::svgf_denoise_routine     [done]     temporal, native; temporal, variance and
 sr::oidn_denoise_routine     [done]     spatial, trained; Intel's weights in our own shaders, named only
                                         (far too slow for `automatic`)
 sr::fsr_upscale_routine      [done]     AMD FSR 3.1's upscaler, its host code driven through sg; any GPU, dx12 and vulkan, not WARP yet
+sr::metalfx_upscale_routine  [done]     Apple MetalFX's temporal upscaler through sg's metal native scope
+sr::metalfx_rr_routine       [done]     MetalFX's denoised scaler, the counterpart of dlss_rr, through the same scope
+metalfx frame interpolation  [planned]  MetalFX's frame interpolator, sr's first frame generation
 sr::dlss_rr_routine          [done]     NVIDIA Ray Reconstruction through sg's dx12 native scope; SDK fetched on request
 sr::nrd_denoise_routine      [done]     NVIDIA's split-signal planner executed through sg; dx12, sources fetched on request
 fsr_rr                       [planned]  FidelityFX's split-signal denoiser; waits for the tracer
