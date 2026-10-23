@@ -7,6 +7,7 @@
 #include <shaped-linter/lex/source_language.hh>
 #include <shaped-linter/lex/source_manager.hh>
 #include <shaped-linter/prose/prose_view.hh>
+#include <shaped-linter/prose/verify.hh>
 #include <shaped-linter/rules/engine.hh>
 #include <shaped-linter/rules/registry.hh>
 #include <shaped-linter/rules/rule.hh>
@@ -29,42 +30,6 @@ cc::string_view line_terminator(cc::string_view text)
     if (first > 0 && text[first - 1] == '\r')
         return "\r\n";
     return "\n";
-}
-
-/// The spelling two token sequences are compared by.
-///
-/// A preprocessor directive is lexed opaquely up to a trailing `//`, so its token text swallows the run of
-/// spaces before that comment.
-/// Trimming here is what lets a plan re-align a trailing comment — the directive itself still has to match
-/// byte for byte.
-cc::string_view comparable_text(token const& t)
-{
-    if (t.kind != token_kind::preprocessor_directive)
-        return t.text;
-
-    auto end = t.text.size();
-    while (end > 0 && (t.text[end - 1] == ' ' || t.text[end - 1] == '\t'))
-        --end;
-    return t.text.subview({.start = 0, .end = end});
-}
-
-/// The tokens an edit must leave untouched.
-///
-/// A Python docstring is dropped: it lexes as a string literal, but every prose rule reads it as prose, so
-/// rewriting one is a prose edit and this check must not call it a code change.
-cc::vector<token> significant_tokens(token_stream const& ts, source_language language)
-{
-    cc::vector<token> out;
-    auto const all = ts.all();
-    for (isize i = 0; i < all.size(); ++i)
-    {
-        if (all[i].is_trivia())
-            continue;
-        if (language == source_language::python && is_python_docstring(all, i))
-            continue;
-        out.push_back(all[i]);
-    }
-    return out;
 }
 
 /// Append a plan diagnostic — already `error: `-prefixed and carrying its own site, since it is read by

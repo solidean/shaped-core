@@ -102,6 +102,7 @@ nx::args_builder build_lint_cli(options& opts, cc::vector<cc::string_view>& trai
 
     args.section("verbs", "shaped-linter prose apply [options] <plan>\n"
                           "shaped-linter prose stats [options] <file>...\n"
+                          "shaped-linter prose verify --baseline <dir> [options] <file>...\n"
                           "shaped-linter bless-includes [options] <file>...");
 
     finish(args);
@@ -164,6 +165,34 @@ nx::args_builder build_prose_stats_cli(prose_stats_options& opts)
                  "markers it reads as text.\n"
                  "The same measure `prose apply --stats` reports a delta in, so a rework can be scoped and budgeted "
                  "before its plan is written.");
+
+    finish(args);
+    return args;
+}
+
+// --- prose verify -------------------------------------------------------------------------------------
+
+nx::args_builder build_prose_verify_cli(prose_verify_options& opts)
+{
+    auto args = nx::args({
+        .name = "shaped-linter prose verify",
+        .description = "check that an edit changed prose alone",
+    });
+
+    args.positional("FILE", opts.files, {.desc = "files as they are now"});
+    args.arg({"baseline"}, opts.baseline,
+             {.desc = "the tree holding each file's earlier version at the same relative path", .metavar = "DIR"});
+    args.arg({"allow-words"}, opts.allow_words_path,
+             {.desc = "paths, one per line, whose prose words may change; their code is still judged", .metavar = "FILE"});
+    add_color_options(args, opts.color);
+
+    args.section("what it judges",
+                 "Code: every token outside comments and docstrings must be unchanged, and in markdown every fence, fenced line, "
+                 "table row and frontmatter line.\n"
+                 "Words: the words of the prose must be unchanged, in order. Line breaks, indentation, comment markers, blockquote "
+                 "and list markers, and a word hyphenated across a line break do not count, so a reflow passes and a dropped stop does not.\n"
+                 "It is the check `prose apply` runs on its own rewrites, for sweeps edited by hand or by script. "
+                 "Exit 0 when every file passes, 1 when any does not.");
 
     finish(args);
     return args;
@@ -259,6 +288,24 @@ cc::result<prose_stats_options, cc::string> parse_prose_stats_options(cc::span<c
     return opts;
 }
 
+cc::result<prose_verify_options, cc::string> parse_prose_verify_options(cc::span<char const* const> args)
+{
+    auto opts = prose_verify_options();
+    auto parser = build_prose_verify_cli(opts);
+
+    auto const result = parser.parse(tokens_of(args, 0));
+    if (auto const o = interpret(result, opts.help); o.handled)
+        return o.failed ? cc::result<prose_verify_options, cc::string>(cc::error(o.message))
+                        : cc::result<prose_verify_options, cc::string>(cc::move(opts));
+
+    if (opts.baseline.empty())
+        return cc::error("prose verify needs --baseline (see prose verify --help)");
+    if (opts.files.empty())
+        return cc::error("no input files (see prose verify --help)");
+
+    return opts;
+}
+
 cc::result<bless_includes_options, cc::string> parse_bless_includes_options(cc::span<char const* const> args)
 {
     auto opts = bless_includes_options();
@@ -299,6 +346,12 @@ cc::string_view prose_apply_usage_text()
 cc::string_view prose_stats_usage_text()
 {
     static auto const text = render_usage<prose_stats_options>([](auto& o) { return build_prose_stats_cli(o); });
+    return text;
+}
+
+cc::string_view prose_verify_usage_text()
+{
+    static auto const text = render_usage<prose_verify_options>([](auto& o) { return build_prose_verify_cli(o); });
     return text;
 }
 

@@ -12,6 +12,7 @@
 #include <shaped-linter/lex/source_manager.hh>
 #include <shaped-linter/prose/apply.hh>
 #include <shaped-linter/prose/plan.hh>
+#include <shaped-linter/prose/verify.hh>
 #include <shaped-linter/report/reporter.hh>
 #include <shaped-linter/rules/engine.hh>
 #include <shaped-linter/rules/registry.hh>
@@ -307,6 +308,95 @@ int run_prose_stats(scl::prose_stats_options const& opts)
     return exit_ok;
 }
 
+/// The lines of `path`, trimmed, blank ones dropped: a list file in any line ending.
+cc::vector<cc::string> read_list(scl::source_manager& sm, cc::string_view path, bool& ok)
+{
+    auto out = cc::vector<cc::string>();
+    auto file = sm.add_from_file(path);
+    if (file.has_error())
+    {
+        cc::eprintln("error: cannot read {}: {}", path, file.error().to_string());
+        ok = false;
+        return out;
+    }
+    auto const text = file.value()->text();
+    for (auto begin = isize(0); begin < text.size();)
+    {
+        auto end = begin;
+        while (end < text.size() && text[end] != '\n')
+            ++end;
+        auto line = text.subview({.start = begin, .end = end});
+        while (!line.empty() && (line[line.size() - 1] == '\r' || line[line.size() - 1] == ' '))
+            line = line.subview({.start = 0, .end = line.size() - 1});
+        if (!line.empty())
+            out.push_back(cc::string(line));
+        begin = end + 1;
+    }
+    return out;
+}
+
+/// `a/b\c` and `a/b/c` name the same file in a list written on another platform.
+cc::string forward_slashes(cc::string_view path)
+{
+    auto out = cc::string(path);
+    for (isize i = 0; i < out.size(); ++i)
+        if (out[i] == '\\')
+            out[i] = '/';
+    return out;
+}
+
+int run_prose_verify(scl::prose_verify_options const& opts)
+{
+    scl::source_manager sm;
+    auto ok = true;
+    auto allowed = cc::vector<cc::string>();
+    if (!opts.allow_words_path.empty())
+        for (auto const& p : read_list(sm, opts.allow_words_path, ok))
+            allowed.push_back(forward_slashes(p));
+    if (!ok)
+        return exit_usage;
+
+    auto problems = isize(0);
+    auto checked = isize(0);
+    for (auto const& file : opts.files)
+    {
+        auto now = sm.add_from_file(file);
+        if (now.has_error())
+        {
+            cc::eprintln("error: cannot read {}: {}", file, now.error().to_string());
+            return exit_usage;
+        }
+        auto earlier = sm.add_from_file(cc::format("{}/{}", opts.baseline, file));
+        if (earlier.has_error())
+            continue; // new since the baseline: nothing to compare with
+
+        ++checked;
+        auto const verdict = scl::verify_prose_edit(file, earlier.value()->text(), now.value()->text());
+        if (verdict.unreadable)
+        {
+            cc::println("error: {}: cannot lex one of the two versions, so the edit cannot be judged", file);
+            ++problems;
+            continue;
+        }
+        if (!verdict.code_change.empty())
+        {
+            cc::println("error: {}: code changed, {}", file, verdict.code_change);
+            ++problems;
+        }
+        auto words_allowed = false;
+        for (auto const& p : allowed)
+            words_allowed = words_allowed || p == forward_slashes(file);
+        if (!verdict.word_change.empty() && !words_allowed)
+        {
+            cc::println("error: {}: prose words changed, {}", file, verdict.word_change);
+            ++problems;
+        }
+    }
+
+    cc::println("shaped-linter prose verify: {} file(s) judged, {} problem(s)", checked, problems);
+    return problems == 0 ? exit_ok : exit_findings;
+}
+
 /// Just the include rule, so a baseline run neither parses a tree nor collects prose findings.
 /// Taken from the registry by id rather than by including the rule's header — a rule is reached from one
 /// place only, and that place is registry.cc.
@@ -475,9 +565,30 @@ int run_prose_command(cc::span<char const* const> args)
         return run_prose_stats(opts.value());
     }
 
+    if (verb == "verify")
+    {
+        auto opts = scl::parse_prose_verify_options(args.subspan(3));
+        cc::console::configure(opts.has_value() ? opts.value().color : cc::console::color_mode::automatic);
+
+        if (opts.has_error())
+        {
+            cc::eprintln("error: {}", opts.error());
+            cc::eprint(scl::prose_verify_usage_text());
+            return exit_usage;
+        }
+
+        if (opts.value().help)
+        {
+            cc::print(scl::prose_verify_usage_text());
+            return exit_ok;
+        }
+
+        return run_prose_verify(opts.value());
+    }
+
     if (verb != "apply")
     {
-        cc::eprintln("error: the prose subcommands are 'apply' and 'stats'");
+        cc::eprintln("error: the prose subcommands are 'apply', 'stats' and 'verify'");
         cc::eprint(scl::prose_apply_usage_text());
         return exit_usage;
     }

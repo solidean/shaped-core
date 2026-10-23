@@ -35,6 +35,7 @@ uv run dev.py run shaped-linter <file>...   # point it at specific files (builds
 
 uv run dev.py lint prose-apply <plan> [--dry-run] [--stats]  # apply a plan of prose rewrites (see below)
 uv run dev.py lint prose-stats <path>...            # how much prose files carry, before writing a plan
+uv run dev.py lint prose-verify [--against REV] [--allow-words FILE] [PATH...]  # an edit made by hand or script changed prose alone
 
 uv run dev.py lint bless-includes [--write]         # refill each .shaped-lint.yml's generated baseline block
 ```

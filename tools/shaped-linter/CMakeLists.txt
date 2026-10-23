@@ -31,6 +31,7 @@ add_library(shaped-linter-core STATIC
     src/shaped-linter/parse/parser.cc
 
     src/shaped-linter/prose/apply.cc
+    src/shaped-linter/prose/verify.cc
     src/shaped-linter/prose/plan.cc
     src/shaped-linter/prose/prose_view.cc
 
@@ -91,6 +92,7 @@ if(SC_BUILD_TESTS)
         tests/prose/apply-test.cc
         tests/prose/plan-test.cc
         tests/prose/prose_view-test.cc
+        tests/prose/verify-test.cc
 
         tests/report/display_width-test.cc
         tests/report/snippet-test.cc
