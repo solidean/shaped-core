@@ -16,8 +16,8 @@ bool is_digit(char c)
 /// Rust and Lean differ only in their comment delimiters and in what an identifier may hold.
 struct comment_syntax
 {
-    cc::string_view line;        // `//` or `--`
-    char block_inner = '*';      // the second byte of a block delimiter: `/*` and `*/`, or `/-` and `-/`
+    cc::string_view line;         // `//` or `--`
+    char block_inner = '*';       // the second byte of a block delimiter: `/*` and `*/`, or `/-` and `-/`
     bool primes_in_names = false; // Lean's `x'` and `h₁'`: an apostrophe after a name continues it
     bool lean_names = false;      // Lean's `!` and `?` may end a name: `get!`, `find?`
 };
@@ -41,10 +41,7 @@ struct comment_scanner
         // A UTF-8 lead or continuation byte is let through, so `ε₁` or `α` stays one name.
         return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || u8(c) >= 0x80;
     }
-    bool is_name_cont(char c) const
-    {
-        return is_name_start(c) || is_digit(c) || (syntax.primes_in_names && c == '\'');
-    }
+    bool is_name_cont(char c) const { return is_name_start(c) || is_digit(c) || (syntax.primes_in_names && c == '\''); }
 
     void emit(token_kind kind, isize start)
     {
@@ -64,8 +61,9 @@ struct comment_scanner
         while (!eof())
             next();
         auto const end = u32(src.size());
-        out.tokens.push_back(
-            {.kind = token_kind::end_of_file, .span = {.file_id = file_id, .byte_begin = end, .byte_end = end}, .text = {}});
+        out.tokens.push_back({.kind = token_kind::end_of_file,
+                              .span = {.file_id = file_id, .byte_begin = end, .byte_end = end},
+                              .text = {}});
     }
 
     void next()
