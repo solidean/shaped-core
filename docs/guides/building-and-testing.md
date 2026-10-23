@@ -565,7 +565,7 @@ It knows its own verdict, so there is no wrapper exit code to misread and no pus
 A gate that rewrites a file stops before any push with a request to commit it; nothing is committed on the tool's own initiative beyond the bump and the closes.
 `--dry-run` says what would be bumped and pushed.
 
-`--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own ahead of the gate, so the push that resolves them is the one that closes them.
+`--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own after the bump and ahead of the gate, so the push that resolves them is the one that closes them.
 If the gate fails, nothing is pushed; [issue-tracking.md](issue-tracking.md#closed) has the rule.
 
 ### Re-checking a commit or a range

@@ -87,12 +87,15 @@ def _merge_upstream(ctx: Context, repo: Path, branch: str, label: str) -> None:
         ctx.die(f"ship: the merge in {label} did not go through; resolve it, commit, and ship again:\n{(merged.stdout + merged.stderr).strip()}")
 
 
-def _commit_closes(ctx: Context, ids: list[str], resolution: str) -> None:
-    """Close each issue and commit the closes as one commit on top of HEAD, ahead of the gate, which validates them like any other."""
+def _commit_closes(ctx: Context, ids: list[str], resolution: str, subs: list[lib.Submodule]) -> None:
+    """Close each issue and commit the closes as one commit on top of HEAD, ahead of the gate, which validates them like any other.
+    A moved submodule pointer stays out of it: a bump is a commit of its own."""
     for issue_id in ids:
         if _dev(ctx, "issues", "close", issue_id, "--resolution", resolution) != 0:
             ctx.die(f"ship: could not close {issue_id}")
     _git(ctx.root, "add", "-A")
+    if subs:
+        _git(ctx.root, "reset", "-q", "--", *[s.path for s in subs])
     subject = f"issues: close {', '.join(ids)} ({resolution})"
     committed = _git(ctx.root, "commit", "-q", "-m", subject, "-m", "Resolved by the commits pushed with this one.")
     if committed.returncode != 0:
@@ -177,9 +180,9 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         if _dirty(repo):
             ctx.die(f"ship: {s.path}'s gate rewrote files; commit them there and ship again")
 
-    if args.closes:
-        _commit_closes(ctx, [i.strip() for i in args.closes.split(",") if i.strip()], args.resolution)
     _bump(ctx, bumping)
+    if args.closes:
+        _commit_closes(ctx, [i.strip() for i in args.closes.split(",") if i.strip()], args.resolution, subs)
 
     for round_no in range(1, _ROUNDS + 1):
         # A later round follows a merge the remote forced: the static gates see what it broke, and the tests ran on this change already.
