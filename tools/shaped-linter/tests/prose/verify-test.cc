@@ -19,7 +19,8 @@ TEST("shaped-linter - prose verify - a reflow passes")
 {
     SECTION("C++ comment lines rebroken")
     {
-        CHECK(passes("a.cc", "// One point. And a\n// second one.\nint x = 1;\n", "// One point.\n// And a second one.\nint x = 1;\n"));
+        CHECK(passes("a.cc", "// One point. And a\n// second one.\nint x = 1;\n",
+                     "// One point.\n// And a second one.\nint x = 1;\n"));
     }
     SECTION("a word hyphenated across a line break, rejoined")
     {
@@ -61,7 +62,8 @@ TEST("shaped-linter - prose verify - what it catches")
     }
     SECTION("a Python docstring is prose, not code")
     {
-        auto const v = verify_prose_edit("a.py", "def f():\n    \"\"\"Old words.\"\"\"\n", "def f():\n    \"\"\"New words.\"\"\"\n");
+        auto const v = verify_prose_edit("a.py", "def f():\n    \"\"\"Old words.\"\"\"\n",
+                                         "def f():\n    \"\"\"New words.\"\"\"\n");
         CHECK(v.code_change.empty());
         CHECK(!v.word_change.empty());
     }

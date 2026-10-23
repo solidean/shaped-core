@@ -182,15 +182,19 @@ nx::args_builder build_prose_verify_cli(prose_verify_options& opts)
     args.positional("FILE", opts.files, {.desc = "files as they are now"});
     args.arg({"baseline"}, opts.baseline,
              {.desc = "the tree holding each file's earlier version at the same relative path", .metavar = "DIR"});
-    args.arg({"allow-words"}, opts.allow_words_path,
-             {.desc = "paths, one per line, whose prose words may change; their code is still judged", .metavar = "FILE"});
+    args.arg(
+        {"allow-words"}, opts.allow_words_path,
+        {.desc = "paths, one per line, whose prose words may change; their code is still judged", .metavar = "FILE"});
     add_color_options(args, opts.color);
 
     args.section("what it judges",
-                 "Code: every token outside comments and docstrings must be unchanged, and in markdown every fence, fenced line, "
+                 "Code: every token outside comments and docstrings must be unchanged, and in markdown every fence, "
+                 "fenced line, "
                  "table row and frontmatter line.\n"
-                 "Words: the words of the prose must be unchanged, in order. Line breaks, indentation, comment markers, blockquote "
-                 "and list markers, and a word hyphenated across a line break do not count, so a reflow passes and a dropped stop does not.\n"
+                 "Words: the words of the prose must be unchanged, in order. Line breaks, indentation, comment "
+                 "markers, blockquote "
+                 "and list markers, and a word hyphenated across a line break do not count, so a reflow passes and a "
+                 "dropped stop does not.\n"
                  "It is the check `prose apply` runs on its own rewrites, for sweeps edited by hand or by script. "
                  "Exit 0 when every file passes, 1 when any does not.");
 

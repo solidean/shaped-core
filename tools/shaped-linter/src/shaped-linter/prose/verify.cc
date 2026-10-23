@@ -62,7 +62,8 @@ cc::vector<prose_word> prose_words(source_buffer const& buffer, source_language 
     {
         auto w = words[i];
         // `cross-` at a line's end and `check` at the next line's start are one word, as a reader reads them.
-        while (w.text.size() > 1 && w.text[w.text.size() - 1] == '-' && i + 1 < words.size() && words[i + 1].line != w.line)
+        while (w.text.size() > 1 && w.text[w.text.size() - 1] == '-' && i + 1 < words.size()
+               && words[i + 1].line != w.line)
         {
             w.text += words[i + 1].text;
             ++i;
@@ -98,7 +99,8 @@ cc::vector<prose_word> markdown_structure(source_buffer const& buffer)
         auto text = buffer.span_text(line.span);
         while (!text.empty() && (text[0] == ' ' || text[0] == '\t'))
             text = text.subview({.start = 1, .end = text.size()});
-        while (!text.empty() && (text[text.size() - 1] == ' ' || text[text.size() - 1] == '\t' || text[text.size() - 1] == '\r'))
+        while (!text.empty()
+               && (text[text.size() - 1] == ' ' || text[text.size() - 1] == '\t' || text[text.size() - 1] == '\r'))
             text = text.subview({.start = 0, .end = text.size() - 1});
         out.push_back({.text = cc::string(text), .line = buffer.line_col_at(line.span.byte_begin).line});
     }
@@ -162,11 +164,13 @@ prose_edit_verdict verify_prose_edit(cc::string_view path, cc::string_view befor
     {
         auto const a = markdown_structure(old_buffer);
         auto const b = markdown_structure(new_buffer);
-        auto const at = first_difference<prose_word>(a, b, [](prose_word const& x, prose_word const& y) { return x.text == y.text; });
+        auto const at = first_difference<prose_word>(
+            a, b, [](prose_word const& x, prose_word const& y) { return x.text == y.text; });
         if (at >= 0)
             verdict.code_change
                 = cc::format("line {}: '{}' where '{}' was", at < b.size() ? b[at].line : new_buffer.line_count(),
-                             at < b.size() ? cc::string_view(b[at].text) : "<nothing>", at < a.size() ? cc::string_view(a[at].text) : "<nothing>");
+                             at < b.size() ? cc::string_view(b[at].text) : "<nothing>",
+                             at < a.size() ? cc::string_view(a[at].text) : "<nothing>");
     }
     else
     {
@@ -184,10 +188,12 @@ prose_edit_verdict verify_prose_edit(cc::string_view path, cc::string_view befor
 
     auto const a = prose_words(old_buffer, language, old_tokens.value());
     auto const b = prose_words(new_buffer, language, new_tokens.value());
-    auto const at = first_difference<prose_word>(a, b, [](prose_word const& x, prose_word const& y) { return x.text == y.text; });
+    auto const at
+        = first_difference<prose_word>(a, b, [](prose_word const& x, prose_word const& y) { return x.text == y.text; });
     if (at >= 0)
-        verdict.word_change = cc::format("line {}: '{}' where '{}' was", at < b.size() ? b[at].line : new_buffer.line_count(),
-                                         excerpt(b, at), excerpt(a, at));
+        verdict.word_change
+            = cc::format("line {}: '{}' where '{}' was", at < b.size() ? b[at].line : new_buffer.line_count(),
+                         excerpt(b, at), excerpt(a, at));
     return verdict;
 }
 } // namespace scl
