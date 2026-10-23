@@ -14,4 +14,5 @@ Only `prefer_file` is implemented: a file's own normals and tangents cross (a gl
 `smooth` is `per_vertex` after a position weld; `crease` is `per_corner`, welded then split by `crease_angle`.
 Both want the mesh-processing helpers that eventually move down to `tg::mesh`, so they are written as free functions over spans when they land.
 
-This is also what a mesh with uvs but no tangents needs: today only `openpbr-spheres` produces a frame (an analytic one per vertex), and such a mesh gets the geometric fallback.
+This is also what a mesh with uvs but no tangents needs: `openpbr-spheres` produces an analytic frame per vertex, and the FBX importer generates one from the uvs for a normal-mapped mesh.
+Any other such mesh gets the geometric fallback.

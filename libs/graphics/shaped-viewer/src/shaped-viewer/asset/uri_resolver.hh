@@ -39,14 +39,30 @@ using uri_resolver_provider = cc::unique_function<cc::result<cc::pinned_data<byt
 /// Passing `{}` restores the filesystem default.
 void set_resolve_uri(uri_resolver_provider provider);
 
+/// The largest file the filesystem default reads, unless a caller asks for another ceiling.
+inline constexpr i64 default_max_file_bytes = i64(4) << 30;
+
 /// The bytes behind `uri`: the caller's hook if they set one, otherwise the filesystem default.
-[[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri);
+/// `max_bytes` bounds only the filesystem default; a hook applies its own policy.
+[[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri,
+                                                                  i64 max_bytes = default_max_file_bytes);
 
 namespace impl
 {
 /// Reads `uri` as a path through `cc::file_read_stream_adapter`, percent-decoding it first.
 /// The default when no hook is set, and what makes "load a file" work with no ceremony.
-[[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri_from_filesystem(cc::string_view uri);
+///
+/// **Only a regular file of at most `max_bytes` is read.**
+/// A uri comes from a file as often as from a caller, and a device or a pipe would otherwise be read until memory runs out.
+/// With no metadata layer in clean-core, "regular" is what the stream shows: a seekable source whose stated size is exactly what reading yields.
+/// A directory fails to open, a pipe cannot seek, and a device such as /dev/zero states one size and yields more.
+/// On Windows a device is refused by name as well, since `NUL` states a size of zero and yields exactly that.
+[[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri_from_filesystem(cc::string_view uri,
+                                                                                  i64 max_bytes = default_max_file_bytes);
+
+/// Whether Windows would open `path` as a device: a `\\.\` path, or a component naming `CON`, `COM1`, `CONIN$` and the like before its first dot or colon.
+/// Judged the same on every platform and in any case, since a name authored anywhere may be opened on Windows.
+[[nodiscard]] bool names_windows_device(cc::string_view path);
 
 /// `%20` and friends decoded; every other byte copied through.
 /// A lone `%` or a malformed escape is kept verbatim rather than being an error — a uri is a caller's string, and a

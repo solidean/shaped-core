@@ -1,0 +1,32 @@
+# Pin and license for the upstream fetched here.
+# fetch-bistro.py reads its pin from this file; which files of the archive it extracts stays in the script.
+# It is `on-request`, so no configure step fetches it; `dev.py deps list` reports whether .install/ is current.
+
+upstreams:
+  - name: Amazon Lumberyard Bistro
+    homepage: https://developer.nvidia.com/orca/amazon-lumberyard-bistro
+    install: on-request
+    source: url
+    track: none
+    version: v5.2
+    asset: Bistro_v5_2.zip
+    download: https://developer.nvidia.com/bistro
+    digest_algo: sha256
+    pin_hash: 0d50e3c724c6c5da19f8eb99ad3f53e36fec37ffa2df9621f9ccf0603f3934e1
+    license: CC-BY-4.0
+    license_files: [.install/LICENSE.txt]
+    used_by: shaped-viewer — the bistro example; and tests that skip without it (babel's FBX reader and DDS / TGA decode, sv's FBX importer)
+    notes: |
+      Amazon Lumberyard's Bistro, revealed at GDC 2017, as NVIDIA's Open Research Content Archive (ORCA) republished it for Falcor: version 5.2.
+      Three FBX scenes (the exterior, the interior, and the interior with filled wine glasses), 633 DDS and TGA textures, Falcor's .pyscene files, and the san_giuseppe_bridge_4k.hdr sky.
+
+      FETCHED ON REQUEST, because it is a scene to look at rather than anything a build or a default test run needs.
+      The archive is about 850 MB; the script verifies it, extracts all of it (about 1.6 GB), and deletes the archive.
+
+      THE PERSON FETCHING IT ACCEPTS THE TERMS: fetch-bistro.py prints them and asks, or takes --accept-license, and downloads nothing otherwise.
+      The archive's LICENSE.txt is the Creative Commons Attribution 4.0 International text, and its README asks that a use be cited as "Amazon Lumberyard Bistro, Open Research Content Archive (ORCA)", Amazon Lumberyard, 2017.
+      The sky map comes from Poly Haven (then HDRI Haven), whose assets are CC0.
+
+      The download address is NVIDIA's short link rather than a file name, and it redirects to a signed, expiring CDN link.
+      So the link is what is pinned and the digest is what is trusted: a republished archive fails the check rather than installing.
+      `track: none`, since NVIDIA publishes no versions to compare against.

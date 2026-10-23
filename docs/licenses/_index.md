@@ -8,6 +8,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 
 | Dependency | Version | License | Used by | Text |
 |---|---|---|---|---|
+| [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) | v5.2 | `CC-BY-4.0` | shaped-viewer — the bistro example; and tests that skip without it (babel's FBX reader and DDS / TGA decode, sv's FBX importer) | [amazon-lumberyard-bistro.txt](amazon-lumberyard-bistro.txt) |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.6 | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | clean-core — cc::blake3 / cc::hash256 (the cryptographic hash) | [blake3-cc0.txt](blake3-cc0.txt), [blake3-a2.txt](blake3-a2.txt), [blake3-a2llvm.txt](blake3-a2llvm.txt) |
 | [DLSS](https://github.com/NVIDIA/DLSS) | v310.9.1 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::dlss_rr_routine (the DLSS Ray Reconstruction denoise member) | [dlss.txt](dlss.txt) |
 | [DXC](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2602.24 | `LicenseRef-Microsoft-DXC-Binary` | shaped-shader-compiler-dxc — HLSL to sg::compiled_shader | [dxc.txt](dxc.txt), [dxc-llvm.txt](dxc-llvm.txt), [dxc-mit.txt](dxc-mit.txt) |

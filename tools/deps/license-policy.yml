@@ -31,6 +31,12 @@ allowed:
     why: Apache-2.0 minus the notice requirement for compiled output, which is what makes it linkable into a binary.
   - identifier: CC0-1.0
     why: Public-domain dedication.
+  - identifier: CC-BY-4.0
+    why: >-
+      Attribution only, for content rather than code — NVIDIA's ORCA release of Amazon Lumberyard Bistro.
+      Read by shaped-viewer's bistro example, and by tests that skip without it: babel's FBX reader and sv's importer under --thorough, and babel's DDS / TGA decode, whose small textures run by default.
+      Its one condition is crediting the work wherever it is shown, which the example and extern/bistro/dependency.yml do.
+      Nothing fetches it by default (extern/bistro is `install: on-request`), no binary contains it, and nothing redistributes it.
   - identifier: Unlicense
     why: Public-domain dedication.
   - identifier: blessing

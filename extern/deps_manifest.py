@@ -62,6 +62,8 @@ class Upstream:
     version: str = ""
     year: str = ""
     asset: str = ""
+    # For `source: url`: the archive's address, where it is not built from `year` and `asset` the way sqlite's is.
+    download: str = ""
     # For `track: tags`, a regex selecting which tags are versions at all — upstreams tag far more than releases.
     # Empty means the default "looks like a version number" pattern.
     tag_pattern: str = ""
@@ -89,7 +91,7 @@ class Upstream:
         if self.source == "github-release":
             return f"{self.repo}/releases/download/{self.tag}/{self.asset}"
         if self.source == "url":
-            return f"https://sqlite.org/{self.year}/{self.asset}"
+            return self.download or f"https://sqlite.org/{self.year}/{self.asset}"
         raise ValueError(f"{self.name}: source {self.source!r} has no archive URL")
 
     @property
@@ -309,6 +311,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         version=str(entry.get("version", "")),
         year=str(entry.get("year", "")),
         asset=per_os("asset", required=False),
+        download=str(entry.get("download", "")),
         tag_pattern=entry.get("tag_pattern", ""),
         unavailable_on=unavailable,
         license_files=list(entry.get("license_files", [])),

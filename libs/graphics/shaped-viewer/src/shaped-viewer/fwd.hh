@@ -111,8 +111,9 @@ struct temporal_slot;        // one resource a view keeps across frames (impl/vi
 } // namespace impl
 
 // asset loading (see asset/)
-enum class asset_format : u8;     // the containers asset_loader reads (asset_loader.hh)
-enum class frame_generation : u8; // how tangent frames are obtained (asset_loader.hh)
+enum class asset_format : u8;            // the containers asset_loader reads (asset_loader.hh)
+enum class frame_generation : u8;        // how tangent frames are obtained (asset_loader.hh)
+enum class fbx_material_convention : u8; // how an FBX material's properties are read (asset_loader.hh)
 struct tangent_frame_options;
 struct asset_loader_config;
 struct asset_material;
