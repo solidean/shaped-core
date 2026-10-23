@@ -35,7 +35,7 @@ The one exception is a leftover claim whose closing is in the commit history: cl
 
 ## Resolving an issue
 
-An issue closes in the push that resolves it: `uv run dev.py check --fix --push --closes <id> [--resolution fixed|wontfix|duplicate|obsolete]`, once the user has asked for the push.
+An issue closes in the push that resolves it: `uv run dev.py ship --closes <id> [--resolution fixed|wontfix|duplicate|obsolete]`, once the user has asked for the push.
 That commits the close on top of the fix, checks, and pushes; nothing closes if the check fails.
 `issues close <id>` is the same close by hand, for a close that belongs inside a larger commit.
 Remove the markers naming it in the same change; `issues check` fails on a marker naming a closed issue.

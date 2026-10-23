@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import platform
-import subprocess
 import sys
 from pathlib import Path
 
@@ -44,14 +43,6 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--no-test", action="store_true",
                    help="Skip the test suite (build + run); just the static checks")
     p.add_argument("--list", action="store_true", help="List registered checks and exit")
-    p.add_argument("--push", action="store_true",
-                   help="Pull, check what the push would send, push; a rejected push pulls again and re-checks only "
-                        "what the merge can break, up to three rounds. Needs a clean working tree.")
-    p.add_argument("--closes", metavar="ID[,ID]", default=None,
-                   help="With --push: close these issues in a commit of their own ahead of the check, so the push "
-                        "that resolves them is the one that closes them; nothing closes if the check fails.")
-    p.add_argument("--resolution", choices=("fixed", "wontfix", "duplicate", "obsolete"), default="fixed",
-                   help="How --closes closes them (default: fixed)")
     return p
 
 
@@ -82,12 +73,9 @@ def _branch_base(ctx: Context) -> str | None:
     return None
 
 
-def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | None = None,
-                  memo: dev.CheckMemo | None = None) -> list[dev.Check]:
+def _build_checks(ctx: Context, *, memo: dev.CheckMemo | None = None) -> list[dev.Check]:
     """The pre-commit registry: project policy for which gates exist.
 
-    `merge_sides` is check --push's later rounds: the paths this push changes and the paths a pull just brought in.
-    The test gate then runs only the binaries both sides reach, since each side was checked on its own already and the merge is what is new.
     `memo` lets the test gate skip a binary that passed before on an identical artifact, and record each pass.
     """
 
@@ -400,12 +388,8 @@ def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | No
 
         # Everything is built above, so a compile break anywhere still fails here; the selection is what RUNS.
         candidates = [t.name for t in test_targets]
-        if merge_sides is not None:
-            names = _binaries_both_sides_reach(ctx, presets[0], merge_sides, candidates)
-            thorough: dict[str, list[str]] = {}
-        else:
-            names = _select_test_binaries(ctx, presets[0], scope, candidates)
-            thorough = _thorough_triggers(ctx, presets[0], scope, candidates)
+        names = _select_test_binaries(ctx, presets[0], scope, candidates)
+        thorough = _thorough_triggers(ctx, presets[0], scope, candidates)
         if not names and not thorough:
             dev.ui.write_line("test: no test binary can be affected by this change")
             return True
@@ -598,127 +582,8 @@ def _select_test_binaries(ctx: Context, preset: dev.Preset, scope: dev.ChangeSco
     return selection.binaries
 
 
-def _binaries_both_sides_reach(ctx: Context, preset: dev.Preset, sides: tuple[list[str], list[str]],
-                               candidates: list[str]) -> list[str]:
-    """After a merge, the test binaries both the push's own change and the pulled-in change can affect.
-
-    Each side was checked alone, so a test only one side reaches has nothing new to say; the intersection is where the two meet.
-    A side that selects everything narrows nothing, so the intersection is then the other side's selection.
-    """
-    graph = dev.TargetGraph.load(preset.build_dir, preset.build_type, root=ctx.root)
-    mine = dev.select_test_binaries_for_change(graph, sides[0], candidates, build_inputs=_BUILD_INPUTS, prose=_PROSE)
-    theirs = dev.select_test_binaries_for_change(graph, sides[1], candidates, build_inputs=_BUILD_INPUTS, prose=_PROSE)
-    reached = set(theirs.binaries)
-    names = [c for c in mine.binaries if c in reached]
-    dev.ui.write_line(console.dim(
-        f"test: after the merge, {len(names)} of {len(candidates)} test binaries are reached by both sides"))
-    return names
-
-
-def _git(ctx: Context, *args: str, timeout: int = 300) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=str(ctx.root), capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", timeout=timeout)
-
-
-def _run_push(args: argparse.Namespace, ctx: Context) -> None:
-    """Pull, check what the push would send, push; a rejected push pulls again and re-checks only what the merge can break.
-
-    What gets pushed is commits, so a dirty working tree is refused: that is also what keeps edits out of a running check.
-    A merge conflict stops the loop with the merge in progress, as git would leave it.
-    Round one checks the push's own change in full.
-    A later round builds everything and runs the test binaries both the push and the newly pulled commits reach, since each side was checked alone already.
-    Under --fix, a rewrite stops before the push: nothing is committed on the tool's own initiative.
-    """
-    if args.names or args.since is not None or args.commit is not None or args.all or args.dirty_only:
-        ctx.die("check --push decides its own scope (what the push sends) and runs the whole registry; "
-                "drop the named checks and the scope flags")
-    head = _git(ctx, "rev-parse", "--abbrev-ref", "HEAD")
-    branch = head.stdout.strip()
-    if head.returncode != 0 or not branch or branch == "HEAD":
-        ctx.die("check --push needs a checked-out branch")
-    if _git(ctx, "status", "--porcelain", "--untracked-files=all").stdout.strip():
-        ctx.die("check --push needs a clean working tree: what it pushes is commits, and a check must not race an edit; "
-                "commit or stash first")
-    if args.closes:
-        _commit_closes(ctx, [i.strip() for i in args.closes.split(",") if i.strip()], args.resolution)
-
-    remote_ref = f"origin/{branch}"
-    rounds = 3
-    mine: list[str] = []
-    seen_remote: str | None = None
-    for round_no in range(1, rounds + 1):
-        fetched = _git(ctx, "fetch", "origin", branch)
-        if fetched.returncode != 0 and round_no == 1 and "couldn't find remote ref" in fetched.stderr:
-            # A branch that was never pushed: nothing to merge, and the base is the integration branch's.
-            remote_ref = ""
-        elif fetched.returncode != 0:
-            ctx.die(f"git fetch failed:\n{fetched.stderr.strip()}")
-
-        remote_sha = _git(ctx, "rev-parse", remote_ref).stdout.strip() if remote_ref else ""
-        if remote_sha and _git(ctx, "merge-base", "--is-ancestor", remote_sha, "HEAD").returncode != 0:
-            dev.ui.write_line(console.dim(f"check --push: merging {remote_ref} ({remote_sha[:9]})"))
-            merged = _git(ctx, "merge", "--no-edit", remote_ref)
-            if merged.returncode != 0:
-                ctx.die(f"the merge of {remote_ref} did not go through; resolve it, commit, and run check --push again:\n"
-                        f"{(merged.stdout + merged.stderr).strip()}")
-
-        base = remote_sha or _branch_base(ctx)
-        if base is None:
-            ctx.die(f"check --push found no base for {branch!r}: fetch origin so origin/{ctx.policy.default_branch} exists")
-        scope = dev.ChangeScope(since=base)
-        memo = _memo(ctx, read=True)
-        if round_no == 1:
-            mine = dev.touched_paths(ctx.root, scope)
-            checks = _build_checks(ctx, memo=memo)
-            ok = _run_gates(args, ctx, checks, scope, memo=memo)
-        else:
-            theirs = dev.touched_paths(ctx.root, dev.ChangeScope(f"{seen_remote}..{remote_sha}"))
-            dev.ui.write_line(console.dim(
-                f"check --push: round {round_no}, {len(theirs)} path(s) came in since the last check"))
-            checks = _build_checks(ctx, merge_sides=(mine, theirs), memo=memo)
-            ok = _run_gates(args, ctx, [c for c in checks if c.name == "test"], scope, named=True, memo=memo)
-        if not ok:
-            sys.exit(1)
-        if _git(ctx, "status", "--porcelain").stdout.strip():
-            ctx.die("check --fix rewrote files; commit them and run check --push again")
-
-        seen_remote = remote_sha
-        pushed = _git(ctx, "push", "origin", branch)
-        if pushed.returncode == 0:
-            dev.ui.write_line(console.green(f"check --push: pushed {branch} to origin"))
-            sys.exit(0)
-        text = pushed.stdout + pushed.stderr
-        if "fetch first" not in text and "non-fast-forward" not in text and "rejected" not in text:
-            ctx.die(f"git push failed:\n{text.strip()}")
-        dev.ui.write_line(console.yellow(f"check --push: origin/{branch} moved during the check, pulling again"))
-    ctx.die(f"origin/{branch} moved {rounds} times while checking; it is busy, run check --push again in a moment")
-
-
 def _memo(ctx: Context, *, read: bool) -> dev.CheckMemo:
     return dev.CheckMemo(ctx.root, ctx.root / "build" / "check-memo.json", read=read)
-
-
-def _commit_closes(ctx: Context, ids: list[str], resolution: str) -> None:
-    """Close each issue and commit the closes as one commit on top of HEAD, ahead of the check.
-
-    The tree is clean here, so everything the closes dirty (the moved files, and every link that pointed at them) is theirs to commit.
-    An unknown or already closed id stops before the check, so a mistake fails cheaply.
-    The commit is part of what the push sends, so the issues gate validates it like any other.
-    """
-    for issue_id in ids:
-        closed = subprocess.run(["uv", "run", "dev.py", "issues", "close", issue_id, "--resolution", resolution],
-                                cwd=str(ctx.root), capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if closed.returncode != 0:
-            ctx.die(f"could not close {issue_id}:\n{(closed.stdout + closed.stderr).strip()}")
-        dev.ui.write_line(console.dim(closed.stdout.strip()))
-    if _git(ctx, "add", "-A").returncode != 0:
-        ctx.die("git add failed after closing the issues")
-    subject = f"issues: close {', '.join(ids)} ({resolution})"
-    body = "Resolved by the commits pushed with this one."
-    committed = _git(ctx, "commit", "-q", "-m", subject, "-m", body)
-    if committed.returncode != 0:
-        ctx.die(f"git commit failed after closing the issues:\n{(committed.stdout + committed.stderr).strip()}")
-    dev.ui.write_line(console.dim(f"check --push: committed `{subject}`"))
 
 
 def _run_gates(args: argparse.Namespace, ctx: Context, selected: list[dev.Check], scope: dev.ChangeScope | None,
@@ -777,9 +642,6 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
     if args.list:
         dev.list_checks(checks)
         sys.exit(0)
-    if args.push:
-        _run_push(args, ctx)
-        return
 
     by_name = {c.name: c for c in checks}
     if args.names:

@@ -276,8 +276,8 @@ Linting the first one calibrates the rest.
 [docs/guides/prose.md](docs/guides/prose.md) is the workflow around it, including what `--fix` will and won't do for you.
 
 **Before pushing, run `uv run dev.py check --fix`** — the pre-push gate, and manual rather than a git hook.
-`uv run dev.py check --fix --push` is that gate plus the pull and the push as one command, and the way to end a piece of work;
-it refuses a dirty tree, re-checks only what a merge can break, and gives up after three rounds.
+`uv run dev.py ship` is that gate plus the pull and the push as one command, submodules with unpushed work and their bump included, and the way to end a piece of work;
+it refuses uncommitted work, reruns the static gates on top of a merge the remote forced, and gives up after three rounds.
 It runs the clang-tidy gates, shaped-linter, clang-format, a full-repo cross-reference check, then the test suite; `--no-test` skips that tail and `--list` shows the registry.
 The order is a correctness property rather than a listing convention, and [Pre-commit checks](docs/guides/building-and-testing.md#pre-commit-checks) says why.
 
@@ -490,7 +490,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
   A push to `main` rejected as non-fast-forward is the same case: pull, resolve, push again.
 * **Commits are grouped by topic, and one may be partially broken.** A commit that does not compile on its own is fine.
 * **Before every push, `uv run dev.py check --fix` must pass.** Not a git hook — manual.
-  `uv run dev.py check --fix --push` runs it and pushes in one go, once the user has asked for the push.
+  `uv run dev.py ship` runs it and pushes in one go, once the user has asked for the push.
   It is the local gate that makes skipping CI cheap, so it is not skipped.
   Its default scope is everything since the merge base with `origin/main`, so on `main` it covers exactly the unpushed commits.
 * **An agent never pushes on its own initiative.** A push needs the user's intent: ask, or wait until told to push.
@@ -548,7 +548,7 @@ A stale "no cc:: equivalent yet" reason sends the next author back to the old wa
 | Collect third-party licenses     | `uv run dev.py deps licenses` (regenerates [docs/licenses/](docs/licenses/_index.md); `--check` is a `check` gate) |
 | Run pre-commit checks            | `uv run dev.py check --fix`                                       |
 | File, find or claim an issue     | `uv run dev.py issues new/list/known/claim` ([issue-tracking](docs/guides/issue-tracking.md); the `issue-tracking` skill) |
-| Close an issue with the push that resolves it | `uv run dev.py check --fix --push --closes <id>` ([issue-tracking](docs/guides/issue-tracking.md#closed)) |
+| Close an issue with the push that resolves it | `uv run dev.py ship --closes <id>` ([issue-tracking](docs/guides/issue-tracking.md#closed)) |
 | Browse and triage issues in a browser | `uv run dev.py issues serve` — edits write files only; the page's Commit & push is a separate step |
 | Re-check an already-made commit  | `uv run dev.py check --commit <rev>` (a range works too; a single commit means its first-parent diff, so a merge yields all it brought in) |
 | Sanity-check the toolchain       | `uv run dev.py doctor`                                            |

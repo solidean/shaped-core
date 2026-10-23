@@ -150,11 +150,11 @@ By hand: edit the two lines, commit only that file, push.
 **An issue closes in the push that resolves it**, never on its own, and the preferred spelling is the push's:
 
 ```bash
-uv run dev.py check --fix --push --closes <id>[,<id>] [--resolution fixed]
+uv run dev.py ship --closes <id>[,<id>] [--resolution fixed]
 ```
 
-It closes each issue in a commit of its own on top of the fix, ahead of the check, so the close is part of what the push sends and the issues gate validates it.
-If the check fails, nothing closes and nothing is pushed.
+It closes each issue in a commit of its own on top of the fix, ahead of the gate, so the close is part of what the push sends and the issues gate validates it.
+If the gate fails, nothing is pushed, and the close stays a local commit to keep or reset.
 Coupling the close to the push is what keeps a claim from outliving its work: the moment the fix is real is the moment the issue ends.
 
 `issues close <id> [--resolution fixed]` is the same close by hand, for a close that belongs inside a larger commit.

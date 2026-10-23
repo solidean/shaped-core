@@ -377,7 +377,7 @@ uv run dev.py check --commit <rev>   # check a commit or range instead
 uv run dev.py check --since <rev>    # everything changed since <rev>, working tree included
 uv run dev.py check crossrefs  # run just one (or several) checks by name
 uv run dev.py check --list     # list the registered checks
-uv run dev.py check --push     # pull, check what the push sends, push; re-checks only what a merge can break
+uv run dev.py ship             # pull, gate and push, every submodule with unpushed work and its bump included
 ```
 
 ### The default scope is the branch, not the working tree
@@ -545,27 +545,28 @@ An `always` gate and a thorough trigger are never memoized, and `--all` or a gat
 The cache is `build/check-memo.json`, and deleting it can never affect correctness: a miss is a run.
 This is what makes a second `check` after a docs tweak, a flaky test or a no-op merge cost only what changed.
 
-### `check --push`: pull, check, push, bounded
+### `ship`: pull, gate, push, submodules included
 
-`uv run dev.py check --fix --push` is the pull, check, push chain as one command, and it is the one that should end a piece of work.
-It knows its own verdict, so there is no wrapper exit code to misread and no push after a check that was not read.
+`uv run dev.py ship` is the pull, gate, push chain as one command, and the one that should end a piece of work; `check` itself never pushes.
+It knows its own verdict, so there is no wrapper exit code to misread and no push after a gate that was not read.
 
-1. It refuses a dirty working tree.
-   What gets pushed is commits, and this is also what keeps an edit out of a running check.
-2. It fetches, and merges `origin/<branch>` when it moved; a conflict stops it with the merge in progress, as git would leave it.
-3. It runs the full registry with selection, scoped to what the push would send: everything since `origin/<branch>`.
-4. It pushes.
-   A rejected push means `origin/<branch>` moved during the check, so it pulls again and continues at 5.
-5. After that merge it builds everything, since a changed signature on one side and a new caller on the other fail here, and runs only the test binaries both sides reach.
-   Each side was checked alone already; the intersection is where the merge is new, and it is usually empty.
-   No static gate reruns: theirs was linted by them.
-6. Three rounds, then it stops and says the branch is busy.
+1. It refuses uncommitted work, here and in every submodule.
+   What gets pushed is commits, and this is also what keeps an edit out of a running gate.
+2. It finds the submodules carrying unpushed commits on the branch `.gitmodules` names, and merges each one's `origin/<branch>` when it moved.
+3. It merges this repository's `origin/<branch>` and syncs the other submodules; a conflict anywhere stops it with the merge in progress, as git would leave it.
+4. A shipping submodule with a `dev.py` of its own runs its own `check --fix` first, since its rules require that gate and the parent's does not run it.
+5. It commits the moved pointers as one commit of their own, with a file the project derives from a submodule (the `presets` gate's) refreshed in it.
+   `--bump <path>` adds a submodule whose work is pushed already but whose pointer is not.
+6. It runs the project's own `dev.py check --fix`, whatever registry the project wired, so the extra roots cover the submodules' prose and links.
+7. It pushes the submodules first, so every pointer names a commit its remote has, then this repository.
+   A rejected push means `origin/<branch>` moved during the gate, so it merges again and reruns the static gates on top of what came in; three rounds, then it stops and says the branch is busy.
+   The tests do not rerun: they passed on this change, and what came in was gated by whoever pushed it.
 
-Under `--fix`, a rewrite stops before the push with a request to commit it; nothing is committed on the tool's own initiative.
-It takes no scope flag and no gate name: what the push sends is the scope, and the whole registry is the gate.
+A gate that rewrites a file stops before any push with a request to commit it; nothing is committed on the tool's own initiative beyond the bump and the closes.
+`--dry-run` says what would be bumped and pushed.
 
-`--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own ahead of the check, so the push that resolves them is the one that closes them.
-If the check fails, nothing closes; [issue-tracking.md](issue-tracking.md#closed) has the rule.
+`--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own ahead of the gate, so the push that resolves them is the one that closes them.
+If the gate fails, nothing is pushed; [issue-tracking.md](issue-tracking.md#closed) has the rule.
 
 ### Re-checking a commit or a range
 
