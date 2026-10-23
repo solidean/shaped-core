@@ -128,6 +128,30 @@ def test_new_writes_a_valid_issue(base: Path):
     assert cli(a, "new", "nope", "x")[0] == 2
 
 
+def test_new_refuses_a_docs_folder_as_owner(base: Path):
+    a, _ = setup(base)
+    code, _, err = cli(a, "new", "bug", "nested", "--in", "docs")
+    assert code == 2 and "docs/docs/issues" in err and "--force" in err, err
+    assert not (a / "docs/docs").exists()
+    code, out, _ = cli(a, "new", "bug", "nested", "--in", "docs", "--force")
+    assert code == 0 and out.strip() == "docs/docs/issues/bug-nested.md", out
+    code, out, _ = cli(a, "new", "bug", "spelled-out", "--in", "docs/issues")
+    assert code == 0 and out.strip() == "docs/issues/bug-spelled-out.md", "docs/issues itself names its owner, as before"
+
+
+def test_claim_refuses_an_issue_check_would_fail(base: Path):
+    a, _ = setup(base)
+    remote = base / "remote.git"
+    before = git(remote, "rev-parse", "main")
+    assert cli(a, "new", "feat", "ahead", "--ref", "file:src/not-yet.cc")[0] == 0
+    code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 2 and "refs file src/not-yet.cc, which does not exist" in err and "without the gate" in err, err
+    assert git(remote, "rev-parse", "main") == before, "nothing was pushed"
+    write(a / "src/not-yet.cc", "x\n")
+    code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 0, err
+
+
 def test_check_finds_what_is_wrong(base: Path):
     a, _ = setup(base)
     write(a / "docs/issues/oops.md", "# T\n")

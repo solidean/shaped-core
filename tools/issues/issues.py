@@ -270,7 +270,8 @@ class Issue:
                 if isinstance(r, dict) and len(r) == 1 and isinstance(next(iter(r.values())), str)]
 
 
-def _load_issue(repo: Repo, path: Path) -> Issue:
+def _load_issue(repo: Repo, path: Path, text: str | None = None) -> Issue:
+    """The issue at `path`, read from disk, or from `text` when given: what a commit is about to write there."""
     rel = path.relative_to(repo.root).as_posix()
     parts = rel.split("/")
     at = max(i for i in range(len(parts) - 1) if parts[i:i + 2] == ["docs", "issues"])
@@ -287,7 +288,9 @@ def _load_issue(repo: Repo, path: Path) -> Issue:
     if not ID_RE.match(stem):
         errors.append((1, f"the file name must be <type>-<slug>.md, type one of {', '.join(TYPES)}, slug lowercase kebab-case"))
 
-    text = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    if text is None:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    text = text.replace("\r\n", "\n")
     meta, key_lines, body, body_line, error = _parse_meta(text)
     if error:
         errors.append((1, error))
@@ -403,6 +406,9 @@ def cmd_new(ws: Workspace, args: argparse.Namespace) -> int:
     owner = (ws.cwd / (args.in_ or ".")).resolve()
     if owner.name == "issues" and owner.parent.name == "docs":
         owner = owner.parent.parent
+    if owner.name == "docs" and not args.force:
+        raise IssueError(f"--in names the directory owning the issue, so {ws.show_path(owner)} would file it in "
+                         f"{ws.show_path(owner / 'docs' / 'issues')}; pass the owner itself, or --force if a docs/ folder really owns it")
     repo = ws.repo_containing(owner)
     taken = [i for i in repo.issues() if i.id == issue_id]
     if taken:
@@ -766,7 +772,13 @@ def cmd_claim(ws: Workspace, args: argparse.Namespace) -> int:
         by = meta.get("claimed-by")
         if by and not args.force:
             raise IssueError(f"{issue.qid} is claimed by {by} since {meta.get('claimed-at') or '?'}; --force takes it over")
-        return set_fields(text, {"claimed-by": who, "claimed-at": _now_stamp()})
+        claimed = set_fields(text, {"claimed-by": who, "claimed-at": _now_stamp()})
+        # A claim skips the pre-push gate, so it runs the issues gate on what it pushes; a ref to a file not written yet is the usual catch.
+        problems = _check_issue(ws, _load_issue(issue.repo, issue.path, claimed))
+        if problems:
+            listed = "\n".join(f"  {ws.show_path(issue.path)}:{n}: {msg}" for n, msg in problems)
+            raise IssueError(f"{issue.qid} would not pass `issues check`, and a claim pushes without the gate:\n{listed}")
+        return claimed
 
     _publish(ws, issue, "claim", mutate)
     return 0
@@ -988,6 +1000,7 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
     q.add_argument("name", help=f"the type ({', '.join(TYPES)}), or the whole id <type>-<slug>")
     q.add_argument("slug", nargs="?", help="the slug, when the first argument is only the type")
     q.add_argument("--in", dest="in_", metavar="DIR", help="the directory owning the issue: DIR/docs/issues/ (default: here)")
+    q.add_argument("--force", action="store_true", help="file it even when DIR is itself a docs/ folder")
     q.add_argument("-t", "--title")
     q.add_argument("--body", help="the description under the title")
     q.add_argument("--priority", choices=PRIORITIES)
