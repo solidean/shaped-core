@@ -57,9 +57,9 @@ A caller who scaled by a ratio of their own would then trace at half resolution 
 The ratio itself comes from `reconstruct_settings::scale`.
 `reconstruct_settings::quality` separately picks the network NGX runs, so the two are independent knobs here and `scale` alone decides the extents.
 
-**Its jitter is the Halton sequence, handed to NGX in sr's sign, and that sign is unverified.**
-FSR and MetalFX each settled theirs by a comparison against a flipped run; `dlss_rr` has the same comparison in dlss-rr-jitter-test, which has not yet run on an RTX machine.
-Until it has, the sign is sr's convention passed through unchanged, not a measured one.
+**Its jitter is the Halton sequence, and NGX's offset is the negation of sr's.**
+FSR and MetalFX each settled theirs by a comparison against a flipped run, and dlss-rr-jitter-test is that comparison for `dlss_rr`.
+On an RTX 5070 Ti (dx12, DLSS 310.9.1) the negated jitter scores 0.046, against 0.242 with sr's passed through.
 
 **NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
 It compiles nothing at run time, owns no device memory and records nothing.

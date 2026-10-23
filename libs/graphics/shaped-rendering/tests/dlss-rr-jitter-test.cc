@@ -15,7 +15,7 @@
 // other machine, CI included.
 // The sign test is metalfx-test's for metalfx_rr: the same stream twice, the second with the jitter flipped, and the
 // right sign reconstructs the stripes measurably better.
-// Until it has run on an RTX machine, the sign sr hands NGX is a convention rather than a measured one.
+// Measured on an RTX 5070 Ti (dx12, DLSS 310.9.1): 0.046 with NGX handed the negated jitter, against 0.242 with sr's.
 
 namespace
 {
