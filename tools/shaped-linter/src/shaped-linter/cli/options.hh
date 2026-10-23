@@ -32,6 +32,10 @@ struct scl::options
     /// Code findings ignore it entirely.
     cc::string changed_lines_path;
 
+    /// --prose-only: run the prose rules alone, over comments, docstrings and markdown.
+    /// For code that follows someone else's style, whose sentences are still ours.
+    bool prose_only = false;
+
     /// --color auto|always|never (`--no-color` is the old spelling of `never`).
     /// `auto` colors only when both stdout and stderr are terminals — see cc::console.
     cc::console::color_mode color = cc::console::color_mode::automatic;

@@ -74,6 +74,11 @@ int run(scl::options const& opts)
     scl::config_resolver configs;
     cc::vector<scl::finding> all;
 
+    auto rules = cc::vector<scl::rule>();
+    for (auto const& r : scl::all_rules())
+        if (!opts.prose_only || r.layer == scl::rule_layer::prose)
+            rules.push_back(r);
+
     for (auto const& file : opts.files)
     {
         auto buffer = sm.add_from_file(file);
@@ -83,7 +88,7 @@ int run(scl::options const& opts)
             return exit_usage;
         }
 
-        auto found = scl::run_rules(*buffer.value(), scl::all_rules(), configs.resolve(file));
+        auto found = scl::run_rules(*buffer.value(), rules, configs.resolve(file));
         for (auto& f : found)
         {
             // Prose findings outside the changed lines are somebody else's older prose, not this edit's.

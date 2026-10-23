@@ -94,6 +94,7 @@ nx::args_builder build_lint_cli(options& opts, cc::vector<cc::string_view>& trai
     args.arg({"fix"}, opts.apply_fixes, "apply each finding's suggested edit back to its file in place");
     args.arg({"changed-lines"}, opts.changed_lines_path,
              {.desc = "report PROSE findings only on the lines named there (see readme)", .metavar = "FILE"});
+    args.arg({"prose-only"}, opts.prose_only, "run only the prose rules, for code that follows someone else's style");
     add_color_options(args, opts.color);
 
     // Everything after `--` is a file, even one starting with `-`.

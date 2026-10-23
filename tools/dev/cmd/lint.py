@@ -103,6 +103,10 @@ def run_clang_tidy(
     return result.ok
 
 
+def _batches(files: list[Path], size: int = 200) -> list[list[Path]]:
+    return [files[start:start + size] for start in range(0, len(files), size)]
+
+
 def run_shaped_linter(
     ctx: Context,
     *,
@@ -153,16 +157,22 @@ def run_shaped_linter(
     # Each batch gets its own step NAME, and therefore its own log.
     # Sharing one meant every batch overwrote the previous one's output, so a finding in any but the last was
     # reported as a failure with an empty log — which is unreadable exactly when a run is big enough to batch.
+    #
+    # A file of an extra root that asks for prose alone takes the prose rules alone, so its batches carry `--prose-only`.
+    prose_only = dev.prose_only_lint_files(ctx.root, files, layout=ctx.policy.layout)
+    batches = [(False, batch) for batch in _batches([f for f in files if f not in prose_only])]
+    batches += [(True, batch) for batch in _batches(sorted(prose_only))]
+
     ok = True
-    batch_count = (len(files) + 199) // 200
-    for start in range(0, len(files), 200):
-        batch = files[start:start + 200]
-        batch_name = "shaped-linter" if batch_count == 1 else f"shaped-linter-{start // 200 + 1}of{batch_count}"
+    for index, (prose_only_batch, batch) in enumerate(batches):
+        batch_name = "shaped-linter" if len(batches) == 1 else f"shaped-linter-{index + 1}of{len(batches)}"
         # The linter's own `auto` sees a pipe (run_step captures it), so it would drop color even while we mirror to a terminal.
         # Hand it dev.py's already-resolved decision instead.
         argv = [str(exe), "--color", "always" if dev.console.enabled() else "never"]
         if fix:
             argv.append("--fix")
+        if prose_only_batch:
+            argv.append("--prose-only")
         if changed_lines_spec is not None:
             argv += ["--changed-lines", str(changed_lines_spec)]
         argv += [str(f) for f in batch]

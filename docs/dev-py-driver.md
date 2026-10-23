@@ -138,8 +138,9 @@ extra_roots=(dev.ExtraRoot("extern/api", submodule=True, checks=("crossrefs", "p
   A scoped lint run takes the submodule's working tree for `--dirty-only`, and the range between the recorded gitlinks for `--commit`.
   For `--since` it takes the submodule's unpushed work, measured from its upstream, else from the branch `.gitmodules` records.
 - **Crossrefs resolve against the extra root.** Its top-level directories are its root segments, so its readme's `docs/x.md` reaches its own docs.
-- **`prose` and `code` split by file kind**, because shaped-linter selects no rule family per run.
-  `prose` takes markdown, which carries prose rules alone; `code` takes C++ and Python, which get every rule, the prose rules over their comments included.
+- **`prose` is the sentences, `code` is the style.**
+  `prose` takes markdown and the comments and docstrings of C, C++ and Python, all under shaped-linter's `--prose-only`, so code that follows someone else's style — a generated binding — is held to the prose rules alone.
+  `code` takes C++ and Python with every rule, the prose rules over their comments included, and wins where a root asks for both.
   An extra root bypasses the `extern/` exclusion, while junk directories below it are still pruned.
 - **`.shaped-lint.yml` resolves as anywhere else**: every config from the file up to the filesystem root, so the project's root config governs a submodule unless the submodule carries its own.
 
