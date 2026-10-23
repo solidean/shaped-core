@@ -12,7 +12,6 @@
 //
 // A stripe pattern near the input's resolution limit, crossed by one hard edge, traced at 32 x 32 and measured at the
 // 64 x 64 output's pixel centres.
-// fsr-test carries its own copy, since it builds only where DXC does and these tests build everywhere.
 
 namespace sr_test::upscale_scene
 {
