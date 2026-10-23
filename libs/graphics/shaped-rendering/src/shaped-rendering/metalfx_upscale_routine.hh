@@ -24,8 +24,9 @@ public:
     /// MetalFX writes only an output with both `image` and `render_target` usage; any other is written through an image
     /// of the routine's own and carried across after.
     /// An `image` output in `rgba16_float` or `rgba32_float` is copied by a compute pass, a `render_target` one is drawn
-    /// in by `sr::blit_routine`, and one with neither is `failed`.
-    /// `pending` while the pass compiles, or the blit for a new output format does, `failed` when it does not build or MetalFX refuses the formats, and
+    /// in by `sr::blit_routine` in any renderable format, and one with neither is `failed`.
+    /// `pending` while the passes compile, or the blit for a new output format does, and then nothing was recorded.
+    /// `failed` when one does not build or MetalFX refuses the formats.
     /// `unsupported` off Metal, on a device without MetalFX, or at a ratio past the device's largest.
     [[nodiscard]] static upscale_outcome execute(sg::command_list& cmd, upscale_inputs const& in, upscale_history& history);
 

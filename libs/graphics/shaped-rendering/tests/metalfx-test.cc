@@ -1,6 +1,7 @@
 #include "shader_fixtures.hh"
 #include "upscale_scene.hh"
 
+#include <clean-core/common/assert.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
@@ -23,7 +24,7 @@ using namespace cc::primitive_defines;
 // jitter sequence, upscaled, and measured against the pattern at the output's pixel centres.
 // Each is a comparison between two runs, so it pins a CONVENTION — the jitter's sign, the motion's direction — which a
 // run that merely completes cannot catch, since MetalFX renders something plausible either way.
-// The scene, tracer and metric are upscale_scene.hh's, copies of fsr-test's, which builds only where DXC does.
+// The scene, tracer and metric are upscale_scene.hh's.
 
 namespace
 {
@@ -46,14 +47,26 @@ struct stream_options
     bool honest_motion = true;       ///< false reports a still image whatever moved
     bool renderable_output = false;  ///< an output MetalFX may write itself, rather than through the routine's copy
     bool render_target_only = false; ///< an output with `render_target` and no `image`, drawn in by sr's blit
+    bool settle_after_first = false; ///< awaits the routine registry once the first frame is submitted
+
+    /// rgba32_float, or rgba8 or bgra8 sRGB read back decoded to linear.
+    sg::pixel_format output_format = sg::pixel_format::rgba32_float;
 };
 
 struct stream_result
 {
+    sr::upscale_outcome first;
     sr::upscale_outcome last;
     cc::vector<tg::vec4f> output;
     f32 last_shift = 0.0f;
 };
+
+/// An 8-bit sRGB-encoded channel as the linear value it stands for.
+[[nodiscard]] f32 srgb_to_linear(byte encoded)
+{
+    auto const c = f32(u8(encoded)) / 255.0f;
+    return c <= 0.04045f ? c / 12.92f : tg::pow((c + 0.055f) / 1.055f, 2.4f);
+}
 
 /// Traces and upscales `options.frames` frames directly through the routine, and reads the last output back.
 cc::shared_async<stream_result> run_stream(sg::context& ctx, stream_options options)
@@ -62,7 +75,7 @@ cc::shared_async<stream_result> run_stream(sg::context& ctx, stream_options opti
     auto const depth = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
     auto const motion = make_image(ctx, k_in, sg::pixel_format::rgba32_float);
     auto const output = ctx.persistent.create_texture_2d(
-        {.format = sg::pixel_format::rgba32_float,
+        {.format = options.output_format,
          .width = k_out,
          .height = k_out,
          .usage = options.render_target_only
@@ -72,9 +85,12 @@ cc::shared_async<stream_result> run_stream(sg::context& ctx, stream_options opti
 
     auto history = sr::upscale_history();
     auto result = stream_result{};
-    auto readback = sg::data_future<tg::vec4f>();
+    auto readback = sg::bytes_future();
     for (auto frame = 0; frame < options.frames; ++frame)
     {
+        if (frame == 1 && options.settle_after_first)
+            (void)co_await ctx.routines.idle_completion();
+
         auto const jitter
             = sr::metalfx_upscale_routine::jitter(u32(frame), tg::vec2i(k_in, k_in), tg::vec2i(k_out, k_out));
         auto const shift = options.shift_per_frame * f32(frame);
@@ -91,16 +107,34 @@ cc::shared_async<stream_result> run_stream(sg::context& ctx, stream_options opti
             *cmd,
             {.color = color, .depth = depth, .motion = motion, .jitter = jitter * options.jitter_sign, .output = output},
             history);
+        if (frame == 0)
+            result.first = result.last;
         if (frame + 1 == options.frames)
-            readback = sg::data_future<tg::vec4f>(cmd->download.bytes_from_texture(output.raw()));
+            readback = cmd->download.bytes_from_texture(output.raw());
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
         result.last_shift = shift;
     }
 
-    auto const pixels = co_await readback.data();
-    for (auto i = isize(0); i < pixels.size(); ++i)
-        result.output.push_back(pixels[i]);
+    if (options.output_format == sg::pixel_format::rgba32_float)
+    {
+        auto const pixels = co_await sg::data_future<tg::vec4f>(readback).data();
+        for (auto i = isize(0); i < pixels.size(); ++i)
+            result.output.push_back(pixels[i]);
+        co_return result;
+    }
+
+    auto const bgra = options.output_format == sg::pixel_format::bgra8_unorm_srgb;
+    CC_ASSERT(bgra || options.output_format == sg::pixel_format::rgba8_unorm_srgb, "run_stream reads back rgba32_float "
+                                                                                   "or 8-bit sRGB");
+    auto const bytes = co_await readback.bytes();
+    for (auto i = isize(0); i + 4 <= bytes.size(); i += 4)
+    {
+        auto const r = bgra ? bytes[i + 2] : bytes[i];
+        auto const b = bgra ? bytes[i] : bytes[i + 2];
+        result.output.push_back(tg::vec4f(srgb_to_linear(r), srgb_to_linear(bytes[i + 1]), srgb_to_linear(b),
+                                          f32(u8(bytes[i + 3])) / 255.0f));
+    }
     co_return result;
 }
 
@@ -261,6 +295,57 @@ ASYNC_INVOCABLE_TEST("sr - metalfx draws into an output with render_target but n
     for (auto i = isize(0); i < target_only.output.size(); ++i)
         largest = cc::max(largest, tg::abs(target_only.output[i][0] - copied.output[i][0]));
     CHECK(largest < 1e-3f).context(cc::format("largest difference {}", largest));
+}
+
+// The usual render-target-only output is sRGB, which no image may be; MetalFX writes a float image, drawn in after.
+ASYNC_INVOCABLE_TEST("sr - metalfx draws into an srgb render target, and matches the copy",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    if (auto const why = why_metalfx_cannot_run(ctx); why.has_value())
+        SKIP(why.value());
+
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+    sr::blit_routine::prewarm(ctx, sg::pixel_format::rgba8_unorm_srgb);
+    (void)co_await ctx.routines.idle_completion();
+
+    auto const srgb
+        = co_await run_stream(ctx, {.render_target_only = true, .output_format = sg::pixel_format::rgba8_unorm_srgb});
+    auto const copied = co_await run_stream(ctx, {});
+    REQUIRE(srgb.last.status == sr::reconstruct_status::denoised);
+    REQUIRE(copied.last.status == sr::reconstruct_status::denoised);
+
+    // One 8-bit step near the scene's brightest 0.9 is about 0.008 in linear.
+    auto largest = 0.0f;
+    for (auto i = isize(0); i < srgb.output.size(); ++i)
+        largest = cc::max(largest, tg::abs(srgb.output[i][0] - copied.output[i][0]));
+    CHECK(largest < 0.01f).context(cc::format("largest difference {}", largest));
+}
+
+// A blit not yet built declines before MetalFX encodes, so the pending frame leaves no history behind.
+// bgra8_unorm_srgb is a format no other test in this binary prewarms, so its first call is the one that registers it.
+ASYNC_INVOCABLE_TEST("sr - metalfx is pending until its blit is built, and that frame encodes nothing",
+                     (sg::context_handle const& ctx_h),
+                     exclusive("sg-reload-generation"))
+{
+    REQUIRE(ctx_h != nullptr);
+    sg::context& ctx = *ctx_h;
+    if (auto const why = why_metalfx_cannot_run(ctx); why.has_value())
+        SKIP(why.value());
+
+    (void)sr_test::shader_fixtures();
+    co_await prewarm(ctx);
+
+    auto const result = co_await run_stream(ctx, {.frames = 2,
+                                                  .render_target_only = true,
+                                                  .settle_after_first = true,
+                                                  .output_format = sg::pixel_format::bgra8_unorm_srgb});
+    CHECK(result.first.status == sr::reconstruct_status::pending);
+    CHECK(result.last.status == sr::reconstruct_status::denoised);
+    CHECK(result.last.restarted);
 }
 
 ASYNC_INVOCABLE_TEST("sr - the front upscales through metalfx behind a denoiser",

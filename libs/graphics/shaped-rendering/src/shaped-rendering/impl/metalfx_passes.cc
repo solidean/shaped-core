@@ -12,6 +12,14 @@ namespace
 {
 /// The output formats metalfx_copy_out.sgl is compiled for: the HDR ones sr's members write.
 constexpr sg::pixel_format k_staged_formats[] = {sg::pixel_format::rgba16_float, sg::pixel_format::rgba32_float};
+
+[[nodiscard]] bool is_staged_format(sg::pixel_format format)
+{
+    for (auto const f : k_staged_formats)
+        if (f == format)
+            return true;
+    return false;
+}
 } // namespace
 
 metalfx_passes::copy_pass const* metalfx_passes::copy_to(sg::pixel_format format) const
@@ -62,33 +70,27 @@ cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& ou
     co_return true;
 }
 
-bool metalfx_needs_staging(sg::texture_2d const& output)
+metalfx_output_plan metalfx_output_plan_of(metalfx_passes const& passes, sg::texture_2d const& output)
 {
     // MetalFX's output usage is ShaderRead | ShaderWrite | RenderTarget, which sg spells `image` plus `render_target`.
     auto const usage = output.raw()->usage();
-    return !usage.has(sg::texture_usage::image) || !usage.has(sg::texture_usage::render_target);
-}
-
-metalfx_output_path metalfx_output_path_of(metalfx_passes const& passes, sg::texture_2d const& output)
-{
-    if (!metalfx_needs_staging(output))
-        return metalfx_output_path::direct;
-    auto const usage = output.raw()->usage();
-    if (usage.has(sg::texture_usage::image) && passes.copy_to(output.raw()->format()) != nullptr)
-        return metalfx_output_path::copy;
-    if (usage.has(sg::texture_usage::render_target))
-        return metalfx_output_path::blit;
-    return metalfx_output_path::none;
+    auto const format = output.raw()->format();
+    auto const has_image = usage.has(sg::texture_usage::image);
+    auto const has_render_target = usage.has(sg::texture_usage::render_target);
+    if (has_image && has_render_target)
+        return {.path = metalfx_output_path::direct, .format = format};
+    if (has_image && passes.copy_to(format) != nullptr)
+        return {.path = metalfx_output_path::copy, .format = format};
+    if (has_render_target)
+        return {.path = metalfx_output_path::blit,
+                .format = is_staged_format(format) ? format : sg::pixel_format::rgba16_float};
+    return {};
 }
 
 bool metalfx_record_blit_out(sg::command_list& cmd, metalfx_images const& images, sg::texture_2d const& output)
 {
     auto pass = cmd.raster.render_to({.color_targets = {output.as_render_target_view().discarded()}});
-    if (sr::blit_routine::execute(pass, images.staged) == sg::routine_outcome::executed)
-        return true;
-    // A routine is registered by its first acquire, and only a registered one is built.
-    sr::blit_routine::prewarm(cmd.context(), output.raw()->format());
-    return false;
+    return sr::blit_routine::execute(pass, images.staged) == sg::routine_outcome::executed;
 }
 
 void metalfx_record_prepare(sg::command_list& cmd,
@@ -118,12 +120,15 @@ void metalfx_record_prepare(sg::command_list& cmd,
     cmd.compute.dispatch_threads(extent[0], extent[1], 1);
 }
 
-sg::texture_2d metalfx_target(sg::context& ctx, metalfx_images& images, sg::texture_2d const& output)
+sg::texture_2d metalfx_target(sg::context& ctx,
+                              metalfx_images& images,
+                              sg::texture_2d const& output,
+                              metalfx_output_plan const& plan)
 {
-    if (!metalfx_needs_staging(output))
+    if (plan.path == metalfx_output_path::direct)
         return output;
     auto const extent = extent_of(output);
-    auto const format = output.raw()->format();
+    auto const format = plan.format;
     if (!is_set(images.staged) || extent_of(images.staged) != extent || images.staged.raw()->format() != format)
         images.staged = ctx.persistent.create_texture_2d(
             {.format = format,

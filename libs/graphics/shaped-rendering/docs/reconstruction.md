@@ -197,7 +197,9 @@ Everything Metal and MetalFX stays in `impl/metalfx_backend.cc`, linked where th
 **It writes only to a texture it may both render to and write from a shader.**
 An output without both `image` and `render_target` usage gets an image of the routine's own, carried across after.
 An `image` output gets a compute copy, compiled for `rgba16_float` and `rgba32_float`; a `render_target` one is drawn in by `sr::blit_routine`, one pipeline per format.
-The staged image is in the output's format and MetalFX writes it as an image, so the blit serves only a format Metal can write that way; `rgba32_float` is the one the tests cover.
+The blit stages in the output's format when that is `rgba16_float` or `rgba32_float`, and in `rgba16_float` otherwise, since MetalFX writes the staged image as an image and sRGB cannot be one.
+The scaler is created for that staged format, and the blit, drawing through a render target, writes any renderable format, sRGB included.
+The blit is asked for before anything is recorded, so a call that finds it still compiling is `pending` with MetalFX's history untouched.
 An output with neither is refused.
 
 **Its jitter is FSR's sequence**: Halton (2, 3) over 8 times the square of the ratio, since MetalFX leaves the sequence to the caller.

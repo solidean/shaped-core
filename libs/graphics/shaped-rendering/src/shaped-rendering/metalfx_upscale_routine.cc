@@ -3,6 +3,7 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/blit_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/jitter_sequence.hh>
 #include <shaped-rendering/impl/metalfx_backend.hh>
@@ -102,8 +103,8 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
         return {.status = reconstruct_status::failed};
 
     // An output MetalFX cannot write is written through an image of our own, copied or drawn across after.
-    auto const path = impl::metalfx_output_path_of(self->_passes, in.output);
-    if (path == impl::metalfx_output_path::none)
+    auto const plan = impl::metalfx_output_plan_of(self->_passes, in.output);
+    if (plan.path == impl::metalfx_output_path::none)
     {
         CC_LOG_ERROR("metalfx: an output of pixel_format {} needs render_target or image usage, the latter in "
                      "rgba16_float or rgba32_float",
@@ -111,12 +112,23 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
         return {.status = reconstruct_status::failed};
     }
 
+    // Asked before anything is recorded, so a frame the blit is not built for leaves MetalFX's history untouched.
+    // Asking registers it, and the registry's next tick builds it.
+    if (plan.path == impl::metalfx_output_path::blit)
+    {
+        auto const blit = sr::blit_routine::try_acquire(ctx, in.output.raw()->format());
+        if (blit.is_failed())
+            return {.status = reconstruct_status::failed};
+        if (!blit.is_ready())
+            return {.status = reconstruct_status::pending};
+    }
+
     auto const restarted = history._prepare(input_extent, output_extent, upscale_method::metalfx);
 
     // The scaler is created for the two formats as well as the extents, so another format is another stream.
     auto* state = static_cast<metalfx_state*>(history._state.get());
     auto const color_format = in.color.raw()->format();
-    auto const output_format = in.output.raw()->format();
+    auto const output_format = plan.format;
     if (state != nullptr && (state->color_format != color_format || state->output_format != output_format))
     {
         history._state = nullptr;
@@ -141,7 +153,7 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
 
     auto const reset = restarted || fresh || state->reset_pending;
     impl::metalfx_record_prepare(cmd, self->_passes, state->images, in.depth, in.motion, in.exposure);
-    auto const target = impl::metalfx_target(ctx, state->images, in.output);
+    auto const target = impl::metalfx_target(ctx, state->images, in.output, plan);
     if (!impl::metalfx_dispatch(*state->stream, cmd,
                                 {.color = in.color,
                                  .depth = state->images.depth,
@@ -156,10 +168,10 @@ upscale_outcome metalfx_upscale_routine::execute(sg::command_list& cmd, upscale_
     }
     state->reset_pending = false;
 
-    if (path == impl::metalfx_output_path::copy)
-        impl::metalfx_record_copy_out(cmd, *self->_passes.copy_to(in.output.raw()->format()), state->images, in.output);
-    if (path == impl::metalfx_output_path::blit && !impl::metalfx_record_blit_out(cmd, state->images, in.output))
-        return {.status = reconstruct_status::pending, .restarted = reset};
+    if (plan.path == impl::metalfx_output_path::copy)
+        impl::metalfx_record_copy_out(cmd, *self->_passes.copy_to(plan.format), state->images, in.output);
+    if (plan.path == impl::metalfx_output_path::blit && !impl::metalfx_record_blit_out(cmd, state->images, in.output))
+        return {.status = reconstruct_status::failed, .restarted = reset};
 
     return {.status = reconstruct_status::denoised, .restarted = reset};
 }

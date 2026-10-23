@@ -481,6 +481,7 @@ sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the desti
 - **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — issue: bug-warp-fsr-shading-change-pyramid-crash.
 - **MetalFX builds wherever the Metal backend does** (`SR_HAS_METALFX`) and runs on a device with its MTL4 scaler.
   An output without both `image` and `render_target` usage costs a copy: a compute pass for an `image` one in `rgba16_float` / `rgba32_float`, a blit for a `render_target` one.
+  The blit serves any renderable format, sRGB included, staging the rest in `rgba16_float`.
 - **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
   knob live, a scale selector, and the raw image beside the reconstructed one.
 

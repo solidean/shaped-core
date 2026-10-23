@@ -2,6 +2,7 @@
 #include <clean-core/record/log.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-rendering/blit_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
 #include <shaped-rendering/impl/metalfx_backend.hh>
 #include <shaped-rendering/metalfx_rr_routine.hh>
@@ -102,13 +103,24 @@ reconstruct_outcome metalfx_rr_routine::execute(sg::command_list& cmd,
         return outcome(reconstruct_status::failed);
 
     // An output MetalFX cannot write is written through an image of our own, copied or drawn across after.
-    auto const path = impl::metalfx_output_path_of(self->_passes, in.output);
-    if (path == impl::metalfx_output_path::none)
+    auto const plan = impl::metalfx_output_plan_of(self->_passes, in.output);
+    if (plan.path == impl::metalfx_output_path::none)
     {
         CC_LOG_ERROR("metalfx: an output of pixel_format {} needs render_target or image usage, the latter in "
                      "rgba16_float or rgba32_float",
                      int(in.output.raw()->format()));
         return outcome(reconstruct_status::failed);
+    }
+
+    // Asked before anything is recorded, so a frame the blit is not built for leaves MetalFX's history untouched.
+    // Asking registers it, and the registry's next tick builds it.
+    if (plan.path == impl::metalfx_output_path::blit)
+    {
+        auto const blit = sr::blit_routine::try_acquire(ctx, in.output.raw()->format());
+        if (blit.is_failed())
+            return outcome(reconstruct_status::failed);
+        if (!blit.is_ready())
+            return outcome(reconstruct_status::pending);
     }
 
     auto restarted = history._prepare(denoise_method::metalfx_rr, input_extent, output_extent);
@@ -122,7 +134,7 @@ reconstruct_outcome metalfx_rr_routine::execute(sg::command_list& cmd,
         .specular_albedo_format = in.guides.specular_albedo.raw()->format(),
         .normal_format = in.guides.normal.raw()->format(),
         .roughness_format = in.guides.roughness.raw()->format(),
-        .output_format = in.output.raw()->format(),
+        .output_format = plan.format,
     };
     auto* state = static_cast<metalfx_rr_state*>(history._member_state.get());
     if (state != nullptr && !same_formats(state->desc, desc))
@@ -148,7 +160,7 @@ reconstruct_outcome metalfx_rr_routine::execute(sg::command_list& cmd,
 
     restarted = restarted || state->reset_pending;
     impl::metalfx_record_prepare(cmd, self->_passes, state->images, in.guides.depth, in.guides.motion, options.exposure);
-    auto const target = impl::metalfx_target(ctx, state->images, in.output);
+    auto const target = impl::metalfx_target(ctx, state->images, in.output, plan);
     if (!impl::metalfx_denoised_dispatch(*state->stream, cmd,
                                          {.color = in.color,
                                           .depth = state->images.depth,
@@ -169,10 +181,10 @@ reconstruct_outcome metalfx_rr_routine::execute(sg::command_list& cmd,
     }
     state->reset_pending = false;
 
-    if (path == impl::metalfx_output_path::copy)
-        impl::metalfx_record_copy_out(cmd, *self->_passes.copy_to(in.output.raw()->format()), state->images, in.output);
-    if (path == impl::metalfx_output_path::blit && !impl::metalfx_record_blit_out(cmd, state->images, in.output))
-        return outcome(reconstruct_status::pending, restarted);
+    if (plan.path == impl::metalfx_output_path::copy)
+        impl::metalfx_record_copy_out(cmd, *self->_passes.copy_to(plan.format), state->images, in.output);
+    if (plan.path == impl::metalfx_output_path::blit && !impl::metalfx_record_blit_out(cmd, state->images, in.output))
+        return outcome(reconstruct_status::failed, restarted);
 
     ++history._frame;
     return outcome(reconstruct_status::denoised, restarted);

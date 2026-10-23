@@ -54,10 +54,6 @@ struct metalfx_images
 /// Builds `out`; false, logged, when a pass does not build.
 [[nodiscard]] cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& out);
 
-/// Whether an output needs `metalfx_target`'s staged image and a copy after: one without both `image` and
-/// `render_target` usage, which is what MetalFX writes.
-[[nodiscard]] bool metalfx_needs_staging(sg::texture_2d const& output);
-
 /// Records metalfx_prepare.sgl: sr's linear `depth` and `motion` into `images`, and `exposure` into its texel.
 void metalfx_record_prepare(sg::command_list& cmd,
                             metalfx_passes const& passes,
@@ -66,23 +62,37 @@ void metalfx_record_prepare(sg::command_list& cmd,
                             sg::texture_2d const& motion,
                             f32 exposure);
 
-/// The image the scaler writes: `output` itself, or `images.staged` at its extent and format where it needs staging.
-[[nodiscard]] sg::texture_2d metalfx_target(sg::context& ctx, metalfx_images& images, sg::texture_2d const& output);
-
 /// How MetalFX's result reaches an output.
 enum class metalfx_output_path
 {
     direct, ///< MetalFX writes the output itself: it has `image` and `render_target`
     copy,   ///< staged, then metalfx_copy_out.sgl writes it as an image: it has `image` and a format the copy has
-    blit,   ///< staged, then `sr::blit_routine` draws it in: it has `render_target` alone
+    blit,   ///< staged, then `sr::blit_routine` draws it in: it has `render_target`, in any renderable format
     none,   ///< nothing can write it
 };
 
-/// The path for `output`, given the copies `passes` has.
-[[nodiscard]] metalfx_output_path metalfx_output_path_of(metalfx_passes const& passes, sg::texture_2d const& output);
+/// The path to an output, and the format MetalFX writes, which is what its scaler must be created for.
+struct metalfx_output_plan
+{
+    metalfx_output_path path = metalfx_output_path::none;
 
-/// Draws `images.staged` into `output` with `sr::blit_routine`; false while that routine's pipeline for the output's
-/// format is not built yet, which this asks for, and then nothing was drawn.
+    /// The output's own, except on the blit path for a format other than rgba16_float or rgba32_float, which stages in
+    /// rgba16_float: the output is then typically sRGB, which no image may be.
+    sg::pixel_format format = sg::pixel_format::undefined;
+};
+
+/// The plan for `output`, given the copies `passes` has.
+[[nodiscard]] metalfx_output_plan metalfx_output_plan_of(metalfx_passes const& passes, sg::texture_2d const& output);
+
+/// The image the scaler writes: `output` itself on the direct path, otherwise `images.staged` at the output's extent and
+/// `plan.format`.
+[[nodiscard]] sg::texture_2d metalfx_target(sg::context& ctx,
+                                            metalfx_images& images,
+                                            sg::texture_2d const& output,
+                                            metalfx_output_plan const& plan);
+
+/// Draws `images.staged` into `output` with `sr::blit_routine`, which the caller found ready before recording anything.
+/// False when it declines anyway, its pipeline having failed to build, and then nothing was drawn.
 [[nodiscard]] bool metalfx_record_blit_out(sg::command_list& cmd,
                                            metalfx_images const& images,
                                            sg::texture_2d const& output);
