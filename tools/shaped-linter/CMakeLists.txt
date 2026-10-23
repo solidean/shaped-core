@@ -25,6 +25,7 @@ add_library(shaped-linter-core STATIC
     src/shaped-linter/lex/directive.cc
     src/shaped-linter/lex/lexer.cc
     src/shaped-linter/lex/python_lexer.cc
+    src/shaped-linter/lex/comment_lexer.cc
     src/shaped-linter/lex/markdown_scanner.cc
 
     src/shaped-linter/parse/parser.cc
@@ -82,6 +83,7 @@ if(SC_BUILD_TESTS)
         tests/lex/source_language-test.cc
         tests/lex/lexer-test.cc
         tests/lex/python_lexer-test.cc
+        tests/lex/comment_lexer-test.cc
         tests/lex/markdown_scanner-test.cc
 
         tests/parse/parser-test.cc

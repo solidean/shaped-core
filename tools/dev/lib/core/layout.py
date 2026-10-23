@@ -19,7 +19,7 @@ from pathlib import Path
 DRIVER_ROOT = Path(__file__).resolve().parents[4]
 
 # What an extra root can opt into.
-# `prose` holds markdown and the comments of C, C++ and Python to the prose rules alone, through shaped-linter's `--prose-only`.
+# `prose` holds markdown and the comments of C, C++, Python, Rust and Lean to the prose rules alone, through shaped-linter's `--prose-only`.
 # `code` gives C++ and Python every rule, the prose rules over their comments included.
 EXTRA_ROOT_CHECKS = ("crossrefs", "prose", "code")
 

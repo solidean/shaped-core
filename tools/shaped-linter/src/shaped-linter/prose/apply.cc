@@ -2,8 +2,7 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
-#include <shaped-linter/lex/lexer.hh>
-#include <shaped-linter/lex/python_lexer.hh>
+#include <shaped-linter/lex/comment_lexer.hh>
 #include <shaped-linter/lex/source_buffer.hh>
 #include <shaped-linter/lex/source_language.hh>
 #include <shaped-linter/lex/source_manager.hh>
@@ -68,11 +67,6 @@ cc::vector<token> significant_tokens(token_stream const& ts, source_language lan
     return out;
 }
 
-cc::result<token_stream> lex_as(source_buffer const& buffer, source_language language)
-{
-    return language == source_language::python ? lex_python(buffer) : lex(buffer);
-}
-
 /// Append a plan diagnostic — already `error: `-prefixed and carrying its own site, since it is read by
 /// the plan's author rather than debugged.
 void check_code_unchanged(planned_rewrite const& rewritten,
@@ -83,8 +77,8 @@ void check_code_unchanged(planned_rewrite const& rewritten,
     auto const before_buffer = source_buffer::from_text(cc::string(original), rewritten.path, 0);
     auto const after_buffer = source_buffer::from_text(cc::string(rewritten.text), rewritten.path, 0);
 
-    auto before = lex_as(before_buffer, language);
-    auto after = lex_as(after_buffer, language);
+    auto before = lex_for(before_buffer, language);
+    auto after = lex_for(after_buffer, language);
     if (before.has_error() || after.has_error())
     {
         out.push_back(

@@ -7,7 +7,9 @@ Where clang-tidy expresses standard checks, shaped-linter expresses **our own ru
 That includes ones clang-tidy structurally cannot, such as rules about specific macro placements.
 
 **Not only C++.** It lints `.cc` / `.hh`, `.py` and `.md`, because a rule about how we *write* — a comment, a docstring, a paragraph — binds all three.
+It also reads the comments of `.rs` and `.lean` files, for the prose rules alone.
 Each language has its own front end; only C++ has a parser.
+`--prose-only` runs the prose rules alone, for code that follows someone else's style but whose sentences are still ours.
 **Self-contained.** No LLVM, clang tooling, or libclang.
 It builds its own lexers and parser.
 **On shaped-core.** `cc::` (clean-core) for all data structures / strings / IO, and `nexus` for tests — deliberate dogfooding.

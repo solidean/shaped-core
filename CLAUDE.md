@@ -24,7 +24,8 @@ Cross-library examples — the ones belonging to no single library — live in `
 One-liner per library:
 
 * **`libs/base/clean-core`** — foundational data structures, memory utilities, assertions, and low-level primitives (`span`, `vector`, `string`, `optional`, `result`, fixed containers,
-  `function_ref`, …). Namespace `cc`. No dependencies.
+  `function_ref`, …). Namespace `cc`.
+  No dependencies.
   Also home to **`cc::rec`** (`record/`), the one event stream logging, profiling, values, stats and tracing all write into —
   a recording is a value type, which is what makes live observability, crash forensics and test assertions one mechanism.
   [docs/logging.md](libs/base/clean-core/docs/logging.md) and [docs/profiling.md](libs/base/clean-core/docs/profiling.md) are the user-facing halves;
@@ -37,7 +38,8 @@ One-liner per library:
 * **`libs/base/nexus`** — lightweight C++23 test framework, Catch2 v3 CLI–compatible (discovery, filtering, sections, JUnit XML) for out-of-the-box IDE integration.
   Carries invocable (parametrized) tests, an API-sequence fuzzer, PGO benchmarks and hardware counters too — its [readme](libs/base/nexus/readme.md) has the map.
   **A passing test logs no warning or error it did not declare** — [docs/log-rule.md](libs/base/nexus/docs/log-rule.md).
-  Namespace `nx`. Depends on clean-core, plus babel-data privately (`babel::json` writes its listing and perf sidecars).
+  Namespace `nx`.
+  Depends on clean-core, plus babel-data privately (`babel::json` writes its listing and perf sidecars).
   **nexus is a leaf**: nothing in shaped-core links it except test binaries, so it sits ON TOP of the libraries it tests despite living in `base/`, and it is added LAST in the root `CMakeLists.txt`.
   It takes `babel-data` rather than all of babel for a reason of its own: every `*-test` binary links nexus, so a nexus dependency is a repo-wide tax and only externals-free libraries belong there.
 * **`libs/base/typed-geometry`** — strongly-typed C++23 math & geometry.
@@ -49,10 +51,12 @@ One-liner per library:
   [docs/plans/geometry-query-matrix.md](libs/base/typed-geometry/docs/plans/geometry-query-matrix.md) is that layer; curves, symbolic and mesh are planned.
   `camera/` is projections and views: `tg::perspective` is left-handed reverse-Z, and every other convention has an explicit name.
   `tg::view_projection`'s `project` / `unproject` pair is specified by its round trip — [docs/modules/camera.md](libs/base/typed-geometry/docs/modules/camera.md).
-  Namespace `tg`. Depends on clean-core.
+  Namespace `tg`.
+  Depends on clean-core.
   Early stage — see its [docs/structure.md](libs/base/typed-geometry/docs/structure.md) roadmap.
 * **`libs/base/clean-net`** — networking: TCP and datagrams, name resolution, TLS, HTTP and WebSocket clients, and a loopback dev server.
-  Namespace `cnet`. Depends on clean-core.
+  Namespace `cnet`.
+  Depends on clean-core.
   **The transport and the protocol clients are peers, not layers.**
   A browser has no sockets and does have `fetch`, and wasm is tier 1 — so HTTP is an interface with backends, and our transport is one of them.
   `cnet::http_level` is the capability ladder a caller checks once; the transport answers `is_supported()` instead.
@@ -63,10 +67,12 @@ One-liner per library:
   One layout on every kernel (`cimd::storage<T, N>` is what a data structure holds), and opaque masks so AVX-512 keeps them in k-registers.
   An operator exists only where AVX2, NEON and SIMD128 each need ≤ 3 instructions; every one has a named member twin.
   The types are committed codegen from `tools/gen-simd.py`.
-  Namespace `cimd`. Depends on clean-core.
+  Namespace `cimd`.
+  Depends on clean-core.
   [docs/design.md](libs/base/clean-simd/docs/design.md) has the decisions; early stage.
 * **`libs/data/babel-data`** — the externals-free base of babel: a base64 codec, a JSON reader and writer, and a block-level markdown reader (`data/`).
-  Namespace `babel`. Depends on clean-core and nothing else, which is the library's whole contract.
+  Namespace `babel`.
+  Depends on clean-core and nothing else, which is the library's whole contract.
   It also declares `namespace babel` itself — the vocabulary aliases and the fallback recording domain — so `fwd.hh` layers rather than forks.
   See its [readme](libs/data/babel-data/readme.md) and [cheat-sheet](libs/data/babel-data/cheat-sheet.md).
 * **`libs/data/babel-serializer`** — the rest of babel: everything that needs more than clean-core.
@@ -82,7 +88,8 @@ One-liner per library:
   glTF decodes EXT_meshopt_compression over the vendored meshoptimizer decoders, and a caller registers its own extensions with hooks that decode bufferViews and accessors.
   `json_of` hands back any element's own JSON, for what an extension adds.
   The aggregator keeps mip 0 of a DDS, as `u8`, or `f32` for BC6H and the float formats.
-  Namespace `babel`. Depends on babel-data + typed-geometry.
+  Namespace `babel`.
+  Depends on babel-data + typed-geometry.
   **One namespace, two libraries**, split by dependency rather than by topic — which is why `data/` spans both, `sqlite` living up here because of what it *needs*.
   `babel-serializer` is the target to link when in doubt; it links babel-data publicly.
   Its [docs/](libs/data/babel-serializer/docs/_index.md) are babel-wide: [docs/coding-guidelines.md](libs/data/babel-serializer/docs/coding-guidelines.md) owns the conventions both libraries follow,
@@ -91,7 +98,8 @@ One-liner per library:
 * **`libs/data/versioned-document`** — structured documents that are versioned, mergeable and verifiable.
   Entities → components → properties, materialized from an immutable content-addressed DAG of ops; property values are a canonical binary codec where equality is byte equality.
   Ships **zero components** — the component set belongs entirely to the application.
-  Namespace `vdoc`. Depends on clean-core.
+  Namespace `vdoc`.
+  Depends on clean-core.
   The in-memory library is complete; persistence is versioned-document-file — its [concept docs](libs/data/versioned-document/docs/_index.md#concepts) are the design, one file per concept.
   [docs/decisions.md](libs/data/versioned-document/docs/decisions.md) carries the settled choices and what would reopen each.
   **The edit path is incremental and realtime** — `build(graph, cache)`, `advance_snapshot`, `vdoc::apply` — so a one-entity edit is ~10 µs whatever the document's size.
@@ -102,13 +110,15 @@ One-liner per library:
   Property granularity is the requirement rather than a refinement, which is why it composes below the typed layer.
 * **`libs/data/versioned-document-file`** — the `.vdoc` save format.
   One SQLite file holding a document's op DAG, its refs and snapshots, its embedded assets over deduplicated blobs, and a disposable workspace.
-  Namespace `vdoc::file`. Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
+  Namespace `vdoc::file`.
+  Depends on versioned-document + babel-serializer (`babel::sqlite`, linked privately).
   Complete: the store and its loader, publishing, the workspace, the content store — assets, blobs, the encoding seam and reclamation — snapshots with pruning, and recovery from an untrusted peer.
   [docs/format.md](libs/data/versioned-document-file/docs/format.md) is the on-disk specification.
 * **`libs/data/blob-cache`** — a persistent, multi-process cache for expensive derived bytes: `(namespace, key, version)` → content-addressed blobs in one shared SQLite file.
   In-process singleflight over the whole acquire pipeline, TTLs, and cost-aware eviction; one `cc::threaded_actor` owns the connection.
   Everything follows from one invariant: **deleting all cache data can never affect correctness**, so a storage failure is a miss and never an error.
-  Namespace `bcache`. Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
+  Namespace `bcache`.
+  Depends on clean-core, plus babel-serializer privately for `babel::sqlite`.
   See its [docs/design.md](libs/data/blob-cache/docs/design.md).
 * **`libs/graphics/shaped-graphics`** — graphics-API wrapper: `context`, `command_list`, GPU resources, over per-backend static libs.
   dx12 and vulkan cover the whole surface; webgpu covers it but the ray-tracing pipeline, on wasm over emdawnwebgpu, and never blocks.
@@ -116,14 +126,17 @@ One-liner per library:
   **metal** covers it too, on Metal 4 (macOS / iOS 26 floor, Apple silicon): windowed and headless presentation, ray tracing, and GPU timestamps.
   opengl and webgl are intended tiers with no backend yet.
   Also home to the **render-routine framework** (`sg::render_routine`, per-context `ctx.routines`) — concrete routines live in shaped-rendering.
-  Namespace `sg`. Depends on clean-core + typed-geometry.
+  Namespace `sg`.
+  Depends on clean-core + typed-geometry.
   Early stage — see [docs/graphics.md](docs/graphics.md).
 * **`libs/graphics/shaped-shader-compiler-dxc`** — a lean DXC wrapper: HLSL → `sg::compiled_shader` (bytecode + reflection), plus an async content-keyed cache.
-  Namespace `ssc::dxc`. Depends on shaped-graphics.
+  Namespace `ssc::dxc`.
+  Depends on shaped-graphics.
   Windows-only, and built only once `extern/dxc` has fetched DXC.
 * **`libs/graphics/shaped-shader-compiler-msl`** — the Metal wrapper: MSL → `sg::compiled_shader` (a metallib, or MSL source where Apple's separately-installed Metal toolchain is absent).
   Reflection reads the source text, because a metallib carries none and Metal's own reflection needs a device and a built pipeline.
-  Namespace `ssc::msl`. Depends on shaped-graphics.
+  Namespace `ssc::msl`.
+  Depends on shaped-graphics.
   Apple-only, and built there **unconditionally** — the toolchain is a run-time lookup rather than a configure gate, since one arm needs no toolchain at all.
 * **`libs/graphics/shaped-shader-library`** — shader packages + hot reloading:
   any target declares its shaders via `sc_add_shader_package` and gets typed C++ symbols; `acquire(ctx)` returns bytecode in a format that context accepts.
@@ -131,10 +144,12 @@ One-liner per library:
   `slib::create_sgl_compiler(inner)` is that edge: sgl's pipeline as `preprocess`, then the DXC, WGSL or metal compiler that was there already.
   An SGL `@raytracing pipeline` generates its pipeline description and shader table, with no index written by hand.
   Hit groups or callables it leaves `.host` compile from SGL at run time — [docs/raytracing-pipelines.md](libs/graphics/shaped-shader-library/docs/raytracing-pipelines.md).
-  Namespace `slib`. Depends on shaped-graphics, plus shaped-graphics-language privately.
+  Namespace `slib`.
+  Depends on shaped-graphics, plus shaped-graphics-language privately.
   The compiler edges are optional: shaped-shader-compiler-dxc where DXC exists, shaped-shader-compiler-msl on Apple — **sg does not depend on it**.
 * **`libs/graphics/shaped-rendering`** — concrete render routines on top of sg's routine framework (mipmap gen, tonemapping, texture compression, …).
-  Namespace `sr`. Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
+  Namespace `sr`.
+  Depends on shaped-graphics + shaped-shader-library (routines acquire their shaders through it), plus the vendored `imgui` bundle (Dear ImGui + ImPlot + ImGuizmo).
   Also on babel-serializer, since Slug reads fonts through `babel::font`.
   Hosts the **Dear ImGui renderer** (`sr::imgui_context` + `sr::imgui_routine`), drawn entirely through sg — see [docs/imgui.md](libs/graphics/shaped-rendering/docs/imgui.md).
   Hosts **Slug**: shapes and text drawn on the GPU from their outlines — `sr::slug_routine` over a caller-owned `sr::slug_atlas`, depth-tested where the scope has depth.
@@ -161,10 +176,12 @@ One-liner per library:
   `prelude/builtins.sgl` is generated from the C++ builtin registry and checked by `dev.py check`, so never edit it by hand.
   **`sgl lsp` is the language server**, a shallow shim that translates what the library answers into LSP; the VS Code extension in `tools/vscode-extension/` is its client.
   [docs/lsp.md](libs/graphics/shaped-graphics-language/docs/lsp.md) is its design.
-  Namespace `sgl`. Depends on clean-core alone, which must stay so: an editor links it to parse.
+  Namespace `sgl`.
+  Depends on clean-core alone, which must stay so: an editor links it to parse.
   Early stage.
 * **`libs/graphics/shaped-viewer`** — professional, RTX-enabled visualization renderer with a dev-friendly API.
-  Namespace `sv`. Depends on shaped-rendering, plus babel-serializer for the asset importer.
+  Namespace `sv`.
+  Depends on shaped-rendering, plus babel-serializer for the asset importer.
   A first vertical slice today: path-traced views blitted into a window.
   Every shader is SGL, so the trace runs on dx12 and vulkan; the default context and the examples are dx12's.
   **A material type is an SGL fragment** (`sv::material_type::shader`), generated into one hit group per permutation.
@@ -437,7 +454,8 @@ Use the `repo_tools` MCP server (`file_structure`, `repo_view`, `repo_search`, `
 `repo_view` for commit/diff content `Read` can't reach.
 
 Scope `repo_search` / `repo_structure` with a single gitignore-style `path` selector — subtree and filename globbing, comma-OR'd: `path=libs/`, `path=*.hh`,
-`path=libs/**/*.hh`. Subtract noise with `exclude=` (or a `!`-prefixed term).
+`path=libs/**/*.hh`.
+Subtract noise with `exclude=` (or a `!`-prefixed term).
 `matching=smart` by default (case- and separator-insensitive); `matching=exact` for verbatim.
 
 ---

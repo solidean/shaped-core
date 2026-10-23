@@ -173,7 +173,7 @@ constexpr struct
 } owns_recorder;
 
 // This test runs only under --thorough, and a default run skips it rather than leaving it out.
-// For a test whose whole point is ground a default run cannot afford, so there is no narrower version of it worth running.
+// For a test that exists to cover ground a default run cannot afford, so there is no narrower version of it worth running.
 // A test that CAN be narrowed stays a normal test and branches on nx::is_thorough() instead.
 // Honoured wherever the body runs, a child dispatched through nx::invoke_tests included.
 constexpr struct

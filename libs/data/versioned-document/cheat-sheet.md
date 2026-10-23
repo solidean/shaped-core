@@ -1,7 +1,8 @@
 # versioned-document — Cheat Sheet
 
 Structured documents that are versioned, mergeable and verifiable.
-Namespace `vdoc`. Depends on clean-core only.
+Namespace `vdoc`.
+Depends on clean-core only.
 
 **Recording domain:** `vdoc`.
 Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).

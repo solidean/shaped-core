@@ -56,7 +56,8 @@ The **baseline for the speedup delta is the clean `release-clang` build**, a fai
 ## Output
 
 Like every dev.py step, each tool invocation is captured to
-`build/<preset>/run-logs/`. Sidecars:
+`build/<preset>/run-logs/`.
+Sidecars:
 
 | File                                    | What it is                                                        |
 |-----------------------------------------|-------------------------------------------------------------------|

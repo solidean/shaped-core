@@ -79,7 +79,8 @@ async error saying so — rather than bytecode the context cannot use.
 
 `acquire` returns an `sg::async_compiled_shader`, which is a `cc::async` node: the ambient scheduler's
 workers run the compile (`cc::install_compute_async_scheduler`), or block on it with
-`cc::try_async_blocking_get`. Compilation is lazy and per format — nothing compiles
+`cc::try_async_blocking_get`.
+Compilation is lazy and per format — nothing compiles
 until something asks.
 
 ## Wiring it up

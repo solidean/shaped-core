@@ -188,8 +188,8 @@ _LINT_SUFFIXES = (".cc", ".hh", ".md", ".py")
 _PROSE_ONLY_SUFFIXES = (".md",)
 
 # The kinds whose comments and docstrings an extra root's `prose` check reads, under `--prose-only`: their code follows someone else's style.
-# Wider than _LINT_SUFFIXES, since a prose-only run holds no code rule that a C file or a `.cpp` could trip.
-_PROSE_COMMENT_SUFFIXES = (".cc", ".hh", ".h", ".c", ".cpp", ".hpp", ".py")
+# Wider than _LINT_SUFFIXES, since a prose-only run holds no code rule that a C file, a `.cpp` or a Rust or Lean file could trip.
+_PROSE_COMMENT_SUFFIXES = (".cc", ".hh", ".h", ".c", ".cpp", ".hpp", ".py", ".rs", ".lean")
 
 # Never ours to lint: vendored code, build output, and caches.
 # `archive` holds text kept verbatim on purpose — an original draft beside the document that replaced it.

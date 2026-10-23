@@ -17,7 +17,8 @@
 /// The stored type is always the *decayed* type of whatever was boxed, so matching is on decayed identity — `T` and `T const&` box the same type.
 struct nx::typed_value
 {
-    /// Boxes a copy/move of `value`. The stored type is the decayed type of V.
+    /// Boxes a copy/move of `value`.
+    /// The stored type is the decayed type of V.
     template <class V>
     [[nodiscard]] static typed_value create(V value)
     {

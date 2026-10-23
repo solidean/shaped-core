@@ -1,7 +1,8 @@
 # versioned-document-file — Cheat Sheet
 
 The `.vdoc` save format: one SQLite file holding a document's history, its embedded assets, and its workspace state.
-Namespace `vdoc::file`. Depends on versioned-document and babel-serializer.
+Namespace `vdoc::file`.
+Depends on versioned-document and babel-serializer.
 
 > The on-disk shape is fully specified in [docs/format.md](docs/format.md).
 

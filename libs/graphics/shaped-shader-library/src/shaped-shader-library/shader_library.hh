@@ -220,7 +220,8 @@ private:
     [[nodiscard]] std::shared_ptr<shader_compiler const> find_shared_compiler(shader_language language,
                                                                               sg::shader_format format) const;
 
-    /// The package that owns `virtual_path`. Every asset path lies under exactly one.
+    /// The package that owns `virtual_path`.
+    /// Every asset path lies under exactly one.
     [[nodiscard]] package_entry const& package_of(cc::string_view virtual_path) const;
 
     /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, rewrite bindings, compile.

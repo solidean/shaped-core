@@ -21,7 +21,8 @@ struct nx::fuzz::fuzz_runner
     /// True while some operation still owes required executions.
     [[nodiscard]] bool should_continue() const;
 
-    /// Rolls the next step into `out`. Returns false if no eligible step could be produced (the run
+    /// Rolls the next step into `out`.
+    /// Returns false if no eligible step could be produced (the run
     /// then ends without being considered a failure).
     [[nodiscard]] bool create_next_execution(fuzz_machine::state const& s, executed_operation& out);
 

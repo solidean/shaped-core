@@ -14,9 +14,9 @@ The engine builds only what some enabled rule asked for — cheap rules stay che
 Alongside those layers rides the file's merged `.shaped-lint.yml` policy, on `lint_context::config`.
 It is resolved once per file before any rule runs and handed to `run_rules`, which is what keeps the engine itself off the filesystem — see [configuration](configuration.md).
 
-## Three languages, one dispatch point
+## Five languages, one dispatch point
 
-A file's extension picks its front end, in `run_rules` and nowhere else: `.cc` / `.hh` are C++, `.py` is Python, `.md` is markdown, anything unrecognized is C++.
+A file's extension picks its front end, in `run_rules` and nowhere else: `.py` is Python, `.md` is markdown, `.rs` is Rust, `.lean` is Lean, anything else is C++.
 Below that call every layer is already language-correct, so a rule reads what it declared without ever asking where it is.
 
 * **C++** — the full pipeline: lexer, then a recursive-descent parser producing a `syntax_tree`.
@@ -26,22 +26,25 @@ Below that call every layer is already language-correct, so a rule reads what it
 * **Markdown** — `scan_markdown` tags each line prose / blank / fence / code / table / frontmatter, and that is the whole front end.
   Deliberately not babel::markdown: babel gives a block's starting line but no byte offsets, and `shaped-linter-core` stays on clean-core alone.
   babel is the corpus reader in the *test* binary only — see [coding-guidelines](coding-guidelines.md#how-the-corpus-reaches-the-test-binary).
+* **Rust and Lean** — prose only: `lex_rust` and `lex_lean` find comments, strings and char literals, so a marker inside a string is never a comment, and lex every other byte as punctuation.
+  No rule reads their code; the tokens exist for the prose layer and for `prose apply`'s code-unchanged check.
 
 `rule::languages` is a bitmask over `source_language`, defaulting to C++ alone — so the existing C++ rules are structurally safe from ever meeting a markdown file.
 
 ## Prose is a layer, not a step
 
 `prose_view` is the file's comments and body text, extracted per language into blocks of lines with the markers stripped.
-That is C++ `//` and `/* */`, Python `#` and docstrings, and markdown body text outside fenced code.
-It is a branch off the token stream rather than a deeper layer, and it is the one layer that exists for all three languages.
+That is C++ and Rust `//` and `/* */`, Python `#` and docstrings, Lean `--` and `/- -/`, and markdown body text outside fenced code.
+It is a branch off the token stream rather than a deeper layer, and it is the one layer that exists for every language.
 
 Lines carry their exact `source_span`, so a prose finding's carets land on the offending words.
 They group into **blocks** — adjacent line comments, one block comment, one paragraph.
 That is because several prose judgements are block-level: whether a line is a short orphan of the one above it cannot be answered line by line.
 
 * **`lex/`** — `source_buffer` (owns bytes + a line index), `source_span` (`{file_id, byte_begin, byte_end}`), `source_manager` (owns all buffers, resolves spans).
-  Plus `source_language` (the dispatch key), `token` / `token_stream`, the C++ `lexer`, the `python_lexer`, and the `markdown_scanner`.
-* **`parse/`** — `syntax_tree` (an arena of `node`s referenced by id) and the recursive-descent `parser`. C++ only.
+  Plus `source_language` (the dispatch key), `token` / `token_stream`, the C++ `lexer`, the `python_lexer`, the Rust and Lean `comment_lexer`, and the `markdown_scanner`.
+* **`parse/`** — `syntax_tree` (an arena of `node`s referenced by id) and the recursive-descent `parser`.
+  C++ only.
 * **`prose/`** — `prose_view` and the per-language extraction that fills it, plus the `prose apply` plan parser and applier.
 * **`rules/`** (under `src/`) — the framework only: `rule` / `finding` / `fix` types, the single `registry`, and the `engine`.
 * **`report/`** — the diagnostic renderer: `snippet` (the line-numbered source view with its carets), `renderer` (a finding, and a whole run, as text).

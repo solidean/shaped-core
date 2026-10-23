@@ -572,7 +572,8 @@ cc::format("{}", h);                               // shortest digits for f16: "
 - Types are **trivially copyable**; default construction **zero-initializes** the components.
 - **Factories are `make_*`** (`make_from_values`, `make_unit`, `make_rotation_z`, …). Distinguished values are static constants (`vec::zero`, `mat::identity`, …) — runtime consts, not `constexpr`.
 - **`mat`'s multi-arg `m[c, r]` needs parentheses inside macros**: `CHECK((m[0,0]) == 1)`, else the comma is read as a macro-argument separator.
-- **`mat` default is the ZERO matrix, not identity** — use `tg::matNf::identity`. A **transform**, by contrast, defaults to the **identity**: a zero-filled transform would be singular.
+- **`mat` default is the ZERO matrix, not identity** — use `tg::matNf::identity`.
+  A **transform**, by contrast, defaults to the **identity**: a zero-filled transform would be singular.
 - **Transform containment is `tg::impl::transform_is_subclass`, NEVER `has_all`.**
   `transform_canonical()` clears bits — `affine` drops `uniform_scaling` because `non_uniform_scaling` subsumes it.
   So `has_all(affine, similarity)` is `false` even though every similarity is affine.

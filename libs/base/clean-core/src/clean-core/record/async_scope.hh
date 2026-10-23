@@ -7,7 +7,8 @@
 // CC_RECORD_ASYNC_SCOPE — attribution that follows the work, and the trace ids that ride it.
 //
 // A CC_RECORD_SCOPE is a stack frame: one thread, one nesting depth, and a hard rule that it must not cross a
-// `co_await`. That is right for a span of straight-line work and useless for a logical task.
+// `co_await`.
+// That is right for a span of straight-line work and useless for a logical task.
 //
 // An async scope is the other half.
 // It rides cc::async's ambient chain, so every node spawned under it carries it to whichever worker picks it up, across

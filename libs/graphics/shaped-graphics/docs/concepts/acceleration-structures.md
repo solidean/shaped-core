@@ -92,7 +92,8 @@ A later trace declares `accel_read` on the `raytracing` stage, and the [barriers
 Preserve these; the rest is tuning:
 
 1. **Inputs stay within the DXR∩Vulkan common denominator** — `float3` vertices, 3×4 row-major transforms,
-   24-bit `instance_id`/`hit_group_offset`, 8-bit `mask`. Widen only behind a capability query.
+   24-bit `instance_id`/`hit_group_offset`, 8-bit `mask`.
+   Widen only behind a capability query.
 2. **A referenced BLAS is fully built before its TLAS**, and a `tlas` instance holds a `blas_handle` so the
    BLAS outlives every TLAS using it.
 3. **Scratch is transient** (single-epoch), never retained.

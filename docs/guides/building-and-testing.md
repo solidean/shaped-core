@@ -141,7 +141,8 @@ The default is chosen by platform:
 | Linux    | `relwithdebinfo-linux-clang`         | on                       |
 | macOS    | `macos-arm-llvm-relwithdebinfo`      | on                       |
 
-Override with `--preset`. **It is a per-subcommand flag — it goes *after* the subcommand** (`uv run dev.py test --preset release-clang`).
+Override with `--preset`.
+**It is a per-subcommand flag — it goes *after* the subcommand** (`uv run dev.py test --preset release-clang`).
 `--emsdk-path` (for WASM) is likewise per-subcommand.
 Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs`, and `--colored` / `--plain` are global, before the subcommand.
 The `--profile*` flags of [Profiling a run](#profiling-a-run) are the one exception to the split: they are declared both globally and per-subcommand, so they bind on either side.

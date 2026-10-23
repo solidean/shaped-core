@@ -25,6 +25,10 @@ The whole point of the seam is that the core knows no GPU.
 Opacity to the caller's translation unit is the entire point.
 ````
 
+```cpp [no-whole-point]
+// The cascade, whose whole point is that stage 4 decides the first conjunct outright.
+```
+
 A property declared the point, closing its clause.
 
 ```cpp [no-whole-point]

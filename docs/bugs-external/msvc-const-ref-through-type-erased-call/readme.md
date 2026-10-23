@@ -2,7 +2,8 @@
 
 **Status:** open upstream, worked around in shaped-core.
 **Filed:** <https://developercommunity.visualstudio.com/t/MSVC-O2-miscompiles-returned-const-loca/11114080>
-**Affects:** `cl` 19.51 (toolset 14.51) at `/O2`. Not 19.29, not `/Od`, not clang-cl, not clang, not gcc.
+**Affects:** `cl` 19.51 (toolset 14.51) at `/O2`.
+Not 19.29, not `/Od`, not clang-cl, not clang, not gcc.
 **Found by:** `libs/base/clean-core/tests/function/function_ref-test.cc`, whose `cc::function_ref<int const&()>` case returned garbage.
 
 ## What happens

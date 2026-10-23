@@ -1,7 +1,8 @@
 # blob-cache
 
 A persistent, multi-process cache for expensive derived bytes.
-Namespace `bcache`. Depends on **clean-core**, and privately on **babel-serializer** for the SQLite engine behind it.
+Namespace `bcache`.
+Depends on **clean-core**, and privately on **babel-serializer** for the SQLite engine behind it.
 
 ```cpp
 #include <blob-cache/blob_cache.hh>

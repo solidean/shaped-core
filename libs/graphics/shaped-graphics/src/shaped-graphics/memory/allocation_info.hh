@@ -14,7 +14,8 @@ struct sg::allocation_info
     /// Owning heap this placement points into, or null for a dedicated (self-allocating) resource.
     memory_heap_handle heap = nullptr;
 
-    /// Byte offset of the placement within `heap`. Ignored when `heap` is null.
+    /// Byte offset of the placement within `heap`.
+    /// Ignored when `heap` is null.
     isize offset = 0;
 
     /// Byte size of the placement, ignored when `heap` is null since the resource then sizes its own allocation.

@@ -17,7 +17,7 @@ constexpr cc::string_view k_rationale
 // The patterns, in phrase_match.hh's notation.
 // A literal point is never followed by a clause end, and is rarely the object of `is`, so most patterns demand one or the other.
 constexpr cc::string_view k_patterns[] = {
-    "the|its|their|our|this whole|entire point !set|sets|cloud|clouds",
+    "the|its|their|our|this|whose whole|entire point !set|sets|cloud|clouds",
     "the very point $",
     "the very point of",
     "is|was|are|were|be|being [exactly|precisely|really|also|still] the point $",

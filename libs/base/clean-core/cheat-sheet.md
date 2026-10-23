@@ -1647,7 +1647,8 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   `value()`/`error()` assert on the wrong state; use `CC_RETURN_IF_ERROR` to
   propagate.
 - **Move-only types:** `unique_vector`, `unique_array`, `unique_function`,
-  `any_error`, `allocation`, `node_allocation`. Plain `vector`/`array`/`string`
+  `any_error`, `allocation`, `node_allocation`.
+  Plain `vector`/`array`/`string`
   copy *deeply* (value semantics) — reach for the `unique_*` variant to forbid copies.
 - **`function_ref` is non-owning** — a lambda or functor must outlive it (storing one bound to a temporary is UB).
   A function or function pointer is held by value.

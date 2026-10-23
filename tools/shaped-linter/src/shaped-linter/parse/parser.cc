@@ -465,7 +465,8 @@ struct parser_impl
         {
             auto const after = skip_balanced(pos, "(", ")");
             auto const header_end = after - 1; // the ')'
-            // A range-for splits at its `:`. Only the declaration ahead of it is a scope; behind it is
+            // A range-for splits at its `:`.
+            // Only the declaration ahead of it is a scope; behind it is
             // the range, whose braced-init-list belongs to no declarator.
             auto const colon = kw(begin, "for") ? range_for_colon(pos + 1, header_end) : isize(-1);
             parse_scope(pos + 1, colon >= 0 ? colon : header_end, decl_scope::function_scope, parent);

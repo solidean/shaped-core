@@ -25,7 +25,8 @@
 class cc::blake3
 {
 public:
-    /// Computes the BLAKE3-256 hash of `data`. Empty data is valid.
+    /// Computes the BLAKE3-256 hash of `data`.
+    /// Empty data is valid.
     [[nodiscard]] CC_PURE static hash256 create(cc::span<byte const> data);
 
     /// A fresh state, equivalent to having hashed nothing.

@@ -524,7 +524,8 @@ Each explicit UB usage must be heavily documented and justified.
 - Avoid "magic sentinels" like `-1` for invalid states.
   Prefer `optional` or `variant` unless there's a justified performance or memory reason.
 - Give each distinct index / handle / id role its own strong enum:
-  `enum class name : int { invalid = -1 };`. The compiler then rejects mixing roles (passing an `op_index` where a `type_index` is wanted),
+  `enum class name : int { invalid = -1 };`.
+  The compiler then rejects mixing roles (passing an `op_index` where a `type_index` is wanted),
   and the named `invalid` member replaces a bare `-1` sentinel.
   This is the positive form of the rule above:
   when a raw `int` index would otherwise carry an `-1` "none", reach for a strong enum instead.
@@ -595,7 +596,8 @@ Two rules follow:
 
 - **Use `cc::atomic`, never `std::atomic` directly** ([clean-core/thread/atomic.hh](../libs/base/clean-core/src/clean-core/thread/atomic.hh)).
   With threads it *is* `std::atomic`; without them it is a plain value with the same API,
-  so a refcount bump is an `add` instead of a `lock xadd`. A hand-written `std::atomic` stays atomic in a build that provably has no concurrency, and no flag can reach it.
+  so a refcount bump is an `add` instead of a `lock xadd`.
+  A hand-written `std::atomic` stays atomic in a build that provably has no concurrency, and no flag can reach it.
   `<atomic>` is blessed to appear in our headers but not to be called into — see [blessed-stdlib-headers.md](../libs/base/clean-core/docs/blessed-stdlib-headers.md).
 - **Never gate API on the flag.** Threaded types keep their full surface and fall back to running on the calling thread; document the fallback instead of `#if`-ing the declaration away.
   `cc::threaded_actor` is the model: same API, and unthreaded the caller drives it.

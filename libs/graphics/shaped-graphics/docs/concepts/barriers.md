@@ -6,7 +6,8 @@ Access is inferred from the operation, and the concurrency model lets several co
 
 ## Access is inferred, not declared
 
-There is no public `declare_access`. What a resource is used as follows from the operation:
+There is no public `declare_access`.
+What a resource is used as follows from the operation:
 
 - `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source.
 - `cmd.copy` ⇒ `copy_read` on src plus `copy_write` on dst, and a self-copy is one combined access.

@@ -159,7 +159,8 @@ template <class EnumT, cc::isize Bits>
 struct cc::flags;
 ```
 
-The anchor is the last directive at conditional depth **0**, not the last `#include`. A prologue that opens
+The anchor is the last directive at conditional depth **0**, not the last `#include`.
+A prologue that opens
 `#if CC_HAS_THREADS` and reaches the code without closing it still gets the directive — placed before the
 conditional, where it holds for every configuration rather than for one branch.
 

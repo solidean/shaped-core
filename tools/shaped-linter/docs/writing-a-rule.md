@@ -40,6 +40,7 @@ The layers a language actually has differ, and the engine gives you an empty one
 | C++ | yes | yes | yes |
 | Python | yes (plus `indent` / `dedent`) | — | yes |
 | markdown | — | — | yes |
+| Rust, Lean | comments, strings and chars apart; the rest is punctuation | — | yes |
 
 ## The slug and the rationale are mandatory
 

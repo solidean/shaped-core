@@ -63,7 +63,8 @@ struct sg::compiled_shader
     shader_format format = shader_format::dxil;
     cc::string entry_point;
 
-    /// The opaque bytecode, in `format`. An owning, shareable, immutable byte blob.
+    /// The opaque bytecode, in `format`.
+    /// An owning, shareable, immutable byte blob.
     cc::pinned_data<byte const> bytecode;
 
     /// The resource bindings the code uses — a flat list; per-set grouping is derived by the consumer.

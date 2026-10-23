@@ -1063,7 +1063,8 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
         // A fresh texture holds no history, and a declaration that changed describes something else.
         //
         // Against `declared_hash`, never `reset_hash`: the latter belongs to whatever writes the resource, and is
-        // stamped later in the frame by `trace`. Comparing or overwriting it here would pit the two against each
+        // stamped later in the frame by `trace`.
+        // Comparing or overwriting it here would pit the two against each
         // other and restart the accumulation on every frame.
         if (e.resized || e.slot->declared_hash != t.reset_hash)
             impl::restart_accumulation(*e.slot);

@@ -160,7 +160,8 @@ Accepting a non-canonical encoding "leniently" would silently break all three.
 
 ### The codec starts in `vdoc`, not in clean-core
 
-**Decided.** `value` lives in `vdoc`. It is not promoted to a `cc::` type now.
+**Decided.** `value` lives in `vdoc`.
+It is not promoted to a `cc::` type now.
 
 There is far too much design space here to one-shot a foundational version: tagging, growth, views, arenas, schema hints, streaming.
 A `cc::value` designed for one speculative second user would be worse for both.
@@ -846,7 +847,8 @@ clean-core has the `cc::memory_resource` seam but no bump resource behind it, an
 This is the **second** hand-rolled copy in the tree — `cc::impl::intern_shard` is the first — which is the point at which it should be written once, in the library that owns the capability.
 It is not written there yet only because the document's own layout was still moving; the seam is already the right shape, so the migration is a deletion rather than a refactor.
 
-**Reopen when:** clean-core grows a bump `cc::memory_resource` next to `cc::system_memory_resource`. Then this copy goes.
+**Reopen when:** clean-core grows a bump `cc::memory_resource` next to `cc::system_memory_resource`.
+Then this copy goes.
 
 ### A document is evolved by consuming it, not by mutating it and not by sharing it
 

@@ -425,7 +425,8 @@ int run_bless_includes(scl::bless_includes_options const& opts)
     return exit_ok;
 }
 
-/// Dispatch `shaped-linter bless-includes …`. `args` is the full argv.
+/// Dispatch `shaped-linter bless-includes …`.
+/// `args` is the full argv.
 int run_bless_includes_command(cc::span<char const* const> args)
 {
     auto opts = scl::parse_bless_includes_options(args.subspan(2));
@@ -447,7 +448,8 @@ int run_bless_includes_command(cc::span<char const* const> args)
     return run_bless_includes(opts.value());
 }
 
-/// Dispatch `shaped-linter prose apply …` / `prose stats …`. `args` is the full argv.
+/// Dispatch `shaped-linter prose apply …` / `prose stats …`.
+/// `args` is the full argv.
 int run_prose_command(cc::span<char const* const> args)
 {
     auto const verb = args.size() >= 3 ? cc::string_view(args[2]) : cc::string_view("");

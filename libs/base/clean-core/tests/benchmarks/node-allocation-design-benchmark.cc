@@ -122,7 +122,8 @@ CC_FORCE_INLINE u64 teb_token()
 // Layout convention: local bitmap at slab offset 0. Same-cache-line variants keep the remote bitmap at
 // offset 8 and the owner at 16; diff-cache-line variants put the remote bitmap at offset 64 (the 2nd line).
 // The node data region starts past the metadata (DATA_OFF), and slot i lives at base+DATA_OFF+i*Size, so
-// `slot = (ptr - base - DATA_OFF) >> log2(Size)` and `base = ptr & ~(SLAB-1)`. We use a full 64-slot bitmap.
+// `slot = (ptr - base - DATA_OFF) >> log2(Size)` and `base = ptr & ~(SLAB-1)`.
+// We use a full 64-slot bitmap.
 
 template <isize Size>
 struct VarAtomic

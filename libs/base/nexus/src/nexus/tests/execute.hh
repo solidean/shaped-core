@@ -305,7 +305,8 @@ nx::test_declaration const* current_slot_declaration();
 // itself). nx::invoke_tests uses this to break invocation cycles rather than recurse forever.
 bool is_declaration_active(nx::test_declaration const* decl);
 
-// Records an "invocation cycle" error on the currently running test (so it fails), naming `decl`. Called when
+// Records an "invocation cycle" error on the currently running test (so it fails), naming `decl`.
+// Called when
 // a driver/invocable would (transitively) invoke a test already running above it.
 void report_invocation_cycle(nx::test_declaration const* decl);
 } // namespace nx::impl

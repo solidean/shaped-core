@@ -926,7 +926,8 @@ using std::memcmp;
 
 // Deliberately NOT re-exported: strlen and strcmp.
 // A cc::string_view constructed from a `char const*` already walks it once and then knows its size, and
-// comparing two of them is `==`. Both are better answers than the C ones, so those stay denied outright.
+// comparing two of them is `==`.
+// Both are better answers than the C ones, so those stay denied outright.
 
 // =========================================================================================================
 // Scope utilities

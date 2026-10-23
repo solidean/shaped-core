@@ -184,7 +184,8 @@ struct list_marker
     i32 content_column = 0;
 };
 
-/// A list-item marker at `pos`, whose indentation was `column`. The content column is what a following
+/// A list-item marker at `pos`, whose indentation was `column`.
+/// The content column is what a following
 /// line must reach to stay inside the item.
 list_marker scan_list_marker(cc::string_view s, i32 pos, i32 column)
 {

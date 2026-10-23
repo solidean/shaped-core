@@ -10,7 +10,8 @@
 // Binary search over an already-ordered indexed range.
 //
 // The `_in_sorted` suffix is a CONTRACT MARKER, not decoration: these cost O(log n) against a precondition the
-// caller must meet, and cc::sequence owns the linear scanning `find`. A bare `first_at_least` would read as one.
+// caller must meet, and cc::sequence owns the linear scanning `find`.
+// A bare `first_at_least` would read as one.
 // Nothing here permutes, so none of it needs the index_swap_range seam — plain indexing is enough.
 
 namespace cc::impl

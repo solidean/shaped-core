@@ -175,7 +175,8 @@ It is the wrong trade.
   With `{quat, T}` the invariant `|q| ≡ 1` can be restored after a long chain of compositions.
   Folded, drift in `|q|` is indistinguishable from a legitimate change of scale, so there is nothing left to restore.
 - At `s → 0` the folded quaternion loses the rotation irrecoverably.
-- `tg::quat`'s own `operator*(quat, vec)` is written in the unit-only form, correct only when `w² + |u|² = 1`. A folded value would be a different thing wearing `quat`'s clothes.
+- `tg::quat`'s own `operator*(quat, vec)` is written in the unit-only form, correct only when `w² + |u|² = 1`.
+  A folded value would be a different thing wearing `quat`'s clothes.
 
 The saving would have been four bytes and roughly no arithmetic.
 Because the table lives in `tg::impl`, the decision is reversible per dimension without an API change.

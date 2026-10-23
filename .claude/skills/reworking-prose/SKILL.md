@@ -46,7 +46,8 @@ A gap is a scope candidate like any other — this skill grows documentation as 
 
 ### 2. Read the files
 
-Plain `Read`. A member doc is unrewritable without its signature, so there is no shortcut around reading the code the prose is attached to.
+Plain `Read`.
+A member doc is unrewritable without its signature, so there is no shortcut around reading the code the prose is attached to.
 
 ### 3. Write the documentation concept
 

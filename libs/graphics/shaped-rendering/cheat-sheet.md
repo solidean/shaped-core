@@ -183,7 +183,8 @@ Gotchas:
 - **One call, inside the scope.** Textures, geometry upload and draws all happen in `execute()`.
   `render_viewports` is the opposite — it opens its own scopes and submits, so never call it inside one.
 - **Viewports change what a coordinate means.** Mouse positions and `ImGui::SetNextWindowPos` become
-  desktop-space, not main-window-relative; offset by `ImGui::GetMainViewport()->Pos`. An `input_event` must
+  desktop-space, not main-window-relative; offset by `ImGui::GetMainViewport()->Pos`.
+  An `input_event` must
   name its `window` for `process_event` to translate it.
 - **Viewports make `update_viewports()` mandatory every frame.**
   Skip it and imgui stops hit-testing the mouse entirely — nothing hovers.

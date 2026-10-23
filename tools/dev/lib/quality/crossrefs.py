@@ -387,7 +387,8 @@ def check_source_refs(src_path: Path, root: Path, base: LinkBase, offenders: lis
             path_part, _, fragment = target.partition("#")
             path_part = urllib.parse.unquote(path_part)
             if not path_part or not looks_like_path(path_part):
-                # Not a reference at all — a C++ comment's `a[i](b)`. Leave the span to the bare-token pass, which
+                # Not a reference at all — a C++ comment's `a[i](b)`.
+                # Leave the span to the bare-token pass, which
                 # still has to see any real doc path written inside those brackets.
                 continue
 

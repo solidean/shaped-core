@@ -33,7 +33,8 @@ struct composed_document
     /// Sorted by entity id bytes.
     cc::vector<entity_id> entities;
 
-    /// Parallel to `entities`. An entry can be empty where every layer's contribution was dropped.
+    /// Parallel to `entities`.
+    /// An entry can be empty where every layer's contribution was dropped.
     cc::vector<raw_entity> composed;
 
     /// The (entity, component) pairs dropped because their layers disagreed about `$schema_version`.
