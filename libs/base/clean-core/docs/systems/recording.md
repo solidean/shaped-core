@@ -20,7 +20,7 @@ Test and example binaries get it from `nx::run`, so neither needs a line of setu
 A recording **site** is a `static constexpr cc::rec::desc` plus a write.
 The descriptor carries the kind, the level, the name, the source location, the unit and the payload layout — so the stream carries a pointer and the payload bytes, and nothing else.
 
-Being `constexpr` is load-bearing: the descriptor is constant-initialized, so a site has no guard variable, no one-time-initialization check and no first-hit cost.
+`constexpr` is what makes the descriptor constant-initialized, so a site has no guard variable, no one-time-initialization check and no first-hit cost.
 
 A **domain** says which part of the source a site belongs to.
 It is resolved by ordinary unqualified name lookup, so a site never names one:

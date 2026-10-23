@@ -30,7 +30,7 @@ The actor thread may not yet have been scheduled to run the CPU memcpy, so `futu
 `future.completion()` is how a caller learns the bytes landed, and `ctx.idle_completion()` is how it waits for every download at once.
 That one drains the transfer actors as well as the GPU, counting outstanding jobs rather than watching an inbox.
 
-## Why reclaim is epoch-granular (the load-bearing decision)
+## Why reclaim is epoch-granular
 
 The subtle part is **when a ring window may be reused**.
 A window holds GPU-written readback bytes the actor must still copy out, so reusing it early corrupts an in-flight download.
@@ -97,7 +97,7 @@ Dropping a recording list (`drop_command_list`) is distinct from dropping the *f
   The separate `sg::bytes_wait_gate` carries only the *submitted* question, since blocking before submit would stall the very thread that must submit.
 - The advance hook is called from [`dx12_epoch.cc`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_epoch.cc).
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 

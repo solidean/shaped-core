@@ -89,7 +89,7 @@ Both survive their command list: the future pins its own destination bytes.
 
 An epoch advance does **not** deliver a download — it drains the GPU, and the readback copy runs on a separate actor.
 
-## Load-bearing invariants
+## Invariants
 
 1. **A list is consumed exactly once**, by submit or by drop, both through the context.
 2. **A list cannot span epochs** — enforced per list, and in aggregate at `advance_epoch`.

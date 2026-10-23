@@ -392,7 +392,7 @@ INVOCABLE_TEST("vdoc::file - two replicas pruned to different depths agree", (st
     CHECK(materialize_through_store(*a, history.head()) == materialize_through_store(*b, history.head()));
 }
 
-INVOCABLE_TEST("vdoc::file - a required snapshot is load-bearing, and replaying without it is lossy",
+INVOCABLE_TEST("vdoc::file - a required snapshot is the only copy, and replaying without it is lossy",
                (store_impl const& impl))
 {
     auto const medium = impl.make_medium();

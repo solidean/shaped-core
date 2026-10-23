@@ -5,7 +5,7 @@
 /// A value describing where a resource's backing GPU memory lives — a cheap, copyable placement handle rather than an owner of the GPU resource.
 /// Produced by a memory_heap, or hand-built for the dedicated case, and passed to a create_* call.
 ///
-/// `heap` null vs non-null is the load-bearing convention.
+/// `heap` null vs non-null decides how the resource is backed.
 ///   - null: self-allocating, so the resource gets its own dedicated allocation and `offset` / `size` are unused.
 ///   - set: placed, so the resource is sub-allocated into `heap` at `offset` and shares the heap's underlying allocation.
 ///     Holding the memory_heap_handle keeps that heap alive.

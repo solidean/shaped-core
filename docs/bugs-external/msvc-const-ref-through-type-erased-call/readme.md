@@ -31,7 +31,7 @@ There is no dangling reference in the source for the optimizer to be exploiting.
 The same source is correct at `/Od` on the same compiler, and correct at `/O2` on the previous MSVC toolset and on two other compilers.
 A source-level defect would not be sensitive to any of those.
 
-The `__declspec(noinline)` on `read_through` is load-bearing: without it the optimizer sees the whole chain, constant-folds it, and produces 42.
+The `__declspec(noinline)` on `read_through` is required: without it the optimizer sees the whole chain, constant-folds it, and produces 42.
 The bug needs the thunk to be opaque at the call site, which is exactly the condition a real `function_ref` call site is in.
 
 ## Reproducing

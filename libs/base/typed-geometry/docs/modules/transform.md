@@ -129,7 +129,7 @@ Every ordering question has to go through `transform_is_subclass`.
 The lattice laws — idempotence, commutativity, and that the join is the *least* upper bound — are proven exhaustively by a `consteval` sweep in `tests/transform/transform-flags-test.cc`.
 That test is the foundation the widening constructor and every dispatch branch rest on.
 
-### Widening is explicit, and that is load-bearing
+### Widening is explicit, and must stay so
 
 Converting a `rigid_transform` to an `affine_transform` is lossless, so an implicit conversion looks harmless.
 It is not.

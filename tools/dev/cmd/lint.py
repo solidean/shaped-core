@@ -36,6 +36,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.profile(sl)
     a.change_scope(sl, default_all=True)
     sl.add_argument("--fix", action="store_true", help="Let shaped-linter apply its suggested fixes in place")
+    sl.add_argument("--no-build", action="store_true",
+                    help="Lint the named FILES with the shaped-linter already built, writing nothing: "
+                         "safe to run from several processes at once, and refused when the build is missing or older than the linter's sources")
+    sl.add_argument("files", nargs="*", metavar="FILE", help="With --no-build: the files or directories to lint")
 
     pa = lint_sub.add_parser("prose-apply", help="Apply a prose plan — many comment/doc rewrites in one pass")
     a.preset(pa)
@@ -105,6 +109,59 @@ def run_clang_tidy(
 
 def _batches(files: list[Path], size: int = 200) -> list[list[Path]]:
     return [files[start:start + size] for start in range(0, len(files), size)]
+
+
+# The linter's own sources, relative to this file: tools/dev/cmd/lint.py beside tools/shaped-linter/.
+_LINTER_SOURCES = Path(__file__).resolve().parents[2] / "shaped-linter"
+
+
+def _built_linter(build_dir: Path) -> Path | None:
+    """The shaped-linter a build left behind, found by path alone so nothing is configured or written.
+    It sits under tools/ in shaped-core's own build and under extern/shaped-core/tools/ in a consumer's."""
+    for sub in (Path("tools/shaped-linter"), Path("extern/shaped-core/tools/shaped-linter")):
+        for name in ("shaped-linter.exe", "shaped-linter"):
+            exe = build_dir / sub / name
+            if exe.is_file():
+                return exe
+    return None
+
+
+def run_shaped_linter_no_build(ctx: Context, *, preset_specs: list[str] | None, paths: list[str]) -> bool:
+    """Lint `paths` with the already built shaped-linter, printing its report; return True if clean.
+
+    For parallel callers on disjoint files: it builds, configures and logs nothing, so two runs never touch the same file.
+    A build older than any of the linter's sources is refused rather than used, since its rules may not be the ones in the tree.
+    """
+    if not paths:
+        ctx.die("lint shaped --no-build needs the FILE(s) to lint")
+    preset = ctx.resolve_presets(preset_specs)[0]
+    exe = _built_linter(preset.build_dir)
+    if exe is None:
+        ctx.die(f"lint shaped --no-build: no shaped-linter under {preset.build_dir}; build it once with `uv run dev.py build -t shaped-linter`")
+    built = exe.stat().st_mtime
+    newer = [p for p in _LINTER_SOURCES.rglob("*") if p.suffix in (".cc", ".hh", ".txt") and p.stat().st_mtime > built]
+    if newer:
+        ctx.die(f"lint shaped --no-build: the built shaped-linter is older than {newer[0].relative_to(_LINTER_SOURCES)}; "
+                "rebuild it once with `uv run dev.py build -t shaped-linter`, from one process")
+
+    files = dev.expand_lint_paths(ctx.root, paths)
+    if not files:
+        print(dev.console.green("shaped-linter: nothing to lint"), file=sys.stderr)
+        return True
+    prose_only = dev.prose_only_lint_files(ctx.root, files, layout=ctx.policy.layout)
+    batches = [(False, batch) for batch in _batches([f for f in files if f not in prose_only])]
+    batches += [(True, batch) for batch in _batches(sorted(prose_only))]
+
+    import subprocess
+
+    ok = True
+    for prose_only_batch, batch in batches:
+        argv = [str(exe), "--color", "always" if dev.console.enabled() else "never"]
+        if prose_only_batch:
+            argv.append("--prose-only")
+        argv += [str(f) for f in batch]
+        ok = subprocess.run(argv, cwd=ctx.root).returncode == 0 and ok
+    return ok
 
 
 def run_shaped_linter(
@@ -352,6 +409,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                 mirror=args.mirror_output, verbose=args.verbose,
             )
             raise SystemExit(0 if ok else 1)
+        case "shaped" if args.no_build or args.files:
+            if not args.no_build:
+                ctx.die("lint shaped: named files need --no-build; without it the run is scoped by change (--dirty-only, --commit, --all)")
+            if args.fix or a.scope_from_args(args) is not None:
+                ctx.die("lint shaped --no-build lints exactly the named files and fixes nothing; drop --fix and the scope flags")
+            raise SystemExit(0 if run_shaped_linter_no_build(ctx, preset_specs=args.preset, paths=args.files) else 1)
         case "shaped":
             ok = run_shaped_linter(
                 ctx, preset_specs=args.preset, scope=_scope(args, ctx), fix=args.fix,

@@ -88,7 +88,7 @@ namespace vdoc_test
 /// **Generation is a fixed LCG rather than a shared rng**, so the corpus is byte-stable across the repo's lifetime and
 /// a failure reproduces from its name alone.
 ///
-/// The `{ancestor, descendant}` head sets are load-bearing: that shape is the counterexample the snapshot cache's
+/// The `{ancestor, descendant}` head sets are required: that shape is the counterexample the snapshot cache's
 /// validity gate exists to reject, and a corpus without it would accept an unsound gate.
 [[nodiscard]] cc::vector<corpus_case> generate_corpus();
 } // namespace vdoc_test

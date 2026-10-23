@@ -426,7 +426,7 @@ Two layers, split by what they need:
 - `uv run tools/instruction-tracer/self-test.py` — the real thing: builds the tracer and `fixture/main.cc`, traces it, and checks the results.
   Windows-only and needs PDBs, which is why it is not part of the `dev.py test` sweep.
 
-The self-test's assertions are optimizer-independent by construction, and one of them is load-bearing for the whole tool.
+The self-test's assertions are optimizer-independent by construction, and the whole tool rests on one of them.
 `self-test.py` says which in its module docstring, and why in that check's own.
 
 ## Layout

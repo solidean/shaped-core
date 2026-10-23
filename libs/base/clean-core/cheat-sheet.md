@@ -466,7 +466,7 @@ auto s = cc::make_shared<T>(args...);              // only way to construct (str
 cc::weak_ptr<T> w = s;  w.lock();                   // weak (if Traits::supports_weak); lock() -> shared_ptr or empty
 // custom Traits (all static, on T*) for intrusive counts: node_size/node_align + init_control/inc_strong/
 // release_strong->{destroy,free}/destroy_object/free_storage (+weak: inc_weak/release_weak->bool/try_lock_strong).
-// release_strong {true,false} => destroy_object THEN release_weak (order is load-bearing); {true,true} => both, skip
+// release_strong {true,false} => destroy_object THEN release_weak (order is fixed); {true,true} => both, skip
 // release_weak. Base-keyed Traits serves derived T via upcast (cc::async keys one on async_node_base);
 // from_alive(T*) MINTS a handle from a pointer known alive (strong > 0).
 T* raw = s.release();  auto back = cc::shared_ptr<T>::adopt(raw);   // MOVE a count out of / into a handle: count-neutral

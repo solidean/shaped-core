@@ -85,7 +85,7 @@ An op that **forks below** a still-required snapshot presents a writer the empti
 So such a batch is refused.
 
 But completing that snapshot's ancestry retires the question entirely: once every op behind it has its payload again, a replay reproduces exactly what the snapshot holds.
-The snapshot stops being load-bearing, and is **demoted** to a droppable cache and unpinned.
+The snapshot stops being required, and is **demoted** to a droppable cache and unpinned.
 
 So a fork is refused only while the hole is still there, and sending the rest of the ancestry in the same batch is what makes it acceptable.
 That is what makes this a boundary rather than a ban.

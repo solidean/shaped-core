@@ -8,6 +8,7 @@ target_sources(shaped-linter-core PRIVATE
     no-bare-todo/no_bare_todo.cc
     no-flow-prose/no_flow_prose.cc
     no-long-prose-line/no_long_prose_line.cc
+    no-stock-words/no_stock_words.cc
     no-whole-point/no_whole_point.cc
     no-why-it-matters/no_why_it_matters.cc
 )

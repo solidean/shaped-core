@@ -29,7 +29,7 @@ Four constraints hold across the files, and breaking any of them corrupts the nu
 **The compiler must not fold the baseline away.**
 `CC_DONT_INLINE` alone is not enough: clang infers a noinline helper is pure and propagates its return value, so a chain of `x+1` steps still collapses to `x+N`, or to a compile-time constant.
 Both files therefore route their baselines through an empty `volatile` inline-asm barrier (`opaque`), which makes its argument un-analyzable *and* gives the containing function side effects.
-The side effects are the load-bearing half for the mutation-free baselines.
+The mutation-free baselines rely on the side effects.
 The reduction and spawn-tree analogs are pure functions of unchanging inputs, and measured 0.00 ns until the barrier was added.
 The point is a baseline that is a genuine hand-written call-based analog, **not** maximally-optimized straight-line code: that is what makes the tax an honest per-node comparison.
 The single-thread cases add a second guard: every graph's leaf value is seeded from the runtime loop index.

@@ -147,7 +147,7 @@ struct sv::generated_material_shader
     /// Where this permutation's cutout opacity lives, and `none` where it cannot cut out.
     ///
     /// It can cut out where its type declares an `opacity_attribute` and something other than the signature's own default supplied it.
-    /// Both halves are load-bearing: an any-hit otherwise runs at every intersection to reject nothing, and costs the instance
+    /// Both halves are needed: an any-hit otherwise runs at every intersection to reject nothing, and costs the instance
     /// the hardware's opaque fast path to do it.
     /// `view_renderer` turns `opacity.can_cut_out()` into `sg::tlas_instance::opaque_override`, so it decides whether the
     /// any-hit can be invoked at all rather than only whether one is compiled.

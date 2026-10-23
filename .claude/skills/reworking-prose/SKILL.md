@@ -78,7 +78,7 @@ If it exists but nothing in the reader's reach links to it, the fix is a cross-l
 
 **Compression is where a rework introduces its own errors, and the tell is a word doing double duty.**
 Collapsing a list that mixes "what exists" with "what is intended" — tiers, roadmaps, support levels — reads afterwards as an assertion that all of it exists.
-When a sentence you are shortening carries a hedge, decide whether the hedge was the load-bearing half before dropping it.
+When a sentence you are shortening carries a hedge, decide whether the sentence rests on the hedge before dropping it.
 
 
 **Backstory is the first thing to cut**, per [Code Comments](../../../docs/coding-guidelines.md#code-comments).

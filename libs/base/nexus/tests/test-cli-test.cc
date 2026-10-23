@@ -272,7 +272,7 @@ TEST("test cli - the generated help still identifies the binary to C++ TestMate"
 {
     auto const help = nx::test_schedule_config::cli_help_text();
 
-    // Load-bearing: the extension scans --help output for this string, and without it an IDE silently
+    // The extension scans --help output for this string, and without it an IDE silently
     // discovers no tests at all.
     // libs/base/nexus/docs/catch2-runner-compat.md is the contract.
     CHECK(help.contains("Compatible with Catch2 v3.11.0"));

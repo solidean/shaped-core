@@ -31,7 +31,7 @@ Standard shared/weak counting, with one rule that the intrusive layout makes sha
 
 The counts must stay readable between those two points, so `destroy_object` must not destroy them.
 With trailing control that is automatic, since the control is separate storage; an intrusive Traits must run a payload-only teardown instead, which is what async's node does.
-`Traits::release_strong` reports what the caller must do next, and the order it reports is load-bearing.
+`Traits::release_strong` reports what the caller must do next, and the order it reports is fixed.
 [shared_ptr.hh](../../src/clean-core/memory/shared_ptr.hh)'s header block carries the case table and the reason, and is the single authority on it.
 
 ## The two escape hatches, and why they differ

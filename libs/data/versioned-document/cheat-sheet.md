@@ -164,7 +164,7 @@ vdoc::advance_snapshot(graph, cache, parent, child); // moves the entry onto a S
 
 cache.clear_unpinned();                              // invisible: costs speed, never a result
 cache.erase(id); cache.is_pinned(id); cache.size();
-cache.unpin(id);                                     // a snapshot that stopped being load-bearing, bytes kept
+cache.unpin(id);                                     // a snapshot no longer required, bytes kept
 cache.take(id);                                      // removes and hands it over; advance_snapshot's primitive
 ```
 

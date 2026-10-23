@@ -466,7 +466,7 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
 /// It hashes the *uploaded* bytes rather than the view's fields, so it cannot drift away from what the shader actually reads.
 ///
 /// Where the view lands is structurally absent — a view_data carries no position — so relayout cannot discard a converged image.
-/// Keeping that discipline is load-bearing for interaction, not just tidiness: a leaf's fit mode, sampler, zoom and
+/// That discipline serves interaction, not just tidiness: a leaf's fit mode, sampler, zoom and
 /// post-process parameters never reach an upload, which is exactly why dragging a wipe slider cannot restart a trace.
 ///
 /// `resolution` is the one deliberate exception to "uploaded bytes only".

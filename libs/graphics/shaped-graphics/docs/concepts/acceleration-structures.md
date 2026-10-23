@@ -87,7 +87,7 @@ Ordering is inferred, never hand-synchronized.
 A build declares [`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over the structure it produces, and `accel_read` over each referenced BLAS.
 A later trace declares `accel_read` on the `raytracing` stage, and the [barriers](barriers.md) system turns those into the right GPU barriers.
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 

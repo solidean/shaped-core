@@ -157,7 +157,7 @@ Asking for more is an assert, never a silent drop.
 A test node **always resolves to a value**, never to an error.
 A failure is data on the `test_execution`; the async failure channel is not used at all.
 
-That is load-bearing rather than tidiness: the phase's join requires every test node, so an error would propagate into the join and turn one red test into a red phase.
+That is for correctness, not tidiness: the phase's join requires every test node, so an error would propagate into the join and turn one red test into a red phase.
 
 ## `ASYNC_TEST`
 

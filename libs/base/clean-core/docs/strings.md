@@ -111,7 +111,7 @@ A raw `char const*` does not: it hashes by address like any other pointer, so wr
 They are `constexpr`, **locale-independent and ASCII-only**, which is exactly why clean-core does not use `<cctype>`.
 
 The header also carries the equality and comparison functors `equal_case_sensitive`, `equal_case_insensitive`, `compare_ascii_case_sensitive` and `compare_ascii_case_insensitive`.
-Those are more load-bearing than they look.
+Those are used more widely than they look.
 `equal_case_sensitive` is the default `EqualF` for `string_view`'s decompose / matching / strip family.
 Passing `equal_case_insensitive` instead makes any of those matches case-insensitive.
 `starts_with`, `ends_with` and `contains` take no `EqualF` and are always case-sensitive.

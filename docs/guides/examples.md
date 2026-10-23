@@ -247,7 +247,7 @@ The main thread's loop also sweeps the thread pumps, which is what lets an unthr
 [libs/base/clean-net/examples/download.cc](../../libs/base/clean-net/examples/download.cc) is the worked case.
 `no_scheduler` is refused on it, as on every async test.
 
-**The name is a slash path**, and it is load-bearing.
+**The name is a slash path**, and three things key off it.
 It is the CLI argument, the gallery entry and the capture slug, so it is written as its own identifier rather than as a sentence.
 As the slug it names both `build/<preset>/captures/` and the committed reference image.
 By convention the first segment is the library the example is about.

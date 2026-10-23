@@ -256,11 +256,11 @@ Moving an OS window and presenting its new content are separate events, and in b
 Put a vsync-blocking main present in that gap and it becomes a full frame: everything inside a window being dragged — dock markers most visibly — lags the window by however far it moved.
 This is the ordering imgui's own examples use, and the order `render_imgui` runs them in.
 
-Only the *present* order is load-bearing, which is why the main list is recorded afterwards rather than before.
+Only the *present* order is constrained, which is why the main list is recorded afterwards rather than before.
 `render_viewports` submits a command list per viewport, and one submitted while the main list is still open makes the two concurrent —
 the font atlas both sample is then reverted to its canonical layout at every viewport submit, which sg reports as a hidden cost of concurrent recording.
 
-**Both changes are load-bearing, and neither is optional once the flag is on.**
+**Neither change is optional once the flag is on.**
 
 - **Every imgui coordinate becomes desktop-space.**
   Mouse positions and `ImGui::SetNextWindowPos` are no longer relative to the main window.

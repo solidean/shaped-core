@@ -179,7 +179,7 @@ barriers go into the small command buffer prepended to the same `vkQueueSubmit`,
 Whole-image rather than per-subresource, because a list that uses one mip leaves the others where `vkCreateImage` left
 them while the tracker would say otherwise.
 
-Claiming at submit rather than at record is the load-bearing part: a list that recorded second can submit first.
+Claiming at submit rather than at record is required: a list that recorded second can submit first.
 
 **An async upload can claim it too**, and on a fresh texture it usually does: whoever enqueues first wins.
 It claims under the submission lock a list submit takes, and before returning it submits the one barrier on the

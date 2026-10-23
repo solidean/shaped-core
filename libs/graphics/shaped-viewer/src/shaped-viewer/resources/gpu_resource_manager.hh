@@ -303,7 +303,7 @@ public:
     /// traces with it and before `freeze()` — every index it returns is minted here.
     /// The buffer it is uploaded into is the record's own and persistent, which is what lets an unchanged working set leave
     /// the staging group clean and its snapshot cached.
-    /// That persistence is load-bearing: a fresh transient buffer per frame re-minted the whole bindless table on every
+    /// That persistence is required: a fresh transient buffer per frame re-minted the whole bindless table on every
     /// trace, and exhausted the descriptor heap within a second of `interactive-showcase-manual-test`.
     [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,
                                                                      mesh_id mesh,

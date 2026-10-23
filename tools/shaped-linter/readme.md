@@ -26,6 +26,7 @@ uv run dev.py lint shaped              # lint the first-party sources: libs/ too
 uv run dev.py lint shaped --dirty-only # just the next commit's changed .cc/.hh/.py/.md
 uv run dev.py lint shaped --commit <rev> # the same for a commit or `A..B` range already made (a single commit means its first-parent diff)
 uv run dev.py lint shaped --fix        # apply the suggested fixes in place (then `dev.py format`)
+uv run dev.py lint shaped --no-build <file|dir>...  # just these, with the linter already built; writes nothing, so parallel runs are safe
 
 uv run dev.py build -t shaped-linter   # build the tool
 uv run dev.py test shaped-linter-test  # run its tests
@@ -189,6 +190,7 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 | `no-bare-todo` | A `TODO`, `FIXME`, `HACK` or `XXX` in a C++ or Python comment. Open work is an issue, and the code names it with `issue: <id>` or `TEMPORARY(<id>)` ([issue tracking](../../docs/guides/issue-tracking.md)); a note that leaves nothing open needs no marker. A backticked mention is prose about the word and never fires, and markdown is not checked. Hint only: the replacement names an issue someone has to file. |
 | `no-flow-prose` | Prose is one semantic point per line, so a sentence ending *mid-line* is a finding — in C++ and Python comments, Python docstrings, and markdown body text alike. A heuristic and a reminder: it carries no fix, because obeying the rule means modelling the prose rather than splicing in a newline. |
 | `no-long-prose-line` | A prose line over 200 characters, the hard ceiling above the otherwise free line length. A point that long almost always holds two and wants splitting at the seam. A line whose longest unbreakable run already exceeds the ceiling — a bare URL, a long path — is left alone, since no split can bring it under. |
+| `no-stock-words` | A word worn into filler by overuse, from a short list that grows one decided entry at a time: `load-bearing` first, in every spelling. A word whose plain sense is common in code (`exactly`) never qualifies. Hint only. |
 | `no-whole-point` | A stock declaration of importance: `which is the whole point`, `X is the point:`, `the point is to`, `that's the point`, `the crux`. The fix says what the property buys, often as a `so …` clause. A list of phrase patterns over a whole prose block, built to stay quiet on a literal point: most patterns demand a clause end after `point` or a declaring pronoun before it. Hint only. |
 | `no-why-it-matters` | A stock announcement of importance: `why this matters`, a sentence opening `This matters`, `, which matters`, `matters more than it sounds`, `here's why`. The fix states the consequence. A real subject keeps a sentence quiet (`the order matters`, `the count that matters`), as does a relative clause wrapped onto the next line. Hint only. |
 | `qualified-type-definition` | A header defines its types qualified — `struct cc::span { … };`, `enum class cc::seek_dir : u8 { … };` — rather than opening the namespace around them. A forward declaration never fires, which is what leaves `fwd.hh` alone; `impl` and `custom` are exempt at any depth. The one type that cannot comply is an unscoped enum with no enum-base, which the grammar gives no opaque declaration. The fix moves each run of adjacent definitions out and leaves the rest inside, so a namespace of nothing but types disappears and a mixed one is split around them. It rewrites to a name that has to be declared already, normally in that library's `fwd.hh` — a missing declaration surfaces as a compile error on the next build. |
@@ -196,7 +198,7 @@ Each rule carries a stable, greppable `[slug]` id (kebab-case, like clang-tidy c
 
 ### `fix` and `hint`
 
-A finding can carry two kinds of rewrite, and the distinction is load-bearing:
+A finding can carry two kinds of rewrite, and only one is applied unattended:
 
 * a **`fix`** is safe to apply unattended — wherever the rule fires, applying it compiles and preserves behavior.
   `--fix` applies it.

@@ -459,7 +459,7 @@ The cache entry is **re-keyed** — removed from the parent, installed at the ch
 What lands at the child genuinely is `surviving(child)`, so "an op id commits to everything behind it" still holds.
 What breaks is any `raw_document` borrowing the old entry, which `raw_document.hh` already says a cache modification does.
 
-**It is caller-driven rather than automatic**, and that is the load-bearing part.
+**It is caller-driven rather than automatic**, and deliberately so.
 During a wide fan the frames are siblings, so advancing onto one would leave every other frame replaying the whole history.
 The snapshot stays at the branch point until a frame is accepted as history, and only the application knows when that is — so it is an API, not a policy knob.
 
@@ -582,11 +582,11 @@ It costs a comparison on a path that is already verifying.
 
 There is nothing to recompute.
 The snapshot was materialized *before* the prune, over the very ops that just came back, so it already is the true `surviving` at that op.
-What changes is not its contents but its standing: history can reproduce it again, so it stops being load-bearing and becomes an ordinary cache entry.
+What changes is not its contents but its standing: history can reproduce it again, so it stops being required and becomes an ordinary cache entry.
 
 Re-encoding a payload that can run to gigabytes in order to move one bit would be the expensive way to change nothing.
 
-The demotion is written **after** the fills, and the order is load-bearing.
+The demotion is written **after** the fills, and the order is fixed.
 A crash between them leaves a snapshot still marked required over history that is already back, which costs one pinned cache entry.
 The reverse would leave a droppable snapshot standing over history that is still gone, which is data loss.
 
@@ -622,7 +622,7 @@ Enforcing it now would also make relaxing it later a **forward-compatibility bre
 That asymmetry is the general rule here, and it is worth stating once: a decoder that rejects more than it must costs compatibility, and a decoder that rejects less can always tighten later.
 Canonicality is different, and non-negotiable — it is what makes equality byte equality, so it stays enforced.
 
-**Reopen when:** something starts interpreting metadata, which would make its shape load-bearing.
+**Reopen when:** something starts interpreting metadata, which would make its shape part of the contract.
 
 ### An unknown assignment encoding tag is a decode error
 
@@ -1070,7 +1070,7 @@ Once a user's document is over the line, no later change can rescue the file the
 
 The blob store already chunks, already has an encoding seam, and already deduplicates — so pointing snapshots at it looks obviously right.
 **The argument against is lifetime.**
-Blob lifetime is decided by a mark-and-sweep over the asset index, and a required snapshot is load-bearing data whose loss is unrecoverable.
+Blob lifetime is decided by a mark-and-sweep over the asset index, and a required snapshot is data whose loss is unrecoverable.
 Putting it behind a GC makes a marking bug into a data-loss bug, in the one place the format promises never to lose anything.
 A cascade makes the lifetime structural instead: those bytes die when their snapshot row dies, and nothing else can reach them.
 
@@ -1119,7 +1119,7 @@ Matching on message text to tell them apart is not a mechanism.
 And `database` gained the `application_id` / `user_version` accessors, which is how a `.vdoc` file identifies itself and how a version from the future is refused.
 
 The store's own `.shaped-lint.yml` does carry one entry — `<memory>`, for the polymorphic store handle, which is a clean-core gap and the third library to file it.
-No sqlite header appears anywhere, which is the clause that was ever load-bearing.
+No sqlite header appears anywhere, which is the clause the decision ever rested on.
 
 **Reopen when:** nothing.
 

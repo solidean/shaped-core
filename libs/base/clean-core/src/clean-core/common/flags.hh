@@ -47,7 +47,7 @@ struct cc::flags
     /// Public because that is what makes cc::flags a structural type, so a flag set can serve as a non-type template parameter.
     /// Prefer the named operations; this is for interop and for bit patterns the enum defines itself.
     ///
-    /// The initializer is load-bearing: it is what makes a default-initialized `cc::flags<E> f;` the EMPTY set rather than indeterminate bits.
+    /// The initializer is what makes a default-initialized `cc::flags<E> f;` the EMPTY set rather than indeterminate bits.
     /// It costs trivial default construction, which nothing in clean-core requires.
     /// Every triviality requirement here is trivial copyability and/or destructibility, and both survive.
     storage_type bits = 0;

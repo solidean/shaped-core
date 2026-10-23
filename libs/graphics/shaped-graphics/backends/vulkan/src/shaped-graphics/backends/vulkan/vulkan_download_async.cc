@@ -504,7 +504,7 @@ bool vulkan_download_async_system::run_one_window()
 
     if (done >= job.size_in_bytes)
     {
-        // The future settles BEFORE the stream control, and the order is load-bearing.
+        // The future settles BEFORE the stream control, and the order is fixed.
         // A caller waits on the handle's completion and then reads its future, so settling the control first leaves a
         // window where the transfer says it is done and the bytes are not there yet — a race a test loses only
         // intermittently, which is the worst kind to ship.

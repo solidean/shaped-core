@@ -116,7 +116,7 @@ cc::async_thread_pool::~async_thread_pool()
         if (w->thread.joinable())
             w->thread.join();
 
-    // Every worker is joined, so two things are now true and both are load-bearing:
+    // Every worker is joined, so two things are now true and what follows relies on both:
     //
     //  * The deques hold RAW pointers, each owning a strong count nobody will ever claim.
     //    Unlike a queue of handles they do not free themselves, so abandoned work would pin its entire graph forever.

@@ -87,7 +87,7 @@ Naming the SDK headers directly instead skips the bracket and breaks the TUs —
 A C++ header parsed *under* the macro would declare `std::win_byte_override` instead of `std::byte`, and since `cc::byte` **is** `std::byte`, that breaks everything downstream.
 Both gates close their own bracket, so nothing after them is actually at risk.
 Keep them terminal anyway: nothing `EXTENDS` a gate tier, and a call site applying one names it last (`sc_target_pch(x NEXUS DX12)`).
-That is what stops the ordering from becoming load-bearing the day someone adds a header the gate does not close over.
+That is what stops the ordering from becoming a constraint the day someone adds a header the gate does not close over.
 
 There is deliberately no `VULKAN` tier: `<vulkan/vulkan.h>` reaches an unsanitized `windows.h` under `VK_USE_PLATFORM_WIN32_KHR`, and 6 TUs do not justify that risk.
 

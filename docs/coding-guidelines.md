@@ -104,7 +104,7 @@ Concretely:
 - **Say the consequence, never that something matters.**
   `which is the whole point`, `This matters because`, `, which matters` and their kin assert weight instead of showing it.
   `Allocation-free, so a handler builds no vector` carries the reason in the words the declaration spent on itself.
-  shaped-linter's `no-whole-point` and `no-why-it-matters` flag the stock phrases.
+  shaped-linter's `no-whole-point` and `no-why-it-matters` flag the stock phrases, and `no-stock-words` the words overuse has burned (`load-bearing`).
 
 ---
 
@@ -671,7 +671,7 @@ one semantic point per line, no reflowed blocks, free line length.
 - **A reference to something that no longer exists is dangling, and gets deleted** — a discarded prototype, a subsystem that was removed, a plan, a handover note, "an earlier version did X".
   The reader cannot look any of it up, so it reads as a live part of the system that they simply cannot find.
   If a removed approach still matters, it is a constraint on the *current* design: state that constraint and drop the history.
-- **Delete backstory by default.** The genuine Chesterton's fence exists — the comment without which someone *will* remove something load-bearing — but it is rare.
+- **Delete backstory by default.** The genuine Chesterton's fence exists — the comment without which someone *will* remove something the code needs — but it is rare.
   On this tree, invented reasoning outnumbers the real cautionary tale by something like 20:1, so the prior is that it goes.
   Keep it only when you can name the concrete mistake the reader would otherwise make, and then state the mistake, not the history.
 - **Litmus test:** if the sentence would read naturally in the PR description or the commit message, it does not belong inline.

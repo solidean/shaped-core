@@ -71,7 +71,7 @@ private:
 
 /// Opens an async scope, writes its begin/end pair, and owns the links that carry it.
 ///
-/// Order is load-bearing: the links go on before the begin event and come off after the end event, so each event sits
+/// The order is fixed: the links go on before the begin event and come off after the end event, so each event sits
 /// beside an ambient delta that already names the full context.
 struct async_scope_guard
 {

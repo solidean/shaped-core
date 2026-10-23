@@ -459,7 +459,7 @@ def _build_checks(ctx: Context, *, merge_sides: tuple[list[str], list[str]] | No
         dev.report.summarize_check_timing(presets, results, records, slow_test_s=_SLOW_TEST_BUDGET_S)
         return ok
 
-    # ORDER IS LOAD-BEARING among the fixers: under --fix they run in this order, after the read-only gates, so what
+    # THE ORDER IS FIXED among the fixers: under --fix they run in this order, after the read-only gates, so what
     # they rewrite is formatted in the same pass.
     # Every gate says what it is about: `watches` are the globs a change must touch for it to run, `always` is the
     # explicit opt-out of selection for a gate whose inputs are the whole tree.

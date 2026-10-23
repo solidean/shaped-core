@@ -37,7 +37,7 @@
 //   {true,  true}  -> destroy_object(p), then free_storage(p). Do NOT call release_weak: no other reference
 //                     exists (a strong-only Traits, or the sole-owner fast path — see cc::fused_refcount).
 //
-// The order is load-bearing: releasing the collective weak before destroy_object would let a racing weak_ptr drop free the storage under it.
+// The order is fixed: releasing the collective weak before destroy_object would let a racing weak_ptr drop free the storage under it.
 // It is one call rather than a dec_strong(T*) -> bool so a Traits CAN answer both questions from a single load.
 // The protocol says nothing about representation: two u32s, one fused u64, or a lone strong count all fit.
 //
@@ -94,7 +94,7 @@ struct cc::fused_refcount
     {
         // Reading exactly (1,1) proves we hold the only reference of any kind: no other thread can mint one, because minting requires already holding one.
         // So there is nobody to race and no RMW is needed; fusing the two counts lets one load prove it.
-        // The ACQUIRE is load-bearing: it pairs with the release of whoever dropped the second-to-last reference, ordering their writes before our teardown.
+        // The ACQUIRE is required: it pairs with the release of whoever dropped the second-to-last reference, ordering their writes before our teardown.
         // Note this leaves the counts reading (1,1) through destroy_object / free_storage; a teardown that outlives the call must rewrite them first.
         if (c.load(cc::memory_order_acquire) == sole_owner)
             return {true, true};

@@ -186,7 +186,7 @@ TEST("sv::resolve_material - final blocks every finer frequency")
     CHECK(r.attributes[0].frequency == sv::material_frequency::material);
     CHECK(constant_of(r) == 0.25f);
 
-    // The same binding without `final` loses to the mesh's texture, which is what makes the flag the load-bearing part.
+    // The same binding without `final` loses to the mesh's texture, which is what makes the flag the part under test.
     auto loose = cc::vector<sv::material_attribute_binding>();
     loose.push_back(sv::material_attribute_binding::of("roughness", 0.25f));
     auto const open = sv::material::create("open", sv::material_type_id(0), loose);

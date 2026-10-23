@@ -94,7 +94,7 @@ namespace cc::impl
 /// A null `a` installs nothing, so a node with no context inherits whatever is driving it.
 ///
 /// Unlike async_ambient_scope this takes NO reference: the caller owns one for the duration, so the scope costs nothing on the poll hot path.
-/// Restoring from `_previous` rather than from the source is load-bearing where poll() uses it — the node the ambient came from can be destroyed before the scope ends.
+/// Restoring from `_previous` rather than from the source is required where poll() uses it — the node the ambient came from can be destroyed before the scope ends.
 ///
 /// It also carries the poll-depth counter behind cc::async_is_polling.
 /// Not because depth is an ambient concern, but because this is the one scope every poll already constructs, so tracking it costs no further TLS resolution and no new site to keep in sync.
@@ -320,7 +320,7 @@ private:
 
 /// RAII push/pop of an ambient scope, and the ONLY supported way to install a link.
 ///
-/// That exclusivity is load-bearing rather than stylistic.
+/// That exclusivity is for soundness, not style.
 /// A node records only the chain HEAD, so an outer scope's count never sees a node created under an inner one.
 /// That is sound only because scopes are strictly LIFO, so the inner scope pops — and checks — first.
 ///

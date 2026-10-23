@@ -697,7 +697,7 @@ enum class cc::async_node_state : cc::u8
 /// It recovers what a base-typed pointer cannot: how to destroy the typed value or error, and how to run and destroy the inline frame.
 /// It also carries the size class, which the intrusive free path needs long after the concrete type is erased.
 ///
-/// alignas(64) is load-bearing: the node packs the 6 low bits of this pointer with the lifecycle state, wake, lock and homed bits, so every instance must be 64-aligned to keep those bits free.
+/// alignas(64) is required: the node packs the 6 low bits of this pointer with the lifecycle state, wake, lock and homed bits, so every instance must be 64-aligned to keep those bits free.
 /// The price is 16 B of rodata per descriptor (48 -> 64), one descriptor per frame type and never per node.
 struct alignas(64) cc::async_type_ops
 {

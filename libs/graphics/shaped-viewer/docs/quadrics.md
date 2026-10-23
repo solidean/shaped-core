@@ -143,7 +143,7 @@ s.add_line(tg::segment3f(a, b), 0.008f, steel);
 ```
 
 They write into a frame-owned set, bucketed by material.
-**That set hashes its contents, not its identity**, and the requirement is load-bearing rather than an optimization.
+**That set hashes its contents, not its identity**, and the sugar depends on that.
 Without it the sugar is a trap: the same drawing that is free with an explicit set costs a full re-upload and BLAS rebuild every frame, and nothing in the API would say so.
 
 The factories take tg objects — `tg::sphere3f` for a vertex, and `tg::segment3f` plus a radius or a style for an edge.
@@ -255,7 +255,7 @@ report the best, with the gradient of whichever quadric it landed on
 The clipper's two roots are only considered when the emit bit is set, so an open tube solves one quadratic and a capped one two.
 Still one `report` and no sorting.
 
-**Taking the nearest survivor rather than the first root is load-bearing for ordinary geometry**, not only for interior views.
+**Taking the nearest survivor rather than the first root is needed for ordinary geometry**, not only for interior views.
 A slab-clipped cylinder is an open tube with nothing closing its ends.
 Seen near end-on — which is what every edge pointing at the camera does — the near root lies on the cylinder outside the slab, and the clipper rejects it.
 The far root is the inside of the opposite wall, and is genuinely visible.

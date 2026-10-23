@@ -1,7 +1,7 @@
 // dx12_upload_async_system: the copy actor behind dx12_upload_async.hh — window packing, submission, and the staging memcpy.
 // The shape and the two fences are on the class doc there.
 // Source bytes are read only during the memcpy into staging, so a job and its pin die as soon as it is fully staged — on the actor thread, off the submission path.
-// Why the acyclicity guard is load-bearing: libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
+// Why the acyclicity guard is required: libs/graphics/shaped-graphics/docs/concepts/upload.async.md.
 
 #include <clean-core/common/time.hh>
 #include <clean-core/container/vector.hh>

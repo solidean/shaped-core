@@ -32,7 +32,7 @@ Two values are equal exactly when their bytes are equal.
 Hashing is over the bytes.
 There is no structural comparison anywhere in the library.
 
-That property is load-bearing far beyond convenience:
+Far more than convenience rests on that property:
 
 - diffing an edit against its parents is a memcmp, not a tree walk;
 - content-addressing an op needs no separate canonicalization pass over values;

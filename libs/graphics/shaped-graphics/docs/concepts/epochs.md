@@ -136,7 +136,7 @@ On retire the handle is nulled **first**, then finalizers run — and crucially 
 They are the feedback point for reclaiming externally-owned backing memory.
 That is the mechanism enabling **placed resources on custom allocators**, where the allocator needs a definite "the GPU is truly done with this" signal before recycling the memory.
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 
