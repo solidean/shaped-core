@@ -486,12 +486,14 @@
         {
             "name": "macos-arm-llvm-sanitize-thread",
             "displayName": "Sanitize Thread Clang (macOS ARM)",
-            "description": "RelWithDebInfo build with ThreadSanitizer, and the default memory resource on operator new so it sees our allocations (optimized rather than Debug because TSan already costs 5-15x, and it is the build the tool is tuned for)",
+            "description": "RelWithDebInfo build with ThreadSanitizer, and the default memory resource on operator new so it sees our allocations (optimized rather than Debug because TSan already costs 5-15x, and it is the build the tool is tuned for). It links the system libc++ rather than Homebrew's: TSan intercepts the system libc++abi only, so Homebrew's __cxa_guard_release is invisible to it and every first use of a function-local static reports as a race",
             "inherits": "macos-arm-llvm-base",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
                 "SANITIZE": "thread",
-                "SC_MIMALLOC": "OFF"
+                "SC_MIMALLOC": "OFF",
+                "CMAKE_EXE_LINKER_FLAGS": "",
+                "CMAKE_SHARED_LINKER_FLAGS": ""
             }
         },
         {

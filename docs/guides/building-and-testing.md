@@ -909,7 +909,7 @@ It is a separate full build of the repo at 5-15x test time, so one platform carr
 That is enough to stop the preset rotting between manual runs, without paying for it three times.
 The macOS preset works and is run by hand; there is no CI leg for either.
 
-Three things to know before reading a report.
+Four things to know before reading a report.
 
 **TSan models no fence at all.**
 `cc::atomic_thread_fence` is a no-op to the tool.
@@ -924,6 +924,11 @@ It is the counterpart of `lsan-suppressions.txt` beside it; the compile-time `sa
 **A stack walk is not the source's.**
 TSan starts threads through a trampoline the walker cannot get past, and rewrites every access, so `cc::capture_stack` reports frames that are correct but not the ones the code suggests.
 `CC_HAS_THREAD_SANITIZER` exists for exactly that, and for nothing else — it is not a way to skip a test that is merely slow under the tool.
+
+**On macOS the TSan preset links the system libc++, not Homebrew's.**
+The runtime intercepts only the system `libc++abi`, so a binary bound to Homebrew's never shows it `__cxa_guard_release`.
+Every first use of a function-local static then reports as a race, though the guard serializes it.
+So `macos-arm-llvm-sanitize-thread` clears the base preset's `-lc++abi` link flags, and builds against the newer headers but links what the OS ships.
 
 ## Useful flags
 
