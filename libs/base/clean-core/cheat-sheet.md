@@ -1079,7 +1079,8 @@ cc::async_poll_depth();          // how many polls this thread is nested in: a t
 // co_await / co_return (#include <clean-core/thread/async_coroutine.hh> — INCLUDING it is what enables coroutines)
 // A coroutine IS a compute frame: the node stores one coroutine_handle (8 B, always inline). T must be MOVABLE.
 // Take coroutine parameters BY VALUE — they are captured by declared type, so a reference dangles across a suspend.
-cc::shared_async<int> load(cc::string p) { auto const& b = co_await read(p); co_return parse(b); } // COLD (= lazy)
+cc::shared_async<int> load(cc::string p) { auto const r = read(p); auto const& b = co_await r; co_return parse(b); } // COLD (= lazy)
+// HOLD the async before binding a reference: `auto const& b = co_await read(p);` dangles once the temporary handle dies
 cc::async_scheduled<int> spawn(cc::string p) { co_return 1; }  // eager at initial suspend; converts to shared_async
 auto a = cc::async_start(load(p));    // "and go": idempotent; no-op if nothing could route (stays cold, drives later)
 int const& v = co_await a;            // -> U const& into the node; a FAILED dep short-circuits (locals destroyed,

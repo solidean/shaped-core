@@ -23,9 +23,14 @@
 //
 //   cc::shared_async<int> load(cc::string p)      // COLD, like make_async_lazy: calling load() runs nothing
 //   {
-//       auto const& bytes = co_await read(p);     // short-circuits if read(p) failed
+//       auto const pending = read(p);
+//       auto const& bytes = co_await pending;     // short-circuits if read(p) failed
 //       co_return parse(bytes);
 //   }
+//
+// co_await hands back a reference INTO the awaited node, and a handle is what keeps that node alive.
+// So the async is held in a variable first: in `auto const& x = co_await read(p);` the handle is a temporary.
+// It dies at the end of the statement, and when nothing else owns the node, x dangles.
 //
 // Laziness is the default, matching make_async_lazy — the plain spelling starts no work, and which of lazy/scheduled you get is never hidden.
 // cc::async_scheduled<T, E> is the eager return type, and cc::async_start schedules a handle you already hold.

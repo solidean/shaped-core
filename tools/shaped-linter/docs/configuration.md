@@ -49,8 +49,8 @@ The policy it carries is unknown, so every verdict taken against it would be a g
 
 | Field | Required | Meaning |
 |---|---|---|
-| `kind` | yes | `allow-include` or `deny-include`, or `allow-blocking-wait` or `deny-blocking-wait` |
-| `value` | yes | the include as written (`<atomic>`), or the name of a blocking call (`async_blocking_get`); a list of them works too, and each is a glob, so `<d3d12*.h>` covers a family |
+| `kind` | yes | `allow-include` or `deny-include`, `allow-blocking-wait` or `deny-blocking-wait`, or `allow-co-await-temporary` or `deny-co-await-temporary` |
+| `value` | yes | the include as written (`<atomic>`), the name of a blocking call (`async_blocking_get`), or the name of an awaited callee (`bytes`); a list of them works too, and each is a glob, so `<d3d12*.h>` covers a family |
 | `reason` | yes | printed with the finding — for a deny it names the replacement |
 | `files` | no | glob or list of globs; the entry applies only to these |
 | `exclude-files` | no | glob or list of globs; the entry does not apply to these |
@@ -113,6 +113,24 @@ rules:
     value: [async_blocking_get_on, try_async_blocking_get_on]
     reason: these tests stand up their own schedulers, and driving them is the subject
     files: tests/thread/async-pool-test.cc
+```
+
+## Awaiting temporaries
+
+`deny-co-await-temporary` and `allow-co-await-temporary` take the names of awaited callees and scope them with `files:` as the entries above do.
+The `co-await-temporary` rule reads them: a reference bound to `co_await f(...)` points into the node of a temporary async.
+Nothing matching means allowed, as for blocking waits.
+A tree denies `"*"` and allows by name the getters that return a copy of a handle something else keeps, since the tokens cannot tell those apart.
+No config in this repo switches it on; a consumer whose asyncs are mostly fresh nodes does.
+
+```yaml
+rules:
+  - kind: deny-co-await-temporary
+    value: "*"
+    reason: the temporary async may own its node alone
+  - kind: allow-co-await-temporary
+    value: bytes
+    reason: bytes() returns a copy of the handle the future keeps
 ```
 
 ## The generated baseline block
