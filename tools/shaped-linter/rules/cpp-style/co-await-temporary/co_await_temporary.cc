@@ -103,10 +103,14 @@ void check(lint_context& ctx)
         auto const name = sig[i - 2]->text;
         ctx.report({
             .rule_id = k_id,
-            .span = {.file_id = sig[i]->span.file_id, .byte_begin = sig[i]->span.byte_begin, .byte_end = expr.back()->span.byte_end},
-            .message = cc::format("`{}` refers into the node of a temporary async, which dies at the end of the statement", name),
+            .span = {.file_id = sig[i]->span.file_id,
+                     .byte_begin = sig[i]->span.byte_begin,
+                     .byte_end = expr.back()->span.byte_end},
+            .message
+            = cc::format("`{}` refers into the node of a temporary async, which dies at the end of the statement", name),
             .sev = severity::warning,
-            .suggested_hint = hint{.message = cc::format("hold the async first: `auto const {0}_async = ...; auto const& {0} = "
+            .suggested_hint = hint{.message = cc::format("hold the async first: `auto const {0}_async = ...; auto "
+                                                         "const& {0} = "
                                                          "co_await {0}_async;`; {1}",
                                                          name, decision.reason)},
         });

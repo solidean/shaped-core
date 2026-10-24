@@ -50,7 +50,8 @@ TEST("co-await-temporary - a file with no config above it is silent")
 
 TEST("co-await-temporary - a reference bound to awaiting a call is reported with a hint")
 {
-    auto const found = run_rules_on_text("void g() { auto const& rows = co_await load(p); }\n", "src/a.cc", config_of(k_deny_all));
+    auto const found
+        = run_rules_on_text("void g() { auto const& rows = co_await load(p); }\n", "src/a.cc", config_of(k_deny_all));
     REQUIRE(count_of(found) == 1);
     CHECK(found[0].message.contains("rows"));
     REQUIRE(found[0].suggested_hint.has_value());
@@ -73,7 +74,7 @@ TEST("co-await-temporary - what is not a temporary stays quiet")
     CHECK(findings_in("auto const& x = co_await *pending;") == 0);
     CHECK(findings_in("auto const& x = co_await (pending);") == 0);
     CHECK(findings_in("auto const& x = co_await cc::move(pending);") == 0);
-    CHECK(findings_in("auto x = co_await load(p);") == 0);         // a copy owns its value
-    CHECK(findings_in("co_await load(p);") == 0);                  // nothing bound
+    CHECK(findings_in("auto x = co_await load(p);") == 0);                // a copy owns its value
+    CHECK(findings_in("co_await load(p);") == 0);                         // nothing bound
     CHECK(findings_in("auto const& x = co_await written.bytes();") == 0); // allowed by name
 }
