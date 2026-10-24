@@ -73,6 +73,12 @@ def _dirty(repo: Path) -> list[str]:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
+def _changed_during_gate(dirty: list[str], advice: str, whose: str = "the ") -> str:
+    """Files uncommitted after the gate: its own fixes, or edits made while it ran, which it cannot tell apart."""
+    files = "\n".join(f"  {line}" for line in dirty)
+    return f"ship: files are uncommitted after {whose}gate, rewritten by its fixes or edited while it ran; nothing was pushed:\n{files}\n{advice}"
+
+
 def _merge_upstream(ctx: Context, repo: Path, branch: str, label: str) -> None:
     fetched = _git(repo, "fetch", "origin", branch)
     if fetched.returncode != 0 and "couldn't find remote ref" not in fetched.stderr:
@@ -125,8 +131,8 @@ def _bump(ctx: Context, subs: list[lib.Submodule]) -> None:
 def _gate(ctx: Context, *, tests: bool) -> None:
     if _dev(ctx, "check", "--fix", *([] if tests else ["--no-test"])) != 0:
         ctx.die("ship: the gate failed; nothing was pushed (the bump commit, if any, stays local)")
-    if _dirty(ctx.root):
-        ctx.die("ship: the gate rewrote files; commit them and ship again")
+    if dirty := _dirty(ctx.root):
+        ctx.die(_changed_during_gate(dirty, "commit them and ship again"))
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
@@ -177,8 +183,8 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         _say(f"gating {s.path} with its own check")
         if subprocess.run(["uv", "run", "dev.py", "check", "--fix"], cwd=str(repo)).returncode != 0:
             ctx.die(f"ship: {s.path}'s own gate failed; nothing was pushed")
-        if _dirty(repo):
-            ctx.die(f"ship: {s.path}'s gate rewrote files; commit them there and ship again")
+        if dirty := _dirty(repo):
+            ctx.die(_changed_during_gate(dirty, f"commit them in {s.path} and ship again", f"{s.path}'s "))
 
     _bump(ctx, bumping)
     if args.closes:
