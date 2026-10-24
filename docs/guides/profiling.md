@@ -39,6 +39,11 @@ auto const m2 = nx::bench::measure_hw_counters([&] { work(); }, {
 The counters (`hw_counter`): the baseline `elapsed_nanoseconds` and `reference_cycles`, and the PMU's.
 Those are `instructions_retired`, `core_cycles`, `branch_instructions`, `branch_misses`, `cache_l1d_accesses`, `cache_l1d_misses`, `cache_llc_references` and `cache_llc_misses`.
 `core_cycles` follows frequency scaling and `reference_cycles` does not, so their ratio is the clock the core ran at against the reference.
+The default set is all of them, `cache_l1d_accesses` last: a single pass over the PMC budget drops it first, and `measure_all` gets it back.
+
+**Instructions retired is the counter to compare by on a loaded machine.**
+It counts what the code did, not how long the core took, so it repeats run to run while wall time and cycles move with whatever else runs.
+Cycles, IPC and miss rates are comparable within one run, side by side.
 
 The call is **best-effort and never fails as a whole**, which is the contract [hardware_counters.hh](../../libs/base/nexus/src/nexus/bench/hardware_counters.hh) states.
 It always yields the baseline — elapsed time plus a reference-cycle count — with no privileges anywhere, including virtualized CI.
