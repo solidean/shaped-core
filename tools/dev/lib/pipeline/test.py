@@ -17,7 +17,7 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from ..core import console, profile, ui
+from ..core import console, crash_reports, profile, ui
 from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from ..core.models import Preset, Target
 from ..core.process import emsdk_env, run_step
@@ -249,6 +249,9 @@ def test(
                 # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
                 run_env = preset_base_env
                 layered = {**preset_env, **(extra_env_for(name) if extra_env_for else {})}
+                # A native nexus binary keeps every crash or hang report in files too, which collect() files below.
+                if not preset.is_cross_compiling:
+                    layered.setdefault("NX_CRASH_DIR", str(crash_reports.incoming_dir(preset.build_dir)))
                 if layered:
                     run_env = {**os.environ, **(preset_base_env or {}), **layered}
 
@@ -267,6 +270,10 @@ def test(
 
                 if profile.enabled():
                     _harvest_test_timings(timings_path, binary=name, preset=preset.name)
+
+                kept = crash_reports.collect(preset.build_dir, target.artifact, result.stdout_log, result.stderr_log)
+                if kept is not None:
+                    ui.write_line(console.yellow(f"  crash report kept: {kept}"))
 
                 # With a name filter, "no matching tests in this binary" isn't a failure.
                 if test_name and not result.ok and _selected_no_tests(result.stderr_log):

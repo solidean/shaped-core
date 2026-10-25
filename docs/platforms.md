@@ -317,6 +317,8 @@ It is declared unconditionally in the root `CMakeLists.txt`, so the cache entry 
 
 The standard **Debug / RelWithDebInfo / Release** build types should all work on every supported platform.
 RelWithDebInfo and Debug have `CC_ASSERT` **on**, Release **off**.
+**Release on Windows writes a PDB beside each binary** (`/Z7`, `/DEBUG /OPT:REF /OPT:ICF`): the same code, and a crash in a release build symbolizes.
+Elsewhere Release has no debug info, since `-g` would put it into the binary itself.
 In CI, only **Linux clang** exercises the full Debug / RelWithDebInfo / Release matrix; every other Tier-1 platform is built and tested at **RelWithDebInfo** only.
 Clang platforms additionally carry sanitizer and coverage presets — see [sanitizers](guides/building-and-testing.md#sanitizers) and [coverage.md](guides/coverage.md).
 The two sanitizer families cannot be combined, so they are separate presets: `sanitize-*` is ASan + UBSan at Debug, `sanitize-thread-*` is ThreadSanitizer at RelWithDebInfo.

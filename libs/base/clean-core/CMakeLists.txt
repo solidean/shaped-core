@@ -645,6 +645,7 @@ if(SC_BUILD_TESTS)
         tests/function/function_ref-test.cc
         tests/function/unique_function-test.cc
 
+        tests/error/crash-handler-test.cc
         tests/error/optional-test.cc
         tests/error/result-test.cc
 

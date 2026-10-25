@@ -369,8 +369,8 @@ def _pump(src, log_file, mirror_to, on_line=None) -> None:
 
 
 # How long a timed-out child gets to report where it is before it is killed outright.
-# Long enough for a crash handler to symbolize every thread and write, short enough to be noise against any real timeout.
-_CRASH_REPORT_GRACE_S = 2.0
+# Long enough for a crash handler to symbolize every thread and write its minidump, short enough to be noise against any real timeout.
+_CRASH_REPORT_GRACE_S = 10.0
 
 
 def _request_crash_report(proc: subprocess.Popen) -> bool:

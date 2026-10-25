@@ -1472,6 +1472,9 @@ cc::add_crash_context_hook(&fn);                    // void()noexcept printed be
 cc::report_all_thread_stacks("why");                // the SAME report with nothing having crashed — for a wait that
                                                     // never finished, where the thread that noticed is never the one
                                                     // that matters. Suspends the others while it walks them.
+cc::set_crash_report_files({.directory = d, .name = "app"}); // every report ALSO a file d/app-<time>-<pid>.txt,
+                                                    // + a .dmp minidump on Windows; nexus sets it from NX_CRASH_DIR
+cc::last_crash_report_path();                       // -> string_view: the last one's path without extension, or empty
 ```
 
 ### System info & resource metrics (see [systems/system-info](docs/systems/system-info.md))

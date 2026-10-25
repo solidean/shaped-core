@@ -450,6 +450,9 @@ int nx::run(int argc, char** argv)
     // stacktrace instead of a bare non-zero exit code.
     cc::install_crash_handler();
     cc::add_crash_context_hook(&nx::impl::report_running_test);
+    // Under a driver that asks for it, every report is kept in a file too, with a minidump on Windows, so a flake can be read after the run.
+    if (auto const directory = nx::impl::crash_directory(); !directory.empty())
+        cc::set_crash_report_files({.directory = directory, .name = nx::program_name()});
 
     // Get the static test registry
     auto& registry = get_static_test_registry();

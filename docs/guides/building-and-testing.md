@@ -323,6 +323,17 @@ For each step, in both modes, it:
 then prints a one-line trace per step plus a pass/fail summary.
 On failure it prints the exact diagnostic selector to run.
 
+### Crash reports
+
+**A test binary that crashes or hangs leaves a folder under `build/<preset>/crashes/`**, which dev.py names on its `crash report kept:` line.
+It holds the crash handler's report, a minidump on Windows, the run's `.ccrec` recording, the captured stdout and stderr, and the very binary and PDB that crashed.
+The run logs above are overwritten by the next run and the binary by the next build, so this folder is what a flake that will not come back is read from.
+dev.py sets `NX_CRASH_DIR` for every native test binary, and nexus hands it to `cc::set_crash_report_files`; a timeout's induced report lands there too.
+The binaries are hard links into `crashes/.binaries/`, one copy per build however many reports share it.
+The newest 20 reports per preset are kept, within 2 GB ([crash_reports.py](../../tools/dev/lib/core/crash_reports.py)).
+Open a minidump against the binary beside it, never the build directory's, which a rebuild has replaced: `lldb` inside the folder, then `target create <binary>.exe --core <report>.dmp`.
+WinDbg takes the folder as both paths, `windbg -z <report>.dmp -i . -y .`.
+
 So the loop is **dev.py, then diagnose with the `repo_tools` MCP tools**:
 
 | After a... | Tool         | Typical call                                                       |

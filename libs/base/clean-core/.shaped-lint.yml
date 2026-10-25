@@ -226,6 +226,11 @@ rules:
     files: src/clean-core/error/crash_handler.cc
 
   - kind: allow-include
+    value: [<fcntl.h>, <sys/stat.h>, <io.h>, <direct.h>, <unistd.h>, <ctime>]
+    reason: a report file opened, pointed stderr at and named for the time from inside a fault handler, where no allocating stream may run
+    files: src/clean-core/error/crash_handler.cc
+
+  - kind: allow-include
     value: <mutex>
     reason: guards the process-wide DbgHelp session, which is not thread-safe — cc::mutex is layered above this file
     files: src/clean-core/platform/native.cc

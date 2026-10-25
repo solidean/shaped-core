@@ -201,6 +201,14 @@ if (MSVC)
     sc_build_options(COMPILE $<$<CONFIG:RelWithDebInfo>:/Ob2>)
 endif()
 
+# Release on Windows carries debug info on the side: a PDB beside each binary, never inside it, so a release crash symbolizes.
+# /OPT:REF and /OPT:ICF restore what /DEBUG turns off, so the code is Release's own.
+# Not elsewhere: -g puts the debug info into the binary, which a consumer shipping it would have to split off first.
+if (MSVC)
+    sc_build_options(COMPILE $<$<CONFIG:Release>:/Z7> LINK $<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF>
+                     $<$<CONFIG:Release>:/OPT:ICF>)
+endif()
+
 # Vendored third-party dependencies (mimalloc, xxHash, ...). Defined before the
 # libs so their targets exist when clean-core links them.
 add_subdirectory(extern)
