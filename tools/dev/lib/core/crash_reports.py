@@ -1,4 +1,4 @@
-"""Crash reports a test binary leaves behind, kept with what reads them, and rotated.
+"""Crash reports a test binary leaves behind, kept with what reads them, and rotated; and the logs of a run that failed without one.
 
 A nexus binary run with NX_CRASH_DIR set keeps each crash or hang report there in files of its own.
 They are the text report, a Windows minidump `.dmp`, and the run's recording `.ccrec`.
@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import time
 from pathlib import Path
 
 # The newest reports kept per preset, and the most disk they may take together; the user chose these (2026-10-25).
@@ -81,6 +82,27 @@ def collect(build_dir: Path, artifact: Path, stdout_log: Path | None, stderr_log
             shutil.copy2(log, folder / name)
     _keep_binary(root, artifact, folder)
     _keep_binary(root, artifact.with_suffix(".pdb"), folder)
+    rotate(build_dir)
+    return folder
+
+
+def keep_failure(build_dir: Path, artifact: Path, logs: list[Path | None]) -> Path:
+    """Copies the logs of a run of `artifact` that failed without a crash report into a folder of their own, and returns it.
+
+    The run logs and the JUnit report are overwritten by the next run, so a test that failed once and then passed leaves nothing else to read.
+    The folder is `<binary>-<date>-<time>-failed`, rotated with the crash reports.
+    """
+    root = crash_root(build_dir)
+    stem = f"{artifact.stem}-{time.strftime('%Y%m%d-%H%M%S')}-failed"
+    folder = root / stem
+    n = 1
+    while folder.exists():
+        folder = root / f"{stem}-{n}"
+        n += 1
+    folder.mkdir(parents=True)
+    for log in logs:
+        if log is not None and log.is_file():
+            shutil.copy2(log, folder / log.name)
     rotate(build_dir)
     return folder
 
