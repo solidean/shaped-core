@@ -138,7 +138,8 @@ cc::string capture_frame_path(cc::string_view pattern, i32 index)
             auto digits = cc::format("{}", index);
             while (digits.size() < width)
                 digits = cc::format("0{}", digits);
-            return cc::format("{}{}{}", pattern.subview({.offset = 0, .size = percent}), digits, pattern.subview(end + 1));
+            return cc::format("{}{}{}", pattern.subview({.offset = 0, .size = percent}), digits,
+                              pattern.subview(end + 1));
         }
     }
 

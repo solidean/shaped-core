@@ -1242,7 +1242,8 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
         CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
 
-        auto const failure = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
+        auto const failure
+            = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
         if (failure.has_error())
             CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
         else if (!failure.value().empty())
@@ -1258,8 +1259,8 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
             if (!settled)
             {
                 session.note_unsettled_frame();
-                CC_LOG_WARNING("capture: frame {} gave up after {}s at {}/{} samples per pixel{}", session.frame_index(),
-                               session.elapsed_seconds(), lowest, session.request().accumulate,
+                CC_LOG_WARNING("capture: frame {} gave up after {}s at {}/{} samples per pixel{}",
+                               session.frame_index(), session.elapsed_seconds(), lowest, session.request().accumulate,
                                held.empty() ? cc::string() : cc::format(", held for {}", held));
             }
             write(sr::capture_frame_path(session.request().output_path, session.frame_index()));
