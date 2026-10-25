@@ -33,8 +33,11 @@
 #endif
 
 // --- Architecture ---
+// wasm64 is memory64: 64-bit pointers, for memories past what 32-bit addresses reach.
 #if defined(__wasm32__) || (defined(__wasm__) && !defined(__wasm64__))
 #define CC_ARCH_WASM32
+#elif defined(__wasm64__)
+#define CC_ARCH_WASM64
 #elif defined(_M_X64) || defined(__x86_64__) || defined(__amd64__)
 #define CC_ARCH_X64
 #elif defined(_M_ARM64) || defined(__aarch64__)
