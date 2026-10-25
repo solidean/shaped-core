@@ -465,6 +465,52 @@ INVOCABLE_TEST("sv - a capture waits for every frame that holds it", (sg::contex
     cc::remove_file(path);
 }
 
+// A sequence capture shows the request's clock, not the wall's, and moves it only once a frame is written.
+//
+// The body animating off `frame::seconds` is the whole of what a video needs, so the clock it sees is the contract:
+// the start time, then one step of 1 / fps per frame, never a wall-clock instant in between.
+// A stride writes only some frames, and still renders every one, so the history a temporal denoiser sees is the same.
+INVOCABLE_TEST("sv - a sequence capture steps the frame clock and writes every stride-th frame",
+               (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto const pattern = cc::format("{}/sv-capture-sequence_%03d.jpg", cc::temp_directory_path());
+    for (auto i = 0; i < 5; ++i)
+        cc::remove_file(sr::capture_frame_path(pattern, i)); // leftovers from an earlier run would make the checks vacuous
+
+    auto const request = sr::capture_request{.active = true,
+                                             .output_path = pattern,
+                                             .size = tg::vec2i(32, 24),
+                                             .accumulate = 1,
+                                             .timeout_seconds = 120.0,
+                                             .frames = 5,
+                                             .fps = 4.0,
+                                             .start_seconds = 1.0,
+                                             .stride = 2};
+
+    auto seen = cc::vector<double>();
+    for (auto f : sv::interactive(ctx, "sv-test/capture-sequence", {}, request))
+    {
+        // a view with nothing traced settles on its first frame, so each frame here is one sequence frame, unheld
+        (void)f.window().view();
+        seen.push_back(f.seconds());
+
+        REQUIRE(seen.size() < 200); // the fifth frame ends the run; this only keeps a hang from becoming a timeout
+    }
+
+    REQUIRE(seen.size() == 5);
+    for (auto i = 0; i < 5; ++i)
+        CHECK(seen[i] == 1.0 + 0.25 * i).context(cc::format("frame {} saw {}s", i, seen[i]));
+
+    for (auto i = 0; i < 5; ++i)
+    {
+        auto const path = sr::capture_frame_path(pattern, i);
+        CHECK(cc::file_read_stream_adapter::open(path).has_value() == (i % 2 == 0)).context(path);
+        cc::remove_file(path);
+    }
+}
+
 // A light's id is hashed under the frame's id stack exactly as a view's is, so the same name under two scopes names
 // two lights — and the same name twice in one layer is the aliasing that stable identity exists to prevent.
 ASYNC_INVOCABLE_TEST("sv - light ids are scoped like view ids, and a duplicate in one layer asserts",
