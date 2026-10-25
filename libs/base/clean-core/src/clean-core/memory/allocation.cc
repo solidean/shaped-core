@@ -3,7 +3,6 @@
 #include <clean-core/common/assertf.hh>
 #include <clean-core/common/macros.hh>
 #include <clean-core/common/utility.hh>
-
 #include <clean-core/thread/atomic.hh>
 
 #include <cstdlib>
@@ -130,6 +129,7 @@ void cc::impl::allocation_failed(isize min_bytes, isize max_bytes, isize alignme
 {
     if (auto const handler = g_allocation_failure_handler.load(cc::memory_order_acquire))
         handler(min_bytes, max_bytes, alignment);
-    CC_ASSERTF_ALWAYS(false, "allocation failed: requested [{}, {}] bytes with alignment {}", min_bytes, max_bytes, alignment);
+    CC_ASSERTF_ALWAYS(false, "allocation failed: requested [{}, {}] bytes with alignment {}", min_bytes, max_bytes,
+                      alignment);
     CC_UNREACHABLE("allocation_failed never returns");
 }
