@@ -4,6 +4,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/platform/environment.hh>
 #include <clean-core/streams/file_stream.hh>
+#include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <shaped-graphics/all.hh>
@@ -83,7 +84,71 @@ capture_request capture_request::from_environment()
             CC_LOG_WARNING("capture: ignoring unparseable {}", capture_timeout_env_var);
     }
 
+    if (auto const frames = cc::environment_variable(capture_frames_env_var); frames.has_value())
+    {
+        auto parsed = i32(0);
+        if (cc::from_string(frames.value(), parsed) && parsed >= 0)
+            req.frames = parsed;
+        else
+            CC_LOG_WARNING("capture: ignoring unparseable {}", capture_frames_env_var);
+    }
+
+    if (auto const fps = cc::environment_variable(capture_fps_env_var); fps.has_value())
+    {
+        auto parsed = 0.0;
+        if (cc::from_string(fps.value(), parsed) && parsed > 0.0)
+            req.fps = parsed;
+        else
+            CC_LOG_WARNING("capture: ignoring unparseable {}", capture_fps_env_var);
+    }
+
+    if (auto const time = cc::environment_variable(capture_time_env_var); time.has_value())
+    {
+        auto parsed = 0.0;
+        if (cc::from_string(time.value(), parsed))
+            req.start_seconds = parsed;
+        else
+            CC_LOG_WARNING("capture: ignoring unparseable {}", capture_time_env_var);
+    }
+
+    if (auto const stride = cc::environment_variable(capture_stride_env_var); stride.has_value())
+    {
+        auto parsed = i32(0);
+        if (cc::from_string(stride.value(), parsed) && parsed >= 1)
+            req.stride = parsed;
+        else
+            CC_LOG_WARNING("capture: ignoring unparseable {}", capture_stride_env_var);
+    }
+
     return req;
+}
+
+cc::string capture_frame_path(cc::string_view pattern, i32 index)
+{
+    // `%d` or `%0Nd`, the one placeholder ffmpeg's image2 demuxer reads back.
+    auto const percent = pattern.find('%');
+    if (percent >= 0)
+    {
+        auto end = percent + 1;
+        auto width = 0;
+        while (end < pattern.size() && pattern[end] >= '0' && pattern[end] <= '9')
+            width = width * 10 + (pattern[end++] - '0');
+        if (end < pattern.size() && pattern[end] == 'd')
+        {
+            auto digits = cc::format("{}", index);
+            while (digits.size() < width)
+                digits = cc::format("0{}", digits);
+            return cc::format("{}{}{}", pattern.subview({.offset = 0, .size = percent}), digits,
+                              pattern.subview(end + 1));
+        }
+    }
+
+    // No placeholder: the index goes before the extension, which is what picks the format.
+    auto const dot = pattern.rfind('.');
+    auto const slash = cc::max(pattern.rfind('/'), pattern.rfind('\\'));
+    if (dot < 0 || dot < slash)
+        return cc::format("{}_{:05}", pattern, index);
+    return cc::format("{}_{:05}{}", pattern.subview({.offset = 0, .size = dot}), index, pattern.subview(dot));
 }
 
 namespace

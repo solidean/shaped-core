@@ -109,9 +109,12 @@ public:
 
     /// Seconds since the frame loop started, sampled once when this frame was acquired.
     /// Every view in the frame animates off that one instant, so they cannot drift apart within a frame.
+    ///
+    /// **During a capture this is the request's clock, not the wall's**: `SC_CAPTURE_TIME`, plus `i / SC_CAPTURE_FPS` on frame `i` of a sequence.
+    /// It holds still while a frame converges, so a body animating off it is the whole of what a video capture needs.
     [[nodiscard]] double seconds() const { return _seconds; }
 
-    /// Seconds since the previous drawn frame; 0 for the first.
+    /// Seconds since the previous drawn frame; 0 for the first, and during a capture 0 on every frame that re-renders the same instant.
     /// A frame the window could not draw is not a previous frame, so resuming from a minimized window reports the whole idle gap here — clamp it before integrating anything.
     [[nodiscard]] double delta_seconds() const { return _delta_seconds; }
 

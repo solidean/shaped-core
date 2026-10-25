@@ -215,18 +215,31 @@ sr::capture_name_env_var           // "SC_CAPTURE_NAME"       — which named ca
 sr::capture_output_env_var         // "SC_CAPTURE_OUT"        — where the image goes; the extension picks jpg or png
 sr::capture_size_env_var           // "SC_CAPTURE_SIZE"       — "<width>x<height>"
 sr::capture_accumulate_env_var     // "SC_CAPTURE_ACCUMULATE" — what to accumulate, in the program's unit (sv: samples per pixel; a raster app: frames)
-sr::capture_timeout_env_var        // "SC_CAPTURE_TIMEOUT"    — seconds before it gives up
+sr::capture_timeout_env_var        // "SC_CAPTURE_TIMEOUT"    — seconds before it gives up; per frame for a sequence
+sr::capture_frames_env_var         // "SC_CAPTURE_FRAMES"     — a sequence of this many frames; unset or 0 is a still
+sr::capture_fps_env_var            // "SC_CAPTURE_FPS"        — the sequence clock's rate, default 30
+sr::capture_time_env_var           // "SC_CAPTURE_TIME"       — the program clock at the first frame or the still, default 0
+sr::capture_stride_env_var         // "SC_CAPTURE_STRIDE"     — write every n-th frame only; all are still rendered
 
 auto const req = sr::capture_request::from_environment();  // -> capture_request; every var, defaults for the unset
 req.active                         // -> bool; everything below is meaningless when false
-req.name / req.output_path         // -> cc::string
+req.name / req.output_path         // -> cc::string; a sequence's output_path is a pattern
 req.size                           // -> tg::vec2i, default 1920x1080
-req.accumulate                     // -> u32, default 60, in the program's own unit
+req.accumulate                     // -> u32, default 60, in the program's own unit; per frame for a sequence
 req.timeout_seconds                // -> double, default 60, spent against req.clock_seconds
 req.clock_seconds                  // -> double (*)(), default cc::current_time_steady_secs; a test swaps in a clock it advances
+req.frames / req.fps / req.start_seconds / req.stride   // the sequence; frames 0 is a still
+req.is_sequence()                  // -> bool, frames > 0
+req.seconds_at(i)                  // -> double, start_seconds + i / fps: what the program's clock shows on frame i
 
+sr::capture_frame_path("f_%05d.png", 7)        // -> "f_00007.png"; %d or %0Nd as ffmpeg reads it, else _%05d before the extension
 sr::write_capture_image_async(ctx, tex, path)  // -> cc::shared_async<cc::result<cc::unit>>; awaited readback, bgra8 -> RGB, format from the extension
 ```
+
+- **A capture's clock is the request's, never the wall's**: a still shows `start_seconds`, frame `i` of a sequence `seconds_at(i)`.
+  The program holds that instant while the frame finishes by its own `accumulate` rule, and moves on only once it is written.
+  `sv::frame::seconds` is that clock in sv, so a body animating off it captures a video with no capture code.
+- **A sequence writes every frame, settled or not**, since one with a hole cannot be encoded; a frame that ran out of time is warned about instead.
 
 - **`active` with an empty `output_path` is a caller error**, not a silent no-op — a tool that forgot the path would otherwise get a run that looked like it worked.
 - **A name the program does not offer must be an ERROR**, never a quiet fall back to the default view.

@@ -1020,6 +1020,7 @@ frame.window() / frame.window("name")  -> window_ref           // the default wi
 frame.view()                           -> view_ref             // == window().view(): the root view the window presents
 frame.viewport_size() -> vec2i;  frame.id() -> u64
 frame.seconds() / frame.delta_seconds() -> double              // since the loop started / since the previous drawn frame (0 on the first)
+                                                               //   a capture's clock instead: SC_CAPTURE_TIME + i / SC_CAPTURE_FPS on sequence frame i, held while it converges
                                                                //   both sampled once per frame, so every view animates off the same instant
 auto id = frame.scoped_id(i);  frame.id_seed()                 // RAII id scope, so one name in a loop names N views
 frame.push_id(i) / frame.pop_id()                              // the same, explicit — every push needs its pop
