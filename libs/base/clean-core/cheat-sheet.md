@@ -441,6 +441,7 @@ uf();  uf.is_valid();                     // backed by cc::node_allocation (very
 auto al = cc::allocation<int>::create_defaulted(n, res);  // create_empty/_filled/_uninitialized/_copy_of
 al.obj_span();  al.resource();  al.is_valid();  al.alloc_size_bytes();
 cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator interface (default backed by mimalloc)
+cc::set_allocation_failure_handler(fn);  // void fn(isize min, isize max, isize align): a failed allocate_bytes calls it, every build; it may throw
 cc::system_memory_resource;                               // malloc/free opt-out; pass &it as `res` to bypass mimalloc
 // CC_HAS_MIMALLOC is 0 under SC_MIMALLOC=OFF (the sanitize presets), and the default IS the system resource there.
 // Only mimalloc resizes in place; the system resource always returns -1, so never assume the default can.
