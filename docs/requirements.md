@@ -109,7 +109,9 @@ Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an alread
 Tests run under Node by default: `-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code.
 Deno runs the same artifacts unchanged; `--runtime` picks between them, and [guides/building-and-testing.md](guides/building-and-testing.md#which-runtime-executes-the-artifact) is how.
 Threads and WebGPU are both wired, as the `emscripten-threads-*`, `emscripten-webgpu-*` and `emscripten-threads-webgpu-*` presets.
-`SC_WASM_EXCEPTIONS=wasm-exceptions` is the one remaining knob that fails configure as not-yet-supported.
+`SC_WASM_EXCEPTIONS=wasm-exceptions` swaps the JS-based exceptions for wasm's own: `-fwasm-exceptions`, setjmp/longjmp on the same mechanism, the proposal's legacy instructions.
+It drops the JS `invoke_*` wrapper around every call that may throw, so calls are plain wasm calls and add no JS frames to the engine's stack.
+Every object of a link must be built in one mode.
 
 Threads are the repo-wide `SC_THREADS` option rather than a wasm-local knob, and each wasm preset sets it explicitly.
 `-pthread` is what predefines `__EMSCRIPTEN_PTHREADS__`, which is what clean-core's `CC_HAS_THREADS` reads, so the flag is the whole of the wiring.

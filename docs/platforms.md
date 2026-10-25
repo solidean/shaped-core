@@ -49,7 +49,8 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 Threads and WebGPU are independent knobs — `SC_THREADS` and `SC_WASM_WEBGPU` — so the wasm presets span all four of their combinations.
 All four build and run their suites; only the plain one is gated in CI, which is what keeps the other three at Tier 2.
 They are deployment tiers rather than a performance gradient: threads mean `SharedArrayBuffer` and therefore a cross-origin-isolated page, while WebGPU alone imposes no such requirement.
-`SC_WASM_EXCEPTIONS=wasm-exceptions` is the one knob that still fails configure as not-yet-supported — [requirements.md](requirements.md#emscripten--wasm) owns all three.
+`SC_WASM_EXCEPTIONS=wasm-exceptions` builds with wasm's own exception handling, Tier 3: no preset here sets it and CI does not run it.
+[requirements.md](requirements.md#emscripten--wasm) owns all three.
 
 **A wasm binary gets a native-sized stack**: 1 MiB for the main thread and for each pthread, where emscripten's default is 64 KiB.
 Overflowing it is no trap on wasm: the stack grows into the heap, and the crash surfaces later as an out-of-bounds read inside the allocator.

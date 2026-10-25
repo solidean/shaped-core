@@ -29,6 +29,13 @@ void capture_session::begin()
     _start_seconds = _request.clock_seconds();
 }
 
+void capture_session::advance_frame()
+{
+    ++_frame;
+    _settled_before_writing = false;
+    begin();
+}
+
 double capture_session::elapsed_seconds() const
 {
     return _request.clock_seconds() - _start_seconds;
