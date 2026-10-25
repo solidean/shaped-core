@@ -281,6 +281,12 @@ def test(
                         ui.write_line(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
                     continue
 
+                # a failure that left no crash report keeps its logs too: the next run overwrites them
+                if not result.ok and kept is None:
+                    failed = crash_reports.keep_failure(preset.build_dir, target.artifact,
+                                                        [result.stdout_log, result.stderr_log, xml_path if write_xml else None])
+                    ui.write_line(console.yellow(f"  failed run's logs kept: {failed}"))
+
                 summary = None
                 if write_xml:
                     # Prefer the binary's own native report, one case per nexus test.

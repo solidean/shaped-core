@@ -329,6 +329,7 @@ On failure it prints the exact diagnostic selector to run.
 It holds the crash handler's report, a minidump on Windows, the run's `.ccrec` recording, the captured stdout and stderr, and the very binary and PDB that crashed.
 The run logs above are overwritten by the next run and the binary by the next build, so this folder is what a flake that will not come back is read from.
 dev.py sets `NX_CRASH_DIR` for every native test binary, and nexus hands it to `cc::set_crash_report_files`; a timeout's induced report lands there too.
+A binary that fails without crashing leaves a `<binary>-<date>-<time>-failed` folder there too: its captured output and its JUnit report, which the next run would overwrite.
 The binaries are hard links into `crashes/.binaries/`, one copy per build however many reports share it.
 The newest 20 reports per preset are kept, within 2 GB ([crash_reports.py](../../tools/dev/lib/core/crash_reports.py)).
 Open a minidump against the binary beside it, never the build directory's, which a rebuild has replaced: `lldb` inside the folder, then `target create <binary>.exe --core <report>.dmp`.
