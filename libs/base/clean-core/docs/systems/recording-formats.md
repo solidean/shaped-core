@@ -103,7 +103,7 @@ events      the event bytes themselves
 
 **In the file, an event header's `desc` slot holds a descriptor INDEX rather than a pointer.**
 Everything else about the event stream is byte-identical to the live one, so writing is a copy plus one word per event and reading is the same word patched back.
-There is no second decoder to keep in step with the first, which is the point.
+So there is no second decoder to keep in step with the first.
 
 ---
 
@@ -124,7 +124,7 @@ A chunk's committed watermark is release-stored after the bytes it covers, so re
 The worst a still-running thread costs the dump is its newest event — a far better trade than the deadlock risk of suspending threads that may hold the loader lock.
 
 The dump reads the chunks directly rather than going through a listener, so **it sees events nothing ever drained**.
-On a path where nothing is going to run again, that is the whole point.
+On a path where nothing is going to run again, nothing else would ever see them.
 
 An arena too small does not fail: it truncates, and the file says so through `loaded_recording::is_truncated()`.
 A truncated dump that loads is worth more than a complete one that does not exist.

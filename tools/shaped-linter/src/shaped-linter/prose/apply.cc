@@ -2,12 +2,12 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
-#include <shaped-linter/lex/lexer.hh>
-#include <shaped-linter/lex/python_lexer.hh>
+#include <shaped-linter/lex/comment_lexer.hh>
 #include <shaped-linter/lex/source_buffer.hh>
 #include <shaped-linter/lex/source_language.hh>
 #include <shaped-linter/lex/source_manager.hh>
 #include <shaped-linter/prose/prose_view.hh>
+#include <shaped-linter/prose/verify.hh>
 #include <shaped-linter/rules/engine.hh>
 #include <shaped-linter/rules/registry.hh>
 #include <shaped-linter/rules/rule.hh>
@@ -32,47 +32,6 @@ cc::string_view line_terminator(cc::string_view text)
     return "\n";
 }
 
-/// The spelling two token sequences are compared by.
-///
-/// A preprocessor directive is lexed opaquely up to a trailing `//`, so its token text swallows the run of
-/// spaces before that comment.
-/// Trimming here is what lets a plan re-align a trailing comment — the directive itself still has to match
-/// byte for byte.
-cc::string_view comparable_text(token const& t)
-{
-    if (t.kind != token_kind::preprocessor_directive)
-        return t.text;
-
-    auto end = t.text.size();
-    while (end > 0 && (t.text[end - 1] == ' ' || t.text[end - 1] == '\t'))
-        --end;
-    return t.text.subview({.start = 0, .end = end});
-}
-
-/// The tokens an edit must leave untouched.
-///
-/// A Python docstring is dropped: it lexes as a string literal, but every prose rule reads it as prose, so
-/// rewriting one is a prose edit and this check must not call it a code change.
-cc::vector<token> significant_tokens(token_stream const& ts, source_language language)
-{
-    cc::vector<token> out;
-    auto const all = ts.all();
-    for (isize i = 0; i < all.size(); ++i)
-    {
-        if (all[i].is_trivia())
-            continue;
-        if (language == source_language::python && is_python_docstring(all, i))
-            continue;
-        out.push_back(all[i]);
-    }
-    return out;
-}
-
-cc::result<token_stream> lex_as(source_buffer const& buffer, source_language language)
-{
-    return language == source_language::python ? lex_python(buffer) : lex(buffer);
-}
-
 /// Append a plan diagnostic — already `error: `-prefixed and carrying its own site, since it is read by
 /// the plan's author rather than debugged.
 void check_code_unchanged(planned_rewrite const& rewritten,
@@ -83,8 +42,8 @@ void check_code_unchanged(planned_rewrite const& rewritten,
     auto const before_buffer = source_buffer::from_text(cc::string(original), rewritten.path, 0);
     auto const after_buffer = source_buffer::from_text(cc::string(rewritten.text), rewritten.path, 0);
 
-    auto before = lex_as(before_buffer, language);
-    auto after = lex_as(after_buffer, language);
+    auto before = lex_for(before_buffer, language);
+    auto after = lex_for(after_buffer, language);
     if (before.has_error() || after.has_error())
     {
         out.push_back(
@@ -211,7 +170,7 @@ void validate_rewrite(planned_rewrite const& rewritten,
     if (language != source_language::markdown)
         check_code_unchanged(rewritten, original, language, out.errors);
 
-    // Runs even after a code-changed error: the point is to report everything wrong in one pass.
+    // Runs even after a code-changed error, so one pass reports everything wrong.
     collect_new_prose(rewritten, sources, out.findings);
 }
 

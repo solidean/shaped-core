@@ -232,10 +232,11 @@ struct camera
 
 /// The dropdown, and what `--capture <name>` selects.
 /// One entry per member the front carries, so a member missing here is one nobody can look at.
-constexpr char const* k_method_names[] = {"automatic", "atrous", "svgf", "oidn", "dlss_rr", "fsr_rr", "nrd"};
+constexpr char const* k_method_names[]
+    = {"automatic", "atrous", "svgf", "oidn", "dlss_rr", "fsr_rr", "nrd", "metalfx_rr"};
 constexpr sr::denoise_method k_method_values[] = {
     sr::denoise_method::automatic, sr::denoise_method::atrous, sr::denoise_method::svgf, sr::denoise_method::oidn,
-    sr::denoise_method::dlss_rr,   sr::denoise_method::fsr_rr, sr::denoise_method::nrd,
+    sr::denoise_method::dlss_rr,   sr::denoise_method::fsr_rr, sr::denoise_method::nrd,  sr::denoise_method::metalfx_rr,
 };
 constexpr int k_method_count = int(sizeof(k_method_names) / sizeof(k_method_names[0]));
 constexpr char const* k_quality_names[] = {"fast", "balanced", "best"};

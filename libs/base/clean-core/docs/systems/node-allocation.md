@@ -28,7 +28,8 @@ The metadata layout is **frontend-dependent**, on `CC_HAS_THREADS`:
 - **Threaded** (native, wasm+pthreads): `local` free bitmap `@0` (u64), `owner_id` `@8` (u32),
   next-slab pointer `@16`; a second **`remote`** free bitmap on the 2nd cache line `@64` (for classes
   whose slab spans two lines, i.e. ≥ 2 B) or `@24` for the single-line 1 B class.
-- **Single-threaded** (wasm without `-pthread`): `local` free bitmap `@0`, next-slab pointer `@8`. No
+- **Single-threaded** (wasm without `-pthread`): `local` free bitmap `@0`, next-slab pointer `@8`.
+  No
   owner/remote — the second cache line is not touched.
 
 The metadata consumes whole slots, so usable capacity depends on class size and frontend:

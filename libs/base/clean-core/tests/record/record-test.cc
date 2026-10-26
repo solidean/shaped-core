@@ -12,10 +12,10 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
@@ -514,7 +514,7 @@ REC_TEST("record - events from a thread that has exited still arrive")
     {
         scoped_listener const reg(c);
 
-        std::thread worker(
+        auto worker = cc::native_thread::start(
             []
             {
                 cc::rec::set_current_thread_record_name("worker");
@@ -552,18 +552,18 @@ REC_TEST("record - a thread started after another was reaped never shares a live
         // A listener keys what it carries per thread by index, so a live thread sharing one with a new thread would
         // merge their attribution: the warning of one test was once filed under another this way.
         auto release = cc::atomic<bool>(false);
-        std::thread alive(
+        auto alive = cc::native_thread::start(
             [&]
             {
                 REC_MARK("alive");
                 while (!release.load(cc::memory_order_acquire))
                     cc::this_thread_yield();
             });
-        std::thread exited([] { REC_MARK("exited"); });
+        auto exited = cc::native_thread::start([] { REC_MARK("exited"); });
         exited.join();
         cc::rec::flush_blocking(); // drains the exited thread's last chunk, which is what lets its state be reaped
 
-        std::thread started([] { REC_MARK("started"); });
+        auto started = cc::native_thread::start([] { REC_MARK("started"); });
         started.join();
         cc::rec::flush_blocking();
 
@@ -787,7 +787,7 @@ REC_TEST("record/value - a literal costs the stream its address, a runtime strin
     CHECK(rec.first_text("buffered").value() == "from a buffer");
     CHECK(rec.first_text("runtime").value() == "built at runtime");
 
-    // ... but the encodings differ, which is the whole point.
+    // ... but the encodings differ.
     auto const type_of = [&](cc::string_view name)
     {
         auto found = cc::rec::type_code::none;

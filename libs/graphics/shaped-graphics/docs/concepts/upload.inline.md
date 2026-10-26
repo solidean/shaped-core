@@ -32,7 +32,7 @@ If **nothing** is in flight and it still does not fit, waiting cannot help — t
 The upload is then staged in a **one-off dedicated buffer** instead, freed with the epoch that recorded the copy.
 Same for a single upload larger than the whole ring, which goes straight there: no budget makes it fit.
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 

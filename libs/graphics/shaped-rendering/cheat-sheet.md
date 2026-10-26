@@ -93,7 +93,7 @@ wsys->displays();                 // -> vector<display_info>: position/size/work
 for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
 {
     e.window;                          // -> sr::window*, null if none was focused
-    e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event>
+    e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event, file_drop_event>
 
     e.payload.visit(                   // THE way to consume an event; every handler must return the same type
         [&](sr::key_event const& k)
@@ -110,10 +110,14 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
             m.is_held(sr::mouse_button::right);   // buttons held during the motion: END A DRAG ON IT TOO,
                                                   // a release outside an uncaptured window never arrives
         },
-        [](auto const&) {});           // catch-all; SPELL ALL FIVE instead and a new event kind fails to compile here
+        [&](sr::file_drop_event const& d)
+        {
+            d.path;                               // cc::string — one event per dropped file
+        },
+        [](auto const&) {});           // catch-all; SPELL ALL SIX instead and a new event kind fails to compile here
 
-    e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel too) — for predicates, and loops that `continue`
-    e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_* too)
+    e.is_key();       // -> bool (is_text/_mouse_move/_mouse_button/_mouse_wheel/_file_drop too) — for predicates, and loops that `continue`
+    e.as_key();       // -> key_event const&, CC_ASSERTs on a different kind (as_text/_mouse_*/_file_drop too)
 }
 
 win->set_relative_mouse_mode(true);   // capture: cursor hidden, x/y meaningless, dx/dy unbounded (FPS camera)
@@ -189,7 +193,8 @@ Gotchas:
 - **One call, inside the scope.** Textures, geometry upload and draws all happen in `execute()`.
   `render_viewports` is the opposite — it opens its own scopes and submits, so never call it inside one.
 - **Viewports change what a coordinate means.** Mouse positions and `ImGui::SetNextWindowPos` become
-  desktop-space, not main-window-relative; offset by `ImGui::GetMainViewport()->Pos`. An `input_event` must
+  desktop-space, not main-window-relative; offset by `ImGui::GetMainViewport()->Pos`.
+  An `input_event` must
   name its `window` for `process_event` to translate it.
 - **Viewports make `update_viewports()` mandatory every frame.**
   Skip it and imgui stops hit-testing the mouse entirely — nothing hovers.
@@ -220,18 +225,31 @@ sr::capture_name_env_var           // "SC_CAPTURE_NAME"       — which named ca
 sr::capture_output_env_var         // "SC_CAPTURE_OUT"        — where the image goes; the extension picks jpg or png
 sr::capture_size_env_var           // "SC_CAPTURE_SIZE"       — "<width>x<height>"
 sr::capture_accumulate_env_var     // "SC_CAPTURE_ACCUMULATE" — what to accumulate, in the program's unit (sv: samples per pixel; a raster app: frames)
-sr::capture_timeout_env_var        // "SC_CAPTURE_TIMEOUT"    — seconds before it gives up
+sr::capture_timeout_env_var        // "SC_CAPTURE_TIMEOUT"    — seconds before it gives up; per frame for a sequence
+sr::capture_frames_env_var         // "SC_CAPTURE_FRAMES"     — a sequence of this many frames; unset or 0 is a still
+sr::capture_fps_env_var            // "SC_CAPTURE_FPS"        — the sequence clock's rate, default 30
+sr::capture_time_env_var           // "SC_CAPTURE_TIME"       — the program clock at the first frame or the still, default 0
+sr::capture_stride_env_var         // "SC_CAPTURE_STRIDE"     — write every n-th frame only; all are still rendered
 
 auto const req = sr::capture_request::from_environment();  // -> capture_request; every var, defaults for the unset
 req.active                         // -> bool; everything below is meaningless when false
-req.name / req.output_path         // -> cc::string
+req.name / req.output_path         // -> cc::string; a sequence's output_path is a pattern
 req.size                           // -> tg::vec2i, default 1920x1080
-req.accumulate                     // -> u32, default 60, in the program's own unit
+req.accumulate                     // -> u32, default 60, in the program's own unit; per frame for a sequence
 req.timeout_seconds                // -> double, default 60, spent against req.clock_seconds
 req.clock_seconds                  // -> double (*)(), default cc::current_time_steady_secs; a test swaps in a clock it advances
+req.frames / req.fps / req.start_seconds / req.stride   // the sequence; frames 0 is a still
+req.is_sequence()                  // -> bool, frames > 0
+req.seconds_at(i)                  // -> double, start_seconds + i / fps: what the program's clock shows on frame i
 
+sr::capture_frame_path("f_%05d.png", 7)        // -> "f_00007.png"; %d or %0Nd as ffmpeg reads it, else _%05d before the extension
 sr::write_capture_image_async(ctx, tex, path)  // -> cc::shared_async<cc::result<cc::unit>>; awaited readback, bgra8 -> RGB, format from the extension
 ```
+
+- **A capture's clock is the request's, never the wall's**: a still shows `start_seconds`, frame `i` of a sequence `seconds_at(i)`.
+  The program holds that instant while the frame finishes by its own `accumulate` rule, and moves on only once it is written.
+  `sv::frame::seconds` is that clock in sv, so a body animating off it captures a video with no capture code.
+- **A sequence writes every frame, settled or not**, since one with a hole cannot be encoded; a frame that ran out of time is warned about instead.
 
 - **`active` with an empty `output_path` is a caller error**, not a silent no-op — a tool that forgot the path would otherwise get a run that looked like it worked.
 - **A name the program does not offer must be an ERROR**, never a quiet fall back to the default view.
@@ -428,10 +446,12 @@ One front that denoises, then upscales; the design is [docs/reconstruction.md](d
 #include <shaped-rendering/reconstruct.hh>                 // the front, the vocabulary, the history
 #include <shaped-rendering/atrous_denoise_routine.hh>      // the native spatial member
 #include <shaped-rendering/fsr_upscale_routine.hh>         // FSR 3.1's upscaler, callable directly
+#include <shaped-rendering/metalfx_upscale_routine.hh>     // MetalFX's temporal upscaler, callable directly; metal only
+#include <shaped-rendering/metalfx_rr_routine.hh>          // MetalFX's denoised scaler, callable directly; metal only
 
 auto const settings = sr::reconstruct_settings{
     .denoiser = sr::denoise_method::automatic,             // flat knobs, each says who reads it; `none` = upscale only
-    .upscaler = sr::upscale_method::automatic,             // fsr where supported, none while the scale is native
+    .upscaler = sr::upscale_method::automatic,             // metalfx, else fsr, where supported; none while the scale is native
     .scale = sr::render_scale_preset::performance,         // named ratios only: 1, 1.5, 1.7, 2
     .fresh_samples = true,                                 // true only when feeding this frame's own samples + motion
     .upscale_sharpness = 0.3f,                             // [0, 1], 0 = off; fsr's RCAS on the upscaled image
@@ -451,9 +471,9 @@ out.status                                                 // denoised | pending
 out.denoiser / out.upscaler / out.restarted                // what ran; whether it started from no history
 history.reset()                                            // a camera cut: the denoiser's and the upscaler's history restart
 
-sr::query_reconstruct_support(ctx)                         // -> sr::reconstruct_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd, fsr}
+sr::query_reconstruct_support(ctx)                         // -> sr::reconstruct_support {atrous, svgf, oidn, dlss_rr, fsr_rr, nrd, metalfx_rr, fsr, metalfx}
 sr::resolve_denoise_method(ctx, settings, guides)          // -> the member `automatic` (or a named method) means here; `guides` is what the CALLER can supply
-sr::resolve_upscale_method(ctx, settings, guides)          // -> the upscaler behind it; none for dlss_rr, which upscales itself
+sr::resolve_upscale_method(ctx, settings, guides)          // -> the upscaler behind it; none for dlss_rr and metalfx_rr, which upscale themselves
                                                            //    every planner takes `guides`, so automatic degrades instead of denoising nothing
 sr::required_guides(m) / sr::optional_guides(m)            // -> sr::reconstruct_guide_set (cc::flags<sr::reconstruct_guide>)
 
@@ -461,10 +481,12 @@ sr::atrous_denoise_routine::execute(cmd, inputs, history, {.iterations = 5, .lum
 sr::svgf_denoise_routine::execute(cmd, inputs, history, {.max_history = 32.0f})  // temporal: FRESH samples, normal+depth+motion REQUIRED
 sr::dlss_rr_routine::execute(cmd, inputs, history, {.quality = sr::denoise_quality::best})  // NVIDIA Ray Reconstruction; temporal, UPSCALES; needs EVERY required guide; a new quality or hdr restarts the stream
 sr::dlss_rr_routine::is_available(ctx)                 // -> bool; SDK fetched (extern/dlss/fetch-dlss.py) + dx12 + RTX adapter. SR_HAS_DLSS
+sr::metalfx_rr_routine::execute(cmd, inputs, history)  // MetalFX's denoised scaler; temporal, UPSCALES; dlss_rr's guides + guides.world_to_view / view_to_clip
 sr::nrd_denoise_routine::execute(cmd, inputs, history)  // NRD/REBLUR; temporal, split-signal, NO upscaling; needs hit_distance + specular + BOTH albedos (de-modulation)
 sr::nrd_denoise_routine::is_available(ctx)             // -> bool; sources fetched (extern/nrd/fetch-nrd.py). No device requirement at all. SR_HAS_NRD
 sr::oidn_denoise_routine::execute(cmd, inputs, history, {.network = sr::oidn_network_size::small})  // trained, spatial: albedo+normal REQUIRED; ~0.2 s/MP base, small ~1.6x faster; never `automatic`
 sr::fsr_upscale_routine::execute(cmd, {.color, .depth, .motion, .jitter, .output}, upscale_history, {.sharpening = true})  // -> sr::upscale_outcome; a CLEAN image only
+sr::metalfx_upscale_routine::execute(cmd, {.color, .depth, .motion, .jitter, .output}, upscale_history)  // -> sr::upscale_outcome; metal; a CLEAN image only
 sr::mix_routine::execute(cmd, dst, src, w)                 // -> bool; dst = mix(dst, src, w) IN PLACE, w in [0,1]; false while compiling, and after a failed compile, which logs why
 sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the destination's format: one compile each
 ```
@@ -485,6 +507,9 @@ sr::mix_routine::prewarm(ctx, dst_format)                  // keyed by the desti
 - **A temporal history is big**: svgf holds eight full-screen images, ~221 MiB per 1080p stream, and FSR about 80 MiB for 720p in, 1080p out.
   Drop the history of a view nobody is looking at.
 - **FSR builds where extern/fidelityfx was fetched** (`SR_HAS_FSR`, Windows today) and runs on dx12 and vulkan hardware; WARP crashes executing it — issue: bug-warp-fsr-shading-change-pyramid-crash.
+- **MetalFX builds wherever the Metal backend does** (`SR_HAS_METALFX`) and runs on a device with its MTL4 scaler.
+  An output without both `image` and `render_target` usage costs a copy: a compute pass for an `image` one in `rgba16_float` / `rgba32_float`, a blit for a `render_target` one.
+  The blit serves any renderable format, sRGB included, staging the rest in `rgba16_float`.
 - **`uv run dev.py example shaped-rendering/denoise-playground`** puts all of it on screen: a tiny path tracer, every
   knob live, a scale selector, and the raw image beside the reconstructed one.
 

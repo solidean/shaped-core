@@ -9,7 +9,7 @@
 // frame time.
 // Summing snapshots is meaningless; averaging them is not.
 // An ACCUMULATE is a delta to add up: bytes uploaded, tasks finished, cache misses.
-// Summing them is the whole point.
+// Summing them gives the total.
 //
 // Values are `f64` only, which also covers every integer up to 2^53.
 // That is a deliberate cap: one numeric type means a listener can graph anything without a type switch.

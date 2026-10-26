@@ -182,7 +182,7 @@ upscale_outcome fsr_upscale_routine::execute(sg::command_list& cmd,
     if (self.is_failed())
         return {.status = reconstruct_status::failed};
 
-    auto const restarted = history._prepare(input_extent, output_extent);
+    auto const restarted = history._prepare(input_extent, output_extent, upscale_method::fsr);
 
     // A stream built against programs a reload has since replaced is rebuilt against the new ones.
     auto* stream = static_cast<impl::fsr_stream*>(history._state.get());

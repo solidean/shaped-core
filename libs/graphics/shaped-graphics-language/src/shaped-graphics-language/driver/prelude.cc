@@ -26,7 +26,10 @@ cc::span<sgl::parsed_prelude_file const> sgl::parsed_prelude()
     static auto const parsed = []
     {
         auto out = cc::vector<parsed_prelude_file>();
-        for (auto const& f : prelude_files())
+        // the registry parsed its own text already, to read each record's names back
+        auto const& registry = builtins::default_registry();
+        out.push_back({.file = registry.parsed, .ast = registry.parsed_ast});
+        for (auto const& f : prelude_files().subspan(1))
         {
             auto file = parse(f.source);
             auto ast = ast::build(file);

@@ -79,6 +79,23 @@ TEST("mesh - decimation holds on every model in the corpus", thorough_only)
   Mark those `thorough_only` and leave a cheap test of the same machinery in the default run, as `bench-run-test.cc` and `record-sampling-test.cc` do.
 - **It holds at dispatch too.** An `INVOCABLE_TEST` marked `thorough_only` is skipped by `nx::invoke_tests` in a default run, whatever its driver carries.
 
+## When `check` runs a thorough test: `rerun_on`
+
+`dev.py check` never runs a thorough test on its own; a test that wants to be run at full strength when something changes says what that something is:
+
+```cpp
+TEST("boolean - M cut S holds on every seed", thorough_only,
+     rerun_on("libs/geometry/mesh-boolean/src/mesh-boolean/cut.cc"),
+     rerun_on("libs/geometry/mesh-boolean/src/mesh-boolean/cut_*.hh"))
+```
+
+- **Opt-in, per test, by its author.** A test has granular provenance: a fuzzer names the one file implementing what it exercises, a viewer sweep names its surface tree.
+  Nothing infers a trigger from the build graph, because a clean-core edit would then run every thorough test in the repo.
+- **Globs are gitignore-shaped.** `**` crosses directories, `*` and `?` do not, and a bare path is one file or one directory and everything under it.
+- **A glob matching no tracked file is an error**, so a moved file cannot silently disarm the rule.
+- **It works on a narrowed test too.** `rerun_on` says when `check` passes `--thorough`; the test may be `thorough_only` or branch on `nx::is_thorough()`.
+- The triggers travel through the `--list-tests-json` listing, which is how dev.py reads them without running anything.
+
 **Not yet: a skip is reported as a pass.**
 nexus has no skipped state, so `SKIP` counts as a passing check and the JUnit writer always writes `skipped="0"`.
 A default run therefore shows every `thorough_only` test as passed, and the reason it did not run appears in no report.

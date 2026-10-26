@@ -7,9 +7,11 @@
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/string.hh>
 #include <clean-core/string/string_view.hh>
+#include <shaped-graphics-language/ast/file_ast.hh>
 #include <shaped-graphics-language/builtins/ids.hh>
 #include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/interpret/scalar.hh>
+#include <shaped-graphics-language/syntax/parsed_file.hh>
 
 /// Everything the compiler knows about a builtin, in ONE record per builtin.
 ///
@@ -190,6 +192,8 @@ struct sgl::builtins::type_record
     cc::string hlsl;
     cc::string wgsl;
     cc::string msl;
+    /// The HLSL spelling of a local whose flags are known constants, as `RayQuery<RAY_FLAG_FORCE_OPAQUE>`; none where its type takes none.
+    cc::string (*hlsl_flagged)(u32 flags) = nullptr;
 
     /// HLSL packs by rows of 16: a value starts a fresh row when its alignment is 16, or when it does not fit the rest of this one.
     block_layout hlsl_layout;
@@ -278,6 +282,12 @@ struct sgl::builtins::function_record
     /// Gives a value only a local may hold, which a target declares without an initializer: `RayQuery<…> q;`.
     /// The call itself writes nothing, and a local it initializes is never copied.
     bool declares_only = false;
+    /// Where its argument at this position is a constant, the local its first argument names takes it into its type
+    /// (`type_record::hlsl_flagged`); -1 for none.
+    i32 flags_argument = -1;
+    /// Impure only for what its value depends on, with no effect: a call of it whose value nothing reads may go.
+    /// It stays impure, since moving it would read state that may have changed in between.
+    bool reads_only = false;
 
     /// Read back from the signature by `finalize`.
     cc::string name;
@@ -338,6 +348,10 @@ struct sgl::builtins::registry
     builtin_id add(function_record record);
     /// A `//` comment block of the generated file, behind an empty line; `text` is whole lines without the last line break.
     void add_comment(cc::string_view text);
+
+    /// What `finalize` parsed `prelude_text()` into, kept so the driver's prelude takes it rather than parsing it twice.
+    parsed_file parsed;
+    ast::file_ast parsed_ast;
 
     /// Parses `prelude_text()` with the normal parser and fills what every record reads back from it.
     /// Every record must parse to exactly one declaration without a diagnostic, and every type a signature names must be registered.

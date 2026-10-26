@@ -66,8 +66,8 @@ inline cc::rec::config deterministic_config()
 
 /// Whether this build can spawn a second thread at all.
 ///
-/// `SC_THREADS=OFF` is a real configuration rather than a formality: under Emscripten without pthreads a `std::thread`
-/// constructor THROWS ("Not supported"), which surfaces as an uncaught exception rather than as a failed check.
+/// `SC_THREADS=OFF` is a real configuration rather than a formality: there cc::native_thread runs its body on the calling thread.
+/// A test that needs a second thread to exist at once would then pass for the wrong reason or hang.
 /// So a test that needs a second thread says so and skips, the same way the sampler tests do.
 [[nodiscard]] constexpr bool threads_available()
 {

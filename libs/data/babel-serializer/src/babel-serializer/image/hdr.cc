@@ -231,7 +231,7 @@ cc::result<cc::unit> decode_flat_scanline(cc::span<byte const> bytes, isize& pos
         if (x == 0)
             return cc::error("hdr: repeat marker at the start of a scanline has nothing to repeat");
 
-        // Both guards are load-bearing: past k_max_repeat_shift the shift itself is undefined, and the run
+        // Both guards are needed: past k_max_repeat_shift the shift itself is undefined, and the run
         // is formed in i64 so that a wide one is rejected here rather than wrapping `x` negative below.
         if (shift > k_max_repeat_shift)
             return cc::error("hdr: repeat marker chain is longer than any legal run");

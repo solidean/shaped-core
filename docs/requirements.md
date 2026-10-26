@@ -45,11 +45,32 @@ Configured per platform via presets.
 | Windows  | `cl` (MSVC)         | VS 2022 (toolset 14.44) and VS 2026 (14.51); `*-msvc-*` presets. |
 | Linux    | `clang++` / `clang` | Default (`relwithdebinfo-linux-clang`).                      |
 | Linux    | `g++` / `gcc`       | `relwithdebinfo-linux-gcc`, the only GCC preset. GCC **13+** for `std::stacktrace`. |
-| macOS    | Homebrew `llvm@22`  | Expects `/opt/homebrew/opt/llvm@22/bin/clang++` (arm64). The formula is versioned so a Homebrew bump cannot move the toolchain under us. |
+| macOS    | Homebrew `llvm@22`  | Expects `/opt/homebrew/opt/llvm@22/bin/clang++` (arm64). The formula is versioned so a Homebrew bump cannot move the toolchain under us. Targets macOS 26.0; see [below](#macos-deployment-target-and-sdk). |
 | Android  | NDK (r27+)          | `android-ndk-arm64-*` presets; NDK located via `$ANDROID_NDK_ROOT`. |
 | WASM     | Emscripten (emsdk)  | `emscripten-*` presets (single-threaded). See below.        |
 
 See [platforms.md](platforms.md) for the full tier matrix — which platforms are actively tested, which are supported, and which are planned.
+
+### macOS: deployment target and SDK
+
+**The `macos-arm-llvm-*` presets set `CMAKE_OSX_DEPLOYMENT_TARGET` to `26.0`**, which puts `-mmacosx-version-min=26.0` on every compile line.
+26 is the floor the Metal backend already states, since `sg::create_metal_context` refuses anything older; see its [readme](../libs/graphics/shaped-graphics/backends/metal/readme.md).
+Without the pin, Homebrew clang derives its target from the SDK, and picks the SDK for the *running* OS through a per-version config file (`etc/clang/arm64-apple-darwin<N>.cfg`).
+That never appears on the command line, so an OS update changed what every TU was compiled for while ninja saw nothing to rebuild.
+Precompiled headers built before the update were then refused as built for another target, and stayed refused.
+With the pin, a change to the target is a change to the command line, and that rebuilds the PCHs with everything else.
+
+**The SDK is resolved at configure time, not pinned in the presets.**
+Pinning one would need an SDK every machine has, and Xcode 27 ships only the 27 SDK while the Command Line Tools 27 still carry the 26 one.
+So [MacosSdk.cmake](../tools/cmake/MacosSdk.cmake) asks the compiler which SDK it would use and puts that `-isysroot` on every compile and link line.
+That is the config file's newest Command Line Tools SDK, `MacOSX<N>.sdk` for the running OS.
+The SDK then moves only when the build directory is reconfigured, and a reconfigure that moves it rebuilds everything, PCHs included.
+Without it the config file's `-isysroot` stays off the command line, and a PCH built against the old SDK is accepted silently by TUs compiled against the new one.
+`dev.py doctor` warns when a build directory's SDK is no longer the one the compiler would pick.
+To build against another SDK, configure with `-DCMAKE_OSX_SYSROOT=<path>`, which the module leaves alone.
+
+Homebrew LLVM 22's libc++ and the macOS 27 SDK need a workaround to build together, which the build applies on its own.
+[libcxx-float-h-guard-vs-macos27-math-h](bugs-external/libcxx-float-h-guard-vs-macos27-math-h/readme.md) has why, and when it goes.
 
 ### Emscripten / WASM
 
@@ -88,7 +109,9 @@ Resolution order is `--emsdk-path` → the `SC_EMSDK_PATH` env var → an alread
 Tests run under Node by default: `-s NODERAWFS=1` gives the binaries real-filesystem access so the JUnit report is written, and `-s EXIT_RUNTIME=1` propagates the pass/fail exit code.
 Deno runs the same artifacts unchanged; `--runtime` picks between them, and [guides/building-and-testing.md](guides/building-and-testing.md#which-runtime-executes-the-artifact) is how.
 Threads and WebGPU are both wired, as the `emscripten-threads-*`, `emscripten-webgpu-*` and `emscripten-threads-webgpu-*` presets.
-`SC_WASM_EXCEPTIONS=wasm-exceptions` is the one remaining knob that fails configure as not-yet-supported.
+`SC_WASM_EXCEPTIONS=wasm-exceptions` swaps the JS-based exceptions for wasm's own: `-fwasm-exceptions`, setjmp/longjmp on the same mechanism, the proposal's legacy instructions.
+It drops the JS `invoke_*` wrapper around every call that may throw, so calls are plain wasm calls and add no JS frames to the engine's stack.
+Every object of a link must be built in one mode.
 
 Threads are the repo-wide `SC_THREADS` option rather than a wasm-local knob, and each wasm preset sets it explicitly.
 `-pthread` is what predefines `__EMSCRIPTEN_PTHREADS__`, which is what clean-core's `CC_HAS_THREADS` reads, so the flag is the whole of the wiring.
@@ -214,7 +237,7 @@ uv run dev.py install sde                    # names the file and the page to do
 uv run dev.py install sde --archive <file>   # into ~/tools/sde, checked against the SHA-256 tools/sde.version pins
 ```
 
-Then `~/tools/sde/sde64 -snb -- <program>` runs a program as a Sandy Bridge, with AVX but no AVX2, and `-help` lists the CPUs.
+Then `~/tools/sde/sde64 -snb -- <program>` (`sde.exe` on Windows) runs a program as a Sandy Bridge, with AVX but no AVX2, and `-help` lists the CPUs.
 There are kits for Windows and Linux x86-64 only.
 
 ## What `dev.py doctor` validates

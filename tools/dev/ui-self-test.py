@@ -10,7 +10,7 @@ The region only exists as escape sequences on a stream, so it is tested by drivi
 width and asserting on what came out.
 `painter=False` keeps rendering synchronous, which is what makes a frame sequence deterministic enough to assert on.
 
-The load-bearing case is `up_count_matches_frame`: every other bug in a repainting region shows up there first, because a
+The first case worth knowing is `up_count_matches_frame`: every other bug in a repainting region shows up there first, because a
 frame that moves the cursor up by the wrong number of lines is exactly how one eats the scrollback above it.
 `feed_never_waits_on_the_terminal` is the other one worth knowing about: it pins the rule process.py's `_pump` states,
 by driving frames into a stream that blocks and requiring feed() to return anyway.

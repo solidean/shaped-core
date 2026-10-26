@@ -340,7 +340,7 @@ void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_re
 
     // The bytes are the epoch's, the buffer is not.
     // In the steady state they come out identical, and skipping the copy is what keeps the upload path quiet — the buffer's
-    // own descriptor never moves either way, which is the part that matters for the group's snapshot.
+    // own descriptor never moves either way, so the group's snapshot stays valid.
     auto const unchanged = bytes.size() == r.uploaded.size()
                         && (bytes.empty() || cc::memcmp(bytes.data(), r.uploaded.data(), size_t(bytes.size())) == 0);
     if (!bytes.empty() && !unchanged)

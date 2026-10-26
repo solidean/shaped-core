@@ -79,7 +79,7 @@ TEST("compression - raw framing round trip, every algorithm")
 
 TEST("compression - raw framing is smaller than framed")
 {
-    // The whole point of raw: no magic, no declared size, no checksum.
+    // Raw drops the magic, the declared size and the checksum.
     // On a blob this small that header is most of the file.
     auto const payload = repetitive_bytes(64);
 

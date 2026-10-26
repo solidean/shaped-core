@@ -1,0 +1,41 @@
+// a vector's lane is subscripted by an int, as an array's element is, and every target writes it as its own `v[i]` (CHK-395)
+
+fun lane_of(v: float4, i: int) => v[i]
+
+test lane_of(float4(1.0, 2.0, 3.0, 4.0), 0) == 1.0
+test lane_of(float4(1.0, 2.0, 3.0, 4.0), 3) == 4.0
+
+// every family of vectors has lanes, a position's included, and a lane is of the vector's field type
+test int3(4, 5, 6)[1] == 5
+test uint2(7, 8)[1] == 8u
+test bool3(true, false, true)[1] == false
+test pos3(1.0, 2.0, 3.0)[2] == 3.0
+
+// a lane of a mutable vector is a place, which an assignment writes and nothing else of the vector
+test:
+    let mut v = float3(1.0, 2.0, 3.0)
+    for i in 0 ..< 3:
+        v[i] = v[i] * 10.0
+    v.x == 10.0 and v.y == 20.0 and v.z == 30.0
+    v[1] = 0.5
+    v.x == 10.0 and v.y == 0.5 and v.z == 30.0
+
+// what picks the lane is any int, so a loop reads one lane after another
+fun total(v: int4) -> int:
+    let mut sum = 0
+    for i in 0 ..< 4:
+        sum += v[i]
+    return sum
+
+test total(int4(1, 2, 3, 4)) == 10
+
+// a constant names a lane the vector has
+@expect(error = "invalid-constant-argument")
+test float2(1.0, 2.0)[2] == 0.0
+
+// the index is an int, and there is one of it
+@expect(error = "type-mismatch")
+test float2(1.0, 2.0)[1u] == 2.0
+
+@expect(error = "wrong-kind-of-name")
+test float2(1.0, 2.0)[0, 1] == 2.0

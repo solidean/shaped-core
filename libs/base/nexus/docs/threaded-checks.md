@@ -13,8 +13,7 @@ The API is in the [cheat-sheet](../cheat-sheet.md#checks-off-the-tests-own-threa
 
 It is printed the moment it happens and summarized at the end as `N check(s) ran outside any test context`, and the run's exit code says so even when every test is green.
 
-That is deliberate, and it is the whole point of the change.
-A check nobody counts is worse than a missing one: it reads as coverage, runs green forever, and the day it starts failing nothing notices.
+It fails on purpose, since a check nobody counts is worse than a missing one: it reads as coverage, runs green forever, and the day it starts failing nothing notices.
 
 ## Where attribution comes from
 
@@ -30,7 +29,7 @@ Reading that stack would bill those checks to the wrong test — silently, and o
 **A thread you start yourself carries nothing**, so say what it belongs to:
 
 ```cpp
-std::thread t(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
+auto t = cc::native_thread::start(nx::attributed_to_current_test([&] { CHECK(worker_saw_it); }));
 ```
 
 For a thread that is already running — a callback arriving on a library's own thread — capture on the test's thread and install on the other one:

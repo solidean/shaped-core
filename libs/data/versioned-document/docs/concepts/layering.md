@@ -22,7 +22,7 @@ layer 0   per frame    →  ─┘
 
 ## A higher layer replaces a lower one per property path
 
-That sentence is the whole feature, and both halves of it are load-bearing.
+That sentence is the whole feature, and each half of it is needed.
 
 **Per property path**, because anything coarser breaks the case above.
 If the base animates a transform and the user overrode only `position`, component-granular replacement would freeze `rotation` at the moment the edit was made.

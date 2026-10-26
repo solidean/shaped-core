@@ -346,7 +346,7 @@ bool device_extensions_available(VkPhysicalDevice dev, cc::span<char const* cons
 // Whether the device supports timeline semaphores — the epoch system's core sync primitive.
 // Core in the 1.2 baseline, but still a feature bit a device may not expose.
 // The first thing sg requires that `dev` does not have, or an empty view when it satisfies the floor.
-// Naming the missing capability is the point: "this GPU is too old" is not something a caller can act on.
+// It names the missing capability, because "this GPU is too old" is not something a caller can act on.
 cc::string_view missing_required_capability(VkPhysicalDevice dev)
 {
     VkPhysicalDeviceProperties props = {};

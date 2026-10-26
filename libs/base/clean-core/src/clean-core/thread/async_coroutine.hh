@@ -6,6 +6,7 @@
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/record/impl/writer_tls.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_backlog.hh>
 
 #include <coroutine>
 
@@ -22,9 +23,14 @@
 //
 //   cc::shared_async<int> load(cc::string p)      // COLD, like make_async_lazy: calling load() runs nothing
 //   {
-//       auto const& bytes = co_await read(p);     // short-circuits if read(p) failed
+//       auto const pending = read(p);
+//       auto const& bytes = co_await pending;     // short-circuits if read(p) failed
 //       co_return parse(bytes);
 //   }
+//
+// co_await hands back a reference INTO the awaited node, and a handle is what keeps that node alive.
+// So the async is held in a variable first: in `auto const& x = co_await read(p);` the handle is a temporary.
+// It dies at the end of the statement, and when nothing else owns the node, x dangles.
 //
 // Laziness is the default, matching make_async_lazy — the plain spelling starts no work, and which of lazy/scheduled you get is never hidden.
 // cc::async_scheduled<T, E> is the eager return type, and cc::async_start schedules a handle you already hold.
@@ -245,18 +251,43 @@ struct async_promise : async_promise_return<T, E, std::is_same_v<T, cc::unit>>
     using error_type = E;
 
     // The coroutine frame is the one allocation this layer adds over a lambda frame, so it goes to the same slab the node does.
-    // node_allocation_free is stateless, which matters here: a coroutine is routinely destroyed on a different thread than the one that created it.
-    static constexpr isize frame_alignment = 16;
+    // node_allocation_free is stateless, so a coroutine may be destroyed on a different thread than the one that created it, as it routinely is.
+    static constexpr isize min_frame_alignment = 16;
+
+    // A frame holds every local that spans a suspend, so it must be as aligned as the most aligned of them.
+    // Clang passes that alignment only under -fcoro-aligned-allocation, and calls the plain operator new otherwise, with no realignment.
+    // So the plain one aligns a frame to its whole size class: a frame's size is a multiple of its alignment, which then divides the class.
+    // Capped, because a page covers every alignas a frame has a reason to carry.
+    static constexpr isize max_frame_alignment = 4096;
+
+    [[nodiscard]] static isize frame_alignment_for(cc::node_class_index idx)
+    {
+        auto const class_bytes = isize(1) << isize(idx);
+        return class_bytes < max_frame_alignment ? class_bytes : max_frame_alignment;
+    }
 
     [[nodiscard]] static void* operator new(std::size_t n)
     {
-        auto const idx = cc::node_class_index_from_size_and_align(isize(n), frame_alignment);
-        return cc::default_node_allocator().allocate_node_bytes(idx, isize(n), frame_alignment);
+        auto const idx = cc::node_class_index_from_size_and_align(isize(n), min_frame_alignment);
+        return cc::default_node_allocator().allocate_node_bytes(idx, isize(n), frame_alignment_for(idx));
     }
     static void operator delete(void* p, std::size_t n)
     {
-        auto const idx = cc::node_class_index_from_size_and_align(isize(n), frame_alignment);
+        auto const idx = cc::node_class_index_from_size_and_align(isize(n), min_frame_alignment);
         cc::node_allocation_free(static_cast<byte*>(p), idx);
+    }
+
+    // Where the compiler does pass the frame's alignment, it is exact.
+    [[nodiscard]] static void* operator new(std::size_t n, std::align_val_t alignment)
+    {
+        auto const align = isize(alignment) > min_frame_alignment ? isize(alignment) : min_frame_alignment;
+        auto const idx = cc::node_class_index_from_size_and_align(isize(n), align);
+        return cc::default_node_allocator().allocate_node_bytes(idx, isize(n), align);
+    }
+    static void operator delete(void* p, std::size_t n, std::align_val_t alignment)
+    {
+        auto const align = isize(alignment) > min_frame_alignment ? isize(alignment) : min_frame_alignment;
+        cc::node_allocation_free(static_cast<byte*>(p), cc::node_class_index_from_size_and_align(isize(n), align));
     }
 
     /// Build the node and install this coroutine as its frame.
@@ -331,16 +362,18 @@ struct async_awaiter_value
         auto& p = h.promise();
         CC_ASSERT(p.ctx != nullptr, "co_await outside of a compute step");
 
+        if (!p.ctx->require(*dep))
+        {
+            p.suspend_on(this, &check<P>);
+            return true;
+        }
+        // Ready includes failed, and only a ready node is final: checked before require(), a failure landing in between would resume us onto value().
         if ((*dep)->has_error())
         {
             p.fail_with((*dep)->propagate_error());
             return true; // stay suspended: the frame destroys us and propagates
         }
-        if (p.ctx->require(*dep))
-            return false; // already ready — no suspension at all
-
-        p.suspend_on(this, &check<P>);
-        return true;
+        return false; // ready with a value: no suspension at all
     }
 
     /// A reference INTO the dependency node's payload, so reading it copies nothing.
@@ -350,7 +383,7 @@ struct async_awaiter_value
     {
         return (*dep)->value();
     }
-    /// A unit carries nothing, so `co_await` on one is awaited for its completion alone, and discarding it is the point.
+    /// A unit carries nothing, so `co_await` on one is awaited for its completion alone, and its result is meant to be discarded.
     U const& await_resume() const
         requires std::is_same_v<std::remove_const_t<U>, cc::unit>
     {
@@ -435,6 +468,7 @@ struct async_awaiter_all
 
 private:
     /// False once a failed dependency has written the promise's failure slot.
+    /// The members still running are then abandoned, so they go to cc::async_abandoned_work.
     template <class P>
     bool collect_failure(P& p) const
     {
@@ -451,6 +485,8 @@ private:
                     }
                 };
                 (one(*ds), ...);
+                if (!ok)
+                    (async_abandoned_work().track(*ds), ...);
             },
             deps);
         return ok;
@@ -500,6 +536,9 @@ private:
             if (d->has_error())
             {
                 p.fail_with(d->propagate_error());
+                // the members still running are abandoned, so they go to cc::async_abandoned_work
+                for (auto const& other : deps)
+                    async_abandoned_work().track(other);
                 return false;
             }
         return true;

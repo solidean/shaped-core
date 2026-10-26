@@ -89,17 +89,23 @@ template <bool IsLeft, int Width, bool IsSigned>
 written write_shift(call_context const& c)
 {
     auto const op = IsLeft ? "<<" : ">>";
+    auto count = operand(c.arguments[1]);
+    // A literal count is 0 to 31 already (CHK-270), so it needs neither the mask nor more than its suffix.
+    auto is_literal_count = !count.empty();
+    for (auto const ch : cc::string_view(count))
+        is_literal_count = is_literal_count && ch >= '0' && ch <= '9';
     if (c.target == language::msl && IsLeft && IsSigned)
     {
         auto const uint_type = Width == 1 ? cc::string("uint") : cc::format("uint{}", Width);
         auto const int_type = Width == 1 ? cc::string("int") : cc::format("int{}", Width);
-        return {.text = cc::format("as_type<{}>(as_type<{}>({}) << {}({} & 31))", int_type, uint_type,
-                                   c.arguments[0].text, uint_type, operand(c.arguments[1]))};
+        auto const masked = is_literal_count && Width == 1 ? count + "u" : cc::format("{}({} & 31)", uint_type, count);
+        return {.text
+                = cc::format("as_type<{}>(as_type<{}>({}) << {})", int_type, uint_type, c.arguments[0].text, masked)};
     }
-    auto count = operand(c.arguments[1]);
     if (c.target == language::wgsl && IsSigned)
-        count = Width == 1 ? cc::format("u32({})", count) : cc::format("vec{}u({})", Width, count);
-    else if (c.target == language::msl)
+        count = Width == 1 ? (is_literal_count ? count + "u" : cc::format("u32({})", count))
+                           : cc::format("vec{}u({})", Width, count);
+    else if (c.target == language::msl && !is_literal_count)
         count = cc::format("({} & 31)", count);
     // DXC warns on `1 << n` and `(0 + 1) << n`, whose left side it cannot type, and `-WX` makes that an error.
     auto left = operand(c.arguments[0]);

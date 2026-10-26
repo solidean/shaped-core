@@ -31,7 +31,7 @@ The [coding-guidelines](../coding-guidelines.md) own the rule and the reasoning 
 
 ### Semantic typing: `vec` vs `pos` vs `comp`
 
-The whole point of tg is that the type system encodes geometry, so these are distinct types with distinct algebra rather than interchangeable tuples.
+tg's type system encodes geometry, so these are distinct types with distinct algebra rather than interchangeable tuples.
 
 - **`vec`** is a free vector — a direction or displacement, with `vec + vec -> vec`, scaling and `dot`.
 - **`pos`** is a point, and its affine rules are deliberate: `pos - pos -> vec`, `pos + vec -> pos`, `pos - vec -> pos`.

@@ -17,10 +17,10 @@ std::unique_ptr<slib::impl::watch_backend> slib::impl::create_watch_backend()
 #include <clean-core/string/conversion.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <shaped-shader-library/filesystem/impl/watch_registry.hh>
 
-#include <thread>
 
 // ReadDirectoryChangesW over one I/O completion port, on one thread for every directory this filesystem watches — rather than a thread apiece.
 // With real_filesystem.cc, this is the only part of slib allowed to reach the OS (see libs/graphics/shaped-shader-library/docs/coding-guidelines.md).
@@ -73,7 +73,7 @@ class iocp_watch_backend final : public slib::impl::watch_backend
 public:
     explicit iocp_watch_backend(HANDLE iocp) : _iocp(iocp)
     {
-        _thread = std::thread([this] { run(); });
+        _thread = cc::native_thread::start([this] { run(); });
     }
     ~iocp_watch_backend() override;
 
@@ -96,7 +96,7 @@ private:
     };
 
     HANDLE _iocp;
-    std::thread _thread;
+    cc::native_thread _thread;
     cc::mutex<state> _state;
 };
 

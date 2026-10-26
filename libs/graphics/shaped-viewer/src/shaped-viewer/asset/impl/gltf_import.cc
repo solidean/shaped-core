@@ -421,8 +421,7 @@ struct gltf_importer
     /// The box a POSITION accessor states, which glTF requires of it — so this costs no payload byte.
     ///
     /// Empty when the file left it out, or stated it at the wrong arity, and `create_mesh` then scans the positions.
-    /// Taking the file's word matters more than it looks: it is what lets a placeholder be drawn at the right size
-    /// before the geometry has arrived at all.
+    /// Taking the file's word lets a placeholder be drawn at the right size before the geometry has arrived at all.
     [[nodiscard]] cc::optional<tg::aabb3f> bounds_of(bg::primitive const& p) const
     {
         auto const* const accessor = doc.find(doc.find_attribute(p, "POSITION"));

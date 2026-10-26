@@ -11,8 +11,8 @@ metal-cpp is how shaped-graphics-metal speaks to Metal at all — see dependency
 The pin tracks the SDK rather than the newest release: a wrapper newer than the framework on disk declares selectors that do not resolve.
 So bumping this is a two-part move — a new Xcode, then the matching `release/metal-cpp_macOS<x>_iOS<x>` tag.
 
-Upstream ships four framework directories and we copy three.
-MetalFX is dropped: nothing in the tree includes it, and none of the other three reach it.
+Upstream ships four framework directories and we copy all four.
+MetalFX is its own target (metal-cpp-metalfx), so only shaped-rendering's MetalFX members load the framework.
 
 Re-running is idempotent: the vendored payload (include/, LICENSE) is wiped first, so files dropped upstream do not linger.
 That payload is committed to the repo; this script is only needed to bump or re-vet the version.
@@ -35,13 +35,14 @@ import deps_manifest  # noqa: E402
 
 # Upstream-relative source -> vendored destination (relative to DEST).
 #
-# The three framework directories move under include/ together and keep their names, because metal-cpp's headers
+# The framework directories move under include/ together and keep their names, because metal-cpp's headers
 # include each other by relative path ("../Foundation/Foundation.hpp") — so their layout relative to one another is
 # load-bearing, and include/ is what a consumer puts on the search path.
-# Everything else upstream ships (MetalFX, SingleHeader, README) is intentionally dropped.
+# Everything else upstream ships (SingleHeader, README) is intentionally dropped.
 COPY_MAP = {
     "Foundation": "include/Foundation",
     "Metal": "include/Metal",
+    "MetalFX": "include/MetalFX",
     "QuartzCore": "include/QuartzCore",
     "LICENSE.txt": "LICENSE",
 }

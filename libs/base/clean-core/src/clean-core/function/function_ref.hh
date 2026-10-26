@@ -7,9 +7,9 @@
 
 /// Non-owning reference to a callable with signature T, in the spirit of std::function_ref (C++26).
 ///
-/// LIFETIME: the referenced callable must outlive the function_ref, which never owns and never copies.
+/// LIFETIME: a function, or a pointer to one, is held by value; any other callable is held by reference and must outlive the function_ref.
+/// So `{.hook = &f}` stored in one statement is safe to call in the next, and a lambda stored the same way is not.
 /// Passing a lambda straight into a parameter is fine — the temporary lives to the end of the full expression.
-/// Invoking a stored function_ref after that temporary dies is UB, as it is for any callable that dies first.
 ///
 /// Binds function pointers, lambdas, functors, pointer-to-member functions and pointer-to-member objects.
 /// Trivially copyable, no heap allocation, one indirect call, and default-constructible into an invalid state.
@@ -37,7 +37,6 @@ public:
 
     /// Construct from any callable — function pointer, lambda, functor, pointer-to-member function, pointer-to-member object.
     /// Takes every kind of reference, since it must not outlive its argument anyway.
-    /// A const callable is invoked as const, so a `mutable` lambda held in a const variable is refused rather than mutated.
     template <class F>
         requires(!std::is_same_v<std::remove_cvref_t<F>, function_ref>)
     function_ref(F&& f)
@@ -52,6 +51,14 @@ public:
             _payload.function = reinterpret_cast<void (*)()>(&f);
             _thunk = [](payload p, Args... args) -> R
             { return cc::invoke(*reinterpret_cast<Fn*>(p.function), cc::forward<Args>(args)...); };
+        }
+        else if constexpr (std::is_pointer_v<Fn> && std::is_function_v<std::remove_pointer_t<Fn>>)
+        {
+            // the pointer is copied, so `&f` written in one statement still calls f in the next
+            using Fp = std::remove_pointer_t<Fn>*;
+            _payload.function = reinterpret_cast<void (*)()>(f);
+            _thunk = [](payload p, Args... args) -> R
+            { return cc::invoke(reinterpret_cast<Fp>(p.function), cc::forward<Args>(args)...); };
         }
         else
         {

@@ -270,7 +270,8 @@ class Issue:
                 if isinstance(r, dict) and len(r) == 1 and isinstance(next(iter(r.values())), str)]
 
 
-def _load_issue(repo: Repo, path: Path) -> Issue:
+def _load_issue(repo: Repo, path: Path, text: str | None = None) -> Issue:
+    """The issue at `path`, read from disk, or from `text` when given: what a commit is about to write there."""
     rel = path.relative_to(repo.root).as_posix()
     parts = rel.split("/")
     at = max(i for i in range(len(parts) - 1) if parts[i:i + 2] == ["docs", "issues"])
@@ -287,7 +288,9 @@ def _load_issue(repo: Repo, path: Path) -> Issue:
     if not ID_RE.match(stem):
         errors.append((1, f"the file name must be <type>-<slug>.md, type one of {', '.join(TYPES)}, slug lowercase kebab-case"))
 
-    text = path.read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n")
+    if text is None:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    text = text.replace("\r\n", "\n")
     meta, key_lines, body, body_line, error = _parse_meta(text)
     if error:
         errors.append((1, error))
@@ -403,6 +406,9 @@ def cmd_new(ws: Workspace, args: argparse.Namespace) -> int:
     owner = (ws.cwd / (args.in_ or ".")).resolve()
     if owner.name == "issues" and owner.parent.name == "docs":
         owner = owner.parent.parent
+    if owner.name == "docs" and not args.force:
+        raise IssueError(f"--in names the directory owning the issue, so {ws.show_path(owner)} would file it in "
+                         f"{ws.show_path(owner / 'docs' / 'issues')}; pass the owner itself, or --force if a docs/ folder really owns it")
     repo = ws.repo_containing(owner)
     taken = [i for i in repo.issues() if i.id == issue_id]
     if taken:
@@ -707,7 +713,7 @@ def _push_commit(repo: Repo, message: str, build) -> None:
 
 
 def _publish(ws: Workspace, issue: Issue, verb: str, mutate) -> None:
-    """Commit `mutate(text)` of the issue as `<verb> <id>`, pushed alone; `mutate` sees the remote's text."""
+    """Commit `mutate(text, base)` of the issue as `<verb> <id>`, pushed alone; `mutate` sees the remote's text and the commit it builds on."""
     repo, rel = issue.repo, issue.rel
     untracked = not _is_tracked(repo.root, rel)
     if not untracked and _git(repo.root, "diff", "--quiet", "HEAD", "--", rel, check=False).returncode != 0:
@@ -719,12 +725,12 @@ def _publish(ws: Workspace, issue: Issue, verb: str, mutate) -> None:
         if path is None:
             if not untracked:
                 raise IssueError(f"{issue.id} is committed here but not on {remote}/{branch}: push it first")
-            return {rel: mutate(issue.text)}
+            return {rel: mutate(issue.text, base)}
         if untracked:
             raise IssueError(f"{remote}/{branch} already has an issue {issue.id}, at {path}")
         if "/closed/" in f"/{path}":
             raise IssueError(f"{issue.id} is closed on {remote}/{branch}")
-        return {path: mutate(_git(repo.root, "show", f"{base}:{path}").stdout.replace("\r\n", "\n"))}
+        return {path: mutate(_git(repo.root, "show", f"{base}:{path}").stdout.replace("\r\n", "\n"), base)}
 
     _push_commit(repo, f"{verb} {issue.id}", build)
 
@@ -761,12 +767,19 @@ def cmd_claim(ws: Workspace, args: argparse.Namespace) -> int:
         raise IssueError(f"{issue.qid} is closed")
     who = _who(ws, issue.repo, args.as_name)
 
-    def mutate(text: str) -> str:
+    def mutate(text: str, base: str) -> str:
         meta = _parse_meta(text)[0]
         by = meta.get("claimed-by")
         if by and not args.force:
             raise IssueError(f"{issue.qid} is claimed by {by} since {meta.get('claimed-at') or '?'}; --force takes it over")
-        return set_fields(text, {"claimed-by": who, "claimed-at": _now_stamp()})
+        claimed = set_fields(text, {"claimed-by": who, "claimed-at": _now_stamp()})
+        # A claim skips the pre-push gate, so it runs the issues gate on what it pushes, against the commit it pushes onto:
+        # an issue or file that exists only in this checkout would fail every other checkout's gate.
+        problems = _check_issue(ws, _load_issue(issue.repo, issue.path, claimed), at=base)
+        if problems:
+            listed = "\n".join(f"  {ws.show_path(issue.path)}:{n}: {msg}" for n, msg in problems)
+            raise IssueError(f"{issue.qid} would not pass `issues check`, and a claim pushes without the gate:\n{listed}")
+        return claimed
 
     _publish(ws, issue, "claim", mutate)
     return 0
@@ -776,7 +789,7 @@ def cmd_release(ws: Workspace, args: argparse.Namespace) -> int:
     issue = ws.resolve(args.id)
     who = _who(ws, issue.repo, args.as_name)
 
-    def mutate(text: str) -> str:
+    def mutate(text: str, base: str) -> str:
         by = _parse_meta(text)[0].get("claimed-by")
         if not by:
             raise IssueError(f"{issue.qid} is not claimed")
@@ -847,7 +860,8 @@ def cmd_close(ws: Workspace, args: argparse.Namespace) -> int:
         raise IssueError("--date is yyyy-mm-dd")
     year, month = date[:4], date[5:7]
     new_path = issue.repo.root / issue.scope / "docs" / "issues" / "closed" / year / month / f"{issue.id}.md"
-    _move(ws, issue, new_path, {"closed": date, "resolution": args.resolution})
+    # The claim ends with the work: a closed issue still carrying one is the leftover the guide tells people to clear.
+    _move(ws, issue, new_path, {"closed": date, "resolution": args.resolution, "claimed-by": None, "claimed-at": None})
     print(f"closed {issue.qid} as {args.resolution}: {ws.show_path(new_path)}")
     print("commit it together with the change that resolves it", file=sys.stderr)
     return 0
@@ -867,8 +881,47 @@ def cmd_reopen(ws: Workspace, args: argparse.Namespace) -> int:
 # check
 # ---------------------------------------------------------------------------
 
-def _check_issue(ws: Workspace, issue: Issue) -> list[tuple[int, str]]:
+class _Resolver:
+    """Where a check looks up the issues and files an issue names: the checkout, or the commit `at` of the issue's repository.
+    Ids qualified with another repository resolve in its checkout either way."""
+
+    def __init__(self, ws: Workspace, repo: Repo, at: str | None):
+        self.ws, self.repo, self.at = ws, repo, at
+        self._names: set[str] | None = None
+
+    def issue_type(self, qid: str) -> str | None:
+        """The type of the issue `qid` names, or None when there is none."""
+        m = QID_RE.match(qid)
+        if self.at is not None and m and (not m.group(1) or self.ws.repo_named(m.group(1)) is self.repo):
+            if self._names is None:
+                self._names = {Path(n).stem for n in _git_out(self.repo.root, "ls-tree", "-r", "--name-only", self.at).splitlines()
+                               if "docs/issues/" in f"/{n}" and n.endswith(".md")}
+            return m.group(2).split("-", 1)[0] if m.group(2) in self._names else None
+        found = self.ws.lookup(qid, self.repo)
+        return found.type if found else None
+
+    def file_lines(self, rel: str) -> int | None:
+        """The line count of the file `rel`, -1 for a directory or an ignored path, None when it does not exist."""
+        if self.at is not None:
+            kind = _git(self.repo.root, "cat-file", "-t", f"{self.at}:{rel}", check=False)
+            if kind.returncode == 0:
+                if kind.stdout.strip() != "blob":
+                    return -1
+                return len(_git(self.repo.root, "show", f"{self.at}:{rel}").stdout.splitlines())
+        else:
+            target = self.repo.root / rel
+            if target.is_dir():
+                return -1
+            if target.is_file():
+                return len(target.read_text(encoding="utf-8", errors="replace").splitlines())
+        # A path git ignores is fetched or generated, so it may be absent on this machine and present on the next.
+        return -1 if _git(self.repo.root, "check-ignore", "-q", rel, check=False).returncode == 0 else None
+
+
+def _check_issue(ws: Workspace, issue: Issue, at: str | None = None) -> list[tuple[int, str]]:
+    """The problems of `issue`; with `at`, the issues and files it names are looked up in that commit of its repository."""
     problems = list(issue.errors)
+    resolve = _Resolver(ws, issue.repo, at)
     meta, line = issue.meta, lambda key: issue.key_lines.get(key, 1)
 
     for key, pattern, shape in (("created", _DATE_RE, "yyyy-mm-dd"), ("closed", _DATE_RE, "yyyy-mm-dd"),
@@ -904,15 +957,15 @@ def _check_issue(ws: Workspace, issue: Issue) -> list[tuple[int, str]]:
 
     parent_id = issue.get("parent")
     if parent_id:
-        parent = ws.lookup(parent_id, issue.repo)
-        if parent is None:
+        parent_type = resolve.issue_type(parent_id)
+        if parent_type is None:
             problems.append((line("parent"), f"parent {parent_id} does not exist"))
-        elif parent.type != "epic":
+        elif parent_type != "epic":
             problems.append((line("parent"), f"parent {parent_id} is not an epic"))
         if issue.type == "epic":
             problems.append((line("parent"), "an epic has no parent"))
     for qid in issue.get_list("blocked-by"):
-        if ws.lookup(qid, issue.repo) is None:
+        if resolve.issue_type(qid) is None:
             problems.append((line("blocked-by"), f"blocked-by {qid} does not exist"))
 
     refs = meta.get("refs")
@@ -924,16 +977,16 @@ def _check_issue(ws: Workspace, issue: Issue) -> list[tuple[int, str]]:
             problems.append((line("refs"), f"a ref is `- <kind>: <value>`, kind one of {', '.join(REF_KINDS)}; not {ref!r}"))
             continue
         kind, value = next(iter(ref.items()))
-        if kind == "issue" and ws.lookup(value, issue.repo) is None:
+        if kind == "issue" and resolve.issue_type(value) is None:
             problems.append((line("refs"), f"refs issue {value}, which does not exist"))
         # A closed issue's files may have moved on since, which is history rather than a problem.
         if kind == "file" and not issue.closed:
             rel, first, last = _file_ref(value)
-            target = issue.repo.root / rel
-            if not target.exists():
+            lines = resolve.file_lines(rel)
+            if lines is None:
                 problems.append((line("refs"), f"refs file {rel}, which does not exist"))
             elif first is not None:
-                count = len(target.read_text(encoding="utf-8", errors="replace").splitlines()) if target.is_file() else 0
+                count = max(lines, 0)
                 if not 1 <= first <= last <= count:
                     problems.append((line("refs"), f"refs {value}, but {rel} has {count} lines"))
     return problems
@@ -985,6 +1038,7 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
     q.add_argument("name", help=f"the type ({', '.join(TYPES)}), or the whole id <type>-<slug>")
     q.add_argument("slug", nargs="?", help="the slug, when the first argument is only the type")
     q.add_argument("--in", dest="in_", metavar="DIR", help="the directory owning the issue: DIR/docs/issues/ (default: here)")
+    q.add_argument("--force", action="store_true", help="file it even when DIR is itself a docs/ folder")
     q.add_argument("-t", "--title")
     q.add_argument("--body", help="the description under the title")
     q.add_argument("--priority", choices=PRIORITIES)

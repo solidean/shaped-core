@@ -388,7 +388,7 @@ CNET_IO_TEST("cnet - a half-close ends the sending half and leaves the answer co
     CHECK(wait_for([&] { return ended->is_ready(); }));
     CHECK(ended->try_error() != nullptr);
 
-    // The connection is still open the other way, which is the whole point of half-closing rather than closing.
+    // Half-closing rather than closing leaves the connection open the other way.
     auto const answer = cc::string_view("and here is the answer");
     CHECK(settled_ok(peer->send(bytes_of(answer))));
 

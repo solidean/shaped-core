@@ -184,8 +184,12 @@ def discover_files(root: Path, *, scope: ChangeScope | None, layout: Layout) -> 
 # it: clang-format must never be pointed at a .md, and the two are answering different questions.
 _LINT_SUFFIXES = (".cc", ".hh", ".md", ".py")
 
-# The kinds shaped-linter has prose rules for and nothing else, which is what an extra root's `prose` check takes.
+# The kinds shaped-linter has prose rules for and nothing else.
 _PROSE_ONLY_SUFFIXES = (".md",)
+
+# The kinds whose comments and docstrings an extra root's `prose` check reads, under `--prose-only`: their code follows someone else's style.
+# Wider than _LINT_SUFFIXES, since a prose-only run holds no code rule that a C file, a `.cpp` or a Rust or Lean file could trip.
+_PROSE_COMMENT_SUFFIXES = (".cc", ".hh", ".h", ".c", ".cpp", ".hpp", ".py", ".rs", ".lean")
 
 # Never ours to lint: vendored code, build output, and caches.
 # `archive` holds text kept verbatim on purpose — an original draft beside the document that replaced it.
@@ -211,13 +215,19 @@ def _is_lintable(path: Path, roots: list[Path], root: Path, layout: Layout) -> b
 
 
 def _extra_lint_suffixes(extra: ExtraRoot) -> tuple[str, ...]:
-    """The suffixes an extra root's lint checks take: `prose` is markdown, `code` the languages with code rules."""
+    """The suffixes an extra root's lint checks take: `prose` is markdown and the comments of code, `code` the languages with code rules."""
     suffixes: tuple[str, ...] = ()
     if "prose" in extra.checks:
-        suffixes += _PROSE_ONLY_SUFFIXES
+        suffixes += _PROSE_ONLY_SUFFIXES + _PROSE_COMMENT_SUFFIXES
     if "code" in extra.checks:
-        suffixes += tuple(s for s in _LINT_SUFFIXES if s not in _PROSE_ONLY_SUFFIXES)
+        suffixes += tuple(s for s in _LINT_SUFFIXES if s not in suffixes and s not in _PROSE_ONLY_SUFFIXES)
     return suffixes
+
+
+def prose_only_lint_files(root: Path, files: list[Path], *, layout: Layout) -> set[Path]:
+    """The files of `files` that take shaped-linter's prose rules alone: those of an extra root asking for `prose` but not `code`."""
+    prose_only = [root / r.path for r in layout.extra_roots if "prose" in r.checks and "code" not in r.checks]
+    return {f for f in files if any(r in f.parents for r in prose_only)}
 
 
 def _extra_lint_roots(layout: Layout) -> list[ExtraRoot]:

@@ -313,7 +313,7 @@ webgpu asserts "a rendering scope is still open at submit" ([webgpu_command_list
 - **Dropping the list ends every declaration silently.**
   A drop is what exception unwinding does to a half-recorded list, and a value destroyed later must find its token dead rather than a freed list.
 - **Binding a pipeline or a group does not end it.**
-  This is load-bearing: dx12 and vulkan reset every bound group when a pipeline is bound.
+  Both backends force this: dx12 and vulkan reset every bound group when a pipeline is bound.
   dx12 does it in `dx12_command_list::compute_bind_pipeline` ([dx12_command_list.cc](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_command_list.cc)).
   vulkan does it in `vulkan_command_list::compute_bind_pipeline` ([vulkan_command_list.compute.cc](../../backends/vulkan/src/shaped-graphics/backends/vulkan/vulkan_command_list.compute.cc)).
   The wavefront rebinds the pipeline and the bindless group before every dispatch, so a declaration that ended on a rebind would end at every op.
@@ -709,7 +709,7 @@ A pass declaring its bindless table asserted on a frame whose materials bound on
 P1 and P2 are this alternative's cheap half, and they landed first.
 The rest — running the range and vacancy asserts once per group, dropping the per-declare heap copies — is part of this plan.
 Each is a constant factor on an O(elements × ops) term: even halving the per-element cost leaves tens of ms on a moving Sponza frame.
-It still matters for the first application, every `cover_all`, every writing declaration, and every scalar binding.
+It still speeds up the first application, every `cover_all`, every writing declaration, and every scalar binding.
 
 ## Decisions
 

@@ -6,7 +6,8 @@ Access is inferred from the operation, and the concurrency model lets several co
 
 ## Access is inferred, not declared
 
-There is no public `declare_access`. What a resource is used as follows from the operation:
+There is no public `declare_access`.
+What a resource is used as follows from the operation:
 
 - `cmd.upload` ⇒ `copy_write` on the destination; `cmd.download` ⇒ `copy_read` on the source.
 - `cmd.copy` ⇒ `copy_read` on src plus `copy_write` on dst, and a self-copy is one combined access.
@@ -106,7 +107,17 @@ A texture's layout follows from the access through `native_layout_for`, rather t
 
 Under-declaring corrupts the tracker — sg then believes a state the GPU is not in — so the scope hands out a native
 resource only for a handle it declared, and the debug layer catches the rest.
-dx12 today; vulkan when a member needs it.
+
+`sg::backend::metal::metal_native_scope::open(cmd, textures, buffers)` is the Metal twin, with one difference that follows from MTL4.
+Foreign code there encodes encoders of its own, and a barrier lives inside an encoder, so sg's barriers cannot reach the foreign work.
+The two meet at a fence instead.
+Opening flushes the declares and closes sg's encoder behind an update of the context's scope fence.
+The foreign code waits for that fence before its work and updates it after.
+sg's next encoder waits for it again, once the scope is destroyed, so the scope must go before sg records anything more; an encoder sg opens inside it asserts.
+MetalFX does its half when its effect's `fence` property is the scope's.
+Ending sg's command buffer at the scope instead, so the submission timeline orders the foreign work, would need no fence.
+It is not done because it costs two extra commits per call, and sg's submit, query and download paths all assume a list is one command buffer.
+dx12 and metal today; vulkan when a member needs it.
 See [shaped-rendering's denoising doc](../../../shaped-rendering/docs/reconstruction.md), which is what asked for it.
 
 ## The vocabulary is backend-neutral
@@ -178,7 +189,7 @@ barriers go into the small command buffer prepended to the same `vkQueueSubmit`,
 Whole-image rather than per-subresource, because a list that uses one mip leaves the others where `vkCreateImage` left
 them while the tracker would say otherwise.
 
-Claiming at submit rather than at record is the load-bearing part: a list that recorded second can submit first.
+Claiming at submit rather than at record is required: a list that recorded second can submit first.
 
 **An async upload can claim it too**, and on a fresh texture it usually does: whoever enqueues first wins.
 It claims under the submission lock a list submit takes, and before returning it submits the one barrier on the

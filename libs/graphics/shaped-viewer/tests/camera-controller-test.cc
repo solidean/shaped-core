@@ -201,7 +201,7 @@ TEST("sv - orbit controller focuses on a point by gliding in, never turning")
     CHECK(!c.update(1.0));
     CHECK(c.orbit.target.distance_to(point) < eps);
     auto const approach = c.config.focus_approach;
-    CHECK(approach < 1.0); // the default moves in, which is the point of approaching
+    CHECK(approach < 1.0); // the default moves in rather than holding the distance
     CHECK(abs_of(c.orbit.distance - 3.0 * approach) < eps);
 
     // The view direction is kept, and the eye moved in along it by exactly what it gave up of the depth.

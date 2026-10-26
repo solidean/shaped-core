@@ -111,7 +111,10 @@ lib.read_modules();                         // -> module_library { paths, texts,
                                             //    directory by directory as added, each sorted by name; files() views the two vectors
 // an SGL package adds its own module dirs; every SGL compile, compile_source and compile_hit_group included, sees all of them.
 // a module file a compile reached is a dependency like an include: editing it reloads the shader.
-lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts)
+lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts); does nothing in a frozen build
+// Frozen builds (SC_FROZEN_SHADERS): no source dir mounted, no reload — docs/frozen-shaders.md.
+// SC_SHADER_RECORD=<file> makes a run write a bundle of every shader it obtains; sc_embed_shader_bundle(TARGET exe) embeds
+// <build>/shader-bundles/<exe>.slibbundle, and a request it holds compiles nothing. slib::register_shader_bundle(bytes) is what that calls.
 lib.poll_hot_reload();                      // no-op unless started unthreaded; safe every frame
 lib.is_hot_reloading();                     // -> bool
 lib.generation();                           // -> u64; coarse "some shader changed" (prefer the asset's). Reads the global below

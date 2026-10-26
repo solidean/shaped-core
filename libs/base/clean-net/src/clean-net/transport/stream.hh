@@ -20,7 +20,7 @@
 /// The same type is a socket, an in-process pipe with no network under it, a link that drops records on purpose, and
 /// a TLS session over any of those -- because it is a handle over a `cnet::connection_backend` rather than over a
 /// socket.
-/// That is the whole point of the seam: a test swaps the transport, not the code being tested.
+/// So a test swaps the transport, not the code being tested.
 ///
 /// The `tcp_` names in this header are the ones that really are TCP -- the options a socket is set up with, and the
 /// connect that opens one over the platform's own stack.

@@ -18,7 +18,8 @@ struct particle
 static_assert(sizeof(particle) == 32);
 } // namespace
 
-// Backend-agnostic tests for persistent buffer allocation through `ctx->persistent.create_raw_buffer`. Each is an
+// Backend-agnostic tests for persistent buffer allocation through `ctx->persistent.create_raw_buffer`.
+// Each is an
 // INVOCABLE_TEST run against every available backend (see tests/context/context-test.cc for the mechanism).
 
 INVOCABLE_TEST("sg - allocates a persistent buffer", (sg::context_handle const& ctx))

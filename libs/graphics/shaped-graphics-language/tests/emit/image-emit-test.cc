@@ -208,28 +208,27 @@ TEST("sgl emit - a texel narrows by a swizzle and widens by the target's own vec
     CHECK(dx12.contains("    io_narrow[id.xy] = c.xy;\n"));
     CHECK(dx12.contains("    io_single[id.xy] = c.x;\n"));
     CHECK(dx12.contains("    const uint2 texel = io_flags[id.x];\n"
-                        "    io_wide[id.xy] = uint4(texel.x, texel.y, 0u, 1u);\n"));
-    CHECK(text_of(k_texels, target::hlsl_vulkan).contains("    io_wide[id.xy] = uint4(texel.x, texel.y, 0u, 1u);\n"));
+                        "    io_wide[id.xy] = uint4(texel, 0u, 1u);\n"));
+    CHECK(text_of(k_texels, target::hlsl_vulkan).contains("    io_wide[id.xy] = uint4(texel, 0u, 1u);\n"));
 
     auto const wgsl = text_of(k_texels, target::wgsl);
     CHECK(wgsl.contains("    textureStore(io_narrow, id.xy, vec4f(c.xy, 0.0, 0.0));\n"));
     CHECK(wgsl.contains("    textureStore(io_single, id.xy, vec4f(c.x, 0.0, 0.0, 0.0));\n"));
     CHECK(wgsl.contains("    let texel: vec2u = io_flags[id.x];\n"
-                        "    textureStore(io_wide, id.xy, vec4u(texel.x, texel.y, 0u, 1u));\n"));
+                        "    textureStore(io_wide, id.xy, vec4u(texel, 0u, 1u));\n"));
 
     auto const msl = text_of(k_texels, target::msl);
     CHECK(msl.contains("    io_narrow.write(float4(c.xy, 0.0, 0.0), uint2(id.xy));\n"));
     CHECK(msl.contains("    io_single.write(float4(c.x, 0.0, 0.0, 0.0), uint2(id.xy));\n"));
-    CHECK(msl.contains("    io_wide.write(uint4(texel.x, texel.y, 0u, 1u), uint2(id.xy));\n"));
+    CHECK(msl.contains("    io_wide.write(uint4(texel, 0u, 1u), uint2(id.xy));\n"));
 }
 
 TEST("sgl emit - a texel of an option's format is the texel of the format the compile gave")
 {
     // CHK-390: widened for a four-channel format, on every target
-    CHECK(picked_text(".rgba8_unorm", target::hlsl_dx12)
-              .contains("    io_picked[id.xy] = float4(texel.x, texel.y, 0.0, 1.0);\n"));
+    CHECK(picked_text(".rgba8_unorm", target::hlsl_dx12).contains("    io_picked[id.xy] = float4(texel, 0.0, 1.0);\n"));
     CHECK(picked_text(".rgba8_unorm", target::wgsl)
-              .contains("    textureStore(io_picked, id.xy, vec4f(texel.x, texel.y, 0.0, 1.0));\n"));
+              .contains("    textureStore(io_picked, id.xy, vec4f(texel, 0.0, 1.0));\n"));
     // the value itself for a format of its own width, and its first component for a single channel
     auto const same = picked_text(".rg32_float", target::hlsl_vulkan);
     CHECK(same.contains("[[vk::image_format(\"rg32f\")]] RWTexture2D<float2> io_picked;\n"));

@@ -1036,6 +1036,8 @@ TEST("result - any_error multi-layer context")
 
 TEST("result - source location capture")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     SECTION("any_error construction captures location")
     {
         auto before = cc::source_location::current();

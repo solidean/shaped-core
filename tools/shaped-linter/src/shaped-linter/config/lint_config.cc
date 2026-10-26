@@ -96,9 +96,12 @@ cc::result<include_directive> read_entry(config_document const& doc, isize id, c
                 d.subject = directive_subject::include;
             else if (k == "allow-blocking-wait" || k == "deny-blocking-wait")
                 d.subject = directive_subject::blocking_wait;
+            else if (k == "allow-co-await-temporary" || k == "deny-co-await-temporary")
+                d.subject = directive_subject::co_await_temporary;
             else
                 return cc::error(cc::format("line {}: unknown rule kind '{}' — expected allow-include, deny-include, "
-                                            "allow-blocking-wait or deny-blocking-wait",
+                                            "allow-blocking-wait, deny-blocking-wait, allow-co-await-temporary or "
+                                            "deny-co-await-temporary",
                                             line, k));
             d.allow = k.starts_with("allow-");
             saw_kind = true;
@@ -174,12 +177,22 @@ include_decision lint_config::classify_include(cc::string_view file_path, cc::st
 
 include_decision lint_config::classify_blocking_wait(cc::string_view file_path, cc::string_view name) const
 {
+    return classify_named(directive_subject::blocking_wait, file_path, name);
+}
+
+include_decision lint_config::classify_co_await_temporary(cc::string_view file_path, cc::string_view name) const
+{
+    return classify_named(directive_subject::co_await_temporary, file_path, name);
+}
+
+include_decision lint_config::classify_named(directive_subject subject, cc::string_view file_path, cc::string_view name) const
+{
     auto const needle = lowered(name);
 
     include_decision decision;
     for (auto const& d : include_directives)
     {
-        if (d.subject != directive_subject::blocking_wait)
+        if (d.subject != subject)
             continue;
         auto const rel = path_under(d.base_dir, file_path);
         if (!rel.has_value())
@@ -191,7 +204,7 @@ include_decision lint_config::classify_blocking_wait(cc::string_view file_path, 
         if (!any_glob_matches(d.values, needle))
             continue;
 
-        // Last match wins, exactly as for includes: a library's allowance for one file overrides the blanket deny above it.
+        // Last match wins, exactly as for includes: a narrower allowance overrides the blanket deny above it.
         decision = {.verdict = d.allow ? include_verdict::allowed : include_verdict::denied, .reason = d.reason};
     }
     return decision;

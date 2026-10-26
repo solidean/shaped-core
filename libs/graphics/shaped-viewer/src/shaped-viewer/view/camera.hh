@@ -70,7 +70,8 @@ struct sv::camera_basis
 ///
 /// `orientation` is a unit quaternion mapping the base frame to the camera frame — it sends +x to right,
 /// +y to up, +z to forward (left-handed, forward points into the scene, matching the raygen). Build one from
-/// a look-at with `look_rotation` / `look_at`; the default frames the origin from `position`. The GPU basis is
+/// a look-at with `look_rotation` / `look_at`; the default frames the origin from `position`.
+/// The GPU basis is
 /// baked by `shaders::tracer::camera_record::from`, taking the aspect ratio from `projection`.
 struct sv::camera
 {

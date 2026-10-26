@@ -1,8 +1,13 @@
+#include <clean-core/common/macros.hh> // CC_HAS_THREADS
+#include <clean-core/common/time.hh>
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 
@@ -278,7 +283,7 @@ TEST("async_backlog - a live backlog is findable by name, and a destroyed one is
         CHECK(probe.outstanding == 0);
     }
 
-    // Unregistered on destruction, which is the part that matters: a report walking a dangling entry is worse than
+    // Unregistered on destruction, because a report walking a dangling entry is worse than
     // one reporting nothing.
     CHECK(probe_registry(name).found == 0);
 }
@@ -311,3 +316,88 @@ TEST("async_backlog - an unnamed backlog is still findable, just not attributabl
     CHECK(cc::try_for_each_async_backlog([&](cc::async_backlog const&) { ++seen; }));
     CHECK(seen > 0);
 }
+
+namespace
+{
+cc::shared_async<cc::unit> await_both(cc::shared_async<int> failing, cc::shared_async<int> pending)
+{
+    co_await cc::async_all(failing, pending);
+}
+
+cc::shared_async<cc::unit> await_span(cc::vector<cc::shared_async<int>> deps)
+{
+    co_await cc::async_all(cc::span<cc::shared_async<int> const>(deps));
+}
+} // namespace
+
+// async_all returns on its first failed member; the others run on, awaited by nobody, unless something records them.
+// A tracked node that is settled or cold counts for nothing, so only the pending member is owed.
+// The abandoned work is process-wide, so each test here counts it alone.
+ASYNC_TEST("async backlog - async_all that fails hands its members still running to the abandoned work", exclusive())
+{
+    auto const before = cc::async_abandoned_work().outstanding_count();
+    auto const failing = cc::make_async_from_error<int>(cc::async_error::make_error(cc::any_error("boom")));
+    auto const pending = cc::make_async_manual<int>();
+
+    co_await cc::async_settled(cc::async_start(await_both(failing, pending)));
+    CHECK(cc::async_abandoned_work().outstanding_count() == before + 1);
+
+    auto const pending_too = cc::make_async_manual<int>();
+    auto deps = cc::vector<cc::shared_async<int>>();
+    deps.push_back(failing);
+    deps.push_back(pending_too);
+    co_await cc::async_settled(cc::async_start(await_span(cc::move(deps))));
+    CHECK(cc::async_abandoned_work().outstanding_count() == before + 2);
+
+    pending->push_value(1);
+    pending_too->push_value(2);
+    co_await cc::async_settled(cc::async_abandoned_work().settled());
+    CHECK(cc::async_abandoned_work().outstanding_count() == before);
+}
+
+#if CC_HAS_THREADS
+namespace
+{
+cc::shared_async<cc::unit> await_one(cc::shared_async<int> work)
+{
+    (void)(co_await work);
+}
+} // namespace
+
+// The awaiter parks on work running elsewhere, and its last handle is gone, so it is torn down parked.
+// The work runs on, and only the abandoned work still knows of it.
+TEST("async backlog - a parked awaiter torn down hands the work it awaited, still running, to the abandoned work",
+     nx::config::no_scheduler,
+     exclusive())
+{
+    cc::async_thread_pool pool(2);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+
+    auto const before = cc::async_abandoned_work().outstanding_count();
+    auto entered = cc::atomic<bool>(false);
+    auto release = cc::atomic<bool>(false);
+    auto const work = cc::async_start(cc::make_async_lazy(
+        [&]
+        {
+            entered.store(true);
+            while (!release.load())
+                cc::this_thread_yield();
+            return 1;
+        }));
+    while (!entered.load())
+        cc::this_thread_yield();
+
+    (void)cc::async_start(await_one(work));
+    // bounded only so that a missing hook fails instead of hanging
+    auto const t0 = cc::current_time_steady_secs();
+    while (cc::async_abandoned_work().outstanding_count() == before && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    CHECK(cc::async_abandoned_work().outstanding_count() == before + 1);
+
+    release.store(true);
+    auto const t1 = cc::current_time_steady_secs();
+    while (cc::async_abandoned_work().outstanding_count() > before && cc::current_time_steady_secs() - t1 < 10.0)
+        cc::this_thread_yield();
+    CHECK(cc::async_abandoned_work().outstanding_count() == before);
+}
+#endif

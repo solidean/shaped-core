@@ -55,9 +55,10 @@ TEST("sgl emit - a case that costs one var and no flag")
 {
     // LEGAL-49: the switch ends the block, so leaving an arm is leaving the block, and no flag is needed.
     auto const wgsl = text_of(k_over_enum, target::wgsl);
-    CHECK(wgsl.contains("    var case_result: f32;\n"));
+    // the one var is the let's own, named after it (LEGAL-60)
+    CHECK(wgsl.contains("    var w: f32;\n"));
     CHECK(!wgsl.contains("_left"));
-    CHECK(wgsl.contains("    let w: f32 = case_result;\n"));
+    CHECK(!wgsl.contains("case_result"));
 }
 
 TEST("sgl emit - an arm with several patterns is one comma list in WGSL and one label per value elsewhere")

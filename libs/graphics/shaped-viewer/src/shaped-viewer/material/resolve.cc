@@ -185,7 +185,7 @@ void warn_unservable_once(cc::string_view name, attribute_frequency f, geometry_
 
         // `final` stops the walk whether or not the sample itself was usable.
         // A binding the mesh carries no uv set for still refuses the mesh's texture, and what stands is the coarser rank that
-        // had won — which is the whole point of refusing a texture we know to be bad.
+        // had won, rather than a texture we know to be bad.
         if (binding->is_final)
             return winner;
     }

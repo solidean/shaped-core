@@ -42,7 +42,7 @@ struct cc::process_usage
 
     /// The highest `resident_bytes` ever reached, as the OS tracked it.
     ///
-    /// **Read from the OS rather than derived from samples**, and that is the point of having it.
+    /// **Read from the OS rather than derived from samples.**
     /// No sampling cadence can reconstruct a true peak: a spike between two samples simply never happened as far as the
     /// samples are concerned.
     i64 peak_resident_bytes = 0;

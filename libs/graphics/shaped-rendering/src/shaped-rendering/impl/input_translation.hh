@@ -8,7 +8,7 @@
 /// Internal: this header names SDL types, so it lives under impl/ and is not part of the public header set.
 /// Nothing outside shaped-rendering's own sources and tests may include it — see docs/coding-guidelines.md.
 ///
-/// These are pure functions of their arguments, which is the whole point.
+/// These are pure functions of their arguments, so a test needs nothing else to drive them.
 /// The mapping is the part most likely to be wrong (a hundred table entries, two sign conventions) and the part
 /// least able to be reached through the public API, so it is tested here rather than through a live window.
 

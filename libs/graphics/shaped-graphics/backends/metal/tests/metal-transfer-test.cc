@@ -2,6 +2,7 @@
 
 #include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
@@ -328,9 +329,9 @@ ASYNC_TEST("sg metal - concurrent submits on one buffer see each other's writes"
     auto const buffer = ctx->persistent.create_raw_buffer(k_threads * isize(sizeof(u32)),
                                                           k_copy_both | sg::buffer_usage::readwrite_buffer);
 
-    auto threads = cc::vector<std::thread>::create_with_capacity(k_threads);
+    auto threads = cc::vector<cc::native_thread>::create_with_capacity(k_threads);
     for (auto i = 0; i < k_threads; ++i)
-        threads.emplace_back(
+        threads.push_back(cc::native_thread::start(
             [&, i]
             {
                 auto const value = u32(i + 1);
@@ -339,7 +340,7 @@ ASYNC_TEST("sg metal - concurrent submits on one buffer see each other's writes"
                 // No CHECK on a spawned thread: it would not be attributed to the running test, and what is proven is
                 // the aggregate read back below.
                 ctx->submit_command_list(cc::move(cmd));
-            });
+            }));
 
     for (auto& t : threads)
         t.join();

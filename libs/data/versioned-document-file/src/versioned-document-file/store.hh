@@ -253,8 +253,8 @@ public:
 
     /// Adds a newly built op to the document.
     ///
-    /// It becomes reachable — and therefore publishable — only once a ref is moved onto it, which is the whole point
-    /// of deriving the op set from the refs.
+    /// It becomes reachable — and therefore publishable — only once a ref is moved onto it, because the op set is
+    /// derived from the refs.
     /// Idempotent, since the graph is keyed by content hash.
     vdoc::op_id add_op(vdoc::op op) { return _ops.add(cc::move(op)); }
 

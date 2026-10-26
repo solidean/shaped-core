@@ -227,7 +227,7 @@ CC_COLD_FUNC void node_allocation_free_large(byte* ptr, node_class_index idx);
 /// The owning thread frees non-atomically into local; a genuinely remote thread atomic_ors into the slab's remote bitmap, which the owner drains on underflow.
 /// A single-threaded build always takes the plain path.
 ///
-/// A free function rather than a node_memory_resource member, and that is the point: freeing needs only the pointer and the class index, so it can never depend on the resource.
+/// A free function rather than a node_memory_resource member: freeing needs only the pointer and the class index, so it can never depend on the resource.
 /// That is what makes cross-thread deallocation stateless — see libs/base/clean-core/docs/systems/node-allocation.md.
 CC_FORCE_INLINE void node_allocation_free(byte* ptr, node_class_index idx)
 {

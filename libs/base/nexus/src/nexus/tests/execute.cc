@@ -502,6 +502,8 @@ cc::mutex<cc::vector<cc::unique_ptr<test_context>>> g_leaked_contexts;
 // When non-null, check results are tallied here instead of being recorded on the active test
 // (see nx::impl::scoped_check_capture). Only the innermost installed sink is active.
 thread_local nx::impl::check_capture_sink* g_check_capture = nullptr;
+// The test that installed g_check_capture, or null where none runs; only its checks are captured.
+thread_local void const* g_check_capture_owner = nullptr;
 
 // Does one scope (a single filter path) permit `section_name` opening at the current section path?
 bool scope_allows(cc::span<test_section* const> curr_section,
@@ -922,8 +924,7 @@ void report_orphan_check(impl::check_result result, cc::string_view why)
     g_orphan_checks.fetch_add(1, cc::memory_order_relaxed);
 
     auto expanded = render_expanded(result);
-    cc::eprintln("nexus: unattributed check at {}:{}: {} ({})", result.location.file_name(), result.location.line(),
-                 expanded, why);
+    cc::eprintln("nexus: unattributed check at {}: {} ({})", nx::impl::site_text(result.location), expanded, why);
 
     g_orphan_errors.lock(
         [&](cc::vector<nx::test_error>& errors)
@@ -1507,15 +1508,16 @@ nx::impl::raii_section_opener::~raii_section_opener()
 }
 
 nx::impl::scoped_check_capture::scoped_check_capture(check_capture_sink& sink)
+  : _previous_sink(g_check_capture), _previous_owner(g_check_capture_owner)
 {
-    // Nesting is not supported: a flat pointer keeps the hot path cheap, and the fuzz engine never nests captures.
-    CC_ASSERT(g_check_capture == nullptr, "nested check captures are not supported");
     g_check_capture = &sink;
+    g_check_capture_owner = current_context();
 }
 
 nx::impl::scoped_check_capture::~scoped_check_capture()
 {
-    g_check_capture = nullptr;
+    g_check_capture = _previous_sink;
+    g_check_capture_owner = _previous_owner;
 }
 
 nx::impl::scoped_test_check_divert::scoped_test_check_divert(async_check_capture_sink& sink) : _ctx(current_context())
@@ -1837,7 +1839,8 @@ void nx::impl::report_check_result(check_result result)
     // Capture mode: a tool such as the fuzz engine is driving user code that is expected to fail often.
     // Tally the outcome and suppress both the host-test side effects and the control-flow throws (REQUIRE/SKIP).
     // One failing operation then neither aborts nor pollutes the host test.
-    if (g_check_capture != nullptr)
+    // Only the capturing test's own checks: another test's body polled on this thread while it blocks is not its to swallow.
+    if (g_check_capture != nullptr && current_context() == g_check_capture_owner)
     {
         auto& sink = *g_check_capture;
         ++sink.executed;
@@ -1908,8 +1911,8 @@ void nx::impl::report_check_result(check_result result)
     {
         // Recorded before the divert, so an off-thread failure reaches the test's `.ccrec` like any other.
         if (!result.passed && result.op != cmp_op::skip && is_outermost_execution())
-            CC_LOG_ERROR("check failed off-thread: {} — {} at {}:{}", result.expr, render_expanded(result),
-                         result.location.file_name(), result.location.line());
+            CC_LOG_ERROR("check failed off-thread: {} — {} at {}", result.expr, render_expanded(result),
+                         nx::impl::site_text(result.location));
 
         report_off_thread_check_result(ctx, cc::move(result));
         return;
@@ -1937,11 +1940,10 @@ void nx::impl::report_check_result(check_result result)
         // under test recorded around it — which is what a failing run's .ccrec is for.
         //
         // Only FAILURES reach here: a passing check returns above, and the fuzz engine's capture sink diverts long
-        // before this, which matters when one fuzz test evaluates tens of millions of them.
+        // before this, so a fuzz test evaluating tens of millions of them never pays for it.
         // A nested run is excluded too — see g_execution_depth.
         if (is_outermost_execution())
-            CC_LOG_ERROR("check failed: {} — {} at {}:{}", result.expr, expanded, result.location.file_name(),
-                         result.location.line());
+            CC_LOG_ERROR("check failed: {} — {} at {}", result.expr, expanded, nx::impl::site_text(result.location));
 
         // Add test error
         ctx.errors.push_back(test_error{
@@ -2537,6 +2539,8 @@ cc::shared_async<cc::unit> make_test_node(nx::test_execution* execution,
     auto const& test_config = execution->instance.declaration->test_config;
     CC_ASSERT(test_config.exclusion_tag_count <= nx::config::max_exclusion_tags,
               "a test asked for more exclusion tags than nx::config::max_exclusion_tags holds");
+    CC_ASSERT(test_config.rerun_on_count <= nx::config::max_rerun_on_globs, "a test asked for more rerun_on globs than "
+                                                                            "nx::config::max_rerun_on_globs holds");
 
     cc::vector<cc::async_mutex<cc::unit>*> tag_locks;
     {
@@ -3283,4 +3287,12 @@ u64 nx::test_seed()
 cc::random nx::test_random()
 {
     return cc::random(nx::test_seed());
+}
+
+cc::string nx::impl::site_text(cc::source_location const& location)
+{
+    if constexpr (CC_SOURCE_SITES == 2)
+        return cc::format("{}:{}", location.file_name(), location.line());
+    else
+        return cc::describe_site(location);
 }

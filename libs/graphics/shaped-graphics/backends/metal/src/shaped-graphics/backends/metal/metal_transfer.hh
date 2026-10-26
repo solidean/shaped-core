@@ -14,7 +14,7 @@
 /// The off-frame transfer path: a second MTL4 queue, its own timeline, and the ordering that makes a command list and
 /// an async copy of the same resource compose.
 ///
-/// **A second queue is the whole point.**
+/// **It runs on a second queue.**
 /// An async transfer exists so a large upload does not sit in the frame's queue behind the frame, and sg's contract is
 /// that it never blocks the caller.
 /// Metal makes the queue itself cheap — `newMTL4CommandQueue` again — so what costs something is the ordering, not the

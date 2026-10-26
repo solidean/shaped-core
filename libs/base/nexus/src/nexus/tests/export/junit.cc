@@ -74,7 +74,7 @@ void emit_testcase(cc::string& out, cc::string const& suite, nx::test_execution 
                     body += " => ";
                     body += error->expanded;
                 }
-                body.appendf(" at {}:{}\n", error->location.file_name(), error->location.line());
+                body.appendf(" at {}\n", nx::impl::site_text(error->location));
             }
             out += xml_escape(body);
         }

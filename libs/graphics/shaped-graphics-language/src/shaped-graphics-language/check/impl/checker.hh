@@ -51,6 +51,9 @@ struct suffixed_number
 /// until the type it meets is known (CHK-61).
 [[nodiscard]] cc::optional<i64> parse_literal_integer(cc::string_view text);
 
+/// Whether the number literal `text` is written in hex, suffixed or not.
+[[nodiscard]] bool is_hex_literal(cc::string_view text);
+
 /// A name of the function being checked: its parameters, then the locals in scope, in source order.
 struct local_name
 {
@@ -657,6 +660,9 @@ struct checker
     [[nodiscard]] cc::string vector_name_of(type_id element, isize count) const;
     /// The swizzle `name` is of a value of `object`, a count of zero where it is none (CHK-385).
     [[nodiscard]] swizzle swizzle_of(type_id object, cc::string_view name) const;
+    /// The type of one lane of `object` where it is a vector a subscript reads a lane of: a swizzled struct whose every
+    /// field has one type (CHK-395); `none` for any other type.
+    [[nodiscard]] type_id lane_type_of(type_id object) const;
     /// What an unknown member of a `@swizzle` struct says about its letters; empty for any other type.
     [[nodiscard]] cc::string why_no_swizzle(type_id object, cc::string_view name) const;
     /// `buffer[element]`, or its `mut` form, interned: two mentions of one buffer type share an id.
@@ -859,6 +865,10 @@ struct checker
     void check_test(i32 index);
     /// The flat tree of test `index`, when it checked soundly and all it reaches inlines whole (flatten.cc).
     void flatten_test(i32 index);
+    /// Every module-level name as `out.symbols` now holds them, the last of `out.module_names`, made anew only when a
+    /// symbol joined since `module_names_for`.
+    [[nodiscard]] cc::set<cc::string> const* module_names();
+    isize module_names_for = -1;
     /// True where the parser or the AST pass reported an error inside `extent` of `file`.
     [[nodiscard]] bool has_syntax_error_in(i32 file, source_span extent) const;
     /// The statement that is the last code line of `statements`, through the last branch of an `if`, a loop's body and
@@ -875,6 +885,8 @@ struct checker
     /// `img[xy]`, a texel of `image`: the `load` it reads as, or the place an assignment stores to (CHK-367); or the
     /// atomic of an `@atomic` image's texel (CHK-373).
     [[nodiscard]] type_id check_texel(function_scope& scope, ast::expr_id id, ast::index const& node, type_id image);
+    /// `v[i]`, one lane of the vector `vector`, of type `lane` (CHK-395).
+    [[nodiscard]] type_id check_lane(function_scope& scope, ast::index const& node, type_id vector, type_id lane);
     /// The `store` of an assignment to the texel `check_texel` left in `texel_place`, with `value` of `type` stored.
     void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
@@ -993,8 +1005,13 @@ struct checker
     [[nodiscard]] bool holds(number_literal const& n, type_id to) const;
     /// The prelude's `float`, `int` or `uint` by name, as a literal's conversion knows them; `none` for another name.
     [[nodiscard]] type_id prelude_type(cc::string_view name) const;
-    /// What a number literal `expr` holds; `is_number` is false for any other expression.
+    /// What a number literal `expr` holds, or an operator over number literals alone folds to (CHK-394); `is_number`
+    /// is false for any other expression.
     [[nodiscard]] number_literal number_of(i32 file, ast::expr_id expr) const;
+    /// Whether the operator call `expr` resolved to a builtin of the prelude, which alone CHK-394 folds.
+    [[nodiscard]] bool calls_prelude_operator(i32 file, ast::expr_id expr) const;
+    /// What a comparison of number literals alone folds to (CHK-394); none for any other expression.
+    [[nodiscard]] cc::optional<bool> comparison_of(i32 file, ast::expr_id expr) const;
     /// The elements of tuple or object literal `expr`, checked where they are no literal themselves, into `literals`.
     [[nodiscard]] i32 shape_literal(function_scope& scope, ast::expr_id expr);
     /// Converts literal `expr`, shaped as `literal`, to `to` by a call of `to`'s name (CHK-81, CHK-85).

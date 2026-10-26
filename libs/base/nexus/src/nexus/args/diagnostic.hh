@@ -82,7 +82,7 @@ struct nx::args_render_options
 
 /// What a parse concluded, and what the process should do about it.
 ///
-/// The whole point of the three-state shape is that `--help` is neither success nor failure: it means the
+/// Three states, because `--help` is neither success nor failure: it means the
 /// program did what was asked and should exit zero, which a bool return cannot express.
 ///
 ///     if (auto const r = args.parse(argc, argv); r.should_exit())

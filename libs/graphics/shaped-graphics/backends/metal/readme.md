@@ -370,7 +370,7 @@ A hit reports its distance, a miss reports −1, and a payload nothing wrote sta
 
 The any-hit test is the pair of the one above it rather than a standalone assertion.
 Opaque geometry reports a hit and the identical non-opaque geometry with a rejecting any-hit reports a miss, so nothing but the function could have changed the answer.
-That matters because traversal consults no any-hit function on opaque geometry at all.
+Traversal consults no any-hit function on opaque geometry at all.
 
 Writing them found real defects that compiled cleanly.
 `dispatch_rays` never set the argument table on its encoder, and its threadgroup shape ignored the grid — which Metal rejects rather than trims.

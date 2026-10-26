@@ -129,7 +129,7 @@ Every ordering question has to go through `transform_is_subclass`.
 The lattice laws — idempotence, commutativity, and that the join is the *least* upper bound — are proven exhaustively by a `consteval` sweep in `tests/transform/transform-flags-test.cc`.
 That test is the foundation the widening constructor and every dispatch branch rest on.
 
-### Widening is explicit, and that is load-bearing
+### Widening is explicit, and must stay so
 
 Converting a `rigid_transform` to an `affine_transform` is lossless, so an implicit conversion looks harmless.
 It is not.
@@ -175,7 +175,8 @@ It is the wrong trade.
   With `{quat, T}` the invariant `|q| ≡ 1` can be restored after a long chain of compositions.
   Folded, drift in `|q|` is indistinguishable from a legitimate change of scale, so there is nothing left to restore.
 - At `s → 0` the folded quaternion loses the rotation irrecoverably.
-- `tg::quat`'s own `operator*(quat, vec)` is written in the unit-only form, correct only when `w² + |u|² = 1`. A folded value would be a different thing wearing `quat`'s clothes.
+- `tg::quat`'s own `operator*(quat, vec)` is written in the unit-only form, correct only when `w² + |u|² = 1`.
+  A folded value would be a different thing wearing `quat`'s clothes.
 
 The saving would have been four bytes and roughly no arithmetic.
 Because the table lives in `tg::impl`, the decision is reversible per dimension without an API change.
@@ -264,7 +265,7 @@ Public is right here, and not a violation of the private-plus-friend rule below.
 That rule exists so a transform cannot quietly override the answer for an object it was not written for.
 `composed_transform` gives exactly the answer its parts give, for anything they can answer for.
 
-The return type is the whole point: it says at compile time whether you got a fused transform or a pair.
+The return type says at compile time whether you got a fused transform or a pair.
 The cost of the pair is real — an object is transformed twice and passes through whatever intermediate type the inner step produced — so `compose` reaches for the fused form first, always.
 
 **There is deliberately no `operator*`.** A transform is applied, not multiplied, and once `*` means composition a reader expects `t * p` to mean application — which tg does not have, on purpose.

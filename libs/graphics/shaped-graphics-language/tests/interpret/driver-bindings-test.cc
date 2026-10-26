@@ -86,34 +86,23 @@ TEST("sgl driver bindings - what the driver leaves out is zero, and a buffer it 
              "0 elements\n");
 }
 
-TEST("sgl driver bindings - determinant of the mat4 a driver binds, column by column")
+TEST("sgl driver bindings - a mat4 a driver binds is its 16 floats column by column, as mat4(c0, c1, c2, c3) is")
 {
-    // EVAL-98; SGL has no mat4 constructor yet, so the matrices come from the driver, a column at a time
     auto const bindings = sgl::check::driver_bindings{
         .groups = {{
             .name = "m",
-            .members = {
-                {.name = "identity", .bytes = floats(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)},
-                {.name = "diagonal", .bytes = floats(2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 0, 0, 0, 5)},
-                // its first and third columns are equal
-                {.name = "repeated", .bytes = floats(1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 9, 1, 2, 3)},
-                // hand-computed by cofactor expansion along the first column: 1 * 1 + 2 * 4 - 1 * 1
-                {.name = "general", .bytes = floats(1, 0, 2, 1, 2, 1, 0, 1, 0, 4, 1, 0, 3, 1, 0, 2)},
-                // `general` with its first two columns swapped
-                {.name = "swapped", .bytes = floats(2, 1, 0, 1, 1, 0, 2, 1, 0, 4, 1, 0, 3, 1, 0, 2)},
-            },
+            .members = {{.name = "general", .bytes = floats(1, 0, 2, 1, 2, 1, 0, 1, 0, 4, 1, 0, 3, 1, 0, 2)}},
         }}};
-    auto const source = cc::string("binding m:\n"
-                                   "    identity: mat4\n"
-                                   "    diagonal: mat4\n"
-                                   "    repeated: mat4\n"
-                                   "    general: mat4\n"
-                                   "    swapped: mat4\n"
-                                   "test {m}:\n    determinant(m.identity) == 1.0\n"
-                                   "test {m}:\n    determinant(m.diagonal) == 120.0\n"
-                                   "test {m}:\n    determinant(m.repeated) == 0.0\n"
-                                   "test {m}:\n    determinant(m.general) == 8.0\n"
-                                   "test {m}:\n    determinant(m.swapped) == -8.0\n");
+    auto const source
+        = cc::string("binding m:\n"
+                     "    general: mat4\n"
+                     "test {m}:\n    (m.general * float4(0.0, 1.0, 0.0, 0.0)) == float4(2.0, 1.0, 0.0, 1.0)\n"
+                     "test {m}:\n"
+                     "    let a = float4(1.0, 0.0, 2.0, 1.0)\n"
+                     "    let b = float4(2.0, 1.0, 0.0, 1.0)\n"
+                     "    let c = float4(0.0, 4.0, 1.0, 0.0)\n"
+                     "    let d = float4(3.0, 1.0, 0.0, 2.0)\n"
+                     "    determinant(m.general) == determinant(mat4(a, b, c, d))\n");
     CHECK(driven_failures_of(source, bindings) == "");
 }
 

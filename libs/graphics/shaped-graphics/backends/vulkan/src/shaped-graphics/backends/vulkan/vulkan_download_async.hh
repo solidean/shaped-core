@@ -70,7 +70,7 @@ struct sg::backend::vulkan::vulkan_async_download_job
     ///
     /// `family` is the ordering constraint the scheduler enforces: two readbacks of one source must run in `sequence`
     /// order, because their completion values were reserved in that order and a timeline only moves forwards.
-    /// Across families the order is free, which is the whole point — a large readback no longer holds up a small one
+    /// Across families the order is free, so a large readback no longer holds up a small one
     /// behind it.
     u64 family = 0;
     u64 sequence = 0;

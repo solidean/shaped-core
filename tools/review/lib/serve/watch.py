@@ -93,7 +93,7 @@ class Watcher:
             try:
                 current = compute_digest(self.paths)
             except Exception:
-                # The poll thread outliving a transient read failure is the whole point of catching here.
+                # Caught so the poll thread outlives a transient read failure.
                 continue
             if current != self.digest:
                 self.digest = current

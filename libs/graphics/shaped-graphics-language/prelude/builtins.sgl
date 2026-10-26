@@ -1049,6 +1049,10 @@
 @builtin @pure @operator("*") fun transform_float4(m: mat4, v: float4) -> float4
 @builtin @pure @operator("*") fun multiply_mat4(m: mat4, b: mat4) -> mat4
 
+// a matrix of its four columns
+/// `c0` to `c2` are where the axes go, and `c3` is where the origin goes.
+@builtin @pure fun mat4(c0: float4, c1: float4, c2: float4, c3: float4) -> mat4
+
 // what a matrix is on its own; every target has it under this name
 /// The factor `m` scales a volume by, negative where it mirrors and 0 where it flattens one.
 @builtin @pure fun determinant(m: mat4) -> float

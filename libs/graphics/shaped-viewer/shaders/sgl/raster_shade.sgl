@@ -90,7 +90,7 @@ fun corner_of(vertex: int){drawn, tracer.bindless, draw} -> varyings:
 fun pixel_context(p: varyings){drawn, tracer.bindless} -> material.shading_context:
     let inst = scene.instance(..drawn.instances[p.instance as int])
     let indices = inst.indices as int
-    return material.make_context(inst, tracer.bindless.buffers[nonuniform indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
+    return material.make_context(inst, tracer.bindless.buffers[indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
 
 /// Whether a cutout material removes this pixel, read through `tracer.instance_opacity` as the tracer's any-hit reads it.
 ///

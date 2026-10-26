@@ -1,0 +1,18 @@
+// MetalFX's result copied into the caller's output, built by sr::impl::metalfx_passes for both MetalFX routines.
+// MetalFX writes only to a texture it may render to and write from a shader, so an output without both usages gets an image of the routine's own that has them.
+// This copies it across; metalfx_passes compiles one variant per output format it stages.
+
+require extended_image_formats
+
+// the output's format
+@option const output_format: pixel_format = .rgba16_float
+
+binding metalfx_copy_out_io:
+    @unfilterable
+    source: texture_2d[float4]
+    target: out image_2d[output_format]
+
+@compute(8, 8) fun main_cs(@thread_id id: int3){metalfx_copy_out_io}:
+    if any(id.xy >= metalfx_copy_out_io.target.size()) => return
+
+    metalfx_copy_out_io.target[id.xy] = metalfx_copy_out_io.source.load(id.xy) as texel[output_format]

@@ -15,7 +15,8 @@ constexpr f32 k_y20 = 0.3153916f; // Y(2,0)/(3z^2 - 1)
 constexpr f32 k_y22 = 0.5462742f; // Y(2,2)/(x^2 - y^2)
 
 // Zonal coefficients of the clamped cosine max(0, cos t), already folded with the sqrt(4pi / (2l + 1)) of the
-// zonal-harmonics rotation — so a lobe aimed at `d` is just `zh_l * Y_lm(d)`. Band 3 is exactly zero, band 4 is not:
+// zonal-harmonics rotation — so a lobe aimed at `d` is just `zh_l * Y_lm(d)`.
+// Band 3 is exactly zero, band 4 is not:
 // this is the standard truncation, not an exact representation.
 constexpr f32 zh_cos0 = 3.1415927f; // pi
 constexpr f32 zh_cos1 = 2.0943951f; // 2 pi / 3

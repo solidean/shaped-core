@@ -40,7 +40,8 @@ constexpr bool stream_can_write(stream_access a)
     return a == stream_access::write || a == stream_access::read_write;
 }
 
-/// True if a stream of access `from` may narrow to access `to`. read_write drops to read or write; the leaf
+/// True if a stream of access `from` may narrow to access `to`.
+/// read_write drops to read or write; the leaf
 /// levels read/write never convert into one another.
 constexpr bool stream_access_narrows(stream_access from, stream_access to)
 {

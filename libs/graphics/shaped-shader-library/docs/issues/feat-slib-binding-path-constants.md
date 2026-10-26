@@ -1,5 +1,6 @@
 ---
-created: 2026-10-20
+created: 2026-10-15
+priority: someday
 refs:
   - symbol: sg::bindless_array::for_binding
 ---

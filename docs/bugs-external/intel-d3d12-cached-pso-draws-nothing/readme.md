@@ -40,7 +40,7 @@ The pipeline is the same object in both processes, so a restore that differs fro
 The debug layer, GPU-based validation included, reports no error on either run, so the pipeline is not a misuse a validation layer can see.
 Under GPU-based validation the restore draws, presumably because the patched shaders take another path through the cache.
 
-## What is load-bearing
+## What the bug needs
 
 Found by cutting shaped-core's own pipeline down in a harness of this shape, first by hand, then mechanically:
 

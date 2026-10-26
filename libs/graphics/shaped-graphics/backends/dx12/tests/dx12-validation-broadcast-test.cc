@@ -10,7 +10,7 @@
 
 // Does D3D12 hand one debug-layer message to every callback on the device that raised it, and to no other device's?
 //
-// Both halves are load-bearing for the backend's logging: without listeners, a message is logged once per device by the
+// The backend's logging relies on both halves: without listeners, a message is logged once per device by the
 // oldest context on it that has none — see dx12_context::set_message_callback.
 // Two contexts on one adapter share a device, which is why the message crosses between them; WARP and hardware do not.
 

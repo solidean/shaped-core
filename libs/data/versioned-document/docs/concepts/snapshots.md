@@ -92,7 +92,7 @@ Two kinds, and the distinction has to be visible everywhere one is touched:
 
 - **droppable** (`required = 0`) — a cache like any other.
   Deleting the row leaves the document materializable, just more slowly, and one that will not decode is a load issue naming its op.
-- **required** (`required = 1`) — **load-bearing**.
+- **required** (`required = 1`) — **the only copy**.
   The history behind this op is gone, so deleting the row destroys data, and one that will not decode fails the open outright.
 
 A required snapshot is **pinned** in the cache, so a tool shedding cache memory cannot reach it.

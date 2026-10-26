@@ -205,7 +205,8 @@ void check(lint_context& ctx)
         auto payload = fix_payload(ctx, v);
 
         // Replace `declarator{…}` (from the end of the whole declarator through the closing brace) with
-        // `declarator = …`. Starting at the declarator-id instead would swallow an array bound.
+        // `declarator = …`.
+        // Starting at the declarator-id instead would swallow an array bound.
         auto const edit = text_edit{
             .span
             = {.file_id = v.declarator.file_id, .byte_begin = v.declarator.byte_end, .byte_end = v.init_span.byte_end},

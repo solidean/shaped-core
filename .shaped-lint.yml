@@ -47,10 +47,6 @@ rules:
     value: <limits>
     reason: no cc:: numeric limits yet
 
-  - kind: allow-include
-    value: <thread>
-    reason: no cc:: thread type — clean-core/thread/thread.hh is helpers only. Prefer cc::threaded_actor or cc::async over a raw thread either way
-
   # =========================================================================================================
   # Denied, with the replacement named
   # =========================================================================================================
@@ -68,6 +64,10 @@ rules:
   - kind: deny-include
     value: [<string>, <string_view>]
     reason: use cc::string / cc::string_view
+
+  - kind: deny-include
+    value: <thread>
+    reason: work goes to cc::async or a cc::threaded_actor; what must own an OS thread starts a cc::native_thread, whose stack is 8 MiB on every platform rather than the platform's default. Yield and sleep are cc::this_thread_yield / cc::this_thread_sleep_secs
 
   - kind: deny-include
     value: <chrono>

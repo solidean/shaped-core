@@ -49,6 +49,7 @@ constexpr tg::vec4f clear_color = tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
         [](sr::mouse_move_event const& m) { return result_t(m.cursor_pos); },   //
         [](sr::mouse_button_event const& b) { return result_t(b.cursor_pos); }, //
         [](sr::mouse_wheel_event const& w) { return result_t(w.cursor_pos); },  //
+        [](sr::file_drop_event const& d) { return result_t(d.cursor_pos); },    //
         [](sr::key_event const&) { return result_t(); },                        //
         [](sr::text_event const&) { return result_t(); });
 }
@@ -390,6 +391,13 @@ isize viewer::pending_resource_work() const
 isize viewer::streaming_resources() const
 {
     return _impl->resources.settling_count();
+}
+
+cc::span<sr::input_event const> viewer::input_events() const
+{
+    if (_impl->window_system == nullptr)
+        return {};
+    return _impl->window_system->events();
 }
 
 cc::shared_async<cc::unit> viewer::background_work()
@@ -751,9 +759,11 @@ frame viewer::acquire_frame()
     // Sampled once, here, so every view in the frame sees the same instant.
     // The first drawn frame has no predecessor, so its delta is 0 rather than the loop's start-up cost, and it is also
     // where the elapsed clock starts — a hand-driven loop opens with begin_frame and nothing else.
-    auto const now = cc::current_time_steady_secs();
+    // A capture shows its request's instant instead of the wall clock's, so it renders the same image on any machine.
+    auto const capturing = im.capture != nullptr;
+    auto const now = capturing ? im.capture->seconds() : cc::current_time_steady_secs();
     if (im.frame_index == 0)
-        im.start_time = now;
+        im.start_time = capturing ? 0.0 : now;
     auto const delta = im.frame_index == 0 ? 0.0 : now - im.last_frame_time;
     im.last_frame_time = now;
     ++im.frame_index;
@@ -1220,6 +1230,49 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     if (!settled && !session.is_out_of_time())
         return;
 
+    auto const write = [&](cc::string const& path)
+    {
+        // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
+        CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
+
+        auto const failure
+            = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
+        if (failure.has_error())
+            CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
+        else if (!failure.value().empty())
+            CC_LOG_ERROR("capture: {}", failure.value());
+    };
+
+    // A sequence writes every frame to its own path, settled or not, since a sequence with a hole cannot be encoded.
+    // A frame that ran out of time is warned about as it is written, and counted again once the run ends.
+    if (session.request().is_sequence())
+    {
+        if (session.writes_frame())
+        {
+            if (!settled)
+            {
+                session.note_unsettled_frame();
+                CC_LOG_WARNING("capture: frame {} gave up after {}s at {}/{} samples per pixel{}",
+                               session.frame_index(), session.elapsed_seconds(), lowest, session.request().accumulate,
+                               held.empty() ? cc::string() : cc::format(", held for {}", held));
+            }
+            write(sr::capture_frame_path(session.request().output_path, session.frame_index()));
+        }
+
+        if (!session.is_last_frame())
+        {
+            session.advance_frame();
+            return;
+        }
+
+        if (session.unsettled_frames() > 0)
+            CC_LOG_WARNING("capture: {} of the sequence's written frames ran out of time before they settled",
+                           session.unsettled_frames());
+        session.mark_done();
+        request_close();
+        return;
+    }
+
     if (settled)
         session.mark_settled_before_writing();
 
@@ -1236,14 +1289,7 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
                        held.empty() ? cc::string() : cc::format(", held for {}", held), path,
                        session.request().output_path);
 
-    // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
-    CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
-
-    auto const failure = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
-    if (failure.has_error())
-        CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
-    else if (!failure.value().empty())
-        CC_LOG_ERROR("capture: {}", failure.value());
+    write(path);
 
     session.mark_done();
     request_close();

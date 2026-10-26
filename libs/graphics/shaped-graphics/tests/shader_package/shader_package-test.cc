@@ -12,7 +12,7 @@
 #include <sg_test_shaders.hh>
 
 // A *consumer* of shaped-graphics declaring its own shaders.
-// That is the whole point: sg does not depend on the shader library, only this test binary does.
+// sg does not depend on the shader library, only this test binary does.
 // Yet a shader declared here builds and resolves against the very context sg handed us.
 //
 // Only built where a shader compiler exists (SC_HAS_DXC_COMPILER); the shader library's own tests cover

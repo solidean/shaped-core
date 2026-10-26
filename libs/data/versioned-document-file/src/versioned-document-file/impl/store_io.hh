@@ -57,7 +57,7 @@ public:
 
 /// Writes one publish, as one transaction.
 ///
-/// The order the publisher calls these in is load-bearing: refs move LAST, so they are only visible once everything
+/// The order the publisher calls these in is fixed: refs move LAST, so they are only visible once everything
 /// they reach is in the same transaction.
 class store_writer
 {

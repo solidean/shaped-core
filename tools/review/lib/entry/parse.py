@@ -189,7 +189,7 @@ class Entry:
         """Every question this entry poses, the synthetic acknowledgement included.
 
         Downstream code counts, answers and reports asks without caring which kind it has,
-        which is the point: an acknowledgement is progress in exactly the way an answer is.
+        because an acknowledgement is progress in the same way an answer is.
 
         A superseded ask is not among them: it has been retired, and only one that was never answered may be.
         """

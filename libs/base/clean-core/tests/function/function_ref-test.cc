@@ -670,6 +670,23 @@ TEST("function_ref - construction from a plain function")
     CHECK(stored() == 42);
 }
 
+TEST("function_ref - a function pointer is held by value, so a registration built from `&f` outlives the statement")
+{
+    struct registration
+    {
+        cc::function_ref<int()> hook;
+    };
+
+    // `&forty_two` is a temporary pointer that dies at the end of this statement
+    auto const r = registration{.hook = &forty_two};
+    CHECK(r.hook() == 42);
+
+    auto ptr = &forty_two;
+    auto const from_lvalue = registration{.hook = ptr};
+    ptr = nullptr;
+    CHECK(from_lvalue.hook() == 42);
+}
+
 TEST("function_ref - function pointer decay via unary plus")
 {
     SECTION("unary + on stateless lambda")

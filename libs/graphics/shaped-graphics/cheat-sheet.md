@@ -1054,7 +1054,7 @@ dctx.create_dx12_command_list()           // -> cc::result<std::unique_ptr<dx12_
 // the sg::context virtuals are thin forwarders to these backend-typed methods
 // escape hatch: dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get()) — "here be dragons"
 
-// foreign code recording onto an sg list (a vendor SDK, a capture tool) — dx12 only, see docs/concepts/barriers.md
+// foreign code recording onto an sg list (a vendor SDK, a capture tool) — dx12 and metal, see docs/concepts/barriers.md
 #include <shaped-graphics/backends/dx12/dx12_native_scope.hh>
 auto const native = sg::backend::dx12::dx12_native_scope::open(cmd,   // -> dx12_native_scope (RAII; no rendering scope open)
     {{.texture = tex, .access = sg::access_flag::shader_write, .stages = sg::pipeline_stage_flag::compute}},
@@ -1064,4 +1064,13 @@ native.resource(tex)                   // -> ID3D12Resource*; ASSERTS on a handl
 // open transitions each declared resource and records that as its state; ~scope forgets the list's bind state
 // sg never rebinds by itself: bind a pipeline again before the next draw or dispatch — one that does not ASSERTS
 // under-declaring corrupts the tracker: declare everything the foreign call touches, and nothing it does not
+
+// the Metal twin — foreign encoders meet sg's at a fence, see docs/concepts/barriers.md
+#include <shaped-graphics/backends/metal/metal_native_scope.hh>
+auto const native = sg::backend::metal::metal_native_scope::open(cmd, textures, buffers); // -> metal_native_scope (RAII)
+native.command_buffer() / native.device() / native.compiler()  // -> MTL4::CommandBuffer* / MTL::Device* / MTL4::Compiler*
+native.fence()                         // -> MTL::Fence*: the foreign work MUST wait for it first and update it last
+native.texture(tex) / native.buffer(buf)  // -> MTL::Texture* / MTL::Buffer*; ASSERTS on a handle the scope did not declare
+// MetalFX: set the effect's `fence` to native.fence() and it does both halves itself
+// record no sg work while the scope is alive — an sg encoder opened inside it ASSERTS; let the scope go first
 ```

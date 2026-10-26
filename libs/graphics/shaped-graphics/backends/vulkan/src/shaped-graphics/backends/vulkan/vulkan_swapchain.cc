@@ -245,7 +245,7 @@ cc::result<cc::unit> vulkan_swapchain::build(tg::vec2i size)
         .imageColorSpace = _vk_surface_format.colorSpace,
         .imageExtent = extent,
         .imageArrayLayers = 1,
-        // TRANSFER_SRC is what makes a presented image readable, which is the whole point of a headless chain being
+        // TRANSFER_SRC makes a presented image readable, so a headless chain is
         // pixel-verifiable rather than merely non-crashing.
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,

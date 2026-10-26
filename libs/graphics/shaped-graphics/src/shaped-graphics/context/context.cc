@@ -580,7 +580,7 @@ cc::shared_async<raster_pipeline_handle> context::create_raster_pipeline_async(r
 
 void context::drain_at_shutdown()
 {
-    // Three things, in this order, and the order is the point.
+    // Three things, and in this order only.
     // An actor delivers a download's bytes only after the GPU finished writing them, so draining the actors first
     // would let a copy land behind us.
     block_until_submissions_complete();

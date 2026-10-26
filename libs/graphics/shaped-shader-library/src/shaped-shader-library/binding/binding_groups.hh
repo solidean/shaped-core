@@ -205,7 +205,7 @@ namespace slib
 /// `hlsl` with every annotated binding carrying the address the pass assigns it: `register(t0, space0)` on the
 /// DXIL arm, `[[vk::binding(0, 0)]]` on the SPIR-V arm, and with the pass's own pragmas removed.
 ///
-/// Writing the address is the whole point rather than a convenience.
+/// Writing the address is required, not a convenience.
 /// DXC numbers only what an entry point references, so without it two stages of one pipeline disagree about a
 /// resource neither of them numbered — see the spike's Q8.
 ///

@@ -3,14 +3,13 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/thread.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_format.hh>
 #include <shaped-graphics/backends/metal/metal_stream.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
-
-#include <thread>
 
 namespace sg::backend::metal
 {
@@ -588,7 +587,7 @@ void metal_transfer_system::shutdown()
     // Every outstanding transfer has to finish before the queue and the timeline go, and a handler still in flight
     // touches both.
     while (_pending.load(std::memory_order_acquire) > 0)
-        std::this_thread::yield();
+        cc::this_thread_yield();
 
     _state.lock(
         [](state& s)

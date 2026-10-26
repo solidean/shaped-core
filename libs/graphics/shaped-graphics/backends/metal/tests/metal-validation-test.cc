@@ -10,7 +10,6 @@
 
 #include <atomic>
 #include <cstdlib>
-#include <thread>
 
 // What Metal actually reports, and where.
 //
@@ -102,7 +101,7 @@ ASYNC_TEST("sg metal - a commit's feedback handler runs")
     // Draining the GPU says nothing about the handler, which runs on a dispatch queue of Metal's choosing — so wait on
     // the condition rather than assuming the drain covered it.
     for (auto spin = 0; spin < 20'000'000 && fired.load() == 0; ++spin)
-        std::this_thread::yield();
+        cc::this_thread_yield();
 
     CHECK(fired.load() == 1);
 

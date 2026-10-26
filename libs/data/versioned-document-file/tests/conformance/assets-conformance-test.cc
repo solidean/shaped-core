@@ -254,7 +254,7 @@ INVOCABLE_TEST("vdoc::file - a single-part asset costs no ceremony and round-tri
     {
         auto const s = open_or_fail(*medium);
 
-        // No name given anywhere: the default carries it, which is the whole point of $main.
+        // No name given anywhere: the default, $main, carries it.
         auto record = asset_record{.asset_id = "solo", .kind = "mesh"};
         record.parts.push_back({.hash = blob.hash, .format = blob.format});
 

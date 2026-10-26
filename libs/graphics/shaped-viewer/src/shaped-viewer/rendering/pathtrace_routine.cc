@@ -550,16 +550,18 @@ sv::impl::permutation_state sv::impl::hit_group_state(sg::context& ctx, material
     auto const& node = p->hit_group;
     if (!node.is_valid())
         return permutation_state::failed;
+    // Readiness first: the compile settles on a worker, and a node that held no value a moment ago may hold one now.
+    // Once ready it never changes, so it holds a value or an error.
+    if (!node->is_ready())
+    {
+        (void)ctx.backlog.start(node);
+        return permutation_state::pending;
+    }
     if (node->try_value() != nullptr)
         return permutation_state::ready;
-    if (node->is_ready())
-    {
-        if (!p->is_failure_reported)
-            CC_LOG_ERROR("the hit group of {} did not compile, so its geometry shades as the stand-in: {}", p->label,
-                         node->try_error()->underlying().to_string());
-        p->is_failure_reported = true;
-        return permutation_state::failed;
-    }
-    (void)ctx.backlog.start(node);
-    return permutation_state::pending;
+    if (!p->is_failure_reported)
+        CC_LOG_ERROR("the hit group of {} did not compile, so its geometry shades as the stand-in: {}", p->label,
+                     node->try_error()->underlying().to_string());
+    p->is_failure_reported = true;
+    return permutation_state::failed;
 }

@@ -22,7 +22,7 @@ So each entry carries the answer as something runnable.
 - **`run.py`** drives the whole thing: finds the toolchain, builds, runs, prints a verdict.
   A `uv` shebang with PEP 723 metadata, matching [dev.py](../../dev.py); it must run from its own directory with no environment set up beforehand.
   Exit **1** when the bug reproduces and **0** when it does not, so it can be used as a check.
-- **Minimize.** Cut until removing one more thing makes the bug disappear, then keep that thing and say why it is load-bearing.
+- **Minimize.** Cut until removing one more thing makes the bug disappear, then keep that thing and say why the bug needs it.
   A repro that is only *mostly* minimal hides the trigger.
 - **`readme.md`** carries what happens and **why it is not our bug**, with the matrix that isolates the trigger.
   Then how to reproduce it, what we do about it in the tree, and what to re-check when the vendor ships an update.
@@ -46,6 +46,7 @@ So each entry carries the answer as something runnable.
 | [webgpu-timestamp-write-index-sentinel](webgpu-timestamp-write-index-sentinel/readme.md) | emdawnwebgpu + Dawn, against wgpu | not yet filed, worked around in shaped-graphics |
 | [deno-code-cache-stale-same-length-source](deno-code-cache-stale-same-length-source/readme.md) | Deno 2.9.6 | gone in 2.9.7, worked around in dev.py below it |
 | [warp-arm64-pac-fastfail](warp-arm64-pac-fastfail/readme.md) | WARP on Windows 11 arm64 | trigger not yet isolated, worked around in shaped-graphics |
+| [libcxx-float-h-guard-vs-macos27-math-h](libcxx-float-h-guard-vs-macos27-math-h/readme.md) | Homebrew LLVM 22 libc++, macOS 27 SDK | fixed upstream in LLVM 23, worked around in the build |
 
 ## Retiring one
 

@@ -526,7 +526,7 @@ CNET_IO_TEST("cnet - a second request to the same origin reuses the connection")
     CHECK(first->try_error() == nullptr);
     CHECK(first->value().body_text() == "first");
 
-    // The connection went back to the pool rather than being closed, which is the whole point.
+    // The connection went back to the pool rather than being closed.
     CHECK(fixture.client->pool().idle_count() == 1);
 
     auto second = http_get(*fixture.client, "http://example.test/two");

@@ -112,7 +112,8 @@ concept declares_args = requires(args_builder& b, T& v) { impl::declare_args_dis
 
 /// What a by-value parse produced: the same three states as args_result, plus the filled-in struct.
 ///
-/// `value()` is only meaningful when `ok()`. On any other outcome the struct holds whatever the parse got
+/// `value()` is only meaningful when `ok()`.
+/// On any other outcome the struct holds whatever the parse got
 /// to before it stopped, which is not something to act on.
 template <class T>
 class nx::parsed

@@ -73,7 +73,8 @@ public:
     }
 
     /// the rotation mapping the canonical basis onto the given axes: the result sends (1, 0, 0) to `x_axis`,
-    /// (0, 1, 0) to `y_axis`, (0, 0, 1) to `z_axis`. The three axes must be orthonormal and right-handed
+    /// (0, 1, 0) to `y_axis`, (0, 0, 1) to `z_axis`.
+    /// The three axes must be orthonormal and right-handed
     /// (they are the columns of the rotation matrix); the result is meaningless otherwise.
     [[nodiscard]] static quat make_from_basis(vec<3, T> const& x_axis, vec<3, T> const& y_axis, vec<3, T> const& z_axis)
         requires(tg::traits::has_sqrt<T>)

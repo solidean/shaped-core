@@ -37,7 +37,7 @@ TEST("sr - window reports its requested size before any poll", main_thread, excl
 
 TEST("sr - window position and size read back without an intervening poll", main_thread, exclusive("sr-window-system"))
 {
-    // The write-through is the point: imgui's viewport backend sets a position and reads it again inside one frame, long before the next poll_events would refresh it.
+    // Written through, because imgui's viewport backend sets a position and reads it again inside one frame, long before the next poll_events would refresh it.
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.title = "placed", .width = 640, .height = 480});
 

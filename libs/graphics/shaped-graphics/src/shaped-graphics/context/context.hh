@@ -587,8 +587,8 @@ protected:
 
     // Streaming transfers, reached via ctx.stream — the weaker tier.
     //
-    // The implementation must NOT give these the automatic command-list synchronization the async pair carries: the
-    // whole point is that a streamed extent costs a later reader nothing.
+    // The implementation must NOT give these the automatic command-list synchronization the async pair carries: a
+    // streamed extent must cost a later reader nothing.
     // Keeping the destination's storage alive across the copy is still required, and must not go through the same
     // stamp, or the reader wait comes back with it.
     //

@@ -264,7 +264,7 @@ A `final` texture binding stops it even when its own sample was skipped, so the 
 A candidate that cannot be used is skipped rather than fatal: a mesh attribute at the wrong format, or a texture whose `uv_attribute` the mesh does not carry, simply loses its turn.
 So every declaration resolves to something and a mesh carrying none of what a type asks for still draws.
 
-**The two keys are the point.**
+**Resolution yields two keys.**
 `permutation_key` covers only the SHAPE of the resolution, plus the type's hash — so gold and copper share one generated shader.
 That shape is which rank won, the geometric frequency, the uv attribute, the sampler, and the read part of the channel swizzle.
 `parameter_key` covers the resolved values (constant bytes, texture ids and the channels they are read through, each mesh attribute's hash and id).
@@ -295,7 +295,7 @@ auto const plaster = lib.register_type(sv::material_type::create({.name = "plast
                                                                   .opacity_attribute = "opacity"}));
 ```
 - **An acquire creates the buffer and hands the payload to `ctx.stream`; it does not upload.**
-  `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait — which is the whole point, since that wait is what turns a big asset from slow into a stall.
+  `ctx.stream` rides the copy queue and trades away `ctx.upload`'s automatic command-list wait, because that wait is what turns a big asset from slow into a stall.
   The buffer exists immediately, so a descriptor naming it is always valid; only its contents are in flight.
 - **A record's state advances where the settle pass runs, never where the transfer finishes.**
   So `residency` is deterministic under test, and `record_pending_work` is what turns a landed transfer into a `complete` record.
@@ -384,7 +384,8 @@ Gotchas:
 - **A sample names its level, 0** — a ray tracing hit shader has no derivatives to pick a mip from.
   The raster pixel stage is the one spelling that does not: it has derivatives, so it samples the same palette at the level they pick.
   Its cutout is not one of its loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0, since a box-filtered mip averages a cutout away.
-- **Every bindless index is `nonuniform`**, because it varies per instance within a wave.
+- **A traced spelling marks every bindless index `nonuniform`**, because it varies per instance within a wave.
+  The raster pixel spelling marks none: its instance is `raster.varyings`' `@per_draw` member, the same across the draw.
 - **Scalars and vectors of f32 / i32 / u32 only.** A matrix or a narrow / 64-bit scalar asserts rather than emitting code that will not compile.
 - **Each load is a function of its own**, so an attribute may be named `params`, `desc` or `uv` — the fragment shares its scope with the attribute names, `surface` and `ctx`, and nothing else.
   `sv_` is the generator's prefix: `sv_attribute_*`, `sv_supplied_*` and the material function.
@@ -961,6 +962,8 @@ store.get_or_create(id) / get / get_ptr       // get asserts the id exists; get_
 store.peek(id) / peek_ptr(id)                 // the same pair without touching, so a hit-test cannot keep a view alive
 store.set_payload_bytes(id, n)                // what the byte budget counts; view_renderer::resolve stamps it
 store.accumulated_frames(id) -> u32           // one named slot's frame counter, defaulting to accumulation(0) — the layer, not the view
+store.history_of(id) -> {restarts, loading_frames}  // the slot's restart count, which picks its seed, and frames traced while loading
+                                              //   read it once after a render: logging every frame changes the timing a flake hangs on
 store.min_accumulated_samples(id) -> u32      // the fewest samples per pixel across every traced layer; sv::impl::min_accumulated_samples is the rule
 store.is_accumulation_converged(id, samples = {}) -> bool  // every traced layer holds `samples`, or stopped at sv::accumulation_sample_cap
 store.pixels_short_of_target(id) -> u32       // pixels of the traced layers still below their trace's target, as last read back
@@ -975,7 +978,7 @@ c.begin_frame(tick, on_release)      // on_release frees the payload AND clears 
 sv::impl::keyed_cache_limits         // { i64 max_idle_frames_payload, max_idle_frames_entry; isize max_payload_bytes, max_entries; }
 ```
 
-The two thresholds are the point: a view's textures are megabytes and go after ~60 idle frames, while the identity behind them costs a few dozen bytes and survives ~240.
+Two thresholds, because a view's textures are megabytes and go after ~60 idle frames, while the identity behind them costs a few dozen bytes and survives ~240.
 That only works because the release hook clears the textures alone — a demotion that reset the record would take the camera with it.
 
 `sg::render_routine::evict` no longer reaches an accumulated image, since none live on a routine.
@@ -1017,12 +1020,14 @@ frame.window() / frame.window("name")  -> window_ref           // the default wi
 frame.view()                           -> view_ref             // == window().view(): the root view the window presents
 frame.viewport_size() -> vec2i;  frame.id() -> u64
 frame.seconds() / frame.delta_seconds() -> double              // since the loop started / since the previous drawn frame (0 on the first)
+                                                               //   a capture's clock instead: SC_CAPTURE_TIME + i / SC_CAPTURE_FPS on sequence frame i, held while it converges
                                                                //   both sampled once per frame, so every view animates off the same instant
 auto id = frame.scoped_id(i);  frame.id_seed()                 // RAII id scope, so one name in a loop names N views
 frame.push_id(i) / frame.pop_id()                              // the same, explicit — every push needs its pop
 frame.present()                                                // flatten + record + present; idempotent
                                                                //   a frame_scope's destructor is this call, and viewer::end_frame is too
 frame.pending_resource_work() -> isize                         // resources still owing post-load work (mip generation and its kin)
+frame.input_events() -> cc::span<sr::input_event const>        // this frame's input, the controllers' included; a file drop is is_file_drop()
 frame.background_work() -> cc::shared_async<cc::unit>          // settles once the background work so far is done, including process-wide compiles and cache writes; what it covers is internal
                                                                //   0 does NOT mean settled, and it never restarts accumulation: that work
                                                                //   changes a texture's contents, not its id, so accumulated_samples cannot see it
@@ -1046,6 +1051,7 @@ view.layout_rows(style) / .layout_columns(style) / .layout_grid(c, r, style) / .
 view.camera(cam)                                               // the caller owns it THIS frame: the controller leaves this view alone
 view.initial_camera(cam) / .initial_orbit(orbit) / .initial_fps(pose)
                                                                //   applied only the first time this id is seen
+view.reset_orbit(orbit)                                        // jumps the orbit controller there NOW; the user keeps orbiting from it
 view.camera_style(sv::camera_style::fly)                       // which built-in controller drives this view; orbit by default
                                                                //   RE-ASSERT every frame — dropping it hands the view back to orbit
                                                                //   the camera survives the switch: the incoming controller is re-seeded from it

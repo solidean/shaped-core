@@ -52,7 +52,7 @@ TEST("sv - the id stack separates views that share a name")
     // The default seed is the unseeded hash, so pushing nothing changes nothing.
     CHECK(sv::view_id::from_string("view", 0) == bare);
 
-    // Same name, two scopes: the whole point of scoped_id in a loop.
+    // Same name, two scopes, as with scoped_id in a loop.
     auto const in_0 = sv::view_id::from_string("view", sv::push_id_seed(0, i64(0)));
     auto const in_1 = sv::view_id::from_string("view", sv::push_id_seed(0, i64(1)));
     CHECK(in_0 != in_1);

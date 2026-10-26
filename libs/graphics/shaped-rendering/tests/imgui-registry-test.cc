@@ -5,8 +5,8 @@
 using namespace cc::primitive_defines;
 
 // The arithmetic behind the imgui renderer, checked against hand-computed numbers.
-// None of this needs a device, so it runs on every platform — which matters,
-// because these are the parts most likely to be subtly wrong (an off-by-one scissor clamp, a row-pitch mistake) and the hardest to spot in a rendered image.
+// None of this needs a device, so it runs on every platform.
+// That covers the parts most likely to be subtly wrong (an off-by-one scissor clamp, a row-pitch mistake) and the hardest to spot in a rendered image.
 
 using namespace sr;
 
