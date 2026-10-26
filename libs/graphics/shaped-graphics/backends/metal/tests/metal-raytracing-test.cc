@@ -2,6 +2,7 @@
 #include "raytrace.metallib.h"
 #include "raytrace_second.metallib.h"
 
+#include <clean-core/record/log.hh>
 #include <clean-core/string/format.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -807,30 +808,28 @@ ASYNC_TEST("sg metal - each ray type traces through its own intersection table")
     CHECK(values[1] == k_miss).context(cc::format("ray type 1 read {}, expected record 5 to reject the hit", values[1]));
 }
 
-// The bug this check exists for, as an application first wrote it.
-// A BLAS of two geometries is built with the default stride, under a table of two ray types and one row.
-// On metal geometry 1 then reaches record 2 through ray type 1's table, which holds 2 records.
-// The hit calls past the table's end, which is a GPU page fault, and the system answers it by refusing the process the GPU.
-// So it is caught at record time, and the list is dropped rather than submitted.
-ASYNC_TEST("sg metal - a shader table too short for a BLAS's geometries is logged by default")
+namespace
 {
-    auto const ctx = mtl::test::make_context();
-    if (ctx == nullptr)
-        SKIP("no metal 4 device on this host");
-
-    // A fresh context, so this is the default rather than a switch the test turned on.
-    // A wrong record is undefined behavior, not a portability matter, so the checks follow CC_ASSERT.
-    CHECK(ctx->hit_record_checks() == (CC_ASSERT_ENABLED != 0));
-    CHECK(!ctx->portability_checks());
-
-    constexpr float k_two_triangles[18] = {
-        10, 10, 0, 11, 10, 0, 10, 11, 0, // geometry 0
-        0,  0,  0, 1,  0,  0, 0,  1,  0, // geometry 1
-    };
-    auto const vertices = ctx->persistent.create_raw_buffer(
-        isize(sizeof(k_two_triangles)), sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
+/// Records a trace through a shader table too short for its BLAS's geometries, and hands the list to `finish`.
+/// A BLAS of `geometry_count` geometries is built with the default stride, under a table of two ray types and one row.
+/// Only the last geometry is in the rays' path, so on metal geometry `geometry_count - 1` reaches record
+/// `geometry_count - 1 + ray type` of a table holding 2, and submitting the list calls past the table's end.
+/// Every resource the trace names lives until `finish` returns.
+void record_short_table_trace(mtl::metal_context_handle const& ctx,
+                              int geometry_count,
+                              cc::function_ref<void(std::unique_ptr<sg::command_list>)> finish)
+{
+    CC_ASSERT(geometry_count >= 2, "a single geometry reaches the same records whatever its stride");
+    constexpr float k_out_of_path[9] = {10, 10, 0, 11, 10, 0, 10, 11, 0};
+    auto triangles = cc::vector<float>();
+    for (auto g = 0; g < geometry_count - 1; ++g)
+        triangles.push_back_range(cc::span<float const>(k_out_of_path));
+    triangles.push_back_range(cc::span<float const>(k_triangle));
+    auto const vertices
+        = ctx->persistent.create_raw_buffer(triangles.size() * isize(sizeof(float)),
+                                            sg::buffer_usage::accel_structure_build_input | sg::buffer_usage::copy_dst);
     auto upload = ctx->create_command_list();
-    upload->upload.bytes_to_buffer(vertices, cc::as_bytes(cc::span<float const>(k_two_triangles)));
+    upload->upload.bytes_to_buffer(vertices, cc::as_bytes(cc::span<float const>(triangles)));
     ctx->submit_command_list(cc::move(upload));
 
     auto desc = sg::raytracing_pipeline_description{};
@@ -845,10 +844,10 @@ ASYNC_TEST("sg metal - a shader table too short for a BLAS's geometries is logge
     sg::hit_shader_handle const row[2] = {accept, accept};
     auto const instance_row = table_desc.add_hit_row(row);
 
-    sg::blas_triangles const geometries[2] = {
-        {.vertices = vertices, .vertex_count = 3},
-        {.vertices = vertices, .vertex_count = 3, .vertex_offset_in_bytes = 9 * isize(sizeof(float))},
-    };
+    auto geometries = cc::vector<sg::blas_triangles>();
+    for (auto g = 0; g < geometry_count; ++g)
+        geometries.push_back(
+            {.vertices = vertices, .vertex_count = 3, .vertex_offset_in_bytes = g * 9 * isize(sizeof(float))});
     auto cmd = ctx->create_command_list();
     auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(geometries));
     auto const instance = sg::tlas_instance{.blas = blas, .hit_group_offset = u32(instance_row)};
@@ -871,14 +870,85 @@ ASYNC_TEST("sg metal - a shader table too short for a BLAS's geometries is logge
     auto table = ctx->create_metal_raytracing_shader_table(table_desc, sg::lifetime_scope::persistent);
     REQUIRE(table.has_value()).context(table.has_error() ? table.error().to_string() : cc::string());
 
-#if CC_ASSERT_ENABLED
-    nx::expect_error("built with hit_record_stride 1, and the shader table traces 2 ray types", nx::exactly(1));
-#endif
-
     auto trace = ctx->create_command_list();
     trace->raytracing.bind_pipeline(*pipeline.value());
     trace->raytracing.bind_group(0, *group);
     trace->raytracing.dispatch_rays(*table.value(), raygen_slot, int(k_thread_count), 1, 1);
-    ctx->drop_command_list(cc::move(trace));
+    finish(cc::move(trace));
+}
+} // namespace
+
+// The bug the hit-record check exists for, as an application first wrote it.
+// It is caught at record time, and the list is dropped rather than submitted.
+ASYNC_TEST("sg metal - a shader table too short for a BLAS's geometries is logged by default")
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // A fresh context, so this is the default rather than a switch the test turned on.
+    // A wrong record is undefined behavior, not a portability matter, so the checks follow CC_ASSERT.
+    CHECK(ctx->hit_record_checks() == (CC_ASSERT_ENABLED != 0));
+    CHECK(!ctx->portability_checks());
+
+#if CC_ASSERT_ENABLED
+    nx::expect_error("built with hit_record_stride 1, and the shader table traces 2 ray types", nx::exactly(1));
+#endif
+
+    record_short_table_trace(ctx, 2,
+                             [&](std::unique_ptr<sg::command_list> trace) { ctx->drop_command_list(cc::move(trace)); });
     co_await ctx->idle_completion();
+}
+
+// A probe rather than a test: it faults the GPU for real, after which the system refuses this process the GPU, so it
+// is run by name and alone.
+// What it answers is whether a fault on one queue stops the process's other queues.
+// The epoch system retires every in-flight epoch once a loss is reported, which resets their command allocators, and
+// that is safe only if no other queue still runs work of this process.
+// A second queue is held back by a wait the CPU releases once the loss is in, and it then signals an event; the log
+// says whether that signal ever arrived, and so whether the system stopped that queue too.
+ASYNC_TEST("sg metal - a real fault stops every queue of the process", nx::config::disabled)
+{
+    auto const ctx = mtl::test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+    ctx->set_hit_record_checks(false); // so nothing logs the record this probe faults on
+
+    auto* const gate = ctx->device()->newSharedEvent();
+    auto* const other_done = ctx->device()->newSharedEvent();
+    auto* const same_done = ctx->device()->newSharedEvent();
+    REQUIRE(gate != nullptr);
+    REQUIRE(other_done != nullptr);
+    REQUIRE(same_done != nullptr);
+
+    auto* const queue_descriptor = MTL4::CommandQueueDescriptor::alloc()->init();
+    NS::Error* error = nullptr;
+    auto* const other = ctx->device()->newMTL4CommandQueue(queue_descriptor, &error);
+    queue_descriptor->release();
+    REQUIRE(other != nullptr);
+    other->wait(gate, 1);
+    other->signalEvent(other_done, 1);
+
+    // Far past the table's end, since a record just past it can land in padding and fault nothing.
+    record_short_table_trace(
+        ctx, 4096, [&](std::unique_ptr<sg::command_list> trace) { ctx->submit_command_list(cc::move(trace)); });
+    ctx->queue()->signalEvent(same_done, 1);
+
+    // A wait on a condition with a deadline, since a probe that hangs answers nothing.
+    for (auto i = 0; i < 100 && !ctx->is_device_lost(); ++i)
+        (void)gate->waitUntilSignaledValue(2, 100);
+    CC_LOG_INFO("device lost after the fault: {}", ctx->is_device_lost());
+
+    gate->setSignaledValue(1);
+    CC_LOG_INFO("the faulting queue signalled after the fault: {}", same_done->waitUntilSignaledValue(1, 5000));
+    CC_LOG_INFO("another queue of this process signalled after the fault: {}",
+                other_done->waitUntilSignaledValue(1, 5000));
+    for (auto const& e : ctx->take_pending_errors())
+        CC_LOG_INFO("deferred error: {}", e.message);
+
+    co_await ctx->idle_completion();
+    other->release();
+    same_done->release();
+    other_done->release();
+    gate->release();
 }
