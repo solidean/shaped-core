@@ -2,6 +2,7 @@
 
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/backends/metal/metal_common.hh>
