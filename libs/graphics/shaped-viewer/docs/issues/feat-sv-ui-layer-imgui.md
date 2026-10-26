@@ -10,3 +10,6 @@ refs:
 
 `layer_kind::ui` exists and is not drawn yet: `render_plan` skips it.
 It should draw through `sr::imgui_context` / `sr::imgui_routine`, into the view's own target.
+
+`frame::imgui` already draws imgui over the whole window, after every view, through the same two types.
+What stays open is the per-view layer: a UI composited into one view's texture, placed and clipped with it.

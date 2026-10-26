@@ -155,6 +155,23 @@ cc::span<sr::input_event const> frame::input_events() const
     return _viewer == nullptr ? cc::span<sr::input_event const>() : _viewer->input_events();
 }
 
+bool frame::imgui()
+{
+    if (_viewer == nullptr || !_open || _presented)
+        return false;
+    return _viewer->open_imgui();
+}
+
+bool frame::imgui_wants_keyboard() const
+{
+    return _viewer != nullptr && _viewer->imgui_wants_keyboard();
+}
+
+bool frame::imgui_wants_mouse() const
+{
+    return _viewer != nullptr && _viewer->imgui_wants_mouse();
+}
+
 cc::shared_async<cc::unit> frame::background_work()
 {
     CC_ASSERT(_viewer != nullptr, "a closed frame has no viewer whose work to wait on");

@@ -1122,6 +1122,26 @@ for (auto f : sv::interactive("simple"))
     f.add_scene().add_mesh(mesh);
 ```
 
+### Dear ImGui over the window
+
+`f.imgui()` opens imgui for the frame, and the body calls `ImGui::` (and `ImPlot::`, after its own `CreateContext`) directly.
+The first call brings the context up; from then on every frame feeds it input and draws the UI over the whole window, after the views.
+The built-in cameras skip what imgui wants; `input_events()` still has every event, so a body handling keys itself checks `f.imgui_wants_keyboard()`.
+One viewer per process can use it, since imgui keeps one global context; a headless capture draws the UI too.
+
+```cpp
+for (auto f : sv::interactive("tool"))
+{
+    if (f.imgui())
+    {
+        ImGui::Begin("options");
+        ImGui::SliderFloat("exposure", &exposure, -4, 4);
+        ImGui::End();
+    }
+    f.add_scene().add_mesh(mesh);
+}
+```
+
 ## Driving the renderer by hand
 
 `sv::interactive` does all of this for you; this is the path for embedding sv in a loop you already own.

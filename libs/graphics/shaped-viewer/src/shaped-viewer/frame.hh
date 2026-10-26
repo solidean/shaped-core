@@ -102,6 +102,28 @@ public:
     /// The span and the text inside it live until the next frame is acquired.
     [[nodiscard]] cc::span<sr::input_event const> input_events() const;
 
+    /// Opens Dear ImGui for this frame, so the body calls `ImGui::` directly; false on a closed frame, where nothing may be drawn.
+    ///
+    ///     if (f.imgui())
+    ///     {
+    ///         ImGui::Begin("options");
+    ///         ImGui::Checkbox("wireframe", &wireframe);
+    ///         ImGui::End();
+    ///     }
+    ///
+    /// The first call brings the context up, and from then on every frame feeds imgui its input and draws the UI over the whole window, after the views.
+    /// One viewer per process may use it: imgui keeps one global context.
+    /// Its windows place themselves in window pixels, and a headless capture draws them too, at the capture's size.
+    ///
+    /// The built-in cameras skip what imgui wants: a wheel over an imgui window scrolls it rather than zooming a view.
+    /// `input_events` still reports every event, so a body acting on keys itself checks `imgui_wants_keyboard` first.
+    [[nodiscard]] bool imgui();
+
+    /// Whether imgui wanted the keyboard or the mouse as of the last imgui frame: a text field has focus, or the cursor is over an imgui window.
+    /// False until `imgui` has been called once.
+    [[nodiscard]] bool imgui_wants_keyboard() const;
+    [[nodiscard]] bool imgui_wants_mouse() const;
+
     /// `sv::background_work` for the context this viewer draws on.
     /// What it covers follows the viewer's internals, which is why it says only "done" and never what the work was.
     /// **Lazy**: start it with `cc::async_start` after the frame loop, never inside a frame, where under `SC_THREADS=OFF` a scheduled node crashed the frame's submit.

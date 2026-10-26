@@ -10,6 +10,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <imgui/imgui.h>
 #include <nexus/async-test.hh>
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
@@ -674,4 +675,47 @@ INVOCABLE_TEST("sv - a frame loop with nothing to trace still lands its streamed
     // "it drains" quietly stops testing anything.
     CHECK(streamed_at_peak > 0).context("nothing was ever in flight, so this test would pass with the sweep removed");
     CHECK(resident).context(cc::format("the payloads were still in flight after {} frames", frames));
+}
+
+// frame::imgui on a headless viewer: the first call brings imgui up, every frame after opens exactly one imgui frame, and the viewer takes the context down with it.
+// Headless still draws the UI, sized to the offscreen target, so a capture shows what the window would.
+ASYNC_INVOCABLE_TEST("sv - frame imgui opens one imgui frame per frame and ends with the viewer",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    REQUIRE(ImGui::GetCurrentContext() == nullptr);
+
+    {
+        auto v_r = sv::viewer::try_create(ctx, "sv-test/imgui", {.width = 160, .height = 120, .headless = true});
+        REQUIRE(v_r.has_value());
+        auto viewer = cc::move(v_r.value());
+
+        auto frames = 0;
+        auto first_frame_count = 0;
+        for (auto f : viewer.frames())
+        {
+            REQUIRE(f.imgui());
+            // a second call joins the imgui frame the first opened rather than starting another
+            REQUIRE(f.imgui());
+            if (frames == 0)
+                first_frame_count = ImGui::GetFrameCount();
+            CHECK(ImGui::GetFrameCount() == first_frame_count + frames);
+            CHECK(ImGui::GetIO().DisplaySize.x == 160.0f);
+
+            ImGui::Begin("options");
+            ImGui::Text("frame %d", frames);
+            ImGui::End();
+
+            // nothing feeds a headless viewer input, so imgui never wants any
+            CHECK(!f.imgui_wants_keyboard());
+            CHECK(!f.imgui_wants_mouse());
+
+            if (++frames == 4)
+                viewer.request_close();
+        }
+        CHECK(frames == 4);
+        CHECK(ImGui::GetCurrentContext() != nullptr);
+        co_await cc::async_settled(sv::background_work(ctx));
+    }
+    CHECK(ImGui::GetCurrentContext() == nullptr);
 }

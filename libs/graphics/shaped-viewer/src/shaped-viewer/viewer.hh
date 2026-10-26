@@ -159,6 +159,20 @@ private:
     /// `frame::background_work`'s answer.
     [[nodiscard]] cc::shared_async<cc::unit> background_work();
 
+    /// `frame::imgui`'s answer: brings the imgui context up on first use, and opens this frame's imgui frame if it is not open yet.
+    [[nodiscard]] bool open_imgui();
+
+    /// Whether the last imgui frame wanted the keyboard or the mouse; false while no imgui frame ever ran.
+    [[nodiscard]] bool imgui_wants_keyboard() const;
+    [[nodiscard]] bool imgui_wants_mouse() const;
+
+    /// Opens this frame's imgui frame, sized to the window (or the offscreen target) and stepped by `delta`.
+    void begin_imgui_frame(double delta);
+
+    /// Ends the open imgui frame and records its draw data on the frame's command list, over `output`.
+    /// Called after the views are composited, so the UI lands on top of them.
+    void record_imgui(sg::render_target_view const& output);
+
     /// Installs the capture this run is taking; the viewer must have been created headless for it.
     ///
     /// **Only `sv::interactive` calls this.**
