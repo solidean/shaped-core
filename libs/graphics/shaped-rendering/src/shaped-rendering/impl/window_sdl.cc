@@ -691,9 +691,13 @@ void window_system::poll_events()
         // A drop of text rather than a file is SDL_EVENT_DROP_TEXT, which nothing asks for yet.
         case SDL_EVENT_DROP_FILE:
             if (event.drop.data != nullptr)
-                _events.push_back({.window = window_from_id(event.drop.windowID),
+            {
+                auto* const w = window_from_id(event.drop.windowID);
+                _events.push_back({.window = w,
                                    .payload = file_drop_event{.path = cc::string(event.drop.data),
-                                                              .cursor_pos = tg::pos2f(event.drop.x, event.drop.y)}});
+                                                              .cursor_pos = impl::pixels_from_logical(
+                                                                  event.drop.x, event.drop.y, density_of(w))}});
+            }
             break;
 
         case SDL_EVENT_QUIT:
