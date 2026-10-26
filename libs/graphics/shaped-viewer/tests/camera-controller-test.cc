@@ -30,8 +30,8 @@ sr::input_event drag(sr::mouse_button held, float dx, float dy)
 sr::input_event drag_at_density(sr::mouse_button held, float dx, float dy, float density)
 {
     return {.payload = sr::mouse_move_event{.delta = tg::vec2f(dx * density, dy * density),
-                                            .held_buttons = sr::mouse_button_bit(held),
-                                            .pixel_density = density}};
+                                            .pixel_density = density,
+                                            .held_buttons = sr::mouse_button_bit(held)}};
 }
 
 sr::input_event wheel(float ticks)
