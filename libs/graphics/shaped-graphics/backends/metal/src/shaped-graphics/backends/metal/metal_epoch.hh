@@ -134,6 +134,8 @@ public:
     /// Every wait returns and every listener fires.
     /// The portable layer checks the loss first, so it fails each pending completion rather than settling it.
     /// The flag keeps that answer even if a queue the system did not stop signals a lower value afterwards.
+    /// Whether a fault stops every queue of the process is not established, so retire and shutdown then leak the
+    /// command allocators rather than reset or release one a pending command buffer may still use.
     /// Safe from any thread; the context calls it from a commit's feedback handler.
     void abandon_timelines();
 

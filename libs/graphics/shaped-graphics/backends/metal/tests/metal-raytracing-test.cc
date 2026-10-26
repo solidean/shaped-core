@@ -900,8 +900,9 @@ ASYNC_TEST("sg metal - a shader table too short for a BLAS's geometries is logge
     co_await ctx->idle_completion();
 }
 
-// A probe rather than a test: it faults the GPU for real, after which the system refuses this process the GPU, so it
-// is run by name and alone.
+// A probe rather than a test, run by name and alone: it means to fault the GPU, after which the system refuses this
+// process the GPU.
+// On an Apple M4 it has not faulted, at 2 geometries or at 4096, and then logs that no loss happened.
 // What it answers is whether a fault on one queue stops the process's other queues.
 // The epoch system retires every in-flight epoch once a loss is reported, which resets their command allocators, and
 // that is safe only if no other queue still runs work of this process.

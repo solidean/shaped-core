@@ -102,17 +102,21 @@ void metal_epoch_system::retire_completed()
     _mutex.lock(
         [&](int&)
         {
-            auto const reached
-                = _is_abandoned.load(cc::memory_order_acquire) ? k_abandoned_value : _epoch_event->signaledValue();
+            auto const is_abandoned = _is_abandoned.load(cc::memory_order_acquire);
+            auto const reached = is_abandoned ? k_abandoned_value : _epoch_event->signaledValue();
             while (!_in_flight.empty() && _in_flight.front().epoch_value <= reached)
             {
                 auto payload = _in_flight.pop_front();
 
-                for (auto* allocator : payload.allocators)
-                {
-                    allocator->reset();
-                    _free_allocators.push_back(allocator);
-                }
+                // **A lost device leaks its allocators rather than resetting them.**
+                // An abandoned epoch reads as finished whether or not its command buffers are, and resetting an
+                // allocator under a pending one is forbidden; nothing records on a lost context again anyway.
+                if (!is_abandoned)
+                    for (auto* allocator : payload.allocators)
+                    {
+                        allocator->reset();
+                        _free_allocators.push_back(allocator);
+                    }
                 for (auto& f : payload.finalizers)
                     finalizers.push_back(cc::move(f));
             }
@@ -301,8 +305,11 @@ void metal_epoch_system::shutdown()
 
     for (auto& f : finalizers)
         f();
-    for (auto* a : allocators)
-        a->release();
+
+    // After a loss the drain above returned at once, so an allocator may still back a pending command buffer.
+    if (!_is_abandoned.load(cc::memory_order_acquire))
+        for (auto* a : allocators)
+            a->release();
 
     _epoch_event->release();
     _submission_event->release();

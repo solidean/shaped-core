@@ -224,9 +224,10 @@ ASYNC_TEST("sg metal - a lost device settles the waits its stopped queue strands
     REQUIRE(blocker != nullptr);
     ctx->queue()->wait(blocker, 1);
 
-    // The epoch closes with nothing submitted: its signal alone is stranded behind the wait.
-    // A command list here would put an allocator in the epoch, and the loss retires the epoch by resetting it, which
-    // Metal forbids while the command buffer is still pending on this queue.
+    // A command list stranded behind the wait puts an allocator in the closing epoch.
+    // The loss retires that epoch while the buffer is still pending, which is why a lost device leaves the allocator
+    // alone; the validation layer does not flag a reset of this empty list's allocator, so this pins the path only.
+    ctx->submit_command_list(ctx->create_command_list());
     auto const closed = ctx->current_epoch();
     ctx->advance_epoch();
 
