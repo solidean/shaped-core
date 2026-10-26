@@ -89,6 +89,8 @@ With `ctx.hit_record_checks()` on, `dispatch_rays` walks every instance of every
 Each must exist and match the BLAS's kind, and a BLAS of more than one geometry must have been built with the table's ray count as its stride.
 The check assumes each trace's geometry multiplier is that ray count, which an SGL-generated table's traces are.
 A hand-written shader passing another multiplier, such as `TraceRay(…, ray_type, 0, …)` sharing one record across geometries, turns the checks off with `ctx.set_hit_record_checks(false)`.
+The switch is per context rather than per table, so that shader turns them off for every table.
+An opt-out on the shader table would let an SGL-generated table keep its check beside it, and is worth adding once a program mixes the two.
 A mismatch **logs an error rather than asserting**, since the hit groups come from shaders that hot reload can change under a running program.
 It is logged once per table and TLAS in a command list, and the dispatch still runs.
 

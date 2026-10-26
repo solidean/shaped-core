@@ -85,6 +85,7 @@ struct sr::window_description
 /// **Pixels** are what a swapchain is sized in: width()/height() and every input_event position.
 /// **Logical units** are what the window manager places and sizes windows in: window_description's size, logical_size, set_size, and the desktop coordinates of position and display_info.
 /// pixel_density converts between them, and is 1 wherever the platform does no high-density scaling (Windows, X11, a headless system).
+/// Input is pixels rather than the logical units SDL reports, because a renderer compares a cursor against rendered pixels, and a conversion owed at every hit test is the one that gets forgotten.
 ///
 /// Created from a window_system, which must outlive it.
 /// Destroying the window closes it immediately.

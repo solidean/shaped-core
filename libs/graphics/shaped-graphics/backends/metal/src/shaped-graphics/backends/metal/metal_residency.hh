@@ -51,7 +51,7 @@ public:
     void shutdown();
 
 private:
-    // A callback mutex rather than cc::mutex: every commit handler removes its staging allocation from here, and
-    // that handler runs on a Metal thread even in a build with SC_THREADS off.
+    // Every commit handler removes its staging allocation from here, on a Metal thread.
+    // cc::mutex is a real lock there only because SC_THREADS=OFF is refused on Apple.
     cc::mutex<MTL::ResidencySet*> _set;
 };

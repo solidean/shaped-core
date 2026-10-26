@@ -102,7 +102,7 @@ public:
     /// So this is a correctness check rather than a portability one, and `portability_checks` does not govern it.
     /// **On by default wherever `CC_ASSERT` is compiled in**, and off in release builds.
     /// It costs a copy of each tlas's instances at build, and a walk of them per shader table and command list.
-    /// A table traced with a geometry multiplier other than its ray count turns it off, since the check assumes that multiplier.
+    /// A caller whose shaders trace with a geometry multiplier other than the ray count turns it off, since the check assumes that multiplier.
     /// Set it before building the tlases and creating the binding groups it should cover.
     /// See libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md.
     [[nodiscard]] bool hit_record_checks() const { return _hit_record_checks.load(cc::memory_order_relaxed); }
