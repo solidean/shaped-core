@@ -347,6 +347,7 @@ struct vertex_buffer_view;
 struct index_buffer_view;
 struct draw_config;
 struct draw_indexed_config;
+struct draw_indexed_args;
 
 // Ray-tracing pipeline + shader table (see raytracing/raytracing_pipeline.hh / raytracing/raytracing_shader_table.hh). A
 // DXR state object plus a table of shader identifiers; dispatched via cmd.raytracing.dispatch_rays.

@@ -289,6 +289,7 @@ protected:
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+    void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Bodies in webgpu_raytracing.cc.
     // The builds write the ray-query polyfill's pool; the ray-tracing pipeline has no webgpu form, so its seams assert.

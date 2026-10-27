@@ -357,6 +357,10 @@ cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
 //   GOTCHA: view.offset_in_bytes + index_range.offset*index_size must be 4-byte aligned (sg::index_buffer_offset_alignment).
 //   So an ODD first index into a uint16 buffer asserts — metal draws only part of the mesh, silently, and dx12/vulkan do not mind.
+cmd.raster.draw_indexed_indirect(args, first = 0, count = 1)  // void — `count` indexed draws, each record of buffer<sg::draw_indexed_args> read by the GPU
+//   sg::draw_indexed_args { u32 index_count, instance_count = 1, first_index; i32 vertex_offset; u32 first_instance } — D3D12/Vk/Metal/WebGPU layout
+//   args need buffer_usage::indirect_command_buffer; instance_count 0 draws nothing, and first_instance is where @instance_index starts
+//   the count is the CPU's: no GPU-written count yet (feat-sg-indirect-draws); one ExecuteIndirect on dx12, a draw per record elsewhere
 //   sg::is_aligned_index_fetch(format, view_offset, first_index) -> bool   // ask instead of asserting
 ```
 

@@ -322,6 +322,7 @@ protected:
     void raster_set_inline_constants(cc::span<byte const> data, cc::optional<isize> offset) override;
     void raster_draw(sg::draw_config const& config) override;
     void raster_draw_indexed(sg::draw_indexed_config const& config) override;
+    void raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count) override;
 
     // Ray tracing (reached through cmd.raytracing).
     // is_supported()'s body is in vulkan_command_list.cc, which has vulkan_context complete.

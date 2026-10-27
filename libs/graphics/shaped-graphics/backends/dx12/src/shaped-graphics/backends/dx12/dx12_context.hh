@@ -630,6 +630,8 @@ public:
 
     // What ExecuteIndirect reads a `sg::dispatch_args` record through; created with the device.
     ComPtr<ID3D12CommandSignature> _dispatch_signature;
+    // What ExecuteIndirect reads a `sg::draw_indexed_args` record through; created with the device.
+    ComPtr<ID3D12CommandSignature> _draw_indexed_signature;
 
     // Kept for QueryVideoMemoryInfo, which is on IDXGIAdapter3 and has no route through the device.
     // Re-obtaining it per query via EnumAdapterByLuid would work and would cost a COM round trip on a call a dashboard

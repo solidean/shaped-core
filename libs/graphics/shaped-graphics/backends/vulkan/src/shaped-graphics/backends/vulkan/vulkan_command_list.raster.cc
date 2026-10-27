@@ -463,4 +463,26 @@ void vulkan_command_list::raster_draw_indexed(sg::draw_indexed_config const& con
     vkCmdDrawIndexed(_buffer, u32(config.index_range.size), u32(config.instance_range.size),
                      u32(config.index_range.offset), config.vertex_offset, u32(config.instance_range.offset));
 }
+
+void vulkan_command_list::raster_draw_indexed_indirect(sg::raw_buffer_handle const& args, isize offset_in_bytes, isize count)
+{
+    CC_ASSERT(_in_render_pass, "an indirect draw requires an open rendering scope");
+    CC_ASSERT(_bound_raster_layout != nullptr, "bind a raster pipeline before drawing");
+    CC_ASSERT(_bound_index_buffer != nullptr, "an indirect indexed draw requires a bound index buffer");
+    auto const buffer = std::dynamic_pointer_cast<vulkan_buffer const>(args);
+    CC_ASSERT(buffer != nullptr, "indirect draw arguments are not a vulkan buffer");
+    CC_ASSERT(!buffer->is_expired(), "indirect draw arguments are a transient buffer used past its epoch");
+    static_assert(sizeof(sg::draw_indexed_args) == sizeof(VkDrawIndexedIndirectCommand));
+
+    // The arguments are fetched at DRAW_INDIRECT, before any vertex is.
+    track_buffer_access(*buffer, sg::pipeline_stage_flag::draw_indirect, sg::access_flag::indirect_read);
+    declare_raster_draw_barriers(true);
+    flush_barriers();
+    resume_rendering();
+
+    // One draw per call: several in one call need the `multiDrawIndirect` feature, which the device is not created with.
+    auto const stride = isize(sizeof(sg::draw_indexed_args));
+    for (auto i = isize(0); i < count; ++i)
+        vkCmdDrawIndexedIndirect(_buffer, buffer->_buffer, VkDeviceSize(offset_in_bytes + i * stride), 1, u32(stride));
+}
 } // namespace sg::backend::vulkan
