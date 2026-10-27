@@ -63,7 +63,7 @@ struct stage_violation
     symbol_id callee = symbol_id::none;
     /// The call written in the tree's own body that reaches it, the call itself where it stands there.
     call_site written = {};
-    /// `any_hit` or `intersection` for an atomic in a decision an inline trace inlined (CHK-398); `none` otherwise.
+    /// `any_hit` or `intersection` for an atomic in a decision an inline trace inlined (CHK-404); `none` otherwise.
     stage decision = stage::none;
 };
 
@@ -80,7 +80,7 @@ struct flattener
 {
     checker const& c;
     cc::vector<stage_violation> stage_violations;
-    /// The decision an inline trace's loop is calling while its body is inlined: `any_hit` or `intersection` (CHK-398).
+    /// The decision an inline trace's loop is calling while its body is inlined: `any_hit` or `intersection` (CHK-404).
     stage inlined_decision = stage::none;
     /// A test's calls of a builtin only the ray-tracing stages reach, which a test cannot run yet.
     cc::vector<stage_violation> ray_stage_calls;
@@ -190,10 +190,10 @@ struct flattener
         auto const* const record = c.out.builtin_function(c.out.at(callee).intrinsic);
         if (record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
             quad_calls.push_back({.file = file(), .call = call, .callee = callee});
-        // CHK-398: a decision runs as often as the traversal asks it, whichever stage's loop asks
+        // CHK-404: a decision runs as often as the traversal asks it, whichever stage's loop asks
         if (record != nullptr && record->is_atomic && inlined_decision != stage::none)
             stage_violations.push_back({.file = file(), .call = call, .callee = callee, .decision = inlined_decision});
-        // EMIT-159: what only a pixel stage needs of the device, which every target then judges alike
+        // EMIT-163: what only a pixel stage needs of the device, which every target then judges alike
         if (record != nullptr && entry.entry_stage == stage::pixel && !record->pixel_features.is_empty())
         {
             auto within = cc::vector<symbol_id>();
@@ -1738,7 +1738,7 @@ struct flattener
     {
         // by value: flattening below may push closures, and the vector moves
         auto const f = closures[handed];
-        // CHK-398: a function handed a candidate or a box is a decision the traversal calls in its loop
+        // CHK-404: a function handed a candidate or a box is a decision the traversal calls in its loop
         auto const outer_decision = inlined_decision;
         auto decision = outer_decision;
         if (!values.empty() && is_valid(values[0]))
@@ -3376,7 +3376,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                     "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
     for (auto const& v : f.stage_violations)
     {
-        // CHK-398: an atomic runs as often as its function, which traversal decides for a decision
+        // CHK-404: an atomic runs as often as its function, which traversal decides for a decision
         auto const* const record = out.builtin_function(out.at(v.callee).intrinsic);
         auto const is_atomic = record != nullptr && record->is_atomic;
         auto const decision = v.decision != stage::none ? v.decision : info.entry_stage;

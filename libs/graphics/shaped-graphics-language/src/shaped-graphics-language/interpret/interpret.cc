@@ -97,7 +97,7 @@ struct machine
     /// Parallel to `out.buffers`: whether the run stored to that buffer, which is what the outcome keeps.
     cc::vector<bool> is_stored;
     /// Each weak compare-exchange of the source that met `expected` so far, and whether that last attempt failed.
-    /// One of the source is one wherever it was inlined (EVAL-98).
+    /// One of the source is one wherever it was inlined (EVAL-100).
     struct weak_exchange
     {
         origin from;
@@ -262,7 +262,7 @@ struct machine
         record.evaluate(in, after);
         if (after.size() != 1)
             return type_error(cc::format("an atomic '{}' whose evaluator gave no one value", record.name));
-        // EVAL-98: a weak compare-exchange that meets `expected` fails every other time, starting with the first
+        // EVAL-100: a weak compare-exchange that meets `expected` fails every other time, starting with the first
         auto is_spurious = false;
         if (record.gives_prelude_struct && in.size() == 3 && in[0].bits == in[1].bits && limits.fails_weak_exchanges)
         {

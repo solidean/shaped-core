@@ -220,7 +220,7 @@ void sgl::builtins::register_conversions(registry& r)
                 });
             }
 
-    r.add_comment("// `T(x)` is `x as T` for every conversion above, and `x` where it is a `T` already (CHK-390)");
+    r.add_comment("// `T(x)` is `x as T` for every conversion above, and `x` where it is a `T` already (CHK-396)");
     for (auto width = 1; width <= 4; ++width)
         for (auto const& to : k_numerics)
             for (auto const& from : k_numerics)

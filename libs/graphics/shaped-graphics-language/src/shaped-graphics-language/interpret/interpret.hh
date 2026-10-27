@@ -118,7 +118,7 @@ struct sgl::check::run_limits
     /// Checks and asserts run, as the structured form means (EVAL-75).
     /// False skips each with its body, as the core form does, which is what a comparison of the two forms wants.
     bool run_checks = true;
-    /// A weak compare-exchange that meets `expected` fails spuriously every other time, the first time first (EVAL-98).
+    /// A weak compare-exchange that meets `expected` fails spuriously every other time, the first time first (EVAL-100).
     /// So a test of one that forgets its retry loop fails, as it may on a GPU; false makes every one strong.
     bool fails_weak_exchanges = true;
     /// Failures past this many are counted in `outcome::failures_dropped` and not kept.

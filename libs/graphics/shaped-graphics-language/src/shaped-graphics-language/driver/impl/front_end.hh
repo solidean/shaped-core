@@ -38,7 +38,7 @@ struct front_end
     cc::vector<cc::string> warnings;
 
     /// A diagnostic judged of the inlined bodies of some entry points alone, which a compile of another one leaves out
-    /// (CHK-396).
+    /// (CHK-402).
     struct entry_diagnostic
     {
         /// Their functions.

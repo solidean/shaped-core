@@ -90,7 +90,7 @@ The machine computes each in plain f64 arithmetic of its own rather than with th
 A test's verdict and an editor's marks are compared across machines.
 A test compares a transcendental within a tolerance, which `nearly_equal` in the prelude spells.
 
-## EVAL-98
+## EVAL-100
 
 A run is one invocation, so nothing ever races its compare-exchange, and a weak one would never fail.
 A shader that forgot the retry loop would then pass every test and fail on a GPU, where WGSL and MSL may fail it spuriously.

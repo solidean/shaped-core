@@ -298,7 +298,7 @@ struct footprint_pin
 };
 
 /// One access of a binding array by index in one entry point's inlined body, which `judge_indices` judges with every
-/// other access the same index text makes (CHK-300, CHK-395).
+/// other access the same index text makes (CHK-300, CHK-401).
 struct index_use
 {
     /// The entry point's function.
@@ -308,7 +308,7 @@ struct index_use
     /// The marked argument where there is a mark, and the index itself where there is none.
     origin written;
     builtins::index_mark mark = {};
-    /// Proven the same in every invocation; proven to vary, by what each invocation is handed (CHK-393); or neither.
+    /// Proven the same in every invocation; proven to vary, by what each invocation is handed (CHK-399); or neither.
     bool is_uniform = false;
     bool varies = false;
     /// What made it not uniform, for a note.
@@ -740,11 +740,11 @@ struct checker
     void index_builtin_symbols();
     /// CHK-282: every barrier and every call that takes derivatives stands where all invocations of its group arrive.
     void judge_uniformity(flat_entry_point const& structured);
-    /// CHK-300, CHK-395: every index into a binding array, judged over the copies the entry points inlined of it.
+    /// CHK-300, CHK-401: every index into a binding array, judged over the copies the entry points inlined of it.
     void judge_indices();
-    /// CHK-396: one diagnostic for each that several entry points were judged to have alike, which names them all.
+    /// CHK-402: one diagnostic for each that several entry points were judged to have alike, which names them all.
     void merge_entry_diagnostics();
-    /// CHK-397: an entry point that expects a diagnostic is judged by it alone, and is never built.
+    /// CHK-403: an entry point that expects a diagnostic is judged by it alone, and is never built.
     void drop_expecting_entry_points();
     /// CHK-270, CHK-311 and CHK-312: every constant of the tree folded, and what WGSL would refuse of it reported.
     void judge_constants(flat_entry_point const& structured);
@@ -774,7 +774,7 @@ struct checker
     /// CHK-383: refuses each 16-bit value a struct crossing a stage edge holds, reported at `where` of `file`.
     void judge_edge_16_bit(i32 file, source_span where, type_id type);
     /// The first value of function bodies alone that `type` holds, such as a `mat3`, through struct members, arrays and
-    /// a buffer's element; `path` is empty when it holds none (CHK-391).
+    /// a buffer's element; `path` is empty when it holds none (CHK-397).
     struct local_only_found
     {
         /// `: mat3` for `type` itself, `.inner.basis: mat3` for a member.
@@ -784,7 +784,7 @@ struct checker
         type_id type = type_id::none;
     };
     [[nodiscard]] local_only_found local_only_path(type_id type) const;
-    /// CHK-391: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
+    /// CHK-397: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
     bool judge_edge_local_only(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).
     void mark_requires_used(cc::span<symbol_id const> functions, feature_set features);
@@ -794,7 +794,7 @@ struct checker
     // ---- footprint pins (check_footprint.cc) ------------------------------------------------------------------------
 
     /// Records the `@expect(footprint = "...")` among the attributes of function `id`, and an entry point's expected
-    /// diagnostics (CHK-397); any other `@expect` there is reported.
+    /// diagnostics (CHK-403); any other `@expect` there is reported.
     void read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_entry_point);
     /// `unmet-expectation` for every pin whose entry point's footprint says otherwise (CHK-267).
     void judge_footprint_pins();

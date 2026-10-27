@@ -121,7 +121,7 @@ TEST("sgl footprint - only an entry point has a footprint to pin, and it pins no
 fun helper(){work} -> float => work.scale
 )")
               .contains("only an entry point has a footprint to pin"));
-    // CHK-397: an entry point expects a diagnostic, and a helper has none of its own to expect
+    // CHK-403: an entry point expects a diagnostic, and a helper has none of its own to expect
     CHECK(reports_for_entry(R"(@expect(error = "x")
 fun helper(){work} -> float => work.scale
 )")

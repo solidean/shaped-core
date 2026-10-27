@@ -230,7 +230,7 @@ It stands only in a `cbuffer`, whose members are globals rather than fields of t
 Neither is needed: once no field crosses a row and a padding field fills each gap, dx12's own packing puts every field right behind the one before, which is where the form placed it.
 A memory form on every target, rather than only where a target's own rule disagrees, keeps one shape of text for a promised layout.
 
-## EMIT-157
+## EMIT-161
 
 WGSL and MSL name only a weak compare-exchange, so SGL offers the weak one as it is and builds the strong one on it.
 Both are named for what they promise, so no call reads as one while meaning the other.
@@ -250,7 +250,7 @@ So the loop almost always runs once.
 In WGSL a `break` is its only exit, so its behavior is {Next}, and the control flow after it is the control flow before it (§ 15.2.6), which keeps a barrier after the call legal.
 MSL and HLSL have no static uniformity rule, and every thread leaves the loop, so a barrier after it is reached by all.
 
-## EMIT-158
+## EMIT-162
 
 A helper invocation of a pixel stage runs for derivatives, or goes on after a `discard`, and its atomics store nothing.
 What they read is no value at all: Vulkan says "values returned by atomic instructions in helper invocations are undefined", and WGSL that they "return indeterminate results" (§ 15.4).
@@ -261,7 +261,7 @@ MSL tells a helper by `simd_is_helper_thread()`, so the loop skips one, and give
 HLSL's strong compare-exchange is one instruction, so it needs neither; SM 6.6's `IsHelperLane` would be the test if it ever did.
 A compute stage has no helpers, so its loop needs no test.
 
-## EMIT-159
+## EMIT-163
 
 WGSL has no test for a helper invocation, so its strong loop cannot be kept from one.
 Bounding the loop would end it, at the price of a strong compare-exchange that may give `expected` without having stored, which is the weak one's promise under the strong one's name.

@@ -155,7 +155,7 @@ constexpr atomic_info k_atomics[] = {
     return op == atomic_op::compare_exchange_strong || op == atomic_op::compare_exchange_weak;
 }
 
-/// EMIT-159: a pixel stage's strong loop must keep a helper invocation out, which needs the target to tell one.
+/// EMIT-163: a pixel stage's strong loop must keep a helper invocation out, which needs the target to tell one.
 [[nodiscard]] check::feature_set strong_pixel_features(atomic_op op)
 {
     return op == atomic_op::compare_exchange_strong ? check::feature_set(check::feature::helper_lane_query)
@@ -191,7 +191,7 @@ constexpr cc::string_view k_atomics_msl[] = {
 /// A vertex stage has no writable storage in WebGPU, and any-hit and intersection stages run as often as traversal decides.
 constexpr cc::string_view k_atomic_stages = "@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)";
 
-/// A compare-exchange writes statements in every target (EMIT-157).
+/// A compare-exchange writes statements in every target (EMIT-161).
 bool every_language(language)
 {
     return true;
@@ -219,7 +219,7 @@ struct exchange_place
     cc::string texel;
 };
 
-/// EMIT-157 and EMIT-158: WGSL's and MSL's compare-exchange, whose own is weak.
+/// EMIT-161 and EMIT-162: WGSL's and MSL's compare-exchange, whose own is weak.
 /// The weak one is that call, once; the strong one retries it in a loop while it failed having read `expected`.
 /// The place, `expected` and `desired` are each evaluated once, in that order, ahead of any loop.
 written write_exchange(call_context const& ctx,
@@ -253,7 +253,7 @@ written write_exchange(call_context const& ctx,
         result.lines.push_back(cc::format("let {}: {} = {};", expected_name, t, expected));
         result.lines.push_back(cc::format("let {}: {} = {};", desired_name, t, desired));
         result.lines.push_back(cc::format("var {}: {};", before, t));
-        // a pixel stage's needs helper_lane_query, which WGSL lacks (EMIT-159), since it cannot keep a helper out of this loop
+        // a pixel stage's needs helper_lane_query, which WGSL lacks (EMIT-163), since it cannot keep a helper out of this loop
         result.lines.push_back("loop {");
         result.lines.push_back(cc::format("    let {} = atomicCompareExchangeWeak({}, {}, {});", exchanged, place_name,
                                           expected_name, desired_name));
@@ -301,7 +301,7 @@ written write_exchange(call_context const& ctx,
     result.lines.push_back(cc::format("const {} {} = {};", t, desired_name, desired));
     result.lines.push_back(place.is_texel ? cc::format("{} {} = {}({});", vector, before, vector, expected_name)
                                           : cc::format("{} {} = {};", t, before, expected_name));
-    // a helper thread's atomics store nothing and read what they please, so it never enters the loop (EMIT-158)
+    // a helper thread's atomics store nothing and read what they please, so it never enters the loop (EMIT-162)
     auto const helper = ctx.is_pixel_stage ? cc::string_view("!simd_is_helper_thread() && ") : cc::string_view();
     result.lines.push_back(
         cc::format("while ({}!{} && {} == {})", helper, attempt(target, desired_name), read, expected_name));
@@ -311,7 +311,7 @@ written write_exchange(call_context const& ctx,
     return result;
 }
 
-/// EMIT-157: HLSL's one compare-exchange, which is strong; a weak one fills the prelude's struct from it.
+/// EMIT-161: HLSL's one compare-exchange, which is strong; a weak one fills the prelude's struct from it.
 written write_hlsl_exchange(call_context const& ctx, cc::string_view place, written result)
 {
     auto const& info = k_atomics[ctx.data & 0xffu];
@@ -629,7 +629,7 @@ void sgl::builtins::register_sync(registry& r)
     r.add_comment("// What a weak compare-exchange gives, a struct of fields every target declares as a program's "
                   "own.\n"
                   "// The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it "
-                  "stored (EMIT-157).");
+                  "stored (EMIT-161).");
     r.add_declaration("/// What a weak compare-exchange read, and whether it stored `desired`.\n"
                       "struct exchange_result[T]:\n"
                       "    old: T\n"

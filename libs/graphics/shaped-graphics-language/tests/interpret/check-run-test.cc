@@ -128,7 +128,7 @@ TEST("sgl run - a failure in a loop of the test keeps the loop's variable, and t
 
 TEST("sgl run - a weak compare-exchange fails spuriously unless the driver asks for every one to be strong")
 {
-    // EVAL-98: one that meets `expected` fails the first time, so a check that it stored fails by default
+    // EVAL-100: one that meets `expected` fails the first time, so a check that it stored fails by default
     auto const checked = check_sources(read_prelude(), "@workgroup binding counters:\n"
                                                        "    slot: atomic[uint]\n"
                                                        "test:\n"

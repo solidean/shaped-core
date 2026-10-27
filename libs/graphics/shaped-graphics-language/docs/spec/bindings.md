@@ -369,10 +369,10 @@ let counted = materials.albedo[uniform (counts.picked[0] % 64)].sample(p.uv)
 * An index the uniformity pass proves the same in every invocation needs no mark, and any other is marked, or refused (CHK-300).
   `nonuniform i` says it may differ, which every varying index says, however plainly the pass sees it vary.
   Forgetting that mark is silent on the GPU: some hardware reads one invocation's descriptor for its whole wave.
-  `uniform i` is the author's word where the pass proves neither, such as a count read from a buffer the shader writes, and is refused on an index the pass proves varying (CHK-394).
+  `uniform i` is the author's word where the pass proves neither, such as a count read from a buffer the shader writes, and is refused on an index the pass proves varying (CHK-400).
   A `nonuniform` mark on an index the pass proves uniform is a warning, since it pays for nothing.
   A mark stands only as the index itself; on a `let` or on a value array's index it would mean nothing, and is refused.
-* A function's index is judged by what each call reaching it passes, in each entry point alone (CHK-395, CHK-396).
+* A function's index is judged by what each call reaching it passes, in each entry point alone (CHK-401, CHK-402).
   A helper that one call reaches with a uniform index and another with a varying one is split in two, or marked `nonuniform` and pays on both.
 * `T[]`, whose length the host binds, is the spelling an unbounded array has, and `unsupported-yet` until sg binds one.
   An array of samplers, and one of more than one dimension, are `unsupported-yet` too.
@@ -426,7 +426,7 @@ Its operations are builtins that take it first, called as methods: `add`, `subtr
 `and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
 Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
 A pixel and a compute stage take them, and so do the ray-tracing stages that run once per launch, ray or call: a raygen, a miss, a closest hit and a callable.
-An any hit and an intersection run as often as the traversal decides, so an atomic there counts something no spec defines, and is `stage-not-allowed` (CHK-398).
+An any hit and an intersection run as often as the traversal decides, so an atomic there counts something no spec defines, and is `stage-not-allowed` (CHK-404).
 So is one in a decision an inline trace calls, in any stage.
 The host holds a buffer of atomics as the plain integers it is.
 Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).
@@ -464,7 +464,7 @@ fun insert_weak(key: uint){table} -> uint:
     return 1024u
 ```
 
-What each target does with them ([EMIT-157](semantics/emitting.md#types) to [EMIT-159](semantics/emitting.md#types)):
+What each target does with them ([EMIT-161](semantics/emitting.md#types) to [EMIT-163](semantics/emitting.md#types)):
 
 * HLSL's `InterlockedCompareExchange` is strong, so both forms are it, and the weak one never fails spuriously there.
 * WGSL's `atomicCompareExchangeWeak` is weak, and so is MSL's `atomic_compare_exchange_weak_explicit` by its name.
@@ -483,7 +483,7 @@ Its caveats are the other atomics' and a few of its own:
   There, a weak one in a retry loop, or a compute stage, is the way.
 * The result of either is non-uniform (CHK-283): an index taken from it into a binding array is `nonuniform`, and a barrier under a branch on it is refused.
   The strong form's loop is the target's, and leaves the control flow as uniform as it found it, so a barrier after the call is fine.
-* A test runs one invocation, which no other ever races ([EVAL-98](semantics/evaluation.md#errors-of-the-program)).
+* A test runs one invocation, which no other ever races ([EVAL-100](semantics/evaluation.md#errors-of-the-program)).
   It fails a weak compare-exchange spuriously every other time each call meets `expected`, the first time first.
   So a weak one without its retry loop fails its test, as it may on a GPU.
 * A spin lock built from either, where one invocation waits for another to release it, may hang a GPU whose SIMD group cannot run both sides; SGL does not detect one.

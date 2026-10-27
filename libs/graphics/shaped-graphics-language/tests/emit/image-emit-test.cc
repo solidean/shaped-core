@@ -131,7 +131,7 @@ TEST("sgl emit - an atomic image's update is the target's own atomic on the texe
 
 TEST("sgl emit - an atomic image's compare-exchange is HLSL's own, and a loop over MSL's weak one")
 {
-    // EMIT-157 on a texel: MSL's texture atomic hands back four wide, and the loop retries a failure that read `expected`
+    // EMIT-161 on a texel: MSL's texture atomic hands back four wide, and the loop retries a failure that read `expected`
     constexpr auto source = "require image_atomics\n"
                             "\n"
                             "binding set:\n"

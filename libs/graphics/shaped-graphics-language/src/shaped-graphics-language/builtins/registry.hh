@@ -68,7 +68,7 @@ struct sgl::builtins::call_context
     cc::string_view result_type;
     /// The entry point holds a `@coherent` member, whose writes a barrier publishes to the whole dispatch (EMIT-150).
     bool is_device_coherent = false;
-    /// The entry point is a pixel stage, whose helper invocations run its atomics without effect (EMIT-158).
+    /// The entry point is a pixel stage, whose helper invocations run its atomics without effect (EMIT-162).
     bool is_pixel_stage = false;
 };
 
@@ -219,7 +219,7 @@ struct sgl::builtins::type_record
     /// What a device needs for a value of it, which an entry point holding one needs too (CHK-382).
     check::feature_set features;
 
-    /// A value of function bodies alone, which no GPU memory and no stage edge holds yet (CHK-391).
+    /// A value of function bodies alone, which no GPU memory and no stage edge holds yet (CHK-397).
     /// The detail of what refuses one says why: `mat3`'s layout in memory is not decided.
     cc::string_view local_only_reason;
 
@@ -263,7 +263,7 @@ struct sgl::builtins::function_record
     /// compare-exchange does so far.
     bool gives_prelude_struct = false;
     /// Takes a number literal only at its default type, as `as` does, so `T(x)` never reaches a conversion `x as T`
-    /// has not (CHK-390).
+    /// has not (CHK-396).
     bool takes_literal_at_default = false;
     /// Stores a texel of its first argument, an image, which MSL fences before the same thread reads it (EMIT-151).
     bool is_image_store = false;
@@ -277,7 +277,7 @@ struct sgl::builtins::function_record
     /// what it gives differs within a workgroup (CHK-377).
     bool is_subgroup_operation = false;
     /// Of those, one whose result is the same in every invocation of the subgroup, a vote, a reduction or a broadcast,
-    /// so its value is unproven rather than varying whatever its argument is (CHK-393).
+    /// so its value is unproven rather than varying whatever its argument is (CHK-399).
     bool agrees_in_subgroup = false;
     /// A subgroup operation within a quad, which a compute stage forms along one axis (CHK-380).
     bool is_quad_operation = false;
@@ -299,7 +299,7 @@ struct sgl::builtins::function_record
     /// What a device needs to run a call of it: an entry point that reaches one needs it too, and declares it (CHK-322).
     check::feature_set features;
     /// What a pixel stage that reaches it needs beside `features`: the strong compare-exchange's `helper_lane_query`
-    /// (EMIT-159).
+    /// (EMIT-163).
     check::feature_set pixel_features;
     /// Takes, past its signature, the position of its acceleration-structure argument among the acceleration members
     /// of the entry point's binding list, which flatten appends as an int: the emulated trace's root (CHK-325).

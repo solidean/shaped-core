@@ -121,7 +121,7 @@ use view
 * **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
-* **CHK-391** `mat3` is the prelude's 3x3 matrix of floats, column-major like `mat4`, and a value of function bodies alone ([why](why/checking.md#chk-391)).
+* **CHK-397** `mat3` is the prelude's 3x3 matrix of floats, column-major like `mat4`, and a value of function bodies alone ([why](why/checking.md#chk-397)).
   `mat3(c0, c1, c2)` makes one of three `float3` columns, `c0` first.
   `m * v` of a `float3` or a `vec3` gives the same type, and `m * n` of two is their product, which applies `n` first.
   It has no other function yet, as `mat4` has none: no transpose, no subscript and no `==`.
@@ -635,7 +635,7 @@ fun shade(k: float) -> float:
   A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
   Between `int` and `uint` the bits stay.
   The interpreter's choice of the unspecified value is saturation at the integer's bounds, and 0 for a NaN.
-* **CHK-390** `T(x)`, where `T` is a numeric scalar or a plain vector, is `x as T` wherever `as` converts the type of `x` to `T`, and `x` where it is a `T` already ([why](why/checking.md#chk-390)).
+* **CHK-396** `T(x)`, where `T` is a numeric scalar or a plain vector, is `x as T` wherever `as` converts the type of `x` to `T`, and `x` where it is a `T` already ([why](why/checking.md#chk-396)).
   So `float(k)` of an `int` is `k as float`, and `float3(n)` of an `int3` converts each component, by CHK-197 and with its unspecified values.
   Each is a function of `T`'s name beside its constructors (CHK-240), so a literal meets the overload of its own type.
   `float(1)` converts the `int` 1, and `uint(-1)` is `constant-not-representable` as `(-1) as uint` is.
@@ -658,7 +658,7 @@ The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2
 * **CHK-358** Every arithmetic operator, `+`, `-`, `*`, `/` and `%`, takes a plain vector and its element type on either side, and is componentwise ([why](why/checking.md#chk-358)).
   So do `&`, `|`, `^`, `<<` and `>>` for the integer families, so `id.xy % 2` and `mask >> 4` need no construction, and unary `-` for the signed families.
 * **CHK-359** `min`, `max` and `clamp` take every integer vector family as they take the float ones, and `abs` and `sign` take the signed ones.
-* **CHK-392** `mix(a, b, t)` of two `float` or `half` vectors takes `t` as one scalar of their element type, or as a vector of their type, one `t` per component.
+* **CHK-398** `mix(a, b, t)` of two `float` or `half` vectors takes `t` as one scalar of their element type, or as a vector of their type, one `t` per component.
   Every target's own `mix` or `lerp` takes both, so neither form needs a construction.
 * **CHK-360** Every vector of the prelude has a one-value constructor, `float3(x)`, whose every component is `x`; it is a function of the vector's name beside its synthesized constructor (CHK-240).
 * **CHK-361** `fwidth(x)` is `abs(ddx(x)) + abs(ddy(x))`, and like `ddx` it is `@stages(.pixel)` and takes derivatives (CHK-282).
@@ -772,7 +772,7 @@ fun f() -> float:
 * **CHK-267** `@expect(footprint = "slot: access, ...")` on an entry point pins its [footprint](../bindings.md#footprint): each touched slot once, as `read`, `write` or `read write`, in any order.
   A footprint that differs is `unmet-expectation`, whose detail spells the one the code has.
   On a function that is no entry point, or with any other argument, it is `invalid-attribute-arguments`.
-* **CHK-397** `@expect(error = "kind")` or `@expect(warning = "kind")` on an entry point, of any stage, takes the diagnostics judged of its inlined body (CHK-396), wherever in the program they stand.
+* **CHK-403** `@expect(error = "kind")` or `@expect(warning = "kind")` on an entry point, of any stage, takes the diagnostics judged of its inlined body (CHK-402), wherever in the program they stand.
   It takes them as a test's expectation takes those inside the test (CHK-232), and one none of them meets is `unmet-expectation`.
   Such an entry point is judged by them alone and never built, as such a test is never run.
   On a function that is no entry point it is `invalid-attribute-arguments`.
@@ -785,7 +785,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
 * **CHK-258** A `require` names features as `sg::feature` names them, and only those a shader can use:
   `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures`, `ray_query` and `raytracing_pipeline`.
   The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), and the subgroup operations `subgroups` (CHK-376).
-  Coherent memory adds `device_coherence` (CHK-368), image atomics `image_atomics` (CHK-372), and a pixel stage's strong compare-exchange `helper_lane_query` (EMIT-159).
+  Coherent memory adds `device_coherence` (CHK-368), image atomics `image_atomics` (CHK-372), and a pixel stage's strong compare-exchange `helper_lane_query` (EMIT-163).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
@@ -890,22 +890,22 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   An access word stands before it and qualifies its element: `out image_2d[.rgba8_unorm][4]`.
 * **CHK-300** An index into a binding array that the uniformity pass proves the same in every invocation needs no mark ([why](why/checking.md#chk-300)).
   Any other is marked `uniform i` or `nonuniform i`.
-  Unmarked, an index the pass proves varying (CHK-393) is `non-uniform-index`, and one it proves neither way is `unproven-index`, whose detail offers both marks.
+  Unmarked, an index the pass proves varying (CHK-399) is `non-uniform-index`, and one it proves neither way is `unproven-index`, whose detail offers both marks.
   A varying index is marked `nonuniform` even where the pass proves it varying, since the mark is what keeps its cost in the source.
   Either mark is its argument unchanged.
-  A `nonuniform` mark on an index the pass proves uniform wherever the program reaches it is the warning `needless-nonuniform` (CHK-395).
+  A `nonuniform` mark on an index the pass proves uniform wherever the program reaches it is the warning `needless-nonuniform` (CHK-401).
   A mark stands only as the whole index into a binding array, `textures[nonuniform i]`; anywhere else, a `let` or an index into a value array included, it is `wrong-kind-of-name`.
   Neither is a keyword: each is a function of the prelude, written as a call without parentheses, which a program's own name of that spelling shadows.
-* **CHK-393** An index the pass does not prove uniform is **proven varying** where it comes from what the stage is handed (CHK-283), or from what a trace or a callable writes back.
+* **CHK-399** An index the pass does not prove uniform is **proven varying** where it comes from what the stage is handed (CHK-283), or from what a trace or a callable writes back.
   It may come so through values, or through a `let mut` assigned under control flow that tests such a value.
   A `let` is its value where it stands, so control flow it stands in leaves it as uniform as its value: an early `return` before `maps[draw.slot]` needs no mark.
   Every other value CHK-283 counts non-uniform is **unproven**: a read of a `mut` buffer, a `mut` image or workgroup memory, and the result of an atomic.
   So is what a subgroup agrees on, whatever it was given: a vote, a reduction and a broadcast, such as `subgroup_broadcast_first(id.x)`.
   A scan, a shuffle and a quad operation give each invocation its own, and are as varying as what they were given.
-* **CHK-394** `uniform i` is the author's word that `i` is the same in every invocation where the pass cannot prove it, and every target writes it as the plain index (EMIT-121).
+* **CHK-400** `uniform i` is the author's word that `i` is the same in every invocation where the pass cannot prove it, and every target writes it as the plain index (EMIT-121).
   On an index the pass proves varying it is `uniform-index-varies`.
   On one the pass proves uniform it costs nothing, and is no warning.
-* **CHK-395** An access in a function is judged over the copies of it each entry point inlined, one per call that reaches it, and each copy by what its call passes ([why](why/checking.md#chk-395)).
+* **CHK-401** An access in a function is judged over the copies of it each entry point inlined, one per call that reaches it, and each copy by what its call passes ([why](why/checking.md#chk-401)).
   So an index a function derives from its parameter needs no mark where every call reaching it passes a value the pass proves uniform.
   An unmarked access that some copies reach uniform and others not is `mixed-index`, at the index.
   Its notes name one call of each kind, where the paths of the two copies part, and what made the other value differ.
@@ -913,7 +913,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   A `nonuniform` mark settles it, and is needless only where every copy in every entry point of the program is uniform.
   A `uniform` mark there is `uniform-index-varies` where a copy is proven varying.
   The index of an element a resource parameter stands for is the one its caller wrote, and is judged there.
-* **CHK-396** A diagnostic of the uniformity pass belongs to the entry points whose inlined bodies it was judged of ([why](why/checking.md#chk-396)).
+* **CHK-402** A diagnostic of the uniformity pass belongs to the entry points whose inlined bodies it was judged of ([why](why/checking.md#chk-402)).
   A compile of one entry point reports the program's diagnostics and its own, and never another entry point's: a vertex stage never answers for a helper only a pixel stage calls.
   A check of the whole file, `sgl test` and the language server among them, reports every entry point's, each once.
   A function no entry point of the program reaches is not judged, since an index it derives from a parameter is its callers' to prove.
@@ -932,7 +932,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-296** `atomic[T]` is an atomic of `uint` or `int`, and of any other `T` `wrong-kind-of-name`.
   It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
   Its builtins are `@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)`.
-* **CHK-398** An atomic's builtin reached from a traversal's decision is `stage-not-allowed`, whose detail says how often the decision runs ([why](why/checking.md#chk-398)).
+* **CHK-404** An atomic's builtin reached from a traversal's decision is `stage-not-allowed`, whose detail says how often the decision runs ([why](why/checking.md#chk-404)).
   A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
 * **CHK-297** An expression of an atomic's type stands only as a builtin's argument; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
@@ -1426,7 +1426,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 
 | kind | reported by |
 |---|---|
-| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-391 |
+| `unsupported-yet` | CHK-8, CHK-61, CHK-134, CHK-213, CHK-237, CHK-291, CHK-299, CHK-307, CHK-314, CHK-321, CHK-329, CHK-333, CHK-338, CHK-339, CHK-344, CHK-346, CHK-347, CHK-350, CHK-352, CHK-353, CHK-357, CHK-366, CHK-374, CHK-379, CHK-381, CHK-383, CHK-387, CHK-389, CHK-397 |
 | `duplicate-declaration` | CHK-12, CHK-28, CHK-241, CHK-347, CHK-351 |
 | `dependency-cycle` | CHK-18, CHK-136 |
 | `unknown-module`, `use-of-own-module` | CHK-347 |
@@ -1439,7 +1439,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `unknown-builtin` | CHK-31 |
 | `expected-body` | CHK-32, CHK-236 |
 | `opaque-struct-needs-builtin` | CHK-34 |
-| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-397, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
+| `invalid-attribute-arguments` | CHK-36, CHK-39, CHK-204, CHK-208, CHK-211, CHK-212, CHK-220, CHK-231, CHK-267, CHK-403, CHK-292, CHK-293, CHK-301, CHK-304, CHK-384, CHK-369, CHK-370, CHK-371 |
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
@@ -1449,7 +1449,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `recursive-call` | CHK-130 |
 | `recursive-trace` | CHK-332 |
 | `unknown-member` | CHK-64, CHK-147, CHK-152, CHK-279, CHK-329, CHK-385 |
-| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-390 |
+| `no-matching-overload` | CHK-71, CHK-155, CHK-316, CHK-340, CHK-329, CHK-344, CHK-365, CHK-366, CHK-367, CHK-396 |
 | `non-exhaustive-case` | CHK-160 |
 | `duplicate-case-pattern` | CHK-161 |
 | `missing-value-in-arm` | CHK-168 |
@@ -1466,7 +1466,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |
-| `unmet-expectation` | CHK-232, CHK-267, CHK-397 |
+| `unmet-expectation` | CHK-232, CHK-267, CHK-403 |
 | `member-name-clash` | CHK-238, CHK-386 |
 | `literal-not-representable` | CHK-60, CHK-61, CHK-253, CHK-357 |
 | `call-spelling` | CHK-256 |
@@ -1474,15 +1474,15 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `literal-needs-type` | CHK-257, CHK-313 |
 | `shift-out-of-range` | CHK-270 |
 | `constant-without-value` | CHK-311 |
-| `constant-not-representable` | CHK-312, CHK-390 |
+| `constant-not-representable` | CHK-312, CHK-396 |
 | `missing-sampler` | CHK-279 |
 | `invalid-constant-argument` | CHK-280, CHK-285, CHK-299, CHK-309, CHK-378, CHK-389 |
 | `non-uniform-control-flow` | CHK-282, CHK-374, CHK-377 |
-| `non-uniform-index` | CHK-300, CHK-395 |
-| `needless-nonuniform` | CHK-300, CHK-395 |
+| `non-uniform-index` | CHK-300, CHK-401 |
+| `needless-nonuniform` | CHK-300, CHK-401 |
 | `unproven-index` | CHK-300 |
-| `mixed-index` | CHK-395 |
-| `uniform-index-varies` | CHK-394, CHK-395 |
+| `mixed-index` | CHK-401 |
+| `uniform-index-varies` | CHK-400, CHK-401 |
 | `invalid-option` | CHK-354 |
 | `unroll-too-long` | CHK-389 |
 
@@ -1500,5 +1500,5 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 * Whether `workgroup_uniform_load` takes an element of a workgroup array at a uniform index.
 * Whether `@subgroup_size` is uniform.
 * Whether a value loaded through an element a `nonuniform` index picked is non-uniform — it counts as uniform today, which is a soundness hole of the same kind.
-* Whether a function no entry point reaches is judged on its own, its parameters unproven, once a module has an interface its callers are checked against (CHK-396).
+* Whether a function no entry point reaches is judged on its own, its parameters unproven, once a module has an interface its callers are checked against (CHK-402).
 * Whether a ray query's committed hit may assume that traversal finds one ray's hits the same way in every lane.

@@ -35,7 +35,7 @@ enum class sgl::check::feature : sgl::u8
     device_coherence,
     /// An `@atomic` image (CHK-372), which WebGPU has on no device.
     image_atomics,
-    /// A pixel stage's `compare_exchange_strong` (EMIT-159), whose loop must tell a helper invocation; WGSL cannot.
+    /// A pixel stage's `compare_exchange_strong` (EMIT-163), whose loop must tell a helper invocation; WGSL cannot.
     helper_lane_query,
 };
 

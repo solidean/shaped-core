@@ -314,7 +314,7 @@ Defining saturation and a NaN of 0 would mean a clamp and a compare around every
 A program that needs a defined result clamps before it converts, and pays for it only where it asks.
 The interpreter still has to give some value, and saturation is the choice that is right on the most hardware.
 
-## CHK-390
+## CHK-396
 
 A shader ported from HLSL, GLSL or MSL writes `float(i)`, and every one of those languages reads it as a conversion.
 Refusing it would only send the author to `as`, and a second meaning would be worse than none.
@@ -453,7 +453,7 @@ For those the author says which it is, and `uniform i` is the word that asserts 
 It is checked against what the pass does prove, so it can never contradict a proven difference, and it costs nothing where it is right.
 `uniform` and `nonuniform` are functions of the prelude rather than keywords, so they are spelled and placed alike, and no program loses the name.
 
-## CHK-395
+## CHK-401
 
 A helper is inlined once per call, so its index has as many values as it has calls.
 Judging the access once, by the first copy the pass met, made a helper called with a uniform index and a varying one impossible to write.
@@ -466,13 +466,13 @@ It is not taken while the pass has known holes (the checking file's "Open"): the
 Once those close, it is the natural relaxation, and breaks no program.
 A needless mark is judged over every entry point of the program, since one shared helper must not warn in the compile of a shader whose sibling needs the mark.
 
-## CHK-396
+## CHK-402
 
 Each entry point is a separate shader, compiled on its own by a host that may never build its siblings.
 A diagnostic judged of one entry point's inlined body says nothing of another's, so failing the other's compile for it would refuse a correct shader.
 A whole-file check still shows every one, since an editor and a test run speak for the file.
 A function no entry point reaches is left alone, though a check could judge it with its parameters unproven.
-That would demand a mark on every library helper that derives an index from a parameter, which is exactly the index CHK-395 lets the callers prove.
+That would demand a mark on every library helper that derives an index from a parameter, which is exactly the index CHK-401 lets the callers prove.
 A module's function is judged where it is used, in the program whose entry points inline it.
 
 ## CHK-320
@@ -708,7 +708,7 @@ The limit of 256 copies bounds the text a mistyped bound can write, and nesting 
 A loop that long wants a loop, and it means what it meant without the attribute, so it compiles as one and the warning tells its author the copies were not written.
 Unrolling every small constant-range loop without the attribute was not chosen: register pressure and text size would change behind the author's back, with no way to keep a loop a loop.
 
-## CHK-391
+## CHK-397
 
 A rotation or a normal matrix is a `mat3`, and building one from three columns is the common case in a body.
 Its layout in GPU memory is a decision of its own: a constant block starts each column on a row of 16 bytes, a buffer's element may pack it into 36, and each target's memory form differs.
@@ -716,7 +716,7 @@ Taking that decision with the first local `mat3` would fix it before any shader 
 Everywhere memory or a stage edge would hold one is refused at its line, the way an array is (CHK-291), rather than by the emitter with no line at all.
 A shader that wants one from memory reads its columns, which are `float3`s, and builds it in the body.
 
-## CHK-398
+## CHK-404
 
 An atomic counts the invocations that reach it, so it means something only where the program can say how many there are.
 A raygen runs once per launch index, a miss once per ray that leaves the scene, a closest hit once per trace that hit, and a callable once per call.

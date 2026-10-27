@@ -154,7 +154,7 @@ TEST("sgl check - a struct's constructor takes its fields in order, and a splat 
           == "no-matching-overload user:[float4(..c)] float4(float, float, float), and the constructor is "
              "float4(float, "
              "float, float, float)\n");
-    // CHK-390: a scalar converts by its name as `as` converts, and `mat4` has no constructor at all
+    // CHK-396: a scalar converts by its name as `as` converts, and `mat4` has no constructor at all
     CHECK(body_reports("let a = float(k)\nreturn k\n") == "");
     CHECK(body_reports("let a = mat4(k)\nreturn k\n")
           == "no-matching-overload user:[mat4(k)] mat4 is opaque and has no constructor\n");
@@ -334,7 +334,7 @@ TEST("sgl check - `as` converts between float, int and uint of one width, and no
 
 TEST("sgl check - a numeric type's name converts as `as` does, and converts nothing `as` does not")
 {
-    // CHK-390: `T(x)` is `x as T`, and `x` itself where it is a `T`
+    // CHK-396: `T(x)` is `x as T`, and `x` itself where it is a `T`
     CHECK(body_reports("let i = int(k)\nlet u = uint(i)\nreturn float(u) + float(k)\n") == "");
     CHECK(body_reports("let w = int3(c)\nreturn float3(w).x\n") == "");
     CHECK(body_reports("let t = vec3(k)\nreturn k\n") == "");

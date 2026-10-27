@@ -122,7 +122,7 @@ enum class sg::feature
     /// WebGPU has no image atomics.
     image_atomics,
 
-    /// A pixel shader may tell a helper invocation from a real one, which SGL's strong compare-exchange needs there (EMIT-159).
+    /// A pixel shader may tell a helper invocation from a real one, which SGL's strong compare-exchange needs there (EMIT-163).
     /// D3D12 and Vulkan need no test, since their compare-exchange is strong already; Metal has `simd_is_helper_thread()`.
     /// WGSL has no such test.
     helper_lane_query,

@@ -1,4 +1,4 @@
-// `mat3` is a 3x3 float matrix of function bodies, made of its columns and multiplied as `mat4` is (CHK-391)
+// `mat3` is a 3x3 float matrix of function bodies, made of its columns and multiplied as `mat4` is (CHK-397)
 
 fun scale(x: float, y: float, z: float) => mat3(float3(x, 0.0, 0.0), float3(0.0, y, 0.0), float3(0.0, 0.0, z))
 

@@ -151,7 +151,7 @@ void sgl::builtins::register_transforms(registry& r)
     add_product(r, "transform_float4", "mat4", "v", "float4", "float4", transform_float4, write_product);
     add_product(r, "multiply_mat4", "mat4", "b", "mat4", "mat4", multiply_mat4, write_product);
 
-    r.add_comment("// a mat3 is a value of function bodies alone (CHK-391): made of its columns, times a three-vector");
+    r.add_comment("// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector");
     r.add(function_record{
         .signature = "@pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3",
         .doc = "/// The matrix of three columns, `c0` first.",

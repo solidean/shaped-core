@@ -88,7 +88,7 @@ TEST("sgl check - a require names a feature a shader can use, as sg names it")
 
 TEST("sgl check - a pixel stage's strong compare-exchange needs helper_lane_query, on every target alike")
 {
-    // EMIT-159: its loop must keep a helper invocation out, which a target that cannot tell one cannot do
+    // EMIT-163: its loop must keep a helper invocation out, which a target that cannot tell one cannot do
     auto const claims = [](cc::string_view require, cc::string_view stage, cc::string_view call)
     {
         auto const is_pixel = stage == "pixel";

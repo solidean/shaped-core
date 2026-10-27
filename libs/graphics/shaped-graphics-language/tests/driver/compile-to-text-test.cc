@@ -203,7 +203,7 @@ TEST("sgl driver - a warning does not fail the compile, and comes back with the 
 
 TEST("sgl driver - what is judged of one entry point's inlined body is no error of another one's compile")
 {
-    // CHK-396: the vertex stage never reaches the pixel stage's helper, so its compile says nothing of the helper
+    // CHK-402: the vertex stage never reaches the pixel stage's helper, so its compile says nothing of the helper
     constexpr auto source
         = cc::string_view("require binding_arrays\n"
                           "\n"

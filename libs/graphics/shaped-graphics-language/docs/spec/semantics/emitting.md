@@ -79,19 +79,19 @@ struct target_ {
 * **EMIT-120** An atomic is `atomic<u32>` in WGSL and `atomic_uint` in MSL, updated by `atomicAdd(&a, v)` and `atomic_fetch_add_explicit(&a, v, memory_order_relaxed)`.
   HLSL declares the plain integer, and its `Interlocked*` gives the value before through an out parameter, so a local declared ahead of the statement holds it.
   A load is `InterlockedOr` with 0, and a store `InterlockedExchange`, so that no plain access races an update.
-* **EMIT-157** A compare-exchange is HLSL's `InterlockedCompareExchange(a, expected, desired, before)`, which is strong, for either form.
+* **EMIT-161** A compare-exchange is HLSL's `InterlockedCompareExchange(a, expected, desired, before)`, which is strong, for either form.
   The weak form fills `exchange_result[T]`, a struct every target declares as the program's own, from it with `exchanged` as `before == expected`.
-  WGSL's `atomicCompareExchangeWeak` and MSL's `atomic_compare_exchange_weak_explicit` are weak, and the weak form is one call of it ([why](why/emitting.md#emit-157)).
+  WGSL's `atomicCompareExchangeWeak` and MSL's `atomic_compare_exchange_weak_explicit` are weak, and the weak form is one call of it ([why](why/emitting.md#emit-161)).
   WGSL fills the struct from its result's `old_value` and `exchanged`, and MSL from its `bool` and the value it wrote back into `expected`.
   The strong form there is a loop over that call, which retries a failure that read `expected` and stops at any other.
   The atomic's place, `expected` and `desired` are each evaluated once, in that order, ahead of any loop.
   An `@atomic` image's texel is the same in MSL, over its texture's `atomic_compare_exchange_weak`, with the coordinate in place of the pointer.
-* **EMIT-158** In a pixel stage, the strong form's loop keeps a helper invocation from spinning on what its atomics read, which is undefined ([why](why/emitting.md#emit-158)).
+* **EMIT-162** In a pixel stage, the strong form's loop keeps a helper invocation from spinning on what its atomics read, which is undefined ([why](why/emitting.md#emit-162)).
   MSL's loop tests `simd_is_helper_thread()` first, so a helper never enters it.
-  HLSL's has no loop, and WGSL cannot tell a helper (EMIT-159).
+  HLSL's has no loop, and WGSL cannot tell a helper (EMIT-163).
   A compute and a ray-tracing stage have no helpers, so their loop has no such test.
-* **EMIT-159** A pixel stage that reaches `compare_exchange_strong` needs `helper_lane_query`, which the check pass judges on every target as any feature (CHK-322).
-  WGSL has no test for a helper invocation, so no loop it holds could keep one out, and EMIT-109 refuses the stage by naming the feature ([why](why/emitting.md#emit-159)).
+* **EMIT-163** A pixel stage that reaches `compare_exchange_strong` needs `helper_lane_query`, which the check pass judges on every target as any feature (CHK-322).
+  WGSL has no test for a helper invocation, so no loop it holds could keep one out, and EMIT-109 refuses the stage by naming the feature ([why](why/emitting.md#emit-163)).
   A weak compare-exchange is one call, which a helper leaves at once, and a compute stage has no helpers, so neither needs the feature.
 * **EMIT-131** A barrier is the target's own execution barrier with one kind of memory, and MSL's one `threadgroup_barrier` names it by its `mem_flags`.
   `workgroup_barrier` is `GroupMemoryBarrierWithGroupSync` in HLSL, `workgroupBarrier` in WGSL and `mem_threadgroup` in MSL.
@@ -99,7 +99,7 @@ struct target_ {
   `texture_barrier` is `DeviceMemoryBarrierWithGroupSync`, `textureBarrier` and `mem_texture`.
 * **EMIT-121** A binding array is its element's declaration with the length after the name, at its first slot, and the resources after it start `count` slots later.
   HLSL wraps an index marked `nonuniform` in `NonUniformResourceIndex`, which DXC carries into SPIR-V as `NonUniform`.
-  MSL needs no mark, and every target writes an index marked `uniform` as the plain index (CHK-394).
+  MSL needs no mark, and every target writes an index marked `uniform` as the plain index (CHK-400).
 
 | SGL | HLSL | WGSL | MSL |
 |---|---|---|---|
@@ -282,8 +282,8 @@ binding affine:
 * **EMIT-43** HLSL declares every matrix member `column_major` and writes a product `mul(a, b)`; WGSL writes `a * b`, for a matrix times a vector and for a matrix times a matrix.
 * **EMIT-44** `transform_position(m, p)` is the product of `m` and the four-vector `(p, 1.0)`.
 * **EMIT-45** `transform_direction(m, v)` is the `xyz` of the product of `m` and `(v, 0.0)`.
-* **EMIT-156** `mat3(c0, c1, c2)` is `transpose(float3x3(c0, c1, c2))` in HLSL, whose constructor takes rows, and the target's own constructor of three columns in WGSL and MSL.
-  A product of a `mat3` is written as EMIT-43 writes a `mat4`'s, and no memory holds one, so no declaration of a block or a buffer names it (CHK-391).
+* **EMIT-160** `mat3(c0, c1, c2)` is `transpose(float3x3(c0, c1, c2))` in HLSL, whose constructor takes rows, and the target's own constructor of three columns in WGSL and MSL.
+  A product of a `mat3` is written as EMIT-43 writes a `mat4`'s, and no memory holds one, so no declaration of a block or a buffer names it (CHK-397).
 
 ## The text
 
@@ -553,7 +553,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
 * Whether `@layout` also promises a buffer element's layout, which EMIT-111 places today without a promise.
 * A struct member of a `@layout(.cpp)` block, which HLSL would read back by building the struct in a local field by field.
-* `mat3` in GPU memory, which the checker refuses today (CHK-391).
+* `mat3` in GPU memory, which the checker refuses today (CHK-397).
   Its three columns each start a row in a constant block (44 bytes), it is 36 bytes in a buffer's element, and its columns split in a memory form.
   The host holds a block's as `slib::gpu_mat3` and a buffer's as `tg::mat3f`, which is those 36 bytes.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.

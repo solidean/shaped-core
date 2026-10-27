@@ -120,7 +120,7 @@ TEST("sgl emit - a comparison under another comparison is parenthesized")
 
 TEST("sgl emit - an atomic in a raygen, a closest hit, a miss and a callable is each target's own device atomic")
 {
-    // CHK-398: each of these runs once per launch, hit, miss or call, so an atomic in it counts something defined
+    // CHK-404: each of these runs once per launch, hit, miss or call, so an atomic in it counts something defined
     auto const source = cc::string_view(R"(require raytracing_pipeline
 
 struct radiance:
@@ -173,7 +173,7 @@ hit_group lit for rs:
         CHECK(text_of_entry(source, "sky", t).contains("    InterlockedAdd(counted_counts[2], 1u, atomic_before);\n"));
         CHECK(text_of_entry(source, "bump", t).contains("    InterlockedAdd(counted_counts[3], 1u, atomic_before);\n"));
     }
-    // a ray-tracing stage has no helpers, so the strong loop needs no test for one (EMIT-158)
+    // a ray-tracing stage has no helpers, so the strong loop needs no test for one (EMIT-162)
     auto const start = text_of_entry(source, "start", target::msl);
     CHECK(start.contains("    (void)(atomic_fetch_add_explicit(&counted_counts[0], 1u, memory_order_relaxed));\n"));
     CHECK(start.contains("    while (!atomic_compare_exchange_weak_explicit(exchange_place, "));

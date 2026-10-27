@@ -46,7 +46,7 @@ struct sgl::check::located_diagnostic
     /// In the order they should be read, each printed as a `note:` line after the diagnostic.
     cc::vector<related_note> notes;
     /// The entry points whose inlined body it was judged of, by function, which a compile of another one leaves out
-    /// (CHK-396).
+    /// (CHK-402).
     /// Empty for a diagnostic of the program, which every compile of it reports.
     cc::vector<symbol_id> entry_points;
 
@@ -84,7 +84,7 @@ struct sgl::check::test_expectation
 };
 
 /// An entry point's `@expect(error = "kind")` or `@expect(warning = "kind")`, which takes the diagnostics judged of its
-/// inlined body (CHK-397).
+/// inlined body (CHK-403).
 struct sgl::check::entry_expectation
 {
     /// The entry point's function.

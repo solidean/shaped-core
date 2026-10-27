@@ -334,7 +334,7 @@ TEST("sgl check - a test that reaches a pipeline's trace is unsupported")
 
 TEST("sgl check - a mat3 is no ray payload, hit attribute or callable's parameter")
 {
-    // CHK-391: what a ray, a hit or a callable carries is ray data a target lays out
+    // CHK-397: what a ray, a hit or a callable carries is ray data a target lays out
     constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
     constexpr auto framed = "struct framed:\n    m: mat3\n";
     CHECK(reports(cc::format("{}rays framed_rays:\n    primary: framed\n", framed))
@@ -385,7 +385,7 @@ cc::string counting(cc::string_view stage, cc::string_view call)
 
 TEST("sgl check - an atomic stands in a raygen, a miss, a closest hit and a callable, which each run once per ray")
 {
-    // CHK-398
+    // CHK-404
     for (auto const stage : {"raygen", "miss", "closest_hit", "callable"})
         for (auto const call : {"counted.counts[0].add(1u)", "let k = counted.counts[0].compare_exchange_strong(0u, 1u)",
                                 "let r = counted.counts[0].compare_exchange_weak(0u, 1u)"})
@@ -414,7 +414,7 @@ TEST("sgl check - an atomic in an any hit or an intersection counts what travers
 
 TEST("sgl check - an atomic in a decision an inline trace calls is refused as one in an any hit or an intersection")
 {
-    // CHK-398: the traversal decides how often its loop calls the decision, whichever stage holds the loop
+    // CHK-404: the traversal decides how often its loop calls the decision, whichever stage holds the loop
     constexpr auto scene = "require ray_query\n"
                            "require image_atomics\n"
                            "struct sphere_attributes:\n    t: float\n"

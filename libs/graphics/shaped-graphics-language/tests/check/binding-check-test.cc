@@ -490,7 +490,7 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
 
 TEST("sgl check - a mat3 is a value of function bodies, and no binding or stage edge holds one yet")
 {
-    // CHK-391: its layout in memory is not decided, so every place that would need one refuses it at its line
+    // CHK-397: its layout in memory is not decided, so every place that would need one refuses it at its line
     constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
     constexpr auto nested = "struct holder:\n    m: mat3\nstruct outer:\n    h: holder\n\n";
     auto const with_nested = [&](cc::string_view members) { return reports_for(cc::string(nested) + listing(members)); };

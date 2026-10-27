@@ -25,7 +25,7 @@ struct divergence
 {
     bool is = false;
     /// Proven to differ: it comes from what each invocation is handed, through values or through the control flow
-    /// (CHK-393).
+    /// (CHK-399).
     /// Where `is` holds without it, the pass can prove it neither the same nor different.
     bool varies = false;
     /// The node that made it so: a branch, a loop's exit, or the read of a value that differs.
@@ -252,7 +252,7 @@ struct uniformity_pass
         if (is_judged && flow.is && is_reporting)
             violations.push_back({.call = id, .flow = flow});
         // CHK-377: what the subgroup agrees on may still differ between the subgroups of a workgroup
-        // CHK-393: so it is unproven however much its argument varied, and `uniform` may say it is the same
+        // CHK-399: so it is unproven however much its argument varied, and `uniform` may say it is the same
         if (record->agrees_in_subgroup)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
         else if (record->is_subgroup_operation && !result.is)
@@ -565,7 +565,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
     if (asks_reconverged && asks_barrier)
         pass.violations.push_back_range(judged(false).violations);
 
-    // judged once every entry point has its own copies, since one written index is judged over all of them (CHK-395)
+    // judged once every entry point has its own copies, since one written index is judged over all of them (CHK-401)
     for (auto const& f : pass.index_findings)
     {
         auto const& index = e.at(f.index);
@@ -641,7 +641,7 @@ void checker::judge_uniformity(flat_entry_point const& structured)
                              record->name.starts_with("sample") ? ": sample before the branch, or name the level or "
                                                                   "the gradients"
                                                                 : ": take them before the branch"));
-        // CHK-396: a compile of another entry point does not report it
+        // CHK-402: a compile of another entry point does not report it
         d.entry_points.push_back(e.function);
         // a branch of the prelude is no line of the program, so the note names the program's call that reached it
         auto const& from = v.flow.where;
@@ -728,7 +728,7 @@ void checker::judge_indices()
             continue;
         }
 
-        // every other verdict is one entry point's, over the copies its own body inlined (CHK-395)
+        // every other verdict is one entry point's, over the copies its own body inlined (CHK-401)
         auto entries = cc::vector<symbol_id>();
         for (auto const* const u : copies)
             if (!check::holds(entries, u->entry))
@@ -775,7 +775,7 @@ void checker::judge_indices()
             located_diagnostic* d = nullptr;
             if (first.mark == builtins::index_mark::uniform)
             {
-                // CHK-394: the author's word stands where the pass cannot prove otherwise, and only there
+                // CHK-400: the author's word stands where the pass cannot prove otherwise, and only there
                 d = &report(diagnostic_kind::uniform_index_varies, first.index.file, where,
                             cc::format("this index is marked `uniform`, and it differs between invocations: mark it "
                                        "`nonuniform {}` instead",

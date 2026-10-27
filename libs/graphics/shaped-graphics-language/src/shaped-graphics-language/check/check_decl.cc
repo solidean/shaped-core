@@ -680,7 +680,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                               out.name_of(type)));
             type = checked_module::error_type;
         }
-        // CHK-391: a value of function bodies alone has no layout in any memory yet, workgroup memory included
+        // CHK-397: a value of function bodies alone has no layout in any memory yet, workgroup memory included
         // It is judged before an array is, so the detail names it rather than the array holding it.
         if (!is_struct && type != checked_module::error_type)
             if (auto const found = local_only_path(type); !found.path.empty())
@@ -985,7 +985,7 @@ void checker::compile_struct(symbol_id id)
                 report(diagnostic_kind::invalid_pipeline, file, span_of(file, ast_of(file).at(m.field).type),
                        cc::format("{} is a ray type, whose payload is a struct, and this is {}", m.name,
                                   out.name_of(m.type)));
-            // CHK-391: a payload is ray data each target lays out, which a value of function bodies alone is not
+            // CHK-397: a payload is ray data each target lays out, which a value of function bodies alone is not
             else if (auto const found = local_only_path(m.type);
                      m.type != checked_module::error_type && !found.path.empty())
                 unsupported(file, span_of(file, ast_of(file).at(m.field).type),
@@ -1944,7 +1944,7 @@ void checker::judge_entry_point(symbol_id id)
                            workgroup_bytes, k_portable_workgroup_bytes));
 
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
-    // CHK-391 first: a value of function bodies alone is what the detail names, rather than an array holding it
+    // CHK-397 first: a value of function bodies alone is what the detail names, rather than an array holding it
     for (auto const& parameter : parameters)
         if (parameter.input == stage_input::none)
         {

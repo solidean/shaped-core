@@ -1960,7 +1960,7 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
         auto const length = chain_of(file, shape_of(p), arguments, i);
         if (!length.has_value())
             return cc::nullopt;
-        // CHK-390: `T(x)` of a literal is `x as T`, which takes the literal at its default type alone
+        // CHK-396: `T(x)` of a literal is `x as T`, which takes the literal at its default type alone
         if (length.value() > 0 && arguments.numbers[i].is_number && takes_literal_at_default)
             return cc::nullopt;
         result.chains[i] = length.value();

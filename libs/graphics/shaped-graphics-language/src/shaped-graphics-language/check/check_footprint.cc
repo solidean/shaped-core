@@ -60,7 +60,7 @@ cc::string normalized(cc::string_view text)
 void checker::read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attribute> attributes, bool is_entry_point)
 {
     auto const& ast = ast_of(file);
-    // a ray-tracing stage has no footprint, and has diagnostics of its own body as every entry point does (CHK-397)
+    // a ray-tracing stage has no footprint, and has diagnostics of its own body as every entry point does (CHK-403)
     auto is_any_entry = is_entry_point;
     for (auto const stage : {"raygen", "closest_hit", "any_hit", "miss", "intersection", "callable"})
         is_any_entry = is_any_entry || find_attribute(file, attributes, stage) != nullptr;
@@ -77,7 +77,7 @@ void checker::read_footprint_pin(symbol_id id, i32 file, ast::range_of<ast::attr
                 = ast::is_valid(argument.value) ? ast.at(argument.value).node.try_as<ast::literal>() : nullptr;
             auto const name = argument.name.empty() ? cc::string_view() : text_of(file, argument.name);
             auto const is_quoted = literal != nullptr && literal->kind == ast::literal_kind::quoted;
-            // CHK-397: a diagnostic judged of the entry point's inlined body, wherever in the program it stands
+            // CHK-403: a diagnostic judged of the entry point's inlined body, wherever in the program it stands
             if ((name == "error" || name == "warning") && is_quoted && text_of(file, where).size() > 2)
             {
                 if (!is_any_entry)

@@ -374,7 +374,7 @@
 @builtin @pure fun clamp(x: float2, low: float2, high: float2) -> float2
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: float2, b: float2, t: float) -> float2
-/// `mix` of each component by its own `t` (CHK-392).
+/// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: float2, b: float2, t: float2) -> float2
 @builtin @pure fun saturate(x: float3) -> float3
 @builtin @pure fun abs(x: float3) -> float3
@@ -383,7 +383,7 @@
 @builtin @pure fun clamp(x: float3, low: float3, high: float3) -> float3
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: float3, b: float3, t: float) -> float3
-/// `mix` of each component by its own `t` (CHK-392).
+/// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: float3, b: float3, t: float3) -> float3
 @builtin @pure fun saturate(x: float4) -> float4
 @builtin @pure fun abs(x: float4) -> float4
@@ -392,7 +392,7 @@
 @builtin @pure fun clamp(x: float4, low: float4, high: float4) -> float4
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: float4, b: float4, t: float) -> float4
-/// `mix` of each component by its own `t` (CHK-392).
+/// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: float4, b: float4, t: float4) -> float4
 @builtin @pure fun saturate(x: half) -> half
 @builtin @pure fun abs(x: half) -> half
@@ -408,7 +408,7 @@
 @builtin @pure fun clamp(x: half2, low: half2, high: half2) -> half2
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: half2, b: half2, t: half) -> half2
-/// `mix` of each component by its own `t` (CHK-392).
+/// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: half2, b: half2, t: half2) -> half2
 @builtin @pure fun saturate(x: half3) -> half3
 @builtin @pure fun abs(x: half3) -> half3
@@ -417,7 +417,7 @@
 @builtin @pure fun clamp(x: half3, low: half3, high: half3) -> half3
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: half3, b: half3, t: half) -> half3
-/// `mix` of each component by its own `t` (CHK-392).
+/// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: half3, b: half3, t: half3) -> half3
 @builtin @pure fun saturate(x: half4) -> half4
 @builtin @pure fun abs(x: half4) -> half4
@@ -426,7 +426,7 @@
 @builtin @pure fun clamp(x: half4, low: half4, high: half4) -> half4
 /// `a` where `t` is 0 and `b` where it is 1.
 @builtin @pure fun mix(a: half4, b: half4, t: half) -> half4
-/// `mix` of each component by its own `t` (CHK-392).
+/// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: half4, b: half4, t: half4) -> half4
 
 // float3 and float4 are plain numbers, so all of their arithmetic is componentwise
@@ -1054,7 +1054,7 @@
 @builtin @pure @operator("*") fun transform_float4(m: mat4, v: float4) -> float4
 @builtin @pure @operator("*") fun multiply_mat4(m: mat4, b: mat4) -> mat4
 
-// a mat3 is a value of function bodies alone (CHK-391): made of its columns, times a three-vector
+// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector
 /// The matrix of three columns, `c0` first.
 @builtin @pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3
 @builtin @pure @operator("*") fun transform_float3(m: mat3, v: float3) -> float3
@@ -1136,7 +1136,7 @@
 @builtin @pure @operator("as") fun convert_ushort4_to_half4(x: ushort4) -> half4
 @builtin @pure @operator("as") fun convert_ushort4_to_short4(x: ushort4) -> short4
 
-// `T(x)` is `x as T` for every conversion above, and `x` where it is a `T` already (CHK-390)
+// `T(x)` is `x as T` for every conversion above, and `x` where it is a `T` already (CHK-396)
 @builtin @pure fun float(x: float) -> float
 @builtin @pure fun float(x: int) -> float
 @builtin @pure fun float(x: uint) -> float
@@ -2431,7 +2431,7 @@
 @builtin @stages(.compute) fun workgroup_uniform_load(m: ushort4) -> ushort4
 
 // What a weak compare-exchange gives, a struct of fields every target declares as a program's own.
-// The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it stored (EMIT-157).
+// The weak one may fail although the atomic held `expected`, so `old` alone cannot say whether it stored (EMIT-161).
 
 /// What a weak compare-exchange read, and whether it stored `desired`.
 struct exchange_result[T]:

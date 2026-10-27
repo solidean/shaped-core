@@ -163,7 +163,7 @@ void sgl::builtins::register_types(registry& r)
         .leaf_count = 16,
     });
 
-    // CHK-391: a value of function bodies alone, so it has no layout, crosses no edge, and is refused in memory
+    // CHK-397: a value of function bodies alone, so it has no layout, crosses no edge, and is refused in memory
     r.add(type_record{
         .declaration = "struct mat3",
         .doc = "/// Column-major, and a vector stands to its right.\n"

@@ -1,4 +1,4 @@
-// `T(x)` converts as `x as T` does, between the numeric families and their widths, and nowhere else (CHK-390)
+// `T(x)` converts as `x as T` does, between the numeric families and their widths, and nowhere else (CHK-396)
 
 test:
     let k = 3

@@ -1,5 +1,5 @@
 // an index into a binding array is proven the same in every invocation, or it says which it is (CHK-300)
-// the verdicts are an entry point's, over the copies of the access its body inlined (CHK-395, CHK-396)
+// the verdicts are an entry point's, over the copies of the access its body inlined (CHK-401, CHK-402)
 
 require binding_arrays
 

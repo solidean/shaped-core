@@ -423,7 +423,7 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
         }
     }
 
-    // CHK-397: an entry point takes the diagnostics judged of its inlined body, which a compile of it would report
+    // CHK-403: an entry point takes the diagnostics judged of its inlined body, which a compile of it would report
     auto expecting = cc::vector<symbol_id>();
     for (auto const& x : m.entry_expectations)
         if (!check::holds(expecting, x.function))

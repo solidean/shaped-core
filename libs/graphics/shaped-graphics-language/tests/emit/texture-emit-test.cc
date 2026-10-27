@@ -498,7 +498,7 @@ TEST("sgl emit - a binding array takes consecutive registers, and a marked index
 
 TEST("sgl emit - a `uniform` mark is the plain index on every target, beside a `nonuniform` one")
 {
-    // CHK-394: the author's word is all the mark is, so no target is told anything of it
+    // CHK-400: the author's word is all the mark is, so no target is told anything of it
     constexpr auto marked = "require binding_arrays\n"
                             "\n"
                             "binding mats:\n"

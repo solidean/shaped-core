@@ -76,7 +76,7 @@ A type record carries its declaration as SGL text, opaque or with fields, and wh
   A size of 0 means the type has no place in a block, which is `bool` today.
 * **What a value is to the interpreter**: how many scalars, and of which kind.
 * **Whether it may be a member of a struct that crosses a stage edge.**
-* **Why no memory holds it, for a value of function bodies alone**, such as `mat3` (CHK-391).
+* **Why no memory holds it, for a value of function bodies alone**, such as `mat3` (CHK-397).
   A reason makes the check pass refuse it in every block, buffer, workgroup binding and stage edge, and the detail it reports gives that reason.
 
 ## What the check is

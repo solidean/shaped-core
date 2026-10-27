@@ -214,7 +214,7 @@ TEST("sgl check - an index read from a compare-exchange is marked nonuniform")
 
 TEST("sgl check - a pixel stage samples with derivatives after a strong compare-exchange")
 {
-    // its loop leaves every pixel of the quad where it found it, and only helpers skip it (EMIT-158)
+    // its loop leaves every pixel of the quad where it found it, and only helpers skip it (EMIT-162)
     CHECK(reports_for("require helper_lane_query\n"
                       "\n"
                       "binding material:\n"
@@ -399,7 +399,7 @@ TEST("sgl check - an index the pass proves neither the same nor different is mar
                                       "    work.values[id.x] = mats.texs[{}].load(int2(0, 0))\n",
                                       index));
     };
-    // CHK-394: the author's word, either way, where the pass has none
+    // CHK-400: the author's word, either way, where the pass has none
     CHECK(counted("uniform k") == "");
     CHECK(counted("nonuniform k") == "");
     CHECK(counted("k")
@@ -491,7 +491,7 @@ TEST("sgl check - a helper reached with a uniform index and a varying one is spl
                        "    return {{color = sample_map(mats.slot, p.uv) + sample_map(p.material, p.uv)}}\n",
                        index));
     };
-    // CHK-395: the explicit mark is the author's choice to pay on the uniform call too
+    // CHK-401: the explicit mark is the author's choice to pay on the uniform call too
     CHECK(helped("nonuniform (map % 8)") == "");
     CHECK(helped("map % 8")
           == "mixed-index user:[map % 8] some calls give this index into a binding array a value the same in every "

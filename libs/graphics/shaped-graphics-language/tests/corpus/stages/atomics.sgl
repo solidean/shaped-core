@@ -58,7 +58,7 @@ test:
     counters.lowest.compare_exchange_strong(-1, 8) == -1
     counters.lowest.load() == 8
 
-// a weak one says whether it stored, and a test fails it spuriously the first time it meets `expected` (EVAL-98)
+// a weak one says whether it stored, and a test fails it spuriously the first time it meets `expected` (EVAL-100)
 test:
     counters.lowest.store(4)
     let missed = counters.lowest.compare_exchange_weak(3, 9)

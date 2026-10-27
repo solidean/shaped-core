@@ -212,7 +212,7 @@ What the GPU hands it besides is a parameter of a prelude type, read from the ta
 
 * **Every stage may take `@launch_id` and `@launch_size`**, both `int3`: which ray of the launch it runs for, and the launch's size (CHK-327).
 * **A trace or a callable called from a stage whose row says no is `stage-not-allowed`**, since the prelude's builtins carry `@stages` (CHK-193).
-* **An atomic in an any hit or an intersection is `stage-not-allowed` too**, and its detail says why: traversal decides how often those run (CHK-398).
+* **An atomic in an any hit or an intersection is `stage-not-allowed` too**, and its detail says why: traversal decides how often those run (CHK-404).
   So is one in a decision an inline trace calls, whatever stage holds the trace.
 * An entry point is no generic function, so a stage names its `A`: `h: procedural_hit[sphere_attributes]`.
 

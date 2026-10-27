@@ -276,7 +276,7 @@ TEST("sgl emit - HLSL writes subtract, load and store as the Interlocked updates
 
 TEST("sgl emit - a strong compare-exchange is HLSL's own, and a loop over the weak one in WGSL and MSL")
 {
-    // EMIT-157: a retry follows only a failure that read the expected value, so every target gives the strong result
+    // EMIT-161: a retry follows only a failure that read the expected value, so every target gives the strong result
     constexpr auto source = "binding table:\n"
                             "    slots: mut buffer[atomic[uint]]\n"
                             "\n"
@@ -351,7 +351,7 @@ TEST("sgl emit - a strong compare-exchange of workgroup memory evaluates its pla
 
 TEST("sgl emit - a weak compare-exchange fills the prelude's exchange_result from each target's own")
 {
-    // EMIT-157: HLSL's strong one never fails spuriously, WGSL's result struct has fields of its own names, and MSL's
+    // EMIT-161: HLSL's strong one never fails spuriously, WGSL's result struct has fields of its own names, and MSL's
     // bool says whether it stored while its expected value takes the value read
     constexpr auto source = "binding table:\n"
                             "    slots: mut buffer[atomic[uint]]\n"
@@ -395,8 +395,8 @@ TEST("sgl emit - a weak compare-exchange fills the prelude's exchange_result fro
 
 TEST("sgl emit - a pixel stage's strong compare-exchange keeps helpers out of its loop, and WebGPU refuses it")
 {
-    // EMIT-158: a helper's atomics store nothing and read anything, so MSL skips the loop on one; HLSL's has no loop
-    // EMIT-159: the pixel stage needs helper_lane_query, which WGSL lacks, and it takes a weak one and a compute stage's
+    // EMIT-162: a helper's atomics store nothing and read anything, so MSL skips the loop on one; HLSL's has no loop
+    // EMIT-163: the pixel stage needs helper_lane_query, which WGSL lacks, and it takes a weak one and a compute stage's
     constexpr auto source = "require helper_lane_query\n"
                             "\n"
                             "binding claims:\n"

@@ -8,7 +8,7 @@ sgl::tested_source sgl::test_source(cc::string_view source,
                                     cc::span<library_file const> library)
 {
     auto const front = driver::impl::run_front_end(source, source_name, library);
-    // the whole file, so every entry point's own diagnostics too (CHK-396)
+    // the whole file, so every entry point's own diagnostics too (CHK-402)
     auto result = tested_source{.errors = front.errors_of(check::symbol_id::none)};
     for (auto const& w : front.warnings_of(check::symbol_id::none))
     {

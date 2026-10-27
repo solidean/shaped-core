@@ -620,13 +620,13 @@ ops[i](mut v)                                            // raygen, miss, closes
 - **A `@workgroup binding` is memory one workgroup shares** (CHK-292 to CHK-295): listed like a binding, in no group, and left out of describe.
   Only a compute entry point lists one, all of it within 16 KiB; `workgroup_barrier()`, `storage_barrier()` and `texture_barrier()` sync it (EMIT-131).
 - **`atomic[uint]` and `atomic[int]` live only in a `mut buffer` or a `@workgroup` binding** (CHK-296), and an expression of one is only ever a builtin's argument (CHK-297).
-  `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-157).
+  `compare_exchange_strong(e, d)` gives the value before, and stored exactly where that is `e`; it is a loop in WGSL and MSL (EMIT-161).
   `compare_exchange_weak(e, d)` gives `exchange_result[T]`: `old`, and `exchanged`, the only proof it stored; retry while `old == e and not exchanged`.
   Both are relaxed: publishing what a claim guards needs a barrier.
-  Atomics stand in pixel, compute, raygen, miss, closest-hit and callable stages; in an any hit or an intersection, or a decision an inline trace calls, they are `stage-not-allowed` (CHK-398).
-  In a pixel stage a helper's atomics store nothing and read garbage; the strong loop skips one in MSL (EMIT-158).
-  A pixel stage's `compare_exchange_strong` needs `require helper_lane_query` (EMIT-159), which WebGPU lacks: there, write the weak one in a loop, or use compute.
-  A test fails a weak one spuriously every other time each call meets `e`, the first time first (EVAL-98), so a missing retry loop fails its test.
+  Atomics stand in pixel, compute, raygen, miss, closest-hit and callable stages; in an any hit or an intersection, or a decision an inline trace calls, they are `stage-not-allowed` (CHK-404).
+  In a pixel stage a helper's atomics store nothing and read garbage; the strong loop skips one in MSL (EMIT-162).
+  A pixel stage's `compare_exchange_strong` needs `require helper_lane_query` (EMIT-163), which WebGPU lacks: there, write the weak one in a loop, or use compute.
+  A test fails a weak one spuriously every other time each call meets `e`, the first time first (EVAL-100), so a missing retry loop fails its test.
 - **`img[xy]` is the image's `load`, and `img[xy] = v` its `store`** (CHK-367): the check pass records the call at the subscript, and `m.texel_stores` holds each assignment's.
   `@atomic` on a `mut` image of `.r32_uint` or `.r32_sint` makes `img[xy]` an atomic, `img[xy].max(v)` (CHK-372), which the flat tree calls as the prelude's internal `texel_max`.
   `@coherent` on a `mut buffer` or image is `globallycoherent` in HLSL and `coherent(device)` in MSL (CHK-368); both features are WGSL's `target-lacks-feature`.
@@ -634,8 +634,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   HLSL `ByteAddressBuffer`, else an array of words (EMIT-155); the host binds a `*_buffer_view<cc::byte>`.
 - **A binding array, `texture_2d[float4][64]`, needs `binding_arrays`** and is read by element alone (CHK-299).
   An index the uniformity pass proves uniform needs no mark (CHK-300); `nonuniform i` is an index that may vary, and `uniform i` the author's word that it does not.
-  Unmarked, a proven varying index is `non-uniform-index` and an unproven one `unproven-index`; `uniform` on a proven varying one is `uniform-index-varies` (CHK-393, CHK-394).
-  A helper's index is judged per call: one it reaches both ways is `mixed-index`, split in two or marked `nonuniform` (CHK-395); a needless `nonuniform` is a warning.
+  Unmarked, a proven varying index is `non-uniform-index` and an unproven one `unproven-index`; `uniform` on a proven varying one is `uniform-index-varies` (CHK-399, CHK-400).
+  A helper's index is judged per call: one it reaches both ways is `mixed-index`, split in two or marked `nonuniform` (CHK-401); a needless `nonuniform` is a warning.
 - **The uniformity pass judges the inlined entry point** (CHK-282 to CHK-284) by WGSL's rules, so no target refuses what SGL accepts.
   A barrier, or a call that takes derivatives implicitly (`sample` without `level`, `ddx`), in non-uniform control flow is `non-uniform-control-flow`.
 - **`@sampler(name)` on a texture member names a sampler of the same binding, or a file-scope one** (CHK-279), which a method call then leaves out: `material.albedo.sample(uv)`.

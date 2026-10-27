@@ -260,7 +260,7 @@ TEST("sgl check - a geometry stage takes the primitive the pipeline assembles")
 
 TEST("sgl check - a mat3 crosses no tessellation or geometry edge")
 {
-    // CHK-391: a control point, a factors struct and a stream's vertex are all edges a target lays out
+    // CHK-397: a control point, a factors struct and a stream's vertex are all edges a target lays out
     constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
     constexpr auto head = "require geometry_shader\n"
                           "require tessellation_shader\n"
