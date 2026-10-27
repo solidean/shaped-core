@@ -337,6 +337,9 @@ The loop is **run `dev.py`, then diagnose with `repo_tools`** — `build_diag` a
 * `SC_CHECK_GEOMETRY_SPECIAL_CASES` (default OFF) logs each special case a typed-geometry query assumes away — collinear lines, a ray in a triangle's plane → `TG_CHECK_SPECIAL_CASES`.
   The `debug-nopch` presets turn it on, so a test that feeds one on purpose declares it with `nx::expect_warning`.
   See [docs/platforms.md](docs/platforms.md#geometry-special-case-checks-sc_check_geometry_special_cases).
+* `SC_ASYNC_AMBIENT_TRACE` (default OFF) lets nexus name who still holds a test's context when it reports leftover async work → `CC_ASYNC_AMBIENT_TRACE`.
+  Off, nothing is paid; on, every context release pays a load and a compare; the `debug-nopch` presets turn it on.
+  See [docs/platforms.md](docs/platforms.md#who-holds-a-tests-context-sc_async_ambient_trace).
 
 ---
 

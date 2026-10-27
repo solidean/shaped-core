@@ -931,6 +931,11 @@ cc deliberately does not assert on it.
 A consumer wanting the stricter rule reads `async_ambient_scope::outstanding()` and decides for itself what a leak means.
 A test runner in particular wants a reported failure naming the test, not the abort a cc-side assert would give it.
 
+A count says how much still carries a context, not who.
+A build with `SC_ASYNC_AMBIENT_TRACE` can watch one link's releases, `cc::async_ambient_watch_releases`, with a hook called on the releasing thread.
+Every drop of a link, a child freeing its parent included, goes through `impl::async_ambient_drop`, so the watch misses none.
+The hook may run under a node's lock, which is why it should only record; nexus captures a stack there and renders it after the unwatch.
+
 `cc::async_is_polling()` sits alongside, on the same per-thread block.
 It answers whether a **throw from here has somewhere to land**: inside a poll it becomes the node's error, outside one it escapes a worker's thread function and terminates.
 That is the question a consumer reporting from arbitrary threads has to answer before it throws, and knowing the ambient context does not answer it.
