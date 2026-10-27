@@ -98,7 +98,7 @@ public:
 
     /// Whether `dispatch_rays` checks every instance of every bound tlas against the hit records it reaches.
     /// A record past the shader table or of the wrong kind is undefined behavior on every backend.
-    /// On metal a record past the table is a GPU page fault.
+    /// On metal a record past the table can fault the GPU, so `dispatch_rays` skips a dispatch that reaches one.
     /// So this is a correctness check rather than a portability one, and `portability_checks` does not govern it.
     /// **On by default wherever `CC_ASSERT` is compiled in**, and off in release builds.
     /// It costs a copy of each tlas's instances at build, and a walk of them per shader table and command list.

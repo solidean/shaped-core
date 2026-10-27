@@ -31,40 +31,54 @@ void command_list::bind_raytracing_group(int group_index, binding_group const& g
 
 void command_list::dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height, int depth)
 {
-    if (context().hit_record_checks())
-        check_hit_records(table);
+    if (context().hit_record_checks() && check_hit_records(table))
+    {
+        CC_LOG_ERROR("dispatch_rays skipped a dispatch whose hit records reach past the shader table's end");
+        return;
+    }
     raytracing_dispatch_rays(table, raygen, width, height, depth);
 }
 
-void command_list::check_hit_records(raytracing_shader_table const& table)
+bool command_list::check_hit_records(raytracing_shader_table const& table)
 {
+    auto past_table_end = false;
     for (auto const* group : _raytracing_groups)
     {
         if (group == nullptr)
             continue;
         for (auto const& tlas : impl::tlases_of(*group))
         {
-            auto seen = false;
+            auto const* checked = static_cast<checked_trace const*>(nullptr);
             for (auto const& c : _checked_traces)
-                seen = seen || (c.table.get() == &table && c.tlas == tlas);
-            if (seen)
+                if (c.table.get() == &table && c.tlas == tlas)
+                    checked = &c;
+            if (checked != nullptr)
+            {
+                past_table_end = past_table_end || checked->past_table_end;
                 continue;
-            // A table no handle owns keys nothing, so it is checked at every dispatch rather than skipped wrongly.
-            _checked_traces.push_back({.table = table.weak_from_this().lock(), .tlas = tlas});
+            }
 
-            // Logged rather than asserted: the hit groups come from shaders that hot reload can change under a running program.
             auto const mismatches = impl::find_hit_record_mismatches(table, *tlas);
-            if (mismatches.empty())
-                continue;
             auto text = cc::string();
+            auto reaches_past_end = false;
             for (auto const& m : mismatches)
-                text += cc::format("\n  {}", m);
-            CC_LOG_ERROR("dispatch_rays traces a tlas whose instances reach hit records of the wrong kind or out of "
-                         "the "
-                         "shader table, which is undefined behavior:{}",
-                         text);
+            {
+                text += cc::format("\n  {}", m.message);
+                reaches_past_end = reaches_past_end || m.past_table_end;
+            }
+            // A table no handle owns keys nothing, so it is checked at every dispatch rather than skipped wrongly.
+            _checked_traces.push_back(
+                {.table = table.weak_from_this().lock(), .tlas = tlas, .past_table_end = reaches_past_end});
+            past_table_end = past_table_end || reaches_past_end;
+            // Logged rather than asserted: the hit groups come from shaders that hot reload can change under a running program.
+            if (!mismatches.empty())
+                CC_LOG_ERROR("dispatch_rays traces a tlas whose instances reach hit records of the wrong kind or out "
+                             "of "
+                             "the shader table, which is undefined behavior:{}",
+                             text);
         }
     }
+    return past_table_end;
 }
 
 bool command_list_raytracing_scope::is_supported() const

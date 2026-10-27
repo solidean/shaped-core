@@ -894,6 +894,8 @@ cmd.raytracing.bind_group(int group_index, binding_group const&) // void — lik
 cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — traces w*h*d rays (product <= 2^30)
 //   under ctx.hit_record_checks() (default ON where CC_ASSERT is compiled in, OFF in release): every instance of every bound tlas is checked against the records it reaches
 //   (exists; procedural iff its blas holds AABBs; stride == ray_count for a blas of 2+ geometries) — LOGS an error once per table+tlas per list, never asserts.
+//   a record PAST THE TABLE's end SKIPS the dispatch (logged; every later dispatch of that pair in the list too) — metal can fault the GPU on it.
+//   a record of the wrong kind logs and still dispatches.
 //   assumes every trace's multiplier == ray_count; hand-written HLSL passing another (e.g. 0) sets ctx.set_hit_record_checks(false)
 //   Sees only tlases built and groups (staging groups included) created while the checks were on.
 //   metal: ONE tlas per dispatch (the first bound one's hit-group offsets; a second logs a warning);

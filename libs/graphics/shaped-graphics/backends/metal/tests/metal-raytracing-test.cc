@@ -879,7 +879,8 @@ void record_short_table_trace(mtl::metal_context_handle const& ctx,
 } // namespace
 
 // The bug the hit-record check exists for, as an application first wrote it.
-// It is caught at record time, and the list is dropped rather than submitted.
+// It is caught at record time and the dispatch is skipped, so submitting the list loses nothing.
+// Without the checks, as in a release build, the submit would reach past the table, so it is not made there.
 ASYNC_TEST("sg metal - a shader table too short for a BLAS's geometries is logged by default")
 {
     auto const ctx = mtl::test::make_context();
@@ -893,19 +894,21 @@ ASYNC_TEST("sg metal - a shader table too short for a BLAS's geometries is logge
 
 #if CC_ASSERT_ENABLED
     nx::expect_error("built with hit_record_stride 1, and the shader table traces 2 ray types", nx::exactly(1));
-#endif
-
-    record_short_table_trace(ctx, 2,
-                             [&](std::unique_ptr<sg::command_list> trace) { ctx->drop_command_list(cc::move(trace)); });
+    nx::expect_error("skipped a dispatch whose hit records reach past the shader table's end", nx::exactly(1));
+    record_short_table_trace(
+        ctx, 2, [&](std::unique_ptr<sg::command_list> trace) { ctx->submit_command_list(cc::move(trace)); });
     co_await ctx->idle_completion();
+    CHECK(!ctx->is_device_lost());
+#endif
+    co_return;
 }
 
 // A probe rather than a test, run by name and alone: it means to fault the GPU, after which the system refuses this
 // process the GPU.
 // On an Apple M4 it has not faulted, at 2 geometries or at 4096, and then logs that no loss happened.
 // What it answers is whether a fault on one queue stops the process's other queues.
-// The epoch system retires every in-flight epoch once a loss is reported, which resets their command allocators, and
-// that is safe only if no other queue still runs work of this process.
+// A loss leaks every in-flight epoch's command allocators rather than reset them, since it is not known whether a fault
+// stops every queue, and this probe is what would answer that.
 // A second queue is held back by a wait the CPU releases once the loss is in, and it then signals an event; the log
 // says whether that signal ever arrived, and so whether the system stopped that queue too.
 ASYNC_TEST("sg metal - a real fault stops every queue of the process", nx::config::disabled)

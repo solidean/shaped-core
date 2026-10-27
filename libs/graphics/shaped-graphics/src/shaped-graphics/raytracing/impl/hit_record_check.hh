@@ -6,7 +6,16 @@
 
 namespace sg::impl
 {
-/// Every way the instances of `tlas` disagree with the hit records of `table` they reach, as one message each.
+/// One way an instance disagrees with the hit records it reaches.
+/// `past_table_end` is what makes the dispatch unsafe: on metal the hit calls through an intersection function table past its end.
+/// A BLAS built with the wrong stride is `past_table_end` when the records it reaches overrun the table under either its stride or the ray count.
+struct hit_record_mismatch
+{
+    bool past_table_end = false;
+    cc::string message;
+};
+
+/// Every way the instances of `tlas` disagree with the hit records of `table` they reach, one entry each.
 ///
 /// Instance i with BLAS b reaches record `hit_group_offset + g * b.hit_record_stride() + r` for each geometry g of b and each ray type r below `table.ray_count()`.
 /// Each such record must exist, and must be procedural exactly when b holds AABBs.
@@ -20,7 +29,7 @@ namespace sg::impl
 /// What sg never recorded is not checked: a tlas built while `context::hit_record_checks` was off has no instances to look at,
 /// and a pipeline a backend built outside the context does not say which of its groups are procedural.
 /// Stops after `max_messages`, since one wrong offset usually breaks every record after it.
-[[nodiscard]] cc::vector<cc::string> find_hit_record_mismatches(raytracing_shader_table const& table,
-                                                                tlas const& tlas,
-                                                                isize max_messages = 8);
+[[nodiscard]] cc::vector<hit_record_mismatch> find_hit_record_mismatches(raytracing_shader_table const& table,
+                                                                         tlas const& tlas,
+                                                                         isize max_messages = 8);
 } // namespace sg::impl

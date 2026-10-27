@@ -70,7 +70,9 @@ public:
     ///
     /// Under `context::hit_record_checks`, every instance of every bound tlas is checked against the hit records it reaches.
     /// Each must exist, and be procedural exactly when the instance's BLAS holds AABBs.
-    /// A mismatch logs an error, once per table and tlas in a list, and the dispatch still runs, since hot reload can change a hit group under a running program.
+    /// A mismatch logs an error, once per table and tlas in a list, rather than asserting, since hot reload can change a hit group under a running program.
+    /// **A dispatch reaching a record past the table's end is skipped**, every time in that list, since metal can fault the GPU on it.
+    /// One reaching only records of the wrong kind still runs.
     /// Only a tlas built, and a group or staging group created, while the checks were on is seen.
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height = 1, int depth = 1);
 

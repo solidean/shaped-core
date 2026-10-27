@@ -1,3 +1,4 @@
+#include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-graphics/raytracing/acceleration_structure.hh>
 #include <shaped-graphics/raytracing/impl/hit_record_check.hh>
@@ -6,9 +7,11 @@
 
 namespace sg::impl
 {
-cc::vector<cc::string> find_hit_record_mismatches(raytracing_shader_table const& table, tlas const& tlas, isize max_messages)
+cc::vector<hit_record_mismatch> find_hit_record_mismatches(raytracing_shader_table const& table,
+                                                           tlas const& tlas,
+                                                           isize max_messages)
 {
-    auto messages = cc::vector<cc::string>();
+    auto messages = cc::vector<hit_record_mismatch>();
     auto const records = table.hit_records();
     auto const ray_count = isize(table.ray_count());
     auto const* const pipeline = table.pipeline().get();
@@ -27,10 +30,15 @@ cc::vector<cc::string> find_hit_record_mismatches(raytracing_shader_table const&
         // With one geometry the stride multiplies nothing, so it cannot disagree between backends.
         if (blas.geometry_count() > 1 && stride != ray_count)
         {
-            messages.push_back(cc::format("instance {} places a BLAS of {} geometries built with hit_record_stride {}, "
-                                          "and the shader table traces {} ray types; metal bakes the stride, so build "
-                                          "the BLAS with {}",
-                                          i, blas.geometry_count(), stride, ray_count, ray_count));
+            // Metal separates geometries by the stride and dx12 by the ray count, so the larger one bounds the reach.
+            auto const last_record = isize(instance.hit_group_offset)
+                                   + (isize(blas.geometry_count()) - 1) * cc::max(stride, ray_count) + ray_count - 1;
+            messages.push_back(
+                {.past_table_end = last_record >= records.size(),
+                 .message = cc::format("instance {} places a BLAS of {} geometries built with hit_record_stride {}, "
+                                       "and the shader table traces {} ray types; metal bakes the stride, so build "
+                                       "the BLAS with {}",
+                                       i, blas.geometry_count(), stride, ray_count, ray_count)});
             continue;
         }
 
@@ -40,10 +48,11 @@ cc::vector<cc::string> find_hit_record_mismatches(raytracing_shader_table const&
                 auto const record = isize(instance.hit_group_offset) + g * stride + r;
                 if (record >= records.size())
                 {
-                    messages.push_back(cc::format("instance {} (hit_group_offset {}) reaches hit record {} for "
-                                                  "geometry "
-                                                  "{} and ray type {}, and the shader table holds {}",
-                                                  i, instance.hit_group_offset, record, g, r, records.size()));
+                    messages.push_back(
+                        {.past_table_end = true,
+                         .message = cc::format("instance {} (hit_group_offset {}) reaches hit record {} for geometry "
+                                               "{} and ray type {}, and the shader table holds {}",
+                                               i, instance.hit_group_offset, record, g, r, records.size())});
                     continue;
                 }
 
@@ -53,11 +62,12 @@ cc::vector<cc::string> find_hit_record_mismatches(raytracing_shader_table const&
                     continue;
 
                 messages.push_back(
-                    cc::format("instance {} (hit_group_offset {}) places a {} BLAS, and geometry {} with "
-                               "ray type {} reaches hit record {}, whose hit group is {}",
-                               i, instance.hit_group_offset, aabbs ? "procedural (AABB)" : "triangle", g, r, record,
-                               procedural.value() ? "procedural (it has an intersection shader)"
-                                                  : "a triangle group (it has no intersection shader)"));
+                    {.message
+                     = cc::format("instance {} (hit_group_offset {}) places a {} BLAS, and geometry {} with "
+                                  "ray type {} reaches hit record {}, whose hit group is {}",
+                                  i, instance.hit_group_offset, aabbs ? "procedural (AABB)" : "triangle", g, r, record,
+                                  procedural.value() ? "procedural (it has an intersection shader)"
+                                                     : "a triangle group (it has no intersection shader)")});
             }
     }
     return messages;
