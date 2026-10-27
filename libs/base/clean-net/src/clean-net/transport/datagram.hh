@@ -103,8 +103,10 @@ struct cnet::datagram_options
 
 /// A socket that sends and receives datagrams, whatever is carrying them.
 ///
-/// `receive_batch` and `send_batch` may run at the same time on two threads.
-/// Two `receive_batch` calls at once are a caller error, and so are two `send_batch` calls.
+/// `receive_batch` may run on several threads at once, and each datagram goes to exactly one of them -- which is what
+/// lets a caller poll and keep an arrival callback at the same time.
+/// `send_batch` may run beside them; two `send_batch` calls at once are a caller error, since the order of their
+/// datagrams relative to each other would be undefined.
 class cnet::datagram_socket
 {
 public:

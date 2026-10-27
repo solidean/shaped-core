@@ -4,11 +4,13 @@
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/mutex.hh>
 #include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <clean-net/transport/datagram.hh>
 #include <clean-net/transport/simulated_transport.hh>
 #include <clean-net/transport/virtual_transport.hh>
+#include <nexus/bench/run.hh>
 #include <nexus/test.hh>
 
 #include <memory> // std::make_unique, to hand datagram_socket a test backend through its interface
@@ -100,6 +102,14 @@ void send_numbered(datagram_socket& from, endpoint to, isize count)
     for (isize i = 0; i < count; ++i)
         packets.push_back({.peer = to, .bytes = cc::span<byte const>(payload).subspan(i).first_n(1)});
     CHECK(from.send_batch(packets).value() == count);
+}
+
+/// Send one datagram carrying `index` as its one byte.
+void send_numbered_from(datagram_socket& from, endpoint to, i32 index)
+{
+    auto const payload = byte(index);
+    auto const packet = outgoing_datagram{.peer = to, .bytes = cc::span<byte const>(&payload, 1)};
+    CHECK(from.send_batch(cc::span<outgoing_datagram const>(&packet, 1)).value() == 1);
 }
 } // namespace
 
@@ -702,4 +712,104 @@ CNET_IO_TEST("cnet - simulated reordering lets later datagrams overtake, and arr
             ++inversions;
     }
     CHECK(inversions > 0);
+}
+
+CNET_IO_TEST("cnet - polling beside the arrival callback hands each datagram to exactly one of them")
+{
+    auto io = io_system::create();
+    auto net = virtual_network(*io);
+    auto a = datagram_socket::try_create(net, loopback_any_port()).value();
+    auto b = datagram_socket::try_create(net, loopback_any_port()).value();
+
+    // Counted from two threads: the callback on the reactor thread, and the polling loop on this one.
+    auto seen = cc::mutex<cc::vector<i32>>(cc::vector<i32>::create_filled(200, 0));
+    auto total = cc::atomic<isize>(0);
+    auto const count = [&](cc::span<datagram const> got)
+    {
+        seen.lock(
+            [&](cc::vector<i32>& v)
+            {
+                for (auto const& d : got)
+                    ++v[isize(d.bytes()[0])];
+            });
+        total.fetch_add(got.size());
+    };
+
+    auto callback_in = inbox(16, 4);
+    b->on_arrival(
+        [&](datagram_socket& s)
+        {
+            auto const n = s.receive_batch(callback_in.all()).value();
+            count(cc::span<datagram const>(callback_in.records).first_n(n));
+        });
+
+    auto poll_in = inbox(16, 4);
+    for (auto i = 0; i < 200; ++i)
+    {
+        send_numbered_from(*a, b->local(), i);
+        auto const n = b->receive_batch(poll_in.all()).value();
+        count(cc::span<datagram const>(poll_in.records).first_n(n));
+    }
+
+    CHECK(pump_until([&] { return total.load() == 200; }));
+    b->on_arrival({});
+
+    auto const once = seen.lock(
+        [](cc::vector<i32> const& v)
+        {
+            auto n = 0;
+            for (auto const c : v)
+                n += c == 1 ? 1 : 0;
+            return n;
+        });
+    CHECK(once == 200);
+
+    a = {};
+    b = {};
+    io->stop();
+}
+
+// ---- benchmarks ----------------------------------------------------------------------------------------
+
+BENCHMARK("cnet - datagrams: polling against the arrival callback, over loopback")
+{
+    auto io = io_system::create({.unthreaded = true});
+    if (!native_transport(*io).is_supported())
+        return;
+
+    auto a = datagram_socket::create(*io, loopback_any_port());
+    auto b = datagram_socket::create(*io, loopback_any_port());
+    auto in = inbox(64, 256);
+
+    auto payload = cc::vector<byte>();
+    payload.resize_to_defaulted(64);
+    auto burst = cc::vector<outgoing_datagram>();
+    for (auto i = 0; i < 16; ++i)
+        burst.push_back({.peer = b->local(), .bytes = payload});
+
+    // The baseline: what a game pays every frame in which nothing arrived.
+    nx::bench::run("poll, nothing waiting", [&] { nx::bench::sink(b->receive_batch(in.all()).value()); });
+
+    nx::bench::run("poll, a burst of 16",
+                   [&](nx::bench::iteration& it)
+                   {
+                       it.items(16);
+                       (void)a->send_batch(burst);
+                       auto got = isize(0);
+                       while (got < 16)
+                           got += b->receive_batch(in.all()).value();
+                   });
+
+    auto received = isize(0);
+    b->on_arrival([&](datagram_socket& s) { received += s.receive_batch(in.all()).value(); });
+    nx::bench::run("callback, a burst of 16",
+                   [&](nx::bench::iteration& it)
+                   {
+                       it.items(16);
+                       received = 0;
+                       (void)a->send_batch(burst);
+                       while (received < 16)
+                           (void)cc::thread_pump_all();
+                   });
+    b->on_arrival({});
 }
