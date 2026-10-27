@@ -166,19 +166,24 @@ struct buffer_use
     bool writes = false;
 };
 
-/// Records on `group` the buffers `views` bind outside binding arrays, and every tlas they bind, which `context::portability_checks` reads.
+/// Records on `group` the buffers `views` bind outside binding arrays, which `context::portability_checks` reads.
 /// Called once, as the group comes back from its backend and before any bind.
 void record_buffer_uses(binding_group const& group, cc::span<named_view const> views);
 void record_buffer_uses(binding_group const& group, binding_group_layout const& layout, cc::span<slotted_view const> views);
+
+/// Records on `group` every tlas `views` bind, arrays included, which `context::hit_record_checks` reads.
+/// Called once, as the group comes back from its backend and before any bind.
+void record_tlases(binding_group const& group, cc::span<named_view const> views);
+void record_tlases(binding_group const& group, cc::span<slotted_view const> views);
 void set_buffer_uses(binding_group const& group, cc::vector<buffer_use> uses);
 
 /// What `record_buffer_uses` or `set_buffer_uses` recorded on `group`, which is empty where neither ran.
 [[nodiscard]] cc::span<buffer_use const> buffer_uses_of(binding_group const& group);
 
-/// Records on `group` the tlases it binds, for a group whose views `record_buffer_uses` never sees: a staging group's snapshot.
+/// Records on `group` the tlases it binds, for a group whose views `record_tlases` never sees: a staging group's snapshot.
 void set_tlases(binding_group const& group, cc::vector<tlas_handle> tlases);
 
-/// The tlases `record_buffer_uses` or `set_tlases` recorded, which dispatch_rays checks against its shader table.
+/// The tlases `record_tlases` or `set_tlases` recorded, which dispatch_rays checks against its shader table.
 [[nodiscard]] cc::span<tlas_handle const> tlases_of(binding_group const& group);
 } // namespace sg::impl
 
@@ -202,10 +207,8 @@ private:
     friend cc::span<impl::buffer_use const> impl::buffer_uses_of(binding_group const& group);
     friend void impl::set_tlases(binding_group const& group, cc::vector<tlas_handle> tlases);
     friend cc::span<tlas_handle const> impl::tlases_of(binding_group const& group);
-    friend void impl::record_buffer_uses(binding_group const& group, cc::span<named_view const> views);
-    friend void impl::record_buffer_uses(binding_group const& group,
-                                         binding_group_layout const& layout,
-                                         cc::span<slotted_view const> views);
+    friend void impl::record_tlases(binding_group const& group, cc::span<named_view const> views);
+    friend void impl::record_tlases(binding_group const& group, cc::span<slotted_view const> views);
     /// Set once, as the group is made, which is why a group that is otherwise immutable holds them `mutable`.
     mutable cc::vector<impl::buffer_use> _buffer_uses;
     mutable cc::vector<tlas_handle> _tlases;

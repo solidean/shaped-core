@@ -67,6 +67,15 @@ void metal_residency_set::remove(MTL::Allocation const* allocation)
         });
 }
 
+void metal_residency_set::commit(MTL4::CommandQueue* queue,
+                                 MTL4::CommandBuffer const* buffer,
+                                 MTL4::CommitOptions const* options)
+{
+    CC_ASSERT(queue != nullptr && buffer != nullptr, "a commit needs a queue and a command buffer");
+    MTL4::CommandBuffer const* const buffers[] = {buffer};
+    _set.lock([&](MTL::ResidencySet*&) { queue->commit(buffers, 1, options); });
+}
+
 void metal_residency_set::shutdown()
 {
     _set.lock(
