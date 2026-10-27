@@ -429,7 +429,7 @@ That holds for glTF's buffers and images as much as for FBX's textures.
 One that cannot be fetched or decoded leaves its material on its factors, and the failures arrive as one issue per kind rather than one per texture.
 
 A hidden node (FBX `Visibility` 0) is helper or proxy geometry its author switched off, so neither it nor anything under it is imported — meshes and lights — with an issue.
-A face the file marks as a hole is not geometry, which matters only for a document read without `triangulate`.
+A face the file marks as a hole is not geometry and is skipped; only a document read without `triangulate` still carries one.
 
 Lights take only a position and a direction from their node, as glTF's do.
 FBX gives an intensity no physical unit — its `Intensity` is a percentage of the DCC tool's own — so the importer takes it one-to-one as candela for a point or spot and lux for a directional light.
