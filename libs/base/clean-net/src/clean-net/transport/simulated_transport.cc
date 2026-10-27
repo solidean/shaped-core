@@ -537,6 +537,10 @@ public:
         if (auto pulled = _state->pull(*_under); pulled.has_error())
             return cc::error(cc::move(pulled).error());
 
+        // What this pull took off the wrapped socket may be what a parked wait needs a timer for: the wrapped socket is
+        // empty now, so its own arrival callback will not run to set one.
+        sim_datagram_state::settle(_state);
+
         auto const now = _state->link->io.time_source().now_ns();
         return _state->queue->lock(
             [&](held_queue& q) -> isize
@@ -585,6 +589,11 @@ public:
 
         // Submit, then park, then let `settle` decide between signalling now and a timer -- the virtual receive's order.
         auto in_flight = io.submit(raw);
+
+        // An empty guard means the io_system was stopping, and `submit` already answered the operation and freed it.
+        if (in_flight.io() == nullptr)
+            return promise;
+
         _state->queue->lock([raw](held_queue& q) { q.parked = raw; });
         sim_datagram_state::settle(_state);
 

@@ -11,6 +11,8 @@
 #include <clean-net/transport/virtual_transport.hh>
 #include <nexus/test.hh>
 
+#include <memory> // std::make_unique, to hand datagram_socket a test backend through its interface
+
 using namespace cc::primitive_defines;
 
 using namespace cnet;
@@ -189,8 +191,10 @@ CNET_IO_TEST("cnet - a peer that went away is silence on the native socket, not 
     auto const dead_end = gone->local();
     gone = {};
 
-    // Windows would otherwise fail the next receive on `a` with WSAECONNRESET, once the ICMP "port unreachable" for
-    // this send arrives.
+    // What this pins is the property, not the mechanism: whenever the ICMP "port unreachable" for this send arrives,
+    // no receive on `a` fails because of it.
+    // Windows reports one as WSAECONNRESET on the next receive unless the socket turned that off, and the receive path
+    // skips it anyway; which of the two kept this green depends on when the reply lands.
     auto const into_the_void = outgoing_datagram{.peer = dead_end, .bytes = bytes_of("anyone?")};
     CHECK(a->send_batch(cc::span<outgoing_datagram const>(&into_the_void, 1)).value() == 1);
 
@@ -363,28 +367,103 @@ CNET_IO_TEST("cnet - the virtual arrival callback runs once per wake and stops w
     CHECK(calls == 1);
 }
 
-CNET_IO_TEST("cnet - with a reactor thread, the arrival callback runs there and a clear waits it out")
+CNET_IO_TEST("cnet - a callback that replaces itself leaves one wait, not two")
+{
+    auto w = world();
+    auto a = datagram_socket::try_create(*w.net, loopback_any_port()).value();
+    auto b = datagram_socket::try_create(*w.net, loopback_any_port()).value();
+
+    auto in = inbox(16);
+    auto second_calls = 0;
+    b->on_arrival(
+        [&](datagram_socket& s)
+        {
+            (void)s.receive_batch(in.all());
+            s.on_arrival(
+                [&](datagram_socket& t)
+                {
+                    ++second_calls;
+                    (void)t.receive_batch(in.all());
+                });
+        });
+
+    send_numbered(*a, b->local(), 1);
+    CHECK(pump_until([&] { return w.io->pending_count() == 1; }));
+
+    // Two waits would each fire on the next datagram, and the second one would stay parked forever.
+    send_numbered(*a, b->local(), 1);
+    CHECK(pump_until([&] { return second_calls == 1; }));
+    for (auto i = 0; i < 10; ++i)
+        (void)cc::thread_pump_all();
+    CHECK(second_calls == 1);
+    CHECK(w.io->pending_count() == 1);
+
+    b->on_arrival({});
+}
+
+CNET_IO_TEST("cnet - a callback may destroy its own socket")
+{
+    auto w = world();
+    auto a = datagram_socket::try_create(*w.net, loopback_any_port()).value();
+    auto b = datagram_socket::try_create(*w.net, loopback_any_port()).value();
+    auto const where = b->local();
+
+    auto in = inbox(4);
+    auto calls = 0;
+    b->on_arrival(
+        [&](datagram_socket& s)
+        {
+            ++calls;
+            (void)s.receive_batch(in.all());
+            b = {};
+        });
+
+    send_numbered(*a, where, 1);
+    CHECK(pump_until([&] { return !b.is_valid(); }));
+
+    send_numbered(*a, where, 1);
+    CHECK(pump_until([&] { return w.io->pending_count() == 0; }));
+    CHECK(calls == 1);
+}
+
+CNET_IO_TEST("cnet - with a reactor thread, the arrival callback runs there and a destroy waits it out")
 {
     auto io = io_system::create();
     auto net = virtual_network(*io);
     auto a = datagram_socket::try_create(net, loopback_any_port()).value();
     auto b = datagram_socket::try_create(net, loopback_any_port()).value();
 
-    auto received = cc::atomic<isize>(0);
+    // Sent before the callback is set, so the first wait can finish on the reactor thread before its hook is in.
+    send_numbered(*a, b->local(), 1);
+
+    auto const test_thread = cc::native_thread_id();
+    auto ran_elsewhere = cc::atomic<bool>(true);
+    auto inside = cc::atomic<bool>(false);
+    auto finished = cc::atomic<bool>(false);
     auto in = inbox(16);
-    b->on_arrival([&](datagram_socket& s) { received.fetch_add(s.receive_batch(in.all()).value()); });
+    b->on_arrival(
+        [&](datagram_socket& s)
+        {
+            if (cc::native_thread_id() == test_thread)
+                ran_elsewhere.store(false);
+            (void)s.receive_batch(in.all());
 
-    for (auto i = 0; i < 20; ++i)
-        send_numbered(*a, b->local(), 1);
-    CHECK(pump_until([&] { return received.load() == 20; }));
+            // Held open long enough that the destroy below lands while this call is still running.
+            inside.store(true);
+            cc::this_thread_sleep_secs(0.02);
+            finished.store(true);
+        });
 
-    // Destroying the socket from this thread while the reactor thread may be inside the callback must not race it.
+    CHECK(pump_until([&] { return inside.load(); }));
     b = {};
+    CHECK(finished.load());
+    CHECK(ran_elsewhere.load());
+
     a = {};
     io->stop();
 }
 
-CNET_IO_TEST("cnet - stopping the io_system ends the arrival callback without calling it")
+CNET_IO_TEST("cnet - stopping the io_system with a datagram already waiting does not call the callback")
 {
     auto w = world();
     auto a = datagram_socket::try_create(*w.net, loopback_any_port()).value();
@@ -393,12 +472,104 @@ CNET_IO_TEST("cnet - stopping the io_system ends the arrival callback without ca
     auto calls = 0;
     b->on_arrival([&](datagram_socket&) { ++calls; });
 
-    w.io->stop();
+    // Delivered, and its wait signalled, before the stop; nothing has pumped yet.
     send_numbered(*a, b->local(), 1);
+    w.io->stop();
     for (auto i = 0; i < 10; ++i)
         (void)cc::thread_pump_all();
     CHECK(calls == 0);
-    CHECK(w.io->pending_count() == 0);
+}
+
+namespace
+{
+/// A backend whose first wait has already finished when it is handed back, as one the reactor thread completed before
+/// the hook went in looks to the code installing it; every later wait never finishes.
+class already_ready_backend final : public datagram_backend
+{
+public:
+    explicit already_ready_backend(io_system& io) : _io(io) {}
+
+    [[nodiscard]] cc::result<isize, error> receive_batch(cc::span<datagram>) override { return isize(0); }
+    [[nodiscard]] cc::result<isize, error> send_batch(cc::span<outgoing_datagram const>) override { return isize(0); }
+
+    [[nodiscard]] cc::shared_async<cc::unit> wait_readable(cancel_token const&) override
+    {
+        auto wait = cc::make_async_manual<cc::unit>();
+        if (_first)
+            wait->push_value(cc::unit{});
+        _first = false;
+        return wait;
+    }
+
+    [[nodiscard]] endpoint local() const override { return {}; }
+    [[nodiscard]] io_system& io() const override { return _io; }
+
+private:
+    io_system& _io;
+    bool _first = true;
+};
+} // namespace
+
+CNET_IO_TEST("cnet - a wait that finished before its hook went in is called from the reactor, never inline")
+{
+    auto io = io_system::create({.unthreaded = true});
+
+    {
+        auto s = datagram_socket(std::make_unique<already_ready_backend>(*io));
+        auto calls = 0;
+        s.on_arrival([&](datagram_socket&) { ++calls; });
+
+        // Not on this thread, inside on_arrival: a caller holding a lock its callback takes would deadlock there.
+        CHECK(calls == 0);
+        CHECK(pump_until([&] { return calls == 1; }));
+        s.on_arrival({});
+    }
+
+    {
+        // And never across a stop: the repost belongs to the reactor, and a stop settles it uncalled.
+        auto s = datagram_socket(std::make_unique<already_ready_backend>(*io));
+        auto calls = 0;
+        s.on_arrival([&](datagram_socket&) { ++calls; });
+        io->stop();
+        for (auto i = 0; i < 10; ++i)
+            (void)cc::thread_pump_all();
+        CHECK(calls == 0);
+    }
+}
+
+CNET_IO_TEST("cnet - a virtual bind clashes with one on every interface, as a real stack's does")
+{
+    auto w = world();
+    auto const any_7000 = endpoint(ip_address::any(ip_family::v4), 7000);
+    auto const loop_7000 = endpoint(ip_address::loopback(ip_family::v4), 7000);
+
+    {
+        auto wide = datagram_socket::try_create(*w.net, any_7000).value();
+        auto narrow = datagram_socket::try_create(*w.net, loop_7000);
+        REQUIRE(narrow.has_error());
+        CHECK(narrow.error().code == error_code::address_in_use);
+    }
+    {
+        auto narrow = datagram_socket::try_create(*w.net, loop_7000).value();
+        auto wide = datagram_socket::try_create(*w.net, any_7000);
+        REQUIRE(wide.has_error());
+        CHECK(wide.error().code == error_code::address_in_use);
+    }
+
+    // Another family on the same port is a different socket altogether.
+    auto v4 = datagram_socket::try_create(*w.net, any_7000).value();
+    CHECK(datagram_socket::try_create(*w.net, endpoint(ip_address::any(ip_family::v6), 7000)).has_value());
+}
+
+CNET_IO_TEST("cnet - a virtual bind to port 0 skips a port bound explicitly")
+{
+    auto w = world();
+
+    // 40000 is where the virtual network starts handing out ports.
+    auto taken = datagram_socket::try_create(*w.net, endpoint(ip_address::loopback(ip_family::v4), 40000)).value();
+    auto picked = datagram_socket::try_create(*w.net, loopback_any_port());
+    REQUIRE(picked.has_value());
+    CHECK(picked.value()->local().port != 40000);
 }
 
 // ---- simulated -----------------------------------------------------------------------------------------
@@ -456,6 +627,24 @@ CNET_IO_TEST("cnet - the simulated arrival callback fires when a held datagram c
     CHECK(pump_until([&] { return received == 1; }));
 
     b->on_arrival({});
+}
+
+CNET_IO_TEST("cnet - simulated loss drops the share of datagrams it says")
+{
+    // 400 datagrams at a quarter loss: the binomial's standard deviation is under 9, so 250..350 is over five of them.
+    for (auto const seed : {u64(1), u64(11), u64(12345)})
+    {
+        auto w = world(link_conditions{.loss_probability = 0.25f, .seed = seed});
+        auto a = datagram_socket::try_create(w.t(), loopback_any_port()).value();
+        auto b = datagram_socket::try_create(w.t(), loopback_any_port()).value();
+
+        send_numbered(*a, b->local(), 400);
+
+        auto in = inbox(512, 4);
+        auto const arrived = b->receive_batch(in.all()).value();
+        CHECK(arrived >= 250);
+        CHECK(arrived <= 350);
+    }
 }
 
 CNET_IO_TEST("cnet - simulated loss replays from its seed")

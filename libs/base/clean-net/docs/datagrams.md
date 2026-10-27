@@ -110,8 +110,11 @@ So one `simulated_transport` covers a test with a TCP lobby and a UDP game chann
 | `virtual_network` | in-process: a send appends a copy to the inbox of whoever is bound at the destination, instantly |
 | `simulated_transport` | loss, duplication, reordering, latency, jitter and bandwidth over either of the others |
 
-The virtual network routes the way a stack does: an exact endpoint first, then a socket bound to every interface on that port.
+The virtual network routes and binds the way a stack without address reuse does: an exact endpoint first, then a socket bound to every interface on that port.
+A bind clashes with one on the same port and family when either is bound to every interface, and a bind to port 0 skips ports already taken.
 A datagram to an endpoint nobody bound vanishes, and one larger than 65 507 bytes is refused, so a test cannot pass with a datagram no real socket would send.
+
+Two known differences remain: `datagram_options` is not read, so a v6 socket bound to every interface never receives v4 even with `v6_only = false`, and the 65 507-byte cap applies to IPv6 as well.
 
 **wasm has no datagram socket and never will**, so the native one reports `unsupported` there rather than disappearing.
 The virtual and simulated ones need no socket and work there, so tests built on them run in every build.
@@ -126,7 +129,9 @@ Each arrival is decided once — dropped, duplicated, delayed — and then held 
   Impairing on both sides would make it 19%.
 - **Over the native transport only inbound traffic is impaired**: a client simulated against a real server sees a bad downlink and a clean uplink.
   A send-side mode can be added behind an option without changing what this one means.
-- **Reordering is one datagram taking a slower path**: an extra delay of one to two times its own, at least a millisecond, so later ones overtake it.
+- **Jitter alone reorders**, since datagrams are released in the order their delays end, as on a real network.
+- **Reordering is one datagram taking a slower path** on top of that: an extra delay of one to two times its own, at least a millisecond, so later ones overtake it.
+- **Bandwidth is a delay by size, not a ceiling**: datagrams in flight together are not queued behind one another.
 - **The arrival time is the release time**, exactly.
 
 ## Not built yet

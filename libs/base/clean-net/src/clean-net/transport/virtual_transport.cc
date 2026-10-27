@@ -284,6 +284,10 @@ public:
         // parked in time to be signalled, so we wake ourselves.
         auto in_flight = _io.submit(raw);
 
+        // An empty guard means the io_system was stopping, and `submit` already answered the operation and freed it.
+        if (in_flight.io() == nullptr)
+            return promise;
+
         auto const arrived_meanwhile = _inbox->lock(
             [raw](pipe_data& d)
             {
@@ -453,6 +457,10 @@ public:
         // Reading them the other way round would leave the window this is here to close.
         auto in_flight = _net->io.submit(raw);
 
+        // An empty guard means the io_system was stopping, and `submit` already answered the operation and freed it.
+        if (in_flight.io() == nullptr)
+            return promise;
+
         auto const arrived_meanwhile = _state->parked_accept.lock(
             [raw, this](impl::io_operation*& slot)
             {
@@ -501,6 +509,15 @@ private:
 
 namespace
 {
+/// Whether a socket bound at `a` keeps another from binding `b`, the way a real stack without address reuse decides:
+/// the same port and family, and the same address or either one bound to every interface.
+[[nodiscard]] bool datagram_binds_clash(endpoint const& a, endpoint const& b)
+{
+    if (a.port != b.port || a.address.family() != b.address.family())
+        return false;
+    return a.address == b.address || a.address.is_unspecified() || b.address.is_unspecified();
+}
+
 /// The largest payload one IPv4 datagram carries, which a virtual network enforces so a test does not pass here
 /// with a datagram no real socket would send.
 constexpr isize k_max_datagram_bytes = 65507;
@@ -618,6 +635,10 @@ public:
         // Submit, park, look again -- the order a virtual receive uses, for the same races.
         // Something already waiting signals at once rather than completing here: a wait never completes inline.
         auto in_flight = _net->io.submit(raw);
+
+        // An empty guard means the io_system was stopping, and `submit` already answered the operation and freed it.
+        if (in_flight.io() == nullptr)
+            return promise;
 
         auto const ready = _self->inbox.lock(
             [raw](virtual_datagram_inbox& d)
@@ -817,20 +838,32 @@ cc::result<cc::unique_ptr<datagram_socket>, error> virtual_network::bind_datagra
                                .native_code = 0,
                                .message = cc::string("bind: the endpoint has no address")});
 
-    auto bound = where;
-    if (bound.port == 0)
-        bound.port = _state->next_port.fetch_add(1);
-
     auto self = cc::make_shared<virtual_datagram_endpoint>();
-    self->where = bound;
+    auto bound = where;
 
     // Checked and registered in one step, so two binds racing for one port cannot both win.
+    // A port of 0 takes the next free one, skipping any a caller bound explicitly.
     auto const taken = _state->datagram_endpoints.lock(
         [&](cc::vector<cc::shared_ptr<virtual_datagram_endpoint>>& all)
         {
-            for (auto const& e : all)
-                if (e->where == bound)
+            auto const picking = bound.port == 0;
+            while (true)
+            {
+                if (picking)
+                    bound.port = _state->next_port.fetch_add(1);
+
+                auto clash = false;
+                for (auto const& e : all)
+                    if (datagram_binds_clash(e->where, bound))
+                        clash = true;
+
+                if (!clash)
+                    break;
+                if (!picking)
                     return true;
+            }
+
+            self->where = bound;
             all.push_back(self);
             return false;
         });

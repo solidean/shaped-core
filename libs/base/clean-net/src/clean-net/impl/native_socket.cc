@@ -456,6 +456,17 @@ namespace
 #endif
 }
 
+/// Whether a send stopped because the OS has no room for the datagram right now, which is not an error.
+/// macOS and the BSDs say so with ENOBUFS rather than EAGAIN when the interface queue is full, and Linux can too.
+[[nodiscard]] bool is_send_buffer_full(i32 native)
+{
+#if defined(_WIN32)
+    return is_would_block_native(native) || native == WSAENOBUFS;
+#else
+    return is_would_block_native(native) || native == ENOBUFS;
+#endif
+}
+
 /// A receive failure that is really about an earlier send to a peer that refused, which for datagrams is loss.
 [[nodiscard]] bool is_echo_of_a_refusal(i32 native)
 {
@@ -644,7 +655,7 @@ cc::result<isize, error> send_datagrams(native_socket s, cc::span<outgoing_datag
         if (n < 0)
         {
             auto const native = last_socket_error();
-            if (is_would_block_native(native) || sent > 0)
+            if (is_send_buffer_full(native) || sent > 0)
                 return sent;
             return cc::error(error_from_native(native, cc::format("sending a datagram to {}", packets[sent].peer)));
         }
@@ -734,7 +745,7 @@ cc::result<isize, error> send_datagrams(native_socket s, cc::span<outgoing_datag
         if (n < 0)
         {
             auto const native = last_socket_error();
-            if (is_would_block_native(native) || i > 0)
+            if (is_send_buffer_full(native) || i > 0)
                 return i;
             return cc::error(error_from_native(native, cc::format("sending a datagram to {}", p.peer)));
         }

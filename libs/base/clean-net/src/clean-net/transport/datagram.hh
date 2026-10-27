@@ -70,7 +70,8 @@ struct cnet::outgoing_datagram
 /// What a datagram socket is set up with.
 ///
 /// An option left at its default is not touched, so the socket keeps whatever the OS would have given it.
-/// An option a caller set and the OS refuses fails the bind, except where marked best effort.
+/// An option a caller set and the OS refuses fails the bind, except `traffic_class`, which is best effort, and
+/// `reuse_address` on Windows, which is ignored.
 struct cnet::datagram_options
 {
     /// For an IPv6 socket, whether it refuses IPv4 traffic.
@@ -79,8 +80,8 @@ struct cnet::datagram_options
 
     /// Allow another socket to bind the same port.
     ///
-    /// Off, unlike a listener: two datagram sockets on one port split the traffic between them, which is almost
-    /// never what a caller who did not ask for it wants.
+    /// Off, unlike a listener: which of two sockets on one port receives a unicast datagram is then up to the OS,
+    /// which is almost never what a caller who did not ask for it wants.
     /// POSIX only; the Windows option of that name permits stealing a port and is never set.
     bool reuse_address = false;
 
@@ -150,6 +151,7 @@ public:
     /// none -- so it must be quick, and handing the datagrams to another thread is its usual job.
     ///
     /// An invalid function clears it.
+    /// One that throws is not called again until it is set anew.
     /// Replacing or clearing it, and destroying the socket, wait for a call already running on another thread; from
     /// inside the callback they do not wait.
     /// After `io_system::stop()` it is never called again.

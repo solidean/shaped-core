@@ -57,7 +57,29 @@ using arrival_state = datagram_socket::arrival_state;
 /// itself.
 thread_local arrival_state const* t_calling = nullptr;
 
-void arm(cc::shared_ptr<arrival_state> const& a);
+/// The arrival state this thread is installing a completion hook for.
+/// A hook that fires during the install means the reactor thread finished the wait first, and the call is moved to the
+/// reactor rather than run here, on whoever called `on_arrival`.
+thread_local arrival_state const* t_hooking = nullptr;
+
+/// Leaves `busy` on the way out, a throw included, so a clear on another thread is never left spinning.
+struct busy_release
+{
+    arrival_state& a;
+    ~busy_release() { a.busy.fetch_sub(1); }
+};
+
+/// Sets a thread-local for one scope and puts back what was there, a throw included.
+struct thread_mark
+{
+    arrival_state const*& slot;
+    arrival_state const* outer;
+
+    thread_mark(arrival_state const*& s, arrival_state const* value) : slot(s), outer(s) { slot = value; }
+    ~thread_mark() { slot = outer; }
+};
+
+void arm(cc::shared_ptr<arrival_state> const& a, u64 generation);
 
 void on_readable(cc::shared_ptr<arrival_state> const& a, u64 generation, cc::shared_async<cc::unit> const& wait)
 {
@@ -75,7 +97,8 @@ void on_readable(cc::shared_ptr<arrival_state> const& a, u64 generation, cc::sha
     auto const live = a->state.lock(
         [&](arrival_state::slots& s)
         {
-            if (s.socket == nullptr || s.generation != generation || !s.callback.is_valid())
+            if (s.socket == nullptr || s.generation != generation || !s.callback.is_valid()
+                || s.backend->io().is_stopping())
                 return false;
             callback = s.callback;
             socket = s.socket;
@@ -85,53 +108,76 @@ void on_readable(cc::shared_ptr<arrival_state> const& a, u64 generation, cc::sha
     if (!live)
         return;
 
-    auto const* const outer = t_calling;
-    t_calling = a.get();
-    (*callback)(*socket);
-    t_calling = outer;
-    a->busy.fetch_sub(1);
+    {
+        auto const leave = busy_release{*a};
+        auto const calling = thread_mark(t_calling, a.get());
+        (*callback)(*socket);
+    }
 
-    arm(a);
+    // With the generation this wait was armed for: a callback replaced meanwhile, here or on another thread, has armed
+    // its own wait, and arming again would leave two.
+    arm(a, generation);
 }
 
-/// Wait for the next arrival, unless the callback is gone or the io_system is stopping.
-void arm(cc::shared_ptr<arrival_state> const& a)
+/// Wait for the next arrival, unless the callback was replaced since `generation`, is gone, or the io_system is
+/// stopping.
+void arm(cc::shared_ptr<arrival_state> const& a, u64 generation)
 {
     auto* backend = static_cast<datagram_backend*>(nullptr);
     auto token = cancel_token();
-    auto generation = u64(0);
+    auto previous = cancel_token();
 
     auto const go = a->state.lock(
         [&](arrival_state::slots& s)
         {
-            if (s.socket == nullptr || !s.callback.is_valid() || s.backend->io().is_stopping())
+            if (s.socket == nullptr || s.generation != generation || !s.callback.is_valid()
+                || s.backend->io().is_stopping())
                 return false;
+            previous = cc::move(s.pending);
             s.pending = cancel_token::create();
             token = s.pending;
             backend = s.backend;
-            generation = s.generation;
             a->busy.fetch_add(1);
             return true;
         });
     if (!go)
         return;
 
-    // Outside the lock: a backend is free to take its own locks and signal the reactor here.
-    // Never inline, which the backend promises, so the continuation cannot run before `busy` drops.
-    auto wait = backend->wait_readable(token);
-    a->busy.fetch_sub(1);
+    // Whatever was pending is not this wait's to keep; normally it already completed and this does nothing.
+    previous.cancel();
 
+    // Outside the lock: a backend is free to take its own locks and signal the reactor here.
+    auto wait = cc::shared_async<cc::unit>();
+    auto* io = static_cast<io_system*>(nullptr);
+    {
+        auto const leave = busy_release{*a};
+        io = &backend->io();
+        wait = backend->wait_readable(token);
+    }
+
+    auto const hooking = thread_mark(t_hooking, a.get());
     impl::when_ready(cc::move(wait),
-                     [a, generation](cc::shared_async<cc::unit> const& w) { on_readable(a, generation, w); });
+                     [a, generation, io](cc::shared_async<cc::unit> const& w)
+                     {
+                         if (t_hooking == a.get())
+                         {
+                             // Finished before the hook was in: run it from the reactor, as every other call is.
+                             impl::run_after(*io, 0, [a, generation, w] { on_readable(a, generation, w); });
+                             return;
+                         }
+                         on_readable(a, generation, w);
+                     });
 }
 
-/// Replace the callback, and wait for a call of the old one still running on another thread.
-void replace(arrival_state& a, cc::unique_function<void(datagram_socket&)> callback, bool socket_gone)
+/// Replace the callback, wait for a call of the old one still running on another thread, and say which generation
+/// the new one is.
+[[nodiscard]] u64 replace(arrival_state& a, cc::unique_function<void(datagram_socket&)> callback, bool socket_gone)
 {
+    auto generation = u64(0);
     auto stale = a.state.lock(
         [&](arrival_state::slots& s)
         {
-            ++s.generation;
+            generation = ++s.generation;
             auto previous = cc::move(s.pending);
             s.callback = callback.is_valid()
                            ? cc::make_shared<cc::unique_function<void(datagram_socket&)>>(cc::move(callback))
@@ -150,6 +196,8 @@ void replace(arrival_state& a, cc::unique_function<void(datagram_socket&)> callb
     if (t_calling != &a)
         while (a.busy.load() > 0)
             cc::this_thread_yield();
+
+    return generation;
 }
 
 // ---- the native backend --------------------------------------------------------------------------------
@@ -235,7 +283,7 @@ datagram_socket::datagram_socket(std::unique_ptr<datagram_backend> backend)
 
 datagram_socket::~datagram_socket()
 {
-    replace(*_arrival, {}, true);
+    (void)replace(*_arrival, {}, true);
 }
 
 cc::result<isize, error> datagram_socket::receive_batch(cc::span<datagram> records)
@@ -251,9 +299,9 @@ cc::result<isize, error> datagram_socket::send_batch(cc::span<outgoing_datagram 
 void datagram_socket::on_arrival(cc::unique_function<void(datagram_socket&)> callback)
 {
     auto const watching = callback.is_valid();
-    replace(*_arrival, cc::move(callback), false);
+    auto const generation = replace(*_arrival, cc::move(callback), false);
     if (watching)
-        arm(_arrival);
+        arm(_arrival, generation);
 }
 
 endpoint datagram_socket::local() const

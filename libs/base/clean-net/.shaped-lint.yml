@@ -74,6 +74,7 @@ rules:
       - src/clean-net/transport/stream.hh
       - src/clean-net/transport/tcp.cc
       - src/clean-net/transport/datagram.hh
+      - tests/datagram-test.cc
       - src/clean-net/transport/virtual_transport.cc
       - src/clean-net/transport/simulated_transport.cc
       - src/clean-net/tls/tls_mbedtls.cc
