@@ -178,7 +178,7 @@ The lock is not recursive, so the rule that remains is: never re-acquire the *sa
 The exclusive guard is an approximation of the model this actually wants, and the gap is a missing clean-core type:
 **executes that only read should run in parallel with each other**, while the read-only scope should hold a shared lock rather than none.
 A read-only routine like `sr::blit_routine` has no reason to serialize against another thread's `execute`, and `try_acquire`'s no-lock path is not the same thing as a shared one.
-Closing it needs a `cc::shared_mutex<T>` beside `cc::mutex<T>`; it is tracked in the [sg TODO](TODO.md).
+Closing it needs a `cc::shared_mutex<T>` beside `cc::mutex<T>`; it is tracked in [feat-sg-routine-shared-exclusive-lock](issues/feat-sg-routine-shared-exclusive-lock.md).
 
 Do not `clear()` / `evict()` a registry while another thread is still recording against the same context.
 
@@ -186,7 +186,7 @@ Do not `clear()` / `evict()` a registry while another thread is still recording 
 
 Nothing a caller does brings a routine up.
 `ctx.routines.tick()` does, and a routine nothing has ticked reads as pending.
-That is the point: initialization is where shaders are compiled and pipelines built, and none of that may happen on the frame path.
+That keeps initialization off the frame path, because it is where shaders are compiled and pipelines built.
 
 It is a **frame-boundary call**.
 It opens and submits a command list of its own, so it must not run inside one, and it belongs after `advance_epoch` and before the frame's first acquire.
@@ -262,7 +262,7 @@ auto const& atlas = self.acquire(_atlas);                // cannot fail
 auto mip = self.acquire_exclusive(_mipmap);              // the same, for one this routine mutates
 ```
 
-That is the point of the whole mechanism: **the number of readiness checks a renderer grows is one per entry into the routine system, not one per routine.**
+So **the number of readiness checks a renderer grows is one per entry into the routine system, not one per routine.**
 Without it every composing routine would have to know the pending state of everything under it and do the right thing in each case, which is boilerplate and gets it wrong somewhere.
 
 A token is redeemed **through the scope or the guard**, never off the routine, so "valid only while the holder is acquired" is structural rather than an assert that release compiles out.

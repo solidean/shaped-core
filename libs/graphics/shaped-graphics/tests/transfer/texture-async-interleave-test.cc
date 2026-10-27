@@ -11,13 +11,13 @@ using namespace cc::primitive_defines;
 // Interleaving a command list with an async transfer of ONE texture, which sg did not promise until the direct queue
 // began settling the layout for the transfer.
 //
-// These are the cases libs/graphics/shaped-graphics/docs/TODO.md carried as its gate while neither backend could hold
-// them: an async transfer runs on a queue that cannot settle a layout for itself, so a list that left the texture
-// somewhere else made the copy illegal on dx12 and unverifiable on vulkan.
-// Both edges are the point — a transfer composing after a list, and a list composing after a transfer — because each
+// These are the cases that were the gate while neither backend could hold them.
+// An async transfer runs on a queue that cannot settle a layout for itself.
+// So a list that left the texture somewhere else made the copy illegal on dx12 and unverifiable on vulkan.
+// Both edges are tested — a transfer composing after a list, and a list composing after a transfer — because each
 // is carried by a different half of the per-resource stamps.
-// The forward edge read through an INLINE readback is the one case still missing here, and
-// libs/graphics/shaped-graphics/docs/TODO.md carries it with what it is waiting on.
+// The forward edge read through an INLINE readback is the one case still missing here.
+// issue: bug-sg-pure-layout-transition-empty-scope carries it with what it is waiting on.
 //
 // The oracle is as much the debug layer as the bytes: both entry points fail a test on any message of warning severity
 // or worse, and the vulkan one runs synchronization validation too.

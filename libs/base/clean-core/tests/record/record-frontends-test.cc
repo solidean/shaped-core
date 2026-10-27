@@ -348,6 +348,8 @@ REC_TEST("record/scope - a scope opens and closes at the depth it was entered")
 
 REC_TEST("record/scope - a scope with no name takes the enclosing function's")
 {
+    if constexpr (CC_SOURCE_SITES < 2)
+        SKIP("reads what only SC_SOURCE_SITES=FULL keeps of a site");
     rec_fixture const fixture(deterministic_config());
 
     collector c;

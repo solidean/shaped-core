@@ -107,7 +107,7 @@ The key is one XXH3-128 pass over the primitive span, taken lazily on the first 
 Folding a digest per `add` was the first shape, and it is about five times the work for the same invariant.
 The cost is the call count rather than the bytes, and `tests/quadric-set-benchmark.cc` is what settled it.
 It is also what lands the streaming, residency and eviction story for free.
-A quadric batch becomes the same kind of thing `mesh_manager` already holds: a hashed payload that `ctx.stream` uploads, and that `record_pending_work` builds a BLAS behind.
+A quadric batch becomes the same kind of thing `mesh_manager` already holds: a hashed payload that `ctx.stream` uploads, and that the first trace reaching it builds a BLAS behind.
 It differs in one way, and deliberately: `quadric_data` BORROWS its span rather than pinning it.
 The authored form cannot be uploaded as it stands — it splits into a primitive buffer and a box buffer — so the acquire builds new arrays anyway, and only on a miss.
 
@@ -143,7 +143,7 @@ s.add_line(tg::segment3f(a, b), 0.008f, steel);
 ```
 
 They write into a frame-owned set, bucketed by material.
-**That set hashes its contents, not its identity**, and the requirement is load-bearing rather than an optimization.
+**That set hashes its contents, not its identity**, and the sugar depends on that.
 Without it the sugar is a trap: the same drawing that is free with an explicit set costs a full re-upload and BLAS rebuild every frame, and nothing in the API would say so.
 
 The factories take tg objects — `tg::sphere3f` for a vertex, and `tg::segment3f` plus a radius or a style for an edge.
@@ -226,7 +226,7 @@ An earlier revision of this design gave quadrics frequencies of their own — `p
 The clip slab makes the second nearly free: it is offset rather than centered, so it carries the axis WITH its sign, and the
 blend parameter falls out of the same evaluation the intersection already does.
 
-It was dropped, and the reason is the whole point of the section above.
+It was dropped for the reason the section above gives.
 A per-end frequency forks the generated body — one material would no longer produce one shader body for both geometries — and
 that property is worth more today than a gradient along an edge.
 `per_quadric` itself was redundant the moment `per_triangle` was read as "one value per element of the geometry's own primitive
@@ -255,7 +255,7 @@ report the best, with the gradient of whichever quadric it landed on
 The clipper's two roots are only considered when the emit bit is set, so an open tube solves one quadratic and a capped one two.
 Still one `report` and no sorting.
 
-**Taking the nearest survivor rather than the first root is load-bearing for ordinary geometry**, not only for interior views.
+**Taking the nearest survivor rather than the first root is needed for ordinary geometry**, not only for interior views.
 A slab-clipped cylinder is an open tube with nothing closing its ends.
 Seen near end-on — which is what every edge pointing at the camera does — the near root lies on the cylinder outside the slab, and the clipper rejects it.
 The far root is the inside of the opposite wall, and is genuinely visible.

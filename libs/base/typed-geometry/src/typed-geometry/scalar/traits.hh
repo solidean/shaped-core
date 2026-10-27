@@ -6,6 +6,7 @@
 #include <typed-geometry/scalar/fwd.hh>
 
 #include <cmath>
+#include <limits>
 #include <type_traits>
 
 /// Scalar trait seam for typed-geometry.
@@ -63,7 +64,7 @@ struct tg::scalar_traits
 };
 
 // std::sqrt and the std trig functions honor errno, which costs codegen for a contract nobody wants.
-// Routed through them for now; libs/base/typed-geometry/docs/TODO.md tracks the replacement.
+// Routed through them for now; issue: perf-tg-std-math-routing
 template <>
 struct tg::scalar_traits<cc::f32>
 {
@@ -76,6 +77,8 @@ struct tg::scalar_traits<cc::f32>
     static constexpr bool has_non_finite = true;
 
     [[nodiscard]] static constexpr f32 one() { return 1.0f; }
+    [[nodiscard]] static constexpr f32 lowest() { return -std::numeric_limits<f32>::infinity(); }
+    [[nodiscard]] static constexpr f32 highest() { return std::numeric_limits<f32>::infinity(); }
     [[nodiscard]] static constexpr bool is_zero(f32 x) { return x == 0.0f; }
     [[nodiscard]] static constexpr bool is_one(f32 x) { return x == 1.0f; }
     [[nodiscard]] static f32 sqrt(f32 x) { return std::sqrt(x); }
@@ -124,6 +127,8 @@ struct tg::scalar_traits<cc::f64>
     static constexpr bool has_non_finite = true;
 
     [[nodiscard]] static constexpr f64 one() { return 1.0; }
+    [[nodiscard]] static constexpr f64 lowest() { return -std::numeric_limits<f64>::infinity(); }
+    [[nodiscard]] static constexpr f64 highest() { return std::numeric_limits<f64>::infinity(); }
     [[nodiscard]] static constexpr bool is_zero(f64 x) { return x == 0.0; }
     [[nodiscard]] static constexpr bool is_one(f64 x) { return x == 1.0; }
     [[nodiscard]] static f64 sqrt(f64 x) { return std::sqrt(x); }
@@ -179,6 +184,11 @@ struct tg::scalar_traits<T>
     [[nodiscard]] static constexpr T one() { return T(1); }
     [[nodiscard]] static constexpr bool is_zero(T x) { return x == T(0); }
     [[nodiscard]] static constexpr bool is_one(T x) { return x == T(1); }
+    [[nodiscard]] static constexpr T highest()
+    {
+        return T(std::make_unsigned_t<T>(~std::make_unsigned_t<T>(0)) >> (std::is_signed_v<T> ? 1 : 0));
+    }
+    [[nodiscard]] static constexpr T lowest() { return std::is_signed_v<T> ? T(-highest() - T(1)) : T(0); }
 
     /// x must not be the type's most negative value, which has no representable magnitude.
     [[nodiscard]] static constexpr T abs(T x)
@@ -255,6 +265,29 @@ inline constexpr bool is_exact = []
     else
         return false;
 }();
+
+/// true if scalar_traits<T> provides lowest() / highest(), the extremes of its order: the infinities where the type has them.
+/// An empty tg::aabb is built from them, min at highest() and max at lowest(), so that it is the identity of union.
+template <class T>
+inline constexpr bool has_extremes = requires {
+    scalar_traits<T>::lowest();
+    scalar_traits<T>::highest();
+};
+
+/// the extremes of T's order; see has_extremes.
+template <class T>
+    requires has_extremes<T>
+[[nodiscard]] constexpr T lowest()
+{
+    return scalar_traits<T>::lowest();
+}
+
+template <class T>
+    requires has_extremes<T>
+[[nodiscard]] constexpr T highest()
+{
+    return scalar_traits<T>::highest();
+}
 
 /// is the value the additive identity? Routed through scalar_traits so symbolic / bigint / ...
 /// scalars can supply a smarter test than a plain comparison.

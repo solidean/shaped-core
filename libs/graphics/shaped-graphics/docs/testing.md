@@ -34,6 +34,7 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   A hardware driver skips only when there is no hardware adapter; one that exists and still fails to create a device fails the test.
   `SC_DX12_ADAPTER=warp` hides every hardware adapter from a whole process, which is how to reproduce a GPU-less run locally: the hardware drivers skip and the WARP ones run.
   `hardware` hides WARP instead, and `none` both, which is how a Windows CI job other than Windows Clang runs: no dx12 test at all, and every one skips rather than fails.
+  WARP means every adapter of Microsoft's vendor id, whatever DXGI's software flag says, since the Windows ARM image enumerates one without it.
   So a test that creates a context of its own SKIPs when creation fails, never `REQUIRE`s it.
   WARP runs on the Windows Clang job alone, and the binaries that bring it up declare a 180 s timeout (`SG_WARP_TEST_BINARY_ARGS`).
   `SC_SG_COLD=all` adds the other half of a CI runner, a first build of every shader and pipeline: the persistent tiers are neither read nor written.
@@ -78,7 +79,7 @@ It becomes runnable against each backend by two pieces working together:
   A readback awaits its own result: `auto const data = co_await future.data();`.
   `co_await ctx->idle_completion()` is for a test that needs the whole GPU and every actor drained.
   `co_await ctx->routines.idle_completion()` is for one that needs every registered routine up.
-  A blocking wait in a library's tests is a `blocking-wait` lint finding, allowed by file in that library's `.shaped-lint.yml` where the wait is the point.
+  A blocking wait in a library's tests is a `blocking-wait` lint finding, allowed by file in that library's `.shaped-lint.yml` where the wait is what the test checks.
   A backend still being built out **registers but disables its driver**, which is how vulkan was grown.
   Registering defines the aliases, so any one API test runs against it by being named exactly.
   The `nx::config::disabled` keeps a sweep out of the seams it has not reached — where a stub aborts, a sweep is a crash rather than a set of failures.
@@ -102,7 +103,7 @@ Attribution rides the ambient context, so the failure lands on the right test wh
 
 The advisories sg provokes on purpose are [`dx12_expected_messages.hh`](../backends/dx12/src/shaped-graphics/backends/dx12/dx12_expected_messages.hh).
 Each dx12 driver allows them for every test in its binary.
-A test whose subject **is** the bad input declares it: `nx::expect_error(...)` when the message is the point, `nx::allow_errors(...)` when whether it appears depends on something else.
+A test whose subject **is** the bad input declares it: `nx::expect_error(...)` when the test checks for the message, `nx::allow_errors(...)` when whether it appears depends on something else.
 
 D3D12 hands one message to **every** callback registered on the device that raised it, and two contexts on one adapter share a device.
 So the backend logs a message from one context per device only — the oldest there without a listener — and a test sees it once however many contexts are alive.

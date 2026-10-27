@@ -6,8 +6,7 @@
 // These cover the value types and the event-buffer lifetime, which is what sr owns outright.
 //
 // They do not cover the SDL-to-sr translation — the scancode table, the wheel-direction flip, the keycode to
-// character rule — because reaching it means injecting real SDL events, and SDL lives in exactly one file
-// (../docs/coding-guidelines.md). See ../docs/TODO.md.
+// character rule — which input-translation-test.cc tests at the seam.
 
 // nx::main_thread here because sr::window_system must be created on the process main thread; see window-test.cc.
 TEST("sr - key modifiers combine and test as a bit set", main_thread)
@@ -37,7 +36,7 @@ TEST("sr - key modifiers combine and test as a bit set", main_thread)
 TEST("sr - window system creation reports whether a backend exists", main_thread, exclusive("sr-window-system"))
 {
     // The API is here either way; only the answer changes.
-    // A caller writes this once and it compiles in both builds, which is the point of not gating the types on SR_HAS_WINDOW.
+    // The types are not gated on SR_HAS_WINDOW, so a caller writes this once and it compiles in both builds.
     auto const created = sr::window_system::try_create({.headless = true});
 
 #if SR_HAS_WINDOW

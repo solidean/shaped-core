@@ -11,7 +11,7 @@
 /// Exactly what [the format](../../../docs/format.md#schema) specifies, and nothing beside it.
 /// **Create what is missing; never rewrite what is there.**
 ///
-/// The shape check runs BEFORE anything is created, which is the whole point:
+/// The shape check runs BEFORE anything is created, because
 /// a `CREATE TABLE IF NOT EXISTS` over an incompatible old table leaves it in place and every later statement fails obscurely, so the real
 /// problem is reported here, naming the table and the column.
 

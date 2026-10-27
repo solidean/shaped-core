@@ -241,6 +241,23 @@ def a_binding_array_is_a_fixed_array_of_views_gathered_as_one_binding():
               "a binding after an array keyed by its position, not its register")
 
 
+@test
+def each_binding_array_has_a_handle_its_access_is_declared_by():
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, ARRAYS)
+    expect_in('        static constexpr sg::texture_array_binding albedo = {.name = "materials_albedo"};\n', header,
+              "a texture array's handle, by the name sg resolves")
+    expect_in('        static constexpr sg::buffer_array_binding params = {.name = "materials_params"};\n', header,
+              "a buffer array's handle")
+    expect_not_in("struct arrays", sgl_host_code.emit_group("pkg", {}, "ns", FILE, GROUP),
+                  "a group without a binding array has no handles")
+    clashing = {**ARRAYS, "members": [*ARRAYS["members"], {**ARRAYS["members"][1], "name": "arrays"}]}
+    try:
+        sgl_host_code.emit_group("pkg", {}, "ns", FILE, clashing)
+        raise AssertionError("a member named like the handles' struct generated a type")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("'arrays'", str(e), "the refusal names the member")
+
+
 # ---- a vertex input ---------------------------------------------------------------------------------------------------
 
 MESH = {

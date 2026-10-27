@@ -314,6 +314,152 @@ TEST("sgl check - a dynamic index into a binding array is proven uniform, or mar
     CHECK(needless.contains("needless-nonuniform"));
 }
 
+TEST("sgl check - a @per_draw member is uniform in the pixel stage, and the vertex stage is held to writing it so")
+{
+    auto const drawn = [](cc::string_view vertex, cc::string_view index)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding materials:\n"
+                                      "    @sampler(smp) albedo: texture_2d[float4][8]\n"
+                                      "    smp: sampler\n"
+                                      "\n"
+                                      "@inline binding draw:\n"
+                                      "    slot: uint\n"
+                                      "    pad: uint3\n"
+                                      "\n"
+                                      "struct varyings:\n"
+                                      "    @position position: hpos4\n"
+                                      "    @per_draw material: uint\n"
+                                      "    uv: float2\n"
+                                      "\n"
+                                      "@pixel struct target:\n"
+                                      "    color: float4\n"
+                                      "\n"
+                                      "@vertex fun vs(@vertex_index i: int, @instance_index k: int){{draw}} -> "
+                                      "varyings:\n"
+                                      "{}"
+                                      "\n"
+                                      "@pixel fun ps(p: varyings){{materials}} -> target:\n"
+                                      "    return {{ color = materials.albedo[{}].sample(p.uv) }}\n",
+                                      vertex, index));
+    };
+    auto const from_draw = cc::string_view("    return { position = hpos4(0.0, 0.0, 0.0, 1.0), material = draw.slot, "
+                                           "uv = float2(0.0) }\n");
+    // CHK-393: a value the same across the draw is the same across the quad and the wave too
+    CHECK(drawn(from_draw, "p.material as int") == "");
+    CHECK(drawn(from_draw, "nonuniform (p.material as int)").contains("needless-nonuniform"));
+    // what is held in a let first is judged as written
+    CHECK(drawn("    let v: varyings = { position = hpos4(0.0, 0.0, 0.0, 1.0), material = draw.slot, uv = float2(0.0) "
+                "}\n"
+                "    return v\n",
+                "p.material as int")
+          == "");
+
+    // the instance differs within a draw, and so does what a branch on the vertex picks
+    auto const instanced
+        = drawn("    return { position = hpos4(0.0, 0.0, 0.0, 1.0), material = k as uint, uv = float2(0.0) }\n", "0");
+    CHECK(instanced.contains("non-uniform-per-draw"));
+    CHECK(instanced.contains("'material' is @per_draw"));
+    CHECK(instanced.contains("this value comes from the stage input k"));
+    CHECK(drawn("    if i > 2:\n"
+                "        return { position = hpos4(0.0, 0.0, 0.0, 1.0), material = 1u, uv = float2(0.0) }\n"
+                "    return { position = hpos4(0.0, 0.0, 0.0, 1.0), material = 2u, uv = float2(0.0) }\n",
+                "0")
+              .contains("non-uniform-per-draw"));
+}
+
+TEST("sgl check - a field of a struct let is as uniform as what it was built from, whatever its other fields are")
+{
+    auto const picked = [](cc::string_view index)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding materials:\n"
+                                      "    @sampler(smp) albedo: texture_2d[float4][8]\n"
+                                      "    smp: sampler\n"
+                                      "    slot: int\n"
+                                      "\n"
+                                      "struct pixel_input:\n"
+                                      "    @position position: hpos4\n"
+                                      "    uv: float2\n"
+                                      "\n"
+                                      "@pixel struct target:\n"
+                                      "    color: float4\n"
+                                      "\n"
+                                      "struct context:\n"
+                                      "    slot: int\n"
+                                      "    uv: float2\n"
+                                      "\n"
+                                      "fun context_of(p: pixel_input){{materials}} -> context => {{ slot = "
+                                      "materials.slot, "
+                                      "uv = p.uv }}\n"
+                                      "\n"
+                                      "@pixel fun ps(p: pixel_input){{materials}} -> target:\n"
+                                      "    let ctx = context_of(p)\n"
+                                      "    return {{color = materials.albedo[{}].sample(ctx.uv)}}\n",
+                                      index));
+    };
+    CHECK(picked("ctx.slot") == "");
+    CHECK(picked("ctx.uv.x as int").contains("non-uniform-index"));
+}
+
+TEST("sgl check - a mark one inlined copy of an index needs is no needless mark where another copy is uniform")
+{
+    auto const twice = [](cc::string_view second)
+    {
+        return reports_for(cc::format("require binding_arrays\n\n"
+                                      "binding materials:\n"
+                                      "    @sampler(smp) albedo: texture_2d[float4][8]\n"
+                                      "    smp: sampler\n"
+                                      "    slot: int\n"
+                                      "\n"
+                                      "struct pixel_input:\n"
+                                      "    @position position: hpos4\n"
+                                      "    uv: float2\n"
+                                      "    @interpolate(.flat) material: int\n"
+                                      "\n"
+                                      "@pixel struct target:\n"
+                                      "    color: float4\n"
+                                      "\n"
+                                      "fun albedo(i: int, uv: float2){{materials}} -> float4:\n"
+                                      "    let at = i + 1\n"
+                                      "    return materials.albedo[nonuniform at].sample(uv)\n"
+                                      "\n"
+                                      "@pixel fun ps(p: pixel_input){{materials}} -> target:\n"
+                                      "    return {{color = albedo(materials.slot, p.uv) + albedo({}, p.uv)}}\n",
+                                      second));
+    };
+    CHECK(twice("p.material") == "");
+    CHECK(twice("materials.slot").contains("needless-nonuniform"));
+}
+
+TEST("sgl check - @per_draw crosses flat, from a vertex stage, and only on a stage link")
+{
+    auto const linked = [](cc::string_view attributes)
+    {
+        return reports_for(cc::format("struct varyings:\n"
+                                      "    @position position: hpos4\n"
+                                      "    {} material: uint\n"
+                                      "\n"
+                                      "@pixel struct target:\n"
+                                      "    color: float4\n"
+                                      "\n"
+                                      "@vertex fun vs() -> varyings:\n"
+                                      "    return {{ position = hpos4(0.0, 0.0, 0.0, 1.0), material = 1u }}\n"
+                                      "\n"
+                                      "@pixel fun ps(p: varyings) -> target:\n"
+                                      "    return {{ color = float4(p.material as float) }}\n",
+                                      attributes));
+    };
+    // @per_draw says flat already, which an integer needs
+    CHECK(linked("@per_draw") == "");
+    CHECK(linked("@per_draw @interpolate(.flat)") == "");
+    CHECK(linked("@per_draw @interpolate(.linear)").contains("a @per_draw member crosses flat"));
+
+    CHECK(reports_for("@vertex struct mesh_vertex:\n"
+                      "    @per_draw point: pos3\n")
+              .contains("unsupported-yet user:[per_draw] the attribute @per_draw"));
+}
+
 TEST("sgl check - an index into a binding array that a parameter stands for is judged where the caller wrote it")
 {
     auto const passed = [](cc::string_view line)
@@ -618,7 +764,7 @@ TEST("sgl check - what a ray-tracing stage is handed differs between its invocat
     };
     CHECK(hit("nonuniform (h.instance_id % 8)") == "");
     CHECK(hit("h.instance_id % 8")
-          == unmarked("h.instance_id % 8", "user:[h] this value comes from what the stage is handed"));
+          == unmarked("h.instance_id % 8", "user:[h.instance_id] this value comes from what the stage is handed"));
     CHECK(hit("h.primitive_index % 8").contains("non-uniform-index"));
 
     auto const candidate = [](cc::string_view index)
@@ -652,7 +798,8 @@ TEST("sgl check - what a ray-tracing stage is handed differs between its invocat
     };
     CHECK(missed("nonuniform ((r.direction.x as int) % 8)") == "");
     CHECK(missed("(r.direction.x as int) % 8")
-          == unmarked("(r.direction.x as int) % 8", "user:[r] this value comes from what the stage is handed"));
+          == unmarked("(r.direction.x as int) % 8", "user:[r.direction] this value comes from what the stage is "
+                                                    "handed"));
 
     // a raygen's launch index is its own, and the launch's size every invocation's
     auto const launched = [](cc::string_view index)

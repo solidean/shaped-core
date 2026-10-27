@@ -128,6 +128,7 @@ namespace sgl::test
 
 /// Removes from `diagnostics` every one inside a test that has an `@expect(error = …)` or `@expect(warning = …)`, and
 /// reports each such expectation that none of them met as `unmet-expectation` (CHK-232).
+/// A test with an unmet expectation puts back every diagnostic it took, as the likeliest reason it went unmet.
 /// Inside is from the test's keyword to the end of its body, so a diagnostic outside is never taken.
 /// A test that expects diagnostics is judged by them alone, and `run_tests` leaves it out.
 /// An entry point that expects them takes those judged of its inlined body the same way, wherever they stand (CHK-403).

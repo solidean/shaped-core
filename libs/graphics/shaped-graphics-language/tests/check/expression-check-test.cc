@@ -154,10 +154,10 @@ TEST("sgl check - a struct's constructor takes its fields in order, and a splat 
           == "no-matching-overload user:[float4(..c)] float4(float, float, float), and the constructor is "
              "float4(float, "
              "float, float, float)\n");
-    // CHK-396: a scalar converts by its name as `as` converts, and `mat4` has no constructor at all
+    // CHK-396: a scalar converts by its name as `as` converts, and `bool32` has no constructor at all
     CHECK(body_reports("let a = float(k)\nreturn k\n") == "");
-    CHECK(body_reports("let a = mat4(k)\nreturn k\n")
-          == "no-matching-overload user:[mat4(k)] mat4 is opaque and has no constructor\n");
+    CHECK(body_reports("let a = bool32(k)\nreturn k\n")
+          == "no-matching-overload user:[bool32(k)] bool32 is opaque and has no constructor\n");
     CHECK(body_reports("let a = vec3(..k, k, k)\nreturn k\n")
           == "type-mismatch user:[..k] float has no fields a splat could spread\n");
     CHECK(body_reports("return dot(..v, v)\n") == "unsupported-yet user:[..v] a splat outside a constructor call\n");
@@ -585,7 +585,7 @@ TEST("sgl check - a constant count or divisor is judged alone, whatever stands b
                           "@compute(1) fun cs(@thread_id id: int3){res}:\n";
     CHECK(reports_for(cc::format("{}    res.ints[0] = id.x >> (40 - 9)\n", head)) == "");
     CHECK(reports_for(cc::format("{}    res.ints[0] = id.x << (40 - 8)\n", head))
-              .contains("shift-out-of-range user:[id.x << (40 - 8)] `id.x << (40 - 8)` shifts by 32"));
+              .contains("shift-out-of-range user:[id.x << (40 - 8)] a shift by 32"));
     CHECK(reports_for(cc::format("{}    res.ints[0] = id.x % (2 - 2)\n", head))
               .contains("constant-without-value user:[id.x % (2 - 2)]"));
     CHECK(reports_for(cc::format("{}    res.ints[0] = (int2(id.x, 1) / int2(1, 0)).x\n", head))

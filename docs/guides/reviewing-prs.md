@@ -447,8 +447,8 @@ The same file hand-rolled 34 lines of byte-order float load that `cc::load_bytes
 Sort each helper into one of three:
 
 - **It exists in `cc` (or `tg`)** — delete the copy.
-- **It does not exist and belongs there** — record it in the library's `docs/lower-library-gaps.md`, and leave the copy with a one-line comment saying `cc` has no equivalent yet.
-  That comment stops the next reviewer re-raising it and the next author writing a fifth copy.
+- **It does not exist and belongs there** — file a `feat` in the lower library's `docs/issues/`, and leave the copy with a one-line comment saying `cc` has no equivalent yet, ending `issue: <id>`.
+  That comment stops the next reviewer re-raising it and the next author writing a fifth copy, and closing the issue fails `issues check` until the copy goes.
 - **It is genuinely specific to this format** — leave it.
 
 **Grep the foundational library for what the helper does, not just its name.**
@@ -535,7 +535,7 @@ A review that only ever offers "fix it" pushes toward a completeness nobody aske
 
 ### A finding the diff already documents is not a finding
 
-**Search the branch's own docs for your finding before you raise it** — `docs/TODO.md`, a "Not yet" section, the `///` on the function.
+**Search the branch's own docs for your finding before you raise it** — `dev.py issues known <path>`, a "Not yet" section, the `///` on the function.
 Raising a recorded gap as a discovery says the reviewer did not read the docs in the diff, and silently overrules a recorded decision to defer without arguing against it.
 **A test counts as recording it**, and so does a spec rule or a comment in a test generator.
 Three of one review's nine findings were already recorded — one TODO, one doc comment, one CHECK in a test nowhere near the code it pins.
@@ -709,7 +709,7 @@ The item needed to say the templated version must keep passing the index.
 **The failure is counting from a grep's output rather than from the set the claim is about** — comments, files outside the population, the same file twice.
 One draft carried three wrong counts, and the argument each supported was correct all three times; the finding survives, the credibility does not.
 **Either enumerate the set in the comment, or drop the number.**
-A list of nine paths is checkable and self-correcting while you write it; where a count really is the point, produce it with a command whose output you paste.
+A list of nine paths is checkable and self-correcting while you write it; where the reader needs the count itself, produce it with a command whose output you paste.
 
 ### A number carried out of its source is restated as the quantity it measures
 

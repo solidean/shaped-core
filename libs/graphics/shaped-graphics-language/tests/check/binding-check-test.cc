@@ -269,8 +269,9 @@ TEST("sgl check - a buffer element is read by subscript and written where the bu
     CHECK(reports_for(listing(members, "    work.src[0] = 1.0\n")).contains("this buffer is read-only"));
     CHECK(reports_for(listing(members, "    let v = work.src[1.5]\n")).contains("a buffer is indexed by an int"));
 
-    // Everything else a subscript could mean is still unbuilt, and says so rather than guessing.
-    CHECK(reports_for(listing(members, "    let v = p.position[0]\n")).contains("a subscript on anything but a buffer"));
+    // A vector's lane is a subscript too (CHK-395); everything else a subscript could mean is still unbuilt, and says so.
+    CHECK(reports_for(listing(members, "    let v = p.position[0]\n")).empty());
+    CHECK(reports_for(listing(members, "    let v = p.position.x[0]\n")).contains("a subscript on anything but a buffer"));
 }
 
 TEST("sgl check - a buffer is a resource and never a value")

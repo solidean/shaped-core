@@ -11,16 +11,18 @@ This is the design, including the parts not built yet.
 
 | member | kind | where it runs | status |
 |---|---|---|---|
-| `atrous` | spatial | dx12, vulkan (HLSL through DXC); WARP included | done |
-| `svgf` | temporal | dx12, vulkan (HLSL through DXC) | done |
-| `oidn` | spatial, trained | dx12, vulkan (HLSL through DXC) | done; named only, not real-time |
+| `atrous` | spatial | every backend (SGL); tested on dx12 and vulkan, WARP included | done |
+| `svgf` | temporal | every backend (SGL); tested on dx12 and vulkan | done |
+| `oidn` | spatial, trained | every backend (SGL); tested on dx12 and vulkan | done; named only, not real-time |
 | `dlss_rr` | temporal, upscales | NVIDIA RTX; dx12 | done, SDK fetched on request |
 | `fsr_rr` | temporal, split-signal | dx12 | planned |
 | `nrd` | temporal, split-signal | dx12 (DXIL); WARP included | done, sources fetched on request |
+| `metalfx_rr` | temporal, upscales | Apple GPUs that run MetalFX's MTL4 denoised scaler; metal | done |
 
 | upscaler | kind | where it runs | status |
 |---|---|---|---|
 | `fsr` | temporal, upscales, does not denoise | any GPU; dx12 and vulkan on Windows builds; not WARP | done |
+| `metalfx` | temporal, upscales, does not denoise | Apple GPUs that run MetalFX's MTL4 scaler; metal | done |
 
 **A spatial member reads one image; a temporal one also reads history reprojected by motion vectors.**
 The temporal ones work from about one sample per pixel, but only if every pixel's motion is known.
@@ -39,7 +41,7 @@ That is the same guide contract NRD wants, which is the argument for doing the t
 It is not built, and what it waits for is the tracer rather than the SDK.
 
 **The native members are what CI tests, and `nrd` does not join them.**
-à-trous and SVGF are our own HLSL, so they run on WARP, and the front's policy is tested through them.
+à-trous and SVGF are our own SGL, so they run on WARP, and the front's policy is tested through them.
 CI never fetches NRD, so what it builds and runs is the null path: `SR_HAS_NRD` is 0, the member reports `unsupported`, and its own tests do not exist.
 They run only where somebody fetched the SDK, which is why a green CI here says nothing about whether NRD works.
 
@@ -55,6 +57,10 @@ A caller who scaled by a ratio of their own would then trace at half resolution 
 The ratio itself comes from `reconstruct_settings::scale`.
 `reconstruct_settings::quality` separately picks the network NGX runs, so the two are independent knobs here and `scale` alone decides the extents.
 
+**Its jitter is the Halton sequence, and NGX's offset is the negation of sr's.**
+FSR and MetalFX each settled theirs by a comparison against a flipped run, and dlss-rr-jitter-test is that comparison for `dlss_rr`.
+On an RTX 5070 Ti (dx12, DLSS 310.9.1) the negated jitter scores 0.046, against 0.242 with sr's passed through.
+
 **NRD is a planner rather than a renderer, which is why it asks nothing of the adapter.**
 It compiles nothing at run time, owns no device memory and records nothing.
 What it answers is "which compute dispatches would denoise this frame, against which resources, with which constants", and sr executes that answer through sg.
@@ -69,17 +75,17 @@ Two routes widen it, and the cheap-looking one was tried and is not cheap.
 **`nrd::PipelineDesc` carries a `computeShaderSPIRV` beside its DXIL, and turning it on is genuinely one line.**
 The DXC `extern/dxc` already pins emits SPIR-V, so `NRD_EMBEDS_SPIRV_SHADERS ON` plus `SHADERMAKE_DXC_VK_PATH` produces 31 SPIR-V blobs with no second compiler and no network.
 What does not follow is a working vulkan arm.
-Built that far and run against a validating vulkan context, two things break, and neither is a line of configuration.
+Built that far and run against a validating vulkan context, two things broke, and neither was a line of configuration.
 
 - **NRD uses two register spaces, which are two descriptor sets under Vulkan.**
   `nrd_session::create` builds one binding group, which is one set, so the constants land outside the layout it declares:
   `vkCreateComputePipelines(): ... uses descriptor [Set 1, Binding 2, variable "REBLUR_SplitScreenConstants"] but the binding was not declared in the VkPipelineLayoutCreateInfo::pSetLayouts[1]`.
   dx12 does not care, which is why the DXIL path never noticed.
-- **NRD's shaders want compute derivatives**, and sg's vulkan backend enables no such feature:
+- **NRD's shaders want compute derivatives**, which sg's vulkan backend did not enable at the time:
   `SPIR-V Capability ComputeDerivativeGroupQuadsKHR was declared, but ... computeDerivativeGroupQuads` is required.
-  So is the `VK_KHR_compute_shader_derivatives` extension, which is the same gap seen from the instance side.
+  sg now probes and enables `VK_KHR_compute_shader_derivatives` where present, so this half is closed.
 
-Both are answerable — a second binding group here, a device feature in sg — and neither is in this change.
+The second binding group is what remains, and [feat-nrd-vulkan-second-binding-group](issues/feat-nrd-vulkan-second-binding-group.md) tracks it.
 **With validation off the same run passes**, which is worth knowing before anyone reads a green run as support.
 
 Beyond that, NRD ships its shaders as source, and `PipelineDesc::shaderIdentifier` exists so a custom integration can supply its own compiled form.
@@ -142,7 +148,7 @@ AMD's precompiled shader headers, and the FidelityFX_SC tool that makes them, ar
 Each pass is compiled through slib instead, from a wrapper that states the permutation's defines and includes AMD's pass.
 The context flags are fixed — linear HDR in, low-resolution motion, inverted infinite depth — so one variant of each pass is all the host code ever asks for, and the backend refuses any other.
 The portable path is the one built: fp32, no forced wave64, no Lanczos lookup table.
-The fp16 and wave64 variants AMD tunes for are a follow-up that needs sg to report 16-bit support; [TODO.md](TODO.md) has it.
+The fp16 and wave64 variants AMD tunes for are a follow-up: [perf-fsr-fp16-wave64-permutations](issues/perf-fsr-fp16-wave64-permutations.md).
 
 **The inputs meet FSR's conventions in the backend, and sr's guides stay as they are.**
 - Depth: sr's linear view depth is converted to an inverted, infinite-far device depth by a small pass, `near / depth`, which FSR reads back as the same view depth.
@@ -154,7 +160,8 @@ The fp16 and wave64 variants AMD tunes for are a follow-up that needs sg to repo
 
 **One offset per frame.**
 An upscaler reconstructs from where each frame's samples landed, so every sample of a frame has to land at the same offset from its pixel's centre.
-`sr::reconstruct_jitter` hands out FSR's Halton sequence, and a tracer uses it in place of a random position inside the pixel while an upscaler runs.
+`sr::reconstruct_jitter` hands out the upscaler's sequence, and a tracer uses it in place of a random position inside the pixel while an upscaler runs.
+FSR answers its own; every member that leaves the sequence to its caller — both MetalFX members and `dlss_rr` — gets a Halton (2, 3) one, `impl/jitter_sequence.hh`.
 It answers (0, 0) when nothing upscales, so a tracer may always ask.
 
 **An upscaled image's alpha is the upscaler's.**
@@ -168,8 +175,55 @@ FSR keeps two full images at the output extent and about a dozen at the traced o
 **Where it runs today.**
 - It builds where extern/fidelityfx was fetched, which is Windows: the host code calls MSVC's secure C runtime and uses `__declspec` unconditionally.
 - It runs on the hardware adapter.
-  WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass, and the FSR image tests skip there; [TODO.md](TODO.md) records what bisecting it established.
-- It runs on vulkan too, through a patch that gives each of AMD's register classes its own SPIR-V binding range; [TODO.md](TODO.md) has what replaces it.
+  WARP crashes inside its own shader compiler on FSR's shading-change pyramid pass, and the FSR image tests skip there.
+  [bug-warp-fsr-shading-change-pyramid-crash](issues/bug-warp-fsr-shading-change-pyramid-crash.md) records what bisecting it established.
+- It runs on vulkan too, through a patch that gives each of AMD's register classes its own SPIR-V binding range.
+  [debt-fsr-spirv-binding-patch](issues/debt-fsr-spirv-binding-patch.md) has what replaces it.
+
+## The MetalFX upscaler
+
+**Apple's temporal upscaler, encoded into sg's own command buffer.**
+MetalFX's MTL4 scaler encodes encoders of its own, so it runs inside sg's Metal native scope and meets sg's encoders at the scope's fence.
+The scaler waits for that fence and updates it when its `fence` is set to it.
+Everything Metal and MetalFX stays in `impl/metalfx_backend.cc`, linked where the Metal backend is built (`SR_HAS_METALFX`); the routine exists everywhere and reports `unsupported` off Metal.
+
+**The inputs meet MetalFX's conventions in one SGL pass, and sr's guides stay as they are.**
+- Depth: `near / depth`, as FSR's, read with `depthReversed`.
+  The upscaler only compares depths, and the denoised scaler is handed a projection built to match, so any positive near plane works; a surface nearer than it lands past 1.
+- Motion: repacked into `rg16_float`; MetalFX's vectors point to where a pixel was, so `motionVectorScale` is -1.
+- Jitter: MetalFX's offset is the negation of sr's, which metalfx-test's sign comparison measured (0.044 against 0.181 the other way).
+- Exposure: `reconstruct_settings::exposure` goes into the one `r16_float` texel MetalFX reads it from.
+
+**It writes only to a texture it may both render to and write from a shader.**
+An output without both `image` and `render_target` usage gets an image of the routine's own, carried across after.
+An `image` output gets a compute copy, compiled for `rgba16_float` and `rgba32_float`; a `render_target` one is drawn in by `sr::blit_routine`, one pipeline per format.
+The blit stages in the output's format when that is `rgba16_float` or `rgba32_float`, and in `rgba16_float` otherwise, since MetalFX writes the staged image as an image and sRGB cannot be one.
+The scaler is created for that staged format, and the blit, drawing through a render target, writes any renderable format, sRGB included.
+The blit is asked for before anything is recorded, so a call that finds it still compiling is `pending` with MetalFX's history untouched.
+An output with neither is refused.
+
+**Its jitter is FSR's sequence**: Halton (2, 3) over 8 times the square of the ratio, since MetalFX leaves the sequence to the caller.
+`automatic` picks it over FSR wherever it runs, as the device's own upscaler; the two never both run on one context today.
+A history switched between the two upscalers starts over, since each one's state is its own type.
+
+## The MetalFX denoised scaler
+
+**`metalfx_rr` is MetalFX's `MTL4FXTemporalDenoisedScaler`: one pass that denoises and upscales, the counterpart of `dlss_rr`.**
+It runs as the upscaler does, through the native scope and the same SGL pass for depth, motion and exposure, with the same conventions for each.
+`impl/metalfx_passes` holds what the two share: that pass, the copy for an output it cannot render to, and the images around the scaler.
+
+**It reads the guides `dlss_rr` does**: both albedos, the world-space normal, the roughness, depth and motion, at the input extent.
+It is created for every texture's format, so a guide in a new format builds a new scaler; it takes the formats it is handed, `rgba32_float` ones included.
+It also reads the camera: `world_to_view` from the guides, and a projection made from `view_to_clip`'s x and y rows with the depth SGL wrote, `near / depth` along whichever axis the caller looks down.
+
+**The scene's detail belongs in the albedo.**
+On metalfx-test's stripes as albedo under lighting that is off by up to 30% per sample, 32 frames upscaled 2x end at an error of 0.091 against the scene, and 0.088 without the noise.
+The same stripes as lighting under a white albedo come out at 0.235: it takes detail the albedo does not explain for noise.
+
+**`automatic` ranks it after `dlss_rr`**, so a caller feeding fresh frames with every guide gets it on Metal.
+`reconstruct_jitter` answers the Halton sequence whenever it runs at a smaller extent, as for every member that upscales by itself; at the native extent it runs too, and the jitter is 0.
+
+**Next on Metal**: MetalFX's frame interpolator, through the same scope.
 
 ## The OIDN member
 
@@ -178,9 +232,10 @@ OIDN's own GPU devices are CUDA, HIP, SYCL and Metal over vendor GEMM libraries,
 Its CPU device would cost a download and an upload every frame.
 The weights are a separate Apache-2.0 repository, and they describe a small U-Net: sixteen 3x3 convolutions with a bias and a ReLU, four 2x2 max pools, and four nearest upsamples with a skip concat.
 So the member runs that network in five compute shaders of its own, with no vendor SDK and no particular hardware.
-They are HLSL today, so it runs where the other native members do, on dx12 and vulkan.
+They are SGL, as the other native members' are, so it builds wherever those do.
 
 **It is correct and portable, and far too slow for a frame loop** — roughly 0.2 s per megapixel, which is why `automatic` never picks it.
+That figure is the HLSL kernel's before the SGL port, which computes the same arithmetic, and has not been re-taken.
 Two networks are fetched, both `rt_hdr_alb_nrm`: HDR radiance with an albedo and a normal, the guides the tracer writes.
 The base one is what OIDN's balanced quality runs, and the small one what its fast quality runs: the same topology with every encoder at 32 channels, at half the compute.
 `reconstruct_settings::quality` picks between them the same way, `fast` running the small one; there is no large network for these guides.
@@ -215,6 +270,7 @@ The base one is what OIDN's balanced quality runs, and the small one what its fa
 ### Measured
 
 One 1080p frame on the development machine's dx12 GPU, by tile cap; the default cap of 512 chooses a 480x432 tile.
+Every timing of our kernel in this section was taken on the HLSL kernel before the SGL port, which computes the same arithmetic, and none has been re-taken.
 
 | cap | time | feature maps |
 |---|---|---|
@@ -233,7 +289,7 @@ The CPU figure is `uv run dev.py test "OIDN's CPU device timed at 1080p" --manua
 - **The gap to CUDA is architectural.**
   OIDN runs cutlass implicit-GEMM convolutions in fp16 on tensor cores, with channels padded to eight, "required by Tensor Core operations".
   Ours is fp32 SIMT at about 3.2 TFLOP/s of a roughly 20-25 peak.
-  A perfect fp32 kernel would still land near 60 ms; the rest is matrix hardware, which neither the HLSL we compile nor SGL reaches today.
+  A perfect fp32 kernel would still land near 60 ms; the rest is matrix hardware, which SGL does not reach today.
 - **The limit is memory divergence, not issue rate.**
   Reading four channels per load cut load instructions fourfold and bought 1.4x, because a window's eighteen texels lie far apart and a `float4` costs the same cache line as a `float`.
   A layout that keeps a window's texels contiguous, as OIDN's CPU device does with CHW, is what would pay next.
@@ -241,7 +297,7 @@ The CPU figure is `uv run dev.py test "OIDN's CPU device timed at 1080p" --manua
   On a 256x256 tile, 16x1 is 8.0 ms where 16x2 is 10.9 and 8x2 is 9.4.
   The wave's lanes already share the input, so a second blocking dimension only costs registers.
 - **Half precision would buy memory rather than speed**, since the limit is cache lines rather than bytes, and memory is what buys a larger tile.
-  It is optional on every backend, so it wants a feature level; [TODO.md](TODO.md) has what that takes.
+  It is optional on every backend, so it wants a feature level; [perf-oidn-half-precision](issues/perf-oidn-half-precision.md) has what that takes.
 - **Once the member runs on WebGPU, its default limits will cap the tile before memory does.**
   `maxStorageBufferBindingSize` defaults to 128 MiB, and the largest binding is one full-resolution map of sixty-four channels.
   That is 50 MiB at the default cap, 110 MiB at 768 and 137 MiB at 1024, so the cap cannot go far past 768 on a device with default limits.
@@ -261,7 +317,7 @@ The oracle below is what makes each step cheap to try: a step either keeps the o
    SGL already has both halves it needs: `@workgroup` bindings and `workgroup_barrier()`.
 2. **Fusion**: each max pool folded into the convolution before it, and each upsample and concat into the convolution after it, as OIDN does.
    It removes eight passes and their round trips through memory.
-3. **Half precision**, behind a feature level, for storage first and arithmetic second; [TODO.md](TODO.md) has what it takes here.
+3. **Half precision**, behind a feature level, for storage first and arithmetic second; [perf-oidn-half-precision](issues/perf-oidn-half-precision.md) has what it takes here.
 4. **Winograd F(2x2, 3x3)**, since every layer is 3x3: 2.25x fewer multiplies, less after its transforms, and worth doing only after 1.
 5. **Matrix hardware**, the remaining ~3x to OIDN's own 20.6 ms.
    Vulkan and Metal expose it today; DirectX's is in preview and WebGPU's experimental, so it waits, and a non-matrix path stays mandatory.
@@ -324,12 +380,20 @@ SVGF carries a per-pixel variance in alpha between its own passes and swaps it f
 An upscaled output is the written exception: its alpha is the upscaler's, since `color`'s is at the other extent.
 Whether a vendor member can honour the rule is open — it may write its own alpha and leave us no say — and that is the point at which the rule is either kept by a copy pass or relaxed in writing.
 
+**A native member compiles its last pass once per output format.**
+An SGL image names its format, so the à-trous, SVGF and OIDN members are routines parametrized on the format of the caller's output, and `reconstruct_routine` prewarms them for it.
+The alternative was one compile per member and no format parameter: always write an `rgba32_float` scratch image, then copy it into the caller's format.
+That costs a full-screen pass and a full-resolution image every frame to save one compile per format, so per-format compiles won.
+A format-less storage image, `image_2d[.host]`, would allow one compile on dx12, vulkan and metal.
+[feat-sgl-format-less-storage-image](../../shaped-graphics-language/docs/issues/feat-sgl-format-less-storage-image.md) plans it.
+webgpu keeps compiling per format, since WGSL has no such image.
+
 ## Selection and refusal
 
 **Explicit means explicit.**
 Naming a member this build or device cannot run reports `unsupported`, logs once per process on sr's domain, and writes nothing.
 Only `automatic` chooses, walking the members best first:
-`dlss_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
+`dlss_rr`, `metalfx_rr`, `fsr_rr`, `nrd`, `svgf`, then `atrous` for a caller feeding fresh frames; `atrous` alone for a caller denoising a converging mean.
 
 **`automatic` walks what the caller can feed, not only what the device can run.**
 A member is skipped when its `required_guides` are not in the `available_guides` the caller passed, because `execute` would refuse it for exactly that and write nothing.
@@ -338,7 +402,7 @@ Resolving on device support alone picks the best member the hardware has and the
 `oidn` is never chosen: at roughly 0.2 s per megapixel it is a reference-quality member rather than a frame-loop one, so a caller names it.
 
 The upscaler resolves after the denoiser, and the same way.
-`automatic` is `fsr` where it runs and the scale is below native, and `none` otherwise; a named upscaler runs at a native scale too, as anti-aliasing.
+`automatic` is `metalfx` where it runs, else `fsr` where that does, when the scale is below native, and `none` otherwise; a named upscaler runs at a native scale too, as anti-aliasing.
 A denoiser that upscales by itself has no upscaler behind it, and `denoiser = none` with an upscaler set upscales alone.
 An upscaler requires the depth and motion guides, and a call without them reports `unsupported`.
 
@@ -372,7 +436,7 @@ The caller can, which is the same reason sv keeps its accumulators in its per-vi
   Nothing would free a stream, since a routine still cannot see a viewport close.
   Either the caller calls a release it will eventually forget, or every closed view leaks its images until the context dies.
   It also puts a map lookup on the render path, and a lock the moment two views are recorded from two threads.
-  The caller-owned object frees itself, which is the whole point.
+  The caller-owned object, by contrast, frees itself.
 - **Members registering themselves with the front through an interface, in place of the enum and its switch.**
   It would make adding a member a one-file change, and it would cost the two preference orders their readability — they become data spread across members, or a priority number each one asserts.
   It also turns which members exist into a runtime fact, so the `CC_UNREACHABLE` that catches a member added to the support query and forgotten in the switch has nothing to fire on.

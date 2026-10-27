@@ -219,7 +219,7 @@ inline constexpr float unbounded_ray_t = 3.402823466e38f;
 ///
 /// Reports the nearest of up to FOUR candidates — two roots of each quadric — keeping each only where it lies inside the other
 /// quadric's interior and within [`t_min`, `t_max`]; the clipper's own two are candidates only where `emits_clip_surface`.
-/// The far-root fallback is load-bearing for ordinary geometry rather than only for interior views: a slab-clipped cylinder is an
+/// The far-root fallback is needed for ordinary geometry rather than only for interior views: a slab-clipped cylinder is an
 /// open tube, so seen near end-on its near root lies outside the slab and the visible surface is the inside of the far wall.
 ///
 /// `ray.dir` need not be normalized; `t` is in units of `ray.dir`, as `TraceRay` reports it.

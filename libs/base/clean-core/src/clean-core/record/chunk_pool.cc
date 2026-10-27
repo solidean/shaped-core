@@ -85,11 +85,7 @@ cc::rec::chunk* cc::rec::chunk_pool::acquire(rec::impl::thread_state* owner, u64
             [&](state& s) -> rec::chunk*
             {
                 if (!s.ready.empty())
-                {
-                    auto* const taken = s.ready.back();
-                    s.ready.pop_back();
-                    return taken;
-                }
+                    return s.ready.pop_back();
                 auto* const grown = _grow_locked(s);
                 if (grown == nullptr)
                     ++s.failed_acquires;

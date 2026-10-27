@@ -6,7 +6,8 @@
 ///
 /// It exists because WRL is Windows-only and DXC is not.
 /// `<wrl/client.h>` ships with MSVC alone, and DXC's own WinAdapter offers `CComPtr` off Windows with a different
-/// surface — `operator&` where WRL has `GetAddressOf()`. Conditionally aliasing one to the other would put an #ifdef
+/// surface — `operator&` where WRL has `GetAddressOf()`.
+/// Conditionally aliasing one to the other would put an #ifdef
 /// at every call site; this puts it nowhere, because both platforms get the same type.
 ///
 /// Deliberately not `cc::shared_ptr` or any other clean-core pointer: COM objects carry their own intrusive refcount

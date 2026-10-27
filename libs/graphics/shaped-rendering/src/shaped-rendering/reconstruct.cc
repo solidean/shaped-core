@@ -10,11 +10,14 @@
 #include <shaped-rendering/dlss_rr_routine.hh>
 #include <shaped-rendering/fsr_upscale_routine.hh>
 #include <shaped-rendering/impl/denoise_images.hh>
+#include <shaped-rendering/impl/jitter_sequence.hh>
+#include <shaped-rendering/metalfx_rr_routine.hh>
+#include <shaped-rendering/metalfx_upscale_routine.hh>
 #include <shaped-rendering/nrd_denoise_routine.hh>
 #include <shaped-rendering/oidn_denoise_routine.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-rendering/svgf_denoise_routine.hh>
-#include <sr_shaders.hh>
+#include <sr_sgl_shaders.hh>
 
 namespace sr
 {
@@ -22,6 +25,9 @@ using impl::is_set;
 
 namespace
 {
+/// What the denoiser writes in front of an upscaler: full floats, like the accumulators it most often filters.
+constexpr auto k_upscale_source_format = sg::pixel_format::rgba32_float;
+
 /// The ratio of output to input each vendor preset stands for.
 ///
 /// The vendors publish the same four, and the numbers below are provisional until a vendor member reads them:
@@ -49,7 +55,8 @@ namespace
 /// `oidn` is in neither: at roughly 0.2 s per megapixel it is a reference-quality member, not one a frame loop can
 /// afford, so a caller has to name it.
 constexpr denoise_method temporal_preference[] = {
-    denoise_method::dlss_rr, denoise_method::fsr_rr, denoise_method::nrd, denoise_method::svgf, denoise_method::atrous,
+    denoise_method::dlss_rr, denoise_method::metalfx_rr, denoise_method::fsr_rr,
+    denoise_method::nrd,     denoise_method::svgf,       denoise_method::atrous,
 };
 constexpr denoise_method spatial_preference[] = {denoise_method::atrous};
 
@@ -100,6 +107,8 @@ cc::string_view to_string(denoise_method m)
         return "fsr_rr";
     case denoise_method::nrd:
         return "nrd";
+    case denoise_method::metalfx_rr:
+        return "metalfx_rr";
     case denoise_method::count_:
         break;
     }
@@ -116,6 +125,8 @@ cc::string_view to_string(upscale_method m)
         return "automatic";
     case upscale_method::fsr:
         return "fsr";
+    case upscale_method::metalfx:
+        return "metalfx";
     case upscale_method::count_:
         break;
     }
@@ -174,16 +185,17 @@ bool reconstruct_history::_prepare(denoise_method method, tg::vec2i input_extent
     return restarted;
 }
 
-bool upscale_history::_prepare(tg::vec2i input_extent, tg::vec2i output_extent)
+bool upscale_history::_prepare(tg::vec2i input_extent, tg::vec2i output_extent, upscale_method upscaler)
 {
-    auto const changed = _input_extent != input_extent || _output_extent != output_extent;
+    auto const changed = _input_extent != input_extent || _output_extent != output_extent || _upscaler != upscaler;
     auto const restarted = changed || _reset_requested;
     if (changed)
     {
-        // The upscaler's state is built for one pair of extents, so it goes with them.
+        // The upscaler's state is built for one pair of extents, and is its own type, so it goes with either.
         _state = nullptr;
         _input_extent = input_extent;
         _output_extent = output_extent;
+        _upscaler = upscaler;
     }
     _reset_requested = false;
     return restarted;
@@ -195,6 +207,8 @@ bool reconstruct_support::supports(upscale_method m) const
     {
     case upscale_method::fsr:
         return fsr;
+    case upscale_method::metalfx:
+        return metalfx;
     case upscale_method::none:
     case upscale_method::automatic:
     case upscale_method::count_:
@@ -219,6 +233,8 @@ bool reconstruct_support::supports(denoise_method m) const
         return fsr_rr;
     case denoise_method::nrd:
         return nrd;
+    case denoise_method::metalfx_rr:
+        return metalfx_rr;
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -237,8 +253,7 @@ bool reconstruct_support::supports(denoise_method m) const
 
 reconstruct_support query_reconstruct_support(sg::context const& ctx)
 {
-    // The native members are HLSL, and slib builds HLSL only through DXC — so a context whose library has no compiler
-    // reaching a format it accepts cannot run them, whatever the backend.
+    // A context whose library has no compiler reaching a format it accepts cannot run the native members, whatever the backend.
     // Asking the assets rather than assuming is what keeps the promise `reconstruct_status::unsupported` makes: without
     // it, `automatic` picks a member whose init then fails, and every call reports `failed` instead.
     //
@@ -251,21 +266,22 @@ reconstruct_support query_reconstruct_support(sg::context const& ctx)
     // The ones still unimplemented stay false, which is what makes `automatic` skip them and a named request report
     // `unsupported` rather than silently running something else.
     return {
-        .atrous = buildable(sr::shaders::atrous_denoise.compute.main_cs),
-        .svgf = buildable(sr::shaders::svgf_temporal.compute.main_cs)
-             && buildable(sr::shaders::svgf_variance.compute.main_cs)
-             && buildable(sr::shaders::svgf_atrous.compute.main_cs),
+        .atrous = buildable(sgl_shaders::atrous_denoise.main_cs.asset),
+        .svgf = buildable(sgl_shaders::svgf.temporal_cs.asset) && buildable(sgl_shaders::svgf.variance_cs.asset)
+             && buildable(sgl_shaders::svgf.atrous_cs.asset),
         .oidn = oidn_denoise_routine::is_available(ctx),
         .dlss_rr = dlss_rr_routine::is_available(ctx),
         .nrd = nrd_denoise_routine::is_available(ctx),
+        .metalfx_rr = metalfx_rr_routine::is_available(ctx),
         .fsr = fsr_upscale_routine::is_available(ctx),
+        .metalfx = metalfx_upscale_routine::is_available(ctx),
     };
 }
 
 bool is_temporal(denoise_method m)
 {
     return m == denoise_method::svgf || m == denoise_method::dlss_rr || m == denoise_method::fsr_rr
-        || m == denoise_method::nrd;
+        || m == denoise_method::nrd || m == denoise_method::metalfx_rr;
 }
 
 reconstruct_guide_set required_guides(denoise_method m)
@@ -276,6 +292,7 @@ reconstruct_guide_set required_guides(denoise_method m)
     case denoise_method::svgf:
         return g::normal | g::depth | g::motion;
     case denoise_method::dlss_rr:
+    case denoise_method::metalfx_rr:
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion;
     case denoise_method::fsr_rr:
         return g::albedo | g::specular_albedo | g::normal | g::roughness | g::depth | g::motion | g::hit_distance
@@ -314,6 +331,8 @@ reconstruct_guide_set optional_guides(denoise_method m)
         return {};
     case denoise_method::nrd:
         return {};
+    case denoise_method::metalfx_rr:
+        return {};
     case denoise_method::none:
     case denoise_method::automatic:
     case denoise_method::count_:
@@ -347,7 +366,7 @@ namespace
 /// Whether a denoiser upscales by itself, so that no upscaler runs behind it.
 [[nodiscard]] bool upscales_itself(denoise_method m)
 {
-    return m == denoise_method::dlss_rr;
+    return m == denoise_method::dlss_rr || m == denoise_method::metalfx_rr;
 }
 
 /// `resolve_upscale_method` against a support answer and a resolved denoiser the caller already has.
@@ -363,6 +382,9 @@ namespace
     // Automatic upscales only when there is something to upscale.
     if (settings.scale == render_scale_preset::native)
         return upscale_method::none;
+    // MetalFX where it runs, since it is the device's own; the two never both run on one context today.
+    if (support.metalfx)
+        return upscale_method::metalfx;
     return support.fsr ? upscale_method::fsr : upscale_method::none;
 }
 
@@ -373,6 +395,8 @@ namespace
     {
     case upscale_method::fsr:
         return fsr_upscale_routine::ratio_of(preset);
+    case upscale_method::metalfx:
+        return metalfx_upscale_routine::ratio_of(preset);
     case upscale_method::none:
     case upscale_method::automatic:
     case upscale_method::count_:
@@ -437,6 +461,8 @@ void log_upscaler_refusal_once(upscale_method m, refusal_reason reason, cc::stri
         return oidn_denoise_routine::execute(cmd, in, history, oidn_denoise_routine::options_for(settings));
     case denoise_method::dlss_rr:
         return dlss_rr_routine::execute(cmd, in, history, dlss_rr_routine::options_for(settings));
+    case denoise_method::metalfx_rr:
+        return metalfx_rr_routine::execute(cmd, in, history, metalfx_rr_routine::options_for(settings));
     case denoise_method::fsr_rr:
     case denoise_method::none:
     case denoise_method::automatic:
@@ -495,10 +521,21 @@ tg::vec2f reconstruct_jitter(sg::context const& ctx,
                              u32 frame_index,
                              reconstruct_guide_set available_guides)
 {
-    if (planned_upscaler(query_reconstruct_support(ctx), settings, available_guides) != upscale_method::fsr)
+    auto const support = query_reconstruct_support(ctx);
+    auto const input_extent = reconstruct_input_extent(ctx, settings, output_extent, available_guides);
+
+    // A member that upscales by itself leaves the sequence to its caller, so it gets the Halton one wherever it runs at
+    // a smaller extent; at the native extent it runs too, unjittered.
+    if (upscales_itself(resolve_with(support, settings, available_guides)))
+        return input_extent == output_extent ? tg::vec2f(0, 0)
+                                             : impl::halton_jitter(frame_index, input_extent, output_extent);
+
+    auto const upscaler = planned_upscaler(support, settings, available_guides);
+    if (upscaler == upscale_method::none)
         return tg::vec2f(0, 0);
-    return fsr_upscale_routine::jitter(
-        frame_index, reconstruct_input_extent(ctx, settings, output_extent, available_guides), output_extent);
+    if (upscaler == upscale_method::metalfx)
+        return metalfx_upscale_routine::jitter(frame_index, input_extent, output_extent);
+    return fsr_upscale_routine::jitter(frame_index, input_extent, output_extent);
 }
 
 cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scope)
@@ -508,20 +545,35 @@ cc::shared_async<cc::unit> reconstruct_routine::init(sg::routine_init_scope scop
     // rather than on the first call.
     // Through prewarm rather than dependency tokens: a token would hold the front pending until every member is ready,
     // and one member this device cannot initialize would then hold every other member hostage.
+    //
+    // The native members compile for the output's format.
+    // Where an upscaler exists they compile for the scratch image the denoiser writes in front of it as well,
+    // unless that is the output's format already.
     auto& ctx = scope.context();
     auto const support = query_reconstruct_support(ctx);
-    if (support.atrous)
-        atrous_denoise_routine::prewarm(ctx);
-    if (support.svgf)
-        svgf_denoise_routine::prewarm(ctx);
+    auto const prewarm_native = [&](sg::pixel_format format)
+    {
+        if (support.atrous)
+            atrous_denoise_routine::prewarm(ctx, format);
+        if (support.svgf)
+            svgf_denoise_routine::prewarm(ctx, format);
+        if (support.oidn)
+            oidn_denoise_routine::prewarm(ctx, format);
+    };
+    if (params() != sg::pixel_format::undefined)
+        prewarm_native(params());
+    if ((support.fsr || support.metalfx) && params() != k_upscale_source_format)
+        prewarm_native(k_upscale_source_format);
     if (support.nrd)
         nrd_denoise_routine::prewarm(ctx);
-    if (support.oidn)
-        oidn_denoise_routine::prewarm(ctx);
     if (support.dlss_rr)
         dlss_rr_routine::prewarm(ctx); // nothing to compile, but the member is a routine like the others
+    if (support.metalfx_rr)
+        metalfx_rr_routine::prewarm(ctx);
     if (support.fsr)
         fsr_upscale_routine::prewarm(ctx);
+    if (support.metalfx)
+        metalfx_upscale_routine::prewarm(ctx);
     co_return;
 }
 
@@ -531,7 +583,7 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
                                                  reconstruct_settings const& settings)
 {
     // Registers the front on first use, so its init prewarms the members; its own readiness gates nothing.
-    (void)try_acquire(cmd);
+    (void)try_acquire(cmd, in.output.format());
 
     auto& ctx = cmd.context();
     // Asked once and used throughout, since every resolver and support check wants the same answer.
@@ -588,7 +640,7 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
     auto denoised = reconstruct_outcome{.status = reconstruct_status::denoised};
     if (denoising)
     {
-        impl::ensure_image(ctx, history._upscale_source, impl::extent_of(in.color), sg::pixel_format::rgba32_float);
+        impl::ensure_image(ctx, history._upscale_source, impl::extent_of(in.color), k_upscale_source_format);
         auto scratch_inputs = in;
         scratch_inputs.output = history._upscale_source;
         denoised = run_denoiser(cmd, scratch_inputs, history, settings, method);
@@ -608,15 +660,17 @@ reconstruct_outcome reconstruct_routine::execute(sg::command_list& cmd,
         history._upscale._source_denoiser = source_denoiser;
     }
 
-    auto const upscaled = fsr_upscale_routine::execute(cmd,
-                                                       {.color = source,
-                                                        .depth = in.guides.depth,
-                                                        .motion = in.guides.motion,
-                                                        .jitter = in.guides.jitter,
-                                                        .view_to_clip = in.guides.view_to_clip,
-                                                        .exposure = settings.exposure,
-                                                        .output = in.output},
-                                                       history._upscale, fsr_upscale_routine::options_for(settings));
+    auto const upscale_in = upscale_inputs{.color = source,
+                                           .depth = in.guides.depth,
+                                           .motion = in.guides.motion,
+                                           .jitter = in.guides.jitter,
+                                           .view_to_clip = in.guides.view_to_clip,
+                                           .exposure = settings.exposure,
+                                           .output = in.output};
+    auto const upscaled = upscaler == upscale_method::metalfx
+                            ? metalfx_upscale_routine::execute(cmd, upscale_in, history._upscale)
+                            : fsr_upscale_routine::execute(cmd, upscale_in, history._upscale,
+                                                           fsr_upscale_routine::options_for(settings));
     return {.status = upscaled.status,
             .denoiser = source_denoiser,
             .upscaler = upscaler,

@@ -3,13 +3,12 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/thread.hh>
 #include <clean-core/thread/thread_pump.hh>
 #include <shaped-graphics/backends/metal/metal_acceleration_structure.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/context/impl/completion_waiter.hh>
 #include <shaped-graphics/exceptions.hh>
-
-#include <thread>
 
 namespace sg::backend::metal
 {
@@ -31,7 +30,7 @@ metal_context::metal_context(MTL::Device* device,
     _feedback = std::make_shared<metal_feedback_sink>(*this);
 
     // The listener the completion-signal waiter arms its notifications on.
-    // Its default queue is Apple's, which is the point: a handler must run even in a build with no threads of ours.
+    // Its default queue is Apple's, so a handler runs even in a build with no threads of ours.
     _completion.listener = MTL::SharedEventListener::alloc()->init();
 }
 
@@ -60,6 +59,10 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
         return cc::error("the metal device refused the zeroed hit-group offsets buffer");
     cc::memset(_zero_hit_group_offsets->contents(), 0, size_t(zero_offsets_bytes));
     _residency.add(_zero_hit_group_offsets);
+
+    _native_scope_fence = _device->newFence();
+    if (_native_scope_fence == nullptr)
+        return cc::error("the metal device refused the native scope's fence");
     return cc::unit{};
 }
 
@@ -237,6 +240,7 @@ void metal_context::do_advance_epoch()
 sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::command_list> cmd)
 {
     CC_ASSERT(cmd != nullptr, "cannot submit a null command list");
+    sg::impl::end_array_declarations_at_submit(*cmd);
     auto& list = static_cast<metal_command_list&>(*cmd);
     CC_ASSERT(list.created_in_epoch() == current_epoch(), "a command list must be submitted in the epoch it was opened "
                                                           "in");
@@ -549,6 +553,12 @@ void metal_context::shutdown()
         _zero_hit_group_offsets = nullptr;
     }
 
+    if (_native_scope_fence != nullptr)
+    {
+        _native_scope_fence->release();
+        _native_scope_fence = nullptr;
+    }
+
     if (_compiler != nullptr)
     {
         _compiler->release();
@@ -602,7 +612,7 @@ void metal_context::block_until_transfers_drained()
         while (still_pending())
         {
             if (!cc::thread_pump_all())
-                std::this_thread::yield();
+                cc::this_thread_yield();
         }
     };
 

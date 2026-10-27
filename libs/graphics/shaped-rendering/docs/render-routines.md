@@ -29,7 +29,8 @@ protected:
 The framework in `sg` needs no shader library; reload tracking is `sg`'s own generation counter.
 
 Call `sr::add_shader_packages(lib)` once at startup, or every routine here acquires nothing and draws nothing.
-sr's packages are SGL and HLSL, so the library needs SGL compiler edges beside DXC's, which `slib::add_available_compilers` registers.
+sr's packages are SGL, plus an HLSL one only in a build that fetched FSR or NRD, which `SR_HAS_HLSL_SHADERS` reports.
+So the library needs SGL compiler edges, and DXC's where that HLSL package exists; `slib::add_available_compilers` registers both.
 
 ## A routine holds state — and the framework guards it
 
@@ -46,11 +47,12 @@ Sorting members by which of those they are is most of the design work — the fi
 
 ## Inline constants: use the generated struct
 
-A shader package entry of the form `file.hlsl:constants:<block>` makes the build emit a C++ struct matching that constant block.
-It emits the `static_assert`s too, pinning the struct's size and every field's absolute offset.
-**Pass that generated type to `set_inline_constants` directly**, the way the denoise routines do, rather than declaring a local mirror of it.
+An SGL `@inline binding` makes its package generate a C++ struct of that name, whose `to_block()` is the block's bytes as the shader reads them.
+**Pass that `to_block()` to `set_inline_constants` directly**, the way the denoise routines do, rather than declaring a local mirror of the struct.
+`sgl_shaders::svgf_temporal_constants{...}.to_block()` in `svgf_denoise_routine.cc` is one.
+The generated types are in [shaped-shader-library's cheat sheet](../../shaped-shader-library/cheat-sheet.md#an-sgl-packages-generated-types).
 
-A local mirror is one more declaration that can drift, and asserting it against the generated one is weaker than what the generator already checks.
+A local mirror is one more declaration that can drift, and asserting it against the generated one is weaker than letting the generator lay out the block.
 A size-only assertion, in particular, passes through any reordering of same-sized fields.
 
 `sr::imgui_routine` does carry a mirror, and it has a reason to.

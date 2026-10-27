@@ -19,7 +19,7 @@ Ranges passed to the factories are in **elements of `T`**.
 Shader reflection reports a binding's *layout and kind* — stride, size, structured/cbuffer/byteaddress — never a C++ type.
 So `T` is *validated* against reflection rather than replaced by it: `sizeof(T)` against the reflected stride, and the view kind against the reflected kind.
 Because the call site already fixed `T`, much of that check is compile-time.
-The validation itself is still deferred — see [TODO](../TODO.md).
+The validation itself is still deferred — see [feat-sg-view-reflection-validation](../issues/feat-sg-view-reflection-validation.md).
 
 **Constants blocks are stricter.**
 Constant buffers / UBOs have placement rules storage buffers do not, so `constants_buffer_view<T>` uses a tighter `constants_element` concept.
@@ -196,7 +196,8 @@ Selecting a nonsensical axis, `.slices` on a non-array say, is a compile error r
 A `view_range` is `{ int start = 0; int count = -1 }` where `count < 0` means "to the end", so the whole-axis default is `{}`.
 
 - **Natural views** — the texture's own dimension: `as_texture_view(params = {})` on any shape,
-  `as_image_view<Format>(params = {})` where `!Traits::is_multisampled`. The params carry the in-dimension
+  `as_image_view<Format>(params = {})` where `!Traits::is_multisampled`.
+  The params carry the in-dimension
   sub-selection: a mip range (texture) or single mip (image), an array-slice range, a cube range, or a
   3D depth-slice window (`depth_slices`, D3D12's `FirstWSlice`/`WSize` — tracked outside the subresource
   range since a whole 3D mip is one subresource for hazard purposes).

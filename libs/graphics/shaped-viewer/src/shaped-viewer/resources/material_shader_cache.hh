@@ -27,9 +27,13 @@ struct sv::material_permutation
     /// BLAS by one that does not.
     geometry_kind kind = geometry_kind::triangles;
 
-    /// Whether this permutation's material ever writes `geometry_opacity` — see `generated_material_shader::can_cut_out`.
-    /// Only a triangle group carries the cutout any-hits, so this is false for every quadric one.
-    bool can_cut_out = false;
+    /// Where this permutation's cutout opacity lives, which every instance shading with it copies into its record.
+    /// Only a triangle group carries the cutout any-hits, so this is `none` for every quadric one.
+    material_opacity opacity;
+
+    /// Where this permutation's emission lives, which decides whether an instance shading with it may light the scene.
+    /// `declares()` is false for a type declaring no emission, and for every stand-in.
+    material_emission emission;
 
     /// The hit group, a hit shader per ray type of the tracer's ray set, as a cold async node.
     ///
@@ -42,6 +46,14 @@ struct sv::material_permutation
 
     /// kept for diagnostics: a compile error names a line in this text, and nothing else can reproduce it
     cc::string source;
+
+    /// The wavefront tracer's shade kernel of this permutation, `generated_material_shader::shade_source`.
+    /// Compiled by `wavefront_routine` the first time a trace names the permutation, and cached there.
+    cc::string shade_source;
+
+    /// The raster path's pixel stage of this permutation, `generated_material_shader::raster_source`, and empty for a quadric one.
+    /// Compiled by `raster_routine` the first time a raster frame draws the permutation, and cached there.
+    cc::string raster_source;
 
     /// What a compile error calls this permutation: the material type's name, and whether it is the quadric form.
     cc::string label;
@@ -59,7 +71,7 @@ struct sv::material_permutation
 /// Compiles go through `sv::acquire_shader_library`, so a generated source resolves its `use`s against the same module
 /// directories the tracer's own package mounts.
 /// **A generated permutation does not hot-reload when a module it uses is edited.**
-/// The key hashes the resolution and the geometry kind rather than the modules' contents — see [docs/TODO.md](../../../docs/TODO.md).
+/// The key hashes the resolution and the geometry kind rather than the modules' contents — issue: bug-sv-hit-group-module-reload.
 ///
 /// **Nothing is evicted.** A permutation is a compiled hit group a live pipeline may hold, and the set is bounded by the
 /// material types a scene uses rather than by its instance count.

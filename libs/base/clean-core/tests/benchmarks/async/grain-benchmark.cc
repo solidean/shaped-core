@@ -299,7 +299,7 @@ void run_fork_floor()
 
 // Why every grain line in the sweep converges on the same cost at small n: that is not per-node cost, since a node is ~50-100 ns inline.
 // It is the foreign-thread round trip -- submit, wake a worker, run, wake the caller.
-// Sweeping the worker count separates the two candidate explanations, which is the whole point of the probe.
+// The probe sweeps the worker count to separate the two candidate explanations.
 // Two context switches would be a constant, whereas contention on the shared injection mutex grows with the number of idle workers scanning it.
 void run_latency()
 {

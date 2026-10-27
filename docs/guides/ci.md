@@ -99,8 +99,8 @@ If SDL ever demands another, the error names the package group — the authorita
 
 Without them nothing breaks: [extern/sdl3](../../extern/sdl3/CMakeLists.txt) checks first and bows out, and
 `SC_HAS_SDL3` reports OFF so the rest of sr still builds.
-That is the point of installing them — otherwise the window and input tests would silently vanish from the
-Linux runs rather than fail, which is the worst of both.
+Installing them keeps the window and input tests in the Linux runs; without them those tests would silently
+vanish rather than fail, which is the worst of both.
 
 The same applies to a developer machine: a Linux checkout without those packages configures and builds fine,
 it just has no `sr::window`.
@@ -146,6 +146,8 @@ Per-platform specifics:
 - **WARP runs on the Windows Clang job alone.**
   No hosted Windows runner has a GPU, so WARP is what runs the dx12 GPU tests, and it compiles every shader single-threaded: tens of seconds per binary.
   The other Windows jobs set `SC_DX12_ADAPTER=hardware`, which hides WARP, and their dx12 tests skip.
+  On the Windows ARM image that rests on sg counting Microsoft's adapters as software: its Basic Render Driver also enumerates *without* DXGI's software flag.
+  Taken for hardware, it ran every sv test on a WARP that fastfails there — [warp-arm64-pac-fastfail](../bugs-external/warp-arm64-pac-fastfail/readme.md).
   The binaries that bring WARP up declare a 180 s timeout; see [sg's testing doc](../../libs/graphics/shaped-graphics/docs/testing.md#devices-and-adapters).
 - **Every cross job also builds a native `sgl`**, the compiler the SGL shader packages are generated with, in the platform's default preset.
   `--toolset` names the cross compiler there, so `SC_HOST_TOOLSET` pins the host one instead: `21` on the Linux-hosted wasm and Android jobs.

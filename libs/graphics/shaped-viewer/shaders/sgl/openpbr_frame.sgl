@@ -59,21 +59,68 @@ fun rotate_frame_to_tangent(f: frame, t_tangent: float3) -> frame:
     if len < 1e-6 => return f
 
     let rt = t / len
-    let keep = if dot(cross(f.n, rt), f.b) < 0.0 => -1.0 else 1.0
-    return frame(rt, cross(f.n, rt) * keep, f.n)
+    let handedness = if dot(cross(f.t, f.b), f.n) < 0.0 => -1.0 else 1.0
+    return frame(rt, cross(f.n, rt) * handedness, f.n)
 
 /// `f` reoriented so its normal is the tangent-space direction `n_tangent`, which is what a normal map supplies.
 ///
 /// The tangent is carried across rather than rebuilt, so the frame keeps following the uv layout.
 /// That is the whole reason for having a tangent frame instead of a bare normal.
 fun perturb_frame(f: frame, n_tangent: float3) -> frame:
-    let n = normalize(to_world(f, normalize(n_tangent)))
+    return reorient_frame(f, normalize(to_world(f, normalize(n_tangent))))
 
-    // Gram-Schmidt the old tangent against the new normal; a tangent that ended up parallel to it leaves the frame alone.
+/// `f` turned so its normal is the unit world direction `n`, its tangent carried across.
+fun reorient_frame(f: frame, n: float3) -> frame:
+    // Gram-Schmidt the old tangent against the new normal; a tangent that ended up parallel to it falls back to `make_frame`.
     let t = f.t - n * dot(n, f.t)
     let len = length(t)
     if len < 1e-6 => return make_frame(n)
 
+    // The frame keeps its handedness, not its bitangent's direction, which a turn past 90 degrees would mirror.
     let rt = t / len
-    let keep = if dot(cross(n, rt), f.b) < 0.0 => -1.0 else 1.0
-    return frame(rt, cross(n, rt) * keep, n)
+    let handedness = if dot(cross(f.t, f.b), f.n) < 0.0 => -1.0 else 1.0
+    return frame(rt, cross(n, rt) * handedness, n)
+
+/// The cosine with the viewer below which `shading_frame` leans a shading normal toward it.
+const min_view_facing = 0.01
+
+/// The unit normal `n` plus just enough of the unit view direction `v` to bring their unnormalized dot to `min_view_facing`, normalized.
+/// `n` itself where it already faces `v` that far.
+/// Continuous in `v`, and never zero: the leaned sum is at least `min_view_facing` long.
+fun lean_toward_view(n: float3, v: float3) -> float3:
+    let facing = dot(n, v)
+    if facing >= min_view_facing => return n
+    return normalize(n + (min_view_facing - facing) * v)
+
+/// The frame `s` is lit in, at a point whose geometric normal, already turned toward the viewer, is `n`.
+///
+/// Four steps: the authored frame where `has_authored` holds, turned to the side `n` faces, then the normal map, then the anisotropy direction, then the lean.
+/// The side is chosen by the turned geometric normal, never by the view direction against the authored normal.
+/// A normal the viewer is behind, or barely sees, leans toward the viewer by `lean_toward_view`.
+/// So does the coat's.
+/// The coat's normal is re-expressed in the result on the way, so `s` comes back ready for `bsdf_prepare`.
+/// A traced hit and a rasterized pixel both build their frame here, which is what keeps the two shading one surface alike.
+fun shading_frame(s: mut surface, n: float3, v: float3, authored: frame, has_authored: bool) -> frame:
+    let mut f = make_frame(n)
+    if has_authored:
+        f = authored
+        // Two-sided: the side the ray hit needs the whole basis turned to it.
+        if dot(f.n, n) < 0.0 => f = flip_frame(f)
+
+    // The frame as authored, which the coat's normal is written in the tangent space of.
+    let authored_frame = f
+
+    // A normal map is a rotation of the frame, not a replacement for it.
+    if s.geometry_normal != float3(0.0, 0.0, 1.0) => f = perturb_frame(f, s.geometry_normal)
+
+    // The anisotropy direction, applied AFTER the normal map, because it is a rotation about the shading normal the normal map decided.
+    if s.geometry_tangent != float3(1.0, 0.0, 0.0) => f = rotate_frame_to_tangent(f, s.geometry_tangent)
+
+    let leaned = lean_toward_view(f.n, v)
+    if leaned != f.n => f = reorient_frame(f, leaned)
+
+    // The coat's normal, re-expressed in the frame the closure works in, before the closure reads it.
+    if s.geometry_coat_normal != float3(0.0, 0.0, 1.0):
+        let coat_world = lean_toward_view(normalize(to_world(authored_frame, normalize(s.geometry_coat_normal))), v)
+        s.geometry_coat_normal = normalize(to_local(f, coat_world))
+    return f

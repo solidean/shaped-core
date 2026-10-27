@@ -123,7 +123,8 @@ void mix(leaves in, result& out)
     for (auto i = isize(0); i < width; ++i)
         out.push_back(scalar::of(in[i].as_float() * (1.0f - t) + in[width + i].as_float() * t));
 }
-/// `t` is one float per component.
+
+/// `mix` with a weight per component.
 void mix_componentwise(leaves in, result& out)
 {
     auto const width = in.size() / 3;

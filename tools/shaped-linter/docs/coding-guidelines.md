@@ -92,7 +92,7 @@ Two things the corpus cannot express about hints, which therefore belong in the 
 Rules for writing one:
 
 * **The finding count must match the annotations exactly.** A block is linted with `all_rules()`, so a *second* rule firing on it is a failure until the block names it too.
-  That is the point — it surfaces cross-talk between rules instead of hiding it.
+  That surfaces cross-talk between rules instead of hiding it.
 * **A block with no annotation is illustration** and is not checked, as is any block in a language the loader does not lint.
   The loader counts the unannotated lintable ones into `lint_corpus_group::skipped`, but nothing reads that field yet, so the skipping is silent in practice.
 * **A malformed annotation is an error**, never "no expectations" — a typo must fail loudly.

@@ -50,7 +50,7 @@ def build_overrides(p: argparse.ArgumentParser) -> None:
 def profile(p: argparse.ArgumentParser) -> None:
     """The profiling flags, repeated per subcommand so they bind on either side of it.
 
-    `SUPPRESS` is load-bearing: a normal default would have the subparser write its own None over a value given before the subcommand.
+    `SUPPRESS` is required: a normal default would have the subparser write its own None over a value given before the subcommand.
     dev.py declares the same three flags globally, and these only shadow them when actually passed.
     """
     p.add_argument(
@@ -95,7 +95,13 @@ def jsruntime(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--deno-path", metavar="PATH", default=None,
-        help="deno executable or its install dir; also selects deno as the runtime. Falls back to SC_DENO_PATH.",
+        help="deno executable or its install dir; also selects deno as the runtime. Falls back to SC_DENO_PATH, "
+             "then the `dev.py install deno` one in ~/tools/deno.",
+    )
+    p.add_argument(
+        "--v8-flag", metavar="FLAG", action="append", default=None,
+        help="A V8 flag for the runtime, repeatable, e.g. --v8-flag=--experimental-wasm-wide_arithmetic; node takes it "
+             "as its own option, deno inside --v8-flags. Falls back to SC_V8_FLAGS (whitespace-separated).",
     )
 
 

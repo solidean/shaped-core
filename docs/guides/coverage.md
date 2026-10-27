@@ -49,7 +49,8 @@ describe the **library sources** under `libs/`, not the tests exercising them.
 ## Output: sidecars and the `coverage_diag` contract
 
 Like every dev.py step, each tool invocation is captured to
-`build/<preset>/run-logs/`. Two sidecars land in the build dir:
+`build/<preset>/run-logs/`.
+Two sidecars land in the build dir:
 
 | File                    | What it is                                                                 |
 |-------------------------|---------------------------------------------------------------------------|

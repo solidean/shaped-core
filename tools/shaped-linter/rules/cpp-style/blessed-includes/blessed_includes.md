@@ -20,7 +20,7 @@ A block without one is a file nothing was said about — the case every other ru
 
 ## a denied include is reported, and its reason is the hint
 
-The reason is the whole point of a `deny-include`: it names where to go instead.
+A `deny-include` reports its reason, which names where to go instead.
 
 ```cpp [blessed-includes] config="rules:\n  - kind: deny-include\n    value: <mutex>\n    reason: use clean-core/thread/mutex.hh\n"
 #include <mutex>

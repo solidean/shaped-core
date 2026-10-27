@@ -167,8 +167,10 @@ cc::string registry::prelude_text() const
 
 void registry::finalize()
 {
-    auto const file = parse(prelude_text());
-    auto const ast = ast::build(file);
+    parsed = parse(prelude_text());
+    parsed_ast = ast::build(parsed);
+    auto const& file = parsed;
+    auto const& ast = parsed_ast;
     CC_ASSERT(file.diagnostics.empty() && ast.diagnostics.empty(), "a builtin record whose SGL text does not parse");
 
     auto const declarations = ast.at(ast.declarations);

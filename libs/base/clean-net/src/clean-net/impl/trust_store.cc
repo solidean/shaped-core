@@ -219,7 +219,7 @@ namespace cnet::impl
 cc::result<system_roots, error> system_root_certificates()
 {
     // Android's roots live behind JNI, and wasm has no handshake here at all.
-    // Saying so is the point: an empty list would let a caller believe a connection was verified against a store
+    // An error rather than an empty list, which would let a caller believe a connection was verified against a store
     // nobody read, so a caller here supplies its own through `tls_trust::additional_roots_pem`.
     return cc::error(unsupported_here("the platform trust store"));
 }

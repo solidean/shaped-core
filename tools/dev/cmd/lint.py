@@ -36,6 +36,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.profile(sl)
     a.change_scope(sl, default_all=True)
     sl.add_argument("--fix", action="store_true", help="Let shaped-linter apply its suggested fixes in place")
+    sl.add_argument("--no-build", action="store_true",
+                    help="Lint the named FILES with the shaped-linter already built, writing nothing: "
+                         "safe to run from several processes at once, and refused when the build is missing or older than the linter's sources")
+    sl.add_argument("files", nargs="*", metavar="FILE", help="With --no-build: the files or directories to lint")
 
     pa = lint_sub.add_parser("prose-apply", help="Apply a prose plan — many comment/doc rewrites in one pass")
     a.preset(pa)
@@ -49,6 +53,18 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     a.preset(ps)
     a.profile(ps)
     ps.add_argument("paths", nargs="+", help="Files or directories to measure (a directory is walked for lintable sources)")
+
+    pv = lint_sub.add_parser("prose-verify",
+                             help="Check that hand- or script-made edits changed prose alone: code unchanged, prose words unchanged")
+    a.preset(pv)
+    a.profile(pv)
+    pv.add_argument("--against", default="HEAD", metavar="REV",
+                    help="The version to judge against, a revision of each file's own repository (default: HEAD)")
+    pv.add_argument("--allow-words", metavar="FILE",
+                    help="Paths, one per line and relative to the project root, whose prose words may change; their code is still judged")
+    pv.add_argument("--no-build", action="store_true", help="Use the shaped-linter already built, as `lint shaped --no-build` does")
+    pv.add_argument("paths", nargs="*", metavar="PATH",
+                    help="Files to judge (default: every file changed against REV, here and in the submodule extra roots)")
 
     bi = lint_sub.add_parser("bless-includes",
                              help="Fill each .shaped-lint.yml's generated block with the includes the tree still needs blessed")
@@ -95,12 +111,75 @@ def run_clang_tidy(
     if limit is not None:
         argv += ["--limit", str(limit)]
 
-    # clang-tidy diagnostics are the point, so mirror the child live; run_step still captures the log.
+    # The clang-tidy diagnostics are the run's output, so mirror the child live; run_step still captures the log.
     result = dev.run_step(
         argv, step_type="lint", name="clang-tidy",
         build_dir=preset.build_dir, cwd=ctx.root, mirror=True, verbose=verbose,
     )
     return result.ok
+
+
+def _batches(files: list[Path], size: int = 200) -> list[list[Path]]:
+    return [files[start:start + size] for start in range(0, len(files), size)]
+
+
+# The linter's own sources, relative to this file: tools/dev/cmd/lint.py beside tools/shaped-linter/.
+_LINTER_SOURCES = Path(__file__).resolve().parents[2] / "shaped-linter"
+
+
+def _built_linter(build_dir: Path) -> Path | None:
+    """The shaped-linter a build left behind, found by path alone so nothing is configured or written.
+    It sits under tools/ in shaped-core's own build and under extern/shaped-core/tools/ in a consumer's."""
+    for sub in (Path("tools/shaped-linter"), Path("extern/shaped-core/tools/shaped-linter")):
+        for name in ("shaped-linter.exe", "shaped-linter"):
+            exe = build_dir / sub / name
+            if exe.is_file():
+                return exe
+    return None
+
+
+def _current_built_linter(ctx: Context, preset_specs: list[str] | None, command: str) -> Path:
+    """The built shaped-linter, or a stop when there is none or it is older than any of its sources, since its rules may not be the tree's."""
+    preset = ctx.resolve_presets(preset_specs)[0]
+    exe = _built_linter(preset.build_dir)
+    if exe is None:
+        ctx.die(f"{command}: no shaped-linter under {preset.build_dir}; build it once with `uv run dev.py build -t shaped-linter`")
+    built = exe.stat().st_mtime
+    newer = [p for p in _LINTER_SOURCES.rglob("*") if p.suffix in (".cc", ".hh", ".txt") and p.stat().st_mtime > built]
+    if newer:
+        ctx.die(f"{command}: the built shaped-linter is older than {newer[0].relative_to(_LINTER_SOURCES)}; "
+                "rebuild it once with `uv run dev.py build -t shaped-linter`, from one process")
+    return exe
+
+
+def run_shaped_linter_no_build(ctx: Context, *, preset_specs: list[str] | None, paths: list[str]) -> bool:
+    """Lint `paths` with the already built shaped-linter, printing its report; return True if clean.
+
+    For parallel callers on disjoint files: it builds, configures and logs nothing, so two runs never touch the same file.
+    A build older than any of the linter's sources is refused rather than used, since its rules may not be the ones in the tree.
+    """
+    if not paths:
+        ctx.die("lint shaped --no-build needs the FILE(s) to lint")
+    exe = _current_built_linter(ctx, preset_specs, "lint shaped --no-build")
+
+    files = dev.expand_lint_paths(ctx.root, paths)
+    if not files:
+        print(dev.console.green("shaped-linter: nothing to lint"), file=sys.stderr)
+        return True
+    prose_only = dev.prose_only_lint_files(ctx.root, files, layout=ctx.policy.layout)
+    batches = [(False, batch) for batch in _batches([f for f in files if f not in prose_only])]
+    batches += [(True, batch) for batch in _batches(sorted(prose_only))]
+
+    import subprocess
+
+    ok = True
+    for prose_only_batch, batch in batches:
+        argv = [str(exe), "--color", "always" if dev.console.enabled() else "never"]
+        if prose_only_batch:
+            argv.append("--prose-only")
+        argv += [str(f) for f in batch]
+        ok = subprocess.run(argv, cwd=ctx.root).returncode == 0 and ok
+    return ok
 
 
 def run_shaped_linter(
@@ -138,11 +217,11 @@ def run_shaped_linter(
         print(dev.console.green("shaped-linter: nothing to lint (no sources in scope)"), file=sys.stderr)
         return True
 
-    # A scoped run is line-exact for prose, and docs/guides/prose.md says why that matters.
+    # A scoped run is line-exact for prose; docs/guides/prose.md has the reason.
     # A spec file rather than argv, since the run already batches to stay under the command-line limit.
     changed_lines_spec: Path | None = None
     if scope is not None:
-        spec = dev.format_changed_line_spec(dev.changed_line_ranges(ctx.root, scope))
+        spec = dev.format_changed_line_spec(dev.lint_changed_line_ranges(ctx.root, scope, layout=ctx.policy.layout))
         if spec:
             changed_lines_spec = preset.build_dir / "shaped-linter-changed-lines.txt"
             changed_lines_spec.parent.mkdir(parents=True, exist_ok=True)
@@ -153,16 +232,22 @@ def run_shaped_linter(
     # Each batch gets its own step NAME, and therefore its own log.
     # Sharing one meant every batch overwrote the previous one's output, so a finding in any but the last was
     # reported as a failure with an empty log — which is unreadable exactly when a run is big enough to batch.
+    #
+    # A file of an extra root that asks for prose alone takes the prose rules alone, so its batches carry `--prose-only`.
+    prose_only = dev.prose_only_lint_files(ctx.root, files, layout=ctx.policy.layout)
+    batches = [(False, batch) for batch in _batches([f for f in files if f not in prose_only])]
+    batches += [(True, batch) for batch in _batches(sorted(prose_only))]
+
     ok = True
-    batch_count = (len(files) + 199) // 200
-    for start in range(0, len(files), 200):
-        batch = files[start:start + 200]
-        batch_name = "shaped-linter" if batch_count == 1 else f"shaped-linter-{start // 200 + 1}of{batch_count}"
+    for index, (prose_only_batch, batch) in enumerate(batches):
+        batch_name = "shaped-linter" if len(batches) == 1 else f"shaped-linter-{index + 1}of{len(batches)}"
         # The linter's own `auto` sees a pipe (run_step captures it), so it would drop color even while we mirror to a terminal.
         # Hand it dev.py's already-resolved decision instead.
         argv = [str(exe), "--color", "always" if dev.console.enabled() else "never"]
         if fix:
             argv.append("--fix")
+        if prose_only_batch:
+            argv.append("--prose-only")
         if changed_lines_spec is not None:
             argv += ["--changed-lines", str(changed_lines_spec)]
         argv += [str(f) for f in batch]
@@ -269,6 +354,98 @@ def run_prose_stats(
     return result.ok
 
 
+# What shaped-linter reads prose from, and so what an edit to prose can touch.
+_PROSE_VERIFY_SUFFIXES = (".md", ".py", ".cc", ".hh", ".h", ".c", ".cpp", ".hpp", ".rs", ".lean")
+
+
+def _git_lines(cwd: Path, *args: str) -> list[str] | None:
+    import subprocess
+
+    out = subprocess.run(["git", *args], cwd=str(cwd), capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return out.stdout.splitlines() if out.returncode == 0 else None
+
+
+def _changed_against(ctx: Context, rev: str) -> list[Path]:
+    """Every prose-bearing file changed against `rev`, untracked ones included, here and in each submodule extra root."""
+    repos = [ctx.root] + [ctx.root / r.path for r in ctx.policy.layout.extra_roots if r.submodule and (ctx.root / r.path).is_dir()]
+    found: list[Path] = []
+    for repo in repos:
+        names = _git_lines(repo, "diff", "--name-only", rev)
+        if names is None:
+            ctx.die(f"lint prose-verify: {rev!r} is not a revision of {repo.relative_to(ctx.root) if repo != ctx.root else 'this repository'}")
+        names += _git_lines(repo, "ls-files", "--others", "--exclude-standard") or []
+        found += [repo / n for n in names if n.endswith(_PROSE_VERIFY_SUFFIXES) and (repo / n).is_file()]
+    return sorted(set(found))
+
+
+def run_prose_verify(
+    ctx: Context,
+    *,
+    preset_specs: list[str] | None,
+    against: str,
+    allow_words: str | None,
+    paths: list[str],
+    no_build: bool,
+    mirror: bool = False,
+    verbose: bool = False,
+) -> bool:
+    """Judge each file against its version at `against` in its own repository; return True if every edit changed prose alone.
+
+    The earlier versions are written to a fresh temporary folder, so parallel runs never share one.
+    shaped-linter's `prose verify` does the judging, with the same token comparison `prose apply` runs on its own rewrites.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    files = [Path(p) if Path(p).is_absolute() else ctx.root / p for p in paths] if paths else _changed_against(ctx, against)
+    files = [f for f in files if f.is_file()]
+    if not files:
+        print(dev.console.green("prose-verify: nothing to judge"), file=sys.stderr)
+        return True
+
+    preset = ctx.resolve_presets(preset_specs)[0]
+    if no_build:
+        exe = _current_built_linter(ctx, preset_specs, "lint prose-verify --no-build")
+    else:
+        ctx.discover(preset)
+        build_results = dev.build([preset], ["shaped-linter"], root=ctx.root, auto_configure=True, mirror=mirror, verbose=verbose)
+        if not all(r.ok for r in build_results):
+            dev.report.print_build_failure(build_results, [preset], ctx.root)
+            return False
+        exe = next((t.artifact for t in ctx.discover(preset)
+                    if t.name == "shaped-linter" and t.kind == "EXECUTABLE" and t.artifact), None)
+        if exe is None:
+            print(dev.console.red("shaped-linter: could not resolve the built executable"), file=sys.stderr)
+            return False
+
+    baseline = Path(tempfile.mkdtemp(prefix="prose-verify-"))
+    try:
+        rel_files: list[str] = []
+        for f in files:
+            top = _git_lines(f.parent, "rev-parse", "--show-toplevel")
+            if not top:
+                continue
+            repo = Path(top[0])
+            earlier = subprocess.run(["git", "show", f"{against}:{f.resolve().relative_to(repo.resolve()).as_posix()}"],
+                                     cwd=str(repo), capture_output=True)
+            rel = f.resolve().relative_to(ctx.root.resolve()).as_posix()
+            rel_files.append(rel)
+            if earlier.returncode == 0:
+                (baseline / rel).parent.mkdir(parents=True, exist_ok=True)
+                (baseline / rel).write_bytes(earlier.stdout)
+
+        argv = [str(exe), "prose", "verify", "--color", "always" if dev.console.enabled() else "never", "--baseline", str(baseline)]
+        if allow_words:
+            argv += ["--allow-words", str(Path(allow_words).resolve())]
+        ok = True
+        for batch in _batches([Path(r) for r in rel_files]):
+            ok = subprocess.run(argv + [b.as_posix() for b in batch], cwd=str(ctx.root)).returncode == 0 and ok
+        return ok
+    finally:
+        shutil.rmtree(baseline, ignore_errors=True)
+
+
 def run_bless_includes(
     ctx: Context,
     *,
@@ -342,6 +519,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                 mirror=args.mirror_output, verbose=args.verbose,
             )
             raise SystemExit(0 if ok else 1)
+        case "shaped" if args.no_build or args.files:
+            if not args.no_build:
+                ctx.die("lint shaped: named files need --no-build; without it the run is scoped by change (--dirty-only, --commit, --all)")
+            if args.fix or a.scope_from_args(args) is not None:
+                ctx.die("lint shaped --no-build lints exactly the named files and fixes nothing; drop --fix and the scope flags")
+            raise SystemExit(0 if run_shaped_linter_no_build(ctx, preset_specs=args.preset, paths=args.files) else 1)
         case "shaped":
             ok = run_shaped_linter(
                 ctx, preset_specs=args.preset, scope=_scope(args, ctx), fix=args.fix,
@@ -358,6 +541,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             ok = run_prose_stats(
                 ctx, preset_specs=args.preset, paths=args.paths,
                 mirror=args.mirror_output, verbose=args.verbose,
+            )
+            raise SystemExit(0 if ok else 1)
+        case "prose-verify":
+            ok = run_prose_verify(
+                ctx, preset_specs=args.preset, against=args.against, allow_words=args.allow_words, paths=args.paths,
+                no_build=args.no_build, mirror=args.mirror_output, verbose=args.verbose,
             )
             raise SystemExit(0 if ok else 1)
         case "bless-includes":

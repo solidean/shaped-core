@@ -88,7 +88,8 @@ struct nx::fuzz::test
     [[nodiscard]] fuzz_result execute_fuzzer(int seed);
 
     /// Searches several seeds for a failing program; on the first failure, shrinks it and prints
-    /// regression code referring to the handle named `test_var`. Returns true if no failure was found.
+    /// regression code referring to the handle named `test_var`.
+    /// Returns true if no failure was found.
     [[nodiscard]] bool execute_fuzz_test(cc::string_view test_var = "test");
 
     // ---- async execution (ops returning cc::shared_async; see nexus/fuzz/async.hh) ----------------

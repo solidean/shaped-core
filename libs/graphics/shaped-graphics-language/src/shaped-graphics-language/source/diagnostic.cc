@@ -252,6 +252,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "mixed-index";
     case diagnostic_kind::uniform_index_varies:
         return "uniform-index-varies";
+    case diagnostic_kind::non_uniform_per_draw:
+        return "non-uniform-per-draw";
     }
     CC_UNREACHABLE("unknown diagnostic_kind");
 }
@@ -494,6 +496,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an index into a binding array that some calls give a uniform value and others one that may differ";
     case diagnostic_kind::uniform_index_varies:
         return "a `uniform` mark on an index that differs between invocations";
+    case diagnostic_kind::non_uniform_per_draw:
+        return "a `@per_draw` value a vertex stage writes that may differ within a draw";
     case diagnostic_kind::nesting_too_deep:
         return "an entry point that nests deeper than the compiler walks, once every call is inlined";
     case diagnostic_kind::invalid_option:
@@ -629,6 +633,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::unproven_index:
     case diagnostic_kind::mixed_index:
     case diagnostic_kind::uniform_index_varies:
+    case diagnostic_kind::non_uniform_per_draw:
     case diagnostic_kind::invalid_option:
         return severity::normal_error;
     case diagnostic_kind::spaced_attribute_arguments:

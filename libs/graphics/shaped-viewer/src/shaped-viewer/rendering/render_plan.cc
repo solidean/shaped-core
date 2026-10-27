@@ -308,7 +308,7 @@ struct builder
                 emit_drawings(view, layer_index, l, res, u32(-1), local);
                 break;
             case layer_kind::ui:
-                // Not drawn yet; see libs/graphics/shaped-viewer/docs/TODO.md for what it still needs.
+                // Not drawn yet; issue: feat-sv-ui-layer-imgui.
                 break;
             }
         }
@@ -628,7 +628,7 @@ bool render_plan::validate() const
                 continue;
             }
 
-            // The whole point of the post-order append: a source is finished before anything samples it.
+            // The post-order append finishes a source before anything samples it.
             if (d.primary.kind == draw_source_kind::target && d.primary.index >= t)
                 return false;
             if (d.kind == draw_kind::wipe && d.secondary.kind == draw_source_kind::target && d.secondary.index >= t)

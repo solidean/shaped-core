@@ -375,14 +375,14 @@ TEST("sgl emit layout - a bool has no layout, and bool32 is the bool GPU memory 
                                         "\n"
                                         "@compute(64) fun main(@thread_id id: int3){work}:\n"
                                         "    if work.flags[id.x] as bool:\n"
-                                        "        work.flags[id.x] = false as bool32\n");
+                                        "        work.flags[id.x] = (id.y == 0) as bool32\n");
     auto const dx12 = text_of(source, target::hlsl_dx12);
     CHECK(dx12.contains("RWStructuredBuffer<uint> work_flags"));
     CHECK(dx12.contains("if (work_flags[id.x] != 0u)"));
-    CHECK(dx12.contains("work_flags[id.x] = (false ? 1u : 0u);"));
+    CHECK(dx12.contains("work_flags[id.x] = (id.y == 0 ? 1u : 0u);"));
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("array<u32>"));
-    CHECK(wgsl.contains("work_flags[id.x] = select(0u, 1u, false);"));
+    CHECK(wgsl.contains("work_flags[id.x] = select(0u, 1u, id.y == 0);"));
 
     auto const d = described(source);
     CHECK(d.bindings[0].members[0].stride == 4);

@@ -169,7 +169,8 @@ binding frame:
     output: mut buffer[float]
 
 @raygen fun start(@launch_id id: int3){frame}:
-    let sgl_data = instancing((id.x as float) + 1.0)
+    let mut sgl_data = instancing((id.x as float) + 1.0)
+    if id.x == 0 => sgl_data.v = 0.5
     frame.output[id.x] = sgl_data.v * 2.0
 )");
     auto unrenamed = cc::string();

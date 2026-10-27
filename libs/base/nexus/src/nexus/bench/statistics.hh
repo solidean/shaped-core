@@ -26,6 +26,6 @@ namespace nx::bench
 /// Returns the largest k for which `P(Bin(n, 0.5) <= k-1) <= 0.025`, so `[x(k), x(n-1-k)]` covers the median with at
 /// least 95% probability.
 /// Returns -1 when no such k exists, which is every n below six: there is no interval that small a sample supports,
-/// and saying so is the point.
+/// and -1 says so rather than inventing one.
 [[nodiscard]] isize median_ci_rank(isize n);
 } // namespace nx::bench

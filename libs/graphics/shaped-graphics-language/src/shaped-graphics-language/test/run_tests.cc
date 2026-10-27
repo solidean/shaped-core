@@ -395,12 +395,14 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
 
         // Every diagnostic inside the test is its own: one expected error usually brings others with it, and the test
         // exists to show the one it names is reported, whatever else is.
+        // Unless one it names is not: what it captured is then the likeliest reason, and is reported after all.
         auto captured = cc::vector<located_diagnostic>();
         for (auto const& d : diagnostics)
             if (is_inside(d))
                 captured.push_back(d);
         diagnostics.remove_all_where(is_inside);
 
+        auto any_unmet = false;
         for (auto const& e : test.expectations)
         {
             if (e.kind != expectation_kind::error && e.kind != expectation_kind::warning)
@@ -411,6 +413,7 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
                 is_met = is_met
                       || ((d.what.level == severity::warning) == wants_warning
                           && cc::glob_matches(e.pattern, to_string(d.what.kind), cc::glob_option::text));
+            any_unmet = any_unmet || !is_met;
             if (!is_met)
                 diagnostics.push_back({
                     .what = {.kind = diagnostic_kind::unmet_expectation,
@@ -421,6 +424,9 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
                     = cc::format("no {} of kind {} stands in this test", wants_warning ? "warning" : "error", e.pattern),
                 });
         }
+        if (any_unmet)
+            for (auto& d : captured)
+                diagnostics.push_back(cc::move(d));
     }
 
     // CHK-403: an entry point takes the diagnostics judged of its inlined body, which a compile of it would report

@@ -69,7 +69,7 @@ public:
     /// Costs a memcmp, unlike everything else on this type.
     ///
     /// The comparison is by UNSIGNED byte value, so a non-ASCII id orders the way its bytes do rather than the way a
-    /// signed `char` would put it — which matters the moment the order reaches a file, a hash or a peer.
+    /// signed `char` would put it, so a file, a hash or a peer sees the same order on every platform.
     [[nodiscard]] std::strong_ordering compare_bytes(interned_string rhs) const
     {
         return as_string_view().compare(rhs.as_string_view()) <=> 0;

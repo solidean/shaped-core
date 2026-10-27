@@ -52,6 +52,8 @@ enum class nx::bench::hw_counter : nx::u8
     cache_l1d_misses,     ///< L1 data-cache read misses
     cache_llc_references, ///< last-level-cache references
     cache_llc_misses,     ///< last-level-cache misses (miss here usually means a main-memory access)
+    core_cycles, ///< core clock cycles while the thread ran; unlike reference_cycles, it follows frequency scaling
+    cache_l1d_accesses, ///< L1 data-cache accesses
 };
 
 namespace nx::bench

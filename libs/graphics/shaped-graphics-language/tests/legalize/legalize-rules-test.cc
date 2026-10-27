@@ -48,11 +48,20 @@ struct rule_fixture
         b.set_body(all);
     }
 
-    static cc::string without_head(cc::string text)
+    /// Without the three lets, which L2 takes away from a legalized tree that reads none of them.
+    static cc::string without_head(cc::string_view text)
     {
-        for (auto i = 0; i < 3; ++i)
-            text = cc::string(cc::string_view(text).subview({.start = text.find('\n') + 1, .end = text.size()}));
-        return text;
+        auto result = cc::string();
+        while (!text.empty())
+        {
+            auto const newline = text.find('\n');
+            auto const end = newline < 0 ? text.size() : newline + 1;
+            auto const line = text.subview({.start = 0, .end = end});
+            if (!line.starts_with("  (let c : ") && !line.starts_with("  (let d : ") && !line.starts_with("  (let e : "))
+                result += line;
+            text = text.subview({.start = end, .end = text.size()});
+        }
+        return result;
     }
 
     cc::string structured() const { return without_head(body_dump(checked.module, b.e)); }
@@ -245,20 +254,19 @@ TEST("sgl legalize - X5: a leave that crosses one loop sets a flag, which is tes
              "    (print (lit 2.0 : float)))\n"
              "  (print (lit 3.0 : float))\n"
              "  (leave $root (lit 0.0 : float))\n");
+    // X7 then writes the `once` and the test that breaks out of it as a branch around what follows the loop
     CHECK(t.core()
           == "  (var:temporary found_left : bool = (lit false : bool))\n"
-             "  (once\n"
-             "    (loop $l\n"
-             "      (print (lit 1.0 : float))\n"
-             "      (if (local c : bool)\n"
-             "        (then\n"
-             "          (assign (local found_left : bool) = (lit true : bool))\n"
-             "          (break)))\n"
-             "      (break))\n"
-             "    (if (local found_left : bool)\n"
+             "  (loop $l\n"
+             "    (print (lit 1.0 : float))\n"
+             "    (if (local c : bool)\n"
              "      (then\n"
+             "        (assign (local found_left : bool) = (lit true : bool))\n"
              "        (break)))\n"
-             "    (print (lit 2.0 : float)))\n"
+             "    (break))\n"
+             "  (if (not (local found_left : bool) : bool)\n"
+             "    (then\n"
+             "      (print (lit 2.0 : float))))\n"
              "  (print (lit 3.0 : float))\n"
              "  (return (lit 0.0 : float))\n");
 }
@@ -290,25 +298,24 @@ TEST("sgl legalize - X5: a leave that crosses two loops is tested behind each of
              "      (leave $rows))\n"
              "    (print (lit 2.0 : float)))\n"
              "  (leave $root (lit 0.0 : float))\n");
+    // the test inside `rows` breaks a loop and stays; X7 takes the one behind it, which broke the `once`
     CHECK(t.core()
           == "  (var:temporary found_left : bool = (lit false : bool))\n"
-             "  (once\n"
-             "    (loop $rows\n"
-             "      (loop $columns\n"
-             "        (if (local c : bool)\n"
-             "          (then\n"
-             "            (assign (local found_left : bool) = (lit true : bool))\n"
-             "            (break)))\n"
-             "        (break))\n"
-             "      (if (local found_left : bool)\n"
+             "  (loop $rows\n"
+             "    (loop $columns\n"
+             "      (if (local c : bool)\n"
              "        (then\n"
+             "          (assign (local found_left : bool) = (lit true : bool))\n"
              "          (break)))\n"
-             "      (print (lit 1.0 : float))\n"
              "      (break))\n"
              "    (if (local found_left : bool)\n"
              "      (then\n"
              "        (break)))\n"
-             "    (print (lit 2.0 : float)))\n"
+             "    (print (lit 1.0 : float))\n"
+             "    (break))\n"
+             "  (if (not (local found_left : bool) : bool)\n"
+             "    (then\n"
+             "      (print (lit 2.0 : float))))\n"
              "  (return (lit 0.0 : float))\n");
 }
 
@@ -550,7 +557,9 @@ TEST("sgl legalize - a once and a break of the input are a block and a leave, so
 {
     auto t = rule_fixture();
     auto all = t.head;
-    all.push_back(t.b.once({t.b.if_(t.c(), {t.b.break_()}), t.print(1.0)}));
+    // every let is read, so L2 has nothing to take away either
+    all.push_back(t.b.once({t.b.if_(t.c(), {t.b.break_()}), t.b.if_(t.d(), {t.b.break_()}),
+                            t.b.if_(t.e(), {t.b.break_()}), t.print(1.0)}));
     all.push_back(t.b.return_(t.f(0.0)));
     t.b.set_body(all);
     CHECK(is_core(t.b.m, t.b.e));
@@ -591,18 +600,17 @@ TEST("sgl legalize - X6: a block that ends in a loop is left by leaving the loop
     t.finish({weight.stmt, shade.stmt, t.b.print(t.b.local(shade.local))});
     CHECK(t.core()
           == "  (var weight : float = (lit 1.0 : float))\n"
-             "  (var:temporary found_result : float)\n"
+             "  (var:temporary shade : float)\n"
              "  (loop $rows\n"
              "    (assign (local weight : float) = (call multiply (local weight : float) (lit 0.5 : float) : float))\n"
              "    (if (call less (local weight : float) (lit 0.25 : float) : bool)\n"
              "      (then\n"
-             "        (assign (local found_result : float) = (local weight : float))\n"
+             "        (assign (local shade : float) = (local weight : float))\n"
              "        (break)))\n"
              "    (if (local d : bool)\n"
              "      (then\n"
-             "        (assign (local found_result : float) = (lit 0.0 : float))\n"
+             "        (assign (local shade : float) = (lit 0.0 : float))\n"
              "        (break))))\n"
-             "  (let shade : float = (local found_result : float))\n"
              "  (print (local shade : float))\n"
              "  (return (lit 0.0 : float))\n");
 }
@@ -620,20 +628,137 @@ TEST("sgl legalize - X6 keeps away from a block that goes on behind its loop")
                   }),
         t.print(2.0),
     });
+    // X6 leaves the flag to X5, and X7 then writes the `once` as a branch around what the block runs behind its loop
     CHECK(t.core()
           == "  (var:temporary found_left : bool = (lit false : bool))\n"
-             "  (once\n"
-             "    (loop $rows\n"
-             "      (if (local c : bool)\n"
-             "        (then\n"
-             "          (assign (local found_left : bool) = (lit true : bool))\n"
-             "          (break)))\n"
-             "      (break))\n"
-             "    (if (local found_left : bool)\n"
+             "  (loop $rows\n"
+             "    (if (local c : bool)\n"
              "      (then\n"
+             "        (assign (local found_left : bool) = (lit true : bool))\n"
              "        (break)))\n"
-             "    (print (lit 1.0 : float)))\n"
+             "    (break))\n"
+             "  (if (not (local found_left : bool) : bool)\n"
+             "    (then\n"
+             "      (print (lit 1.0 : float))))\n"
              "  (print (lit 2.0 : float))\n"
+             "  (return (lit 0.0 : float))\n");
+}
+
+TEST("sgl legalize - L1: a let whose value repeats a let in scope reads that one, and only where it is in scope")
+{
+    auto t = rule_fixture();
+    auto const a = [&] { return t.b.member(t.b.local(local_id(0)), "a"); };
+    auto const plus = [&](flat_expr_id x, f64 y) { return t.b.call("add", {x, t.f(y)}); };
+    auto const printed = [&](cc::string_view name, flat_expr_id value) -> cc::vector<flat_stmt_id>
+    {
+        auto const declared = t.b.let(name, value);
+        return {declared.stmt, t.b.print(t.b.local(declared.local))};
+    };
+    auto const first = printed("first", plus(a(), 1.0));
+    auto const again = printed("again", plus(a(), 1.0));
+    auto const inside = printed("inside", plus(a(), 1.0));
+    auto const left = printed("left", plus(a(), 2.0));
+    auto const right = printed("right", plus(a(), 2.0));
+    auto const behind = printed("behind", plus(a(), 2.0));
+    // a value of literals alone names a number, and two lets that agree on one say different things
+    auto const one = printed("one", t.b.call("add", {t.f(1.0), t.f(2.0)}));
+    auto const other = printed("other", t.b.call("add", {t.f(1.0), t.f(2.0)}));
+    // a var may change between the two
+    auto const n = t.b.var("n", t.float_type(), a());
+    auto const before = printed("before", plus(t.b.local(n.local), 1.0));
+    auto const changed = t.b.assign(t.b.local(n.local), t.f(3.0));
+    auto const after = printed("after", plus(t.b.local(n.local), 1.0));
+
+    auto body = cc::vector<flat_stmt_id>();
+    body.push_back_range(first);
+    body.push_back_range(again);
+    body.push_back(t.b.if_(t.c(), inside));
+    body.push_back(t.b.if_(t.d(), left, right));
+    body.push_back_range(behind);
+    body.push_back_range(one);
+    body.push_back_range(other);
+    body.push_back(n.stmt);
+    body.push_back_range(before);
+    body.push_back(changed);
+    body.push_back_range(after);
+    t.finish(body);
+    CHECK(t.core()
+          == "  (let first : float = (call add (member (local p : frag) a : float) (lit 1.0 : float) : float))\n"
+             "  (print (local first : float))\n"
+             "  (print (local first : float))\n"
+             "  (if (local c : bool)\n"
+             "    (then\n"
+             "      (print (local first : float))))\n"
+             "  (if (local d : bool)\n"
+             "    (then\n"
+             "      (let left : float = (call add (member (local p : frag) a : float) (lit 2.0 : float) : float))\n"
+             "      (print (local left : float)))\n"
+             "    (else\n"
+             "      (let right : float = (call add (member (local p : frag) a : float) (lit 2.0 : float) : float))\n"
+             "      (print (local right : float))))\n"
+             "  (let behind : float = (call add (member (local p : frag) a : float) (lit 2.0 : float) : float))\n"
+             "  (print (local behind : float))\n"
+             "  (let one : float = (call add (lit 1.0 : float) (lit 2.0 : float) : float))\n"
+             "  (print (local one : float))\n"
+             "  (let other : float = (call add (lit 1.0 : float) (lit 2.0 : float) : float))\n"
+             "  (print (local other : float))\n"
+             "  (var n : float = (member (local p : frag) a : float))\n"
+             "  (let before : float = (call add (local n : float) (lit 1.0 : float) : float))\n"
+             "  (print (local before : float))\n"
+             "  (assign (local n : float) = (lit 3.0 : float))\n"
+             "  (let after : float = (call add (local n : float) (lit 1.0 : float) : float))\n"
+             "  (print (local after : float))\n"
+             "  (return (lit 0.0 : float))\n");
+}
+
+TEST("sgl legalize - L2: a let nothing reads is gone with what only it read, unless its value has an effect or may "
+     "have none")
+{
+    auto t = rule_fixture();
+    auto const a = [&] { return t.b.member(t.b.local(local_id(0)), "a"); };
+    auto const unread = t.b.let("unread", t.b.call("add", {a(), t.f(1.0)}));
+    auto const inner = t.b.let("inner", t.b.call("add", {a(), t.f(2.0)}));
+    auto const outer = t.b.let("outer", t.b.call("add", {t.b.local(inner.local), t.f(1.0)}));
+    auto const noisy = t.b.let("noisy", t.b.call_with_effect("saturate", {a()}));
+    // an int division by zero has no value (EVAL-84), so whether a run reaches it is something a reader can tell
+    auto const whole = t.b.call("convert_float_to_int", {a()});
+    auto const divided = t.b.let("divided", t.b.call("divide_int", {whole, t.b.int_literal(2)}));
+    t.finish({unread.stmt, inner.stmt, outer.stmt, noisy.stmt, divided.stmt});
+    CHECK(t.core()
+          == "  (let noisy : float = (call:effect saturate (member (local p : frag) a : float) : float))\n"
+             "  (let divided : int = (call divide_int (call convert_float_to_int (member (local p : frag) a : float) : "
+             "int) (lit 2 : int) : int))\n"
+             "  (return (lit 0.0 : float))\n");
+}
+
+TEST("sgl legalize - F1 and F2: what substitution made constant is its literal, and a branch on one is the side it "
+     "takes")
+{
+    auto t = rule_fixture();
+    auto const two = t.b.let("two", t.b.int_literal(2));
+    auto const sum = t.b.call("add_int", {t.b.local(two.local), t.b.int_literal(3)});
+    auto const less = t.b.call("less_int", {t.b.int_literal(1), t.b.local(two.local)});
+    auto const half = t.b.call("add", {t.f(0.25), t.f(0.25)});
+    // an int division by zero has no value, so it stays where a run meets it (EVAL-84)
+    auto const undefined = t.b.call("divide_int", {t.b.int_literal(1), t.b.int_literal(0)});
+    t.finish({
+        two.stmt,
+        t.b.print(sum),
+        t.b.if_(less, {t.print(1.0)}, {t.print(2.0)}),
+        t.b.print(half),
+        t.b.print(t.b.local(two.local)),
+        t.b.if_(t.d(), {t.b.print(undefined)}),
+    });
+    // `two` is read by name where nothing folds, and a float sum is the target's to round
+    CHECK(t.core()
+          == "  (let two : int = (lit 2 : int))\n"
+             "  (print (lit 5 : int))\n"
+             "  (print (lit 1.0 : float))\n"
+             "  (print (call add (lit 0.25 : float) (lit 0.25 : float) : float))\n"
+             "  (print (local two : int))\n"
+             "  (if (local d : bool)\n"
+             "    (then\n"
+             "      (print (call divide_int (lit 1 : int) (lit 0 : int) : int))))\n"
              "  (return (lit 0.0 : float))\n");
 }
 

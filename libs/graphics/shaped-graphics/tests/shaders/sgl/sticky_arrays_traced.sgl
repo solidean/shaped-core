@@ -1,0 +1,33 @@
+// An array one bind point's dispatches and traces both read: the raytracing half of tests/barrier/sticky-array-test.cc.
+// A file of its own, so sticky_arrays.sgl's tests need no ray-tracing pipelines.
+
+require binding_arrays
+require raytracing_pipeline
+
+binding rack:
+    sources: buffer[int][3]
+
+binding bin:
+    merged: mut buffer[int]
+
+// Copies, per thread, the word of the source `id.x % 3` picks.
+@compute(64) fun gather_rack(@thread_id id: int3){rack, bin}:
+    bin.merged[id.x] = rack.sources[nonuniform (id.x % 3)][id.x]
+
+struct probe:
+    is_missed: bool
+
+rays probe_rays:
+    probe: probe
+
+// The same gather from a raygen, which traces nothing.
+@raygen fun gather_rack_traced(@launch_id id: int3){rack, bin}:
+    bin.merged[id.x] = rack.sources[nonuniform (id.x % 3)][id.x]
+
+@miss fun probe_miss(p: mut probe):
+    p.is_missed = true
+
+@raytracing pipeline traced_gather:
+    rays = probe_rays
+    raygen = gather_rack_traced
+    miss.probe = probe_miss

@@ -41,7 +41,7 @@ struct sg::backend::metal::metal_texture_view_key
 /// view object that outlives every argument buffer naming it, and giving each group its own would mean deferring its
 /// destruction behind that group's epoch.
 ///
-/// **An entry is evicted with its texture, and that is load-bearing rather than tidy.**
+/// **An entry is evicted with its texture, and not merely for tidiness.**
 /// A view retains its parent, so an entry that outlives the texture keeps the MTLTexture alive for the context's whole
 /// lifetime — every per-frame texture ever bound, forever.
 /// The eviction rides the texture's own finalizer, so it runs exactly where the MTLTexture is released.

@@ -221,6 +221,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     mixed_index,
     /// A `uniform` mark on an index the check pass proves varying.
     uniform_index_varies,
+    /// A `@per_draw` member that a vertex stage returns a value of which may differ between the invocations of a draw.
+    non_uniform_per_draw,
     /// An entry point whose flat tree, with every call inlined, nests deeper than the compiler walks.
     nesting_too_deep,
     /// A compile's value for a name no option has, of another type than the option's, or for a name given twice.

@@ -111,13 +111,19 @@ if(EMSCRIPTEN)
     endif()
 
     # nexus drives its control flow (REQUIRE / SKIP / CHECK_ASSERTS, fuzzing) through C++ exceptions, so they
-    # must be enabled. Emscripten disables them by default; -fexceptions is the broadly-compatible JS-based
-    # mode. -fwasm-exceptions (native wasm EH, faster, needs a newer runtime) is reserved for later.
+    # must be enabled. Emscripten disables them by default.
+    # fexceptions is the JS-based mode: every call that may throw from a frame with cleanups goes out through a JS
+    # `invoke_*` wrapper, a round trip that blocks inlining and puts a JS frame on the engine's stack per call.
+    # wasm-exceptions is wasm's own exception handling: no wrappers, the engine unwinds.
+    # It emits the proposal's legacy instructions, which every engine that runs shared memory and SIMD128 runs too.
+    # setjmp/longjmp must use the same mechanism, or a C library that uses them fails to link.
+    # Every object of a link must be built in one mode, so this is a repo-wide knob.
     if(SC_WASM_EXCEPTIONS STREQUAL "fexceptions")
         sc_build_options(COMPILE -fexceptions)
         sc_build_options(LINK -fexceptions)
     elseif(SC_WASM_EXCEPTIONS STREQUAL "wasm-exceptions")
-        message(FATAL_ERROR "SC_WASM_EXCEPTIONS=wasm-exceptions is planned (Tier 3) but not yet supported")
+        sc_build_options(COMPILE -fwasm-exceptions "SHELL:-s SUPPORT_LONGJMP=wasm")
+        sc_build_options(LINK -fwasm-exceptions "SHELL:-s SUPPORT_LONGJMP=wasm" "SHELL:-s WASM_LEGACY_EXCEPTIONS=1")
     else()
         message(FATAL_ERROR "SC_WASM_EXCEPTIONS='${SC_WASM_EXCEPTIONS}': expected 'fexceptions' or 'wasm-exceptions'")
     endif()

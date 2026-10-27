@@ -28,7 +28,8 @@ The metadata layout is **frontend-dependent**, on `CC_HAS_THREADS`:
 - **Threaded** (native, wasm+pthreads): `local` free bitmap `@0` (u64), `owner_id` `@8` (u32),
   next-slab pointer `@16`; a second **`remote`** free bitmap on the 2nd cache line `@64` (for classes
   whose slab spans two lines, i.e. ≥ 2 B) or `@24` for the single-line 1 B class.
-- **Single-threaded** (wasm without `-pthread`): `local` free bitmap `@0`, next-slab pointer `@8`. No
+- **Single-threaded** (wasm without `-pthread`): `local` free bitmap `@0`, next-slab pointer `@8`.
+  No
   owner/remote — the second cache line is not touched.
 
 The metadata consumes whole slots, so usable capacity depends on class size and frontend:
@@ -126,7 +127,7 @@ Still open:
   A downstream index-based store runs this design under a multi-generation stress test; it is not in clean-core yet.
 - **`any_node_allocation` reserved bytes** — it has 7 padding bytes earmarked for future use.
 - **A leaked node is invisible to a leak checker** — the slab is the allocation, so a dead slot is unused bytes in a live block.
-  A build mode routing every class through the large-node path would fix it; [TODO](../TODO.md) has the shape.
+  A build mode routing every class through the large-node path would fix it; [feat-cc-node-alloc-direct-mode](../issues/feat-cc-node-alloc-direct-mode.md) has the shape.
 
 **Confidence gaps — `TODO`s before the cross-thread guarantee is *proven*, not just *argued*:**
 

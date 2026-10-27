@@ -62,7 +62,7 @@ cc::shared_async<cc::unit> require_compiled(sg::context* ctx, sv::material_permu
     REQUIRE(group->size() == 2);
     CHECK((*group)[0].closest_hit.has_value());
     for (auto const& e : *group)
-        CHECK(e.any_hit.has_value() == p->can_cut_out);
+        CHECK(e.any_hit.has_value() == p->opacity.can_cut_out());
     co_return;
 }
 
@@ -88,7 +88,7 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - the fallback stands in for a p
     // block was laid out for some other material is simply never touched.
     CHECK(fallback.layout.slots.empty());
     CHECK(fallback.layout.size_bytes == 0);
-    CHECK(!fallback.can_cut_out);
+    CHECK(!fallback.opacity.can_cut_out());
     CHECK(fallback.kind == sv::geometry_kind::triangles);
 
     // Compiled once per cache, like any other permutation.
@@ -108,8 +108,8 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - the fallback stands in for a p
     auto lib = sv::material_library::create();
     auto signature = cc::vector<sv::material_signature_entry>();
     signature.push_back(sv::material_signature_entry::of("roughness", 0.5f));
-    auto const broken = lib.register_type(
-        sv::material_type::create("broken", cc::move(signature), "surface.nonsense = not_a_function(roughness)\n"));
+    auto const broken = lib.register_type(sv::material_type::create(
+        {.name = "broken", .signature = cc::move(signature), .shader = "surface.nonsense = not_a_function(roughness)\n"}));
     auto const id = lib.acquire(sv::material::create("broken", broken, {}));
 
     auto const& bad = cache.acquire(sv::resolve_material(lib, id, make_mesh()));

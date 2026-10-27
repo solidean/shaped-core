@@ -23,7 +23,7 @@ It reaches the output as the `help` text of the CLI declaration in [schedule.cc]
 Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc](../src/nexus/tests/schedule.cc)), declared with [nx::args](args.md).
 `--help` is generated from that same declaration, so the two cannot describe different programs.
 
-Two properties of the declaration are load-bearing for this compatibility layer:
+This compatibility layer rests on two properties of the declaration:
 
 * **Unknown arguments are captured, not rejected**, via `allow_unknown`.
   That is what keeps "any other arg is a filter" true, and what lets a test whose name begins with a dash be selected at all.
@@ -240,7 +240,7 @@ The same numbers print after the pass/fail line of a test run, and not of an exa
 
 ## Known gaps
 
-The following Catch2 XML features are not yet implemented (tracked in the `export/catch2.cc` TODO comment):
+The following Catch2 XML features are not yet implemented (tracked in [feat-nexus-catch2-xml-fidelity](issues/feat-nexus-catch2-xml-fidelity.md)):
 
 - `<StdOut>` / `<StdErr>` capture inside test cases
 - `INFO` / `CAPTURE` contextual messages

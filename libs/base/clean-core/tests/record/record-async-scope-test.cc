@@ -10,10 +10,10 @@
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 
-#include <thread>
 
 using namespace cc::primitive_defines;
 using namespace cc_rec_test;
@@ -125,7 +125,7 @@ REC_TEST("record/async-scope - the scope survives a co_await, which a local scop
 
                 co_await cc::async_yield();
 
-                // The whole point: the continuation is still under the scope, wherever it resumed.
+                // The continuation is still under the scope, wherever it resumed.
                 if (auto const* const s = cc::rec::current_async_scope(); s != nullptr)
                     *a = s->name;
 
@@ -180,7 +180,7 @@ REC_TEST("record/async-scope - attribution outlives the links it came from")
     }
 
     // Every scope object and every link is long gone, and the recording still tells the two hundred contexts apart.
-    // That is the point of attributing by ID rather than by the ambient ADDRESS: an address is unique only while its
+    // It can because it attributes by ID rather than by the ambient ADDRESS: an address is unique only while its
     // link lives, so keeping it meaningful would have meant pinning one per context switch.
     CHECK(captured.count("work") == 200);
 
@@ -307,7 +307,7 @@ REC_TEST("record/async-scope - a scope OPENED INSIDE a coroutine survives the su
                 co_return 7;
             }(gate, &inside, &after_suspend);
 
-            std::thread waker(
+            auto waker = cc::native_thread::start(
                 [&gate]
                 {
                     cc::this_thread_sleep_secs(0.02);

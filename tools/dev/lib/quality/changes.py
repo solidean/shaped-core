@@ -218,7 +218,7 @@ def _warn_on_drift(root: Path, head: str, selected: set[Path]) -> None:
 def _since_files(root: Path, base: str) -> list[Path]:
     """Files that differ from `base` on disk — the branch's commits and its uncommitted edits together.
 
-    `git diff <base>` with no second revision compares against the WORKING TREE, which is the whole point: one listing
+    `git diff <base>` with no second revision compares against the WORKING TREE, so one listing
     covers both halves, so nothing falls between "already committed" and "not committed yet".
     Untracked files are added separately, since a diff cannot see them.
     """
@@ -244,6 +244,43 @@ def changed_files(root: Path, scope: ChangeScope) -> list[Path]:
 
     base, head = resolve_range(root, scope.revision)
     return _revision_files(root, base, head)
+
+
+def touched_paths(root: Path, scope: ChangeScope) -> list[str]:
+    """Every path the scope touched, deletions included, as repo-relative POSIX names.
+
+    `changed_files` is what a linter reads, so it drops what no longer exists.
+    Selection asks a different question: a deleted or renamed file under a watched tree is a reason to run the gate, not a file to inspect.
+    The old name of a rename is included for the same reason.
+    """
+    if scope.since is not None:
+        if _rev_parse(root, scope.since) is None:
+            raise ChangeScopeError(f"{scope.since!r} does not name a commit")
+        names = set(_split_z(_git_or_raise(root, ["diff", "--name-only", "-z", scope.since])))
+        untracked = _git(root, ["ls-files", "--others", "--exclude-standard", "-z"], timeout=30)
+        if untracked is not None and untracked.returncode == 0:
+            names |= set(_split_z(untracked.stdout))
+        return sorted(names)
+    if scope.is_working_tree:
+        out = _git(root, ["status", "--porcelain", "--untracked-files=all", "-z"], timeout=30)
+        if out is None or out.returncode != 0:
+            return []
+        names = set()
+        # `-z` porcelain: a rename is two NUL-separated entries, the new path first (after the status), then the old.
+        entries = _split_z(out.stdout)
+        i = 0
+        while i < len(entries):
+            entry = entries[i]
+            status, path = entry[:2], entry[3:]
+            names.add(path)
+            if "R" in status or "C" in status:
+                i += 1
+                if i < len(entries):
+                    names.add(entries[i])
+            i += 1
+        return sorted(names)
+    base, head = resolve_range(root, scope.revision)
+    return sorted(set(_split_z(_git_or_raise(root, ["diff", "--name-only", "-z", base, head]))))
 
 
 # A hunk header names the post-image side as `+<start>[,<count>]`, and `-U0` makes every hunk a bare change.
@@ -295,14 +332,7 @@ def changed_line_ranges(root: Path, scope: ChangeScope) -> dict[Path, list[tuple
         # Against the working tree, so the ranges are numbered against what is on disk and there is no drift to warn
         # about — which is the other reason this kind is the right default for a gate that runs before a commit.
         _parse_diff_ranges(root, _git_or_raise(root, ["diff", "--unified=0", "--no-color", scope.since]), ranges)
-        untracked = _git(root, ["ls-files", "--others", "--exclude-standard"], timeout=30)
-        if untracked is not None and untracked.returncode == 0:
-            for name in untracked.stdout.splitlines():
-                if not name.strip():
-                    continue
-                p = (root / name.strip()).resolve()
-                if p.is_file():
-                    ranges.setdefault(p, []).append((1, _ALL_LINES))
+        _untracked_ranges(root, ranges)
         return ranges
 
     if not scope.is_working_tree:
@@ -314,17 +344,89 @@ def changed_line_ranges(root: Path, scope: ChangeScope) -> dict[Path, list[tuple
     out = _git(root, ["diff", "--unified=0", "--no-color", "HEAD"])
     if out is not None and out.returncode == 0:
         _parse_diff_ranges(root, out.stdout, ranges)
-
-    untracked = _git(root, ["ls-files", "--others", "--exclude-standard"], timeout=30)
-    if untracked is not None and untracked.returncode == 0:
-        for name in untracked.stdout.splitlines():
-            if not name.strip():
-                continue
-            p = (root / name.strip()).resolve()
-            if p.is_file():
-                ranges.setdefault(p, []).append((1, _ALL_LINES))
-
+    _untracked_ranges(root, ranges)
     return ranges
+
+
+def _untracked_ranges(root: Path, ranges: dict[Path, list[tuple[int, int]]]) -> None:
+    """Mark every untracked file as changed end to end, since it has no diff to number lines by."""
+    untracked = _git(root, ["ls-files", "--others", "--exclude-standard"], timeout=30)
+    if untracked is None or untracked.returncode != 0:
+        return
+    for name in untracked.stdout.splitlines():
+        if not name.strip():
+            continue
+        p = (root / name.strip()).resolve()
+        if p.is_file():
+            ranges.setdefault(p, []).append((1, _ALL_LINES))
+
+
+def _gitlink(root: Path, rev: str, sub_path: str) -> str | None:
+    """The commit `rev` records for the submodule at `sub_path`, or None when it records none."""
+    out = _git(root, ["ls-tree", rev, "--", sub_path], timeout=30)
+    if out is None or out.returncode != 0:
+        return None
+    entry = out.stdout.split()
+    return entry[2] if len(entry) >= 3 and entry[1] == "commit" else None
+
+
+def _submodule_base(root: Path, sub_path: str) -> str | None:
+    """Where the submodule's unpushed work starts: its merge base with its upstream, or None when it has none.
+
+    A submodule is usually on a detached HEAD, which has no `@{upstream}`, so the branch `.gitmodules` records is tried next.
+    """
+    sub = root / sub_path
+    candidates = ["@{upstream}"]
+    listed = _git(root, ["config", "-f", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"], timeout=30)
+    if listed is not None and listed.returncode == 0:
+        for line in listed.stdout.splitlines():
+            key, _, path = line.partition(" ")
+            if path.strip() != sub_path:
+                continue
+            name = key[len("submodule."):-len(".path")]
+            branch = _git(root, ["config", "-f", ".gitmodules", f"submodule.{name}.branch"], timeout=30)
+            if branch is not None and branch.returncode == 0 and branch.stdout.strip():
+                candidates.append(f"origin/{branch.stdout.strip()}")
+    candidates.append("origin/HEAD")
+    for candidate in candidates:
+        out = _git(sub, ["merge-base", candidate, "HEAD"], timeout=30)
+        if out is not None and out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    return None
+
+
+def submodule_changes(root: Path, sub_path: str, scope: ChangeScope) -> tuple[list[Path], dict[Path, list[tuple[int, int]]]]:
+    """What `scope` covers inside the submodule at `sub_path`: its files and their changed line ranges, as absolute paths.
+
+    The superproject sees a submodule as one gitlink, so each kind is translated into the submodule's own history:
+    - the working tree is the submodule's working tree;
+    - `since` is everything since the submodule's merge base with its upstream, working tree included — its unpushed work, as `since` is the superproject's;
+    - a revision is the range between the gitlinks its two ends record, empty when the pointer did not move.
+    A submodule with no upstream to measure from falls back to its working tree.
+    Raises ChangeScopeError when a recorded gitlink is not in the submodule's object store.
+    """
+    sub = root / sub_path
+    ranges: dict[Path, list[tuple[int, int]]] = {}
+    if not (sub / ".git").exists():
+        return [], ranges
+
+    if scope.revision is not None:
+        base, head = resolve_range(root, scope.revision)
+        old, new = _gitlink(root, base, sub_path), _gitlink(root, head, sub_path)
+        if new is None or old == new:
+            return [], ranges
+        old = old or _EMPTY_TREE
+        files = _revision_files(sub, old, new)
+        _parse_diff_ranges(sub, _git_or_raise(sub, ["diff", "--unified=0", "--no-color", old, new]), ranges)
+        return files, ranges
+
+    base = _submodule_base(root, sub_path) if scope.since is not None else None
+    files = _since_files(sub, base) if base is not None else _dirty_files(sub)
+    out = _git(sub, ["diff", "--unified=0", "--no-color", base or "HEAD"])
+    if out is not None and out.returncode == 0:
+        _parse_diff_ranges(sub, out.stdout, ranges)
+    _untracked_ranges(sub, ranges)
+    return files, ranges
 
 
 def format_changed_line_spec(ranges: dict[Path, list[tuple[int, int]]]) -> str:

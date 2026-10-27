@@ -46,7 +46,7 @@ Sub-structs are hashed field by field, never as a raw `memcpy` of a struct whose
   So raster PSOs would have to go structural before they could be persisted.
 
 - **compiled shader** = source + entry point + stage + model + every compile option + **the DXC version**.
-  The version matters only to a key that outlives the process, and there it is load-bearing: without it a DXC upgrade keeps serving the previous compiler's DXIL forever.
+  The version matters only to a key that outlives the process, and there it is required: without it a DXC upgrade keeps serving the previous compiler's DXIL forever.
 
 Structural rather than pointer identity is what makes a key mean anything outside the process that made it.
 Two independently created but identical group layouts collapse to one, so for the tiers keyed that way acquiring through the cache is a convenience rather than a precondition for dedup.

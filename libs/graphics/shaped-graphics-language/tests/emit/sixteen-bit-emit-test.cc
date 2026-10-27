@@ -162,3 +162,34 @@ TEST("sgl emit layout - a 2-byte gap a half leaves is padded with a 16-bit field
     auto const msl = text_of(source, target::msl);
     CHECK(msl.contains("    half gain;\n    ushort _pad0;\n    packed_float2 tint;\n"));
 }
+
+TEST("sgl emit - is_nan and is_inf of a half test the bits of the float it widens to")
+{
+    constexpr cc::string_view source = "require shader_f16\n"
+                                       "\n"
+                                       "binding work:\n"
+                                       "    values: mut buffer[half4]\n"
+                                       "    flags: mut buffer[uint]\n"
+                                       "\n"
+                                       "@compute(64) fun run(@thread_id id: int3){work}:\n"
+                                       "    let v = work.values[id.x].xyz\n"
+                                       "    let n = is_nan(v.x)\n"
+                                       "    let i = any(is_inf(v))\n"
+                                       "    work.flags[id.x] = select(n, 1u, 0u) + select(i, 2u, 0u)\n";
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("((asuint(float(v.x)) & uint(0x7fffffffu)) > uint(0x7f800000u))")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(float3(v)) & uint3(0x7fffffffu)) == uint3(0x7f800000u))")).dump("hlsl", hlsl);
+    }
+
+    // WGSL bitcasts no lone f16, which is why every target widens first.
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("((bitcast<u32>(f32(v.x)) & u32(0x7fffffffu)) > u32(0x7f800000u))")).dump("wgsl", wgsl);
+    CHECK(wgsl.contains("((bitcast<vec3<u32>>(vec3<f32>(v)) & vec3<u32>(0x7fffffffu)) == vec3<u32>(0x7f800000u))"))
+        .dump("wgsl", wgsl);
+
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("((as_type<uint>(float(v.x)) & uint(0x7fffffffu)) > uint(0x7f800000u))")).dump("msl", msl);
+    CHECK(msl.contains("((as_type<uint3>(float3(v)) & uint3(0x7fffffffu)) == uint3(0x7f800000u))")).dump("msl", msl);
+}

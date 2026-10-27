@@ -15,12 +15,6 @@ rules:
     files: src/shaped-shader-library/filesystem/real_filesystem.cc
 
   - kind: allow-include
-    value: <thread>
-    reason: the watch backend runs its own OS wait loop, which is what a file watcher is
-    files:
-      - src/shaped-shader-library/filesystem/impl/watch_backend_windows.cc
-
-  - kind: allow-include
     value: [<filesystem>, <fstream>]
     reason: fixture files these tests write and clean up, outside the API under test
     files: tests/**

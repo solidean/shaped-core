@@ -5,7 +5,7 @@
 
 /// What a mesh is allowed to be, as a set of independent bits.
 ///
-/// TODO: provisional, and nothing consumes these yet.
+/// Provisional, and nothing consumes these yet (issue: feat-sv-honor-mesh-flags).
 /// The set will grow as the renderer learns to honor it — pickability, backface culling, wireframe overlay, ...
 enum class sv::mesh_flag
 {

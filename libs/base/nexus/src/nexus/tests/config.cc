@@ -37,4 +37,12 @@ void nx::impl::apply_config_item(config::cfg& result, config::cfg const& rhs)
             result.exclusion_tags[result.exclusion_tag_count] = rhs.exclusion_tags[i];
         ++result.exclusion_tag_count;
     }
+
+    // Triggers accumulate the same way: each item names one more path the test reruns on.
+    for (int i = 0; i < rhs.rerun_on_count && i < config::max_rerun_on_globs; ++i)
+    {
+        if (result.rerun_on_count < config::max_rerun_on_globs)
+            result.rerun_on_globs[result.rerun_on_count] = rhs.rerun_on_globs[i];
+        ++result.rerun_on_count;
+    }
 }

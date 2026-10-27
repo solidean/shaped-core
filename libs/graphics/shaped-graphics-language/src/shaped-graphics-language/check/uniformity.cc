@@ -50,6 +50,13 @@ divergence first_of(divergence const& a, divergence const& b)
     return a.is ? a : b;
 }
 
+/// A return and the `@per_draw` member reported there, each once.
+struct per_draw_report
+{
+    origin at;
+    i32 member = -1;
+};
+
 /// A construct a `break` or a `continue` of the core tree may leave.
 struct exit_scope
 {
@@ -66,6 +73,9 @@ struct uniformity_pass
     i32 prelude_count = 0;
     /// Parallel to `e.locals`; a local that is assigned anywhere under divergence is divergent everywhere.
     cc::vector<divergence> locals;
+    /// Parallel to `e.locals`: of a `let` whose value is a construction, in uniform control flow, each field's own
+    /// divergence, so a read of a uniform field of a struct that also holds a divergent one is uniform.
+    cc::vector<cc::vector<divergence>> fields;
     cc::vector<exit_scope> scopes;
     /// A `return` some invocations took and others did not: every statement after it is divergent.
     divergence returned;
@@ -95,6 +105,29 @@ struct uniformity_pass
         divergence value;
     };
     cc::vector<index_finding> index_findings;
+
+    /// CHK-393: a value a vertex stage returns of a `@per_draw` member, which may differ within a draw.
+    struct per_draw_finding
+    {
+        origin at;
+        i32 member = -1;
+        divergence value;
+    };
+    cc::vector<per_draw_finding> per_draw_findings;
+    /// Set for a vertex stage whose result has a `@per_draw` member, whose every return the walk then judges.
+    bool judges_per_draw = false;
+
+    /// Whether `member` of the stage struct, read in a pixel stage, is the same in every invocation of a draw.
+    [[nodiscard]] bool is_per_draw_input(flat_member const& member) const
+    {
+        if (e.entry_stage != stage::pixel || !is_valid(e.input) || member.is_swizzle())
+            return false;
+        auto const* const ref = e.at(member.object).node.try_as<flat_local_ref>();
+        if (ref == nullptr || index_of(ref->local) != 0)
+            return false;
+        auto const members = m.at(m.at(e.input).members);
+        return member.member >= 0 && member.member < members.size() && members[member.member].is_per_draw;
+    }
 
     /// The mark `index` is, `uniform i` or `nonuniform i`; none for any other index.
     [[nodiscard]] builtins::index_mark mark_of(flat_expr_id index) const
@@ -195,7 +228,22 @@ struct uniformity_pass
                 else
                     result = index;
             },
-            [&](flat_member const& member) { result = value(member.object, flow); },
+            [&](flat_member const& member)
+            {
+                // CHK-393: the vertex stage was held to writing it the same in every invocation of the draw
+                if (is_per_draw_input(member))
+                    return;
+                auto const* const ref = e.at(member.object).node.try_as<flat_local_ref>();
+                if (ref != nullptr && !member.is_swizzle() && member.member >= 0
+                    && member.member < fields[index_of(ref->local)].size())
+                {
+                    result = fields[index_of(ref->local)][member.member];
+                    if (result.is && is_first_seen_at(result.where, x.from))
+                        result.where = x.from;
+                    return;
+                }
+                result = value(member.object, flow);
+            },
             [&](flat_element const& element)
             {
                 auto const index = value(element.index, flow);
@@ -315,6 +363,45 @@ struct uniformity_pass
         settle_local(l->local, written, flow);
     }
 
+    /// The construction a returned value is, through the immutable lets that hold one; none for any other value.
+    [[nodiscard]] flat_construct const* construction_of(flat_expr_id id) const
+    {
+        for (auto depth = 0; depth < 8; ++depth)
+        {
+            auto const& x = e.at(id).node;
+            if (auto const* const c = x.try_as<flat_construct>())
+                return c;
+            auto const* const ref = x.try_as<flat_local_ref>();
+            if (ref == nullptr || e.at(ref->local).is_mut)
+                return nullptr;
+            auto next = flat_expr_id::none;
+            for (auto const& s : e.stmts)
+                if (auto const* const let = s.node.try_as<flat_let>(); let != nullptr && let->local == ref->local)
+                    next = let->value;
+            if (!is_valid(next))
+                return nullptr;
+            id = next;
+        }
+        return nullptr;
+    }
+
+    /// CHK-393: each `@per_draw` member of what a vertex stage returns, and the flow it returns in, are the same in
+    /// every invocation of the draw.
+    void judge_per_draw(flat_stmt const& s, flat_expr_id returned_value, divergence const& flow)
+    {
+        auto const members = m.at(m.at(e.result).members);
+        auto const* const construct = construction_of(returned_value);
+        for (auto i = isize(0); i < members.size(); ++i)
+        {
+            if (!members[i].is_per_draw)
+                continue;
+            auto const whole = construct == nullptr || e.at(construct->arguments).size() != members.size();
+            auto d = first_of(value(whole ? returned_value : e.at(construct->arguments)[i], flow), set_under(flow));
+            if (d.is)
+                per_draw_findings.push_back({.at = s.from, .member = i32(i), .value = cc::move(d)});
+        }
+    }
+
     /// The flow inside a branch on a value of divergence `d`.
     [[nodiscard]] static divergence as_branch(divergence const& d, origin const& where, ast::range_of<call_site> through)
     {
@@ -383,7 +470,7 @@ struct uniformity_pass
             (void)value(condition, exit);
         if (exit.is && !entered.is && (repeats || !reconverges))
             (void)statements(body, exit);
-        scopes.pop_back();
+        scopes.remove_back();
         // a `break` or a `continue` stays inside it, and a `return` goes on out
         auto const after = reconverges ? first_of(flow, returned) : first_of(flow, exit);
         return {.flow = after, .jumps = returns > returns_before};
@@ -395,7 +482,25 @@ struct uniformity_pass
         s.node.visit(
             // a `let` is its value where it stands, so it takes no control dependence; a `var`, a `let mut` assigned in
             // some branches, does
-            [&](flat_let const& l) { settle_local(l.local, value(l.value, flow), divergence::none()); },
+            [&](flat_let const& l)
+            {
+                auto const* const c = e.at(l.value).node.try_as<flat_construct>();
+                auto const& local = e.at(l.local);
+                if (c == nullptr || flow.is || local.is_mut || local.kind != local_kind::let)
+                {
+                    settle_local(l.local, value(l.value, flow), divergence::none());
+                    return;
+                }
+                auto& each = fields[index_of(l.local)];
+                each.clear();
+                auto whole = divergence::none();
+                for (auto const a : e.at(c->arguments))
+                {
+                    each.push_back(value(a, flow));
+                    whole = first_of(whole, each.back());
+                }
+                settle_local(l.local, whole, divergence::none());
+            },
             [&](flat_var const& v) { settle_local(v.local, value(v.value, flow), flow); },
             [&](flat_assign const& a)
             {
@@ -455,7 +560,7 @@ struct uniformity_pass
                 for (auto const& a : e.at(sw.arms))
                     left = first_of(left, statements(a.body, inside).flow);
                 left = first_of(left, statements(sw.default_body, inside).flow);
-                scopes.pop_back();
+                scopes.remove_back();
                 // the arms meet again after it, unless one left the loop or the function around it
                 result.jumps = returns + continues > jumps_before;
                 if (result.jumps)
@@ -475,6 +580,8 @@ struct uniformity_pass
             [&](flat_return const& r)
             {
                 (void)value(r.value, flow);
+                if (judges_per_draw && is_reporting && reconverges && is_valid(r.value))
+                    judge_per_draw(s, r.value, flow);
                 ++returns;
                 if (flow.is && !returned.is)
                 {
@@ -521,6 +628,13 @@ void checker::judge_uniformity(flat_entry_point const& structured)
         if (x.node.is<flat_element>())
             asks_reconverged = asks_reconverged || is_resource(out.at(x.type).kind);
     }
+    // CHK-393: a vertex stage's every return is judged where what it returns has a `@per_draw` member
+    auto judges_per_draw = false;
+    if (structured.entry_stage == stage::vertex && is_valid(structured.result)
+        && out.at(structured.result).kind == type_kind::structure)
+        for (auto const& member : out.at(out.at(structured.result).members))
+            judges_per_draw = judges_per_draw || member.is_per_draw;
+    asks_reconverged = asks_reconverged || judges_per_draw;
     if (!asks_barrier && !asks_reconverged)
         return;
 
@@ -531,7 +645,9 @@ void checker::judge_uniformity(flat_entry_point const& structured)
                                     .e = e,
                                     .prelude_count = prelude_count,
                                     .locals = cc::vector<divergence>::create_defaulted(e.locals.size()),
-                                    .reconverges = reconverges};
+                                    .fields = cc::vector<cc::vector<divergence>>::create_defaulted(e.locals.size()),
+                                    .reconverges = reconverges,
+                                    .judges_per_draw = judges_per_draw};
 
         // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id
         for (auto i = isize(0); i < e.locals.size(); ++i)
@@ -614,6 +730,29 @@ void checker::judge_uniformity(flat_entry_point const& structured)
             use.through.push_back(site);
         index_uses.push_back(cc::move(use));
     }
+    auto const members = judges_per_draw ? out.at(out.at(e.result).members) : cc::span<member_info const>();
+    auto reported_returns = cc::vector<per_draw_report>();
+    for (auto const& f : pass.per_draw_findings)
+    {
+        auto is_seen = false;
+        for (auto const& r : reported_returns)
+            is_seen = is_seen || (r.at == f.at && r.member == f.member);
+        if (is_seen)
+            continue;
+        reported_returns.push_back({.at = f.at, .member = f.member});
+        auto const where = ast::is_valid(f.at.stmt) ? span_of(f.at.file, f.at.stmt) : span_of(f.at.file, f.at.expr);
+        auto& d = report(diagnostic_kind::non_uniform_per_draw, f.at.file, where,
+                         cc::format("'{}' is @per_draw, and what this returns for it may differ between the "
+                                    "invocations of a draw",
+                                    members[f.member].name));
+        auto const& from = f.value.where;
+        if (ast::is_valid(from.expr) || ast::is_valid(from.stmt))
+            d.notes.push_back(
+                {.file = from.file,
+                 .where = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt),
+                 .message = cc::format("this value {}", f.value.why)});
+    }
+
     auto reported = cc::vector<flat_expr_id>();
     for (auto const& v : pass.violations)
     {
@@ -715,7 +854,8 @@ void checker::judge_indices()
         // CHK-300: a mark that pays for nothing is a warning only where no entry point of the program needs it
         if (first.mark == builtins::index_mark::nonuniform)
         {
-            auto is_needless = true;
+            // a mark of a module or the prelude serves every program that calls it, which this one cannot speak for
+            auto is_needless = first.index.file == out.program_file();
             for (auto const* const u : copies)
                 is_needless = is_needless && u->is_uniform;
             if (!is_needless)

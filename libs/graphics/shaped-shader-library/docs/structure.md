@@ -124,7 +124,7 @@ The shape the seam is built for, and what is still `[planned]`:
   shaped-viewer's stages take about a second each on `debug-clang`: `shaped-viewer-test` there ran the front end 79 to 85 times, for about 80 s of compute across threads, and took 62 to 70 s.
   With the persistent tier warm it ran the front end not at all, and took 27.5 s.
   The tier does not skip the prelude check, once per process, wherever a pipeline is acquired: `sgl::describe` runs it, and its memo is in memory only.
-  The SGL library's [TODO](../../shaped-graphics-language/docs/TODO.md) has what that check costs and the next cuts.
+  [epic-sgl-prelude-check-cost](../../shaped-graphics-language/docs/issues/epic-sgl-prelude-check-cost.md) has what that check costs and the next cuts.
   **Neither fingerprint covers clean-core**, though it shapes the text too: SGL writes its numeric literals through `cc::to_string`.
   So a clean-core change that alters SGL's output needs `SC_SG_COLD=shaders`, or a wiped cache, before a run shows it.
   `SC_SG_COLD=shaders` turns the persistent tier off as it does DXC's.
@@ -145,7 +145,7 @@ The shape the seam is built for, and what is still `[planned]`:
   A pipeline keeps its last stages per context and per set of values, which a reload that moves its frozen part falls back to.
   An image whose format names an option is a format-erased `sg::any_texture_view`, and its group states `declared_bindings(values)` beside the defaults' table.
   An entry point's layout is then built from the values it is acquired with.
-  A binding array whose length names an option generates no type yet, since its field fixes the length (the TODO).
+  A binding array whose length names an option generates no type yet, since its field fixes the length ([feat-slib-option-sized-binding-array](issues/feat-slib-option-sized-binding-array.md)).
   A group's textures and images are typed views, a bound sampler an `sg::sampler` field, and a `sampler name:` block of the binding one of its `declared_samplers()`.
   Its table carries every fact sg's layouts take from a binding, from `sgl describe`, so the WebGPU layout agrees with the WGSL the group becomes.
   **The MSL arm runs too**: `create_metal_compiler()` is the `metal_lib` inner compiler that `create_sgl_compiler` maps to the `msl` target.
@@ -162,10 +162,12 @@ The shape the seam is built for, and what is still `[planned]`:
 
 **Today [done]:** source embedding plus the baked source dir, mounted as an overlay — see [shaders.md](../../shaped-graphics/docs/shaders.md) for what that gives a consumer.
 
-**[planned] — precompiled bytecode.** A shipped binary still compiles at startup, so DXC ships with it.
-Building the bytecode at build time and embedding *that* would remove the compiler from a shipped build entirely.
-The natural shape: a build-time compile step whose output plugs into `ssc::dxc::shader_cache` as a `cc::key_value_provider` tier, with the embedded source staying as the fallback.
-DXC now runs on Windows and Linux both, so a cross-platform build can precompile SPIR-V anywhere and DXIL where the Windows SDK is — which is the same split a runtime compile already has.
+**[done] — recorded bytecode, in frozen builds.** `SC_FROZEN_SHADERS` mounts no source directory and reloads nothing.
+An executable carries a bundle a recording run (`SC_SHADER_RECORD`) wrote, keyed in front of every compiler, so a hit skips SGL's front end and DXC both.
+Anything the bundle misses compiles from the embedded sources, which is why DXC still ships — [frozen-shaders](frozen-shaders.md).
+
+**[planned] — no compiler in a shipped build.** That needs a bundle known to be complete, so a miss can be an error rather than a compile.
+For packages that is enumerable at build time; for run-time generated sources such as sv's material permutations it needs the permutation space stated, not reached by example.
 
 ## Reload
 

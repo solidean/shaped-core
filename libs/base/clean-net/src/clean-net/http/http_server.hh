@@ -41,14 +41,14 @@ struct cnet::http_server_description
     /// Bind every interface of `family` rather than that family's loopback.
     ///
     /// **This server is not hardened for hostile input.**
-    /// A distinct field rather than a bind address, because the point is that the choice is visible; setting it logs
+    /// A distinct field rather than a bind address, so the choice is visible; setting it logs
     /// a warning through `cc::rec` at startup.
     bool bind_all_interfaces = false;
 
     /// Which family to bind, since a listening socket binds exactly one.
     ///
     /// IPv4 by default, which is what a browser reaches on `127.0.0.1`.
-    /// It matters because `localhost` resolves to both and a browser may try `::1` first: the fallback costs a
+    /// `localhost` resolves to both and a browser may try `::1` first: the fallback costs a
     /// refused connect, and a machine whose `localhost` is `::1` alone reaches nothing at all.
     /// `v6` binds `::1`, or `::` with `bind_all_interfaces`.
     ip_family family = ip_family::v4;

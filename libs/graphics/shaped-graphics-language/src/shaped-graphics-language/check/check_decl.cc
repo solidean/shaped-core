@@ -625,7 +625,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         auto const name = text_of(file, f.name);
 
         cc::string_view const known_on_field[]
-            = {"position", "per_instance", "stream", "interpolate", "edge_factors", "inside_factors"};
+            = {"position", "per_instance", "stream", "interpolate", "per_draw", "edge_factors", "inside_factors"};
         // CHK-276: a `@pixel struct` member may be the depth or the sample mask rather than a color target
         cc::string_view const known_on_pixel_field[]
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
@@ -848,13 +848,20 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             }
         }
 
+        // CHK-393: a value that is the same across a draw crosses flat, which interpolating could only round
+        auto const* const interpolate = find_attribute(file, f.attributes, "interpolate");
+        auto const is_per_draw = is_struct && find_attribute(file, f.attributes, "per_draw") != nullptr;
+        auto interpolated = interpolation_of(file, interpolate);
+        if (is_per_draw && interpolate == nullptr)
+            interpolated = {.kind = interpolation::kind_t::flat};
         collected.push_back({
             .name = name,
             .type = type,
             .field = line->field,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
-            .interpolate = interpolation_of(file, find_attribute(file, f.attributes, "interpolate")),
-            .has_interpolate = find_attribute(file, f.attributes, "interpolate") != nullptr,
+            .interpolate = interpolated,
+            .has_interpolate = interpolate != nullptr,
+            .is_per_draw = is_per_draw,
             .output = is_target_struct ? pixel_output_of(file, f.attributes, type, name) : pixel_output::color,
             .factor = find_attribute(file, f.attributes, "edge_factors") != nullptr   ? tessellation_factor::edge
                     : find_attribute(file, f.attributes, "inside_factors") != nullptr ? tessellation_factor::inside
@@ -1204,6 +1211,8 @@ void checker::compile_const(symbol_id id)
     auto const is_uint = written == prelude_type(builtins::k_uint);
     auto const is_float = written == prelude_type(builtins::k_float);
     auto const converts = (is_int || is_uint || is_float) && converted.is_number && holds(converted, written);
+    if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
+        info.is_hex = is_hex_literal(text_of(file, span_of(file, literal)));
 
     if (converts)
     {
@@ -2044,13 +2053,24 @@ void checker::judge_entry_point(symbol_id id)
                                    out.name_of(m.type), m.name));
             if (m.has_interpolate && m.is_position)
                 invalid(cc::format("the @position member '{}' is the rasterizer's, and is no interpolated value", m.name));
+            // CHK-393: what is the same across a draw crosses flat, which @per_draw says already
+            if (m.is_per_draw && m.is_position)
+                invalid(cc::format("the @position member '{}' differs between the vertices of a draw, so it is no "
+                                   "@per_draw value",
+                                   m.name));
+            else if (m.is_per_draw && m.interpolate.kind != interpolation::kind_t::flat)
+                invalid(cc::format("a @per_draw member crosses flat, so '{}' takes no other @interpolate", m.name));
         }
     };
     auto const judge_uninterpolated = [&](type_id edge)
     {
         for (auto const& m : out.at(out.at(edge).members))
+        {
             if (m.has_interpolate)
                 invalid(cc::format("'{}' crosses no stage edge, so @interpolate means nothing on it", m.name));
+            if (m.is_per_draw)
+                invalid(cc::format("'{}' crosses no stage edge, so @per_draw means nothing on it", m.name));
+        }
     };
     if (info.entry_stage == stage::vertex && stage_struct != nullptr)
         judge_uninterpolated(stage_struct->type);

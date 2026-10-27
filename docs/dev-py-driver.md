@@ -125,6 +125,26 @@ The dependency only flows one way.
 **The project's shape is policy too.**
 `Policy.layout` is a [Layout](../tools/dev/lib/core/layout.py): the directories clang-format owns, what shaped-linter and the crossref check walk, where libraries live for coverage.
 Every lib/ function that walks the tree takes it as a required argument, so a project reusing the driver cannot silently inherit ours.
+
+`Layout.extra_roots` names directories some checks own beyond those roots — typically a submodule whose docs the project writes — and defaults to none.
+Each is an `ExtraRoot`: a path, whether it is a submodule, which of `crossrefs`, `prose` and `code` apply, and gitignore-style `include` / `exclude` globs relative to it.
+
+```python
+extra_roots=(dev.ExtraRoot("extern/api", submodule=True, checks=("crossrefs", "prose"), exclude=("src/**", "test/**")),)
+```
+
+- **A submodule is read through its own git**, since the superproject sees only its gitlink.
+  A full run lists its tracked and unignored files.
+  A scoped lint run takes the submodule's working tree for `--dirty-only`, and the range between the recorded gitlinks for `--commit`.
+  For `--since` it takes the submodule's unpushed work, measured from its upstream, else from the branch `.gitmodules` records.
+- **Crossrefs resolve against the extra root.** Its top-level directories are its root segments, so its readme's `docs/x.md` reaches its own docs.
+- **`prose` is the sentences, `code` is the style.**
+  `prose` takes markdown and the comments and docstrings of C, C++, Python, Rust and Lean, all under shaped-linter's `--prose-only`,
+  so code that follows someone else's style — a generated binding — is held to the prose rules alone.
+  `code` takes C++ and Python with every rule, the prose rules over their comments included, and wins where a root asks for both.
+  An extra root bypasses the `extern/` exclusion, while junk directories below it are still pruned.
+- **`.shaped-lint.yml` resolves as anywhere else**: every config from the file up to the filesystem root, so the project's root config governs a submodule unless the submodule carries its own.
+
 `Policy.default_branch` is the branch `check` scopes itself against.
 
 The driver's *own* files are the other kind of path, and they are not policy: the pinned clang-format and its fetcher, the emsdk pin, the vendored TLS stack doctor reports on.

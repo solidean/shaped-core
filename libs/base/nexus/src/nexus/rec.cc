@@ -1,4 +1,5 @@
 #include <clean-core/container/map.hh>
+#include <clean-core/platform/environment.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/record/console_listener.hh>
@@ -11,6 +12,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/mutex.hh>
+#include <nexus/args/ambient.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/rec.hh>
 
@@ -280,10 +282,30 @@ bool nx::impl::run_recording_active()
     return g_active;
 }
 
+cc::string_view nx::impl::crash_directory()
+{
+    static auto const directory = cc::environment_variable("NX_CRASH_DIR").value_or(cc::string());
+    return directory;
+}
+
 cc::string nx::impl::run_dump_path()
 {
     // Computed once, because install_crash_dump copies it and the hang report prints it -- and those have to agree.
-    static auto const path = cc::temp_file_path("nexus-run", ".ccrec");
+    static auto const path = [] -> cc::string
+    {
+        auto temp = cc::temp_file_path("nexus-run", ".ccrec");
+        if (crash_directory().empty())
+            return temp;
+        // the temp path's file name is unique to this process; it goes into the crash directory, after the program's name
+        auto name = cc::string_view(temp);
+        for (auto i = name.size() - 1; i >= 0; --i)
+            if (name[i] == '/' || name[i] == '\\')
+            {
+                name = name.subview(i + 1);
+                break;
+            }
+        return cc::format("{}/{}-{}", crash_directory(), nx::program_name(), name);
+    }();
     return path;
 }
 

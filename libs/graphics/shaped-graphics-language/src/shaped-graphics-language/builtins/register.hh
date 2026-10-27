@@ -17,7 +17,7 @@ void register_types(registry& r);
 void register_scalar_math(registry& r);
 /// The componentwise families of the vectors, and what `pos3` and `vec3` mean together.
 void register_vector_math(registry& r);
-/// `mat4` times a matrix, a position, a direction and a plain four-vector; `mat3` of its columns, times a vector.
+/// `mat4` times a matrix, a position, a direction and a plain four-vector, and its determinant; `mat3` of its columns, times a vector.
 void register_transforms(registry& r);
 /// `x as T` between `float`, `int` and `uint` of one width, as operator functions of `as`, and `T(x)` beside it.
 void register_conversions(registry& r);

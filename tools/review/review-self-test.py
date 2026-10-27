@@ -1992,11 +1992,11 @@ def test_a_foreign_path_is_never_claimed_by_the_plan_nor_resolved(root: Path) ->
     `foreign:` says the path lives in another checkout: it is never resolved, so it is never a problem,
     and the page draws it as external, with the prefix dropped and the provider walk skipping it.
     """
-    blocks = "## prose\n\nPorted from `foreign:cpu_info.cc` and `foreign:C:/work/ember/src/x86.rs:12`.\n"
+    blocks = "## prose\n\nPorted from `foreign:cpu_info.cc` and `foreign:C:/work/other/src/x86.rs:12`.\n"
     assert not _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
 
-    html = render_markdown("From `foreign:C:/work/ember/src/x86.rs`.")
-    assert '<code class="raw ref-foreign" title="outside this repository">C:/work/ember/src/x86.rs</code>' in html, html
+    html = render_markdown("From `foreign:C:/work/other/src/x86.rs`.")
+    assert '<code class="raw ref-foreign" title="outside this repository">C:/work/other/src/x86.rs</code>' in html, html
 
     from tools.review.lib.render.markdown import strip_raw
     assert strip_raw("From `foreign:a/b.cc`.") == "From `a/b.cc`.", strip_raw("From `foreign:a/b.cc`.")
@@ -2027,6 +2027,13 @@ def test_a_planned_folder_does_not_turn_a_member_access_into_a_file(root: Path) 
     blocks = "## prose\n\nCall `obj.size()` on `sr::window.headless`.\n"
     tokens = _context_tokens(root, "planned: src/stages/10_lsp/\n", blocks)
     assert not tokens, tokens
+
+
+def test_a_shell_expansion_is_not_a_folder(root: Path) -> None:
+    """A substitution's pattern ends in a slash, and its variable name would otherwise read as a folder."""
+    blocks = '## prose\n\n```bash\necho "raw:${mod//\\//.}" > "$out/"\n```\n'
+    tokens = _context_tokens(root, "", blocks)
+    assert not tokens, [(t.text, t.problem) for t in tokens]
 
 
 def test_a_planned_folder_does_not_make_member_accesses_files(root: Path) -> None:

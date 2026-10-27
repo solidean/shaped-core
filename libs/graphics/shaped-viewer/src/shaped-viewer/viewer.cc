@@ -6,6 +6,7 @@
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/record/stat.hh>
 #include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh> // cc::thread_pump_all
@@ -26,6 +27,7 @@
 #include <shaped-viewer/rendering/viewer_renderer.hh>
 #include <shaped-viewer/resources/resource_managers.hh>
 #include <shaped-viewer/shader_library.hh>
+#include <shaped-viewer/view/render_settings.hh>
 #include <shaped-viewer/view/view_store.hh>
 #include <shaped-viewer/view/viewer_definition.hh>
 #include <shaped-viewer/viewer.hh>
@@ -47,6 +49,7 @@ constexpr tg::vec4f clear_color = tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
         [](sr::mouse_move_event const& m) { return result_t(m.cursor_pos); },   //
         [](sr::mouse_button_event const& b) { return result_t(b.cursor_pos); }, //
         [](sr::mouse_wheel_event const& w) { return result_t(w.cursor_pos); },  //
+        [](sr::file_drop_event const& d) { return result_t(d.cursor_pos); },    //
         [](sr::key_event const&) { return result_t(); },                        //
         [](sr::text_event const&) { return result_t(); });
 }
@@ -174,6 +177,11 @@ struct viewer::impl
     // Closed between the two, and unused by frames(), whose frame belongs to the loop variable.
     frame current_frame;
 
+    // Whether begin_frame opened the `sv.frame` scope that end_frame closes.
+    // A frames() loop and a destructor with no frame open must close nothing: an unmatched end would pop whatever scope
+    // the caller has open on this thread.
+    bool frame_scope_open = false;
+
     // Everything this viewer's views keep across frames: cameras, controllers, placements and textures alike.
     // Handed to the renderers rather than reached out of them — see view/view_store.hh.
     sv::view_store views;
@@ -195,6 +203,9 @@ struct viewer::impl
     // Last frame's leaves, in window space and with the links that order them.
     // Routing runs before the next frame is authored, so last frame's answer is the only one there is.
     cc::vector<hit_region> last_hit_regions;
+
+    /// Whether a layer left `render_mode::automatic` has been said to fall back to raster, which is said once per viewer.
+    bool raster_fallback_reported = false;
 
     /// A double-click waiting for its view's next trace, at a point of that view's image in [0, 1).
     struct pick_request
@@ -258,15 +269,6 @@ cc::result<viewer> viewer::try_create(sg::context& ctx, cc::string_view id_str, 
         if (win_r.has_error())
             return cc::error("shaped-viewer: could not create a window");
         win = cc::move(win_r.value());
-    }
-
-    // Ray tracing must be supported to build the meshes' BLAS; fail cleanly rather than asserting later.
-    {
-        auto probe = ctx.create_command_list();
-        auto const rt_supported = probe->raytracing.is_supported();
-        ctx.drop_command_list(cc::move(probe));
-        if (!rt_supported)
-            return cc::error("shaped-viewer: the rendering context reports no ray-tracing support");
     }
 
     // The frame's output: a back buffer when there is a window, an offscreen texture when there is not.
@@ -391,6 +393,13 @@ isize viewer::streaming_resources() const
     return _impl->resources.settling_count();
 }
 
+cc::span<sr::input_event const> viewer::input_events() const
+{
+    if (_impl->window_system == nullptr)
+        return {};
+    return _impl->window_system->events();
+}
+
 cc::shared_async<cc::unit> viewer::background_work()
 {
     return sv::background_work(*_impl->ctx);
@@ -415,6 +424,12 @@ void viewer::apply_capture(cc::string_view name, cc::function_ref<void(capture_c
 
     body({.first_frame = session->is_first_application(), .name = name, .size = f.viewport_size()});
     session->mark_applied();
+}
+
+void viewer::hold_capture(cc::string_view reason)
+{
+    if (auto* const session = _impl->capture.get(); session != nullptr)
+        session->hold(reason);
 }
 
 sv::impl::view_state& viewer::state_of(view_id id)
@@ -744,9 +759,11 @@ frame viewer::acquire_frame()
     // Sampled once, here, so every view in the frame sees the same instant.
     // The first drawn frame has no predecessor, so its delta is 0 rather than the loop's start-up cost, and it is also
     // where the elapsed clock starts — a hand-driven loop opens with begin_frame and nothing else.
-    auto const now = cc::current_time_steady_secs();
+    // A capture shows its request's instant instead of the wall clock's, so it renders the same image on any machine.
+    auto const capturing = im.capture != nullptr;
+    auto const now = capturing ? im.capture->seconds() : cc::current_time_steady_secs();
     if (im.frame_index == 0)
-        im.start_time = now;
+        im.start_time = capturing ? 0.0 : now;
     auto const delta = im.frame_index == 0 ? 0.0 : now - im.last_frame_time;
     im.last_frame_time = now;
     ++im.frame_index;
@@ -804,6 +821,7 @@ frame& viewer::begin_frame()
     // The outer frame bracket, closed in end_frame — everything a frame does nests under this one span.
     // After the assert above, so the misuse it catches does not also open a second span.
     CC_RECORD_SCOPE_BEGIN("sv.frame");
+    im.frame_scope_open = true;
 
     // A closed frame holds no backbuffer and no command list, so overwriting one strands nothing.
     im.current_frame = acquire_frame();
@@ -818,7 +836,11 @@ void viewer::end_frame()
     _impl->current_frame = frame{};
 
     // Closed LAST, so the present is inside the frame it belongs to rather than after it.
-    CC_RECORD_SCOPE_END("sv.frame");
+    if (_impl->frame_scope_open)
+    {
+        CC_RECORD_SCOPE_END("sv.frame");
+        _impl->frame_scope_open = false;
+    }
 }
 
 frame_range viewer::frames()
@@ -863,6 +885,11 @@ void viewer::finish_frame(frame& f)
     auto def = viewer_definition{};
     def.views = f._views;
     def.nodes = f._nodes;
+
+    // A capture asks every traced view for its samples and no more, so a traced layer stops where the image is taken.
+    // Also while work is owed: what the views hold then is thrown away once it drains, so tracing on past the target buys nothing.
+    if (im.capture != nullptr && !im.capture->is_done())
+        def.sample_target = im.capture->request().accumulate;
 
     // A canvas places its drawings in logical pixels, so it takes the content scale of the display the window is on —
     // the one whose rectangle holds the window's top-left corner, which is also where a new window opens.
@@ -1022,6 +1049,24 @@ void viewer::finish_frame(frame& f)
             p.at = p.at + down;
     }
 
+    def.wavefront_budget_ms = sv::impl::wavefront_budget_of(im.config);
+
+    // `automatic` is resolved here, where the plan is built, so the plan declares what the resolved mode writes.
+    for (auto& v : def.views)
+        for (auto& l : v.layers)
+        {
+            if (l.kind != layer_kind::scene_3d || l.settings.mode != render_mode::automatic)
+                continue;
+            l.settings.mode = resolve_render_mode(*im.ctx, l.settings.mode);
+            if (l.settings.mode == render_mode::raster && !im.raster_fallback_reported)
+            {
+                CC_LOG_WARNING("the device has no ray tracing, so every layer left render_mode::automatic is "
+                               "rasterized: "
+                               "lit directly, unshadowed and without bounces");
+                im.raster_fallback_reported = true;
+            }
+        }
+
     // What the store already holds for each view, so the plan can decide what refreshes.
     // Read off the composite texture rather than a field stamped beside it, so "the plan believes this can be
     // re-presented" and "there is something to re-present" cannot drift apart.
@@ -1153,27 +1198,87 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     auto any_traced = false;
     auto views_converged = true;
     auto lowest = u32(0);
+    auto short_pixels = u32(0);
     for (auto const& tr : plan.traces)
     {
         if (!tr.refresh)
             continue;
 
         if (!any_traced)
-            lowest = im.views.min_accumulated_frames(tr.id);
+            lowest = im.views.min_accumulated_samples(tr.id);
         else
-            lowest = cc::min(lowest, im.views.min_accumulated_frames(tr.id));
+            lowest = cc::min(lowest, im.views.min_accumulated_samples(tr.id));
+        short_pixels += im.views.pixels_short_of_target(tr.id);
 
         any_traced = true;
-        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate_frames);
+        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate);
     }
 
     // Payloads still streaming count as owed work too: until they land their meshes are traced as placeholder boxes, and
     // an image converged over those is a picture of the stand-ins.
     // Landing does restart the accumulation, but a stream slower than the convergence lets the stand-ins finish first.
-    auto const owed = im.resources.pending_work_count() + im.resources.settling_count();
+    // A frame whose body says its image is not the finished one owes work the viewer cannot see, such as a load of its own.
+    auto const held = session.take_hold();
+    auto const owed = im.resources.pending_work_count() + im.resources.settling_count() + (held.empty() ? 0 : 1);
+
+    // Owed work that drains restarts every traced view, so the image is traced against the final resources and nothing before them.
+    // Work landing in place keeps a texture's id, and pixels that had already stopped at the target would otherwise keep
+    // samples of what it replaced.
+    // A frame tracing nothing has no samples to throw away, so it settles at once.
+    // Nor does a run out of time: it writes what it has on this frame, where a restart would defer the write and leave it a frame's samples.
+    if (session.note_owed_work(owed) && !plan.traces.empty() && !session.is_out_of_time())
+    {
+        for (auto const& tr : plan.traces)
+            im.views.restart_accumulation(tr.id);
+        return;
+    }
+
     auto const settled = session.is_settled(views_converged, any_traced, owed, traces_ran);
     if (!settled && !session.is_out_of_time())
         return;
+
+    auto const write = [&](cc::string const& path)
+    {
+        // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
+        CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
+
+        auto const failure
+            = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
+        if (failure.has_error())
+            CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
+        else if (!failure.value().empty())
+            CC_LOG_ERROR("capture: {}", failure.value());
+    };
+
+    // A sequence writes every frame to its own path, settled or not, since a sequence with a hole cannot be encoded.
+    // A frame that ran out of time is warned about as it is written, and counted again once the run ends.
+    if (session.request().is_sequence())
+    {
+        if (session.writes_frame())
+        {
+            if (!settled)
+            {
+                session.note_unsettled_frame();
+                CC_LOG_WARNING("capture: frame {} gave up after {}s at {}/{} samples per pixel{}",
+                               session.frame_index(), session.elapsed_seconds(), lowest, session.request().accumulate,
+                               held.empty() ? cc::string() : cc::format(", held for {}", held));
+            }
+            write(sr::capture_frame_path(session.request().output_path, session.frame_index()));
+        }
+
+        if (!session.is_last_frame())
+        {
+            session.advance_frame();
+            return;
+        }
+
+        if (session.unsettled_frames() > 0)
+            CC_LOG_WARNING("capture: {} of the sequence's written frames ran out of time before they settled",
+                           session.unsettled_frames());
+        session.mark_done();
+        request_close();
+        return;
+    }
 
     if (settled)
         session.mark_settled_before_writing();
@@ -1182,17 +1287,16 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     // succeeded, so an unsettled image left at that path would be refreshed over the committed reference.
     auto const path = session.settled_before_writing() ? cc::string(session.request().output_path)
                                                        : sv::impl::partial_capture_path(session.request().output_path);
+    // A wavefront layer names how many pixels hold its floor down, since one stalled pixel stalls the whole capture.
     if (!session.settled_before_writing())
-        CC_LOG_WARNING("capture: giving up after {}s at {}/{} accumulated frames — writing what it has to {}, and "
+        CC_LOG_WARNING("capture: giving up after {}s at {}/{} samples per pixel{}{} — writing what it has to {}, and "
                        "nothing to {}",
-                       session.elapsed_seconds(), lowest, session.request().accumulate_frames, path,
+                       session.elapsed_seconds(), lowest, session.request().accumulate,
+                       short_pixels == 0 ? cc::string() : cc::format(", {} pixels short of it", short_pixels),
+                       held.empty() ? cc::string() : cc::format(", held for {}", held), path,
                        session.request().output_path);
 
-    auto const failure = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
-    if (failure.has_error())
-        CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
-    else if (!failure.value().empty())
-        CC_LOG_ERROR("capture: {}", failure.value());
+    write(path);
 
     session.mark_done();
     request_close();

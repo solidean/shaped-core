@@ -40,6 +40,7 @@ The layers a language actually has differ, and the engine gives you an empty one
 | C++ | yes | yes | yes |
 | Python | yes (plus `indent` / `dedent`) | — | yes |
 | markdown | — | — | yes |
+| Rust, Lean | comments, strings and chars apart; the rest is punctuation | — | yes |
 
 ## The slug and the rationale are mandatory
 
@@ -284,7 +285,7 @@ Three things bite while writing cases:
 * **A block is linted with `all_rules()`**, so a second rule firing on your case fails until the block names it too — deliberate, since it surfaces cross-talk.
 
 **Always add both a positive and a negative** — a case that must fire and a look-alike that must not.
-For a structural rule, the negatives are the point: prove it does *not* fire on the mem-initializer, the braced return, the call-site aggregate.
+For a structural rule, the negatives carry the weight: prove it does *not* fire on the mem-initializer, the braced return, the call-site aggregate.
 When you cut a corner in the parser, pin it in the corpus (even asserting the known-wrong-but-safe behavior), so the boundary is documented and does not regress silently.
 
 ## Growing the lexer or parser

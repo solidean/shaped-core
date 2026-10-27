@@ -213,7 +213,7 @@ Three things are worth knowing:
 - **A wheel event deliberately carries no position.**
   imgui already has the cursor from the motion events, and with `ConfigInputTrickleEventQueue` (imgui's default) a position change followed by a wheel is split across two frames —
   restating it would delay every scroll by a frame.
-  A *button* event does send its position, because there the trickle is the point: the click lands at the position it happened at.
+  A *button* event does send its position, because there the trickle makes the click land at the position it happened at.
 
 Ask `wants_keyboard()` / `wants_mouse()` before acting on the same input yourself, or a camera will spin while the user drags a slider.
 
@@ -256,11 +256,11 @@ Moving an OS window and presenting its new content are separate events, and in b
 Put a vsync-blocking main present in that gap and it becomes a full frame: everything inside a window being dragged — dock markers most visibly — lags the window by however far it moved.
 This is the ordering imgui's own examples use, and the order `render_imgui` runs them in.
 
-Only the *present* order is load-bearing, which is why the main list is recorded afterwards rather than before.
+Only the *present* order is constrained, which is why the main list is recorded afterwards rather than before.
 `render_viewports` submits a command list per viewport, and one submitted while the main list is still open makes the two concurrent —
 the font atlas both sample is then reverted to its canonical layout at every viewport submit, which sg reports as a hidden cost of concurrent recording.
 
-**Both changes are load-bearing, and neither is optional once the flag is on.**
+**Neither change is optional once the flag is on.**
 
 - **Every imgui coordinate becomes desktop-space.**
   Mouse positions and `ImGui::SetNextWindowPos` are no longer relative to the main window.
@@ -287,7 +287,7 @@ arithmetic being right is not the same as it reaching the draw, and until viewpo
 
 Dragging a detached viewport window over another makes the dock-target markers drawn inside it lag the window, settling as soon as it stops.
 That is an ImGui docking-branch bug, not ours — it reproduces with upstream's own `example_win32_directx12` at the tag we vendor, with none of our code involved.
-See [TODO.md](TODO.md) for what was ruled out and how.
+[bug-imgui-viewport-dock-markers-lag-upstream](issues/bug-imgui-viewport-dock-markers-lag-upstream.md) has what was ruled out and how.
 
 ## Not wired yet
 

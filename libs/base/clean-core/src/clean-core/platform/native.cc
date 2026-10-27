@@ -13,8 +13,6 @@
 // Must come after windows.h.
 #include <DbgHelp.h>
 
-// TODO: Future - decide if dbghelp.lib linking should be exposed in CMake target_link_libraries
-//       instead of using #pragma comment(lib, ...) for better cross-project control
 #pragma comment(lib, "dbghelp.lib")
 #endif
 

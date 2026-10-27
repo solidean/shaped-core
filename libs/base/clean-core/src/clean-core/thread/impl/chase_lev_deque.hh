@@ -15,7 +15,7 @@
 //
 // The orderings below are the Lê/Pop/Cohen/Nardelli formulation from "Correct and Efficient Work-Stealing for
 // Weak Memory Models" (PPoPP'13), machine-checked against C11.
-// They are load-bearing and subtle: DO NOT adjust one because it looks redundant on x86.
+// They are all required, and subtle: DO NOT adjust one because it looks redundant on x86.
 // TSO hides a missing acquire/release, and ARM64 is a shipping target here that does not.
 
 namespace cc::impl

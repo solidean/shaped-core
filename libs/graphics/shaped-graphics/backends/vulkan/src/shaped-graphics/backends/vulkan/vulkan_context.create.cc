@@ -346,7 +346,7 @@ bool device_extensions_available(VkPhysicalDevice dev, cc::span<char const* cons
 // Whether the device supports timeline semaphores — the epoch system's core sync primitive.
 // Core in the 1.2 baseline, but still a feature bit a device may not expose.
 // The first thing sg requires that `dev` does not have, or an empty view when it satisfies the floor.
-// Naming the missing capability is the point: "this GPU is too old" is not something a caller can act on.
+// It names the missing capability, because "this GPU is too old" is not something a caller can act on.
 cc::string_view missing_required_capability(VkPhysicalDevice dev)
 {
     VkPhysicalDeviceProperties props = {};
@@ -758,6 +758,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     auto vk12_features = VkPhysicalDeviceVulkan12Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
         .pNext = &vk13_features,
+        .shaderFloat16 = shader_features.shader_float16,
         .shaderUniformBufferArrayNonUniformIndexing = shader_features.uniform_buffer_array_non_uniform_indexing,
         .shaderSampledImageArrayNonUniformIndexing = shader_features.sampled_image_array_non_uniform_indexing,
         .shaderStorageBufferArrayNonUniformIndexing = shader_features.storage_buffer_array_non_uniform_indexing,
@@ -765,7 +766,6 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
         .descriptorBindingPartiallyBound = VK_TRUE,
         .runtimeDescriptorArray = VK_TRUE,
-        .shaderFloat16 = shader_features.shader_float16,
         .scalarBlockLayout = VK_TRUE,
         .shaderSubgroupExtendedTypes = shader_features.subgroup_extended_types,
         // How the query system resets a pool: vkCmdResetQueryPool cannot be recorded inside a render-pass instance,

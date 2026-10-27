@@ -419,7 +419,7 @@ TEST("function_ref - return type preservation")
             // The standalone reproduction and the matrix that isolates it are docs/bugs-external/msvc-const-ref-through-type-erased-call.
             // clang-cl, clang/gcc and cl < 19.51 are all correct.
             // Only the runtime value-check is quarantined; the type assertion above still runs everywhere.
-            // TODO(msvc-19.51): drop this guard once the compiler fix ships.
+            // TEMPORARY(debt-cc-msvc-const-ref-type-erased-call-guard): drop this guard once the compiler fix ships.
             // Filed upstream: https://developercommunity.visualstudio.com/t/MSVC-O2-miscompiles-returned-const-loca/11114080
 #if !(defined(_MSC_VER) && !defined(__clang__) && _MSC_VER >= 1951)
             CHECK(ref() == 42);
@@ -649,6 +649,42 @@ TEST("function_ref - capture-heavy lambda")
         };
         check(lambda);
     }
+}
+
+namespace
+{
+int forty_two()
+{
+    return 42;
+}
+} // namespace
+
+TEST("function_ref - construction from a plain function")
+{
+    // a function is not an object, so it cannot travel as the `void*` a callable object does
+    auto check = [](cc::function_ref<int()> f) { CHECK(f() == 42); };
+    check(forty_two);
+    check(&forty_two);
+
+    auto stored = cc::function_ref<int()>(forty_two);
+    CHECK(stored() == 42);
+}
+
+TEST("function_ref - a function pointer is held by value, so a registration built from `&f` outlives the statement")
+{
+    struct registration
+    {
+        cc::function_ref<int()> hook;
+    };
+
+    // `&forty_two` is a temporary pointer that dies at the end of this statement
+    auto const r = registration{.hook = &forty_two};
+    CHECK(r.hook() == 42);
+
+    auto ptr = &forty_two;
+    auto const from_lvalue = registration{.hook = ptr};
+    ptr = nullptr;
+    CHECK(from_lvalue.hook() == 42);
 }
 
 TEST("function_ref - function pointer decay via unary plus")
@@ -1132,4 +1168,35 @@ TEST("function_ref - temporary conversions with various signatures")
         CHECK(process_rvalue([](int&& x) { return x * 2; }, 5) == 10);
         CHECK(process_rvalue([](int&& x) { return x + 1; }, 9) == 10);
     }
+}
+
+TEST("function_ref - a const callable binds and is invoked as const")
+{
+    // a const lambda: the case a `void*` payload could not take without a cast
+    auto const add = [](int a, int b) { return a + b; };
+    cc::function_ref<int(int, int)> const f = add;
+    CHECK(f(2, 3) == 5);
+
+    // a functor whose call operator has a const and a non-const overload: the const one is the one reached
+    struct which
+    {
+        int operator()() const { return 1; }
+        int operator()() { return 2; }
+    };
+    auto const fixed = which{};
+    auto mutable_one = which{};
+    CHECK(cc::function_ref<int()>(fixed)() == 1);
+    CHECK(cc::function_ref<int()>(mutable_one)() == 2);
+
+    // a mutable lambda bound through a non-const reference still mutates its own state
+    auto calls = 0;
+    auto counter = [n = 0, &calls]() mutable
+    {
+        ++calls;
+        return ++n;
+    };
+    cc::function_ref<int()> const g = counter;
+    CHECK(g() == 1);
+    CHECK(g() == 2);
+    CHECK(calls == 2);
 }

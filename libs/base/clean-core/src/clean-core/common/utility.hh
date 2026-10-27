@@ -74,9 +74,7 @@
 //   begin(c) / end(c)                - get begin/end iterators from container or array
 //
 
-// TODO
-// - is_memcopyable
-// - is/has things
+// Not yet here: is_memcopyable, and the is/has traits.
 
 namespace cc
 {
@@ -531,7 +529,7 @@ struct cc::projection_function
     }
 
 private:
-    // TODO: move to real utility
+    // A general nth-of-pack utility would replace this.
     template <unsigned Idx, class T, class... Ts>
     static constexpr auto&& get_nth(T&& first, Ts&&... rest) noexcept
     {
@@ -928,7 +926,8 @@ using std::memcmp;
 
 // Deliberately NOT re-exported: strlen and strcmp.
 // A cc::string_view constructed from a `char const*` already walks it once and then knows its size, and
-// comparing two of them is `==`. Both are better answers than the C ones, so those stay denied outright.
+// comparing two of them is `==`.
+// Both are better answers than the C ones, so those stay denied outright.
 
 // =========================================================================================================
 // Scope utilities

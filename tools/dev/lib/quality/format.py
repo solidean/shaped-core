@@ -16,10 +16,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core import console, ui
-from ..core.layout import DRIVER_ROOT, Layout
+from ..core.layout import DRIVER_ROOT, ExtraRoot, Layout
 from ..core.models import StepResult
 from ..core.process import response_file, run_step
-from .changes import ChangeScope, changed_files
+from . import roots as extra_roots
+from .changes import ChangeScope, changed_files, changed_line_ranges
 
 
 class FormatSetupError(Exception):
@@ -183,6 +184,13 @@ def discover_files(root: Path, *, scope: ChangeScope | None, layout: Layout) -> 
 # it: clang-format must never be pointed at a .md, and the two are answering different questions.
 _LINT_SUFFIXES = (".cc", ".hh", ".md", ".py")
 
+# The kinds shaped-linter has prose rules for and nothing else.
+_PROSE_ONLY_SUFFIXES = (".md",)
+
+# The kinds whose comments and docstrings an extra root's `prose` check reads, under `--prose-only`: their code follows someone else's style.
+# Wider than _LINT_SUFFIXES, since a prose-only run holds no code rule that a C file, a `.cpp` or a Rust or Lean file could trip.
+_PROSE_COMMENT_SUFFIXES = (".cc", ".hh", ".h", ".c", ".cpp", ".hpp", ".py", ".rs", ".lean")
+
 # Never ours to lint: vendored code, build output, and caches.
 # `archive` holds text kept verbatim on purpose — an original draft beside the document that replaced it.
 # Linting it would mean editing it, which is the one thing an archive must not have happen to it.
@@ -206,17 +214,43 @@ def _is_lintable(path: Path, roots: list[Path], root: Path, layout: Layout) -> b
     return path.parent == root and path.name in layout.lint_root_files
 
 
+def _extra_lint_suffixes(extra: ExtraRoot) -> tuple[str, ...]:
+    """The suffixes an extra root's lint checks take: `prose` is markdown and the comments of code, `code` the languages with code rules."""
+    suffixes: tuple[str, ...] = ()
+    if "prose" in extra.checks:
+        suffixes += _PROSE_ONLY_SUFFIXES + _PROSE_COMMENT_SUFFIXES
+    if "code" in extra.checks:
+        suffixes += tuple(s for s in _LINT_SUFFIXES if s not in suffixes and s not in _PROSE_ONLY_SUFFIXES)
+    return suffixes
+
+
+def prose_only_lint_files(root: Path, files: list[Path], *, layout: Layout) -> set[Path]:
+    """The files of `files` that take shaped-linter's prose rules alone: those of an extra root asking for `prose` but not `code`."""
+    prose_only = [root / r.path for r in layout.extra_roots if "prose" in r.checks and "code" not in r.checks]
+    return {f for f in files if any(r in f.parents for r in prose_only)}
+
+
+def _extra_lint_roots(layout: Layout) -> list[ExtraRoot]:
+    return [r for r in layout.extra_roots if _extra_lint_suffixes(r)]
+
+
 def discover_lint_files(root: Path, *, scope: ChangeScope | None, layout: Layout) -> list[Path]:
     """Return the sorted list of files shaped-linter should lint.
 
     Wider than `discover_files`: it covers `.md` and `.py` too, and reaches docs/ and .claude/skills/,
     because the linter's prose rules bind every file a human writes sentences in.
+    The layout's extra roots that ask for `prose` or `code` are in too, even below `extern/`, with junk directories below them still pruned.
     A `scope` restricts the set to what that change set touched (see quality/changes.py); None means the whole tree.
     """
     roots = [r for r in lint_roots(root, layout=layout) if r.is_dir()]
 
     if scope is not None:
-        return sorted({p for p in changed_files(root, scope) if _is_lintable(p, roots, root, layout)})
+        project = changed_files(root, scope)
+        found = {p for p in project if _is_lintable(p, roots, root, layout)}
+        for extra in _extra_lint_roots(layout):
+            files, _ = extra_roots.scoped_files(root, extra, scope, pruned=_LINT_EXCLUDED_DIRS, project_changes=project)
+            found |= {p for p in files if p.suffix in _extra_lint_suffixes(extra)}
+        return sorted(found)
 
     found: list[Path] = []
     for lint_root in roots:
@@ -226,7 +260,24 @@ def discover_lint_files(root: Path, *, scope: ChangeScope | None, layout: Layout
                 if f.endswith(_LINT_SUFFIXES):
                     found.append(Path(dirpath) / f)
     found += [root / f for f in layout.lint_root_files if (root / f).is_file()]
-    return sorted(found)
+    for extra in _extra_lint_roots(layout):
+        suffixes = _extra_lint_suffixes(extra)
+        found += [root / extra.path / rel for rel in extra_roots.list_files(root, extra, pruned=_LINT_EXCLUDED_DIRS)
+                  if rel.endswith(suffixes)]
+    return sorted(set(found))
+
+
+def lint_changed_line_ranges(root: Path, scope: ChangeScope, *, layout: Layout) -> dict[Path, list[tuple[int, int]]]:
+    """`changed_line_ranges` for a scoped lint run, with the ranges inside the layout's submodule extra roots added.
+
+    Those come from each submodule's own diff, which the project's diff cannot see past the gitlink.
+    """
+    ranges = changed_line_ranges(root, scope)
+    for extra in _extra_lint_roots(layout):
+        if extra.submodule:
+            _, sub_ranges = extra_roots.scoped_files(root, extra, scope, pruned=_LINT_EXCLUDED_DIRS)
+            ranges.update(sub_ranges)
+    return ranges
 
 
 def expand_lint_paths(root: Path, paths: list[str]) -> list[Path]:

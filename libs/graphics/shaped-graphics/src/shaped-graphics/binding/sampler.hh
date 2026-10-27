@@ -27,7 +27,8 @@ enum class sg::sampler_address_mode
 };
 
 /// Comparison function for a comparison ("shadow") sampler — compares the fetched texel against the
-/// reference value the shader passes to `SampleCmp`. Shared with `depth_stencil_state`'s depth test.
+/// reference value the shader passes to `SampleCmp`.
+/// Shared with `depth_stencil_state`'s depth test.
 enum class sg::compare_op
 {
     never,

@@ -105,24 +105,24 @@ TEST("sgl emit - a one-value constructor and a scalar beside a vector are each t
 TEST("sgl emit - an if that is a value is a local each branch assigns, and only the taken branch runs")
 {
     auto const hlsl = text_of(k_vectors, target::hlsl_dx12);
-    CHECK(hlsl.contains("    float if_result;\n"
+    // the result is the let's own local, named after it (LEGAL-60)
+    CHECK(hlsl.contains("    float tone;\n"
                         "    if (v.x > 0.5)\n"
                         "    {\n"
-                        "        if_result = sqrt(v.x);\n"
+                        "        tone = sqrt(v.x);\n"
                         "    }\n"
                         "    else\n"
                         "    {\n"
-                        "        if_result = v.y;\n"
-                        "    }\n"
-                        "    const float tone = if_result;\n"));
+                        "        tone = v.y;\n"
+                        "    }\n"));
+    CHECK(!hlsl.contains("if_result"));
     auto const wgsl = text_of(k_vectors, target::wgsl);
-    CHECK(wgsl.contains("    var if_result: f32;\n"
+    CHECK(wgsl.contains("    var tone: f32;\n"
                         "    if v.x > 0.5 {\n"
-                        "        if_result = sqrt(v.x);\n"
+                        "        tone = sqrt(v.x);\n"
                         "    } else {\n"
-                        "        if_result = v.y;\n"
-                        "    }\n"
-                        "    let tone: f32 = if_result;\n"));
+                        "        tone = v.y;\n"
+                        "    }\n"));
 }
 
 TEST("sgl emit - an if value on a constant is the taken branch's expression, with no local")
@@ -263,4 +263,40 @@ TEST("sgl emit - mix of vectors takes a vector t on every target, which HLSL cal
     CHECK(text_of(blended, target::hlsl_vulkan).contains("const float3 m = lerp(p.uv, (float3)1.0, p.uv);\n"));
     CHECK(text_of(blended, target::wgsl).contains("let m: vec3f = mix(p.uv, vec3f(1.0), p.uv);\n"));
     CHECK(text_of(blended, target::msl).contains("const float3 m = mix(p.uv, float3(1.0), p.uv);\n"));
+}
+
+TEST("sgl emit - is_nan and is_inf are a test of the bits on every target")
+{
+    constexpr cc::string_view source
+        = "struct pixel_input:\n"
+          "    @position position: hpos4\n"
+          "\n"
+          "@pixel struct target:\n"
+          "    color: float4\n"
+          "\n"
+          "@pixel fun main_ps(p: pixel_input) -> target:\n"
+          "    let v = float3(p.position.x, p.position.y, p.position.z)\n"
+          "    let nan = is_nan(p.position.x)\n"
+          "    let inf = any(is_inf(v))\n"
+          "    return { color = float4(select(nan, 1.0, 0.0), select(inf, 1.0, 0.0), 0.0, 1.0) }\n";
+    // Vulkan may assume no NaN arises unless the module says otherwise, which DXC's SPIR-V does not, so dx12 and vulkan
+    // share one text that never hands `isnan` the value.
+    for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
+    {
+        auto const hlsl = text_of(source, t);
+        CHECK(hlsl.contains("((asuint(p.position.x) & uint(0x7fffffffu)) > uint(0x7f800000u))")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(v) & uint3(0x7fffffffu)) == uint3(0x7f800000u))")).dump("hlsl", hlsl);
+        CHECK(!hlsl.contains("isnan(")).dump("hlsl", hlsl);
+        CHECK(!hlsl.contains("isinf(")).dump("hlsl", hlsl);
+    }
+
+    // Both may assume no NaN arises, so neither is handed the value to test.
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("bitcast<u32>(")).dump("wgsl", wgsl);
+    CHECK(wgsl.contains("bitcast<vec3<u32>>(")).dump("wgsl", wgsl);
+    CHECK(!wgsl.contains("isNan")).dump("wgsl", wgsl);
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("as_type<uint>(")).dump("msl", msl);
+    CHECK(msl.contains("as_type<uint3>(")).dump("msl", msl);
+    CHECK(!msl.contains("isnan(")).dump("msl", msl);
 }

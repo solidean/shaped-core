@@ -454,7 +454,7 @@ void parse_available(cc::shared_ptr<exchange> const& ex)
     }
 
     // A sink that took nothing leaves those bytes here, and reading more would put the pressure in this vector
-    // instead of in TCP's receive window -- which is the whole point of the return value.
+    // instead of in TCP's receive window, which the return value exists to prevent.
     // So the request stops until `resume_body::resume` says the sink can take them.
     if (!ex->unparsed.empty() && ex->parser.head_complete() && !ex->discarding_body && !ex->paused)
     {
@@ -617,7 +617,7 @@ void start_attempt(cc::shared_ptr<exchange> const& ex)
     ex->parser.start_response(ex->request.method);
     ex->connection_was_pooled = false;
 
-    // A pooled connection is already past the connect and the handshake, which is the whole point of keeping it.
+    // A pooled connection is already past the connect and the handshake, so reusing it skips both.
     if (ex->pool != nullptr)
         if (auto pooled = ex->pool->try_take(target.origin()); pooled.is_valid())
         {

@@ -50,6 +50,55 @@ void multiply_mat4(leaves in, result& out)
     }
 }
 
+/// Element (row, column) of the transpose of `matrix`, which has the same determinant.
+f64 transposed_at(leaves matrix, isize row, isize column)
+{
+    return f64(matrix[row * 4 + column].as_float());
+}
+
+/// The determinant of rows 1 to 3 of `matrix` without column `skip`: the minor of element (0, skip).
+f64 minor_of(leaves matrix, isize skip)
+{
+    isize kept[3] = {0, 0, 0};
+    auto count = isize(0);
+    for (auto column = isize(0); column < 4; ++column)
+        if (column != skip)
+            kept[count++] = column;
+    auto const at = [&](isize row, isize k) { return transposed_at(matrix, row, kept[k]); };
+    return at(1, 0) * (at(2, 1) * at(3, 2) - at(2, 2) * at(3, 1)) - at(1, 1) * (at(2, 0) * at(3, 2) - at(2, 2) * at(3, 0))
+         + at(1, 2) * (at(2, 0) * at(3, 1) - at(2, 1) * at(3, 0));
+}
+
+/// Cofactor expansion along the first row, in f64 and rounded once.
+void determinant(leaves in, result& out)
+{
+    auto sum = 0.0;
+    for (auto column = isize(0); column < 4; ++column)
+    {
+        auto const term = transposed_at(in, 0, column) * minor_of(in, column);
+        sum += column % 2 == 0 ? term : -term;
+    }
+    out.push_back(scalar::of(f32(sum)));
+}
+
+/// The columns, one behind the other, are the matrix's leaves already, for a `mat4` and a `mat3` alike.
+void from_columns(leaves in, result& out)
+{
+    for (auto const& leaf : in)
+        out.push_back(leaf);
+}
+
+/// WGSL's and MSL's constructor takes columns, and HLSL's takes rows.
+written write_from_columns(call_context const& c)
+{
+    auto const mat4 = c.builtins.at(c.builtins.find_type("mat4")).spelled_in(c.target);
+    auto const text = cc::format("{}({}, {}, {}, {})", mat4, c.arguments[0].text, c.arguments[1].text,
+                                 c.arguments[2].text, c.arguments[3].text);
+    if (c.target == language::hlsl)
+        return {.text = cc::format("transpose({})", text)};
+    return {.text = text};
+}
+
 /// Row `row` of `matrix * (x, y, z)`, for a `mat3`, whose element (row r, column c) is leaf c * 3 + r.
 f32 transformed3(leaves matrix, isize row, f32 x, f32 y, f32 z)
 {
@@ -71,12 +120,6 @@ void multiply_mat3(leaves in, result& out)
             out.push_back(
                 scalar::of(transformed3(in, row, in[at].as_float(), in[at + 1].as_float(), in[at + 2].as_float())));
     }
-}
-
-/// The three columns, one behind the other, which is what a `mat3` is to the interpreter.
-void mat3_of_columns(leaves in, result& out)
-{
-    out.push_back_range(in);
 }
 
 /// HLSL's constructor takes rows, so the columns it is handed are transposed back.
@@ -151,11 +194,23 @@ void sgl::builtins::register_transforms(registry& r)
     add_product(r, "transform_float4", "mat4", "v", "float4", "float4", transform_float4, write_product);
     add_product(r, "multiply_mat4", "mat4", "b", "mat4", "mat4", multiply_mat4, write_product);
 
+    r.add_comment("// a matrix of its four columns");
+    r.add(function_record{
+        .signature = "@pure fun mat4(c0: float4, c1: float4, c2: float4, c3: float4) -> mat4",
+        .doc = "/// `c0` to `c2` are where the axes go, and `c3` is where the origin goes.",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_from_columns, .hlsl_names = k_transpose},
+    });
+
+    r.add_comment("// what a matrix is on its own; every target has it under this name");
+    impl::add_function(r, "determinant", {"m", "mat4"}, "float", determinant, {},
+                       "/// The factor `m` scales a volume by, negative where it mirrors and 0 where it flattens one.");
+
     r.add_comment("// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector");
     r.add(function_record{
         .signature = "@pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3",
         .doc = "/// The matrix of three columns, `c0` first.",
-        .evaluate = mat3_of_columns,
+        .evaluate = from_columns,
         .write = {.kind = spelling_kind::custom, .custom = write_mat3_of_columns, .hlsl_names = k_transpose},
     });
     add_product(r, "transform_float3", "mat3", "v", "float3", "float3", transform_float3, write_product);

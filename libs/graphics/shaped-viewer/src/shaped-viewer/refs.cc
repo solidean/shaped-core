@@ -721,6 +721,15 @@ void view_ref::initial_orbit(orbit_state const& o)
     }
 }
 
+void view_ref::reset_orbit(orbit_state const& o)
+{
+    auto& st = _frame->state_of(_view);
+    st.camera_seeded = true;
+    st.controller.cancel_focus();
+    st.controller.orbit = o;
+    st.camera = o.to_camera();
+}
+
 void view_ref::initial_fps(fps_state const& pose)
 {
     auto& st = _frame->state_of(_view);
@@ -774,14 +783,14 @@ cc::string_view view_ref::display_name() const
     return _frame->state_of(_view).display_name;
 }
 
-u32 view_ref::accumulated_frames() const
+u32 view_ref::accumulated_samples() const
 {
-    return impl::min_accumulated_frames(_frame->state_of(_view));
+    return impl::min_accumulated_samples(_frame->state_of(_view));
 }
 
-bool view_ref::is_accumulation_converged(cc::optional<u32> frames) const
+bool view_ref::is_accumulation_converged(cc::optional<u32> samples) const
 {
-    return impl::is_accumulation_converged(_frame->state_of(_view), frames);
+    return impl::is_accumulation_converged(_frame->state_of(_view), samples);
 }
 
 // ---- window_ref ------------------------------------------------------------------------------------------

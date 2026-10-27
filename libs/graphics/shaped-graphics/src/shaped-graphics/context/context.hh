@@ -128,9 +128,10 @@ public:
     /// Sticky once set: the context is unusable and must be torn down and recreated.
     /// Submit / advance / fence waits and the throwing create façades raise sg::device_lost_exception once this is true.
     /// Device loss surfaces on the `try_*` surface only as an ordinary, unclassified error, so a caller polling it must check this to break its retry loop.
-    [[nodiscard]] bool is_device_lost() const { return _device_lost; }
+    [[nodiscard]] bool is_device_lost() const { return _device_lost.load(cc::memory_order_acquire); }
 
     /// Backend-provided reason the device was lost; empty while the device is healthy.
+    /// Read it only once is_device_lost() is true: a backend may be writing it from its own thread until then.
     [[nodiscard]] cc::string_view device_loss_reason() const { return _device_loss_reason; }
 
     /// Take everything the backend reported since the last call, in the order it saw them.
@@ -223,7 +224,7 @@ public:
     /// of its own.
     /// `general` on both backends today, whichever way the transfer goes — dx12 because its copy queue cannot run a
     /// layout barrier at all, vulkan because one layout for both directions is what needs no extra machinery.
-    /// libs/graphics/shaped-graphics/docs/TODO.md carries what honouring the direction would take.
+    /// issue: perf-sg-direction-specific-async-layout carries what honouring the direction would take.
     /// `cmd.prepare_for_async` is what a caller writes; this is the seam it resolves through.
     [[nodiscard]] virtual texture_layout async_ready_layout(async_direction direction) const = 0;
 
@@ -430,6 +431,14 @@ private:
     [[nodiscard]] bool claim_render_pass_split_warning(cc::string_view cause);
     friend class command_list;
 
+    /// Keeps `layout` where `holds_array_binding` looks, while it lives, if it has an array binding at all.
+    /// Every layout the context creates passes through here, from ctx.uncached.
+    void note_array_layout(binding_group_layout_handle const& layout);
+
+    /// Whether a layout created here and still alive has an array binding `name`, of textures or images where `is_texture` says so and of buffers or bytes otherwise.
+    /// The lookup behind a by-name array declaration; it takes a lock and walks every such layout, so it runs only where an assert does.
+    [[nodiscard]] bool holds_array_binding(cc::string_view name, bool is_texture);
+
     cc::mutex<cc::vector<pending_completion>> _pending_completions;
     std::unique_ptr<completion_signals> _completion_signals;
 
@@ -565,8 +574,8 @@ protected:
 
     // Streaming transfers, reached via ctx.stream — the weaker tier.
     //
-    // The implementation must NOT give these the automatic command-list synchronization the async pair carries: the
-    // whole point is that a streamed extent costs a later reader nothing.
+    // The implementation must NOT give these the automatic command-list synchronization the async pair carries: a
+    // streamed extent must cost a later reader nothing.
     // Keeping the destination's storage alive across the copy is still required, and must not go through the same
     // stamp, or the reader wait comes back with it.
     //
@@ -789,7 +798,10 @@ protected:
     cc::mutex<cc::vector<device_error>> _pending_errors;
 
     // Sticky device-loss state (see is_device_lost), set once via mark_device_lost and never cleared.
-    bool _device_lost = false;
+    // Atomic because metal reports loss from a dispatch queue Apple owns.
+    // _device_loss_claimed picks the one reporter that writes _device_loss_reason; _device_lost publishes it.
+    cc::atomic<bool> _device_loss_claimed = false;
+    cc::atomic<bool> _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
     cc::atomic<bool> _render_pass_split_warnings = true;
 
@@ -798,6 +810,9 @@ protected:
 
     // The split causes already warned about; command lists record on any thread.
     cc::mutex<cc::vector<cc::string>> _warned_split_causes;
+
+    // The layouts with an array binding, for holds_array_binding; an expired one is dropped at the next note.
+    cc::mutex<cc::vector<std::weak_ptr<binding_group_layout const>>> _array_layouts;
     cc::string _device_loss_reason;
 
     // Built-in pipeline/layout cache reached via ctx.cached.

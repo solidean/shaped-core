@@ -5,6 +5,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <typed-geometry/linalg/cross.hh>
 #include <cube_shaders.hh>
 
 using namespace cc::primitive_defines;

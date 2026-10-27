@@ -458,6 +458,61 @@ TEST("gltf - node transforms keep the form the file used")
     CHECK(doc.nodes[2].scale == tg::vec3f(1, 1, 1)); // the spec's default scale is one, not zero
     CHECK(doc.nodes[2].rotation == tg::quat_f::identity);
     CHECK(doc.children_of(doc.nodes[2]).empty());
+
+    // local_transform reads whichever form the file used
+    CHECK(doc.nodes[0].local_transform()(tg::pos3f(1, 1, 1)) == tg::pos3f(6, 7, 8));
+    // scale 2, then half a turn about z, then the translation
+    auto const moved = doc.nodes[1].local_transform()(tg::pos3f(1, 0, 0));
+    CHECK((moved - tg::pos3f(-1, 2, 3)).length() < 1e-5f);
+    CHECK(doc.nodes[2].local_transform()(tg::pos3f(4, 5, 6)) == tg::pos3f(4, 5, 6));
+}
+
+TEST("gltf - local_transform takes a drifted rotation and a zero scale")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "nodes": [
+            {"rotation": [0, 0, 1.02, 0]},
+            {"scale": [0, 1, 1], "translation": [3, 0, 0]}
+        ]})"))
+                         .value();
+
+    // a half turn about z, read as if the quaternion were unit length
+    auto const turned = doc.nodes[0].local_transform()(tg::pos3f(1, 0, 0));
+    CHECK((turned - tg::pos3f(-1, 0, 0)).length() < 1e-5f);
+    CHECK(doc.nodes[0].rotation == tg::quat_f(0, 0, 1.02f, 0)); // the stored value is the file's
+    // a zero scale flattens, which glTF uses to hide a node
+    CHECK(doc.nodes[1].local_transform()(tg::pos3f(7, 2, 0)) == tg::pos3f(3, 2, 0));
+}
+
+TEST("gltf - a node matrix that is not affine is malformed, and keeps its affine part")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "nodes": [{"matrix": [1, 0, 0, 0.5, 0, 1, 0, 0, 0, 0, 1, 0, 5, 6, 7, 1]}]})"))
+                         .value();
+
+    CHECK(doc.has_issue_of(babel::gltf::issue_kind::malformed));
+    CHECK((doc.nodes[0].matrix[0, 3]) == 0);
+    CHECK(doc.nodes[0].local_transform()(tg::pos3f(0, 0, 0)) == tg::pos3f(5, 6, 7));
+}
+
+TEST("gltf - a vec3 accessor's stated bounds come back as a box")
+{
+    auto const doc = babel::gltf::read(cc::string_view(R"({"asset": {"version": "2.0"},
+        "accessors": [
+            {"componentType": 5126, "count": 3, "type": "VEC3", "min": [-1, 0, 2], "max": [3, 4, 5]},
+            {"componentType": 5126, "count": 3, "type": "VEC3"},
+            {"componentType": 5126, "count": 3, "type": "VEC2", "min": [0, 0], "max": [1, 1]},
+            {"componentType": 5122, "normalized": true, "count": 3, "type": "VEC3", "min": [-32767, 0, 0], "max": [32767, 100, 5]}
+        ]})"))
+                         .value();
+
+    REQUIRE(doc.accessors.size() == 4);
+    CHECK(!doc.bounds_of(doc.accessors[3]).has_value()); // stated in stored integers, not in positions
+    auto const b = doc.bounds_of(doc.accessors[0]);
+    REQUIRE(b.has_value());
+    CHECK(b.value() == tg::aabb3f(tg::pos3f(-1, 0, 2), tg::pos3f(3, 4, 5)));
+    CHECK(!doc.bounds_of(doc.accessors[1]).has_value()); // the file stated none
+    CHECK(!doc.bounds_of(doc.accessors[2]).has_value()); // not a vec3
 }
 
 TEST("gltf - materials, textures, samplers and images")
@@ -866,4 +921,47 @@ TEST("gltf - KHR_lights_punctual lights and the nodes that place them")
         "extensions": {"KHR_lights_punctual": {"lights": [{"type": "point"}]}},
         "nodes": [{"extensions": {"KHR_lights_punctual": {"light": -2}}}]})"))
               .has_error());
+}
+
+// Extensions the reader does not model
+// -------------------------------------------------------------------------------------------------
+
+TEST("gltf - a vendor extension reads through json_of, on the element that carries it")
+{
+    auto const json = cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["VENDOR_tint"],
+        "materials": [{"name": "plain"},
+                      {"name": "tinted", "extensions": {"VENDOR_tint": {"strength": 0.25}}, "extras": {"note": "x"}}],
+        "meshes": [{"primitives": [{"attributes": {}, "extensions": {"VENDOR_tint": {"strength": 0.5}}}]}]})");
+    // without the option the document is not kept, and no element reaches its JSON
+    auto const lean = REQUIRED_VALUE(babel::gltf::read(json));
+    CHECK(!lean.json_of(lean.materials[1]).is_valid());
+    CHECK(!lean.json_root().is_valid());
+
+    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.keep_json_document = true}));
+    REQUIRE(doc.materials.size() == 2);
+
+    CHECK(!doc.json_of(doc.materials[0])["extensions"].is_valid());
+    auto const tint = doc.json_of(doc.materials[1])["extensions"]["VENDOR_tint"];
+    CHECK(tint["strength"].as_double() == 0.25);
+    CHECK(doc.json_of(doc.materials[1])["extras"]["note"].as_string() == "x");
+
+    auto const& prim = doc.primitives_of(doc.meshes[0])[0];
+    CHECK(doc.json_of(prim)["extensions"]["VENDOR_tint"]["strength"].as_double() == 0.5);
+    CHECK(doc.json_root()["extensionsUsed"][0].as_string() == "VENDOR_tint");
+
+    // an element built by hand has no object in the document
+    CHECK(!doc.json_of(babel::gltf::material()).is_valid());
+}
+
+TEST("gltf - a registered extension may be required, and its use is no issue")
+{
+    auto const json = cc::string_view(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["VENDOR_tint"], "extensionsRequired": ["VENDOR_tint"]})");
+    CHECK(babel::gltf::read(json).has_error());
+
+    // no hook: an extension that only adds information, which the caller reads through json_of
+    babel::gltf::extension const mine[] = {{.name = "VENDOR_tint"}};
+    auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.extensions = mine}));
+    CHECK(!doc.has_issues()).dump("issues", doc.issue_report());
 }

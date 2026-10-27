@@ -35,7 +35,7 @@ The connection is a member of the actor implementation, not of `blob_cache`.
 There is no path from a cache handle to a `babel::sqlite::database`, only a mailbox — so exclusive ownership is a
 fact of the structure rather than a convention somebody could break by adding one accessor.
 
-**Mailbox order is load-bearing.** Messages dispatch in send order, so a `get` enqueued after a `put` sees that
+**Mailbox order is part of the contract.** Messages dispatch in send order, so a `get` enqueued after a `put` sees that
 put's writes, and no read ever interleaves with a write on this connection — which is what makes the blob handle a read streams through impossible for the actor to invalidate under itself.
 
 ## Identity: two hashes that must never be confused
@@ -58,7 +58,7 @@ A caller that wants a fixed-size key hashes its own inputs and passes the digest
 `(namespace, key, version)` maps to one committed object until that entry is evicted.
 A second `put` under a live key stores nothing and reports `already_present`.
 
-This matters most where it is least expected.
+The rule covers a case that is easy to miss.
 Two processes may compute the same key at once and legitimately produce *different* bytes — two ZIP archives of the same files differing only in their embedded timestamps, say.
 Either is a valid answer for the logical key.
 What must not happen is the mapping flapping between them depending on who wrote last.
@@ -78,7 +78,7 @@ Covering only the compute would let two callers both look up, both observe a mis
 The pipeline is one raw `cc::async` compute frame rather than a chain of continuations, because the node a caller holds must *be* the pipeline.
 Only then does driving the result drive the work, which is what lets the cache impose no scheduler of its own beyond the one a caller's compute already needs.
 
-Three properties of the table are each load-bearing:
+The table rests on three properties:
 
 * **The lock covers one map probe and one insert.** No database call, no mailbox enqueue and no compute ever runs
   under it — which is also why an `acquire` may be issued from a thread already holding a caller's own lock.
@@ -108,7 +108,7 @@ The separation is semantic, not incidental.
 Two computations can reach identical bytes at wildly different cost and with completely different lifetimes, so none of those may become a property of the shared object.
 The object carries only what is intrinsic to the bytes — the hash, the size, the chunk count — plus the refcount that says how many entries name it.
 
-`expires_at` and `compute_secs` are **nullable, and NULL is load-bearing**.
+`expires_at` and `compute_secs` are **nullable, and NULL means something**.
 Absent means "never expires" and "cost unknown", and both differ from a stored zero: a zero expiry is an entry that is already expired, and a zero cost is a caller saying this is free to rebuild.
 Encoding either absence as a sentinel would collapse two answers a caller can legitimately give into one.
 Both collapses point the wrong way, too: GC would read "never expires" as "expire it now", or "unknown" as "throw it away first".
@@ -246,4 +246,4 @@ That is what lets the same code drive a threaded and an unthreaded store: the di
 * **Streaming public APIs** — chunking is an internal persistence detail today, and the seam for streaming later.
 * **A public delete beyond `invalidate` / `clear`** — `version` covers most invalidation, and expiry and collection
   cover the rest.
-* **Exact accounting after every mutation** — approximate is the point.
+* **Exact accounting after every mutation** — the accounting is approximate by design.

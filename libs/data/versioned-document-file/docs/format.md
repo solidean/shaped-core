@@ -118,7 +118,7 @@ Publishing derives the op set to persist from the refs being set, so an op no re
 ```sql
 CREATE TABLE snapshots (
     op_hash      BLOB PRIMARY KEY NOT NULL,
-    required     INTEGER NOT NULL,  -- 1 = load-bearing, 0 = droppable cache
+    required     INTEGER NOT NULL,  -- 1 = the only copy, 0 = droppable cache
     encoding     TEXT NOT NULL,     -- the payload codec: `raw` today
     decoded_size INTEGER NOT NULL,
     stored_size  INTEGER NOT NULL,
@@ -179,7 +179,7 @@ Two builds computing the same snapshot produce byte-identical rows.
 ```sql
 CREATE TABLE assets (
     asset_id TEXT PRIMARY KEY NOT NULL,  -- the same string a document property holds
-    kind     TEXT NOT NULL,              -- load-bearing: what the asset is
+    kind     TEXT NOT NULL,              -- authoritative: what the asset is
     parts    BLOB NOT NULL,              -- an encoded vdoc value (array), see below
     meta     BLOB,                       -- an encoded vdoc value (object), informational
     deps     BLOB                        -- an encoded vdoc value (array of asset id strings)
@@ -266,7 +266,7 @@ CREATE TABLE workspace (
 
 A separate table precisely so it can be `DELETE FROM`-ed in its entirety without a second thought.
 
-- **Nothing here is load-bearing.** Discarding the whole table leaves a fully valid document.
+- **Nothing here is part of the document.** Discarding the whole table leaves a fully valid document.
 - **A workspace write creates no op and moves no ref.** Moving a camera must not become edit history, and must not make the document look unsaved.
 - `version` describes the shape of `value`; a reader that does not know a version **skips the entry and leaves it in place**.
 - Only dirty keys are written, which is what keeps a newer build's keys unclobbered by an older one.
@@ -405,13 +405,13 @@ Each op is inserted and then filled: the insert conflicts away where the row is 
 So the write never has to classify an op correctly in order to be correct.
 
 **A recovery can retire a prune boundary, and that is the only thing that moves `required` back to 0.**
-Once every op behind a required snapshot has its payload again, replaying reproduces exactly what the snapshot holds, so the row stops being load-bearing and is demoted to a droppable cache.
+Once every op behind a required snapshot has its payload again, replaying reproduces exactly what the snapshot holds, so the row is no longer the only copy and is demoted to a droppable cache.
 The demotion moves the flag alone — the chunks are already correct, and re-encoding a payload that can run to gigabytes to move one bit would be the expensive way to change nothing.
 
 Until that happens the boundary still binds, from the other direction: **a batch introducing an op that forks below a still-required snapshot is refused**.
 That op would present a writer the emptied ops superseded and nothing can suppress — the same fabricated multi-value pruning refuses to create.
 Sending the rest of that snapshot's ancestry in the same batch is what makes such a batch acceptable, which is why this is a boundary rather than a ban.
 
-The demotion is written **after** the fills, and the order is load-bearing.
+The demotion is written **after** the fills, and the order is fixed.
 A crash between them leaves a snapshot still marked required over history that is already back, which costs one pinned cache entry.
 The reverse would leave a droppable snapshot standing over history that is still gone, which is data loss.

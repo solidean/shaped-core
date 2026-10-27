@@ -174,7 +174,7 @@ TEST("args struct - the argv overload skips the program path")
 
 TEST("args struct - declare_args works on a builder the caller owns")
 {
-    // The by-reference path and the by-value path are the same declaration, which is the point.
+    // The by-reference path and the by-value path share one declaration.
     auto options = build_options();
     auto args = nx::args({});
     nx::declare_args(args, options);

@@ -19,6 +19,9 @@ add_library(shaped-rendering
     src/shaped-rendering/nrd_denoise_routine.cc
     src/shaped-rendering/oidn_denoise_routine.cc
     src/shaped-rendering/fsr_upscale_routine.cc
+    src/shaped-rendering/metalfx_rr_routine.cc
+    src/shaped-rendering/metalfx_upscale_routine.cc
+    src/shaped-rendering/impl/metalfx_passes.cc
     src/shaped-rendering/impl/tza.cc
     src/shaped-rendering/impl/oidn_network.cc
     src/shaped-rendering/compression/bc_compress_routine.cc
@@ -60,6 +63,11 @@ target_sources(shaped-rendering
     src/shaped-rendering/oidn_denoise_routine.hh
     src/shaped-rendering/fsr_upscale_routine.hh
     src/shaped-rendering/impl/fsr_backend.hh
+    src/shaped-rendering/metalfx_rr_routine.hh
+    src/shaped-rendering/metalfx_upscale_routine.hh
+    src/shaped-rendering/impl/metalfx_backend.hh
+    src/shaped-rendering/impl/metalfx_passes.hh
+    src/shaped-rendering/impl/jitter_sequence.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/compression/bc_compress_routine.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
@@ -174,6 +182,20 @@ else()
     unset(SC_DLSS_RUNTIME CACHE)
 endif()
 
+# Apple MetalFX's temporal upscaler, wherever the Metal backend is built.
+#
+# It encodes through sg's Metal native scope and links the framework through metal-cpp-metalfx, both PRIVATE: no
+# public header of ours names a Metal type.
+# Without the backend the routine still exists and reports `unsupported`, as the DLSS member does without its SDK.
+if(TARGET shaped-graphics-metal AND TARGET metal-cpp-metalfx)
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/metalfx_backend.cc)
+    target_link_libraries(shaped-rendering PRIVATE shaped-graphics-metal metal-cpp-metalfx)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_METALFX=1)
+else()
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/metalfx_null.cc)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_METALFX=0)
+endif()
+
 # AMD FSR 3.1's upscaler, where its sources were fetched (extern/fidelityfx).
 #
 # AMD's host code joins this library's objects and reaches the GPU only through the backend in impl/fsr_backend.cc.
@@ -228,7 +250,7 @@ endif()
 # sr's own shader packages, one per language: a package has one.
 # Must be declared here, in the CMakeLists that defines the target: the generated sources are added as PRIVATE sources and add_custom_command(OUTPUT) is directory-scoped.
 # A routine's shaders go in the SGL package, which reaches dx12, vulkan, webgpu and metal from one source.
-# The HLSL package holds the shaders not yet ported; docs/TODO.md says what holds each back.
+# The HLSL package holds the shaders that include a vendor SDK's own headers: FSR 3.1's passes and NRD's packing.
 #
 # Deliberately not gated on a compiler existing.
 # Package generation needs none — it emits C++ descriptors and embeds the sources;
@@ -263,61 +285,39 @@ sc_add_shader_package(
         raster_box_filter_mipmap.sgl:*
         nn_pool.sgl:*
         nn_upsample.sgl:*
+        nn_conv.sgl:*
+        nn_io.sgl:*
         slug_quads.sgl:*
+        mix.sgl:*
+        atrous_denoise.sgl:*
+        svgf.sgl:*
+        fsr_prepare_depth.sgl:*
+        fsr_clear_float.sgl:*
+        fsr_clear_uint.sgl:*
+        metalfx_prepare.sgl:*
+        metalfx_copy_out.sgl:*
+        box_filter_mipmap.sgl:*
 )
 
 # sr's SGL modules, which another package `use`s by naming this directory in its own MODULE_DIRS.
 # Module `slug` is Slug's coverage: a mesh's own pixel shader draws a shape on its surface through it.
 set(SR_SGL_MODULE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/shaders/modules" CACHE INTERNAL "sr's SGL module directory")
 
-sc_add_shader_package(
-    TARGET     shaped-rendering
-    NAME       sr_shaders
-    NAMESPACE  sr::shaders
-    SOURCE_DIR shaders
-    LANGUAGE   hlsl
-    SHADERS
-        box_filter_mipmap.hlsl:compute:main_1d_cs
-        box_filter_mipmap.hlsl:compute:main_1d_array_cs
-        box_filter_mipmap.hlsl:compute:main_2d_cs
-        box_filter_mipmap.hlsl:compute:main_2d_array_cs
-        box_filter_mipmap.hlsl:compute:main_3d_cs
-        atrous_denoise.hlsl:compute:main_cs
-        atrous_denoise.hlsl:binding:atrous_bindings
-        atrous_denoise.hlsl:constants:gConstants
-        svgf_temporal.hlsl:compute:main_cs
-        svgf_temporal.hlsl:binding:svgf_temporal_bindings
-        svgf_temporal.hlsl:constants:gConstants
-        svgf_variance.hlsl:compute:main_cs
-        svgf_variance.hlsl:binding:svgf_variance_bindings
-        svgf_variance.hlsl:constants:gConstants
-        svgf_atrous.hlsl:compute:main_cs
-        svgf_atrous.hlsl:binding:svgf_atrous_bindings
-        svgf_atrous.hlsl:constants:gConstants
-        mix.hlsl:compute:main_cs
-        mix.hlsl:binding:mix_bindings
-        mix.hlsl:constants:gConstants
-        fsr_prepare_depth.hlsl:compute:main_cs
-        fsr_prepare_depth.hlsl:binding:fsr_prepare_depth_bindings
-        fsr_prepare_depth.hlsl:constants:gConstants
-        fsr_clear_float.hlsl:compute:main_cs
-        fsr_clear_float.hlsl:binding:fsr_clear_float_bindings
-        fsr_clear_float.hlsl:constants:gConstants
-        fsr_clear_uint.hlsl:compute:main_cs
-        fsr_clear_uint.hlsl:binding:fsr_clear_uint_bindings
-        fsr_clear_uint.hlsl:constants:gConstants
-        ${_sr_fsr_shaders}
-        ${_sr_nrd_shaders}
-        nn_conv.hlsl:compute:main_cs
-        nn_conv.hlsl:binding:nn_conv_bindings
-        nn_conv.hlsl:constants:gConstants
-        nn_input.hlsl:compute:main_cs
-        nn_input.hlsl:binding:nn_input_bindings
-        nn_input.hlsl:constants:gConstants
-        nn_output.hlsl:compute:main_cs
-        nn_output.hlsl:binding:nn_output_bindings
-        nn_output.hlsl:constants:gConstants
-)
+# The HLSL package holds only what a vendor SDK brings, so a build without either SDK has none.
+set(_sr_hlsl_shaders ${_sr_fsr_shaders} ${_sr_nrd_shaders})
+if(_sr_hlsl_shaders)
+    sc_add_shader_package(
+        TARGET     shaped-rendering
+        NAME       sr_shaders
+        NAMESPACE  sr::shaders
+        SOURCE_DIR shaders
+        LANGUAGE   hlsl
+        SHADERS    ${_sr_hlsl_shaders}
+    )
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_HLSL_SHADERS=1)
+else()
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_HLSL_SHADERS=0)
+endif()
 
 # Test executable.
 # The window/input tests and the imgui arithmetic (scissor clamping, ortho projection, texture-rect packing) need no device and run everywhere;
@@ -327,6 +327,7 @@ if(SC_BUILD_TESTS)
     add_executable(shaped-rendering-test
         tests/main.cc
         tests/smoke-test.cc
+        tests/capture-request-test.cc
         tests/input-test.cc
         tests/window-test.cc
         tests/window-manual-test.cc
@@ -409,6 +410,8 @@ if(SC_BUILD_TESTS)
             tests/nn-resample-test.cc
             tests/slug-routine-test.cc
             tests/slug-traced-test.cc
+            tests/metalfx-test.cc
+            tests/dlss-rr-jitter-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
 
@@ -432,15 +435,18 @@ if(SC_BUILD_TESTS)
         target_sources(shaped-rendering-test PRIVATE tests/imgui-manual-test.cc)
     endif()
 
-    # The routines whose shaders are still HLSL need DXC, which reaches dx12 and vulkan and nothing else.
-    # A build with DXC has no other backend, so these never meet a context their shaders cannot reach.
+    # The tests held to dx12 and vulkan, which a build with DXC has and no other: NRD's and FSR's HLSL need DXC.
+    # The SGL routines among them are listed here until webgpu and metal are held to them too; issue: chore-sr-sgl-routines-on-webgpu-and-metal
     if(_sr_test_backends AND SC_HAS_DXC_COMPILER)
         target_sources(shaped-rendering-test PRIVATE
             tests/box-filter-mipmap-test.cc
             tests/denoise-test.cc
+            tests/denoise-reference-test.cc
+            tests/fsr-clear-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
             tests/nrd-test.cc
+            tests/svgf-reference-test.cc
             tests/oidn-test.cc
             tests/nn-conv-test.cc
             tests/nn-ops-test.cc
@@ -460,6 +466,29 @@ if(SC_BUILD_TESTS)
         else()
             target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
         endif()
+    endif()
+
+    # SGL against the hand-written HLSL each of these shaders was ported from, timed on a dx12 device.
+    # The HLSL is kept under tests/bench/shaders as it stood before the port, and nothing but the benchmark reads it.
+    if(_sr_test_backends AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
+        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-hlsl-benchmark.cc)
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_bench_hlsl_shaders
+            NAMESPACE  sr_bench::hlsl
+            SOURCE_DIR tests/bench/shaders
+            LANGUAGE   hlsl
+            SHADERS
+                atrous_denoise.hlsl:compute:main_cs
+                atrous_denoise.hlsl:binding:atrous_bindings
+                atrous_denoise.hlsl:constants:gConstants
+                svgf_atrous.hlsl:compute:main_cs
+                svgf_atrous.hlsl:binding:svgf_atrous_bindings
+                svgf_atrous.hlsl:constants:gConstants
+                nn_conv.hlsl:compute:main_cs
+                nn_conv.hlsl:binding:nn_conv_bindings
+                nn_conv.hlsl:constants:gConstants
+        )
     endif()
 
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.

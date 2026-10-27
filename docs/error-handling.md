@@ -31,7 +31,7 @@ It yields two hard rules:
   So they are **not** assertions; they are a `result` or an exception, per the sections below.
   "User" here is broad: the calling programmer's *arguments* can violate a contract, but data and conditions from outside the program never do.
 - **Assertions must be side-effect free.**
-  The checked expression must not be load-bearing for correctness — the program must behave identically with `CC_ASSERT` compiled out.
+  Correctness must not depend on the checked expression — the program must behave identically with `CC_ASSERT` compiled out.
   Temporary debug output inside a custom handler is fine.
 
 The test: *could a correct caller have avoided this by reading the docs and checking a cheap precondition?*

@@ -457,8 +457,8 @@ public:
                    "uint sgl_user_instance [[user_instance_id]], ray_data sgl_ray_data& sgl_data [[payload]])\n{\n";
             out += "    sgl_context const sgl_ctx = sgl_data.context;\n";
             write_context_bindings(out, p);
-            // TODO: metal hands a traversal function its instance's transforms only under intersection tags sg's
-            // tables do not declare, so a hit's transforms are the identity here
+            // A hit's transforms are the identity here: metal hands a traversal function its instance's transforms
+            // only under intersection tags sg's tables do not declare (issue: feat-sgl-metal-raytracing-pipeline-dxr-parity).
             out.appendf("    sgl_hit_record sgl_hit;\n"
                         "    sgl_hit.t = {};\n"
                         "    sgl_hit.t_min = sgl_min;\n"
@@ -528,6 +528,8 @@ public:
         write_bound_resources(out, p);
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
+            if (!p.stage_input_read[i])
+                continue;
             auto const local = p.e.stage_inputs[i].local;
             out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
                         stage_input_value(p, i));

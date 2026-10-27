@@ -79,7 +79,7 @@ ASYNC_INVOCABLE_TEST("sg dx12 - each resource counts its transfers on its own ti
     c.upload.bytes_to_buffer(a, cc::make_pinned_data(bytes_a));
     CHECK(da->_pending_async_upload_value.load() == a1 + 1); // one step, not two
 
-    // And the bytes still land, which is the point of all of it.
+    // And the bytes still land.
     auto const back_a = co_await c.download.bytes_from_buffer(a, 0, 1024).bytes();
     auto const back_b = co_await c.download.bytes_from_buffer(b, 0, 1024).bytes();
     CHECK(back_a[1023] == bytes_a[1023]);

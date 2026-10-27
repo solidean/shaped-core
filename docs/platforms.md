@@ -36,12 +36,13 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 | Linux | x64 | Clang | 1 | CI — the deep Debug / RelWithDebInfo / Release matrix |
 | Linux | x64 | GCC 14 (13+) | 1 | CI |
 | Linux | arm64 | Clang | 1 | CI — `ubuntu-26.04-arm`, native arm64 |
-| macOS | arm64 | Homebrew LLVM (clang) | 1 | CI |
+| macOS | arm64 | Homebrew LLVM (clang) | 1 | CI — macOS 26.0 and later, the [deployment target](requirements.md#macos-deployment-target-and-sdk) the presets pin |
 | WebAssembly | wasm32 | Emscripten (Clang) | 1 | CI — single-threaded, no WebGPU; runs under Node |
 | iOS | arm64 | Apple Clang | 2 | CI — build-only (cross-compiled, not test-run) |
 | Android | arm64 | NDK (Clang) | 2 | CI — build-only; `android-ndk-arm64-*` presets (NDK from `$ANDROID_NDK_ROOT`) |
 | SteamOS | x64 | Clang | 2 | No CI — built and run by hand, semi-regularly; see [SteamOS](#steamos) below |
 | WebAssembly + threads | wasm32 | Emscripten (Clang) | 2 | No CI — `-pthread`; `emscripten-threads-*` presets, run under Node |
+| WebAssembly memory64 | wasm64 | Emscripten (Clang) | 3 | No preset here — `-sMEMORY64=1` on every object, which a consumer sets; clean-core knows it as `CC_ARCH_WASM64` |
 | WebAssembly + WebGPU | wasm32 | Emscripten (Clang) | 2 | CI on `emscripten-threads-webgpu-relwithdebinfo` — emdawnwebgpu, and sg's webgpu backend; `emscripten-webgpu-*` presets for WebGPU alone |
 | WebAssembly — WASI | wasm32 | wasi-sdk (Clang) | 3 | planned |
 | Consoles | — | vendor toolchains | 3 | planned |
@@ -49,7 +50,8 @@ Never on the arch, and never on a hand-rolled `sizeof(void*) == 8`.
 Threads and WebGPU are independent knobs — `SC_THREADS` and `SC_WASM_WEBGPU` — so the wasm presets span all four of their combinations.
 All four build and run their suites; only the plain one is gated in CI, which is what keeps the other three at Tier 2.
 They are deployment tiers rather than a performance gradient: threads mean `SharedArrayBuffer` and therefore a cross-origin-isolated page, while WebGPU alone imposes no such requirement.
-`SC_WASM_EXCEPTIONS=wasm-exceptions` is the one knob that still fails configure as not-yet-supported — [requirements.md](requirements.md#emscripten--wasm) owns all three.
+`SC_WASM_EXCEPTIONS=wasm-exceptions` builds with wasm's own exception handling, Tier 3: no preset here sets it and CI does not run it.
+[requirements.md](requirements.md#emscripten--wasm) owns all three.
 
 **A wasm binary gets a native-sized stack**: 1 MiB for the main thread and for each pthread, where emscripten's default is 64 KiB.
 Overflowing it is no trap on wasm: the stack grows into the heap, and the crash surfaces later as an out-of-bounds read inside the allocator.
@@ -127,6 +129,31 @@ Windows is unaffected either way, since it never used the chain.
 So `OFF` means "this build does not capture stacks on clang or GCC" — which is a real choice for a shipping target that wants the register back, and never a free one.
 Expect roughly 0.5-2% and one register on x86-64 for keeping them, and next to nothing on arm64, where macOS mandates the chain anyway.
 
+## Source sites (`SC_SOURCE_SITES`)
+
+`SC_SOURCE_SITES` picks what a binary says about its own source at each `cc::source_location` → clean-core's `CC_SOURCE_SITES`:
+
+| Level | Kept at a site | For |
+|---|---|---|
+| `FULL` (default) | file, line and function, as strings, as `std::source_location` keeps them | development |
+| `OPAQUE` | the site's code address, nothing else | a shipped binary that should name none of its source, yet whose reports stay resolvable |
+| `OFF` | nothing | a binary that should say nothing at all |
+
+The sites are every capture of `cc::any_error`, `cc::error`, `async_fail`, the `CC_ASSERT` family, `cc::rec` and nexus.
+Below `FULL`, `file_name()` and `function_name()` are `""` and `line()` and `column()` are 0, so code reading them still compiles.
+`CC_SITE_TEXT(text)` is `text` at `FULL` and `""` below it: always-on checks lose their condition text, and an unnamed `cc::rec` scope its default name.
+`cc::describe_site` prints a site at every level, `module+0xoffset` at `OPAQUE`.
+
+**An `OPAQUE` site resolves through the build's debug info**, offline: the PDB on Windows, the DWARF or split debug file elsewhere.
+`llvm-symbolizer --inlining --obj=<module>` on the module's address plus the offset names it, inlined sites included.
+The innermost frames are `source_location.hh`'s own, since the address is taken by an instruction inlined into the site; the first frame outside it is the site.
+On clang and GCC that instruction is one `lea` (`adr` on arm64), the cost of `std::source_location`'s capture; cl.exe has no inline assembly there, so it is a call.
+A site evaluated in a constant expression has no code address, so it is unnamed below `FULL`: `cc::rec`'s descriptors are the case.
+wasm has no address to take either, so there `OPAQUE` keeps nothing, as `OFF` does.
+
+A whole-build switch, never per-target: `cc::source_location`'s layout changes with it.
+The `singlethreaded-*` presets build at `OPAQUE`, so `check` exercises a level below `FULL`; a test reading what only `FULL` keeps skips below it.
+
 ## x86-64 feature level (`SC_X64_LEVEL`)
 
 `SC_X64_LEVEL` (default `v3`) is the x86-64 feature level every function in the build may assume: `v1` (SSE2), `v2` (SSE4.2, POPCNT), `v3` (AVX2, FMA, F16C, BMI) or `v4` (AVX-512 F/BW/CD/DQ/VL).
@@ -176,7 +203,7 @@ Metal reports a command buffer's completion by calling back on a dispatch queue 
 An unthreaded Apple build would therefore run sg's completion work on a second thread, in a build that has compiled its locks out.
 MTL4 offers no pollable substitute: command-buffer errors reach us through that callback and nowhere else.
 
-The refusal is keyed on the **target**, not the host, and that distinction is the point.
+The refusal is keyed on the **target**, not the host.
 A Mac cross-compiling to wasm is not an Apple target, so the `emscripten-*` presets stay single-threaded and configure fine from macOS — which is how a Mac exercises the unthreaded mode.
 
 No API appears or disappears with it.
@@ -242,6 +269,15 @@ The targeted tests — rounding, signed zeros, the edge lanes, permute, the loop
 Only the test binary sees it, and the dispatched battery's kernel TUs through it, so it is no ODR hazard and may differ between targets.
 The `debug-nopch` presets turn it on, so `dev.py check`'s debug leg and CI still build and run the full set.
 
+## Frozen shaders (`SC_FROZEN_SHADERS`)
+
+`SC_FROZEN_SHADERS` (default `OFF`) is the shipping mode for shaders, and reaches slib as `SLIB_FROZEN_SHADERS`, 0 or 1.
+On, no shader source is read from disk and nothing hot-reloads.
+An executable that calls `sc_embed_shader_bundle` also serves the bytecode a recording run of it compiled, and compiles the rest from its embedded sources.
+
+It is whole-build, set by the `frozen-*` presets, which is how `dev.py install shaped-view` builds the copy it installs.
+[frozen-shaders](../libs/graphics/shaped-shader-library/docs/frozen-shaders.md) is the design.
+
 ## Example backend (`SC_EXAMPLE_BACKEND`)
 
 `SC_EXAMPLE_BACKEND` (default `auto`) picks which graphics backend the `*-example` binaries are built and linked against: `auto`, `dx12`, `vulkan`, `metal` or `webgpu`.
@@ -283,6 +319,8 @@ It is declared unconditionally in the root `CMakeLists.txt`, so the cache entry 
 
 The standard **Debug / RelWithDebInfo / Release** build types should all work on every supported platform.
 RelWithDebInfo and Debug have `CC_ASSERT` **on**, Release **off**.
+**Release on Windows writes a PDB beside each binary** (`/Z7`, `/DEBUG /OPT:REF /OPT:ICF`): the same code, and a crash in a release build symbolizes.
+Elsewhere Release has no debug info, since `-g` would put it into the binary itself.
 In CI, only **Linux clang** exercises the full Debug / RelWithDebInfo / Release matrix; every other Tier-1 platform is built and tested at **RelWithDebInfo** only.
 Clang platforms additionally carry sanitizer and coverage presets — see [sanitizers](guides/building-and-testing.md#sanitizers) and [coverage.md](guides/coverage.md).
 The two sanitizer families cannot be combined, so they are separate presets: `sanitize-*` is ASan + UBSan at Debug, `sanitize-thread-*` is ThreadSanitizer at RelWithDebInfo.

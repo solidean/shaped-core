@@ -136,7 +136,7 @@ The error says which it is, but not hitting it at all is better.
       https://github.com/ocornut/imgui/releases/tag/v1.92.9
 ```
 
-That is the point of reading notes at all.
+Reading the notes turns a version gap into something to act on.
 "seven releases behind" is a shrug; "seven releases behind, one of which fixes a use-after-free" is a decision.
 
 Where the notes come from depends on the track, and none of it costs an extra round trip worth worrying about.

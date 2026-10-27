@@ -48,7 +48,7 @@ TEST("cc resource_limits - recommended_worker_count is usable and bounded")
 
 TEST("cc resource_limits - the machine description is never clamped to the limits")
 {
-    // The whole point of the split: a stamp says what the host is, whatever this process may use of it.
+    // Split from the limits so a stamp says what the host is, whatever this process may use of it.
     // So the machine count must not shrink just because a quota exists.
     auto const before = cc::get_system_info().logical_cores();
     (void)cc::query_resource_limits();

@@ -266,7 +266,7 @@ ASYNC_INVOCABLE_TEST("sg vulkan - the debug messenger reaches the installed call
 
     // A zero-size buffer violates VUID-VkBufferCreateInfo-size-00912, which the layer reports and the driver then
     // rejects — a pure diagnostic with no object created and nothing to clean up.
-    // Going through vkCreateBuffer directly is the point: create_vulkan_buffer treats size 0 as a legal empty buffer
+    // Through vkCreateBuffer directly, because create_vulkan_buffer treats size 0 as a legal empty buffer
     // and never calls Vulkan, so only the raw call can provoke the layer.
     auto const info = VkBufferCreateInfo{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,

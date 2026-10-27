@@ -1,8 +1,10 @@
 #include <clean-core/common/time.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/error/exception.hh> // std::exception, to classify one that escaped a compute frame
 #include <clean-core/error/exception_base.hh>
 #include <clean-core/memory/node_allocation.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_backlog.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/impl/async_parker.hh>
 #include <clean-core/thread/impl/async_tls.hh>
@@ -817,6 +819,19 @@ void cc::async_node_base::unsubscribe_all_slow()
         });
 }
 
+CC_COLD_FUNC void cc::async_node_base::abandon_running_deps()
+{
+    // Scheduled or running, a dep keeps itself alive until it settles, so the weak entry waits for all of it.
+    // A parked dep is held elsewhere, or torn down after this node and its own deps judged the same way.
+    deps().for_each(
+        [](impl::async_dep_entry e)
+        {
+            auto const ds = e.dep()->load_state(cc::memory_order_acquire);
+            if (ds == async_node_state::scheduled || ds == async_node_state::running)
+                impl::async_track_abandoned(e.dep());
+        });
+}
+
 void cc::async_node_base::add_continuation(async_node_base* dependent)
 {
     lock_scope g(this);
@@ -842,9 +857,9 @@ cc::async_error cc::impl::async_error_propagate(async_error const& e)
     if (e.is_cancelled())
         return async_error::make_cancelled();
 
-    // cc::any_error is move-only and a shared node's error must not be moved out, so re-materialize the message.
-    // The context chain is lost — a richer error-sharing scheme is a follow-up.
-    return async_error::make_error(cc::any_error(e.underlying().to_string()));
+    // cc::any_error is move-only and a shared node's error must not be moved out, so each dependent gets a clone.
+    // It keeps the root's message, site and context chain: a chain of any length reports the error as it was raised.
+    return async_error::make_error(e.underlying().clone());
 }
 
 cc::async_error cc::custom::async_error_from_exception_trait<cc::async_error>::make(cc::string_view message)
@@ -883,6 +898,15 @@ bool cc::async_node_base::install_completion_hook_or_ready(void (*fn)(void*), vo
     return false;
 }
 
+namespace
+{
+// A teardown that drops the last reference to another node queues it here instead of tearing it down inside its own.
+// A parked frame holds the node it awaits, so a chain of parked coroutines would otherwise tear down as one recursion per link.
+// The outermost teardown on the thread drains the queue before it returns, so a drop still finishes everything it releases.
+thread_local bool t_tearing_down = false;
+thread_local cc::vector<cc::async_node_base*> t_teardown_queue;
+} // namespace
+
 bool cc::async_node_base::destroy_payload()
 {
     // The homed test rides on the word teardown reads anyway.
@@ -890,7 +914,22 @@ bool cc::async_node_base::destroy_payload()
     auto const s = async_node_state((w & state_mask) >> state_shift);
     if ((w & homed_bit) != 0) [[unlikely]]
         return teardown_payload_or_defer(s);
+
+    if (t_tearing_down)
+    {
+        // Queued, the queue owns the strong owners' collective weak count, as a home does for a deferred teardown.
+        // The sole-owner fast path leaves the counts reading (1,1); nothing can race the store, as there.
+        if ((_counts.load(cc::memory_order_acquire) >> 32) != 0)
+            _counts.store(cc::fused_refcount::weak_unit, cc::memory_order_relaxed);
+        t_teardown_queue.push_back(this);
+        return true;
+    }
+
+    t_tearing_down = true;
     teardown_payload_as(s);
+    while (!t_teardown_queue.empty())
+        impl::async_run_deferred_teardown(t_teardown_queue.pop_back()); // may queue more
+    t_tearing_down = false;
     return false;
 }
 
@@ -920,6 +959,9 @@ CC_FORCE_INLINE void cc::async_node_base::teardown_payload_as(async_node_state c
         // Strong-0, so nothing races the read: a never-resolved homed node stops counting against its home.
         auto* const home
             = (s != async_node_state::external_pending && is_homed()) ? impl::async_home_of(home_word()) : nullptr;
+        // A parked node's deps outlive it, and one still running is then awaited by nobody.
+        if (s == async_node_state::blocked && !deps().empty()) [[unlikely]]
+            abandon_running_deps();
         unsubscribe_all();
         destroy_frame();                  // a never-resolved frame (dropped cold, or parked) — a plain ~F, so
                                           // no re-entrancy contract applies here; it just releases its captures

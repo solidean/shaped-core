@@ -30,7 +30,7 @@ static_assert(classifies_non_finite<float>);
 static_assert(!classifies_non_finite<int>);
 
 // The exponent must be an integer type, so `scale_by_pow2(x, 1.5f)` is a compile error rather than a silent
-// truncation to 1 — the whole point of the family being exact.
+// truncation to 1, because the family is exact.
 template <class T, class N>
 concept scales_by_pow2 = requires(T x, N n) { tg::scale_by_pow2(x, n); };
 template <class T, class N>

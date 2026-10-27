@@ -222,7 +222,7 @@ sg::create_webgpu_context(WGPUDevice, webgpu_config = {}) // -> cc::result<conte
 //   (a test body making bound calls asks for main_thread). See backends/webgpu/readme.md
 #include <shaped-graphics/backends/dx12/dx12_context.hh>
 sg::create_dx12_context(dx12_config = {})          // -> cc::result<context_handle>
-// dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware hides WARP, =none hides both); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
+// dx12_config { activate_global_debug_layer=false; adapter=hardware (or warp / hardware_or_warp; SC_DX12_ADAPTER=warp hides hardware process-wide, =hardware hides WARP — every Microsoft-vendor adapter, flagged or not —, =none hides both); upload_ring_bytes/download_ring_bytes/async_{upload,download}_window_bytes=16 MiB; descriptor+sampler heap sizing }
 // GOTCHA: activate_global_debug_layer is PROCESS-wide and one-way, unlike vulkan's per-instance enable_validation_layers.
 //   false = 'this context does not ask for it', NOT 'this context is unvalidated' — nothing ever deactivates it.
 //   it must be activated before the process's FIRST device: a later activation is refused, because performing it
@@ -309,7 +309,7 @@ cmd.download.data_from_buffer(typed_buf[, off, count])        // -> sg::data_fut
 cmd.download.bytes_from_texture(tex, subresource={}, region={}) // -> sg::bytes_future — inline read one texture (sub)region back (needs copy_src), tightly packed; ready once the submitted list runs
 cmd.ensure_layout(tex, layout, range={})                      // void — leave `tex` in `layout` when this list submits; saves the NEXT consumer a transition. no buffer overload (no layout)
 cmd.prepare_for_async(tex, direction, range={})               // void — ensure_layout with the layout the BACKEND picks for ctx.upload/download/stream. sg::async_direction::{upload,download,both}
-                                                              //   only needed after a list MOVED the texture: skip it then and the transfer submits a one-transition list itself and WARNS once per texture. general on all three backends today (see docs/TODO.md)
+                                                              //   only needed after a list MOVED the texture: skip it then and the transfer submits a one-transition list itself and WARNS once per texture. general on all three backends today (see perf-sg-direction-specific-async-layout)
                                                               //   a FRESH texture needs nothing: its first async upload runs the one-time UNDEFINED transition on the transfer queue (vulkan), and dx12 starts in COMMON
 sg::subresource_index  // { int mip_level=0; int array_layer=0; texture_aspect aspect=color }  — addresses one subresource (point analog of subresource_range); <shaped-graphics/resource/subresource.hh>
 sg::texture_region     // { tg::pos3i offset; tg::vec3i size } — a texel box. the copy APIs take cc::optional<texture_region>: none = whole subresource, empty (size<=0) = no-op, else bounds-checked. block-aligned for BC. host bytes TIGHTLY packed (row = width-in-blocks × block-bytes); <shaped-graphics/resource/texture_region.hh>
@@ -353,7 +353,7 @@ cmd.raster.bind_index_buffer(ibuf->as_index_buffer(sg::index_format::uint16))  /
 cmd.raster.set_viewport(vp) / .set_scissor(rect)       // void — override the scope's viewport / scissor
 cmd.raster.set_stencil_reference(u32) / .set_blend_constants(tg::vec4f)  // void — dynamic depth-stencil / blend state; blend constants are 0 until set, per rendering scope
 cmd.raster.set_inline_constants(data|POD, offset={})   // void — root/push constants (same as cmd.compute)
-cmd.raster.declare_array_buffer_access(name, elements) / declare_array_texture_access(name, elements)  // void — as on cmd.compute, next draw only
+cmd.raster.declare_array_buffer_access(G::arrays::member | "name", elements) / declare_array_texture_access(…)  // -> sg::array_access_declaration — as on cmd.compute, every draw while it lives; also ends with the scope
                                                          //   an element is tracked at the stages the code touches its array in (every stage of the op without a footprint)
 cmd.raster.draw({.vertex_range={.offset=0,.size=3}, .instance_range={.offset=0,.size=1}})   // void — ranges are cc::offset_size {first, count}
 cmd.raster.draw_indexed({.index_range={.offset=0,.size=N}, .instance_range={.offset=0,.size=1}, .vertex_offset=0})  // void
@@ -773,18 +773,27 @@ arr.slot() / capacity() / occupied_count() / pinned_count()  // -> binding_slot 
 // recording (on a command_list, via the cmd.compute scope):
 cmd.compute.bind_pipeline(pipeline)      // void — active pipeline (caches its workgroup size + bound pipeline layout)
 cmd.compute.bind_group(group_index, group) // void — bind a binding_group at slot `group_index` (indexes the pipeline layout's groups; asserts a pinned group's index matches)
-cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups
-cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis
+cmd.compute.dispatch_groups(x, y, z)     // void — dispatch x*y*z workgroups; each count ASSERTS <= sg::max_dispatch_groups_per_dimension (65535)
+cmd.compute.dispatch_threads(x, y, z)    // void — dispatch ceil(threads / workgroup_size) groups per axis, under the same 65535 cap: nothing splits a larger 1D range
 cmd.compute.dispatch_groups_indirect(args, index = 0)  // void — the group counts buffer<sg::dispatch_args> element `index` holds, read by the GPU at the dispatch
                                          //   sg::dispatch_args { u32 x = 0, y = 1, z = 1 } — a shader's own uint3 struct re-types with reinterpret_as<sg::dispatch_args>()
                                          //   args need buffer_usage::indirect_command_buffer (+ readwrite_buffer for the shader that writes them)
-                                         //   each count must be at most 65535; larger is undefined, and webgpu skips the dispatch
+                                         //   each count must be at most 65535 too; larger is undefined, and webgpu skips the dispatch
                                          //   the args must not be bound writable to the same dispatch (webgpu refuses it); bytes: dispatch_groups_indirect_bytes(raw_buffer_handle, offset_in_bytes % 4 == 0)
 //   a dispatch or draw asserts where one buffer is bound writable AND read another way (webgpu refuses it); two writable views are fine
-cmd.compute.declare_array_buffer_access(name, elements)  // void — per-element access for a buffer array/bindless binding, next dispatch only
-cmd.compute.declare_array_texture_access(name, elements) // void — same for a texture array (elements also carry a layout)
-                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pair)
+auto d = cmd.compute.declare_array_buffer_access(G::arrays::member, elements)  // [[nodiscard]] -> sg::array_access_declaration — in force for EVERY dispatch/trace while `d` lives
+cmd.compute.declare_array_texture_access(G::arrays::member, elements) // same for a texture array (elements also carry a layout)
+                                                         // G::arrays::member is the sg::buffer_array_binding / sg::texture_array_binding the shader package generates: a typo does not compile
+cmd.compute.declare_array_buffer_access("set.name", elements)  // by reflection name, for a layout no package generates (reflected, hand-written)
+                                                         //   ASSERTS at the declare unless a layout this context holds has a buffer (texture) array of that name
+                                                         // (scalar bindings are inferred; arrays can't be — declare them; cmd.raytracing and cmd.raster have the same pairs)
                                                          // an array the code indexes and nobody declared LOGS and gets a global barrier; one it never indexes needs none
+d.withdraw();                                            // ends it now; destroying it does the same. Move-only; a moved-from one ends nothing; ending one never asserts
+                                                         // compute + raytracing are one bind point; a pipeline/group rebind ends nothing; an op binding no such array leaves it dormant
+                                                         // once applied, a later op reading the array at stages and access it already applied skips the element work
+                                                         //   GOTCHA: the write counter is per LIST — a write to any resource any application tracked ends EVERY application,
+                                                         //   and an op at new stages or access re-applies once
+                                                         // a submitted or dropped list ends its declarations silently; a value outliving it then does nothing
 
 // raster_pipeline — a graphics PSO. Owns its shaders; formats/state baked in. Draws via cmd.raster (above).
 //   bind_pipeline ASSERTS the rendering's color count/formats, depth format and sample count equal pipeline.target_formats()
@@ -1046,7 +1055,7 @@ dctx.create_dx12_command_list()           // -> cc::result<std::unique_ptr<dx12_
 // the sg::context virtuals are thin forwarders to these backend-typed methods
 // escape hatch: dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get()) — "here be dragons"
 
-// foreign code recording onto an sg list (a vendor SDK, a capture tool) — dx12 only, see docs/concepts/barriers.md
+// foreign code recording onto an sg list (a vendor SDK, a capture tool) — dx12 and metal, see docs/concepts/barriers.md
 #include <shaped-graphics/backends/dx12/dx12_native_scope.hh>
 auto const native = sg::backend::dx12::dx12_native_scope::open(cmd,   // -> dx12_native_scope (RAII; no rendering scope open)
     {{.texture = tex, .access = sg::access_flag::shader_write, .stages = sg::pipeline_stage_flag::compute}},
@@ -1056,4 +1065,13 @@ native.resource(tex)                   // -> ID3D12Resource*; ASSERTS on a handl
 // open transitions each declared resource and records that as its state; ~scope forgets the list's bind state
 // sg never rebinds by itself: bind a pipeline again before the next draw or dispatch — one that does not ASSERTS
 // under-declaring corrupts the tracker: declare everything the foreign call touches, and nothing it does not
+
+// the Metal twin — foreign encoders meet sg's at a fence, see docs/concepts/barriers.md
+#include <shaped-graphics/backends/metal/metal_native_scope.hh>
+auto const native = sg::backend::metal::metal_native_scope::open(cmd, textures, buffers); // -> metal_native_scope (RAII)
+native.command_buffer() / native.device() / native.compiler()  // -> MTL4::CommandBuffer* / MTL::Device* / MTL4::Compiler*
+native.fence()                         // -> MTL::Fence*: the foreign work MUST wait for it first and update it last
+native.texture(tex) / native.buffer(buf)  // -> MTL::Texture* / MTL::Buffer*; ASSERTS on a handle the scope did not declare
+// MetalFX: set the effect's `fence` to native.fence() and it does both halves itself
+// record no sg work while the scope is alive — an sg encoder opened inside it ASSERTS; let the scope go first
 ```

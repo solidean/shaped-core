@@ -29,6 +29,8 @@
 template <int D, class T>
 struct tg::frustum
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a frustum is 3D");
 
     plane<D, T> planes[6] = {};
@@ -51,31 +53,27 @@ public:
     ///
     /// A point is inside when its clip coordinates satisfy -w <= x <= w, -w <= y <= w and 0 <= z <= w, and each of
     /// those six inequalities is a plane in world space read off the rows of the matrix.
-    /// Other depth conventions get their own named factories when a caller needs one.
     /// A projection with an infinite far plane has nothing to read there, and gives the frustum an absent far plane.
+    /// tg::view_projection::frustum picks the factory matching its depth convention.
     [[nodiscard]] static constexpr frustum make_from_view_projection(projective_transform<D, T> const& vp)
         requires(tg::traits::has_sqrt<T>)
     {
-        auto const m = vp.to_mat();
-        auto const row = [&](int r)
-        { return vec<4, T>(m.cols[0].data[r], m.cols[1].data[r], m.cols[2].data[r], m.cols[3].data[r]); };
-        // a clip-space half-space a . (x, 1) >= 0, as a world plane with its normal pointing out
-        auto const outward = [](vec<4, T> const& a)
-        {
-            auto const n = vec<3, T>(a.data[0], a.data[1], a.data[2]);
-            auto const l = n.length();
-            return plane<D, T>(-n / l, a.data[3] / l);
-        };
-        auto const r0 = row(0);
-        auto const r1 = row(1);
-        auto const r2 = row(2);
-        auto const r3 = row(3);
-        // infinite far: the z row has no xyz part, so z >= 0 holds everywhere in front of the camera
-        auto const far_
-            = tg::traits::is_zero(r2.data[0]) && tg::traits::is_zero(r2.data[1]) && tg::traits::is_zero(r2.data[2])
-                ? plane<D, T>(vec<D, T>(), T(0))
-                : outward(r2);
-        return frustum(outward(r3 + r0), outward(r3 - r0), outward(r3 + r1), outward(r3 - r1), outward(r3 - r2), far_);
+        // near is z <= w, far is z >= 0
+        return frustum::make_from_clip_rows(vp, vec<4, T>(T(0), T(0), T(-1), T(1)), vec<4, T>(T(0), T(0), T(1), T(0)));
+    }
+
+    /// The same for a forward [0, 1] depth range, near to 0 and far to 1: D3D's, Vulkan's and Metal's classic one.
+    [[nodiscard]] static constexpr frustum make_from_view_projection_zero_to_one(projective_transform<D, T> const& vp)
+        requires(tg::traits::has_sqrt<T>)
+    {
+        return frustum::make_from_clip_rows(vp, vec<4, T>(T(0), T(0), T(1), T(0)), vec<4, T>(T(0), T(0), T(-1), T(1)));
+    }
+
+    /// The same for OpenGL's [-1, 1] depth range, near to -1 and far to 1.
+    [[nodiscard]] static constexpr frustum make_from_view_projection_minus_one_to_one(projective_transform<D, T> const& vp)
+        requires(tg::traits::has_sqrt<T>)
+    {
+        return frustum::make_from_clip_rows(vp, vec<4, T>(T(0), T(0), T(1), T(1)), vec<4, T>(T(0), T(0), T(-1), T(1)));
     }
 
     // readings
@@ -233,12 +231,48 @@ public:
     // comparison
 public:
     [[nodiscard]] friend constexpr bool operator==(frustum const&, frustum const&) = default;
+
+private:
+    /// `near_a` and `far_a` are the clip-space half-spaces a . (x, y, z, w) >= 0 the depth convention bounds depth by.
+    /// A far half-space with no xyz part holds everywhere in front of the camera: an infinite far plane, left absent.
+    [[nodiscard]] static constexpr frustum make_from_clip_rows(projective_transform<D, T> const& vp,
+                                                               vec<4, T> const& near_a,
+                                                               vec<4, T> const& far_a)
+        requires(tg::traits::has_sqrt<T>)
+    {
+        auto const m = vp.to_mat();
+        auto const row = [&](int r)
+        { return vec<4, T>(m.cols[0].data[r], m.cols[1].data[r], m.cols[2].data[r], m.cols[3].data[r]); };
+        auto const r0 = row(0);
+        auto const r1 = row(1);
+        auto const r2 = row(2);
+        auto const r3 = row(3);
+        // the world-space half-space of a clip-space one: a . (M (x, 1)) = (a^T M) . (x, 1)
+        auto const world
+            = [&](vec<4, T> const& a) { return r0 * a.data[0] + r1 * a.data[1] + r2 * a.data[2] + r3 * a.data[3]; };
+        // a half-space a . (x, 1) >= 0, as a world plane with its normal pointing out
+        auto const outward = [](vec<4, T> const& a)
+        {
+            auto const n = vec<3, T>(a.data[0], a.data[1], a.data[2]);
+            auto const l = n.length();
+            return plane<D, T>(-n / l, a.data[3] / l);
+        };
+        auto const far_world = world(far_a);
+        auto const far_ = tg::traits::is_zero(far_world.data[0]) && tg::traits::is_zero(far_world.data[1])
+                               && tg::traits::is_zero(far_world.data[2])
+                            ? plane<D, T>(vec<D, T>(), T(0))
+                            : outward(far_world);
+        return frustum(outward(r3 + r0), outward(r3 - r0), outward(r3 + r1), outward(r3 - r1), outward(world(near_a)),
+                       far_);
+    }
 };
 
 /// The six faces of a tg::frustum, intrinsic_dim 2.
 template <int D, class T>
 struct tg::frustum_boundary
 {
+    using scalar_t = T;
+
     static_assert(D == 3, "a frustum is 3D");
 
     plane<D, T> planes[6] = {};

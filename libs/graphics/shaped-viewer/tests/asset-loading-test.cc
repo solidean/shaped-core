@@ -7,6 +7,8 @@
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
+#include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/spin.hh>
 #include <nexus/test.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
 #include <shaped-viewer/material/material.hh>
@@ -22,7 +24,7 @@ using namespace cc::primitive_defines;
 // CPU-only tests for the asset importer.
 //
 // No GPU and no filesystem: every document is built in memory, and the uri path runs through a resolver the test
-// installs — which is the whole point of the loader holding no device and opening no file.
+// installs, which the loader allows by holding no device and opening no file.
 
 namespace
 {
@@ -748,8 +750,8 @@ TEST("sv::asset - an async load lands whole, and its materials are minted where 
     CHECK(pending.is_ready());
     CHECK(!pending.has_error());
 
-    // The same asset the synchronous path produces, materials included — which is the point of splitting the import
-    // rather than only moving it.
+    // The same asset the synchronous path produces, materials included, because the import is split rather than only
+    // moved.
     REQUIRE(pending.meshes().size() == 2);
     CHECK(pending.meshes()[0].name == "red");
     CHECK(pending.data().material("red") != sv::material_id::invalid);
@@ -759,6 +761,51 @@ TEST("sv::asset - an async load lands whole, and its materials are minted where 
     // Polling again is idempotent, which is what lets a frame loop call it unconditionally.
     CHECK(pending.poll());
     CHECK(pending.meshes().size() == 2);
+}
+
+TEST("sv::asset - dropping a load in flight waits for its worker to leave the loader")
+{
+    // The worker reads the loader's config throughout, so a drop that returned while it ran would leave it reading a
+    // loader the caller destroys next — the Sponza example did exactly that when its capture ended mid-load.
+    // This pins the contract rather than racing for the bug: a worker held until the drop returns would deadlock a drop
+    // that waits, so a drop that does not wait fails here only when it beats the worker's last store.
+    auto lib = make_library();
+    auto entered = cc::atomic<bool>(false);
+    auto dropping = cc::atomic<bool>(false);
+    auto finished = cc::atomic<bool>(false);
+
+    // Held inside the loader until the drop has begun, so the drop always meets a worker that is still there.
+    auto const resolve = [&](cc::string_view) -> cc::result<cc::pinned_data<byte const>>
+    {
+        entered.store(true);
+        while (!dropping.load())
+            cc::spin_pause();
+        finished.store(true);
+
+        auto text = cc::vector<byte>();
+        for (auto const c : two_material_obj)
+            text.push_back(byte(c));
+        return cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(text)));
+    };
+
+    auto const loader = sv::asset_loader({.materials = &lib, .resolve = resolve});
+    {
+        auto pending = loader.load_async("mem/quad.obj");
+
+        // Without threads nothing runs until the drop drives it, so there is no worker to wait for here.
+#if CC_HAS_THREADS
+        while (!entered.load())
+            cc::spin_pause();
+#endif
+        dropping.store(true);
+    }
+
+#if CC_HAS_THREADS
+    CHECK(finished.load());
+#else
+    // Dropped before anything ran it, which the loader sees before it fetches: the load never starts.
+    CHECK(!entered.load());
+#endif
 }
 
 TEST("sv::asset - a load that cannot be resolved reports it rather than throwing")

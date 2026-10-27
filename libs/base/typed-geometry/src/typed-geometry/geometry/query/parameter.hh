@@ -14,7 +14,12 @@ template <class A, class B>
 [[nodiscard]] constexpr auto intersection_parameter_with(A const& a, B const& b)
 {
     if constexpr (has_op<intersection_parameter_op, A, B>)
+    {
+        // the empty set has no crossing; a default-constructed result is no hits, or no interval
+        if (impl::is_empty_set(b))
+            return decltype(intersection_parameter_op<A, B>::apply(a, b))();
         return intersection_parameter_op<A, B>::apply(a, b);
+    }
     else
         static_assert(false, "tg: no intersection_parameter_with for this pair of types; "
                              "tg::has_intersection_parameter_with<A, B> is the probe");

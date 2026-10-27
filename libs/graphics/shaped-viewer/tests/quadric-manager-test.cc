@@ -17,10 +17,20 @@ using namespace cc::primitive_defines;
 //
 // This needs a ray-tracing device, because the thing being tested IS the acceleration structure build — a procedural BLAS over
 // AABBs rather than triangles, which is the first use of that path anywhere in sv.
+// The upload itself needs none: a batch lands without a BLAS, and the first trace that reaches it asks for one.
 // What the batch is made of, and what its content hash promises, is covered without a device in quadric-set-test.cc.
 
 namespace
 {
+/// `id`'s BLAS, built on a list of its own, as the first trace reaching the batch would build it.
+[[nodiscard]] sg::blas_handle build_blas(sg::context& ctx, sv::quadric_manager& manager, sv::quadric_set_id id)
+{
+    auto cmd = ctx.create_command_list();
+    auto blas = manager.acquire_blas(*cmd, id);
+    ctx.submit_command_list(cc::move(cmd));
+    return blas;
+}
+
 /// A small batch of both primitive kinds, built the way a caller would.
 sv::quadric_set structure_of(float radius)
 {
@@ -62,7 +72,13 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch streams in and gets a procedural BLAS
 
     CHECK(manager.get(id).state == sv::residency::complete);
     CHECK(manager.settling_count() == 0);
-    CHECK(manager.get(id).blas != nullptr);
+
+    // Landed is drawable, and the BLAS still waits for a trace: a batch only ever rasterized never builds one.
+    CHECK(manager.get(id).blas == nullptr);
+    auto const blas = build_blas(ctx, manager, id);
+    CHECK(blas != nullptr);
+    CHECK(manager.get(id).blas == blas); // held, so the next trace builds nothing
+    CHECK(build_blas(ctx, manager, id) == blas);
 
     // Both buffers are real, and they are separate: the boxes are the build input and the primitives are the
     // intersection shader's, which is why a batch is two buffers rather than one.
@@ -120,7 +136,7 @@ ASYNC_INVOCABLE_TEST("sv - the resource manager drains quadric batches with ever
     m.wait_for_pending_uploads();
 
     CHECK(m.quadrics.get(id).state == sv::residency::complete);
-    CHECK(m.quadrics.get(id).blas != nullptr);
+    CHECK(m.quadrics.get(id).blas == nullptr); // a trace asks for it
     CHECK(m.settling_count() == 0);
 
     co_return;
@@ -141,7 +157,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch can be a single primitive", (sg::cont
     manager.wait_for_settled();
 
     CHECK(manager.get(id).state == sv::residency::complete);
-    CHECK(manager.get(id).blas != nullptr);
+    CHECK(build_blas(ctx, manager, id) != nullptr);
     CHECK(manager.get(id).primitive_count == 1);
     CHECK(manager.get(id).aabbs.element_count() == 1);
 

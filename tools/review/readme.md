@@ -191,7 +191,8 @@ The maintainer answers whenever, says so, and the agent runs `delta <name> --fin
   It fails with what the server printed when nothing answers within ten seconds; that output is otherwise in `.serve.log` in the review folder.
 - **The page can close its own server**, with `Close server` in the toolbar, and `review stop <name>` does it from a terminal.
   An agent starts `serve` in the background, so there is no window to interrupt — without either of those the only way out is finding the process.
-- The first run pays a `uv` resolve for `pygments` and `markdown-it-py`. That is the dependency cost, and it is cached afterwards.
+- The first run pays a `uv` resolve for `pygments` and `markdown-it-py`.
+  That is the dependency cost, and it is cached afterwards.
 
 **`Send to Claude` shows the round before it sends it.**
 An ask counts as answered on its first selection, so a checkbox left untaken reads exactly like one nobody saw.
@@ -228,14 +229,14 @@ Named here rather than left to be discovered.
   so ordering is not actually captured.
   Use `radio:` and `check:` until it is.
 - **A review folder is scratch.** It lives under `.tmp/`, the tool changes under it, and there is no migration promise;
-  making a review a durable artifact is in [TODO.md](TODO.md).
+  making a review a durable artifact is [feat-review-export](docs/issues/feat-review-export.md).
 - **Symbol links do not exist.** File, folder and commit references resolve; a `sg::context::download` in prose does not.
 - **The published page has no offline form.** `show --all` is the fallback for reading a review away from the machine,
   and answers come back as chat text.
 
 ## Elsewhere
 
-- [TODO.md](TODO.md) — ideas agreed in a session but not built, as opposed to the known gaps above.
+- [docs/issues/](docs/issues/) — ideas agreed in a session but not built, and small fixes, one file each.
 - [docs/_index.md](docs/_index.md) — the design: the coverage model, the block grammar, the folder format.
 - [docs/guides/reviewing-prs.md](../../docs/guides/reviewing-prs.md) — what we look for in a review, which is the taste this tool carries rather than replaces.
 - [the `reviewing-a-pr` skill](../../.claude/skills/reviewing-a-pr/SKILL.md) — how a session drives all of this.
