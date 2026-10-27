@@ -1,0 +1,79 @@
+// The raster path's culling: one thread per draw, deciding whether its instance's box reaches the camera's view.
+//
+// A draw it rejects keeps its arguments with an instance count of 0, which `draw_indexed_indirect` draws nothing for.
+// So the CPU records one indirect draw per material permutation, whatever the culling decides.
+// sv::raster_routine dispatches it, and libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md is the design.
+use raster
+use scene
+use tracer
+
+/// One draw's object-space box, which the cull kernel tests through its instance's placement.
+struct cull_item:
+    box_min: float3
+    /// 1 where the box is known; 0 draws the row whatever the camera sees
+    has_box: uint
+    box_max: float3
+    pad: uint
+
+/// `sg::draw_indexed_args`, field for field.
+struct draw_args:
+    index_count: uint
+    instance_count: uint
+    first_index: uint
+    vertex_offset: int
+    first_instance: uint
+
+binding raster_cull_io:
+    /// One element, the frame constants the draws are projected with.
+    frame: buffer[raster.frame_constants]
+    instances: buffer[tracer.instance_record]
+    /// One per draw, parallel to `templates`.
+    items: buffer[cull_item]
+    /// Every draw's arguments as the CPU wrote them, `first_instance` its row of `instances`.
+    templates: buffer[draw_args]
+    /// What is drawn: the templates, with the instance count of a draw nothing of reaches the view set to 0.
+    args: mut buffer[draw_args]
+
+@inline binding raster_cull_shape:
+    count: uint
+    pad: uint3
+
+/// Whether the world box around `c` with half-extents `e` lies wholly on the outer side of the plane through the camera.
+/// The plane is `dot(n, p - position) + d = 0`, outside where that is positive.
+fun beyond(n: float3, d: float, position: float3, c: float3, e: float3) -> bool:
+    let s = dot(n, c - position) + d
+    let r = dot(abs(n), e)
+    return s - r > 0.0
+
+/// Whether the world box around `c` with half-extents `e` misses the view of `cam`: beside the image, or wholly before the near plane.
+///
+/// The side planes are where `scene.camera_project` puts a point on the image's edge.
+/// The projection has no far plane, so nothing is cut for its distance.
+fun outside_view(cam: scene.camera, near: float, c: float3, e: float3) -> bool:
+    let f = normalize(cam.forward)
+    let r = cam.right_scaled / dot(cam.right_scaled, cam.right_scaled)
+    let u = cam.up_scaled / dot(cam.up_scaled, cam.up_scaled)
+    if beyond(-f, near, cam.position, c, e) => return true
+    if beyond(r - f, 0.0, cam.position, c, e) => return true
+    if beyond(-r - f, 0.0, cam.position, c, e) => return true
+    if beyond(u - f, 0.0, cam.position, c, e) => return true
+    return beyond(-u - f, 0.0, cam.position, c, e)
+
+@compute(64) fun cull(@thread_id id: int3){raster_cull_io, raster_cull_shape}:
+    let i = id.x
+    if (i as uint) >= raster_cull_shape.count => return
+    let t = raster_cull_io.templates[i]
+    let item = raster_cull_io.items[i]
+
+    let mut instances = t.instance_count
+    if item.has_box != 0u:
+        let f = raster_cull_io.frame[0]
+        let inst = scene.instance(..raster_cull_io.instances[t.first_instance as int])
+        let center = (item.box_min + item.box_max) * 0.5
+        let half_extent = (item.box_max - item.box_min) * 0.5
+        // The box placed in the world: its center moved, and its extent the largest each world axis can see of it.
+        let c = raster.to_world_point(inst, center)
+        let e = float3(dot(abs(inst.to_world_x.xyz), half_extent), dot(abs(inst.to_world_y.xyz), half_extent), dot(abs(inst.to_world_z.xyz), half_extent))
+        if outside_view(scene.camera(..f.camera), f.near_plane, c, e) => instances = 0u
+
+    raster_cull_io.args[i] = draw_args(t.index_count, instances, t.first_index, t.vertex_offset, t.first_instance)

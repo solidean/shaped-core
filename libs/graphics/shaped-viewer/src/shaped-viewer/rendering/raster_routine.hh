@@ -66,6 +66,9 @@ struct sv::raster_draw
     /// Where the row's indices start in the index pool, and the vertex they are relative to.
     u32 first_index = 0;
     u32 base_vertex = 0;
+
+    /// The row's geometry's box in its own space, which the GPU culls the draw by through the row's placement; none draws it always.
+    cc::optional<tg::aabb3f> bounds;
 };
 
 /// Everything one raster frame binds and draws.
@@ -108,17 +111,22 @@ struct sv::raster_frame_desc
 
     /// Where set, receives what a frame that executed drew through `fallback` in place of `permutations`.
     stand_in_report* stand_ins = nullptr;
+
+    /// Where set, receives the arguments the frame drew from, after culling, grouped by permutation in `draws` order within each.
+    /// For a test reading back what was culled.
+    sg::buffer<sg::draw_indexed_args>* drawn_args = nullptr;
 };
 
-/// The raster path: one draw per scene item, through each material permutation's generated pixel stage, into a G-buffer.
+/// The raster path: one indexed draw per scene item, through each material permutation's generated pixel stage, into a G-buffer.
 ///
-/// A draw pulls its triangles out of the bindless tables in the vertex stage, three vertices per triangle and no vertex buffer, so one vertex stage serves every mesh.
+/// **The GPU decides what draws.** A cull dispatch tests each item's box against the camera's view and writes its draw's arguments, an instance count of 0 for one out of view.
+/// The CPU then records one indirect draw per permutation, whatever was culled.
+/// A draw's first instance is its row of the instance table, which the vertex stage takes as `@first_instance`.
 /// Its pixel stage is the permutation's `raster_source`: the material body the tracer's hit group evaluates, then `raster.shade`.
 /// That lights the surface directly from every light, unshadowed, and from the environment's SH, and writes the G-buffer.
 /// The environment fills whatever no surface covered, last.
 ///
 /// The bindings come in three groups, as the tracer's do: `raster.drawn`, the manager's bindless tables, and `slug.tables` for the decals.
-/// Which row a draw is rides as inline constants, `raster.draw`.
 /// libs/graphics/shaped-viewer/docs/raster.md is the design.
 class sv::raster_routine : public sg::render_routine<raster_routine>
 {
@@ -152,6 +160,9 @@ private:
 
     /// The environment pass of `raster_pass.sgl`.
     sg::raster_pipeline_handle _environment;
+
+    /// `raster_cull.sgl`'s kernel; null where it failed to build, and a frame then draws every item.
+    sg::compute_pipeline_handle _cull;
 
     /// One permutation's pixel stage and the pipeline over it, compiled and built on first use, polled rather than waited on.
     struct surface_pipeline

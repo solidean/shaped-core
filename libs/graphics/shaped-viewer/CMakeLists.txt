@@ -194,6 +194,7 @@ sc_add_shader_package(
         tracer_pipeline.sgl:*
         wavefront.sgl:*
         raster_pass.sgl:*
+        raster_cull.sgl:*
         layout.sgl:*
         depth_fill.sgl:*
         emitter_cdf.sgl:*

@@ -73,6 +73,9 @@ struct raster_readback
     cc::vector<rgba16> albedo;
     cc::vector<tg::vec2f> motion;
     cc::vector<f32> primary_depth;
+
+    /// The instance count the cull dispatch left the one draw with: 1 drawn, 0 culled.
+    u32 instance_count = 0;
 };
 
 /// Draws `item` once with no transform through `raster_routine`, retrying until it executes, and reads every target back.
@@ -95,7 +98,8 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
                      .triangle_count = u32(mesh_rec->geometry.triangle_count),
                      .permutation = 0,
                      .first_index = u32(mesh_rec->geometry.first_index),
-                     .base_vertex = u32(mesh_rec->geometry.base_vertex)});
+                     .base_vertex = u32(mesh_rec->geometry.base_vertex),
+                     .bounds = mesh_rec->bounds});
 
     auto const targets = gbuffer_of(ctx, size);
     auto const record = sv::camera_record_of(cam);
@@ -118,6 +122,7 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
                                                          : sv_test::upload_lights(*cmd, lights);
         auto const bindless = resources.freeze();
 
+        auto drawn_args = sg::buffer<sg::draw_indexed_args>();
         auto const drawn = sv::raster_routine::execute(
             *cmd, {.frame = {.camera = record,
                              .previous_camera = record,
@@ -134,10 +139,14 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
                    .index_pool = resources.meshes.index_pool(),
                    .permutations = permutations,
                    .bindless = &bindless,
-                   .targets = targets});
+                   .targets = targets,
+                   .drawn_args = &drawn_args});
 
         // Asserted only after the submit: a REQUIRE unwinding past an unsubmitted list asserts in its destructor.
         auto const ready = drawn == sg::routine_outcome::executed;
+        auto args = sg::data_future<sg::draw_indexed_args>();
+        if (ready)
+            args = cmd->download.data_from_buffer(drawn_args);
         auto color = sg::data_future<tg::vec4f>();
         auto normal = sg::data_future<rgba16>();
         auto depth = sg::data_future<f32>();
@@ -179,6 +188,10 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
         take(albedo, out.albedo);
         take(motion, out.motion);
         take(primary_depth, out.primary_depth);
+        auto const culled = args.try_get_data();
+        REQUIRE(culled.has_value());
+        REQUIRE(culled.value().size() == 1);
+        out.instance_count = culled.value()[0].instance_count;
         co_return out;
     }
 }
@@ -730,6 +743,73 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a surface one unit in front of anothe
         if (!(p[1] > 0.5f && p[0] < 0.5f))
             ++far_shown;
     CHECK(far_shown == 0).context(cc::format("{} of {} pixels show the farther plane", far_shown, drawn.color.size()));
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a draw whose box misses the view is culled on the GPU, and one reaching it "
+                     "is not",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // An unlit green square two units wide, facing the camera five units ahead of the origin.
+    auto positions = cc::vector<tg::pos3f>();
+    for (auto const& p : {tg::pos3f(-1, -1, 5), tg::pos3f(1, -1, 5), tg::pos3f(1, 1, 5), tg::pos3f(-1, -1, 5),
+                          tg::pos3f(1, 1, 5), tg::pos3f(-1, 1, 5)})
+        positions.push_back(p);
+    auto& lib = sv_test::shared_material_library();
+    auto const unlit = lib.acquire_type(sv::builtin_material::unlit).value();
+    auto mesh = sv::mesh{.name = "square",
+                         .geometry = sv::triangle_geometry::create_from_positions(positions),
+                         .material = lib.acquire(sv::material::create("square", unlit, {}))};
+    mesh.attributes.push_back(sv::mesh_attribute::create(
+        "color", sv::attribute_frequency::per_triangle, cc::vector<tg::vec3f>{tg::vec3f(0, 1, 0), tg::vec3f(0, 1, 0)}));
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const item = resources.acquire_scene_item(mesh);
+    resources.wait_for_pending_uploads();
+    REQUIRE(resources.meshes.get(item.mesh).bounds.has_value());
+
+    constexpr auto size = tg::vec2i(32, 32);
+    auto const green_pixels = [](raster_readback const& r)
+    {
+        auto n = 0;
+        for (auto const& p : r.color)
+            if (p[1] > 0.5f && p[0] < 0.5f)
+                ++n;
+        return n;
+    };
+    auto const camera_toward = [](tg::pos3d target)
+    {
+        auto cam = sv::camera::looking_at(tg::pos3d(0, 0, 0), target);
+        cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+        return cam;
+    };
+
+    // Straight at it: drawn, and covering the middle of the image.
+    auto const ahead
+        = co_await draw_raster(ctx, resources, item, camera_toward(tg::pos3d(0, 0, 5)), {}, sv::background{}, size);
+    CHECK(ahead.instance_count == 1u);
+    CHECK(green_pixels(ahead) > 0);
+
+    // Turned away: the square is behind the camera, culled, and nothing of it is drawn.
+    auto const behind
+        = co_await draw_raster(ctx, resources, item, camera_toward(tg::pos3d(0, 0, -5)), {}, sv::background{}, size);
+    CHECK(behind.instance_count == 0u);
+    CHECK(green_pixels(behind) == 0);
+
+    // Turned 27 degrees aside, past the 22.5 degree half-angle: the square's center is out of view and its near edge in it.
+    // A box tested by its center alone would be culled here; the corners keep it.
+    auto const aside
+        = co_await draw_raster(ctx, resources, item, camera_toward(tg::pos3d(2.5, 0, 5)), {}, sv::background{}, size);
+    CHECK(aside.instance_count == 1u);
+    CHECK(green_pixels(aside) > 0);
     co_await cc::async_settled(sv::background_work(ctx));
 }
 

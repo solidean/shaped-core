@@ -81,6 +81,9 @@ struct resolved_view
     /// What a raster frame draws per row; no trace reads it.
     cc::vector<u32> triangle_counts;
 
+    /// The box of `instances[i]`'s geometry in its own space, which a raster frame culls the row by; none where nothing declared one.
+    cc::vector<cc::optional<tg::aabb3f>> bounds;
+
     /// One per instance that lights the scene this frame, in item order: its light record, and what the sampler reads beyond it.
     /// `emitters[k].instance` is the row of `records` it describes; `link_emitters` writes that row's light index once the table is grouped.
     cc::vector<shaders::tracer::light_record> emitter_lights;
@@ -203,6 +206,8 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.parameter_blocks.push_back(item.instance);
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
             out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_geometry().triangle_count) : 0);
+            out.bounds.push_back(pending ? cc::optional<tg::aabb3f>(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1)))
+                                         : cc::optional<tg::aabb3f>());
 
             // Set for any batch, pending or not: a pending one is a triangle instance this frame and a procedural one
             // the next, and the stand-in has to already be compiling by then.
@@ -246,6 +251,9 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         auto const placement = is_pending ? placeholder_transform(mesh->bounds.value(), item.transform) : item.transform;
         auto const triangle_count
             = u32(is_pending ? resources.meshes.placeholder_geometry().triangle_count : mesh->geometry.triangle_count);
+        // A placeholder is the unit cube, which its placement scales onto the mesh's box.
+        auto const object_bounds
+            = is_pending ? cc::optional<tg::aabb3f>(tg::aabb3f(tg::pos3f(0, 0, 0), tg::pos3f(1, 1, 1))) : mesh->bounds;
         auto const object_area = mesh->surface_area;
         auto blas = sg::blas_handle();
         if (traced)
@@ -262,6 +270,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
         out.parameter_blocks.push_back(item.instance);
         out.triangle_counts.push_back(triangle_count);
+        out.bounds.push_back(object_bounds);
 
         // An instance lights the scene where its own permutation declares an emission that is not dark throughout.
         // The GPU reads each factor at the sampled point, so a constant, a texture and a mesh attribute all qualify; the estimate weighs selection alone.
@@ -908,7 +917,8 @@ struct raster_scene
                          .triangle_count = resolved.triangle_counts[i],
                          .permutation = permutation_of[group],
                          .first_index = resolved.records[i].first_index,
-                         .base_vertex = resolved.records[i].base_vertex});
+                         .base_vertex = resolved.records[i].base_vertex,
+                         .bounds = resolved.bounds[i]});
     }
 
     // Quadric batches are not drawn yet; issue: feat-sv-raster-quadric-batches

@@ -14,6 +14,9 @@ one indexed draw per triangle item ─▶ environment where nothing was drawn
    (pixel: @primitive_id, barycentrics, the material, then raster.shade)
 ```
 
+- **The GPU culls first**: `raster_cull.sgl` tests each item's box, placed by its instance, against the camera's view.
+  It writes the item's draw arguments, with an instance count of 0 for one out of view, and the CPU records one `draw_indexed_indirect` per material permutation.
+  A draw's first instance is its row of the instance table, which the vertex stage takes as `@first_instance`.
 - **One indexed draw per scene item**, through the mesh manager's central index pool, at the mesh's first index and base vertex; no vertex buffer is bound.
   The vertex stage, `surface_vs` of [raster_pass.sgl](../shaders/raster_pass.sgl), pulls its vertex out of the central vertex pool.
   So one vertex stage serves every mesh, whatever attributes it carries.

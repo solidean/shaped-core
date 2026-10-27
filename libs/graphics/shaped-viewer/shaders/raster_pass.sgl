@@ -3,12 +3,15 @@
 // The pixel stage of a surface is generated per material permutation and compiled at run time, so it has no entry here.
 // The file joins module `raster` (shaders/sgl), which holds what those generated stages share with it.
 // sv::raster_routine builds the pipelines, and libs/graphics/shaped-viewer/docs/raster.md is the design.
+require first_instance
+
 use raster
 use tracer
 
 /// One vertex of the draw's instance: an indexed draw through the index pool, and no vertex buffer.
-@vertex fun surface_vs(@vertex_index vertex: int){raster.drawn, tracer.bindless, raster.draw} -> raster.varyings:
-    return raster.vertex_of(vertex)
+/// The draw's first instance is its row of `raster.drawn.instances`, the same for the whole draw.
+@vertex fun surface_vs(@vertex_index vertex: int, @first_instance row: int){raster.drawn, tracer.bindless} -> raster.varyings:
+    return raster.vertex_of(vertex, row as uint)
 
 /// What the environment pass hands its pixel stage: the position alone, whose pixel is the camera ray.
 struct environment_varyings:

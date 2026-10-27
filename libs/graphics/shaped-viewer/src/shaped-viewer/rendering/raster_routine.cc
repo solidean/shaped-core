@@ -152,6 +152,14 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
         co_return;
     }
     _environment = *built;
+
+    // Culling is what makes a frame cheaper, never what makes it right, so a kernel that does not build draws everything.
+    auto const cull = shaders::raster_cull.cull.acquire_pipeline(ctx);
+    co_await cc::async_settled(cull);
+    auto const* const cull_built = cull->try_value();
+    _cull = cull_built != nullptr ? *cull_built : nullptr;
+    if (_cull == nullptr)
+        CC_LOG_ERROR("the raster cull kernel did not build, so a raster frame draws every item");
     co_return;
 }
 
@@ -200,8 +208,7 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
         groups.push_back(ctx.cached.acquire_binding_group_layout<raster::drawn>());
         groups.push_back(bindless.layout());
         groups.push_back(ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>());
-        auto const layout = ctx.cached.acquire_pipeline_layout(
-            {.groups = cc::move(groups), .inline_constants = raster::draw::inline_binding()});
+        auto const layout = ctx.cached.acquire_pipeline_layout({.groups = cc::move(groups)});
 
         // Two-sided like the tracer, which shades a triangle seen from behind through its turned normal.
         s.pending = ctx.cached.acquire_raster_pipeline({
@@ -299,6 +306,74 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             .curves = (has_atlas ? d.decal_atlas->curve_texture() : self->_stand_ins.decal_curves).as_texture_view(),
             .bands = (has_atlas ? d.decal_atlas->band_texture() : self->_stand_ins.decal_bands).as_texture_view()});
 
+    // One bin per permutation, its draws contiguous in the argument buffers, in the order the frame lists them.
+    static_assert(sizeof(shaders::draw_args) == sizeof(sg::draw_indexed_args));
+    auto counts = cc::vector<isize>::create_defaulted(pipelines.size());
+    for (auto const& draw : d.draws)
+    {
+        CC_ASSERT(isize(draw.permutation) < pipelines.size(), "a raster draw names a permutation the frame holds");
+        if (draw.triangle_count != 0)
+            ++counts[draw.permutation];
+    }
+    auto firsts = cc::vector<isize>::create_defaulted(pipelines.size());
+    auto next = cc::vector<isize>::create_defaulted(pipelines.size());
+    auto total = isize(0);
+    for (auto p = isize(0); p < counts.size(); ++p)
+    {
+        firsts[p] = total;
+        next[p] = total;
+        total += counts[p];
+    }
+    auto templates = cc::vector<shaders::draw_args>::create_defaulted(total);
+    auto items = cc::vector<shaders::cull_item>::create_defaulted(total);
+    for (auto const& draw : d.draws)
+    {
+        if (draw.triangle_count == 0)
+            continue;
+        auto const slot = next[draw.permutation]++;
+        templates[slot] = {.index_count = draw.triangle_count * 3,
+                           .instance_count = 1,
+                           .first_index = draw.first_index,
+                           .vertex_offset = i32(draw.base_vertex),
+                           .first_instance = draw.instance};
+        if (draw.bounds.has_value())
+            items[slot] = {.box_min = draw.bounds.value().min - tg::pos3f::zero,
+                           .has_box = 1,
+                           .box_max = draw.bounds.value().max - tg::pos3f::zero,
+                           .pad = 0};
+    }
+
+    // Culled on the GPU into `args`; without the kernel the templates are drawn as they stand.
+    auto drawn_args = sg::buffer<sg::draw_indexed_args>();
+    if (total > 0)
+    {
+        auto const template_buffer = ctx.transient.create_buffer_from_data(
+            cmd, templates,
+            sg::buffer_usage::readonly_buffer | sg::buffer_usage::indirect_command_buffer | sg::buffer_usage::copy_src);
+        drawn_args = template_buffer.reinterpret_as<sg::draw_indexed_args>();
+        if (self->_cull != nullptr)
+        {
+            auto const item_buffer = ctx.transient.create_buffer_from_data(cmd, items, sg::buffer_usage::readonly_buffer);
+            auto const args = ctx.transient.create_buffer<shaders::draw_args>(
+                total, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::indirect_command_buffer
+                           | sg::buffer_usage::copy_src);
+            auto const cull_group = ctx.transient.create_binding_group(
+                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull_io>(),
+                shaders::raster_cull_io{.frame = frame.as_readonly_buffer(),
+                                        .instances = d.instance_table.as_readonly_buffer(),
+                                        .items = item_buffer.as_readonly_buffer(),
+                                        .templates = template_buffer.as_readonly_buffer(),
+                                        .args = args.as_readwrite_buffer()});
+            cmd.compute.bind_pipeline(*self->_cull);
+            cmd.compute.bind_group(0, *cull_group);
+            cmd.compute.set_inline_constants(shaders::raster_cull_shape{.count = u32(total), .pad = {}}.to_block());
+            cmd.compute.dispatch_threads(int(total));
+            drawn_args = args.reinterpret_as<sg::draw_indexed_args>();
+        }
+    }
+    if (d.drawn_args != nullptr)
+        *d.drawn_args = drawn_args;
+
     // A layer with no drawings still has a primary depth written; this frame alone reads it, which is nobody.
     auto const primary_depth = t.primary_depth.raw() != nullptr
                                  ? t.primary_depth
@@ -327,24 +402,21 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     // The first draw applies them, and a later one finds them current unless its pipeline touches them at new stages.
     // The environment draw binds no table, so it leaves them dormant, and a pass with nothing else to draw ends them silently.
     auto const declared = d.bindless->declare_raster_access(cmd);
-    if (!d.draws.empty())
+    if (total > 0)
     {
         CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
         pass.bind_index_buffer(d.index_pool.as_index_buffer());
     }
-    for (auto const& draw : d.draws)
+    for (auto p = isize(0); p < counts.size(); ++p)
     {
-        CC_ASSERT(isize(draw.permutation) < pipelines.size(), "a raster draw names a permutation the frame holds");
-        if (draw.triangle_count == 0)
+        if (counts[p] == 0)
             continue;
-        pass.bind_pipeline(*pipelines[draw.permutation]);
+        pass.bind_pipeline(*pipelines[p]);
         pass.bind_group(0, *drawn);
         pass.bind_group(bindless_group, *d.bindless->group());
         pass.bind_group(2, *tables);
-        pass.set_inline_constants(raster::draw{.instance = draw.instance, .pad0 = {}}.to_block());
         // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
-        pass.draw_indexed({.index_range = {.offset = isize(draw.first_index), .size = isize(draw.triangle_count) * 3},
-                           .vertex_offset = int(draw.base_vertex)});
+        pass.draw_indexed_indirect(drawn_args, firsts[p], counts[p]);
     }
 
     pass.bind_pipeline(*self->_environment);

@@ -33,7 +33,7 @@ binding drawn:
     /// One element, the frame constants.
     frame: buffer[frame_constants]
 
-    /// The per-item table; one draw is one row of it, `draw.instance`.
+    /// The per-item table; one draw is one row of it, its first instance.
     instances: buffer[tracer.instance_record]
 
     /// Every light of the layer, `light_count` of them.
@@ -46,18 +46,13 @@ binding drawn:
     decals: buffer[tracer.decal_record]
     decal_shapes: buffer[tracer.decal_shape]
 
-/// Which row of `drawn.instances` one draw is, the only thing that changes between the draws of a frame.
-@inline binding draw:
-    instance: uint
-    pad0: uint3
-
 /// What the vertex stage hands the pixel stage: which instance, and where on it, in its own space and in the world.
 ///
 /// The draw is indexed, so a corner is shared by the triangles meeting there and cannot say which triangle it is.
 /// The pixel stage takes its triangle from `@primitive_id` and finds the barycentrics of `object` in it, which is what a traced hit reports.
 struct varyings:
     @position position: hpos4
-    /// the row of `drawn.instances`, which the vertex stage reads from `draw`, so a pixel indexes by it unmarked
+    /// the row of `drawn.instances`, which the vertex stage takes from `@first_instance`, so a pixel indexes by it unmarked
     @per_draw instance: uint
     /// the point in the mesh's own space, where the barycentrics are found: the corners are stored there, and it is near the origin
     object: float3
