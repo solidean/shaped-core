@@ -717,7 +717,7 @@ fun f() -> float:
 
 | attribute | stage | type |
 |---|---|---|
-| `@vertex_index`, `@instance_index` | vertex | `int` |
+| `@vertex_index`, `@instance_index`, `@first_instance` | vertex | `int` |
 | `@is_front_facing` | pixel | `bool` |
 | `@sample_index` | pixel | `int` |
 | `@sample_mask` | pixel | `uint` |
@@ -752,6 +752,7 @@ fun f() -> float:
 * **CHK-272** `@primitive_id` needs `primitive_index` of a device and `@sample_index` needs `sample_rate_shading`, as a binding member needs its feature (CHK-261).
   The feature is the pixel stage's alone: the geometry and tessellation stages have the primitive's index wherever they have the stage.
   `@subgroup_size` and `@subgroup_invocation_id` need `subgroups` in every stage that takes them.
+  `@first_instance`, the draw's first instance that `@instance_index` counts from, needs `first_instance`, which WGSL has no builtin for.
 * **CHK-90** A `@vertex fun` returns a struct with at most one field that carries `@position`, and that field is of the type `hpos4`.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`.
@@ -940,7 +941,9 @@ Tint's verdict on a barrier cannot be silenced, so a barrier keeps WGSL's rules 
   A subgroup operation (CHK-377) and `workgroup_uniform_load` (CHK-374) stand where a barrier does.
 * **CHK-283** A value is **non-uniform** where it comes from what the stage is handed, from a `mut` buffer or a `mut` image,
   from a non-uniform value, or from a local set anywhere in non-uniform control flow.
-  What a stage is handed is each of its parameters but `@workgroup_id` and `@launch_size`, which are the same in every invocation, and but a `@per_draw` member of the pixel stage's struct (CHK-393).
+  What a stage is handed is each of its parameters but `@workgroup_id`, `@launch_size` and `@first_instance`, which are the same in every invocation.
+  Nor is a `@per_draw` member of the pixel stage's struct (CHK-393).
+  So a `@per_draw` member may come from `@first_instance`, which is how one draw of an indirect batch keeps its row uniform.
   A field of a `let` that holds a construction made in uniform control flow is as uniform as the value it was built from, whatever the struct's other fields are.
   Among them are the stage struct, every other stage input, a tessellation stage's factors, and a ray-tracing stage's payload, ray, hit, candidate and box (CHK-326).
   A local a trace writes as its payload, or a callable as its parameter, is non-uniform throughout, as one set in non-uniform control flow is.

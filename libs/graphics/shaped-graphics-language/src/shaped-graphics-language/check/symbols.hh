@@ -193,6 +193,8 @@ enum class sgl::check::stage_input : sgl::u8
     none,
     vertex_index,
     instance_index,
+    /// The draw's first instance, which `@instance_index` counts from: the same for every vertex of a draw (CHK-283).
+    first_instance,
     is_front_facing,
     sample_index,
     sample_mask,

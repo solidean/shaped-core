@@ -305,6 +305,37 @@ TEST("sgl check - a @per_draw member is uniform in the pixel stage, and the vert
               .contains("non-uniform-per-draw"));
 }
 
+TEST("sgl check - @first_instance is the same across a draw, so a @per_draw member may come from it")
+{
+    auto const drawn = [](cc::string_view material)
+    {
+        return reports_for(
+            cc::format("require binding_arrays, first_instance\n\n"
+                       "binding materials:\n"
+                       "    @sampler(smp) albedo: texture_2d[float4][8]\n"
+                       "    smp: sampler\n"
+                       "\n"
+                       "struct varyings:\n"
+                       "    @position position: hpos4\n"
+                       "    @per_draw material: uint\n"
+                       "    uv: float2\n"
+                       "\n"
+                       "@pixel struct target:\n"
+                       "    color: float4\n"
+                       "\n"
+                       "@vertex fun vs(@instance_index k: int, @first_instance first: int) -> varyings:\n"
+                       "    return {{ position = hpos4(0.0, 0.0, 0.0, 1.0), material = {}, uv = float2(0.0) }}\n"
+                       "\n"
+                       "@pixel fun ps(p: varyings){{materials}} -> target:\n"
+                       "    return {{ color = materials.albedo[p.material as int].sample(p.uv) }}\n",
+                       material));
+    };
+    // CHK-283: the first instance is the draw's, which is what lets an indirect batch of draws keep a row per draw uniform
+    CHECK(drawn("first as uint") == "");
+    // the instance index counts on from it, and differs within a draw of several instances
+    CHECK(drawn("k as uint").contains("non-uniform-per-draw"));
+}
+
 TEST("sgl check - a field of a struct let is as uniform as what it was built from, whatever its other fields are")
 {
     auto const picked = [](cc::string_view index)

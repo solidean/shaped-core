@@ -288,8 +288,10 @@ public:
         case sg::feature::subgroups:
             return _subgroups;
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
+        // BaseInstance is the DrawParameters capability, which creation requires `shaderDrawParameters` for.
         case sg::feature::device_coherence:
         case sg::feature::image_atomics:
+        case sg::feature::first_instance:
             return true;
         }
         return false;

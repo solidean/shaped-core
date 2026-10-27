@@ -121,6 +121,12 @@ enum class sg::feature
     /// D3D12 requires typed UAV atomics on r32 formats and Vulkan requires storage-image atomics on them, Metal has them from Apple7.
     /// WebGPU has no image atomics.
     image_atomics,
+
+    /// A vertex shader may read the draw's first instance on its own (SGL's `@first_instance`), the same for the whole draw.
+    /// It is how one draw of an indirect batch learns which it is, uniformly.
+    /// D3D12 has it from shader model 6.8, Vulkan from `shaderDrawParameters`, which creation requires, and Metal always.
+    /// WGSL has no builtin for it.
+    first_instance,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -154,8 +160,9 @@ inline constexpr feature k_all_features[] = {
     feature::subgroups,
     feature::device_coherence,
     feature::image_atomics,
+    feature::first_instance,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::image_atomics) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::first_instance) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -207,6 +214,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "device_coherence";
     case feature::image_atomics:
         return "image_atomics";
+    case feature::first_instance:
+        return "first_instance";
     }
     return "";
 }

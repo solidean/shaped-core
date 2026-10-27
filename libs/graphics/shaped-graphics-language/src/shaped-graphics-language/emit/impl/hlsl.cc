@@ -599,7 +599,13 @@ public:
             parameters.push_back(
                 cc::format("{} {} : {}", spelled.hlsl_type, p.stage_input_names[i], spelled.hlsl_semantic));
             // EMIT-128: HLSL counts from the draw's base, and shader model 6.8 says where the draw started
-            if (has_base(p, p.e.stage_inputs[i].input))
+            // An instance's base is `@first_instance` itself where the entry takes that, since a semantic is taken once.
+            auto takes_first_instance = false;
+            for (auto const& other : p.e.stage_inputs)
+                takes_first_instance = takes_first_instance || other.input == check::stage_input::first_instance;
+            auto const base_is_shared
+                = p.e.stage_inputs[i].input == check::stage_input::instance_index && takes_first_instance;
+            if (has_base(p, p.e.stage_inputs[i].input) && !base_is_shared)
                 parameters.push_back(cc::format("uint {} : {}", p.stage_input_bases[i],
                                                 p.e.stage_inputs[i].input == check::stage_input::vertex_index
                                                     ? "SV_StartVertexLocation"
