@@ -8,6 +8,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <clean-net/fwd.hh>
 #include <clean-net/impl/reactor.hh>
+#include <clean-net/transport/datagram.hh>
 
 #include <memory> // std::unique_ptr, to own a backend through its interface -- see .shaped-lint.yml
 
@@ -61,6 +62,36 @@ using pipe = cc::mutex<pipe_data>;
             return op;
         });
 }
+
+/// One datagram on its way, held by the socket it was sent to.
+struct virtual_datagram
+{
+    endpoint from;
+    cc::vector<byte> bytes;
+
+    /// Delivery is instant, so the moment it was sent is the moment it arrived.
+    i64 arrived_at_ns = 0;
+};
+
+struct virtual_datagram_inbox
+{
+    cc::vector<virtual_datagram> queue;
+
+    /// How far the reader has consumed; the queue is cleared rather than shifted once it catches up.
+    isize head = 0;
+
+    /// The one readiness wait on this socket, signalled by whoever delivers next.
+    impl::io_operation* parked = nullptr;
+
+    [[nodiscard]] bool has_any() const { return head < queue.size(); }
+};
+
+/// What a datagram socket and the network that routes to it both point at.
+struct virtual_datagram_endpoint
+{
+    endpoint where;
+    cc::mutex<virtual_datagram_inbox> inbox;
+};
 
 /// What a listener and the network that made it both point at.
 struct virtual_listener_state
@@ -359,6 +390,9 @@ struct virtual_network::state
     /// A short list rather than a map: a test has a handful of listeners, and `endpoint` has no hash of its own.
     cc::mutex<cc::vector<cc::shared_ptr<virtual_listener_state>>> listeners;
 
+    /// Every bound datagram socket, a short list for the same reason.
+    cc::mutex<cc::vector<cc::shared_ptr<virtual_datagram_endpoint>>> datagram_endpoints;
+
     /// Where a synthetic port comes from, for a bind to 0 and for the far end of every connect.
     cc::atomic<i32> next_port = 40000;
 
@@ -465,6 +499,214 @@ private:
 };
 } // namespace
 
+namespace
+{
+/// The largest payload one IPv4 datagram carries, which a virtual network enforces so a test does not pass here
+/// with a datagram no real socket would send.
+constexpr isize k_max_datagram_bytes = 65507;
+
+/// A readiness wait on a virtual datagram socket, parked until something is delivered.
+struct virtual_readable_op final : impl::io_operation
+{
+    cc::shared_async<cc::unit> promise;
+    cc::unique_ptr<virtual_readable_op> self;
+    impl::cancel_registration cancellation;
+    cc::shared_ptr<virtual_datagram_endpoint> owner;
+
+    void on_complete(cc::optional<error> failure) override
+    {
+        auto const keep_alive_until_return = cc::move(self);
+        cancellation.detach();
+
+        owner->inbox.lock(
+            [this](virtual_datagram_inbox& d)
+            {
+                if (d.parked == this)
+                    d.parked = nullptr;
+            });
+
+        if (failure.has_value())
+            promise->push_error(to_async_error(cc::move(failure.value())));
+        else
+            promise->push_value(cc::unit{});
+    }
+};
+
+/// A datagram socket on a virtual network.
+///
+/// A send finds the receiving socket in the network's registry and appends a copy to its inbox; nobody bound there
+/// means the datagram is gone, exactly as on a real network.
+class virtual_datagram_backend final : public datagram_backend
+{
+public:
+    virtual_datagram_backend(cc::shared_ptr<virtual_network::state> net, cc::shared_ptr<virtual_datagram_endpoint> self)
+      : _net(cc::move(net)), _self(cc::move(self))
+    {
+    }
+
+    [[nodiscard]] cc::result<isize, error> receive_batch(cc::span<datagram> records) override
+    {
+        return _self->inbox.lock(
+            [&](virtual_datagram_inbox& d) -> isize
+            {
+                auto filled = isize(0);
+                while (filled < records.size() && d.has_any())
+                {
+                    auto const& from = d.queue[d.head];
+                    auto& r = records[filled];
+                    auto const n = cc::min(from.bytes.size(), r.buffer.size());
+                    for (isize i = 0; i < n; ++i)
+                        r.buffer[i] = from.bytes[i];
+                    r.size = n;
+                    r.peer = from.from;
+                    r.received_at_ns = from.arrived_at_ns;
+                    r.truncated = n < from.bytes.size();
+                    ++d.head;
+                    ++filled;
+                }
+                if (!d.has_any())
+                {
+                    d.queue.clear();
+                    d.head = 0;
+                }
+                return filled;
+            });
+    }
+
+    [[nodiscard]] cc::result<isize, error> send_batch(cc::span<outgoing_datagram const> packets) override
+    {
+        auto const now = _net->io.time_source().now_ns();
+        for (isize i = 0; i < packets.size(); ++i)
+        {
+            auto const& p = packets[i];
+            auto refused = cc::optional<error>();
+            if (!p.peer.address.is_valid() || p.peer.address.is_unspecified())
+                refused = error{.code = error_code::invalid_argument,
+                                .native_code = 0,
+                                .message = cc::format("send: {} is not a destination", p.peer)};
+            else if (p.bytes.size() > k_max_datagram_bytes)
+                refused = error{.code = error_code::invalid_argument,
+                                .native_code = 0,
+                                .message = cc::format("send: a datagram of {} bytes is larger than any network carries",
+                                                      p.bytes.size())};
+
+            // The partial-batch rule: an error only when nothing went before it.
+            if (refused.has_value())
+            {
+                if (i > 0)
+                    return i;
+                return cc::error(cc::move(refused.value()));
+            }
+
+            deliver(p, now);
+        }
+        return packets.size();
+    }
+
+    [[nodiscard]] cc::shared_async<cc::unit> wait_readable(cancel_token const& token) override
+    {
+        auto op = cc::make_unique<virtual_readable_op>();
+        op->kind = impl::io_op_kind::manual;
+        op->owner = _self;
+
+        auto promise = cc::make_async_manual<cc::unit>();
+        op->promise = promise;
+
+        auto* const raw = op.get();
+        raw->self = cc::move(op);
+
+        // Submit, park, look again -- the order a virtual receive uses, for the same races.
+        // Something already waiting signals at once rather than completing here: a wait never completes inline.
+        auto in_flight = _net->io.submit(raw);
+
+        auto const ready = _self->inbox.lock(
+            [raw](virtual_datagram_inbox& d)
+            {
+                if (d.has_any())
+                    return true;
+                d.parked = raw;
+                return false;
+            });
+
+        if (ready)
+            _net->io.signal(raw);
+
+        raw->cancellation.attach(cc::move(in_flight), token);
+        return promise;
+    }
+
+    [[nodiscard]] endpoint local() const override { return _self->where; }
+    [[nodiscard]] io_system& io() const override { return _net->io; }
+
+    ~virtual_datagram_backend() override
+    {
+        // Leaving the registry is what makes later datagrams to this endpoint vanish rather than pile up.
+        _net->datagram_endpoints.lock(
+            [this](cc::vector<cc::shared_ptr<virtual_datagram_endpoint>>& all)
+            {
+                for (isize i = 0; i < all.size(); ++i)
+                    if (all[i].get() == _self.get())
+                    {
+                        all[i] = cc::move(all[all.size() - 1]);
+                        all.remove_back();
+                        return;
+                    }
+            });
+    }
+
+private:
+    /// Hand one datagram to whoever is bound at its destination, if anyone is.
+    void deliver(outgoing_datagram const& p, i64 now)
+    {
+        // An exact match first, then a socket bound to every interface on that port, the way a real stack routes.
+        auto target = _net->datagram_endpoints.lock(
+            [&](cc::vector<cc::shared_ptr<virtual_datagram_endpoint>> const& all) -> cc::shared_ptr<virtual_datagram_endpoint>
+            {
+                auto wildcard = cc::shared_ptr<virtual_datagram_endpoint>();
+                for (auto const& e : all)
+                {
+                    if (e->where == p.peer)
+                        return e;
+                    if (e->where.port == p.peer.port && e->where.address.is_unspecified()
+                        && e->where.address.family() == p.peer.address.family())
+                        wildcard = e;
+                }
+                return wildcard;
+            });
+
+        if (!target.is_valid())
+            return;
+
+        // A socket bound to every interface has no single address to be seen from, so the receiver sees the one the
+        // datagram was sent to, as it would on one machine.
+        auto from = _self->where;
+        if (from.address.is_unspecified())
+            from.address = p.peer.address;
+
+        auto copy = virtual_datagram{.from = from, .bytes = {}, .arrived_at_ns = now};
+        copy.bytes.resize_to_defaulted(p.bytes.size());
+        for (isize i = 0; i < p.bytes.size(); ++i)
+            copy.bytes[i] = p.bytes[i];
+
+        auto* const waiting = target->inbox.lock(
+            [&](virtual_datagram_inbox& d)
+            {
+                d.queue.push_back(cc::move(copy));
+                auto* const op = d.parked;
+                d.parked = nullptr;
+                return op;
+            });
+
+        // Outside the lock, because the completion takes the same lock to deregister.
+        if (waiting != nullptr)
+            _net->io.signal(waiting);
+    }
+
+    cc::shared_ptr<virtual_network::state> _net;
+    cc::shared_ptr<virtual_datagram_endpoint> _self;
+};
+} // namespace
+
 // ---- the network ---------------------------------------------------------------------------------------
 
 virtual_network::virtual_network(io_system& io) : _state(cc::make_shared<state>(io))
@@ -565,5 +807,40 @@ cc::shared_async<cc::shared_ptr<stream_connection>> virtual_network::connect(end
     auto promise = cc::make_async_manual<handle>();
     promise->push_value(cc::move(client));
     return promise;
+}
+
+cc::result<cc::unique_ptr<datagram_socket>, error> virtual_network::bind_datagram(endpoint const& where,
+                                                                                  datagram_options const& /*options*/)
+{
+    if (!where.address.is_valid())
+        return cc::error(error{.code = error_code::invalid_argument,
+                               .native_code = 0,
+                               .message = cc::string("bind: the endpoint has no address")});
+
+    auto bound = where;
+    if (bound.port == 0)
+        bound.port = _state->next_port.fetch_add(1);
+
+    auto self = cc::make_shared<virtual_datagram_endpoint>();
+    self->where = bound;
+
+    // Checked and registered in one step, so two binds racing for one port cannot both win.
+    auto const taken = _state->datagram_endpoints.lock(
+        [&](cc::vector<cc::shared_ptr<virtual_datagram_endpoint>>& all)
+        {
+            for (auto const& e : all)
+                if (e->where == bound)
+                    return true;
+            all.push_back(self);
+            return false;
+        });
+
+    if (taken)
+        return cc::error(error{.code = error_code::address_in_use,
+                               .native_code = 0,
+                               .message = cc::format("{} already has a virtual datagram socket", bound)});
+
+    CC_LOG_TRACE("virtual datagram socket on {}", bound);
+    return cc::make_unique<datagram_socket>(std::make_unique<virtual_datagram_backend>(_state, cc::move(self)));
 }
 } // namespace cnet

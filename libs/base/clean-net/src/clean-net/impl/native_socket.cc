@@ -2,6 +2,8 @@
 
 #include <clean-core/common/utility.hh>
 #include <clean-core/string/format.hh>
+#include <clean-net/common/clock.hh>
+#include <clean-net/transport/datagram.hh>
 
 // CNET_HAS_SOCKETS is a PRIVATE define set by clean-net's CMakeLists: 1 where the platform has BSD sockets, 0 on
 // wasm, which has none of any kind.
@@ -20,6 +22,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>
+#include <mswsock.h>
 // clang-format on
 #else
 #include <arpa/inet.h>
@@ -28,6 +31,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #endif
 
@@ -215,6 +219,7 @@ error error_from_native(i32 native, cc::string_view what)
         break;
     case WSAEINVAL:
     case WSAEAFNOSUPPORT:
+    case WSAEMSGSIZE:
         code = error_code::invalid_argument;
         break;
 #else
@@ -242,6 +247,7 @@ error error_from_native(i32 native, cc::string_view what)
         break;
     case EINVAL:
     case EAFNOSUPPORT:
+    case EMSGSIZE:
         code = error_code::invalid_argument;
         break;
 #endif
@@ -435,6 +441,308 @@ cc::result<cc::unit, error> set_tcp_no_delay(native_socket s, bool no_delay)
         return cc::error(error_from_native(last_socket_error(), "setting TCP_NODELAY"));
     return cc::unit{};
 }
+
+// ---- datagrams -----------------------------------------------------------------------------------------
+
+namespace
+{
+/// Whether the platform is saying "nothing more right now" rather than "no".
+[[nodiscard]] bool is_would_block_native(i32 native)
+{
+#if defined(_WIN32)
+    return native == WSAEWOULDBLOCK;
+#else
+    return native == EWOULDBLOCK || native == EAGAIN || native == EINTR;
+#endif
+}
+
+/// A receive failure that is really about an earlier send to a peer that refused, which for datagrams is loss.
+[[nodiscard]] bool is_echo_of_a_refusal(i32 native)
+{
+#if defined(_WIN32)
+    return native == WSAECONNRESET || native == WSAENETRESET;
+#else
+    return native == ECONNREFUSED;
+#endif
+}
+
+[[nodiscard]] error no_address(cc::string_view what)
+{
+    return {.code = error_code::invalid_argument,
+            .native_code = 0,
+            .message = cc::format("{}: the endpoint has no address", what)};
+}
+
+[[nodiscard]] cc::result<cc::unit, error> set_int_option(native_socket s, i32 level, i32 name, i32 value, cc::string_view what)
+{
+    int const v = value;
+    if (::setsockopt(raw_of(s), level, name, reinterpret_cast<char const*>(&v), sizeof(v)) != 0)
+        return cc::error(error_from_native(last_socket_error(), what));
+    return cc::unit{};
+}
+
+[[nodiscard]] cc::result<cc::unit, error> set_dont_fragment(native_socket s, ip_family family)
+{
+#if defined(_WIN32)
+    if (family == ip_family::v6)
+        return set_int_option(s, IPPROTO_IPV6, IPV6_DONTFRAG, 1, "setting IPV6_DONTFRAG");
+    return set_int_option(s, IPPROTO_IP, IP_DONTFRAGMENT, 1, "setting IP_DONTFRAGMENT");
+#elif defined(IP_MTU_DISCOVER)
+    // Linux spells it as a discovery mode: DO means never fragment locally, and fail a send larger than the path.
+    if (family == ip_family::v6)
+        return set_int_option(s, IPPROTO_IPV6, IPV6_MTU_DISCOVER, IPV6_PMTUDISC_DO, "setting IPV6_MTU_DISCOVER");
+    return set_int_option(s, IPPROTO_IP, IP_MTU_DISCOVER, IP_PMTUDISC_DO, "setting IP_MTU_DISCOVER");
+#elif defined(IP_DONTFRAG)
+    if (family == ip_family::v6)
+        return set_int_option(s, IPPROTO_IPV6, IPV6_DONTFRAG, 1, "setting IPV6_DONTFRAG");
+    return set_int_option(s, IPPROTO_IP, IP_DONTFRAG, 1, "setting IP_DONTFRAG");
+#else
+    (void)s;
+    (void)family;
+    return cc::error(unsupported_here("refusing to fragment a datagram"));
+#endif
+}
+
+#if defined(__linux__)
+/// The most records one `recvmmsg` or `sendmmsg` call carries; a longer batch is several calls.
+constexpr isize k_mmsg_batch = 64;
+#endif
+} // namespace
+
+cc::result<cc::unit, error> apply_datagram_options(native_socket s, ip_family family, datagram_options const& options)
+{
+#if defined(_WIN32)
+    // Without this, a send that draws an ICMP "port unreachable" makes the NEXT receive fail with WSAECONNRESET, so a
+    // peer that went away looks like a broken socket; every other platform reports nothing on an unconnected socket.
+    // SIO_UDP_NETRESET is the same for an ICMP "TTL expired".
+    // Best effort: the receive path skips both errors anyway.
+    BOOL off = FALSE;
+    auto returned = DWORD(0);
+    (void)::WSAIoctl(raw_of(s), SIO_UDP_CONNRESET, &off, sizeof(off), nullptr, 0, &returned, nullptr, nullptr);
+    (void)::WSAIoctl(raw_of(s), SIO_UDP_NETRESET, &off, sizeof(off), nullptr, 0, &returned, nullptr, nullptr);
+#endif
+
+    if (family == ip_family::v6)
+        if (auto r = set_v6_only(s, options.v6_only); r.has_error())
+            return r;
+
+    if (options.receive_buffer_bytes > 0)
+        if (auto r = set_int_option(s, SOL_SOCKET, SO_RCVBUF, options.receive_buffer_bytes, "setting SO_RCVBUF");
+            r.has_error())
+            return r;
+
+    if (options.send_buffer_bytes > 0)
+        if (auto r = set_int_option(s, SOL_SOCKET, SO_SNDBUF, options.send_buffer_bytes, "setting SO_SNDBUF");
+            r.has_error())
+            return r;
+
+    if (options.dont_fragment)
+        if (auto r = set_dont_fragment(s, family); r.has_error())
+            return r;
+
+    // Best effort: Windows ignores it without a QoS policy, and the network may rewrite it anyway.
+    if (options.traffic_class != 0)
+    {
+        if (family == ip_family::v6)
+            (void)set_int_option(s, IPPROTO_IPV6, IPV6_TCLASS, options.traffic_class, "setting IPV6_TCLASS");
+        else
+            (void)set_int_option(s, IPPROTO_IP, IP_TOS, options.traffic_class, "setting IP_TOS");
+    }
+
+    return cc::unit{};
+}
+
+#if defined(__linux__)
+
+cc::result<isize, error> receive_datagrams(native_socket s, cc::span<datagram> records, clock& stamp)
+{
+    mmsghdr headers[k_mmsg_batch];
+    iovec vectors[k_mmsg_batch];
+    sockaddr_storage addresses[k_mmsg_batch];
+
+    auto filled = isize(0);
+    while (filled < records.size())
+    {
+        auto const chunk = cc::min(records.size() - filled, k_mmsg_batch);
+        for (isize i = 0; i < chunk; ++i)
+        {
+            auto& r = records[filled + i];
+            vectors[i] = {.iov_base = r.buffer.data(), .iov_len = size_t(r.buffer.size())};
+            headers[i] = {};
+            headers[i].msg_hdr.msg_name = &addresses[i];
+            headers[i].msg_hdr.msg_namelen = socklen_t(sizeof(addresses[i]));
+            headers[i].msg_hdr.msg_iov = &vectors[i];
+            headers[i].msg_hdr.msg_iovlen = 1;
+        }
+
+        auto const n = ::recvmmsg(raw_of(s), headers, unsigned(chunk), MSG_DONTWAIT, nullptr);
+        if (n < 0)
+        {
+            auto const native = last_socket_error();
+            if (is_would_block_native(native))
+                return filled;
+            if (is_echo_of_a_refusal(native))
+                continue;
+            if (filled > 0)
+                return filled;
+            return cc::error(error_from_native(native, "receiving datagrams"));
+        }
+
+        auto const now = stamp.now_ns();
+        for (isize i = 0; i < isize(n); ++i)
+        {
+            auto& r = records[filled + i];
+            auto const peer = from_sockaddr(addresses[i]);
+            r.size = isize(headers[i].msg_len);
+            r.peer = peer.has_value() ? peer.value() : endpoint();
+            r.received_at_ns = now;
+            r.truncated = (headers[i].msg_hdr.msg_flags & MSG_TRUNC) != 0;
+        }
+        filled += isize(n);
+
+        // A short batch means the socket ran dry, and asking again would only be told so.
+        if (isize(n) < chunk)
+            return filled;
+    }
+    return filled;
+}
+
+cc::result<isize, error> send_datagrams(native_socket s, cc::span<outgoing_datagram const> packets)
+{
+    mmsghdr headers[k_mmsg_batch];
+    iovec vectors[k_mmsg_batch];
+    sockaddr_storage addresses[k_mmsg_batch];
+
+    auto sent = isize(0);
+    while (sent < packets.size())
+    {
+        // A packet with no address ends the chunk before it, so the ones ahead of it still go out.
+        auto chunk = isize(0);
+        auto const most = cc::min(packets.size() - sent, k_mmsg_batch);
+        for (; chunk < most; ++chunk)
+        {
+            auto const& p = packets[sent + chunk];
+            auto length = socklen_t(0);
+            if (!to_sockaddr(p.peer, addresses[chunk], length))
+                break;
+            vectors[chunk] = {.iov_base = const_cast<byte*>(p.bytes.data()), .iov_len = size_t(p.bytes.size())};
+            headers[chunk] = {};
+            headers[chunk].msg_hdr.msg_name = &addresses[chunk];
+            headers[chunk].msg_hdr.msg_namelen = length;
+            headers[chunk].msg_hdr.msg_iov = &vectors[chunk];
+            headers[chunk].msg_hdr.msg_iovlen = 1;
+        }
+
+        if (chunk == 0)
+        {
+            if (sent > 0)
+                return sent;
+            return cc::error(no_address("sending a datagram"));
+        }
+
+        auto const n = ::sendmmsg(raw_of(s), headers, unsigned(chunk), MSG_DONTWAIT);
+        if (n < 0)
+        {
+            auto const native = last_socket_error();
+            if (is_would_block_native(native) || sent > 0)
+                return sent;
+            return cc::error(error_from_native(native, cc::format("sending a datagram to {}", packets[sent].peer)));
+        }
+
+        sent += isize(n);
+
+        // Short means the kernel stopped at a packet it would not take, or the chunk ended at one without an address;
+        // either way the next call, starting there, says why.
+        if (isize(n) < most)
+            return sent;
+    }
+    return sent;
+}
+
+#else // one datagram per syscall
+
+cc::result<isize, error> receive_datagrams(native_socket s, cc::span<datagram> records, clock& stamp)
+{
+    auto filled = isize(0);
+    while (filled < records.size())
+    {
+        auto& r = records[filled];
+        sockaddr_storage addr = {};
+        auto truncated = false;
+
+#if defined(_WIN32)
+        auto length = socket_length(sizeof(addr));
+        auto n = ::recvfrom(raw_of(s), reinterpret_cast<char*>(r.buffer.data()), int(r.buffer.size()), 0,
+                            reinterpret_cast<sockaddr*>(&addr), &length);
+        if (n == SOCKET_ERROR && ::WSAGetLastError() == WSAEMSGSIZE)
+        {
+            // Windows fails a datagram that did not fit, after filling the buffer with as much of it as did.
+            n = int(r.buffer.size());
+            truncated = true;
+        }
+#else
+        // recvmsg rather than recvfrom: only the message flags say a datagram was cut, and only recvmsg returns them.
+        iovec vec = {.iov_base = r.buffer.data(), .iov_len = size_t(r.buffer.size())};
+        msghdr header = {};
+        header.msg_name = &addr;
+        header.msg_namelen = socket_length(sizeof(addr));
+        header.msg_iov = &vec;
+        header.msg_iovlen = 1;
+        auto const n = ::recvmsg(raw_of(s), &header, 0);
+        if (n >= 0)
+            truncated = (header.msg_flags & MSG_TRUNC) != 0;
+#endif
+
+        if (n < 0)
+        {
+            auto const native = last_socket_error();
+            if (is_would_block_native(native))
+                return filled;
+            if (is_echo_of_a_refusal(native))
+                continue;
+            if (filled > 0)
+                return filled;
+            return cc::error(error_from_native(native, "receiving a datagram"));
+        }
+
+        auto const peer = from_sockaddr(addr);
+        r.size = isize(n);
+        r.peer = peer.has_value() ? peer.value() : endpoint();
+        r.received_at_ns = stamp.now_ns();
+        r.truncated = truncated;
+        ++filled;
+    }
+    return filled;
+}
+
+cc::result<isize, error> send_datagrams(native_socket s, cc::span<outgoing_datagram const> packets)
+{
+    for (isize i = 0; i < packets.size(); ++i)
+    {
+        auto const& p = packets[i];
+        sockaddr_storage addr = {};
+        auto length = socket_length(0);
+        if (!to_sockaddr(p.peer, addr, length))
+        {
+            if (i > 0)
+                return i;
+            return cc::error(no_address("sending a datagram"));
+        }
+
+        auto const n = ::sendto(raw_of(s), reinterpret_cast<char const*>(p.bytes.data()), int(p.bytes.size()), 0,
+                                reinterpret_cast<sockaddr const*>(&addr), length);
+        if (n < 0)
+        {
+            auto const native = last_socket_error();
+            if (is_would_block_native(native) || i > 0)
+                return i;
+            return cc::error(error_from_native(native, cc::format("sending a datagram to {}", p.peer)));
+        }
+    }
+    return packets.size();
+}
+
+#endif
 } // namespace cnet::impl
 
 #else // CNET_HAS_SOCKETS -- the platform has no sockets of any kind
@@ -521,6 +829,18 @@ cc::result<cc::unit, error> set_v6_only(native_socket, bool)
 cc::result<cc::unit, error> set_tcp_no_delay(native_socket, bool)
 {
     return cc::error(no_sockets("setting TCP_NODELAY"));
+}
+cc::result<cc::unit, error> apply_datagram_options(native_socket, ip_family, datagram_options const&)
+{
+    return cc::error(no_sockets("setting datagram options"));
+}
+cc::result<isize, error> receive_datagrams(native_socket, cc::span<datagram>, clock&)
+{
+    return cc::error(no_sockets("receiving datagrams"));
+}
+cc::result<isize, error> send_datagrams(native_socket, cc::span<outgoing_datagram const>)
+{
+    return cc::error(no_sockets("sending datagrams"));
 }
 } // namespace cnet::impl
 

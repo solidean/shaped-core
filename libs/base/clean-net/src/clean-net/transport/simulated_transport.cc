@@ -6,6 +6,7 @@
 #include <clean-core/thread/mutex.hh>
 #include <clean-net/fwd.hh>
 #include <clean-net/impl/reactor.hh>
+#include <clean-net/transport/datagram.hh>
 
 #include <memory> // std::unique_ptr, to own a backend through its interface -- see .shaped-lint.yml
 
@@ -76,11 +77,30 @@ struct simulated_transport::state
         return delay <= 0 ? 0 : i64(delay);
     }
 
-    [[nodiscard]] bool draws_loss()
+    [[nodiscard]] bool draws_loss() { return draws(conditions.loss_probability); }
+
+    /// Whether an event of probability `p` happens this time; never draws for a condition that is off, so a link with
+    /// it off replays the same stream as one that never had it.
+    [[nodiscard]] bool draws(f32 p)
     {
-        if (conditions.loss_probability <= 0)
+        if (p <= 0)
             return false;
-        return rng.lock([&](cc::random& r) { return r.uniform(0.0f, 1.0f) < conditions.loss_probability; });
+        return rng.lock([&](cc::random& r) { return r.uniform(0.0f, 1.0f) < p; });
+    }
+
+    /// The delay, in nanoseconds, a datagram of `bytes` takes: `delay_ms_for` without its rounding, since a datagram's
+    /// release time is compared against the clock directly.
+    [[nodiscard]] i64 delay_ns_for(isize bytes)
+    {
+        auto delay = f64(conditions.latency_ms);
+
+        if (conditions.jitter_ms > 0)
+            delay += rng.lock([&](cc::random& r) { return f64(r.uniform(-conditions.jitter_ms, conditions.jitter_ms)); });
+
+        if (conditions.bandwidth_bytes_per_sec > 0 && bytes > 0)
+            delay += 1000.0 * f64(bytes) / f64(conditions.bandwidth_bytes_per_sec);
+
+        return delay <= 0 ? 0 : i64(delay * 1000.0 * 1000.0);
     }
 };
 
@@ -283,6 +303,310 @@ private:
 };
 } // namespace
 
+// ---- datagrams -----------------------------------------------------------------------------------------
+//
+// WHERE A DATAGRAM IS IMPAIRED: where it is received, and nowhere else.
+// Each arrival is decided once -- dropped, duplicated, delayed, or delayed further so later ones overtake it -- and then
+// held until its release time, which `receive_batch` and the readiness wait both read.
+// So nothing per datagram needs a timer, and in a test where every socket comes from one simulated transport each
+// datagram crosses exactly one impairment.
+// Over the native transport that means only what arrives here is impaired, which [datagrams.md](../../../docs/datagrams.md) records.
+
+namespace
+{
+/// A datagram the link has decided to deliver, waiting for its moment.
+struct held_datagram
+{
+    endpoint peer;
+    cc::vector<byte> bytes;
+    bool truncated = false;
+
+    /// When it arrives, as far as the caller can tell, on the io_system's clock.
+    i64 release_ns = 0;
+};
+
+struct held_queue
+{
+    /// Ordered by release time, earliest first, so what is due is always a prefix.
+    cc::vector<held_datagram> items;
+
+    /// The one readiness wait on this socket.
+    impl::io_operation* parked = nullptr;
+
+    /// When the timer that will next look at the queue fires; 0 when none is pending.
+    i64 timer_at_ns = 0;
+
+    [[nodiscard]] bool has_due(i64 now) const { return !items.empty() && items[0].release_ns <= now; }
+};
+
+/// What `receive_batch` reads the wrapped socket into, before each datagram is copied into the held queue.
+struct pull_scratch
+{
+    cc::vector<byte> bytes;
+    cc::vector<datagram> records;
+};
+
+/// The largest datagram anything carries, so the scratch slots never cut one the wrapped socket received whole.
+constexpr isize k_scratch_slot = 65536;
+constexpr isize k_scratch_slots = 8;
+
+/// A readiness wait on a simulated datagram socket, parked until something is due.
+struct sim_readable_op final : impl::io_operation
+{
+    cc::shared_async<cc::unit> promise;
+    cc::unique_ptr<sim_readable_op> self;
+    impl::cancel_registration cancellation;
+    cc::shared_ptr<cc::mutex<held_queue>> queue;
+
+    void on_complete(cc::optional<error> failure) override
+    {
+        auto const keep_alive_until_return = cc::move(self);
+        cancellation.detach();
+
+        queue->lock(
+            [this](held_queue& q)
+            {
+                if (q.parked == this)
+                    q.parked = nullptr;
+            });
+
+        if (failure.has_value())
+            promise->push_error(to_async_error(cc::move(failure.value())));
+        else
+            promise->push_value(cc::unit{});
+    }
+};
+
+/// What a simulated datagram socket and its timers share; a timer can fire after the socket is gone.
+struct sim_datagram_state
+{
+    cc::shared_ptr<sim_state> link;
+    cc::shared_ptr<cc::mutex<held_queue>> queue = cc::make_shared<cc::mutex<held_queue>>();
+    cc::mutex<pull_scratch> scratch;
+
+    explicit sim_datagram_state(cc::shared_ptr<sim_state> l) : link(cc::move(l))
+    {
+        scratch.lock(
+            [](pull_scratch& p)
+            {
+                p.bytes.resize_to_defaulted(k_scratch_slot * k_scratch_slots);
+                p.records.resize_to_defaulted(k_scratch_slots);
+                for (isize i = 0; i < k_scratch_slots; ++i)
+                    p.records[i].buffer = cc::span<byte>(p.bytes).subspan(i * k_scratch_slot).first_n(k_scratch_slot);
+            });
+    }
+
+    /// Decide the fate of one arrival, and queue what survives it.
+    void impair(held_queue& q, datagram const& d)
+    {
+        auto const& c = link->conditions;
+        if (link->draws_loss())
+            return;
+
+        auto const copies = link->draws(c.duplicate_probability) ? 2 : 1;
+        for (auto k = 0; k < copies; ++k)
+        {
+            auto delay = link->delay_ns_for(d.size);
+
+            // Reordering is one datagram taking a slower path: an extra delay of one to two times its own, and at least
+            // a millisecond so a link with no latency still reorders.
+            if (link->draws(c.reorder_probability))
+            {
+                auto const factor = link->rng.lock([](cc::random& r) { return f64(r.uniform(1.0f, 2.0f)); });
+                auto const extra = i64(f64(delay) * factor);
+                delay += extra > 1000 * 1000 ? extra : 1000 * 1000;
+            }
+
+            auto held = held_datagram{.peer = d.peer,
+                                      .bytes = {},
+                                      .truncated = d.truncated,
+                                      .release_ns = d.received_at_ns + delay};
+            held.bytes.resize_to_defaulted(d.size);
+            for (isize i = 0; i < d.size; ++i)
+                held.bytes[i] = d.buffer[i];
+
+            // Insertion keeps the queue ordered; a test link holds a handful, so a shift is cheaper than a heap.
+            auto at = q.items.size();
+            while (at > 0 && q.items[at - 1].release_ns > held.release_ns)
+                --at;
+            q.items.push_back({});
+            for (auto i = q.items.size() - 1; i > at; --i)
+                q.items[i] = cc::move(q.items[i - 1]);
+            q.items[at] = cc::move(held);
+        }
+    }
+
+    /// Move everything the wrapped socket has into the held queue, deciding each one's fate on the way.
+    [[nodiscard]] cc::result<cc::unit, error> pull(datagram_socket& under)
+    {
+        return scratch.lock(
+            [&](pull_scratch& p) -> cc::result<cc::unit, error>
+            {
+                while (true)
+                {
+                    auto got = under.receive_batch(p.records);
+                    if (got.has_error())
+                        return cc::error(cc::move(got).error());
+
+                    auto const n = got.value();
+                    if (n > 0)
+                        queue->lock(
+                            [&](held_queue& q)
+                            {
+                                for (isize i = 0; i < n; ++i)
+                                    impair(q, p.records[i]);
+                            });
+
+                    if (n < p.records.size())
+                        return cc::unit{};
+                }
+            });
+    }
+
+    /// Wake a parked wait if something is due, and otherwise make sure a timer will look again when something is.
+    static void settle(cc::shared_ptr<sim_datagram_state> const& self)
+    {
+        auto& io = self->link->io;
+        auto const now = io.time_source().now_ns();
+        auto timer_in_ms = i64(-1);
+
+        auto* const waiting = self->queue->lock(
+            [&](held_queue& q) -> impl::io_operation*
+            {
+                if (q.parked == nullptr)
+                    return nullptr;
+
+                if (q.has_due(now))
+                {
+                    auto* const op = q.parked;
+                    q.parked = nullptr;
+                    return op;
+                }
+
+                // Only a waiter needs a timer: a caller that polls reads the release times itself.
+                if (!q.items.empty() && (q.timer_at_ns == 0 || q.items[0].release_ns < q.timer_at_ns))
+                {
+                    q.timer_at_ns = q.items[0].release_ns;
+                    timer_in_ms = (q.timer_at_ns - now + 999'999) / 1'000'000;
+                }
+                return nullptr;
+            });
+
+        if (waiting != nullptr)
+            io.signal(waiting);
+
+        if (timer_in_ms >= 0)
+            impl::run_after(io, timer_in_ms,
+                            [self]
+                            {
+                                auto const now = self->link->io.time_source().now_ns();
+                                self->queue->lock(
+                                    [now](held_queue& q)
+                                    {
+                                        // Only the timer the queue is counting on clears it; an older one that was
+                                        // overtaken by an earlier release leaves the newer one in place.
+                                        if (q.timer_at_ns != 0 && q.timer_at_ns <= now)
+                                            q.timer_at_ns = 0;
+                                    });
+                                settle(self);
+                            });
+    }
+};
+
+/// A datagram socket over a simulated link.
+class simulated_datagram_backend final : public datagram_backend
+{
+public:
+    simulated_datagram_backend(cc::shared_ptr<sim_datagram_state> s, cc::unique_ptr<datagram_socket> under)
+      : _state(cc::move(s)), _under(cc::move(under))
+    {
+        // Arrivals are pulled as they happen, so a release time counts from when the datagram really arrived rather
+        // than from whenever the caller next polled.
+        // No cycle: the state never owns the wrapped socket, and the wrapped socket's destructor clears this callback.
+        // A failed pull is left for the caller's next `receive_batch` to report.
+        _under->on_arrival(
+            [s = _state](datagram_socket& u)
+            {
+                (void)s->pull(u);
+                sim_datagram_state::settle(s);
+            });
+    }
+
+    [[nodiscard]] cc::result<isize, error> receive_batch(cc::span<datagram> records) override
+    {
+        if (auto pulled = _state->pull(*_under); pulled.has_error())
+            return cc::error(cc::move(pulled).error());
+
+        auto const now = _state->link->io.time_source().now_ns();
+        return _state->queue->lock(
+            [&](held_queue& q) -> isize
+            {
+                auto filled = isize(0);
+                while (filled < records.size() && filled < q.items.size() && q.items[filled].release_ns <= now)
+                {
+                    auto const& h = q.items[filled];
+                    auto& r = records[filled];
+                    auto const n = cc::min(h.bytes.size(), r.buffer.size());
+                    for (isize i = 0; i < n; ++i)
+                        r.buffer[i] = h.bytes[i];
+                    r.size = n;
+                    r.peer = h.peer;
+                    r.received_at_ns = h.release_ns;
+                    r.truncated = h.truncated || n < h.bytes.size();
+                    ++filled;
+                }
+
+                for (isize i = filled; i < q.items.size(); ++i)
+                    q.items[i - filled] = cc::move(q.items[i]);
+                for (isize i = 0; i < filled; ++i)
+                    q.items.remove_back();
+                return filled;
+            });
+    }
+
+    [[nodiscard]] cc::result<isize, error> send_batch(cc::span<outgoing_datagram const> packets) override
+    {
+        return _under->send_batch(packets);
+    }
+
+    [[nodiscard]] cc::shared_async<cc::unit> wait_readable(cancel_token const& token) override
+    {
+        auto& io = _state->link->io;
+
+        auto op = cc::make_unique<sim_readable_op>();
+        op->kind = impl::io_op_kind::manual;
+        op->queue = _state->queue;
+
+        auto promise = cc::make_async_manual<cc::unit>();
+        op->promise = promise;
+
+        auto* const raw = op.get();
+        raw->self = cc::move(op);
+
+        // Submit, then park, then let `settle` decide between signalling now and a timer -- the virtual receive's order.
+        auto in_flight = io.submit(raw);
+        _state->queue->lock([raw](held_queue& q) { q.parked = raw; });
+        sim_datagram_state::settle(_state);
+
+        raw->cancellation.attach(cc::move(in_flight), token);
+        return promise;
+    }
+
+    [[nodiscard]] endpoint local() const override { return _under->local(); }
+    [[nodiscard]] io_system& io() const override { return _state->link->io; }
+
+    ~simulated_datagram_backend() override
+    {
+        // First, so no arrival callback is still running into the state below.
+        _under = {};
+    }
+
+private:
+    cc::shared_ptr<sim_datagram_state> _state;
+    cc::unique_ptr<datagram_socket> _under;
+};
+} // namespace
+
 // ---- the transport -------------------------------------------------------------------------------------
 
 simulated_transport::simulated_transport(io_system& io, transport& under, link_conditions const& conditions)
@@ -349,5 +673,15 @@ cc::shared_async<cc::shared_ptr<stream_connection>> simulated_transport::connect
                         });
 
     return promise;
+}
+cc::result<cc::unique_ptr<datagram_socket>, error> simulated_transport::bind_datagram(endpoint const& where,
+                                                                                      datagram_options const& options)
+{
+    auto under = _state->under.bind_datagram(where, options);
+    if (under.has_error())
+        return cc::error(cc::move(under).error());
+
+    return cc::make_unique<datagram_socket>(std::make_unique<simulated_datagram_backend>(
+        cc::make_shared<sim_datagram_state>(_state), cc::move(under).value()));
 }
 } // namespace cnet

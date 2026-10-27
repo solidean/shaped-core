@@ -4,6 +4,9 @@
 
 /// What a link does to the traffic passing through it.
 ///
+/// **A datagram is impaired where it is received**, once: in a test where every socket comes from one simulated
+/// transport each datagram crosses exactly one impairment, and over the native transport only inbound traffic does.
+///
 /// **Every field is off by default**, so a simulated transport nobody configured is indistinguishable from the one
 /// underneath.
 /// That is not a convenience: without it, a passing test against a simulated link proves nothing, because nobody
@@ -26,6 +29,8 @@ struct cnet::link_conditions
     f32 duplicate_probability = 0;
 
     /// Datagram paths only, and ignored on a stream, whose whole promise is that order is kept.
+    /// A reordered datagram takes one to two times its own delay again, and at least a millisecond, so later ones
+    /// overtake it.
     f32 reorder_probability = 0;
 
     /// A throughput ceiling, which becomes a delay proportional to the bytes moved.
@@ -70,6 +75,9 @@ public:
 
     [[nodiscard]] cc::result<cc::unique_ptr<stream_listener>, error> listen(endpoint const& where,
                                                                             tcp_listen_options const& options) override;
+
+    [[nodiscard]] cc::result<cc::unique_ptr<datagram_socket>, error> bind_datagram(endpoint const& where,
+                                                                                   datagram_options const& options) override;
 
     simulated_transport(simulated_transport const&) = delete;
     simulated_transport& operator=(simulated_transport const&) = delete;

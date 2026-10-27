@@ -87,12 +87,42 @@ public:
     virtual ~listener_backend() = default;
 };
 
-/// Where connections and listeners come from.
+/// One datagram socket, whatever is carrying it.
+///
+/// `cnet::datagram_socket` documents the contract of the two batch calls; a backend implements exactly that.
+class cnet::datagram_backend
+{
+public:
+    [[nodiscard]] virtual cc::result<isize, error> receive_batch(cc::span<datagram> records) = 0;
+    [[nodiscard]] virtual cc::result<isize, error> send_batch(cc::span<outgoing_datagram const> packets) = 0;
+
+    /// Completes once a `receive_batch` would return at least one datagram, and reads nothing itself.
+    ///
+    /// One wait, rather than a standing subscription: `datagram_socket::on_arrival` is built by waiting again after
+    /// every call.
+    /// **It must never complete inline**, only from a later reactor wait.
+    /// The callback above it re-arms from its own completion, so an inline completion would recurse for as long as
+    /// datagrams keep arriving.
+    [[nodiscard]] virtual cc::shared_async<cc::unit> wait_readable(cancel_token const& token) = 0;
+
+    [[nodiscard]] virtual endpoint local() const = 0;
+
+    /// The io_system the waits are submitted to.
+    [[nodiscard]] virtual io_system& io() const = 0;
+
+    datagram_backend() = default;
+    datagram_backend(datagram_backend const&) = delete;
+    datagram_backend& operator=(datagram_backend const&) = delete;
+    virtual ~datagram_backend() = default;
+};
+
+/// Where connections, listeners and datagram sockets come from.
 ///
 /// One transport is the platform's own sockets; others answer without a network at all, or misbehave on the way
 /// through to another one.
 /// No method here takes a default argument: a default on a virtual binds to the static type of the call, so the
-/// defaults live on `cnet::tcp_connect` and `cnet::stream_listener::try_create` instead.
+/// defaults live on `cnet::tcp_connect`, `cnet::stream_listener::try_create` and `cnet::datagram_socket::try_create`
+/// instead.
 class cnet::transport
 {
 public:
@@ -114,6 +144,12 @@ public:
     /// Binding and listening never waits, so there is nothing here for a token to cancel.
     [[nodiscard]] virtual cc::result<cc::unique_ptr<stream_listener>, error> listen(endpoint const& where,
                                                                                     tcp_listen_options const& options)
+        = 0;
+
+    /// Binding never waits either.
+    /// Fails with `unsupported` where this transport has no datagrams, which is the native one on wasm.
+    [[nodiscard]] virtual cc::result<cc::unique_ptr<datagram_socket>, error> bind_datagram(endpoint const& where,
+                                                                                           datagram_options const& options)
         = 0;
 
     transport() = default;
