@@ -121,8 +121,9 @@ CNET_IO_TEST("cnet - datagrams over loopback arrive whole, with their sender and
     auto a = datagram_socket::try_create(*io, loopback_any_port());
     if (!native_transport(*io).is_supported())
     {
+        // The one native test that runs here anyway: the answer itself is what wasm owes.
         CHECK(a.error().code == error_code::unsupported);
-        return;
+        SKIP("this platform has no sockets");
     }
     auto b = datagram_socket::create(*io, loopback_any_port());
 
@@ -161,7 +162,7 @@ CNET_IO_TEST("cnet - an empty native socket answers zero rather than waiting or 
 {
     auto io = io_system::create({.unthreaded = true});
     if (!native_transport(*io).is_supported())
-        return;
+        SKIP("this platform has no sockets");
 
     auto s = datagram_socket::create(*io, loopback_any_port());
     auto in = inbox(4);
@@ -172,7 +173,7 @@ CNET_IO_TEST("cnet - a native datagram larger than its room is cut, and says so"
 {
     auto io = io_system::create({.unthreaded = true});
     if (!native_transport(*io).is_supported())
-        return;
+        SKIP("this platform has no sockets");
 
     auto a = datagram_socket::create(*io, loopback_any_port());
     auto b = datagram_socket::create(*io, loopback_any_port());
@@ -194,7 +195,7 @@ CNET_IO_TEST("cnet - a peer that went away is silence on the native socket, not 
 {
     auto io = io_system::create({.unthreaded = true});
     if (!native_transport(*io).is_supported())
-        return;
+        SKIP("this platform has no sockets");
 
     auto a = datagram_socket::create(*io, loopback_any_port());
     auto gone = datagram_socket::create(*io, loopback_any_port());
@@ -229,7 +230,7 @@ CNET_IO_TEST("cnet - a native send batch reports how far it got, and the next ca
 {
     auto io = io_system::create({.unthreaded = true});
     if (!native_transport(*io).is_supported())
-        return;
+        SKIP("this platform has no sockets");
 
     auto a = datagram_socket::create(*io, loopback_any_port());
     auto b = datagram_socket::create(*io, loopback_any_port());
@@ -251,7 +252,7 @@ CNET_IO_TEST("cnet - the native arrival callback is level-triggered")
 {
     auto io = io_system::create({.unthreaded = true});
     if (!native_transport(*io).is_supported())
-        return;
+        SKIP("this platform has no sockets");
 
     auto a = datagram_socket::create(*io, loopback_any_port());
     auto b = datagram_socket::create(*io, loopback_any_port());
@@ -775,7 +776,7 @@ BENCHMARK("cnet - datagrams: polling against the arrival callback, over loopback
 {
     auto io = io_system::create({.unthreaded = true});
     if (!native_transport(*io).is_supported())
-        return;
+        SKIP("this platform has no sockets");
 
     auto a = datagram_socket::create(*io, loopback_any_port());
     auto b = datagram_socket::create(*io, loopback_any_port());
