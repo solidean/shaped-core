@@ -91,7 +91,7 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
     auto permutations = cc::vector<sv::material_permutation const*>();
     permutations.push_back(permutation);
     auto draws = cc::vector<sv::raster_draw>();
-    draws.push_back({.instance = 0, .triangle_count = u32(mesh_rec->triangle_count), .permutation = 0});
+    draws.push_back({.instance = 0, .triangle_count = u32(mesh_rec->geometry.triangle_count), .permutation = 0});
 
     auto const targets = gbuffer_of(ctx, size);
     auto const record = sv::camera_record_of(cam);

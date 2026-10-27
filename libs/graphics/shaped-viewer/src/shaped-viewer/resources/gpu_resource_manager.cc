@@ -362,26 +362,25 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     _upload_parameters(cmd, r);
 
     // A pending batch is traced as the placeholder CUBE through the triangle fallback, so its record has to name the
-    // cube's positions — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
+    // cube's range of the pools — exactly as the mesh overload below does, and for the same reason: the triangle closest hit reads the hit
     // triangle's three corners back out of `inst.vertices` to recompute the geometric normal.
     // The batch's own primitive buffer would be wrong there twice over, since it holds nothing yet AND is not positions.
     //
     // Naming the real buffer while it streams would also stall: a command list that touches a resource a stream is
     // still filling waits for the whole transfer to land, and the first frames would pay that for bytes the placeholder
     // never reads.
-    // `placeholder_vertices` is filled by a direct upload rather than a stream, so it is never the thing being waited on.
+    // The cube is uploaded directly rather than streamed, so it is never the thing being waited on.
     auto const pending = q.state != residency::complete;
-    auto const vertices
-        = pending ? meshes.placeholder_vertices().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+    auto const vertices = pending ? meshes.vertex_pool().raw()->as_raw_readonly() : q.primitives.raw()->as_raw_readonly();
+    auto const& cube = meshes.placeholder_geometry();
 
-    // A quadric indexes nothing, but the field still has to name something the bound snapshot covers.
-    auto const stand_in = meshes.index_stand_in().raw()->as_raw_readonly();
-
+    // A landed quadric indexes nothing, but the field still has to name something the bound snapshot covers.
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0,
             .vertices = u32(acquire_buffer(vertices)),
-            .indices = u32(acquire_buffer(stand_in)),
-            .is_indexed = 0u,
+            .indices = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly())),
+            .base_vertex = pending ? u32(cube.base_vertex) : 0u,
+            .first_index = pending ? u32(cube.first_index) : 0u,
             .link_mask = ~0u,
             .shade_group = 0,
             .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
@@ -396,34 +395,37 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
     CC_ASSERT(contains_instance(instance), "no such instance_id");
     auto& r = _instances[isize(u32(instance))];
 
-    // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's geometry: a hit reads
-    // positions back out of the instance to recompute the geometric normal, and the real buffer holds nothing yet.
+    // A pending mesh is traced as the placeholder cube, so its record has to name the CUBE's range: a hit reads
+    // positions back out of the instance to recompute the geometric normal, and the mesh's own range holds nothing yet.
     auto const pending = m.state != residency::complete;
-    auto const& vertices = pending ? meshes.placeholder_vertices() : m.vertices;
-    auto const& indices = pending ? meshes.index_stand_in() : m.indices;
+    auto const& geometry = pending ? meshes.placeholder_geometry() : m.geometry;
+    auto const vertices = u32(acquire_buffer(meshes.vertex_pool().raw()->as_raw_readonly()));
+    auto const indices = u32(acquire_buffer(meshes.index_pool().raw()->as_raw_readonly()));
 
     // Shaded through the fallback, which reads no parameter block, so the block is neither built nor bound — building it
     // is what would bind a still-streaming attribute buffer.
-    // The index stand-in fills the slot, since a record has to name some buffer there.
+    // The index pool fills the slot, since a record has to name some buffer there.
     if (pending || !attributes_resident(instance))
-        return {.param_buffer = u32(acquire_buffer(meshes.index_stand_in().raw()->as_raw_readonly())),
+        return {.param_buffer = indices,
                 .param_offset = 0,
-                .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
-                .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-                .is_indexed = (!pending && m.is_indexed) ? 1u : 0u,
+                .vertices = vertices,
+                .indices = indices,
+                .base_vertex = u32(geometry.base_vertex),
+                .first_index = u32(geometry.first_index),
                 .link_mask = ~0u,
                 .shade_group = 0,
                 .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
 
     _upload_parameters(cmd, r);
 
-    // Every index here is this epoch's, minted right where it is written — which is what puts all four into the access
+    // Every index here is this epoch's, minted right where it is written — which is what puts all of them into the access
     // declaration `freeze()` hands the trace.
     return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
             .param_offset = 0, // one block per buffer today; the shader reads through the offset regardless
-            .vertices = u32(acquire_buffer(vertices.raw()->as_raw_readonly())),
-            .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
-            .is_indexed = m.is_indexed ? 1u : 0u,
+            .vertices = vertices,
+            .indices = indices,
+            .base_vertex = u32(geometry.base_vertex),
+            .first_index = u32(geometry.first_index),
             .link_mask = ~0u,
             .shade_group = 0,
             .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it

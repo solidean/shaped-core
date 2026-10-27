@@ -14,6 +14,7 @@
 #include <shaped-graphics/transfer/stream_handle.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/resources/impl/lru_pool.hh>
+#include <shaped-viewer/resources/impl/range_allocator.hh>
 #include <shaped-viewer/resources/quadric_data.hh>
 #include <shaped-viewer/resources/resource_data.hh>
 #include <shaped-viewer/resources/value_summary.hh>
@@ -76,31 +77,37 @@ inline constexpr u32 emitter_cdf_block_size = 256;
 }
 } // namespace sv
 
-/// One uploaded mesh: its geometry buffers, and the BLAS built from them once something traces it.
+/// Where one mesh's triangles sit in `mesh_manager`'s two central pools.
+///
+/// Its vertices are `[base_vertex, base_vertex + vertex_count)` of `vertex_pool`.
+/// Its indices are `[first_index, first_index + 3 * triangle_count)` of `index_pool`, **relative to `base_vertex`**.
+/// So an index is the vertex a per-vertex attribute is numbered by, and `base_vertex` is added only to reach a position.
+/// That is also what an indexed draw's base vertex and a BLAS's vertex offset expect.
+struct sv::geometry_range
+{
+    isize base_vertex = 0;
+    isize vertex_count = 0;
+    isize first_index = 0;
+    isize triangle_count = 0;
+
+    [[nodiscard]] isize index_count() const { return 3 * triangle_count; }
+};
+
+/// One uploaded mesh: where its geometry sits in the manager's central pools, and the BLAS built from it once something traces it.
 ///
 /// **The BLAS is built on demand**, by the first trace that reaches the mesh through `mesh_manager::acquire_blas`.
 /// A mesh only ever rasterized never gets one, which is what lets a raster layer draw on a device without ray tracing.
 /// Once built it stays, so a trace then rebuilds only the (cheap) TLAS each frame.
 ///
-/// Indexed and non-indexed geometry stay distinct all the way down.
-/// An `indexed_triangle_data` acquire uploads the caller's index buffer and builds an indexed BLAS, while a `triangle_data` acquire uploads nothing extra and builds a non-indexed one.
-/// `is_indexed` is what a shader branches on.
-/// It reaches the path tracer's closest-hit per instance, through `shaders::tracer::instance_record::is_indexed` and the hit's instance id.
-/// It is also the only thing that makes `indices` meaningful.
+/// **Every mesh is indexed on the GPU.**
+/// A raw triangle list is uploaded with the indices 0, 1, 2, ..., so its triangle `t` still has the corners `3t`, `3t + 1` and `3t + 2`, which a per-vertex attribute is numbered by.
 struct sv::mesh_record
 {
-    /// How much of this mesh has reached the GPU: `complete` once its buffers are uploaded, whether or not a BLAS was built.
-    /// While `pending` there is nothing to draw, so a placeholder box stands in for it — see `mesh_manager::placeholder_vertices`.
+    /// How much of this mesh has reached the GPU: `complete` once its geometry is uploaded, whether or not a BLAS was built.
+    /// While `pending` there is nothing to draw, so a placeholder box stands in for it — see `mesh_manager::placeholder_geometry`.
     residency state = residency::pending;
 
-    sg::buffer<tg::pos3f> vertices;
-
-    /// The mesh's own indices when `is_indexed`; otherwise the manager's stand-in buffer, which no shader
-    /// reads but every binding group must still cover.
-    sg::buffer<u32> indices;
-    bool is_indexed = false;
-
-    isize triangle_count = 0;
+    geometry_range geometry;
 
     /// Null until a trace asks `mesh_manager::acquire_blas` for it.
     sg::blas_handle blas;
@@ -137,6 +144,12 @@ struct sv::mesh_record
 /// Hands out `mesh_id`s and owns the geometry + BLAS behind each, with LRU budgeting (see resource_budget).
 /// This is where the one-time BLAS build lives (a BLAS build is setup, not a per-frame pass, so it stays
 /// here rather than in a routine), and it runs only for a mesh something traces.
+///
+/// **Every mesh's geometry lives in two central pools**, one vertex buffer and one index buffer, each mesh a range of both.
+/// That is what lets a draw be indexed without a buffer bound per mesh, and a BLAS be built from the very bytes a draw reads.
+/// A mesh streams into staging of its own and is copied into its ranges once it landed, so no stream ever targets a pool.
+/// A pool that runs out is replaced by one twice its size, its contents copied over on the GPU.
+/// An evicted mesh's ranges are reused only once the frames that may still read them have retired.
 class sv::mesh_manager : public impl::lru_pool<mesh_id, mesh_record>
 {
 public:
@@ -145,16 +158,15 @@ public:
 
     /// The mesh_id for `mesh.hash`, resident from a prior acquire (O(1)), or a freshly queued one.
     ///
-    /// On a miss the buffers are created and the geometry is handed to `ctx.stream`, which carries it on the copy
+    /// On a miss the mesh's ranges are allocated and the geometry is handed to `ctx.stream`, which carries it on the copy
     /// queue at its own pace — so an acquire costs an allocation and a hash lookup rather than a transfer.
     /// The id is usable at once and the mesh is `pending` until `collect_settled` sees its geometry land; until then it
     /// is drawn as the placeholder box.
     /// Ray tracing need not be supported: nothing here builds an acceleration structure.
     ///
-    /// Non-indexed: `positions` is a triangle list, 3 vertices per triangle, count a multiple of 3.
+    /// Non-indexed: `positions` is a triangle list, 3 vertices per triangle, count a multiple of 3; it is uploaded with the indices 0, 1, 2, ... .
     [[nodiscard]] mesh_id acquire(triangle_data const& mesh);
-    /// Indexed: `indices` names triangles into `positions`, count a multiple of 3. Nothing is de-indexed —
-    /// the BLAS is built from the index buffer and the closest-hit reads through it.
+    /// Indexed: `indices` names triangles into `positions`, count a multiple of 3; nothing is de-indexed.
     [[nodiscard]] mesh_id acquire(indexed_triangle_data const& mesh);
 
     /// The unit cube every pending mesh is traced as, built on first use; ray tracing must be supported on the context.
@@ -164,14 +176,21 @@ public:
     /// and a hundred 3x4 matrices.
     [[nodiscard]] sg::blas_handle const& placeholder_blas();
 
-    /// The cube's own vertices, which an instance record must name in place of the mesh's, built on first use.
+    /// Where the cube sits in the pools, which an instance record must name in place of a pending mesh's range.
     ///
     /// A hit reads positions back out of the instance to recompute the geometric normal, and a raster draw pulls its
-    /// corners from it, so pointing at the real mesh's buffer while drawing the cube would read triangles it never had.
-    [[nodiscard]] sg::buffer<tg::pos3f> const& placeholder_vertices();
+    /// corners from it, so naming the real mesh's range while drawing the cube would read triangles it never had.
+    /// Uploaded directly rather than streamed, so a list touching it never waits on a transfer.
+    [[nodiscard]] geometry_range const& placeholder_geometry();
 
-    /// The stand-in index buffer a non-indexed record binds; the placeholder is non-indexed, so it binds this too.
-    [[nodiscard]] sg::buffer<u32> const& index_stand_in();
+    /// The central vertex pool: every mesh's positions, `float3` each, at its `geometry_range::base_vertex`.
+    ///
+    /// The buffer is replaced when the pool grows, so read it per frame rather than keeping it.
+    [[nodiscard]] sg::buffer<tg::pos3f> const& vertex_pool();
+
+    /// The central index pool: every mesh's indices, `u32` each and relative to its base vertex, at its `geometry_range::first_index`.
+    /// Replaced on growth like `vertex_pool`.
+    [[nodiscard]] sg::buffer<u32> const& index_pool();
 
     /// Marks every mesh whose geometry has finished streaming `complete`; returns how many.
     ///
@@ -220,28 +239,57 @@ public:
     /// How many meshes are still streaming.
     [[nodiscard]] isize settling_count() const { return _settling.size(); }
 
+    /// How many vertices and indices the pools hold room for; they grow, and never shrink.
+    [[nodiscard]] isize vertex_pool_capacity() const { return _vertex_ranges.capacity(); }
+    [[nodiscard]] isize index_pool_capacity() const { return _index_ranges.capacity(); }
+
 private:
     explicit mesh_manager(sg::context& ctx) : _ctx(ctx) {}
 
-    /// The transfers one queued mesh is waiting on.
+    /// One queued mesh: its payload streaming into staging buffers of its own, which `collect_settled` copies into its ranges once landed.
     ///
-    /// The payload is NOT held here: `ctx.stream` took the pin, so the bytes are owned by the transfer and released
-    /// when it settles.
-    /// Dropping this entry cancels whatever has not been sent, which is what makes evicting a still-streaming mesh
-    /// free rather than something to remember.
+    /// Staged rather than streamed into the pools, because a list touching a buffer a stream still fills waits for the whole transfer, and every frame touches the pools.
+    /// Dropping this entry cancels whatever has not been sent.
     struct pending_mesh
     {
         sg::stream_upload_handle vertices;
-        sg::stream_upload_handle indices; ///< invalid for a raw triangle list
+        sg::stream_upload_handle indices;
+        sg::buffer<tg::pos3f> staged_vertices;
+        sg::buffer<u32> staged_indices;
         isize bytes = 0;
     };
 
-    /// Finishes `id` if its transfers have settled; returns whether it did.
-    [[nodiscard]] bool _try_settle(mesh_id id, pending_mesh& p);
+    /// An evicted mesh's ranges, waiting for the last frame that may read them to retire.
+    struct retiring_ranges
+    {
+        geometry_range geometry;
+        sg::epoch evicted_in = sg::epoch(0);
+    };
 
-    /// The stand-in a non-indexed record binds as `Indices`, created on first use and recorded onto `cmd`.
-    /// Its contents are never read — it exists only so the trace's binding group is complete.
-    [[nodiscard]] sg::buffer<u32> _acquire_index_stand_in(sg::command_list& cmd);
+    void on_remove(mesh_id id, mesh_record& record) override;
+
+    /// Creates both pools on first use, with the placeholder cube at their start.
+    void _ensure_pools();
+
+    /// Ranges for `vertex_count` vertices and `triangle_count` triangles, growing a pool that has no room.
+    [[nodiscard]] geometry_range _allocate(isize vertex_count, isize triangle_count);
+
+    /// Replaces a pool by one holding at least `min_capacity` elements, carrying its contents over.
+    void _grow_vertex_pool(isize min_capacity);
+    void _grow_index_pool(isize min_capacity);
+
+    /// Allocates, streams and records one mesh; both acquires end here.
+    [[nodiscard]] mesh_id _insert(cc::hash128 hash,
+                                  cc::pinned_data<tg::pos3f const> positions,
+                                  cc::pinned_data<u32 const> indices,
+                                  f32 surface_area,
+                                  cc::optional<tg::aabb3f> bounds);
+
+    /// Frees every retiring range whose readers have all retired.
+    void _reclaim();
+
+    /// Finishes `id` if its transfers have settled, recording its copy into the pools onto `copies`, opened on first need; returns whether it did.
+    [[nodiscard]] bool _try_settle(mesh_id id, pending_mesh& p, std::unique_ptr<sg::command_list>& copies);
 
     /// Whether the kernels of shaders/emitter_cdf.sgl are built, starting them on first use; polled, never waited on.
     [[nodiscard]] bool _emitter_cdf_kernels_ready();
@@ -252,9 +300,13 @@ private:
     sg::async_compute_pipeline _world_blocks;
     sg::async_compute_pipeline _world_total;
     bool _cdf_failed = false;
-    sg::buffer<u32> _index_stand_in;
     sg::blas_handle _placeholder_blas;
-    sg::buffer<tg::pos3f> _placeholder_vertices;
+    geometry_range _placeholder;
+    sg::buffer<tg::pos3f> _vertex_pool;
+    sg::buffer<u32> _index_pool;
+    impl::range_allocator _vertex_ranges;
+    impl::range_allocator _index_ranges;
+    cc::vector<retiring_ranges> _retiring;
     cc::map<mesh_id, pending_mesh> _settling;
 };
 

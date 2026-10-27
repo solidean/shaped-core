@@ -182,7 +182,7 @@ m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_me
 m.describe_instance(cmd, mesh_id, instance_id)  // -> shaders::tracer::instance_record, the per-item record a hit reads by its instance id
                                        //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
 m.attributes_resident(instance_id)              // -> bool; until true the item shades through the fallback, binding no still-streaming attribute
-sv::shaders::tracer::instance_record   // { param_buffer, param_offset, vertices, indices, is_indexed, link_mask, padding } — generated from scene.instance, 32 bytes
+sv::shaders::tracer::instance_record   // { param_buffer, param_offset, vertices, indices, base_vertex, first_index, link_mask, opacity…, placement } — generated from scene.instance, 116 bytes
 ```
 
 A block holds, at the offsets `material_parameter_layout` names: a constant inline, an `sv::attribute_desc`
@@ -201,7 +201,8 @@ Gotchas:
 - **The layout and shader key must come from ONE `generate_material_shader`** over that same resolved material, or the block is filled at offsets the shader does not read.
 - **A sampled texture must already be resident** — a `texture_id` on a mesh is one the caller acquired.
 - **The block is zero-filled first**, so alignment padding is stable and one material does not upload as two different blobs.
-- **`is_indexed` rides on the instance, not the frame.** Geometry layout is a property of the mesh, and a view may hold an indexed and a non-indexed one at once.
+- **`vertices` and `indices` name the central pools, and `base_vertex` / `first_index` the mesh's range of them.**
+  The indices are relative to `base_vertex`, so `material.triangle_corners` hands back the numbering per-vertex attributes use, and `material.position_of` adds the base.
 - **The instance, light, camera and frame records are generated from module `tracer`**, so there is no C++ copy to keep in lockstep; fill them field by field, since they have no defaults.
 
 ## Materials — a type, an instance, and the frequency chain
@@ -750,11 +751,14 @@ sv::indexed_triangle_data  // { pinned_data<pos3f const> positions; pinned_data<
 T::create(range…)          // pins (moving an owning rvalue in, deep-copying a borrow) + hashes now (XXH3-128); call once at authoring time, not per frame
 sv::hash_bytes_of(span) / sv::combine_hashes(a, b)  // the hashing primitives, if you key content yourself
 
-mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else uploads, and builds nothing — needs no ray tracing
-mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, indexed: a BLAS built later follows the index buffer's primitive order
-mesh_manager::acquire_blas(cmd, id) -> blas_handle const& // built onto cmd the first time, held after; id complete, ray tracing required
+mesh_manager::acquire(triangle_data) -> mesh_id          // O(1) if resident; else streams into the pools with indices 0, 1, 2, ..., and builds nothing — needs no ray tracing
+mesh_manager::acquire(indexed_triangle_data) -> mesh_id  // same, with the caller's indices: a BLAS built later follows their primitive order
+mesh_manager::acquire_blas(cmd, id) -> blas_handle const& // built onto cmd from the mesh's range of the pools the first time, held after; id complete, ray tracing required
 quadric_manager::acquire_blas(cmd, id)                    // the same, a procedural BLAS over the batch's boxes
-sv::mesh_record          // { buffer<pos3f> vertices; buffer<u32> indices; bool is_indexed; isize triangle_count; blas_handle blas (null until a trace);
+mesh_manager::vertex_pool() / index_pool()                // -> sg::buffer<pos3f> / <u32> const& — EVERY mesh's geometry; replaced when it grows, so read it per frame
+mesh_manager::vertex_pool_capacity() / index_pool_capacity() // -> isize — grows by doubling, never shrinks
+sv::geometry_range       // { isize base_vertex, vertex_count, first_index, triangle_count; index_count() } — indices relative to base_vertex
+sv::mesh_record          // { residency state; geometry_range geometry; blas_handle blas (null until a trace);
                          //   f32 surface_area (object space, summed at acquire); buffer<f32> emitter_cdf (null until an emissive instance is traced); }
 mesh_manager::acquire_emitter_cdf(cmd, id) -> buffer<f32> const*  // the two-level area CDF, built on the GPU onto cmd once and held; null while its kernels compile
 mesh_manager::acquire_world_area(cmd, id, linear) -> optional<f32> // id's exact world area under a non-similarity placement, summed on the GPU; none until it lands
@@ -814,7 +818,7 @@ m.wait_for_pending_uploads()       // blocks until every transfer lands, then fi
 m.settling_count()                 // -> isize, payloads still in flight across the managers
 sv::residency                      // pending | base_resident | complete | failed — on EVERY record, not just textures
 m.meshes.placeholder_blas()        // -> the shared unit cube every pending mesh is traced as; ray tracing required
-m.meshes.placeholder_vertices()    // -> its vertices, which a pending mesh's instance record names instead of its own; no ray tracing needed
+m.meshes.placeholder_geometry()    // -> geometry_range const& — the cube's range of the pools, which a pending mesh's instance record names instead of its own; no ray tracing needed
 m.context()                        // -> sg::context& every manager records into
 m.pending_work_count()              // -> isize — resources still waiting for their follow-up
 // config: { texture_policy textures_policy = {.generate_mips = true, .compress = true, .compress_min_extent = 64}; work_budget work = {.max_dispatches_per_epoch = 16} }
@@ -1207,9 +1211,10 @@ sv::layout_routine::execute(scope, window_id, draws, textures)    // borders + p
 - **A shadow ray carries its own minimal payload** (`tracer.shadow_payload`, visibility alone) and its own miss, so a cutout needs an any-hit per payload.
 - **A too-small budget thrashes** — a resource whose id a live scene still names must stay resident; if the
   byte budget can't hold a frame's working set, `get_ptr` returns null and the renderer asserts.
-- **Indexed and non-indexed are separate paths end to end** — nothing is de-indexed and no index buffer is synthesized.
-  `mesh_record::is_indexed` says which a record is, and it reaches the path tracer's hit through the instance record's `is_indexed`, per instance.
-  A non-indexed record binds the manager's stand-in there, which no shader reads.
+- **Every mesh is indexed on the GPU**: a raw triangle list is uploaded with the indices 0, 1, 2, ..., one vertex per corner, so its per-vertex attributes keep their numbering.
+  Nothing is de-indexed, and an indexed mesh keeps its shared vertices.
+- **An evicted mesh's ranges of the pools are reused only once its frames have retired.**
+- **A mesh streams into staging of its own and is copied into its ranges once it landed**, so no stream ever targets a pool, which every frame touches.
 - **Calling `view.camera(...)` every frame restarts the accumulation every frame** — by design, since an animated view has no history worth blending.
   Seed with `initial_camera` / `initial_orbit` / `initial_fps` instead for a view that should converge.
 - **Nothing about placement may reach a trace.** A `view_data` has no position at all, and a leaf's fit, sampler, zoom and post-process

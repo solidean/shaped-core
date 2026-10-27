@@ -698,8 +698,10 @@ ASYNC_INVOCABLE_TEST("sv - an instance record names its own geometry and paramet
     auto const record = m.describe_instance(*cmd, mesh_id, instance);
 
     CHECK(record.param_offset == 0u);
-    CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(mesh_id).vertices.raw()->as_raw_readonly())));
-    CHECK(record.indices == u32(m.acquire_buffer(m.meshes.get(mesh_id).indices.raw()->as_raw_readonly())));
+    CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.vertex_pool().raw()->as_raw_readonly())));
+    CHECK(record.indices == u32(m.acquire_buffer(m.meshes.index_pool().raw()->as_raw_readonly())));
+    CHECK(record.base_vertex == u32(m.meshes.get(mesh_id).geometry.base_vertex));
+    CHECK(record.first_index == u32(m.meshes.get(mesh_id).geometry.first_index));
 
     // Every element the record names was acquired by building it, which is what makes the access declaration complete.
     {
@@ -717,17 +719,16 @@ ASYNC_INVOCABLE_TEST("sv - an instance record names its own geometry and paramet
         CHECK(holds(record.indices));
     }
 
-    // Geometry layout is a property of the mesh, which is what lets a view hold an indexed and a non-indexed one at once.
-    CHECK(record.is_indexed == 0u);
-
+    // An indexed mesh and a raw list share the pools, each its own range of both.
     auto const indexed_geometry
-        = sv::triangle_geometry::create_from_indexed_triangles(positions, cc::vector<u32>{0, 1, 2});
+        = sv::triangle_geometry::create_from_indexed_triangles(positions, cc::vector<u32>{0, 2, 1});
     auto const indexed = m.meshes.acquire(sv::indexed_triangle_data::from(indexed_geometry));
     m.wait_for_pending_uploads();
-    CHECK(m.describe_instance(*cmd, indexed, instance).is_indexed == 1u);
-
-    // Two meshes are two distinct geometry slots — which is the thing "one mesh per view" made impossible.
-    CHECK(m.describe_instance(*cmd, indexed, instance).vertices != record.vertices);
+    auto const other = m.describe_instance(*cmd, indexed, instance);
+    CHECK(other.vertices == record.vertices);
+    CHECK(other.indices == record.indices);
+    CHECK(other.base_vertex != record.base_vertex);
+    CHECK(other.first_index != record.first_index);
 
     ctx.submit_command_list(cc::move(cmd));
     ctx.advance_epoch();
@@ -837,7 +838,8 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
         auto cmd = ctx.create_command_list();
         auto const item = m.acquire_scene_item(sv::resident_mesh{.geometry = b.geometry, .material = material});
         auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
-        CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.placeholder_vertices().raw()->as_raw_readonly())));
+        CHECK(record.base_vertex == u32(m.meshes.placeholder_geometry().base_vertex));
+        CHECK(record.first_index == u32(m.meshes.placeholder_geometry().first_index));
 
         ctx.submit_command_list(cc::move(cmd));
     }
@@ -862,7 +864,8 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
         auto cmd = ctx.create_command_list();
         auto const item = m.acquire_scene_item(sv::resident_mesh{.geometry = a.geometry, .material = material});
         auto const record = m.describe_instance(*cmd, item.mesh, item.instance);
-        CHECK(record.vertices == u32(m.acquire_buffer(m.meshes.get(a.geometry).vertices.raw()->as_raw_readonly())));
+        CHECK(record.base_vertex == u32(m.meshes.get(a.geometry).geometry.base_vertex));
+        CHECK(record.first_index == u32(m.meshes.get(a.geometry).geometry.first_index));
 
         ctx.submit_command_list(cc::move(cmd));
     }

@@ -126,15 +126,15 @@ fun load_f3_at(b: bytes, d: attribute_desc, frequency: uint, ctx: shading_contex
     let e = if frequency == frequency_per_corner => corner_elements(ctx) else ctx.corner
     return interpolate_f3(b, d, e, ctx.barycentrics)
 
-/// The three vertex indices of triangle `primitive` on `inst`.
-///
-/// The guard is load-bearing on the non-indexed path: a non-indexed mesh hands in a stand-in for `index_buffer` that has no elements to read.
-/// So the loads sit inside an `if` statement and are never selected between.
+/// The three vertex indices of triangle `primitive` on `inst`, relative to its base vertex, as its per-vertex attributes are numbered.
+/// `index_buffer` is the central index pool; every mesh is indexed there.
 fun triangle_corners(inst: scene.instance, index_buffer: bytes, primitive: uint) -> uint3:
-    let base = primitive * 3
-    if inst.is_indexed != 0:
-        return uint3(index_buffer.load(4 * base), index_buffer.load(4 * (base + 1)), index_buffer.load(4 * (base + 2)))
-    return uint3(base, base + 1, base + 2)
+    let base = inst.first_index + primitive * 3
+    return uint3(index_buffer.load(4 * base), index_buffer.load(4 * (base + 1)), index_buffer.load(4 * (base + 2)))
+
+/// Vertex `v` of `inst`'s mesh, relative to its base vertex, out of the central vertex pool.
+fun position_of(inst: scene.instance, vertex_buffer: bytes, v: uint) -> float3:
+    return reinterpret_as_float(vertex_buffer.load3((inst.base_vertex + v) * 12))
 
 /// The shading context for a hit on `inst`, which is all a generated material needs to know about where it is.
 /// `bary` is the two barycentrics a hit attribute carries; the third is what is left of one.

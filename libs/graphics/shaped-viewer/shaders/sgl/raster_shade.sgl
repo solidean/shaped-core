@@ -53,10 +53,10 @@ fun project(cam: scene.camera, p: float3, near: float) -> hpos4:
     let y = dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)
     return hpos4(x, y, near, depth)
 
-/// Corner `vertex % 3` of triangle `vertex / 3` of the draw's instance, pulled out of the bindless tables.
+/// Corner `vertex % 3` of triangle `vertex / 3` of the draw's instance, pulled out of the central pools.
 ///
 /// No vertex buffer and no index buffer are bound: the draw is three vertices per triangle, and each reads its own corner the way a hit reads all three.
-/// That is what lets one pipeline draw every mesh, indexed or not, whatever its attributes.
+/// That is what lets one pipeline draw every mesh, whatever its attributes.
 fun corner_of(vertex: int){drawn, tracer.bindless, draw} -> varyings:
     let f = drawn.frame[0]
     let instance = draw.instance
@@ -76,7 +76,7 @@ fun corner_of(vertex: int){drawn, tracer.bindless, draw} -> varyings:
         bary = float3(0.0, 0.0, 1.0)
 
     let vertices = inst.vertices as int
-    let object = reinterpret_as_float(tracer.bindless.buffers[vertices].load3(index * 12u))
+    let object = material.position_of(inst, tracer.bindless.buffers[vertices], index)
     let world = to_world_point(inst, object)
     return {
         position = project(scene.camera(..f.camera), world, f.near_plane)

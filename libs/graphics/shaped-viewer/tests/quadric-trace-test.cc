@@ -132,7 +132,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
                            .param_offset = 0,
                            .vertices = primitives,
                            .indices = primitives,
-                           .is_indexed = 0,
+                           .base_vertex = 0,
+                           .first_index = 0,
                            .link_mask = ~0u});
 
         auto const frame = ctx.transient.create_buffer_from_pod(
@@ -522,7 +523,8 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
                            .param_offset = 0,
                            .vertices = primitives,
                            .indices = primitives,
-                           .is_indexed = 0,
+                           .base_vertex = 0,
+                           .first_index = 0,
                            .link_mask = ~0u});
 
         auto const frame
@@ -783,7 +785,8 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
                            .param_offset = 0,
                            .vertices = primitives,
                            .indices = primitives,
-                           .is_indexed = 0,
+                           .base_vertex = 0,
+                           .first_index = 0,
                            .link_mask = ~0u});
 
         auto const frame

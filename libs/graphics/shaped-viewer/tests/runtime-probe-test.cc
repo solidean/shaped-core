@@ -38,7 +38,7 @@ struct runtime_probe_case
     float t_min = 0.0f;
     float t_max = 1e30f;
     u32 primitive = 0;
-    u32 is_indexed = 0;
+    u32 first_index = 0;
     u32 desc_offset = 0;
     tg::vec2f bary;
     u32 pad[2] = {};
@@ -49,6 +49,9 @@ static_assert(sizeof(sv_test::shaders::runtime_probe_case) == sizeof(runtime_pro
 
 /// How many float4s one case writes, in the order the probe writes them.
 constexpr isize results_per_case = 8;
+
+/// The indices of the raw-list mesh at the start of the probe's index memory: four triangles, three corners each.
+constexpr isize sequential_index_count = 12;
 
 /// The memory the probe reads: quadric records, attribute descriptors with their elements, and triangle indices.
 struct runtime_probe_memory
@@ -211,7 +214,7 @@ cc::vector<runtime_probe_case> make_cases()
         auto& c = cases[i];
         auto const fi = float(i);
         c.primitive = u32(i % 4);
-        c.is_indexed = u32(i % 2);
+        c.first_index = i % 2 == 0 ? 0u : u32(sequential_index_count);
         c.desc_offset = i % 5 == 0 ? 48u : 0u;
         c.bary = tg::vec2f(0.05f + 0.03f * float(i % 7), 0.6f - 0.04f * float(i % 11)) * (0.9f + 0.001f * fi);
     }
@@ -224,8 +227,12 @@ runtime_probe_memory make_memory()
     for (auto const& p : make_primitives())
         memory.quadrics.push_back(sv::quadric_gpu::of(p));
     memory.attributes = make_attributes();
-    // Four triangles over twelve vertices, in an order no non-indexed reading would produce.
-    memory.indices = cc::vector<u32>{11, 3, 7, 0, 10, 5, 9, 2, 4, 8, 1, 6};
+    // Two meshes of four triangles over twelve vertices, as the central index pool holds them.
+    // The first is a raw list's sequential indices; the second an order no raw list would produce.
+    for (auto i = isize(0); i < sequential_index_count; ++i)
+        memory.indices.push_back(u32(i));
+    for (auto const index : {11u, 3u, 7u, 0u, 10u, 5u, 9u, 2u, 4u, 8u, 1u, 6u})
+        memory.indices.push_back(index);
     return memory;
 }
 
@@ -479,10 +486,10 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
         auto const& c = cases[i];
         auto const* const r = &results[i * results_per_case];
 
-        // An indexed triangle reads its corners through the index buffer, a plain list numbers them three per primitive.
+        // A triangle reads its corners through the index pool, from its mesh's first index on.
         u32 corner[3] = {};
         for (auto k = 0; k < 3; ++k)
-            corner[k] = c.is_indexed != 0 ? memory.indices[c.primitive * 3 + u32(k)] : c.primitive * 3 + u32(k);
+            corner[k] = memory.indices[c.first_index + c.primitive * 3 + u32(k)];
         for (auto k = 0; k < 3; ++k)
             CHECK(r[6][k] == float(corner[k])).context(cc::format("case {}: corner {} is {}", i, k, r[6][k]));
 

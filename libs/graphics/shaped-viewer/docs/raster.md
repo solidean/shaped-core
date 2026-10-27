@@ -14,9 +14,9 @@ one draw per triangle item ─▶ environment where nothing was drawn
    (pixel: the material, then raster.shade)
 ```
 
-- **One draw per scene item**, three vertices per triangle and no vertex or index buffer.
-  The vertex stage, `surface_vs` of [raster_pass.sgl](../shaders/raster_pass.sgl), pulls its corner out of the bindless tables the way a hit reads its triangle, through the instance record.
-  So one vertex stage serves every mesh, indexed or not, whatever attributes it carries.
+- **One draw per scene item**, three vertices per triangle and no vertex or index buffer bound.
+  The vertex stage, `surface_vs` of [raster_pass.sgl](../shaders/raster_pass.sgl), pulls its corner the way a hit reads its triangle, through the instance record.
+  It reads the mesh manager's central pools, so one vertex stage serves every mesh, whatever attributes it carries.
 - **The pixel stage is generated per material permutation**, `raster_source` beside the hit group and the wavefront's shade kernel.
   It builds the hit's `material.shading_context` from the triangle and its barycentrics, evaluates the material, and hands the surface to `raster.shade`.
 - **The depth test is reversed.** A surface tests at `near / depth`, cleared to 0 at infinity and passing `greater`.

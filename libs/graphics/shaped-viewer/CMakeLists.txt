@@ -42,6 +42,7 @@ add_library(shaped-viewer
     src/shaped-viewer/viewer.cc
     src/shaped-viewer/impl/wavefront_pacing.cc
     src/shaped-viewer/resources/resource_managers.cc
+    src/shaped-viewer/resources/impl/range_allocator.cc
     src/shaped-viewer/resources/value_summary.cc
     src/shaped-viewer/resources/bindless_tables.cc
     src/shaped-viewer/resources/gpu_resource_manager.cc
@@ -128,6 +129,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/resources/bindless_tables.hh
     src/shaped-viewer/resources/gpu_resource_manager.hh
     src/shaped-viewer/resources/impl/lru_pool.hh
+    src/shaped-viewer/resources/impl/range_allocator.hh
     src/shaped-viewer/rendering/pathtrace_routine.hh
     src/shaped-viewer/rendering/stand_in_report.hh
     src/shaped-viewer/rendering/raster_routine.hh
@@ -238,6 +240,8 @@ if(SC_BUILD_TESTS)
         tests/smoke-test.cc
         tests/vocabulary-test.cc
         tests/lru-pool-test.cc
+        tests/range-allocator-test.cc
+        tests/geometry-pool-test.cc
         tests/keyed-cache-test.cc
         tests/quadric-test.cc
         tests/quadric-set-test.cc

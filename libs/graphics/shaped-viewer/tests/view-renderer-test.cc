@@ -107,11 +107,11 @@ ASYNC_INVOCABLE_TEST("sv - view renderer renders indexed geometry (headless)", (
 
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
-    CHECK(mesh_rec->is_indexed); // an indexed BLAS, and the closest-hit reads through the real index buffer
-    CHECK(mesh_rec->indices.element_count() == welded.indices.size());
-    CHECK(mesh_rec->vertices.element_count() == welded.positions.size());
+    // The welded vertices stay shared: the pool holds the mesh's own indices, not one vertex per corner.
+    CHECK(mesh_rec->geometry.index_count() == welded.indices.size());
+    CHECK(mesh_rec->geometry.vertex_count == welded.positions.size());
     // Triangle order follows the index buffer, so the per-triangle material set still lines up.
-    CHECK(mesh_rec->triangle_count == box.materials.size());
+    CHECK(mesh_rec->geometry.triangle_count == box.materials.size());
 
     auto const size = tg::vec2i(96, 96);
 

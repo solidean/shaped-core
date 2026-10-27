@@ -580,10 +580,10 @@ fun shade_sampled(payload: mut surface_payload, surface_in: openpbr.surface, n: 
 
 // ---- Triangles ------------------------------------------------------------------------------------------------------
 
-/// One object-space position out of the instance's own vertex buffer: `float3`s, tightly packed, as `sv::mesh_manager` uploads them.
+/// One object-space position of the instance's mesh, `vertex` relative to its base vertex in the central vertex pool.
 fun instance_position(inst: scene.instance, vertex: uint){bindless} -> float3:
     let buffer = inst.vertices as int
-    return reinterpret_as_float(bindless.buffers[nonuniform buffer].load3(vertex * 12u))
+    return material.position_of(inst, bindless.buffers[nonuniform buffer], vertex)
 
 /// The shading context of a triangle hit, which is all a material needs to know about where it is.
 fun triangle_context(h: triangle_hit){traced, bindless} -> material.shading_context:

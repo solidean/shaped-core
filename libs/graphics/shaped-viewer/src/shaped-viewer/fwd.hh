@@ -19,6 +19,7 @@ using namespace cc::primitive_defines;
 // GPU resource managers (see resources/resource_managers.hh)
 struct resource_budget;
 struct manager_config;
+struct geometry_range;
 struct mesh_record;
 struct texture_record;
 struct attribute_record;

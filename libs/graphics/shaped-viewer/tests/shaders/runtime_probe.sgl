@@ -16,8 +16,8 @@ struct runtime_probe_case:
     t_max: float
     /// the triangle whose corners and attributes are read
     primitive: uint
-    /// whether `indices` holds its corners
-    is_indexed: uint
+    /// where in `indices` the mesh's own start, as a range of the central index pool does
+    first_index: uint
     /// where in `attributes` the attribute descriptors start
     desc_offset: uint
     /// the two barycentrics a hit attribute carries
@@ -52,7 +52,7 @@ binding runtime_probe_io:
     let roots = quadric.roots_of(prim.surface, c.origin - prim.origin, c.dir)
 
     let none = scene.no_offset
-    let inst = scene.instance(7u, 64u, 0u, 0u, c.is_indexed, 0xffffffffu, scene.value_none, none, none, 0u, 0u, 0u, none, none, 0u, 0u, float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0))
+    let inst = scene.instance(7u, 64u, 0u, 0u, 0u, c.first_index, 0xffffffffu, scene.value_none, none, none, 0u, 0u, 0u, none, none, 0u, 0u, float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0))
 
     let ctx = material.make_context(inst, runtime_probe_io.indices, c.primitive, c.bary)
     let qctx = quadric.make_context(inst, c.quadric)

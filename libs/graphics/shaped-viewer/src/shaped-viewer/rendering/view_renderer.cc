@@ -202,7 +202,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
             out.parameter_blocks.push_back(item.instance);
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
-            out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_vertices().element_count() / 3) : 0);
+            out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_geometry().triangle_count) : 0);
 
             // Set for any batch, pending or not: a pending one is a triangle instance this frame and a procedural one
             // the next, and the stand-in has to already be compiling by then.
@@ -245,7 +245,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // Read first: building the BLAS charges the budget, which may move what `mesh` points at.
         auto const placement = is_pending ? placeholder_transform(mesh->bounds.value(), item.transform) : item.transform;
         auto const triangle_count
-            = is_pending ? u32(resources.meshes.placeholder_vertices().element_count() / 3) : u32(mesh->triangle_count);
+            = u32(is_pending ? resources.meshes.placeholder_geometry().triangle_count : mesh->geometry.triangle_count);
         auto const object_area = mesh->surface_area;
         auto blas = sg::blas_handle();
         if (traced)

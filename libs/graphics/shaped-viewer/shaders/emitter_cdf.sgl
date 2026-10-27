@@ -14,9 +14,9 @@ const block_size = 256u
 
 /// The mesh the CDF is built from, and the CDF.
 binding emitter_cdf_io:
-    /// Positions, three floats each, as `sv::mesh_manager` uploads them.
+    /// The central vertex pool, three floats per position; the mesh's own start at `emitter_cdf_shape.base_vertex`.
     vertices: bytes
-    /// Three indices per triangle where `emitter_cdf_shape.is_indexed` is set, and a stand-in nothing reads where it is not.
+    /// The central index pool, three per triangle and relative to the base vertex; the mesh's own start at `emitter_cdf_shape.first_index`.
     indices: bytes
     /// `triangle_count + block_count + 1` floats, laid out as the file's header says.
     /// For the world-area kernels, `block_count + 1`: each block's world area, then the instance's.
@@ -29,18 +29,17 @@ binding emitter_cdf_io:
     column_z: float4
     triangle_count: uint
     block_count: uint
-    is_indexed: uint
+    base_vertex: uint
+    first_index: uint
 
-/// Vertex `v`'s object-space position.
-fun position(v: uint){emitter_cdf_io} -> float3:
-    return reinterpret_as_float(emitter_cdf_io.vertices.load3(v * 12u))
+/// The mesh's vertex `v`'s object-space position.
+fun position(v: uint){emitter_cdf_io, emitter_cdf_shape} -> float3:
+    return reinterpret_as_float(emitter_cdf_io.vertices.load3((emitter_cdf_shape.base_vertex + v) * 12u))
 
-/// Triangle `t`'s three vertex indices.
+/// Triangle `t`'s three vertex indices, relative to the mesh's base vertex.
 fun triangle_corners(t: uint){emitter_cdf_io, emitter_cdf_shape} -> uint3:
-    let base = t * 3u
-    if emitter_cdf_shape.is_indexed != 0u:
-        return uint3(emitter_cdf_io.indices.load(4u * base), emitter_cdf_io.indices.load(4u * (base + 1u)), emitter_cdf_io.indices.load(4u * (base + 2u)))
-    return uint3(base, base + 1u, base + 2u)
+    let base = emitter_cdf_shape.first_index + t * 3u
+    return uint3(emitter_cdf_io.indices.load(4u * base), emitter_cdf_io.indices.load(4u * (base + 1u)), emitter_cdf_io.indices.load(4u * (base + 2u)))
 
 /// Triangle `t`'s object-space area.
 fun triangle_area(t: uint){emitter_cdf_io, emitter_cdf_shape} -> float:

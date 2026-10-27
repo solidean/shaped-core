@@ -43,13 +43,14 @@ struct light_record:
     select_pdf: float
     select_cdf: float
 
-/// `scene.instance` as `traced.instances` holds it, 112 bytes; `scene.instance` says who fills what.
+/// `scene.instance` as `traced.instances` holds it, 116 bytes; `scene.instance` says who fills what.
 struct instance_record:
     param_buffer: uint
     param_offset: uint
     vertices: uint
     indices: uint
-    is_indexed: uint
+    base_vertex: uint
+    first_index: uint
     link_mask: uint
     opacity_kind: uint
     opacity_offset: uint
