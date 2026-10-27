@@ -845,6 +845,10 @@ co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs
 
 - **Entries are weak.** A backlog never keeps work alive, and a node that is gone or settled counts for nothing.
   Tracking compacts dead entries away once the backlog doubles past what last survived, so one nobody settles stays bounded by its live entries.
+- **Gone means torn down.** A node dropped before it resolved fails a weak lock at once, yet its teardown runs after: its frame's captures and its context go only then.
+  So such an entry counts until that teardown ends, which marks the node `torn_down`, and `settled()` polls until it has.
+  The teardown runs on the thread that dropped the last handle, or on the node's home when its options ask for that; a waiter on that home's thread runs the home meanwhile.
+  A node that resolved needs none of this: it let go of both as it resolved, so only the dropped-unresolved branch writes the mark.
 - **Cold nodes are not waited for**, since nothing may ever start them, and `settled()` never starts one.
   A node tracked cold counts once something starts it, which is how a component can track what it hands out before knowing who drives it.
 - **`settled()` waits in rounds.** Each round pins what is pending, waits for it, and sweeps again, so work a settling node tracks on its way out is still waited for.
