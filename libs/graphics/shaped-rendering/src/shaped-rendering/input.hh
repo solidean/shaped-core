@@ -12,6 +12,7 @@
 ///
 /// Names describe the US-QWERTY legend, which is only a naming convention — the value is the position.
 /// Our own vocabulary of positions, not a platform scancode number: the underlying values mean nothing outside sr.
+/// It deliberately stops at F12 and skips the media, `AC_*` and `INTERNATIONAL*` keys; they read as `scancode::unknown`.
 enum class sr::scancode : sr::u16
 {
     unknown = 0,
@@ -162,6 +163,12 @@ enum class sr::key_modifiers : sr::u8
 namespace sr
 {
 
+/// The bit `mouse_move_event::held_buttons` sets for `b`.
+[[nodiscard]] constexpr u8 mouse_button_bit(mouse_button b)
+{
+    return u8(1u << u8(b));
+}
+
 [[nodiscard]] constexpr key_modifiers operator|(key_modifiers a, key_modifiers b)
 {
     return key_modifiers(u8(a) | u8(b));
@@ -227,6 +234,12 @@ struct sr::mouse_move_event
     /// Motion since the previous event, in pixels.
     /// This is the value to drive a camera with: it stays correct when the cursor is captured or hits the screen edge.
     tg::vec2f delta;
+
+    /// The buttons held during this motion, one `mouse_button_bit` each.
+    /// A drag should end on it as well as on the button's release: a release outside an uncaptured window never arrives.
+    u8 held_buttons = 0;
+
+    [[nodiscard]] bool is_held(mouse_button b) const { return (held_buttons & mouse_button_bit(b)) != 0; }
 };
 
 struct sr::mouse_button_event
@@ -262,6 +275,16 @@ struct sr::mouse_wheel_event
     tg::pos2f cursor_pos;
 };
 
+/// A file dropped onto a window, one event per file: dropping three files yields three.
+struct sr::file_drop_event
+{
+    /// The dropped file's path, as the platform spells it.
+    cc::string path;
+
+    /// Where it was dropped, in pixels relative to the window's client area.
+    tg::pos2f cursor_pos;
+};
+
 /// One thing the user did.
 ///
 /// Obtained from window_system::events(), oldest first, across every window in the order the OS reported them.
@@ -281,13 +304,13 @@ struct sr::input_event
     /// Never dangles within one frame: a window destroyed mid-frame drops its events from this span.
     sr::window* window = nullptr;
 
-    /// What happened, as one of the five event payloads.
+    /// What happened, as one of the six event payloads.
     ///
     /// Visiting it is the way to consume an event: each handler receives its payload named and typed, with no probe first.
     /// Handlers are combined into one overload set, so a trailing `[](auto const&) {}` absorbs the kinds a handler does not care about
-    /// — spell all five instead, and a sixth event kind becomes a compile error here rather than silence.
+    /// — spell all six instead, and a seventh event kind becomes a compile error here rather than silence.
     /// The `is_*` / `as_*` accessors below are for what a visit cannot express: a predicate, or a loop body that must `continue`.
-    cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event> payload;
+    cc::variant<key_event, text_event, mouse_move_event, mouse_button_event, mouse_wheel_event, file_drop_event> payload;
 
     /// Which kind the payload holds.
     /// For a predicate — code that then wants the payload is usually a visit instead.
@@ -296,6 +319,7 @@ struct sr::input_event
     [[nodiscard]] bool is_mouse_move() const { return payload.is<mouse_move_event>(); }
     [[nodiscard]] bool is_mouse_button() const { return payload.is<mouse_button_event>(); }
     [[nodiscard]] bool is_mouse_wheel() const { return payload.is<mouse_wheel_event>(); }
+    [[nodiscard]] bool is_file_drop() const { return payload.is<file_drop_event>(); }
 
     /// The payload as one specific kind, which the event must hold.
     /// Ask the matching is_* first unless the kind is already known.
@@ -304,4 +328,5 @@ struct sr::input_event
     [[nodiscard]] mouse_move_event const& as_mouse_move() const { return payload.as<mouse_move_event>(); }
     [[nodiscard]] mouse_button_event const& as_mouse_button() const { return payload.as<mouse_button_event>(); }
     [[nodiscard]] mouse_wheel_event const& as_mouse_wheel() const { return payload.as<mouse_wheel_event>(); }
+    [[nodiscard]] file_drop_event const& as_file_drop() const { return payload.as<file_drop_event>(); }
 };

@@ -33,8 +33,11 @@
 #endif
 
 // --- Architecture ---
+// wasm64 is memory64: 64-bit pointers, for memories past what 32-bit addresses reach.
 #if defined(__wasm32__) || (defined(__wasm__) && !defined(__wasm64__))
 #define CC_ARCH_WASM32
+#elif defined(__wasm64__)
+#define CC_ARCH_WASM64
 #elif defined(_M_X64) || defined(__x86_64__) || defined(__amd64__)
 #define CC_ARCH_X64
 #elif defined(_M_ARM64) || defined(__aarch64__)
@@ -68,7 +71,8 @@
 // =========================================================================================================
 // Conditionally defined: CC_HAS_RTTI, CC_HAS_CPP_EXCEPTIONS
 // Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS, CC_HAS_MIMALLOC, CC_HAS_THREAD_SANITIZER
-// From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED, CC_NO_MIMALLOC
+// Always defined, 0 to 2: CC_SOURCE_SITES
+// From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED, CC_NO_MIMALLOC, CC_SOURCE_SITES_OPAQUE, CC_SOURCE_SITES_OFF
 //
 // CMake only ever defines inputs; this header owns every derivation and defines the outputs unconditionally.
 // So CC_ENABLE_ASSERT_IN_RELEASE feeds CC_ASSERT_ENABLED, CC_SINGLE_THREADED feeds CC_HAS_THREADS, and CC_NO_MIMALLOC feeds CC_HAS_MIMALLOC.
@@ -218,6 +222,33 @@
 #define CC_HAS_MIMALLOC 0
 #else
 #define CC_HAS_MIMALLOC 1
+#endif
+
+// =========================================================================================================
+// What a binary says about its own source
+// =========================================================================================================
+// CC_SOURCE_SITES - what a cc::source_location keeps of its site (2, 1 or 0).
+//
+//   2, FULL   - file, line and function, as std::source_location does; the default.
+//   1, OPAQUE - the site's code address only, which the build's debug info resolves offline.
+//   0, OFF    - nothing.
+//
+// CC_SOURCE_SITES_OPAQUE and CC_SOURCE_SITES_OFF (from CMake: SC_SOURCE_SITES) select the lower two.
+// It changes cc::source_location's layout, so it must agree across the whole build.
+// CC_SITE_TEXT(text) is `text` at FULL and "" below it: the source text a check or a name would otherwise carry.
+
+#if defined(CC_SOURCE_SITES_OFF)
+#define CC_SOURCE_SITES 0
+#elif defined(CC_SOURCE_SITES_OPAQUE)
+#define CC_SOURCE_SITES 1
+#else
+#define CC_SOURCE_SITES 2
+#endif
+
+#if CC_SOURCE_SITES == 2
+#define CC_SITE_TEXT(text) text
+#else
+#define CC_SITE_TEXT(text) ""
 #endif
 
 // =========================================================================================================

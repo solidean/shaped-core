@@ -27,8 +27,13 @@ rules:
     files: src/babel-serializer/geometry/fbx.cc
 
   - kind: allow-include
+    value: <meshoptimizer.h>
+    reason: the EXT_meshopt_compression decoders behind babel::gltf, confined to the reader TU
+    files: src/babel-serializer/geometry/gltf.cc
+
+  - kind: allow-include
     value: <charconv>
-    reason: "TODO: from_chars is what a number is parsed with, and being fast is the point of these readers — migrate once a cc:: from-string lands"
+    reason: "from_chars is what a number is parsed with; issue: chore-babel-from-chars-to-cc-from-string"
     files:
       - src/babel-serializer/geometry/obj.cc
       - src/babel-serializer/geometry/stl.cc

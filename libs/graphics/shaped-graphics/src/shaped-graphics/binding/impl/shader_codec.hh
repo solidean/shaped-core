@@ -13,7 +13,7 @@
 /// silently corrupt cached shaders.
 ///
 /// Fixed little-endian widths and length prefixes throughout, so the encoding does not depend on the compiler that
-/// wrote it — a blob is read back by a different build than made it, which is the whole point.
+/// wrote it, because a blob is read back by a different build than made it.
 
 namespace sg::impl
 {

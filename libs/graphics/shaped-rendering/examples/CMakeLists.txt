@@ -1,8 +1,8 @@
 # shaped-rendering examples: runnable demonstrations of sr's routines in practice.
 # Run one with `uv run dev.py example shaped-rendering/denoise-playground`; see docs/guides/examples.md.
 #
-# Gated rather than broken: the denoise playground traces through a DXC-compiled compute shader and presents through
-# a swapchain, so it needs a backend to create a context on and a compiler to feed it.
+# Gated rather than broken: the denoise playground needs a backend to create a context on and a compiler to feed it.
+# Its compute shaders reach dx12 and vulkan as HLSL through DXC, and it presents through a swapchain.
 # Every CI leg builds all targets, wasm and cross-compile included, so an ungated graphical example would break
 # builds that could never have run it.
 if(NOT SC_HAS_DXC_COMPILER)
@@ -15,7 +15,7 @@ if(NOT SC_BUILD_EXAMPLES)
     return()
 endif()
 
-# dx12 and vulkan both take HLSL through DXC and both present through a swapchain, so one source serves them.
+# dx12 and vulkan both take SGL's HLSL through DXC and both present through a swapchain, so one source serves them.
 sc_resolve_example_backend(_sr_backend _sr_mode SUPPORTS dx12 vulkan)
 if(_sr_mode STREQUAL "none")
     return()
@@ -52,14 +52,10 @@ sc_add_shader_package(
     NAME       scene_shaders
     NAMESPACE  shaders
     SOURCE_DIR denoise-playground/shaders
-    LANGUAGE   hlsl
+    LANGUAGE   sgl
     SHADERS
-        noisy_scene.hlsl:compute:main_cs
-        noisy_scene.hlsl:binding:scene_bindings
-        noisy_scene.hlsl:constants:gConstants
-        compose.hlsl:compute:main_cs
-        compose.hlsl:binding:compose_bindings
-        compose.hlsl:constants:gConstants
+        noisy_scene.sgl:*
+        compose.sgl:*
 )
 
 # NGX loads its network runtime from the directory of the binary that initialized it, and it arrives through an

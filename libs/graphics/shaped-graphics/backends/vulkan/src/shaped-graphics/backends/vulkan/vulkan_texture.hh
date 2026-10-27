@@ -62,13 +62,15 @@ protected:
 public:
     /// Accumulate one declared access over `range`, entering an untouched box at `layout`.
     /// Thread-safe.
-    void declare_access(sg::command_list_slot slot,
-                        sg::subresource_range range,
-                        sg::pipeline_stage_flags stages,
-                        sg::access_flags access,
-                        sg::texture_layout layout) const
+    sg::impl::member_track declare_access(sg::command_list_slot slot,
+                                          sg::subresource_range range,
+                                          sg::pipeline_stage_flags stages,
+                                          sg::access_flags access,
+                                          sg::texture_layout layout,
+                                          bool from_array_application = false) const
     {
-        _access.lock([&](vulkan_texture_access& a) { a.declare(slot, range, stages, access, layout); });
+        return _access.lock([&](vulkan_texture_access& a)
+                            { return a.declare(slot, range, stages, access, layout, from_array_application); });
     }
 
     /// Whether any async or streaming transfer of this texture has been enqueued and not yet completed.

@@ -10,10 +10,11 @@ test:
     let big = 2147483647
     big + 1 == -2147483647 - 1
 
-@expect(error = "constant-not-representable")
+// over literals alone the operator folds first (CHK-394), and an int does not hold the literal it folds to
+@expect(error = "literal-not-representable")
 test (1 << 31) == 0
 
-@expect(error = "constant-not-representable")
+@expect(error = "literal-not-representable")
 test 2147483647 + 1 == 0
 
 @expect(error = "constant-not-representable")

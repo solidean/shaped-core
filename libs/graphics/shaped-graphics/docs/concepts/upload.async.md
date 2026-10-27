@@ -25,7 +25,7 @@ They are the preferred spelling over `create_buffer` followed by an upload, sinc
 The copy runs on the transfer queue, and nothing orders it against the epoch boundary that recycles a transient resource's storage.
 `ctx.upload`, `ctx.download` and `ctx.stream` assert on a transient target; a transient resource transfers inline instead.
 
-## Why sync is automatic in both directions (the load-bearing decision)
+## Why sync is automatic in both directions
 
 The staged copy runs **later**, asynchronously, on a queue the caller never sees.
 For the CPU timeline `submit → async upload → submit` to just work — no future to poll, no manual barrier — the system needs sync in **both directions**.
@@ -82,7 +82,7 @@ Only the actor thread fills them, so there is no concurrent-recording hazard and
 What remains is a per-window **staging fence** the transfer queue signals as each window's copy completes.
 A window's size is a backend config knob, and can also be changed at runtime — see the resize note in the dx12 section below.
 
-Three windows is the load-bearing count, because it lets **CPU memcpy and GPU copy overlap**:
+The count of three windows is what lets **CPU memcpy and GPU copy overlap**:
 
 - The actor fills the current window and **submits it as soon as it fills** — or as soon as the inbox drains, for low latency — then rolls to the next window.
 - It reuses a window's memory only **three submissions later**, so on coming back to a window that window's copy is almost always already done and the reuse wait is free.
@@ -99,7 +99,7 @@ Two kinds of fence on the transfer queue, both signaled per window:
 
 **Completion is per resource, not per system**, and that follows directly from out-of-order selection.
 "Signal the highest value I finished" is only exact where completion order matches reservation order.
-That is guaranteed inside a family and deliberately broken across families — overtaking an unrelated blocked upload is the point.
+That is guaranteed inside a family and deliberately broken across families, so an upload can overtake an unrelated blocked one.
 One shared counter therefore reports a low-numbered upload complete the moment any higher-numbered one finishes.
 A reader then stops waiting for a copy that has not run.
 So the **timeline is the family**: [`dx12_completion_group`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_completion_group.hh), one per resource per direction.
@@ -109,7 +109,7 @@ A value is meaningless without the timeline it was reserved on, so every stamp a
 Finished upload jobs, and their pins, are destroyed on the actor thread.
 That is off the submission path, so releasing a large pin never stalls a latency-sensitive thread.
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 
@@ -161,7 +161,7 @@ Not invariants — v1 shortcuts:
 - **Async texture copies assume the texture is already in the COMMON layout** — the copy queue can't run layout barriers.
   A freshly-created texture qualifies.
   One left in a shader/attachment layout by a direct-queue list must be transitioned back first, or uploaded inline (`cmd.upload.bytes_to_texture` drives the barrier).
-  There is no way to ask for that transition today, which is what the prepare-for-async command in the [TODO](../TODO.md) adds.
+  `cmd.prepare_for_async` asks for that transition.
 - **Resource lifetime spans the copy queue.**
   The copy queue is decoupled from epochs, so a buffer whose last reference is dropped while an async upload to it is still in flight must not be freed when its epoch retires.
   Deferred deletion carries a second gate: each expiring resource is tagged with the buffer's `_pending_async_upload_value`.

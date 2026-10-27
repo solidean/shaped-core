@@ -78,13 +78,12 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
                 [preset], _object_targets(args, ctx, preset), root=ctx.root,
                 auto_configure=not args.no_configure, mirror=args.mirror_output,
                 verbose=args.verbose, emsdk_path=args.emsdk_path, keep_going=args.keep_going,
-                one_step=True,
             )
         if not all(r.ok for r in results):
             ctx.fail_build(results, presets)
         build_steps = [r for r in results if r.step_type == "build"]
         files = sum(dev.ninja_built_count(r.stdout_log) for r in build_steps)
-        dev.report.summarize_build(build_steps, files, presets)
+        dev.report.summarize_build(build_steps, files, presets, targets=None)
         sys.exit(0)
 
     # Targets are resolved against the first preset (target sets match across presets).
@@ -114,5 +113,5 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
         ctx.fail_build(results, presets)
     build_steps = [r for r in results if r.step_type == "build"]
     files = sum(dev.ninja_built_count(r.stdout_log) for r in build_steps)
-    dev.report.summarize_build(build_steps, files, presets)
+    dev.report.summarize_build(build_steps, files, presets, targets=len(target_names) if target_names else None)
     sys.exit(0)

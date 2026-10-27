@@ -103,9 +103,11 @@ public:
                                                          sg::subresource_range range,
                                                          sg::pipeline_stage_flags stages,
                                                          sg::access_flags access,
-                                                         sg::texture_layout layout) const
+                                                         sg::texture_layout layout,
+                                                         bool from_array_application = false) const
     {
-        return _access.lock([&](dx12_texture_access& t) { return t.track(slot, range, stages, access, layout); });
+        return _access.lock([&](dx12_texture_access& t)
+                            { return t.track(slot, range, stages, access, layout, from_array_application); });
     }
 
     /// Flush the accesses declared for `slot` since the last flush and return the per-box barriers to emit before the op; empty means all freebies.

@@ -616,9 +616,11 @@ void window_system::poll_events()
             break;
 
         case SDL_EVENT_MOUSE_MOTION:
-            _events.push_back({.window = window_from_id(event.motion.windowID),
-                               .payload = mouse_move_event{.cursor_pos = tg::pos2f(event.motion.x, event.motion.y),
-                                                           .delta = tg::vec2f(event.motion.xrel, event.motion.yrel)}});
+            _events.push_back(
+                {.window = window_from_id(event.motion.windowID),
+                 .payload = mouse_move_event{.cursor_pos = tg::pos2f(event.motion.x, event.motion.y),
+                                             .delta = tg::vec2f(event.motion.xrel, event.motion.yrel),
+                                             .held_buttons = impl::held_buttons_from_sdl(event.motion.state)}});
             break;
 
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -640,6 +642,15 @@ void window_system::poll_events()
                                    .cursor_pos = tg::pos2f(event.wheel.mouse_x, event.wheel.mouse_y)}});
             break;
         }
+
+        // SDL owns the path only until the next pump, so it is copied rather than referenced.
+        // A drop of text rather than a file is SDL_EVENT_DROP_TEXT, which nothing asks for yet.
+        case SDL_EVENT_DROP_FILE:
+            if (event.drop.data != nullptr)
+                _events.push_back({.window = window_from_id(event.drop.windowID),
+                                   .payload = file_drop_event{.path = cc::string(event.drop.data),
+                                                              .cursor_pos = tg::pos2f(event.drop.x, event.drop.y)}});
+            break;
 
         case SDL_EVENT_QUIT:
             _is_quit_requested = true;

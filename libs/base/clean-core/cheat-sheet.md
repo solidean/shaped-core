@@ -412,6 +412,8 @@ r.or_throw();                             // -> T&& or throws cc::result_excepti
 r.with_context("while parsing");          // chain context (E = any_error); also with_context_lazy
 CC_RETURN_IF_ERROR(expr);                 // early-return the error from the current function
 // cc::any_error: with_context(msg), site(), to_string(), has_stacktrace() — move-only, type-erased.
+//   message() is the text alone, for a library's user; to_string() adds site, context and trace, for its developer.
+//   clone() is the one way to copy one; text of any kind is kept verbatim, any other type through its debug string.
 
 #include <clean-core/error/exception.hh>  // the blessed route to <exception> / <stdexcept>; declares nothing itself
 // Return a result; where something is genuinely exceptional (a lost device, or_throw), throw through this header.
@@ -423,7 +425,7 @@ CC_RETURN_IF_ERROR(expr);                 // early-return the error from the cur
 
 ```cpp
 #include <clean-core/function/function_ref.hh>   // cc::function_ref<R(Args...)> — NON-owning, trivially copyable
-void process(cc::function_ref<int(int)> f);      // bind any lambda/fn-ptr/functor; must outlive the ref
+void process(cc::function_ref<int(int)> f);      // a function / fn-ptr is held by value; any other callable by reference, must outlive the ref
 f(42);  f.is_valid();  bool(f);
 
 #include <clean-core/function/unique_function.hh> // cc::unique_function<R(Args...)> — owning, MOVE-ONLY
@@ -439,6 +441,7 @@ uf();  uf.is_valid();                     // backed by cc::node_allocation (very
 auto al = cc::allocation<int>::create_defaulted(n, res);  // create_empty/_filled/_uninitialized/_copy_of
 al.obj_span();  al.resource();  al.is_valid();  al.alloc_size_bytes();
 cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator interface (default backed by mimalloc)
+cc::set_allocation_failure_handler(fn);  // void fn(isize min, isize max, isize align): a failed allocate_bytes calls it, every build; it may throw
 cc::system_memory_resource;                               // malloc/free opt-out; pass &it as `res` to bypass mimalloc
 // CC_HAS_MIMALLOC is 0 under SC_MIMALLOC=OFF (the sanitize presets), and the default IS the system resource there.
 // Only mimalloc resizes in place; the system resource always returns -1, so never assume the default can.
@@ -464,7 +467,7 @@ auto s = cc::make_shared<T>(args...);              // only way to construct (str
 cc::weak_ptr<T> w = s;  w.lock();                   // weak (if Traits::supports_weak); lock() -> shared_ptr or empty
 // custom Traits (all static, on T*) for intrusive counts: node_size/node_align + init_control/inc_strong/
 // release_strong->{destroy,free}/destroy_object/free_storage (+weak: inc_weak/release_weak->bool/try_lock_strong).
-// release_strong {true,false} => destroy_object THEN release_weak (order is load-bearing); {true,true} => both, skip
+// release_strong {true,false} => destroy_object THEN release_weak (order is fixed); {true,true} => both, skip
 // release_weak. Base-keyed Traits serves derived T via upcast (cc::async keys one on async_node_base);
 // from_alive(T*) MINTS a handle from a pointer known alive (strong > 0).
 T* raw = s.release();  auto back = cc::shared_ptr<T>::adopt(raw);   // MOVE a count out of / into a handle: count-neutral
@@ -768,15 +771,70 @@ cc::dedup_sorted_ex(start, size, range, cmp);   // -> isize surviving count; com
 cc::sort_ex(start, size, range, cmp, should_sort); // should_sort(start, size) -> bool prunes subranges (=> sort_at)
 ```
 
-## Sequence (lazy ranges — early prototype, see [sequence](docs/sequence.md))
+## Sequence (lazy ranges — see [sequence](docs/sequence.md), examples `clean-core/sequence-*`)
 
 ```cpp
-#include <clean-core/sequence/sequence.hh>   // cc::sequence<RangeT> — single-pass; non-copy/non-move
-cc::sequence{some_range}.count();            // use as a temporary; terminal ops consume the range
-cc::sequence{v}.count_if(pred);  .any(pred);  .all(pred);  .index_of(pred);  .find(pred);  // find needs stable elements
-cc::sequence{v}.accumulate(init, fn);  .each(fn);
-cc::sequence{v}.to_vector();  .to_container<C>();  .push_to(existing);
-// NOT implemented despite being declared: .sum() and .to_array(). map/filter/take/zip and the factories do not exist yet.
+// entry points: every container. values() references an lvalue and OWNS a temporary (never store a sequence)
+v.values();  v.indices();         // vector, array, small/fixed_vector, fixed_array, spans, ringbuffers
+m.keys();  m.values();            // map (keys().contains(k) is the map's lookup); set: s.values()
+make_vec().values();              // owns the vector: safe to name, first / to_vector / partition ... move elements out
+cc::iota(n);  cc::iota(a, b);     // integers; .contains(i) is a range check
+cc::zip(a, b, ...);               // containers or sequences, in step until the shortest ends
+cc::values_of(r);  cc::indices_of(r);   // contiguous ranges, C arrays; temporaries owned
+#include <clean-core/sequence/iterator_ranges.hh>  // opt-in (<iterator>): begin/end ranges, std::list, std::map, ...
+cc::repeat(x, n);  cc::single(x);  cc::empty_sequence<T>();
+cc::repeat(x);  cc::generate(f);  cc::iterate(init, f);   // INFINITE: count/sum/to_* static-assert, .take(n) first
+
+// terminal ops are &&-qualified: chain on the temporary, or cc::move(s).count() for a named one. single pass.
+.count();  .count_if(p);  .any(p);  .all(p);  .none(p);  .contains(x);  .each(f);  .consume();
+.index_of(p);                     // -> cc::optional<isize>
+.find_last(p);  .last_index_of(p);   // from the back; a predicate's index still counts from the front
+.equals(r);  .starts_with(r);  .mismatch(r);  .compare(r);   // r: any range; compare is lexicographic <=>
+.is_sorted();  .is_sorted_by(key);
+.min_max();  .try_min_max();      // cc::min_and_max<T>: auto [lo, hi] = ...
+.index_of_min();  .index_of_max();  .nth(i);  .try_nth(i);
+.min_ptr();  .max_ptr_by(key);    // -> pointer or nullptr when empty; borrowed elements only
+.sum_into(acc);  .min_into(acc);  .max_into(opt);  .min_ptr_into(p);  .max_ptr_by_into(p, key);  // fold several sequences
+.find(p);                         // -> pointer or nullptr; static-asserts borrowed elements (not on owning / by-value map)
+.try_fold(f);                     // f -> bool|void, true stops; -> whether it stopped
+.to_vector();  .to_array();  .to_fixed_array<N>();  .to_container<C>();  .push_to(c);   // needs vector.hh; a zip -> cc::tuple (needs tuple.hh)
+// EVERY callback, keys and predicates too, may take a leading isize (its position) and gets zip/window items SPREAD
+// spread wins where both fit: (isize i, auto w) over a zip of ints is (a, b); scan's f is f(acc, idx?, item)
+// count() over a sized map does NOT call the map; .consume() runs every element; inspect has no size, so it runs
+
+// lazy transformations
+.map(f);  .filter(p);  .flat_map(f);  .flatten();   // map keeps a reference result a reference (member projection)
+.take(n);  .skip(n);              // on a contiguous source: no new layer, skipped elements never evaluated
+.take_while(p);  .skip_while(p);
+.chain(other);                    // other: sequence or container; same element type, T& + T const& -> T const&
+.zip(others...);                  // callbacks take items SPREAD: .map([](int a, float b) { ... })
+.enumerate();                     // callbacks take (isize i, item)
+.pairwise();  .windows<N>();  .chunks<N>();   // packs, spread into callbacks: .pairwise().map([](int a, int b) {...})
+.step_by(k);  .take_last(n);  .skip_last(n);
+.filter_map(f);                   // f returns cc::optional<U> or U*: kept when engaged / non-null
+.scan(init, f);  .dedup();  .dedup_by(key);  .inspect(f);
+for (auto&& [a, b] : cc::zip(x, y)) ...   // range-for binds a zip's pack
+.reversed();                      // contiguous, iota, and map/filter/chain/zip over them; take/skip need a size
+.to_sorted_vector(cmp?);  .to_sorted_vector_by(key);   // cc::sort, NOT stable; include algorithm/sort.hh
+.to_grouped_map(key);             // cc::map<key, cc::vector<element>>, in sequence order
+.count_by(key);  .partition(p);  .to_map(key, value);  .to_set();
+.join(", ");                      // cc::string; needs string/format.hh
+cc::println("{:.2f}", v.values()); // [1.00, 2.50]: cc::format consumes a sequence, so only a temporary or cc::move(s)
+
+// needing a first element: x() only compiles on a NON-EMPTY sequence
+.assert_non_empty().sum();        // .sum() .min() .max() .average() .first() .last() .min_by(key) .max_by(key)
+if (auto s = v.values().filter(p).try_as_non_empty(); s.has_value()) use(cc::move(s.value()).min());
+.sum_from(i64(0));                // any sequence; init's type is the accumulator, acc + x must keep it (no float->int)
+.min_or(x);  .try_min();  .first_or(x);  .try_first();  .try_last();   // any sequence; all return BY VALUE
+.sum(&particle::mass);            // x(f) is map(f).x(): sum / min / max / average of a projection
+// sum is decltype(x + x), so u8 sums as int; average is sum / n: f64 for integers, else / T::scalar_t
+.average_or(x);  .try_average();   // any sequence; all three take <AccT>: .average<f64>() sums floats in double
+// fixed_array / fixed_span with N > 0 are non-empty at compile time: fa.values().sum() needs no check
+// take / skip drop that (they may empty it) at any depth; over positions they evaluate nothing they drop
+// a map / filter_map whose lambda CAPTURES returns non-borrowed references: find() refuses; fn / member pointers are fine
+
+for (auto& x : v.values()) ...    // a pointer loop, same as `for (auto& x : v)`
+// range-for over a filter is external iteration and does not vectorize: a hot loop wants .filter(p).each(f)
 ```
 
 ## Threading
@@ -811,6 +869,13 @@ cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for th
                                           //   cc::thread_id::invalid (0) is the "no thread" sentinel
 cc::register_at_thread_exit(fn, userdata); // void(*)(void*), run at thread exit, last registered first; register from a COLD path
                                           //   the way a hot thread_local stays trivially destructible (MSVC/clang-cl guard every access to one that is not)
+
+#include <clean-core/thread/native_thread.hh> // the escape hatch: work goes to cc::async or a threaded_actor, never a raw thread
+auto t = cc::native_thread::start([&] { ... });              // an OS thread with an 8 MiB stack on EVERY platform (std::thread: 512 KiB on macOS)
+auto t = cc::native_thread::start(fn, {.name = "io", .stack_bytes = 16 << 20}); // named from inside, before the body runs
+t.join();                                 // required before destruction or reassignment — no detach; joinable() until then
+                                          // without threads: start runs the body inline, so join returns at once
+                                          // <thread> is denied repo-wide; yield/sleep are cc::this_thread_yield / cc::this_thread_sleep_secs
 
 #include <clean-core/thread/spin.hh>
 cc::spin_pause();                         // CPU spin-wait hint, for a SHORT bounded spin; never a substitute for blocking
@@ -988,6 +1053,7 @@ co_await cc::async_settled(backlog.settled());           // pinned at the CALL; 
 cc::async_backlog::settled(span_of_backlog_ptrs);        // several at once — list UPSTREAM first (compile before its store)
 backlog.outstanding_count();                             // started + unsettled; racy, diagnostics/tests
 backlog.tracked_count();                                 // entries held, live or not; tracking compacts, so bounded without settling
+cc::async_abandoned_work();                                // process-wide: async_all's members left running on a failure, a torn-down parked node's running deps
 // COLD nodes are neither waited for nor started. A manual node its producer ABANDONS keeps a settled() parked forever.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
@@ -1004,6 +1070,8 @@ cc::async_ambient_install_scope const i(h); // install it there for a block; tak
 h.reset();                       // drop the hold now. NOT `h = {}`: a default-constructed handle captures again
 cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
                                  // or escape a worker thread and terminate — the question before reporting by throw
+cc::async_poll_depth();          // how many polls this thread is nested in: a thread blocked on a node polls others one
+                                 // level deeper, so a thread_local per-call state compares depths to spot a foreign call
 // DRIVE-SITE: a subtree driven from one work item is billed to that item's context, and an inline-driven dep
 // inherits its driver's. A node stores it only as a resume token, written once when it is queued/parked/yielded —
 // never by a thread merely WAKING it, so a shared dep completing under B cannot contaminate A's continuation.
@@ -1012,7 +1080,8 @@ cc::async_is_polling();          // inside a poll? i.e. would a throw from here 
 // co_await / co_return (#include <clean-core/thread/async_coroutine.hh> — INCLUDING it is what enables coroutines)
 // A coroutine IS a compute frame: the node stores one coroutine_handle (8 B, always inline). T must be MOVABLE.
 // Take coroutine parameters BY VALUE — they are captured by declared type, so a reference dangles across a suspend.
-cc::shared_async<int> load(cc::string p) { auto const& b = co_await read(p); co_return parse(b); } // COLD (= lazy)
+cc::shared_async<int> load(cc::string p) { auto const r = read(p); auto const& b = co_await r; co_return parse(b); } // COLD (= lazy)
+// HOLD the async before binding a reference: `auto const& b = co_await read(p);` dangles once the temporary handle dies
 cc::async_scheduled<int> spawn(cc::string p) { co_return 1; }  // eager at initial suspend; converts to shared_async
 auto a = cc::async_start(load(p));    // "and go": idempotent; no-op if nothing could route (stays cold, drives later)
 int const& v = co_await a;            // -> U const& into the node; a FAILED dep short-circuits (locals destroyed,
@@ -1404,6 +1473,9 @@ cc::add_crash_context_hook(&fn);                    // void()noexcept printed be
 cc::report_all_thread_stacks("why");                // the SAME report with nothing having crashed — for a wait that
                                                     // never finished, where the thread that noticed is never the one
                                                     // that matters. Suspends the others while it walks them.
+cc::set_crash_report_files({.directory = d, .name = "app"}); // every report ALSO a file d/app-<time>-<pid>.txt,
+                                                    // + a .dmp minidump on Windows; nexus sets it from NX_CRASH_DIR
+cc::last_crash_report_path();                       // -> string_view: the last one's path without extension, or empty
 ```
 
 ### System info & resource metrics (see [systems/system-info](docs/systems/system-info.md))
@@ -1580,11 +1652,12 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   `value()`/`error()` assert on the wrong state; use `CC_RETURN_IF_ERROR` to
   propagate.
 - **Move-only types:** `unique_vector`, `unique_array`, `unique_function`,
-  `any_error`, `allocation`, `node_allocation`. Plain `vector`/`array`/`string`
+  `any_error`, `allocation`, `node_allocation`.
+  Plain `vector`/`array`/`string`
   copy *deeply* (value semantics) — reach for the `unique_*` variant to forbid copies.
-- **`function_ref` is non-owning** — the referenced callable must outlive it
-  (binding a temporary is UB). `CC_DEFER` captures by reference — keep captured
-  state alive.
+- **`function_ref` is non-owning** — a lambda or functor must outlive it (storing one bound to a temporary is UB).
+  A function or function pointer is held by value.
+- **`CC_DEFER` captures by reference** — keep captured state alive.
 - **`create_uninitialized` requires a trivial `T`.**
 - **`cc::tuple` and `cc::pair` default-construct their elements VALUE-initialized**, unlike `cc::vector`'s uninitialized resizes.
 - **`cc::variant` has no valueless state**, not even after `take<T>()` — that leaves a moved-from alternative behind, at the same index.

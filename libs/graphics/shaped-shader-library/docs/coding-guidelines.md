@@ -6,7 +6,7 @@ This document only captures what is **slib-specific**: the rules the code cannot
 Each one exists to keep a promise [shaders.md](../../shaped-graphics/docs/shaders.md) makes to a consumer, so that is the other half to read.
 
 It is intentionally short.
-**Extend it** whenever you catch yourself breaking something load-bearing that nothing in the compiler would have stopped.
+**Extend it** whenever you catch yourself breaking something that nothing in the compiler would have stopped.
 
 ---
 

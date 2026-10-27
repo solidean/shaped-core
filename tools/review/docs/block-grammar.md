@@ -308,7 +308,7 @@ A review of a port names the files it ports from, and those live in a repository
 `raw:` would hide that they are paths at all, and `planned:` makes it worse: a bare foreign name resolves nowhere, so it is drawn as a file the design will create.
 
 ```markdown
-Ported from `foreign:C:/work/ember/src/simd/cpu_info.cc`.
+Ported from `foreign:C:/work/other/src/simd/cpu_info.cc`.
 ```
 
 `foreign:` is skipped by every provider exactly as `raw:` is, so it is never resolved, planned, missing or ambiguous.

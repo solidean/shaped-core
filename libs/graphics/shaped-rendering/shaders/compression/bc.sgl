@@ -77,13 +77,6 @@ fun weight(index_bits: int, i: int) -> int:
 fun interpolate(a: int4, b: int4, w: int) -> int4:
     return ((64 - w) * a + w * b + int4(32)) >> int4(6)
 
-/// Channel `c` of `v`, since SGL subscripts no vector yet.
-fun channel(v: int4, c: int) -> int:
-    if c == 0 => return v.x
-    if c == 1 => return v.y
-    if c == 2 => return v.z
-    return v.w
-
 fun to_srgb(c: float) -> float:
     let l = saturate(c)
     let e = if l <= 0.0031308 => l * 12.92 else 1.055 * pow(l, 1.0 / 2.4) - 0.055
@@ -357,8 +350,8 @@ fun encode_mode6(px: float4[16], opaque: bool, error: mut float) -> uint4:
     let mut pos = 0
     put(mut block, mut pos, 64u, 7)
     for c in 0 ..< 4:
-        put(mut block, mut pos, channel(fit.q0, c) as uint, 7)
-        put(mut block, mut pos, channel(fit.q1, c) as uint, 7)
+        put(mut block, mut pos, fit.q0[c] as uint, 7)
+        put(mut block, mut pos, fit.q1[c] as uint, 7)
     put(mut block, mut pos, fit.p0 as uint, 1)
     put(mut block, mut pos, fit.p1 as uint, 1)
     for i in 0 ..< 16:
@@ -407,10 +400,10 @@ fun encode_two_subsets(px: float4[16], mode: int, p: int, error: mut float) -> u
     put(mut block, mut pos, 1u << (mode as uint), mode + 1)
     put(mut block, mut pos, p as uint, 6)
     for c in 0 ..< channels:
-        put(mut block, mut pos, channel(fit0.q0, c) as uint, bits)
-        put(mut block, mut pos, channel(fit0.q1, c) as uint, bits)
-        put(mut block, mut pos, channel(fit1.q0, c) as uint, bits)
-        put(mut block, mut pos, channel(fit1.q1, c) as uint, bits)
+        put(mut block, mut pos, fit0.q0[c] as uint, bits)
+        put(mut block, mut pos, fit0.q1[c] as uint, bits)
+        put(mut block, mut pos, fit1.q0[c] as uint, bits)
+        put(mut block, mut pos, fit1.q1[c] as uint, bits)
     if mode == 1:
         put(mut block, mut pos, fit0.p0 as uint, 1)
         put(mut block, mut pos, fit1.p0 as uint, 1)

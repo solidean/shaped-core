@@ -225,7 +225,10 @@ cc::result<binding_group_layout_handle> context_uncached_scope::try_create_bindi
         unsupported.has_value())
         return cc::error(cc::move(unsupported.value()));
 
-    return _ctx.try_create_binding_group_layout(bindings, static_samplers, lifetime_scope::persistent);
+    auto created = _ctx.try_create_binding_group_layout(bindings, static_samplers, lifetime_scope::persistent);
+    if (created.has_value())
+        _ctx.note_array_layout(created.value());
+    return created;
 }
 
 pipeline_layout_handle context_uncached_scope::create_pipeline_layout(pipeline_layout_description const& desc)

@@ -47,7 +47,7 @@ def driver(name: str, type: str, start: float, end: float) -> profile.Job:
 
 
 def no_lane_double_books(jobs: list[profile.Job], epsilon: float) -> None:
-    """Two jobs sharing a lane must not overlap by more than epsilon — the whole point of a lane."""
+    """Two jobs sharing a lane must not overlap by more than epsilon, which is what a lane guarantees."""
     by_lane: dict[tuple[str, int], list[profile.Job]] = {}
     for j in jobs:
         by_lane.setdefault((j.group, j.lane), []).append(j)
@@ -327,7 +327,7 @@ def test_adjacent_siblings_stay_siblings() -> None:
 
 
 def test_split_summary_does_not_double_count() -> None:
-    """The whole point of the split: leaf rows are addable, containers are not mixed in."""
+    """The split keeps leaf rows addable by keeping containers out of them."""
     jobs = [
         driver("check", "invocation", 0.0, 10.0),
         driver("all", "build", 0.0, 8.0),
@@ -352,7 +352,7 @@ def test_split_summary_does_not_double_count() -> None:
 
 
 def test_union_span_counts_overlap_once() -> None:
-    """The span column is the whole point of the summary, so its overlap merging has to be exact."""
+    """The summary is read by its span column, so its overlap merging has to be exact."""
     check(profile.union_span([]) == 0.0, "nothing spans no time")
 
     serial = [job("a", "t", 0.0, 1.0), job("b", "t", 1.0, 2.0)]

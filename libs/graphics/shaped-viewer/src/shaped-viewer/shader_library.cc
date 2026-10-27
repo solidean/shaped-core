@@ -28,7 +28,7 @@ cc::result<slib::shader_library*> impl::acquire_default_shader_library()
     // owner, so destroying the library at exit would leave them naming freed assets.
     // The whole construction is scoped rather than the library pointer annotated, because the filesystems the packages mount are
     // owned through a cc:: container and LeakSanitizer cannot reach them from `lib` — cc::leak_scope's header says why.
-    // libs/graphics/shaped-viewer/docs/TODO.md carries the case for a shape that leaks nothing and needs no annotation at all.
+    // TEMPORARY(debt-sv-default-shader-library-leak): a shape that leaks nothing needs no annotation at all.
     auto const leak_guard = cc::leak_scope();
 
     auto* const lib = new slib::shader_library();

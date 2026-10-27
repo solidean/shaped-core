@@ -1,0 +1,182 @@
+// The denoise network's way in and out: its inputs packed into the nine channels it was trained on, and its three output channels turned back into radiance.
+//
+// Both go through the transfer function the network was trained through.
+// A path tracer's radiance spans many orders of magnitude and a network cannot see that directly, so OIDN maps it through a PERCEPTUALLY UNIFORM curve first and inverts the curve afterwards.
+// Every constant below is OIDN's, because the weights were trained against exactly this curve.
+// A different one that merely looks similar is a systematically wrong image rather than a slightly different one.
+// Three pieces: linear near zero, a power in the middle, a logarithm above; see `core/color.h` in the OIDN sources, from which these are transcribed.
+//
+// Feature maps are HWC: index (y * width + x) * channels + c.
+
+require extended_image_formats
+
+// the format of the image `output_cs` writes, which is the caller's output
+@option const target_format: pixel_format = .rgba32_float
+
+// The largest value the curve is normalized against, which is also the largest a half float holds.
+const pu_y_max = 65504.0
+
+const pu_a = 1.41283765e+03
+const pu_b = 1.64593172e+00
+const pu_c = 4.31384981e-01
+const pu_d = -2.94139609e-03
+const pu_e = 1.92653254e-01
+const pu_f = 6.26026094e-03
+const pu_g = 9.98620152e-01
+const pu_y0 = 1.57945760e-06
+const pu_y1 = 3.22087631e-02
+const pu_x0 = 2.23151711e-03
+const pu_x1 = 3.70974749e-01
+
+fun pu_forward_raw(y: float) -> float:
+    if y <= pu_y0 => return pu_a * y
+    if y <= pu_y1 => return pu_b * pow(y, pu_c) + pu_d
+    return pu_e * log(y + pu_f) + pu_g
+
+fun pu_inverse_raw(x: float) -> float:
+    if x <= pu_x0 => return x / pu_a
+    if x <= pu_x1 => return pow((x - pu_d) / pu_b, 1.0 / pu_c)
+    return exp((x - pu_g) / pu_e) - pu_f
+
+// What the curve is divided by so that the largest representable value maps to 1.
+// Derived rather than written down, because the alternative is a literal that can drift from the constants above without anything noticing.
+// OIDN computes it the same way, in its transfer function's constructor.
+fun pu_norm_scale() => 1.0 / pu_forward_raw(pu_y_max)
+
+fun pu_forward(y: float3) => float3(pu_forward_raw(y.x), pu_forward_raw(y.y), pu_forward_raw(y.z)) * pu_norm_scale()
+
+fun pu_inverse(x: float3) -> float3:
+    let s = x / pu_norm_scale()
+    return float3(pu_inverse_raw(s.x), pu_inverse_raw(s.y), pu_inverse_raw(s.z))
+
+// Zero for a NaN or an infinity, and `x` itself otherwise.
+fun finite_or_zero(x: float) => if is_nan(x) or is_inf(x) => 0.0 else x
+
+// NaN and infinity reach the network as whatever the hardware does with them, and one of either poisons every pixel its receptive field touches, so both are removed on the way in.
+fun sanitize(v: float3) => float3(finite_or_zero(v.x), finite_or_zero(v.y), finite_or_zero(v.z))
+
+// ---- in ------------------------------------------------------------------------------------------------------------
+
+// Radiance in 0-2, diffuse albedo in 3-5, world normal in 6-8, HWC, which is the order `enc_conv0`'s weights expect and the reason it has nine input channels.
+//
+// Each is prepared the way OIDN prepares it, and they differ: radiance is scaled, clamped to non-negative and taken through the transfer curve.
+// Albedo is clamped to [0, 1] and left alone; a normal is clamped to [-1, 1] and mapped onto [0, 1] because the network's inputs are unsigned.
+
+@inline binding nn_input_constants:
+    // The TENSOR's extent, which is the image's rounded up to a multiple of sixteen so four pools can halve it.
+    width: uint
+    height: uint
+    // The IMAGE's extent.
+    // Everything past it is the padding, and it is zero in every channel.
+    // What OIDN writes there and what the weights were trained against, where repeating the edge instead moves the output along the right and bottom borders.
+    source_width: uint
+    source_height: uint
+    // Where this tile's tensor starts in the image: never negative, and always a multiple of sixteen.
+    // An edge tile is shifted inward to end where the whole run's padded tensor ends, so its texels past the image are the same zeros the whole run pads with.
+    source_offset_x: int
+    source_offset_y: int
+    // What the radiance is multiplied by before the curve, which is what brings a scene into the range the network was trained over.
+    // OIDN derives one by measuring the image; this takes it from the caller, and 1 means "already in that range".
+    input_scale: float
+
+binding nn_input_images:
+    @unfilterable
+    color: texture_2d[float4]
+    @unfilterable
+    albedo: texture_2d[float4]
+    @unfilterable
+    normal: texture_2d[float4]
+    // HWC, twelve channels
+    target: mut buffer[float]
+
+@compute(8, 8) fun input_cs(@thread_id id: int3){nn_input_images, nn_input_constants}:
+    let width = nn_input_constants.width as int
+    if id.x >= width or id.y >= (nn_input_constants.height as int) => return
+
+    // Twelve, not nine: every tensor's channel count is padded to a multiple of four so the convolution can read four at a time.
+    // And the three padding channels carry a hard zero rather than whatever was in memory.
+    let base = (id.y * width + id.x) * 12
+
+    // Past the image, the padding and a tile's overhang alike are zero in every channel.
+    let sample = int2(nn_input_constants.source_offset_x + id.x, nn_input_constants.source_offset_y + id.y)
+    if sample.x >= (nn_input_constants.source_width as int) or sample.y >= (nn_input_constants.source_height as int):
+        @unroll
+        for c in 0 ..< 12:
+            nn_input_images.target[base + c] = 0.0
+        return
+    let p = max(sample, int2(0))
+
+    let mut color = sanitize(nn_input_images.color.load(p).xyz) * nn_input_constants.input_scale
+    color = max(color, float3(0.0))
+    color = pu_forward(color)
+
+    let albedo = clamp(sanitize(nn_input_images.albedo.load(p).xyz), float3(0.0), float3(1.0))
+
+    let normal = clamp(sanitize(nn_input_images.normal.load(p).xyz), float3(-1.0), float3(1.0)) * 0.5 + 0.5
+
+    nn_input_images.target[base + 0] = color.x
+    nn_input_images.target[base + 1] = color.y
+    nn_input_images.target[base + 2] = color.z
+    nn_input_images.target[base + 3] = albedo.x
+    nn_input_images.target[base + 4] = albedo.y
+    nn_input_images.target[base + 5] = albedo.z
+    nn_input_images.target[base + 6] = normal.x
+    nn_input_images.target[base + 7] = normal.y
+    nn_input_images.target[base + 8] = normal.z
+    nn_input_images.target[base + 9] = 0.0
+    nn_input_images.target[base + 10] = 0.0
+    nn_input_images.target[base + 11] = 0.0
+
+// ---- out -----------------------------------------------------------------------------------------------------------
+
+// The inverse of the input's curve, and the inverse of its scale, so a caller that handed in an `input_scale` gets an image in the units it started from.
+//
+// The network's output is sanitized before the curve rather than after.
+// It is a convolution's sum, so it can carry a NaN that the inverse would turn into a NaN of a different magnitude rather than removing.
+
+@inline binding nn_output_constants:
+    // The TENSOR's extent, which is what indexes the source.
+    width: uint
+    height: uint
+    // The IMAGE's extent.
+    // The padding beyond it was only ever there to give the pools a size they could halve, so nothing is written for it.
+    target_width: uint
+    target_height: uint
+    // This tile's INTERIOR, which is the only part of the tensor worth keeping.
+    // The overlap around it exists so the interior sees the same neighborhood a whole-image run would, and it is discarded rather than written.
+    write_width: uint
+    write_height: uint
+    // Where the interior lands in the image, and where it starts inside the tensor.
+    target_offset_x: int
+    target_offset_y: int
+    read_offset_x: int
+    read_offset_y: int
+    // the same one the input applied; this divides by it
+    input_scale: float
+
+binding nn_output_images:
+    // HWC, four channels
+    source: buffer[float]
+    // The caller's colour, whose alpha the output carries through as `reconstruct_inputs::output` promises.
+    @unfilterable
+    color: texture_2d[float4]
+    target: out image_2d[target_format]
+
+@compute(8, 8) fun output_cs(@thread_id id: int3){nn_output_images, nn_output_constants}:
+    if id.x >= (nn_output_constants.write_width as int) or id.y >= (nn_output_constants.write_height as int) => return
+
+    let dst = int2(nn_output_constants.target_offset_x + id.x, nn_output_constants.target_offset_y + id.y)
+    if dst.x >= (nn_output_constants.target_width as int) or dst.y >= (nn_output_constants.target_height as int) => return
+
+    let src = int2(nn_output_constants.read_offset_x + id.x, nn_output_constants.read_offset_y + id.y)
+    // Four, not three: the network's last tensor is padded to a multiple of four like every other one, and its fourth channel is a zero nothing reads.
+    let base = (src.y * (nn_output_constants.width as int) + src.x) * 4
+    let mut value = float3(nn_output_images.source[base + 0], nn_output_images.source[base + 1], nn_output_images.source[base + 2])
+
+    value = max(sanitize(value), float3(0.0))
+    value = pu_inverse(value)
+
+    // Undoing the scale the input applied, so the result is in the caller's units.
+    let scale = if nn_output_constants.input_scale != 0.0 => 1.0 / nn_output_constants.input_scale else 0.0
+    let alpha = nn_output_images.color.load(dst, 0).w
+    nn_output_images.target[dst] = float4(..(value * scale), alpha) as texel[target_format]

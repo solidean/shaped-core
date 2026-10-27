@@ -47,14 +47,14 @@ struct cc::flags
     /// Public because that is what makes cc::flags a structural type, so a flag set can serve as a non-type template parameter.
     /// Prefer the named operations; this is for interop and for bit patterns the enum defines itself.
     ///
-    /// The initializer is load-bearing: it is what makes a default-initialized `cc::flags<E> f;` the EMPTY set rather than indeterminate bits.
+    /// The initializer is what makes a default-initialized `cc::flags<E> f;` the EMPTY set rather than indeterminate bits.
     /// It costs trivial default construction, which nothing in clean-core requires.
     /// Every triviality requirement here is trivial copyability and/or destructibility, and both survive.
     storage_type bits = 0;
 
     /// A flag value as storage bits — the one place the two encodings differ.
     ///
-    /// The declared storage may be narrower than the enum's underlying type, which is the whole point of declaring it,
+    /// The declared storage may be narrower than the enum's underlying type, to keep the flag set small,
     /// so a value that does not fit must be caught here rather than silently losing its high bits.
     /// A negative value fails the same check: it converts to a huge unsigned one, which fits neither encoding.
     [[nodiscard]] static constexpr storage_type bits_of(EnumT v)

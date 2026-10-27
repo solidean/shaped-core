@@ -11,12 +11,14 @@ namespace nx::bench
 {
 namespace
 {
-// The portable default set.
+// The portable default set: every counter, so a miss rate has its accesses beside its misses.
 // The first two are the always-on baseline; the rest need PMU access.
+// Last is the one a single pass over budget drops first: the misses alone already say how much missed.
 constexpr hw_counter s_default_set[] = {
-    hw_counter::elapsed_nanoseconds,  hw_counter::reference_cycles, hw_counter::instructions_retired,
-    hw_counter::branch_instructions,  hw_counter::branch_misses,    hw_counter::cache_l1d_misses,
-    hw_counter::cache_llc_references, hw_counter::cache_llc_misses,
+    hw_counter::elapsed_nanoseconds, hw_counter::reference_cycles,     hw_counter::instructions_retired,
+    hw_counter::core_cycles,         hw_counter::branch_instructions,  hw_counter::branch_misses,
+    hw_counter::cache_l1d_misses,    hw_counter::cache_llc_references, hw_counter::cache_llc_misses,
+    hw_counter::cache_l1d_accesses,
 };
 
 // Our best-effort explanation of what each counter measures, deliberately terse.
@@ -40,6 +42,10 @@ cc::string_view description_of(hw_counter c)
         return "accesses that reached the last-level cache";
     case hw_counter::cache_llc_misses:
         return "last-level-cache misses; typically a main-memory access (~hundreds of cycles)";
+    case hw_counter::core_cycles:
+        return "core clock cycles while the thread ran; against ref_cycles, the clock the core actually ran at";
+    case hw_counter::cache_l1d_accesses:
+        return "L1 data-cache accesses";
     }
     return "";
 }
@@ -65,6 +71,10 @@ cc::string_view impl::logical_counter_name(hw_counter c)
         return "llc_refs";
     case hw_counter::cache_llc_misses:
         return "llc_misses";
+    case hw_counter::core_cycles:
+        return "core_cycles";
+    case hw_counter::cache_l1d_accesses:
+        return "l1d_accesses";
     }
     return "unknown";
 }

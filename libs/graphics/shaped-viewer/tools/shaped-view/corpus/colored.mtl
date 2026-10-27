@@ -1,0 +1,4 @@
+newmtl paint
+Kd 0.8 0.3 0.2
+Ks 0.2 0.2 0.2
+Ns 40

@@ -216,6 +216,27 @@ TEST("atomic - atomic_xor performs atomic bitwise XOR")
     }
 }
 
+TEST("atomic - atomic_ref compare_exchange swaps on a match and reports the current value otherwise")
+{
+    // the no-threads shim must have the whole std::atomic_ref surface, compare_exchange included
+    u32 value = 7;
+    auto const ref = cc::atomic_ref<u32>(value);
+
+    auto expected = u32(3);
+    CHECK(!ref.compare_exchange_strong(expected, 9, cc::memory_order_acq_rel, cc::memory_order_acquire));
+    CHECK(expected == 7);
+    CHECK(value == 7);
+
+    CHECK(ref.compare_exchange_strong(expected, 9));
+    CHECK(value == 9);
+
+    // weak may fail spuriously on hardware, so it is retried as every caller does
+    expected = 9;
+    while (!ref.compare_exchange_weak(expected, 11, cc::memory_order_acq_rel, cc::memory_order_acquire))
+        CHECK(expected == 9);
+    CHECK(value == 11);
+}
+
 TEST("atomic - atomic operations return old values")
 {
     SECTION("return values are pre-operation values")

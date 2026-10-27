@@ -4,7 +4,7 @@ Every check here is advisory, never a failure.
 The repo configures, builds and passes its whole suite with none of it — the graphics libraries degrade instead of disappearing, which is exactly what makes a gap invisible.
 A checkout with no windowing headers still builds an `sr::window_system::try_create` that always fails, and a Vulkan swapchain that reports the platform unsupported.
 Nothing says so until an example draws nothing.
-Naming that cost is the whole point of these lines.
+These checks name that cost.
 
 Each check mirrors one CMake gate, and the mirror must stay exact:
 `find_package(Vulkan)` in libs/graphics/shaped-graphics/CMakeLists.txt, the `check_include_file` probes in

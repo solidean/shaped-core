@@ -125,7 +125,7 @@ DXGI's Alt+Enter fullscreen handling is suppressed (`DXGI_MWA_NO_ALT_ENTER`); th
 
 ## Deferred
 
-See [TODO](../TODO.md) for the full list.
+See [epic-sg-presentation-gaps](../issues/epic-sg-presentation-gaps.md) for the full list.
 The ones worth knowing while using this:
 
 - **deeper HDR** — metadata and tone-mapping beyond selecting a color space;

@@ -276,6 +276,8 @@ public:
         // WebGPU hands an index over unsigned and SGL counts in int, so each conversion stands at the top.
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
+            if (!p.stage_input_read[i])
+                continue;
             auto const local = p.e.stage_inputs[i].local;
             out.appendf("    let {}: {} = {};\n", p.locals[index_of(local)], type_text(p, *this, p.e.at(local).type),
                         stage_input_value(p, i));

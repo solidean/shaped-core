@@ -230,7 +230,7 @@ void json::writer::impl_close(i32 depth)
 
     auto const lvl = _stack.back();
     auto const ends_compact = _compact_depth == depth;
-    _stack.pop_back();
+    _stack.remove_back();
     if (lvl.has_any)
         this->impl_indent(); // the closing bracket lines up with what opened it, one level out
     this->impl_emit(lvl.is_object ? "}" : "]");

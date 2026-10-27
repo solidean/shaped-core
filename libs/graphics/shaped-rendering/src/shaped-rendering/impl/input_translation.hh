@@ -8,7 +8,7 @@
 /// Internal: this header names SDL types, so it lives under impl/ and is not part of the public header set.
 /// Nothing outside shaped-rendering's own sources and tests may include it — see docs/coding-guidelines.md.
 ///
-/// These are pure functions of their arguments, which is the whole point.
+/// These are pure functions of their arguments, so a test needs nothing else to drive them.
 /// The mapping is the part most likely to be wrong (a hundred table entries, two sign conventions) and the part
 /// least able to be reached through the public API, so it is tested here rather than through a live window.
 
@@ -27,6 +27,9 @@ namespace sr::impl
 
 /// SDL numbers its mouse buttons from 1; anything past the two extra buttons is reported as x2.
 [[nodiscard]] sr::mouse_button mouse_button_from_sdl(u8 sdl_button);
+
+/// SDL's held-button mask as `mouse_button_bit`s.
+[[nodiscard]] u8 held_buttons_from_sdl(SDL_MouseButtonFlags state);
 
 /// The scroll amount with the platform's inverted-scroll flag applied.
 /// SDL reports the raw direction plus a flag rather than pre-correcting it, so forgetting this inverts scrolling

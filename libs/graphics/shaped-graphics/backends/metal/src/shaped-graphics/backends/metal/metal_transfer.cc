@@ -3,14 +3,13 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh>
 #include <clean-core/record/log.hh>
+#include <clean-core/thread/thread.hh>
 #include <shaped-graphics/backends/metal/metal_buffer.hh>
 #include <shaped-graphics/backends/metal/metal_context.hh>
 #include <shaped-graphics/backends/metal/metal_format.hh>
 #include <shaped-graphics/backends/metal/metal_stream.hh>
 #include <shaped-graphics/backends/metal/metal_texture.hh>
 #include <shaped-graphics/exceptions.hh> // sg::exception, thrown where a recording seam has no error channel
-
-#include <thread>
 
 namespace sg::backend::metal
 {
@@ -172,8 +171,7 @@ void metal_transfer_system::wait_for_queues(MTL4::CommandQueue* queue,
 
     // And behind any streaming transfer still filling this resource.
     //
-    // **Metal orders the async tier against streams, where dx12 does not** — see libs/graphics/shaped-graphics/docs/TODO.md, which records the gap
-    // on the backend that has it.
+    // **Metal orders the async tier against streams, where dx12 does not** — issue: bug-sg-dx12-async-transfer-ignores-stream.
     // The per-resource streaming timeline is what makes it cheap here: an async transfer waits on the same value a
     // command list would, and `promote_to_async` is then purely the statement of intent it is documented to be.
     if (auto const wait = pending_stream_wait(resource); wait.event != nullptr)
@@ -588,7 +586,7 @@ void metal_transfer_system::shutdown()
     // Every outstanding transfer has to finish before the queue and the timeline go, and a handler still in flight
     // touches both.
     while (_pending.load(std::memory_order_acquire) > 0)
-        std::this_thread::yield();
+        cc::this_thread_yield();
 
     _state.lock(
         [](state& s)

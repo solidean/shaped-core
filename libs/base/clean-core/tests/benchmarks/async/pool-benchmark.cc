@@ -104,7 +104,7 @@ constexpr int tree_depth = 16; // 2^17 - 1 = 131071 nodes, trivial leaves
 // --- leaf work -------------------------------------------------------------------------------------------
 
 // An empty inline-asm barrier: it makes `v` un-analyzable and, being volatile, gives its containing function side effects.
-// The side effects are the load-bearing half.
+// The side effects are the half the baseline needs.
 // Without them a CC_DONT_INLINE serial baseline is still a pure function of unchanging arguments, so clang hoists the whole call out of the timing loop.
 // The baseline then measures 0.00 ns.
 CC_FORCE_INLINE void opaque(i64& v)
@@ -206,7 +206,7 @@ CC_DONT_INLINE i64 serial_reduce(cc::span<i32 const> d)
 }
 
 // Mirrors async_tree's shape: two recursive calls per internal node, a trivial leaf.
-// So the comparison is per-node call overhead vs per-node scheduling overhead, which is the point of the case.
+// So the case compares per-node call overhead against per-node scheduling overhead.
 CC_DONT_INLINE i64 serial_tree(int depth)
 {
     if (depth == 0)

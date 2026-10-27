@@ -16,7 +16,8 @@ struct sv::drawing_set_record
     cc::vector<u32> first_record;
     cc::vector<u32> record_count;
 
-    /// Each drawing's extent in its own units, from its outlines' points; empty for a drawing with nothing in it.
+    /// Each drawing's extent in its own units, from its outlines' points.
+    /// A drawing with nothing in it gets a zero box at the origin, not tg's empty box, whose infinities the placement and the decal shader cannot take.
     cc::vector<tg::aabb2f> bounds;
 
     /// Whether the set found room; a decal set that found the decal atlas full of this frame's decals did not.

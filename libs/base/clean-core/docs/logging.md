@@ -173,7 +173,7 @@ A recording holds chunk references, and letting `shutdown()` free the pool under
 
 This is what makes a warning testable at all.
 `shaped-graphics`'s "more than 64 concurrent command lists" is asserted on in `libs/graphics/shaped-graphics/tests/barrier/slot-recording-test.cc`.
-Both that it fires and that it fires **once**, which is the whole point of the guard around it.
+Both that it fires and that it fires **once**, as the guard around it promises.
 
 **A passing test logs no warning or error it did not declare.**
 `nx::expect_warning` and `nx::allow_warnings` are the declarations, and the console withholds a test's warnings until the run judges them — see nexus's [log rule](../../nexus/docs/log-rule.md).

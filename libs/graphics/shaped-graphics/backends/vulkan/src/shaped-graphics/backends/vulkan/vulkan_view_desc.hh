@@ -53,7 +53,7 @@ struct sg::backend::vulkan::vulkan_image_view_key
 /// One per context; a view is created on first use and lives until its texture is released.
 /// A rendering scope's attachment views are not here — see acquire_attachment_view.
 ///
-/// **A cached view is dropped with its texture, and that is load-bearing rather than tidy.**
+/// **A cached view is dropped with its texture, and not merely for tidiness.**
 /// The drop rides the texture's own finalizer, so it happens exactly when the VkImage does: at epoch retire, once
 /// the GPU is done with both.
 ///

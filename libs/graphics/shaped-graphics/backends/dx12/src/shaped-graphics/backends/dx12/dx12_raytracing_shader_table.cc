@@ -73,8 +73,8 @@ cc::result<dx12_raytracing_shader_table_handle> dx12_raytracing_shader_table::cr
     write_section(hit_start, desc.hit, pipeline->shader_ids_hit);
     write_section(callable_start, desc.callable, pipeline->shader_ids_callable);
 
-    // TODO: back this with a dedicated shader_binding_table usage once types.hh grows one; a plain
-    // shader-readable + copy-dst buffer is a temporary stand-in.
+    // A plain shader-readable + copy-dst buffer stands in for storage of the shader table's own.
+    // issue: feat-sg-shader-table-storage
     auto buffer_result = ctx.create_dx12_buffer(total, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst,
                                                 sg::allocation_info{});
     CC_RETURN_IF_ERROR(buffer_result);

@@ -43,7 +43,8 @@ These are not requests for new clean-core symbols — they exist only because a 
   `std::cout` and `cc::print` stay in order.
 - **`std::string` map key.** [execute.cc](../src/nexus/tests/execute.cc) bridges a
   `cc::string` section name to a `std::string` key on every lookup — only because
-  the map is `std::unordered_map`. Removed together with `cc::map`.
+  the map is `std::unordered_map`.
+  Removed together with `cc::map`.
 - **Console output in the fuzzer.** [fuzz/test.cc](../src/nexus/fuzz/test.cc) prints
   findings and the reproducer via `std::cerr` + the same `as_sv()` bridge — folds into
   the `cc::println` migration above.

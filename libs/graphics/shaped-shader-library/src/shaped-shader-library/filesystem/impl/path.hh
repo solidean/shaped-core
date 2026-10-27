@@ -17,7 +17,8 @@ namespace slib::impl
 /// That is what confines a mount to its own subtree, so it is the traversal guard rather than a tidiness pass.
 [[nodiscard]] cc::optional<cc::string> normalize_path(cc::string_view path);
 
-/// Normalized `base` (a directory) joined with `relative`. An empty base just normalizes `relative`.
+/// Normalized `base` (a directory) joined with `relative`.
+/// An empty base just normalizes `relative`.
 [[nodiscard]] cc::optional<cc::string> join_path(cc::string_view base, cc::string_view relative);
 
 /// The directory part of an already-normalized path; empty when it has none.

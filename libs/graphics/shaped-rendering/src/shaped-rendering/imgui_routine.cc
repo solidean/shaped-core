@@ -276,7 +276,7 @@ sg::routine_outcome imgui_routine::execute(sg::rendering_scope& scope, prepared_
     {
         for (auto const& dc : list->CmdBuffer)
         {
-            // TODO(sr): user callbacks are not dispatched.
+            // User callbacks are not dispatched; issue: feat-imgui-user-callbacks.
             // Supporting them also means supporting ImDrawCallback_ResetRenderState, which needs the bind block above factored out of this loop.
             // No imgui core path emits one, so nothing is lost until a caller adds one.
             if (dc.UserCallback != nullptr)

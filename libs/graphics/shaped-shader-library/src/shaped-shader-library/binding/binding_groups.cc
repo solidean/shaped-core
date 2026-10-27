@@ -1343,9 +1343,9 @@ cc::result<cc::string> slib::rewrite_binding_groups(cc::string_view hlsl, sg::sh
 
     // Every matrix the pass parsed is made column-major, on BOTH arms.
     //
-    // DXC's own default is already column-major, so this changes nothing about the bytes today -- which is the
-    // point: it is what keeps them from changing under a `#pragma pack_matrix(row_major)` or a `-Zpr` set
-    // somewhere the declaration cannot see.
+    // DXC's own default is already column-major, so this changes nothing about the bytes today.
+    // It keeps them from changing under a `#pragma pack_matrix(row_major)` or a `-Zpr` set somewhere the declaration
+    // cannot see.
     // The generated mirror reads those floats as columns, and this is what makes that true rather than likely.
     for (auto const offset : parsed.value().matrix_offsets)
         edits.push_back({.offset = offset, .text = cc::string("column_major ")});

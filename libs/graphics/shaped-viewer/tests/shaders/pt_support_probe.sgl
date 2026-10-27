@@ -20,7 +20,8 @@ struct probe_light:
     cone_offset: float
     one_minus_cos_angular_radius: float
     link_mask: uint
-    pad0: float2
+    select_pdf: float
+    select_cdf: float
 
 binding pt_support_io:
     /// The lights, which item `i` reads as `lights[i % light_count]`.
@@ -29,7 +30,7 @@ binding pt_support_io:
     /// The 16 SH coefficients of the environment, as `sv::background_gpu` lays them out, as `tracer.traced.background` declares it.
     sh: buffer[float4]
 
-    /// Eight per item, in the order `pt_support_measure` writes them.
+    /// `results_per_item` of pt-support-probe-test.cc per item, in the order `pt_support_measure` writes them.
     results: mut buffer[float4]
 
     item_count: uint
@@ -59,7 +60,7 @@ fun probe_direction(u: float3) -> float3:
 
     // x: a uniform, y: the two MIS weights of one pair summed, z: the environment pdf, w: the selection pdf over the lights
     let weights = pt.mis_weight(u1, u2) + pt.mis_weight(u2, u1)
-    let w0 = float4(u1, weights, pt.env_pdf(), pt.light_select_pdf(pt_support_io.light_count))
+    let w0 = float4(u1, weights, pt.env_pdf(), pt.light_select_pdf(l, pt_support_io.light_count))
 
     // a cosine-weighted direction about `n`, and whether it is finite
     let cosine = pt.sample_cosine_hemisphere(n, u4, u5)

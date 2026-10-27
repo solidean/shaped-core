@@ -1,0 +1,248 @@
+// The raster path's SHADING: how a draw pulls its triangles, how a pixel finds the surface a traced hit would, and how that surface is lit without tracing.
+//
+// A generated material pixel shader evaluates its material itself and hands `shade` the surface it got, as a closest hit hands `tracer.shade` one.
+// Everything from there is the same for every material: the frame, the closure, the lights, the environment and the G-buffer.
+module raster
+
+use material
+use openpbr
+use pt
+use scene
+use slug
+use tracer
+
+/// The side of the grid an area light is integrated over: `area_grid` squared fixed points per light and pixel.
+const area_grid = 4
+
+/// The 16 SH coefficients of the environment, copied out of their buffer into the array `scene.background_radiance` takes.
+fun background_sh(){drawn} -> float4[16]:
+    let mut sh = float4[16].filled(float4(0.0))
+    for k in 0 ..< 16:
+        sh[k] = drawn.background[k]
+    return sh
+
+/// An object-space point of `inst` in the world.
+fun to_world_point(inst: scene.instance, p: float3) -> float3:
+    let q = float4(p.x, p.y, p.z, 1.0)
+    return float3(dot(inst.to_world_x, q), dot(inst.to_world_y, q), dot(inst.to_world_z, q))
+
+/// An object-space direction of `inst` in the world, by the linear part of its placement alone.
+fun to_world_vector(inst: scene.instance, v: float3) -> float3:
+    let q = float4(v.x, v.y, v.z, 0.0)
+    return float3(dot(inst.to_world_x, q), dot(inst.to_world_y, q), dot(inst.to_world_z, q))
+
+/// -1 where `inst`'s placement mirrors, and 1 where it does not.
+///
+/// A face normal crossed from world-space corners turns over under a mirror, where the inverse transpose a hit uses does not.
+/// So the sign of the determinant is what makes the two agree on which side of a face is its front.
+fun mirroring_of(inst: scene.instance) -> float:
+    let det = dot(inst.to_world_x.xyz, cross(inst.to_world_y.xyz, inst.to_world_z.xyz))
+    let sign = if det < 0.0 => -1.0 else 1.0
+    return sign
+
+/// Where world point `p` lands through `cam`, as the clip position of the pinhole `scene.camera_ray_offset` traces through.
+///
+/// `w` is the view depth along the camera's forward axis, and `z / w` is `near / w`: reversed, 1 at the near plane and 0 at infinity.
+/// A float's spacing shrinks toward 0 as fast as `near / w` does, so the depth test resolves a far surface as finely as a near one.
+/// That is the raster pass's own depth alone; `primary_depth` stays `1 - near / w`, the depth `sv::matrices_of` builds and the tracer writes.
+/// Up is up in clip space, which is the tracer's image read top row first.
+fun project(cam: scene.camera, p: float3, near: float) -> hpos4:
+    let offset = p - cam.position
+    let depth = dot(offset, normalize(cam.forward))
+    let x = dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled)
+    let y = dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)
+    return hpos4(x, y, near, depth)
+
+/// Corner `vertex % 3` of triangle `vertex / 3` of the draw's instance, pulled out of the bindless tables.
+///
+/// No vertex buffer and no index buffer are bound: the draw is three vertices per triangle, and each reads its own corner the way a hit reads all three.
+/// That is what lets one pipeline draw every mesh, indexed or not, whatever its attributes.
+fun corner_of(vertex: int){drawn, tracer.bindless, draw} -> varyings:
+    let f = drawn.frame[0]
+    let instance = draw.instance
+    let inst = scene.instance(..drawn.instances[instance as int])
+    let primitive = (vertex / 3) as uint
+    let k = vertex % 3
+
+    let indices = inst.indices as int
+    let corners = material.triangle_corners(inst, tracer.bindless.buffers[indices], primitive)
+    let mut index = corners.x
+    let mut bary = float3(1.0, 0.0, 0.0)
+    if k == 1:
+        index = corners.y
+        bary = float3(0.0, 1.0, 0.0)
+    else if k == 2:
+        index = corners.z
+        bary = float3(0.0, 0.0, 1.0)
+
+    let vertices = inst.vertices as int
+    let object = reinterpret_as_float(tracer.bindless.buffers[vertices].load3(index * 12u))
+    let world = to_world_point(inst, object)
+    return {
+        position = project(scene.camera(..f.camera), world, f.near_plane)
+        instance = instance
+        primitive = primitive
+        barycentrics = bary
+        world = world
+    }
+
+/// The shading context of the pixel's triangle, as `tracer.triangle_context` makes one for a hit there.
+fun pixel_context(p: varyings){drawn, tracer.bindless} -> material.shading_context:
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+    let indices = inst.indices as int
+    return material.make_context(inst, tracer.bindless.buffers[indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
+
+/// Whether a cutout material removes this pixel, read through `tracer.instance_opacity` as the tracer's any-hit reads it.
+///
+/// Where the type's cutoff is above 0 that is glTF's MASK, and the pixel is cut exactly where a hit is.
+/// A cutoff of 0 is coverage, which a tracer draws stochastically and converges to a partial surface.
+/// One raster frame cannot, so coverage below one half is cut and the rest kept.
+fun is_cut(p: varyings, ctx: material.shading_context){drawn, tracer.bindless} -> bool:
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+    return tracer.instance_opacity(inst, ctx) < 0.5
+
+/// Paints every decal reaching `p` into `surface`'s base, as `tracer.apply_decals` paints a hit.
+fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){drawn, slug.tables}:
+    let count = drawn.frame[0].decal_count
+    for i in 0 ..< (count as int):
+        let d = drawn.decals[i]
+        let mut at = float2(0.0)
+        let fade = tracer.decal_reach(d, p, n, mut at)
+        if fade <= 0.0 => continue
+        let first = d.first_shape as int
+        for k in 0 ..< (d.shape_count as int):
+            tracer.paint_decal_shape(mut surface, d, drawn.decal_shapes[first + k], at, footprint, fade)
+
+/// What arrives along `wi` with radiance-times-solid-angle `incoming` and leaves toward the viewer, BSDF and cosine folded in.
+/// `n` is the geometric normal turned toward the viewer.
+/// Light reaches only its side, wherever the shading normal leans.
+fun reflected(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, wi: float3, incoming: float3) -> float3:
+    let wi_local = openpbr.to_local(f, wi)
+    if wi_local.z <= 0.0 or dot(wi, n) <= 0.0 => return float3(0.0)
+    return openpbr.bsdf_eval(b, wo_local, wi_local) * incoming * wi_local.z
+
+/// Direct light from `l` at `p`, unoccluded, through the closure `b` in frame `f` over the face whose turned geometric normal is `n`.
+///
+/// The same quantity the tracer's next-event estimate converges to there, before its shadow ray: evaluated rather than sampled.
+/// A point and a parallel light are exact.
+/// A rect is integrated over a fixed `area_grid` by `area_grid` grid of points on it, which is exact in the limit and close for a light not much nearer than its own size.
+/// A distant disc is its center direction, carrying the whole solid angle the disc subtends.
+fun direct_light(l: scene.light, b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3) -> float3:
+    if l.path == scene.light_path_area:
+        let mut sum = float3(0.0)
+        let cells = area_grid as float
+        for i in 0 ..< area_grid:
+            for j in 0 ..< area_grid:
+                let s = ((i as float) + 0.5) / cells * 2.0 - 1.0
+                let t = ((j as float) + 0.5) / cells * 2.0 - 1.0
+                let to_light = l.position + s * l.u + t * l.v - p
+                let dist2 = max(dot(to_light, to_light), 1e-12)
+                let wi = to_light / sqrt(dist2)
+                let cos_face = dot(l.normal, -wi)
+                let cos_light = if (l.flags & scene.light_flag_two_sided) != 0u => abs(cos_face) else cos_face
+                if cos_light <= 0.0 => continue
+                // The solid angle one grid cell subtends, which the tracer's area-to-solid-angle density divides by.
+                let solid_angle = l.area * cos_light / (dist2 * cells * cells)
+                sum += reflected(b, f, n, wo_local, wi, l.emission * scene.light_cone(l, cos_light) * solid_angle)
+        return sum
+
+    if l.path == scene.light_path_point:
+        let to_light = l.position - p
+        let dist2 = max(dot(to_light, to_light), 1e-12)
+        let wi = to_light / sqrt(dist2)
+        return reflected(b, f, n, wo_local, wi, l.emission * (scene.light_cone(l, dot(l.normal, -wi)) / dist2))
+
+    if l.path == scene.light_path_distant_point:
+        return reflected(b, f, n, wo_local, -l.normal, l.emission)
+
+    // scene.light_path_distant_disc: radiance over the cone it subtends
+    let solid_angle = 2.0 * pt.pi * l.one_minus_cos_angular_radius
+    return reflected(b, f, n, wo_local, -l.normal, l.emission * solid_angle)
+
+/// The environment's light at a surface, unoccluded: the SH's irradiance through the diffuse albedo, and its radiance about the mirror direction through the specular one.
+///
+/// An approximation where the tracer integrates: the diffuse half is exact for a Lambertian base, and the specular half blurs toward the irradiance as the surface roughens.
+/// Nothing shadows it but the occlusion an asset baked, which `shade` multiplies in.
+fun ambient(surface: openpbr.surface, n: float3, v: float3){drawn} -> float3:
+    let sh = background_sh()
+    let diffuse = scene.background_irradiance(sh, n) / pt.pi
+    let mirror = normalize(openpbr.reflect_about(-v, n))
+    let specular = mix(scene.background_radiance(sh, mirror), diffuse, openpbr.pt_roughness(surface))
+    return openpbr.pt_diffuse_albedo(surface) * diffuse + openpbr.pt_specular_albedo(surface) * specular
+
+/// Shades the pixel `p` covers, whose material evaluated to `surface_in` through `ctx` as `pixel_context` made it, and writes every target.
+///
+/// The surface is described as `tracer.shade_triangle` describes a hit: the flat face normal of the triangle's own corners, turned toward the viewer, and the material's authored frame.
+/// `supplied_tangent_frame` is whether that frame was authored rather than defaulted, which the generated material knows.
+/// `occlusion` is the material's baked ambient occlusion, 1 for none: it darkens the environment's light and no analytic light's.
+fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool, occlusion: float){drawn, tracer.bindless, slug.tables} -> targets:
+    let f = drawn.frame[0]
+    let cam = scene.camera(..f.camera)
+    let inst = scene.instance(..drawn.instances[p.instance as int])
+
+    let w0 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
+    let w1 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
+    let w2 = to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
+    let mut n = normalize(cross(w1 - w0, w2 - w0)) * mirroring_of(inst)
+
+    let v = normalize(cam.position - p.world)
+    // Which side the viewer is on, read off the geometry BEFORE the normal is turned to face it.
+    let exiting = dot(n, v) < 0.0
+    if exiting => n = -n
+
+    // The authored frame is in object space, so it moves with the instance the geometry does.
+    let mut authored = openpbr.frame(float3(0.0), float3(0.0), float3(0.0))
+    if supplied_tangent_frame:
+        let local = openpbr.frame_from_quaternion(surface_in.geometry_tangent_frame, surface_in.geometry_handedness)
+        authored = openpbr.frame(normalize(to_world_vector(inst, local.t)), normalize(to_world_vector(inst, local.b)), normalize(to_world_vector(inst, local.n)))
+
+    let to_point = p.world - cam.position
+    let view_depth = dot(to_point, normalize(cam.forward))
+
+    // Painted before anything reads the base, the G-buffer included.
+    let mut surface = surface_in
+    apply_decals(mut surface, p.world, n, f.pixel_spread * length(to_point))
+
+    let shading = openpbr.shading_frame(mut surface, n, v, authored, supplied_tangent_frame)
+    // Every wavelength at once: a dispersive interface has no single path here to collapse onto one.
+    let b = openpbr.bsdf_prepare(surface, exiting, 3u)
+    let wo_local = openpbr.to_local(shading, v)
+
+    let mut color = b.emission
+    // `shading_frame` leaves the viewer in front of the frame, so only a degenerate input fails this.
+    if wo_local.z > 0.0:
+        for i in 0 ..< (f.light_count as int):
+            color += direct_light(scene.light(..drawn.lights[i]), b, shading, n, wo_local, p.world)
+        color += ambient(surface, shading.n, v) * occlusion
+
+    let prev = scene.camera(..f.previous_camera)
+    let motion = float2(p.position.x, p.position.y) - scene.camera_project(prev, p.world - prev.position, f.size)
+    return {
+        color = float4(..color, 1.0)
+        normal = float4(..n, 0.0)
+        depth = view_depth
+        albedo = float4(..openpbr.pt_diffuse_albedo(surface), 0.0)
+        specular_albedo = float4(..openpbr.pt_specular_albedo(surface), 0.0)
+        roughness = openpbr.pt_roughness(surface)
+        motion = motion
+        primary_depth = max(1.0 - f.near_plane / view_depth, 0.0)
+    }
+
+/// What a pixel no surface covers holds: the environment along its camera ray, and an empty G-buffer.
+///
+/// The environment reprojects as a point at infinity, so it moves with the camera's rotation and not with its translation, as the tracer's escaped rays do.
+fun environment(pixel: float2){drawn} -> targets:
+    let f = drawn.frame[0]
+    let cam = scene.camera(..f.camera)
+    let dir = normalize(scene.camera_ray_offset(cam, pixel, f.size))
+    let prev = scene.camera(..f.previous_camera)
+    return {
+        color = float4(..scene.background_radiance(background_sh(), dir), 1.0)
+        normal = float4(0.0)
+        depth = 0.0
+        albedo = float4(0.0)
+        specular_albedo = float4(0.0)
+        roughness = 0.0
+        motion = pixel - scene.camera_project(prev, dir, f.size)
+        primary_depth = 1.0
+    }

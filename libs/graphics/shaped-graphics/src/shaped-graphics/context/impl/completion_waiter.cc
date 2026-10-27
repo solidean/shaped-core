@@ -1,8 +1,7 @@
 #include "completion_waiter.hh"
 
 #include <clean-core/common/utility.hh>
-
-#include <thread>
+#include <clean-core/thread/native_thread.hh>
 
 namespace sg::impl
 {
@@ -22,7 +21,7 @@ struct completion_waiter::state
     cc::mutex<armed_targets> armed;
 
 #if CC_HAS_THREADS
-    std::thread waiter;
+    cc::native_thread waiter;
 #else
     cc::thread_pump_registration pump;
 #endif
@@ -76,7 +75,7 @@ void completion_waiter::arm(u64 submission, u64 epoch)
     if (!start)
         return;
 #if CC_HAS_THREADS
-    s.waiter = std::thread([&s] { s.run(); });
+    s.waiter = cc::native_thread::start([&s] { s.run(); });
 #else
     s.pump = cc::register_thread_pump([&s] { return s.pump_once(); });
 #endif

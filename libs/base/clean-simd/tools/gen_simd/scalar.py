@@ -85,7 +85,7 @@ def ops(kernel: str, e: Elem, w: int) -> dict[str, Impl]:
     if e.is_float:
         # cl.exe, on x64 and ARM64, swaps the operands of the float ternary once it is inlined here, returning b on a tie of +0 and -0.
         # For cl.exe alone, a select on the bit patterns, which no compiler can reorder; clang and GCC keep the ternary.
-        # libs/base/clean-simd/docs/TODO.md has the open question.
+        # TEMPORARY(debt-cimd-msvc-float-minmax-swap)
         fb = "u32" if e.bits == 32 else "u64"
 
         def pick(cond: str) -> str:

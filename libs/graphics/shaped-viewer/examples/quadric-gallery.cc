@@ -36,6 +36,9 @@ using namespace cc::primitive_defines;
 // subject held at arm's length — which is exactly the distinction `sv::camera_style` draws.
 // One call picks it; the viewer routes the events and runs the per-frame integration a held key needs.
 //
+// The sparkle near the shapes' bases is slow to settle, and it is not a defect.
+// It is light the glossy floor reflects off the glossy shapes, which the tracer samples exactly but rarely; issue: feat-sv-glossy-clamp-option
+//
 // Controls
 //   right-drag   look           W/A/S/D   move along the view         E / Q   rise and fall
 //   shift        faster         ctrl      slower                      wheel   retune the base speed
@@ -57,7 +60,7 @@ tg::pos3f slot(int i)
 
 /// An ellipsoid with the given semi-axes: x²/a² + y²/b² + z²/c² - 1.
 ///
-/// Built by hand rather than from a factory, which is the point of showing it — the record takes any quadric, and the named
+/// Built by hand rather than from a factory, to show that the record takes any quadric and that the named
 /// constructors are conveniences over the same ten numbers.
 sv::quadric_primitive ellipsoid(tg::pos3f const& at, tg::vec3f const& semi_axes)
 {
@@ -203,7 +206,7 @@ EXAMPLE("shaped-viewer/quadric-gallery")
         // A non-uniform scale turns every sphere in it into an ellipsoid, which costs nothing because a general quadric
         // is closed under an affine map where a typed sphere would not be.
         //
-        // Tall and narrow rather than uniformly smaller, which is the whole point of showing it: a shrunk copy reads as
+        // Tall and narrow rather than uniformly smaller, because a shrunk copy reads as
         // the same shapes further away, and only a copy whose PROPORTIONS changed shows the distortion happening.
         auto instanced = scene.add_quadrics(gallery);
         instanced.transform(

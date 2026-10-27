@@ -21,6 +21,11 @@ sr::input_event motion(float dx, float dy)
     return {.payload = sr::mouse_move_event{.delta = tg::vec2f(dx, dy)}};
 }
 
+sr::input_event drag(sr::mouse_button held, float dx, float dy)
+{
+    return {.payload = sr::mouse_move_event{.delta = tg::vec2f(dx, dy), .held_buttons = sr::mouse_button_bit(held)}};
+}
+
 sr::input_event wheel(float ticks)
 {
     return {.payload = sr::mouse_wheel_event{.delta = tg::vec2f(0, ticks)}};
@@ -54,11 +59,11 @@ TEST("sv - orbit controller turns a drag into azimuth and elevation")
     CHECK(!c.handle(button(sr::mouse_button::left, true))); // the press itself moves nothing
     CHECK(c.is_dragging());
 
-    CHECK(c.handle(motion(10, 0)));
+    CHECK(c.handle(drag(sr::mouse_button::left, 10, 0)));
     CHECK(abs_of(c.orbit.azimuth.degree() - 10 * step) < eps);
 
     // Dragging down lowers the eye.
-    CHECK(c.handle(motion(0, 10)));
+    CHECK(c.handle(drag(sr::mouse_button::left, 0, 10)));
     CHECK(abs_of(c.orbit.elevation.degree() + 10 * step) < eps);
 
     (void)c.handle(button(sr::mouse_button::left, false));
@@ -73,10 +78,10 @@ TEST("sv - orbit controller keeps the eye off the pole")
 
     // camera::orbiting needs the view direction never to align with +y, so elevation must stop short of 90.
     auto const limit = c.config.max_elevation.degree();
-    (void)c.handle(motion(0, -100000));
+    (void)c.handle(drag(sr::mouse_button::left, 0, -100000));
     CHECK(abs_of(c.orbit.elevation.degree() - limit) < eps);
 
-    (void)c.handle(motion(0, 200000));
+    (void)c.handle(drag(sr::mouse_button::left, 0, 200000));
     CHECK(abs_of(c.orbit.elevation.degree() + limit) < eps);
 }
 
@@ -112,7 +117,7 @@ TEST("sv - orbit controller pans the target across the view plane")
 
     (void)c.handle(button(sr::mouse_button::middle, true));
     CHECK(c.is_dragging());
-    CHECK(c.handle(motion(10, 0)));
+    CHECK(c.handle(drag(sr::mouse_button::middle, 10, 0)));
 
     // The scene follows the cursor, so dragging right moves the target left.
     CHECK(c.orbit.target[0] < 0);
@@ -159,7 +164,7 @@ TEST("sv - orbit controller focuses on a point by gliding in, never turning")
     CHECK(!c.update(1.0));
     CHECK(c.orbit.target.distance_to(point) < eps);
     auto const approach = c.config.focus_approach;
-    CHECK(approach < 1.0); // the default moves in, which is the point of approaching
+    CHECK(approach < 1.0); // the default moves in rather than holding the distance
     CHECK(abs_of(c.orbit.distance - 3.0 * approach) < eps);
 
     // The view direction is kept, and the eye moved in along it by exactly what it gave up of the depth.
@@ -191,7 +196,7 @@ TEST("sv - orbit controller's focus yields to a pan and scales with a zoom")
     // A pan takes the target by hand, and the glide gives it up rather than dragging it back.
     CHECK(c.focus_on(c.camera().position + c.camera().basis().forward * 3.0 - c.camera().basis().up));
     (void)c.handle(button(sr::mouse_button::middle, true));
-    CHECK(c.handle(motion(10, 0)));
+    CHECK(c.handle(drag(sr::mouse_button::middle, 10, 0)));
     CHECK(!c.is_focusing());
     CHECK(!c.update(1.0));
 }
@@ -264,11 +269,11 @@ TEST("sv - fps controller turns a right-drag into yaw and pitch")
     CHECK(c.is_looking());
 
     // Moving right turns right, and yaw +90 degrees looks along +x.
-    CHECK(c.handle(motion(10, 0)));
+    CHECK(c.handle(drag(sr::mouse_button::right, 10, 0)));
     CHECK(abs_of(c.pose.yaw.degree() - 10 * step) < eps);
 
     // Moving down looks down.
-    CHECK(c.handle(motion(0, 10)));
+    CHECK(c.handle(drag(sr::mouse_button::right, 0, 10)));
     CHECK(abs_of(c.pose.pitch.degree() + 10 * step) < eps);
 
     (void)c.handle(button(sr::mouse_button::right, false));
@@ -280,6 +285,22 @@ TEST("sv - fps controller turns a right-drag into yaw and pitch")
     CHECK(c.handle(motion(10, 0)));
 }
 
+TEST("sv - a drag ends on the first motion without its button, even when the release never arrived")
+{
+    // A button let go outside an uncaptured window sends no release, and the next motion is the first sign of it.
+    auto fly = sv::fps_camera_controller{};
+    (void)fly.handle(button(sr::mouse_button::right, true));
+    CHECK(fly.handle(drag(sr::mouse_button::right, 10, 0)));
+    CHECK(!fly.handle(motion(10, 0)));
+    CHECK(!fly.is_looking());
+
+    auto orbit = sv::orbit_camera_controller{};
+    (void)orbit.handle(button(sr::mouse_button::left, true));
+    CHECK(orbit.handle(drag(sr::mouse_button::left, 10, 0)));
+    CHECK(!orbit.handle(drag(sr::mouse_button::right, 10, 0))); // another button held is not this drag's
+    CHECK(!orbit.is_dragging());
+}
+
 TEST("sv - fps controller keeps the view off the pole")
 {
     auto c = sv::fps_camera_controller{};
@@ -287,10 +308,10 @@ TEST("sv - fps controller keeps the view off the pole")
 
     // A view direction aligned with +y leaves the right axis undefined, so pitch must stop short of 90.
     auto const limit = c.config.max_pitch.degree();
-    (void)c.handle(motion(0, -100000));
+    (void)c.handle(drag(sr::mouse_button::right, 0, -100000));
     CHECK(abs_of(c.pose.pitch.degree() - limit) < eps);
 
-    (void)c.handle(motion(0, 200000));
+    (void)c.handle(drag(sr::mouse_button::right, 0, 200000));
     CHECK(abs_of(c.pose.pitch.degree() + limit) < eps);
 }
 

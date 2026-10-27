@@ -24,6 +24,10 @@ template <class A, class B>
 {
     static_assert(written_once<intersects_op, A, B>, "tg: an intersects kernel is written in both orders");
 
+    // the empty set meets nothing
+    if (impl::is_empty_set(a) || impl::is_empty_set(b))
+        return false;
+
     if constexpr (has_op<intersects_op, A, B>)
         return intersects_op<A, B>::apply(a, b);
     else if constexpr (has_op<intersects_op, B, A>)
@@ -66,6 +70,10 @@ template <class A, class B>
 [[nodiscard]] constexpr bool may_intersect(A const& a, B const& b)
 {
     static_assert(written_once<may_intersect_op, A, B>, "tg: a may_intersect kernel is written in both orders");
+
+    // culling an object whose bounds are still empty is an ordinary case, and the answer is certain
+    if (impl::is_empty_set(a) || impl::is_empty_set(b))
+        return false;
 
     if constexpr (has_op<may_intersect_op, A, B>)
         return may_intersect_op<A, B>::apply(a, b);

@@ -424,7 +424,7 @@ byte* cc::node_allocator::allocate_node_bytes_non_fast(node_class_index idx)
 
     // The head's local just emptied, which is why the fast path fell through, but any slab in the ring — including the head — may have cross-thread frees waiting in its remote bitmap.
     // Walk the whole ring from the head; on each slab with an empty local, drain remote into local with an atomic exchange, and retry.
-    // TODO: still O(ring) per exhaustion for alloc-heavy workloads — some bookkeeping could keep this cheaper.
+    // Still O(ring) per exhaustion for alloc-heavy workloads — some bookkeeping could keep this cheaper.
     auto base = start_base;
     do
     {

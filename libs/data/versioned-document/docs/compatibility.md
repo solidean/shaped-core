@@ -22,7 +22,7 @@ It is "which components do they *both* understand" — and that question has a u
 
 ---
 
-## Three kinds, and the third is the point
+## Three kinds: backward, forward and partial
 
 **Backward.** A new build opens an old document.
 Ordinary, and every format claims it.

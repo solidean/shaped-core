@@ -193,8 +193,7 @@ template <class T>
 }
 
 /// combined sine and cosine of an angle as a pair {sin(a), cos(a)}.
-///
-/// TODO: with libm we can use the combined sincos() entry point, which is cheaper than two calls.
+/// issue: perf-tg-combined-sincos
 template <class T>
 [[nodiscard]] cc::pair<T, T> sin_cos(angle<T> a)
     requires(tg::traits::has_trigonometry<T>)

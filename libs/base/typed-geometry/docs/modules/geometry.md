@@ -86,6 +86,27 @@ A `sphere`'s `{center, radius}` does not say which plane the circle lies in, so 
 Its primary template is therefore left undefined and each supported pair is a specialization: `sphere<D, D, T>` is `{center, radius}`, and `sphere<2, 3, T>` adds the plane's normal.
 A pair with no specialization is an incomplete type, which is the same "opt in per case, never a silent default" stance `object_traits` takes.
 
+### The default `aabb` is the empty box
+
+`aabb()` is the empty set, min at the scalar's highest value and max at its lowest — the infinities for a float.
+It departs from two things that hold elsewhere: an aabb's otherwise solid `min <= max`, and `mat`'s precedent of defaulting to zero.
+The reason is that it is the identity of union, so accumulating bounds needs no first-element special case and no optional.
+`tg::aabb_of` over nothing, an empty range included, is simply the empty box, and merging it changes nothing.
+
+**Every query verb answers for it once, in its dispatcher, not in the kernels.**
+It meets nothing, so `intersects` and `may_intersect` are false and a ray's `intersection_parameter_with` finds no crossing.
+Every set contains it, and it contains nothing but itself.
+`distance`, `closest_points`, `separation` and `project_to` have no answer and assert.
+Left to the kernels, the slab test would turn (+inf, -inf) into (-inf, +inf) and report a hit, and the hot pairs would compute with infinities.
+`impl::is_empty_set` is the one test, and for a type with no `is_empty()` it compiles away.
+
+The measures, the corners and sampling refuse it as well.
+A scaling or translating transform keeps it empty explicitly, since a negative scale would otherwise turn (+inf, -inf) into all of space; a rotating one asserts, having no `tg::box` to give.
+A flat box, min == max on an axis, is a box like any other and not empty, and `==` is no emptiness test, since many boxes are empty: `is_empty()` is.
+
+The price is a few comparisons at the start of every aabb query.
+That is accepted: a query that has to be as fast as possible over many boxes belongs to a bespoke layout with SIMD, not to the single-object verbs.
+
 ### Named vertex members
 
 Named vertex members (`pos0`/`pos1`/`pos2`) are used instead of the `data[]`/`operator[]` storage of the linalg types.

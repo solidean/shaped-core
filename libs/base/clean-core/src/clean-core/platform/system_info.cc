@@ -52,6 +52,8 @@ constexpr cc::string_view architecture_name()
     return "arm32";
 #elif defined(CC_ARCH_WASM32)
     return "wasm32";
+#elif defined(CC_ARCH_WASM64)
+    return "wasm64";
 #else
     return "";
 #endif

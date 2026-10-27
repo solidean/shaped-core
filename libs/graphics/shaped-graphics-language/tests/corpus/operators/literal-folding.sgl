@@ -1,0 +1,43 @@
+// an operator over number literals alone is a number literal itself, which converts where it is used (CHK-394)
+
+test (1 + 2) * 0.5 == 1.5
+test (2 - 3) * 4 == -4
+test -(1 + 2) == -3
+test 1 << 4 == 16
+test (6 & 3) | 8 == 10
+
+// a sum of integer literals takes a float parameter, as one integer literal does
+fun half(x: float) => x * 0.5
+
+test half(1 + 2) == 1.5
+
+test:
+    let x: float = 2 * 3
+    x == 6.0
+
+// an integer literal is held in 64 bits while it folds, and the type it ends up with must hold the result
+@expect(error = "literal-not-representable")
+test 2147483647 + 1 == 0
+
+test:
+    let x: uint = 2147483647 + 1
+    x == 2147483648u
+
+// which division `1 / 3` means is still the literal's to say (CHK-313)
+@expect(error = "literal-needs-type")
+test 1 / 3 == 0
+
+test 1.0 / 4 == 0.25
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+// a comparison of literals is a bool literal, so the branch on it is flattened on the side it takes (CHK-356)
+@pixel fun folded_ps(p: pixel_input) -> target:
+    let scale = 1.0 / 255
+    if 2 < 3:
+        return { color = float4(p.position.x * scale, 255 * 4 - 1, 0.0, 1.0) }
+    return { color = float4(0.0) }

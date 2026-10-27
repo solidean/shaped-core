@@ -18,7 +18,7 @@
 // Propagating one is copying a single pointer, O(1) whatever the number of consumers.
 // Only lookup is O(consumers), since it walks until the tag matches.
 //
-// That asymmetry is the point: lookup happens inside a CHECK or a profiler zone-enter, never per spawn and never per poll.
+// So the O(consumers) cost lands only on lookup, which happens inside a CHECK or a profiler zone-enter, never per spawn and never per poll.
 // Each link also carries a mask of the tags on its chain, so a miss — the common answer — costs one AND rather than a walk.
 //
 // The chain is already a stack, so a profiler gets enclosing-scope nesting for free.
@@ -93,8 +93,8 @@ namespace cc::impl
 /// Install `a` as the calling thread's ambient for a scope, restoring the previous head on the way out.
 /// A null `a` installs nothing, so a node with no context inherits whatever is driving it.
 ///
-/// Unlike async_ambient_scope this takes NO reference: the caller owns one for the duration, and the whole point is to be free on the poll hot path.
-/// Restoring from `_previous` rather than from the source is load-bearing where poll() uses it — the node the ambient came from can be destroyed before the scope ends.
+/// Unlike async_ambient_scope this takes NO reference: the caller owns one for the duration, so the scope costs nothing on the poll hot path.
+/// Restoring from `_previous` rather than from the source is required where poll() uses it — the node the ambient came from can be destroyed before the scope ends.
 ///
 /// It also carries the poll-depth counter behind cc::async_is_polling.
 /// Not because depth is an ambient concern, but because this is the one scope every poll already constructs, so tracking it costs no further TLS resolution and no new site to keep in sync.
@@ -232,6 +232,14 @@ namespace cc
 {
     return impl::async_tls().poll_depth > 0;
 }
+
+/// How many polls the calling thread is inside, nested; 0 outside any.
+/// A thread blocked on a node helps the pool, so it may poll an unrelated node inside its own: one level deeper than where it blocked.
+/// A consumer keeping per-call state in a thread_local compares depths to tell its own nested call from such a foreign one.
+[[nodiscard]] inline int async_poll_depth()
+{
+    return impl::async_tls().poll_depth;
+}
 } // namespace cc
 
 /// A chain head captured from one thread so it can be re-installed on another, retained for as long as it is held.
@@ -312,7 +320,7 @@ private:
 
 /// RAII push/pop of an ambient scope, and the ONLY supported way to install a link.
 ///
-/// That exclusivity is load-bearing rather than stylistic.
+/// That exclusivity is for soundness, not style.
 /// A node records only the chain HEAD, so an outer scope's count never sees a node created under an inner one.
 /// That is sound only because scopes are strictly LIFO, so the inner scope pops — and checks — first.
 ///

@@ -22,7 +22,7 @@ _SCRIPT = Path(__file__).resolve().parents[2] / "issues" / "issues.py"
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
-    p = sub.add_parser(NAME, help="In-repo issue tracking: new, list, show, known, claim, release, close, check")
+    p = sub.add_parser(NAME, help="In-repo issue tracking: new, list, show, known, claim, release, close, check, serve")
     tracker.add_arguments(p)
     return p
 

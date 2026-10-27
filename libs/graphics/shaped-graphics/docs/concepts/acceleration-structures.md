@@ -87,12 +87,13 @@ Ordering is inferred, never hand-synchronized.
 A build declares [`accel_write`](../../src/shaped-graphics/barrier/resource_access.hh) on the `accel_build` stage over the structure it produces, and `accel_read` over each referenced BLAS.
 A later trace declares `accel_read` on the `raytracing` stage, and the [barriers](barriers.md) system turns those into the right GPU barriers.
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 
 1. **Inputs stay within the DXR∩Vulkan common denominator** — `float3` vertices, 3×4 row-major transforms,
-   24-bit `instance_id`/`hit_group_offset`, 8-bit `mask`. Widen only behind a capability query.
+   24-bit `instance_id`/`hit_group_offset`, 8-bit `mask`.
+   Widen only behind a capability query.
 2. **A referenced BLAS is fully built before its TLAS**, and a `tlas` instance holds a `blas_handle` so the
    BLAS outlives every TLAS using it.
 3. **Scratch is transient** (single-epoch), never retained.
@@ -173,7 +174,7 @@ A `tlas` binds as a shader resource through the `acceleration_structure` binding
 The pipeline path is `raytracing_pipeline`, `raytracing_shader_table` and `cmd.raytracing.dispatch_rays`, on dx12 (WARP included), vulkan and metal.
 See [raytracing-pipeline](raytracing-pipeline.md), which also says which feature each backend reports.
 
-**Deferred** (see [TODO.md](../TODO.md)):
+**Deferred** (see [epic-sg-acceleration-structure-gaps](../issues/epic-sg-acceleration-structure-gaps.md) and [epic-sg-raytracing-pipeline-gaps](../issues/epic-sg-raytracing-pipeline-gaps.md)):
 
 - the **transient (single-epoch) variant**, and the **refit / update + compaction** runtime path;
 - the shader table's own storage abstraction — it is backed by a plain readable buffer today, and [types.hh](../../src/shaped-graphics/types.hh) rules an SBT out of `buffer_usage` deliberately;

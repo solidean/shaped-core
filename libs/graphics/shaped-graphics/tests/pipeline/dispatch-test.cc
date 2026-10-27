@@ -774,8 +774,9 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
     if (!ctx->supports(sg::feature::binding_arrays))
         SKIP("this context has no binding arrays");
 
-    // `lanes` carries the array `lanes.sources`, and a declaration of an array's access asserts where no bound group carries it.
-    // So it is how a draw shows whether the dispatch's group is still bound.
+    // `lanes` carries the buffer array `lanes.sources`, and the rects' groups carry none.
+    // A raster declaration of an element past its end asserts at the first draw whose bound groups hold it.
+    // So a draw that does not assert shows that the dispatch's group is not bound there.
     auto const gather = co_await shaders::binding_arrays::gather.acquire_pipeline(*ctx);
     auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::rects::floating);
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::binding_arrays::lanes>();
@@ -799,19 +800,22 @@ ASYNC_INVOCABLE_TEST("sg - a group bound for a dispatch is not bound at a later 
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    cmd->compute.declare_array_buffer_access("lanes.sources", reads);
+    auto const declared
+        = cmd->compute.declare_array_buffer_access(shaders::binding_arrays::lanes::arrays::sources, reads);
     cmd->compute.dispatch_threads(64);
     {
         auto scope
             = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 0))},
                                      .target_set = shaders::rects::rect_target::name});
         scope.bind_pipeline(*draw);
-        scope.declare_array_buffer_access("lanes.sources", {});
-        CHECK_ASSERTS(batch.draw(scope, 0));
+        sg::array_buffer_access const past_the_end[] = {{.index = 3, .access = sg::access_flag::shader_read}};
+        auto const declared
+            = scope.declare_array_buffer_access(shaders::binding_arrays::lanes::arrays::sources, past_the_end);
+        batch.draw(scope, 0);
     }
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));
     CHECK((co_await back.data())[0] == 1); // the dispatch before the scope ran, gathering a 1
-    // The draw that asserted used the rects' vertex buffers, whose uploads nothing else waits on.
+    // The draw used the rects' vertex buffers, whose uploads nothing else waits on.
     co_await ctx->idle_completion();
 }

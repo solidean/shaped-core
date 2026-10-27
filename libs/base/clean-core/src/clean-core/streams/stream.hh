@@ -43,7 +43,7 @@
 // CONVERSIONS only ever NARROW — drop seekable, and read_write -> read or write; read and write are leaf capabilities that never cross.
 // An adapter converts straight to its natural (most-capable) stream, or to any legal narrowing of it.
 // A stream narrows to another stream too, but only FROM AN RVALUE: converting consumes the source and leaves it invalid, so a backend never ends up with two live views.
-// That matters because the stream holds the curr/end window while flush is stateful in the adapter — a second overlay onto the same backend would desynchronize both.
+// The stream holds the curr/end window while flush is stateful in the adapter, so a second overlay onto the same backend would desynchronize both.
 // Temporarily downgrading a stream and getting the original back is a separate story, and not one this offers.
 // Narrowing away write capability ASSERTS while writes are still pending: they can only drain through the source's own write bound, so flush before narrowing.
 

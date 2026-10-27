@@ -13,6 +13,7 @@ namespace
 constexpr hw_counter s_pmu_counters[] = {
     hw_counter::instructions_retired, hw_counter::branch_instructions,  hw_counter::branch_misses,
     hw_counter::cache_l1d_misses,     hw_counter::cache_llc_references, hw_counter::cache_llc_misses,
+    hw_counter::core_cycles,          hw_counter::cache_l1d_accesses,
 };
 
 bool is_baseline(hw_counter c)

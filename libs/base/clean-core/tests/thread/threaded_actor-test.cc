@@ -3,6 +3,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/string/to_string.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/threaded_actor.hh>
 #include <nexus/test.hh>
 
@@ -541,7 +542,7 @@ TEST("threaded_actor - a hand pump and a sweep on another thread never run the s
     actor->start(unthreaded);
 
     cc::atomic<bool> stop = {false};
-    auto sweeper = std::thread(
+    auto sweeper = cc::native_thread::start(
         [&]
         {
             while (!stop.load())

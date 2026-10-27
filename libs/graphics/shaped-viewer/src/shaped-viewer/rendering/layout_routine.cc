@@ -184,6 +184,9 @@ sg::routine_outcome layout_routine::execute(sg::rendering_scope& scope,
 
     for (auto const& d : draws)
     {
+        // a draw left without a rect holds tg's empty box, whose extremes would overflow the subtraction below
+        if (d.dst_rect.is_empty())
+            continue;
         auto const w = d.dst_rect.max[0] - d.dst_rect.min[0];
         auto const h = d.dst_rect.max[1] - d.dst_rect.min[1];
         if (w <= 0 || h <= 0)

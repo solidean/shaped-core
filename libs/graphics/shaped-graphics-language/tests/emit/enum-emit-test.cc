@@ -19,7 +19,9 @@ constexpr cc::string_view k_source = "enum light_kind:\n"
                                      "    normal: vec3\n"
                                      "\n"
                                      "@pixel fun main_ps(p: pixel_input) -> frame:\n"
-                                     "    let kind = light_kind.spot\n"
+                                     "    let mut kind = light_kind.spot\n"
+                                     "    if p.normal.x > 0.5:\n"
+                                     "        kind = light_kind.point\n"
                                      "    let is_sun = kind == light_kind.sun\n"
                                      "    if is_sun => return {color = float4(1.0, 1.0, 1.0, 1.0)}\n"
                                      "    return {color = float4(0.0, 0.0, 0.0, 1.0)}\n";
@@ -56,16 +58,17 @@ TEST("sgl emit - an enum is one named int constant per case, in front of the str
 
 TEST("sgl emit - an enum value is its constant and a comparison is the target's ==")
 {
+    // `kind` changes at run time: a comparison of two constants would fold away (LEGAL-58)
     auto const hlsl = text_of(target::hlsl_dx12);
-    CHECK(hlsl.contains("const int kind = light_kind_spot;"));
+    CHECK(hlsl.contains("int kind = light_kind_spot;"));
     CHECK(hlsl.contains("const bool is_sun = kind == light_kind_sun;"));
 
     auto const wgsl = text_of(target::wgsl);
-    CHECK(wgsl.contains("let kind: i32 = light_kind_spot;"));
+    CHECK(wgsl.contains("var kind: i32 = light_kind_spot;"));
     CHECK(wgsl.contains("let is_sun: bool = kind == light_kind_sun;"));
 
     auto const msl = text_of(target::msl);
-    CHECK(msl.contains("const int kind = light_kind_spot;"));
+    CHECK(msl.contains("int kind = light_kind_spot;"));
 
     // The two HLSL targets differ in their addresses alone, never in a statement.
     CHECK(text_of(target::hlsl_vulkan).contains("const bool is_sun = kind == light_kind_sun;"));

@@ -17,7 +17,7 @@ Depend on `future.completion()` to chain off it, poll `future.is_ready()` / `fut
 The returned `pinned_data` keeps the bytes alive on its own, so it stays valid past the future's lifetime.
 A zero-size read yields an already-ready, empty future.
 
-## Why sync is automatic in both directions (the load-bearing decision)
+## Why sync is automatic in both directions
 
 The read runs **later**, asynchronously, on a queue the caller never sees.
 For the CPU timeline `submit → async download → submit` to just work with no manual barrier, the system needs sync in **both directions**.
@@ -108,7 +108,7 @@ The **destination** is held **weak** — a `weak_ptr` on the future's pin — so
   That is exactly async upload's dropped-target rule: a cancelled job still signals its value, and only the copy is skipped.
 - If the pin expires **after** the read was recorded (**drain time**), the memcpy is skipped and the staged bytes are simply not copied out.
 
-## Load-bearing invariants
+## Invariants
 
 Preserve these; the rest is tuning:
 
@@ -180,7 +180,7 @@ First choice is a second queue from a transfer-capable family, since graphics an
 Failing that, route one stream onto another queue, or fall back to a single shared queue.
 **A single shared transfer queue reintroduces the FIFO deadlock above.**
 That fallback must therefore serialize upload against download — one actor for both, say — rather than run two independent actors on it.
-The vulkan backend is still a stub, but the constraint is load-bearing for its design.
+The vulkan backend is still a stub, but its design must honor the constraint.
 
 ## vulkan implementation
 

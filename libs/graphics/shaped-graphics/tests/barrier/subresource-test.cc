@@ -3,7 +3,7 @@
 #include <shaped-graphics/resource/subresource.hh>
 
 // Pure unit tests for the subresource covering-partition, which is designed-in for textures.
-// The load-bearing property is the covering invariant: the boxes always exactly tile the whole domain.
+// The property under test is the covering invariant: the boxes always exactly tile the whole domain.
 // They split to keep it exact, and merge back when uniform.
 
 namespace

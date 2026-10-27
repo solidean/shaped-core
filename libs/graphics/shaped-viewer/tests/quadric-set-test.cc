@@ -11,7 +11,7 @@ using namespace cc::primitive_defines;
 
 // CPU-only tests for the quadric batch: what `add` accumulates, and what the content hash promises.
 //
-// The hash is the whole point of the type, so most of this is about it.
+// The type exists for its hash, so most of this is about it.
 // Equal contents must give equal hashes, or a placement uploads bytes the manager already holds; and differing contents must
 // give differing hashes, or a placement hands back the WRONG batch — which is the failure that shows up as one drawing wearing
 // another's geometry.

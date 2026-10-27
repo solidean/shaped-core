@@ -20,7 +20,7 @@ Test and example binaries get it from `nx::run`, so neither needs a line of setu
 A recording **site** is a `static constexpr cc::rec::desc` plus a write.
 The descriptor carries the kind, the level, the name, the source location, the unit and the payload layout — so the stream carries a pointer and the payload bytes, and nothing else.
 
-Being `constexpr` is load-bearing: the descriptor is constant-initialized, so a site has no guard variable, no one-time-initialization check and no first-hit cost.
+`constexpr` is what makes the descriptor constant-initialized, so a site has no guard variable, no one-time-initialization check and no first-hit cost.
 
 A **domain** says which part of the source a site belongs to.
 It is resolved by ordinary unqualified name lookup, so a site never names one:
@@ -220,7 +220,7 @@ A reader replaying the anchored thread in order reaches the sample with the trac
 The scope stack is the half that matters: a sample stops at `current_scope_frame()`, and the frames below it are exactly what that stack names.
 
 So a sample taken inside instrumented code is **short on purpose** — often a single address — and splicing supplies the rest.
-That cuts the walk and the payload by the same factor, which matters most for sampling, the one thing that can flood the stream.
+That cuts the walk and the payload by the same factor, and sampling, the one thing that can flood the stream, gains the most.
 
 The order the sampler obeys is not negotiable: take the registry lock, suspend, read the anchor and walk into a fixed buffer, resume, and only then write.
 A suspended thread may hold the allocator's lock or the pool's, so allocating or writing before the resume hangs on a lock its owner cannot release.
@@ -235,7 +235,8 @@ A high-resolution waitable timer floors near half a millisecond, and neither `ti
 For one frame's worth of ticks that is a couple of samples each, which is not a profile of anything.
 
 Two limits worth knowing.
-Only threads the recorder already knows are sampled, which a thread joins by recording anything at all — enumerating the process's OS threads instead is in the [TODO](../TODO.md).
+Only threads the recorder already knows are sampled, which a thread joins by recording anything at all.
+Enumerating the process's OS threads instead is [feat-cc-rec-sampler-os-thread-enumeration](../issues/feat-cc-rec-sampler-os-thread-enumeration.md).
 And there is no sampler at all without threads (`SC_THREADS=OFF`) or on a platform that cannot walk a foreign thread's stack; `is_sampling()` reports which you are in rather than pretending.
 
 ### Values, markers and stats
@@ -277,7 +278,7 @@ So a megabyte of mesh or framebuffer data costs the stream sixteen bytes, and a 
 
 **Opt-in per type, through `cc::rec::pinnable_traits`.**
 Pinning is a promise about lifetime and immutability that only a type's author can make, so nothing is pinnable by accident.
-`cc::pinned_data<T>` is pinnable out of the box, which is the whole point of that type.
+`cc::pinned_data<T>` is pinnable out of the box, since that type exists to make the promise.
 
 **The bytes must not change while any recording holding them is alive.**
 Nothing copies them, so a mutation after the fact rewrites history instead of being recorded as a second value.
@@ -297,7 +298,7 @@ Its value must be fixed-size — a scalar, an enum, a pointer or a literal — b
 
 The two stat kinds are not interchangeable, and picking the wrong one produces a plausible graph of the wrong thing.
 A snapshot is the current reading of something that exists whether or not you look; summing snapshots is meaningless.
-An accumulate is a delta, and summing is the whole point.
+An accumulate is a delta, and summing gives the total.
 
 Values are `f64` only, which also covers every integer up to 2^53.
 That is a deliberate cap: one numeric type means a listener graphs anything without a type switch.
@@ -323,7 +324,7 @@ CC_RECORD_RELATION(cc::rec::relation_same_key_as, a, b, c);   // n-ary
 CC_RECORD_RELATION_MANY(type, discovered_members);            // a runtime member list
 ```
 
-**Naming the trace is the point.**
+**A trace gets a name, not only an id.**
 A bare id is an opaque number, and a viewer showing `0x0800000000000003` helps nobody, so a scope names the trace and mints its id.
 
 **A relation type is a static object, not an enum**, for the same reason a `cc::rec::unit` is: an enum of relation kinds is always missing the case the next consumer needs.
@@ -557,7 +558,8 @@ Everything ordered is ordered by **timestamp**, not by block, so a query means t
 A scope whose close is missing comes back with `is_open` set rather than being dropped — a truncated stream is the normal case here, not an error.
 
 Queries are linear scans.
-An index would be a hash from descriptor to offsets built on first use; nothing has needed one yet, and it is recorded in [TODO](../TODO.md) rather than built.
+An index would be a hash from descriptor to offsets built on first use.
+Nothing has needed one yet, and it is recorded as [perf-cc-rec-query-index](../issues/perf-cc-rec-query-index.md) rather than built.
 
 ### The assertion pattern
 
@@ -659,7 +661,7 @@ A stack on every error is affordable; a stack on every warning is not.
 
 A capture can also stop early, at `cc::rec::current_scope_frame()`.
 Everything below the frame that opened the innermost profiling scope is what the scope stack already names, so walking it again spends time and payload on a fact the stream carries.
-That matters most for sampling, where it shortens the stacks rather than just the walk.
+Sampling gains the most, since there it shortens the stacks rather than just the walk.
 The scope guard stores that frame next to the depth it already touches, so the early-out costs one store per scope.
 
 Emscripten has no walkable native stack and returns an empty capture; `cc::stack_capture_available()` says which you are in.
@@ -680,7 +682,7 @@ An unresolved frame keeps its address rather than acquiring a confident wrong na
 ### Changing what the sampler does, while it does it
 
 The whole `sampling_config` is re-read once per tick, so `cc::rec::reconfigure_sampling` takes effect within one interval and nothing needs the sampler stopped.
-That matters beyond convenience: a stop-and-restart loses every sample in the gap, which is exactly the stretch somebody turning a knob is looking at.
+A stop-and-restart would lose every sample in the gap, which is exactly the stretch somebody turning a knob is looking at.
 
 ```cpp
 cc::rec::reconfigure_sampling({.rate_hz = 2000.0});                  // a slider in a profiler window
@@ -755,7 +757,7 @@ The size it saved does not pay for that.
 `stop_at_scope` leaves an instrumented stack at one or two frames, where an id is no smaller than the frames it replaces, so only a deep uninstrumented stack ever benefited.
 
 If sampled bytes do become the constraint, the shape to reach for is a stream-level dictionary that retention understands — not a sampler-local table.
-That is the open TODO entry; there is no reader-side indirection to keep working around until then.
+That is [feat-cc-rec-stack-dictionary](../issues/feat-cc-rec-stack-dictionary.md); there is no reader-side indirection to keep working around until then.
 
 **`cc::rec::hot_functions`** ([hot_functions.hh](../../src/clean-core/record/hot_functions.hh)) is the reduction that makes all of this usable without a viewer.
 It symbolizes every captured stack and folds them by function, into self time and inclusive time.

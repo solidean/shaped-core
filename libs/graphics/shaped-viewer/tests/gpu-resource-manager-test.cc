@@ -9,6 +9,7 @@
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
 #include <shaped-rendering/box_filter_mipmap_routine.hh>
+#include <shaped-rendering/compression/bc_compress_routine.hh>
 #include <shaped-viewer/all.hh>
 #include <shaped-viewer/resources/impl/mip_layout.hh>
 #include <typed-geometry/geometry/query/distance.hh>
@@ -228,6 +229,10 @@ ASYNC_INVOCABLE_TEST("sv - a texture acquire is content-addressed and pins its e
     CHECK(record->state == sv::residency::base_resident);
     CHECK(record->texture.raw() != nullptr);
 
+    // The base level alone was read whole, so its summary bounds every texel an emission may sample.
+    REQUIRE(record->summary.has_value());
+    CHECK(record->summary.value().exact);
+
     // The budget is charged for the chain that was allocated rather than the one level that was uploaded:
     // a record's byte size is fixed at insert, so nothing could correct it once the rest of the mips land.
     auto chain_bytes = isize(0);
@@ -288,6 +293,10 @@ ASYNC_INVOCABLE_TEST("sv - a texture given every mip is complete", (sg::context_
     // Nothing is left for a follow-up to do, which is what `complete` means — the policy asked for mips and got them.
     CHECK(record->state == sv::residency::complete);
     CHECK(record->uploaded_mips == record->total_mips);
+
+    // The summary read the 1x1 level, whose range need not bound the base's, so it may never prove an emission dark.
+    REQUIRE(record->summary.has_value());
+    CHECK(!record->summary.value().exact);
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();
@@ -357,8 +366,9 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
-    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
-    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     (void)co_await ctx.routines.idle_completion();
 
     auto cmd = ctx.create_command_list();
@@ -397,8 +407,9 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // WORKAROUND, same one as sr's mipmap tests: record_pending_work runs sr::box_filter_mipmap_routine, which
     // declines until its variant is built, and a tick drives only what is already registered.
     // So the shape is named here rather than discovered.
-    // Goes away once a routine's readiness is an async; see libs/graphics/shaped-graphics/docs/TODO.md, "Readiness as an async".
-    sr::box_filter_mipmap_routine::prewarm(ctx, sr::mipmap_variant::tex_2d);
+    // Goes away once a routine's readiness is an async; issue: feat-sg-routine-readiness-async.
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
     (void)co_await ctx.routines.idle_completion();
 
     // A coroutine lambda, awaited on the spot, so what it captures by reference outlives every suspend.
@@ -431,6 +442,80 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     co_await ctx.idle_completion();
 }
 
+ASYNC_INVOCABLE_TEST("sv - a completed RGBA8 texture is replaced by its BC7 encoding, at a quarter of the budget",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto const& env = sv_test::shared_env();
+    if (!env.has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the mipmap and BC7 shaders");
+    if (!sr::bc_compress_routine::can_compress(ctx, sg::pixel_format::rgba8_unorm, sg::pixel_format::bc7_rgba_unorm))
+        SKIP("this device has no BC textures");
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    // 128x128 is above the policy's smallest extent, and arrives with its base level alone.
+    auto const id = m.acquire_texture(
+        sv::texture_data::create(make_pixels(128, 128, 9, false), sg::pixel_format::rgba8_unorm, 128, 128));
+    m.wait_for_pending_uploads();
+    auto const uncompressed_bytes = m.textures.used_bytes();
+    auto const uploaded = std::weak_ptr<sg::raw_texture const>(m.textures.get_ptr(id)->texture.raw());
+    REQUIRE(m.textures.get_ptr(id)->summary.has_value());
+    CHECK(m.textures.get_ptr(id)->summary.value().exact);
+    (void)element_of(m, id); // sampled before the swap, as a frame drawing it meanwhile does
+
+    // WORKAROUND, the one the mip tests above carry: a tick drives only routines that are already registered.
+    sr::box_filter_mipmap_routine::prewarm(
+        ctx, {.shape = sr::mipmap_variant::tex_2d, .format = sg::pixel_format::rgba8_unorm});
+    sr::bc_compress_routine::prewarm(ctx, sg::pixel_format::bc7_rgba_unorm);
+    (void)co_await ctx.routines.idle_completion();
+
+    // The mips first, and the encode once the chain they complete is there: two requests, one after the other.
+    for (auto round = 0; round < 4 && m.pending_work_count() > 0; ++round)
+    {
+        auto cmd = ctx.create_command_list();
+        (void)m.record_pending_work(*cmd);
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        m.advance_to(ctx.current_epoch());
+    }
+    CHECK(m.pending_work_count() == 0);
+
+    auto const* const record = m.textures.get_ptr(id);
+    REQUIRE(record != nullptr);
+    CHECK(record->compressed);
+    CHECK(record->state == sv::residency::complete);
+    CHECK(record->texture.format() == sg::pixel_format::bc7_rgba_unorm);
+
+    // The summary is of the pixels before their lossy encoding, so it still estimates the mean and bounds nothing.
+    REQUIRE(record->summary.has_value());
+    CHECK(!record->summary.value().exact);
+    CHECK(record->texture.mip_levels() == sv::impl::mip_count_of(128, 128));
+
+    // The budget was charged for the full RGBA8 chain at insert; BC7 is a quarter of it, but for the levels below
+    // a block, which still cost a whole one.
+    auto const compressed_bytes = m.textures.used_bytes();
+    CHECK(compressed_bytes < uncompressed_bytes / 3).dump("before", uncompressed_bytes).dump("after", compressed_bytes);
+
+    // The texture it replaced is gone once its bindless element has sat idle long enough to be released, a few
+    // epochs, or the swap would cost memory rather than save it.
+    for (auto round = 0; round < 6; ++round)
+    {
+        // An acquire in each epoch, as a frame resolving a material makes.
+        (void)element_of(m, id);
+        ctx.advance_epoch();
+        co_await ctx.idle_completion();
+        m.advance_to(ctx.current_epoch());
+    }
+    CHECK(uploaded.expired()).dump("holders", uploaded.use_count());
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
 ASYNC_INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
@@ -454,9 +539,9 @@ ASYNC_INVOCABLE_TEST("sv - a texture policy that wants no mips queues nothing", 
 
 namespace
 {
-[[nodiscard]] sv::mesh_attribute scalar_attribute(cc::string name, sv::attribute_frequency f, f32 a, f32 b, f32 c)
+[[nodiscard]] sv::mesh_attribute scalar_attribute(cc::string_view name, sv::attribute_frequency f, f32 a, f32 b, f32 c)
 {
-    return sv::mesh_attribute::create(cc::move(name), f, cc::vector<f32>{a, b, c});
+    return sv::mesh_attribute::create(cc::string(name), f, cc::vector<f32>{a, b, c});
 }
 
 /// The u32 at `offset` of a parameter block, which is how every non-constant slot is read back.
@@ -682,7 +767,7 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
     REQUIRE(asset.has_value());
     REQUIRE(asset.value().meshes.size() == 1);
 
-    // The whole point of the CPU/GPU split: what the loader produced needs no adaptation to become a resource.
+    // With the CPU/GPU split, what the loader produced needs no adaptation to become a resource.
     auto const mesh = m.create_mesh(asset.value().meshes[0]);
     CHECK(mesh.geometry != sv::mesh_id::invalid);
     CHECK(mesh.triangle_count == 2);
@@ -763,6 +848,10 @@ ASYNC_INVOCABLE_TEST("sv - a mesh that has not streamed in yet is traced as a pl
     CHECK(m.meshes.get(a.geometry).state == sv::residency::complete);
     CHECK(m.meshes.get(b.geometry).state == sv::residency::complete);
     CHECK(m.settling_count() == 0);
+
+    // Landed is drawable, and the BLAS still waits for the first trace that asks for it.
+    CHECK(m.meshes.get(a.geometry).blas == nullptr);
+    CHECK(sv_test::blas_of(m, a.geometry) != nullptr);
     CHECK(m.meshes.get(a.geometry).blas != nullptr);
 
     // Once resident, the record names its own geometry again.
@@ -861,8 +950,8 @@ ASYNC_INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seede
         = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
     CHECK(while_pending != element_of(m, texture));
 
-    // Once it lands the same block names the real thing, with no permutation change in between — which is the point
-    // of substituting at the slot rather than letting the sample lose to a coarser rank.
+    // Once it lands the same block names the real thing, with no permutation change in between, because the
+    // pending texture is substituted at the slot rather than letting the sample lose to a coarser rank.
     m.wait_for_pending_uploads();
     CHECK(m.textures.get(texture).state != sv::residency::pending);
     auto const once_resident
@@ -960,6 +1049,104 @@ ASYNC_INVOCABLE_TEST("sv::mesh - an evicted payload is re-acquired rather than n
     m.wait_for_pending_uploads();
     CHECK(m.create_mesh(mesh).geometry == again.geometry);
     CHECK(mesh.is_ready());
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
+ASYNC_INVOCABLE_TEST("sv::mesh - placing a mesh again reuses its resolved item until what it resolves from changes",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+
+    auto const first = m.acquire_scene_item(mesh);
+    REQUIRE(mesh.cache.item.has_value());
+    CHECK(first.instance != sv::instance_id::invalid);
+
+    // The same mesh placed again is the same item, without resolving its material afresh.
+    // Every id is content-addressed and would match after a resolve too, so a planted key is what tells the two apart.
+    auto const planted = cc::hash128{.low = 1, .high = 2};
+    mesh.cache.item.value().shader_key = planted;
+    auto const again = m.acquire_scene_item(mesh);
+    CHECK(again.instance == first.instance);
+    CHECK(again.shader_key == planted);
+    mesh.cache.item.value().shader_key = first.shader_key;
+
+    // A transform is the placement's, read fresh every time, so moving the mesh never needs a resolve.
+    mesh.transform = tg::affine_transform3f::make_translation(tg::vec3f(1, 2, 3));
+    auto const moved = m.acquire_scene_item(mesh);
+    CHECK(moved.instance == first.instance);
+    CHECK(tg::pos3f(0, 0, 0).transformed(moved.transform).distance_to(tg::pos3f(1, 2, 3)) < 1e-5f);
+
+    // A value the material resolves from changes the item: the per-instance base color lands in its parameters.
+    mesh.attributes.push_back(sv::mesh_attribute::create_value("base_color", tg::vec3f(1, 0, 0)));
+    auto const recolored = m.acquire_scene_item(mesh);
+    CHECK(recolored.instance != first.instance);
+
+    // So does another material.
+    auto const lib = sv::acquire_material_library().value();
+    auto const type = lib->acquire_type(sv::builtin_material::openpbr).value();
+    auto bindings = cc::vector<sv::material_attribute_binding>();
+    bindings.push_back(sv::material_attribute_binding::of("specular_roughness", 0.75f));
+    mesh.material = lib->acquire(sv::material::create("rough", type, bindings));
+    auto const rematerialized = m.acquire_scene_item(mesh);
+    CHECK(rematerialized.instance != recolored.instance);
+    CHECK(mesh.cache.item_material == mesh.material);
+
+    // And an evicted payload mints the slot anew, which resolves against the new ids rather than the cached item.
+    m.wait_for_pending_uploads();
+    REQUIRE(m.meshes.evict(mesh.cache.resources.geometry));
+    auto const reminted = m.acquire_scene_item(mesh);
+    CHECK(reminted.mesh != rematerialized.mesh);
+    CHECK(m.meshes.contains(reminted.mesh));
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
+// An instance record names its attributes by id, and an evicted attribute comes back under a new one.
+// So the instance has to be keyed on the ids it names, not on the bytes behind them, or it would read a dead id.
+ASYNC_INVOCABLE_TEST("sv::mesh - an evicted attribute a material reads resolves to an instance naming its new id",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto mesh = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    mesh.attributes.push_back(sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle,
+                                                         cc::vector<tg::vec3f>{tg::vec3f(1, 0, 0)}));
+
+    // Every attribute descriptor slot of the item's record, and whether each names a resident attribute.
+    auto const names_live_attributes = [&](sv::scene_item const& item)
+    {
+        auto found = false;
+        for (auto const& slot : m.get_instance(item.instance).slots)
+            if (slot.kind == sv::material_slot_kind::attribute_descriptor)
+            {
+                found = true;
+                if (!m.attributes.contains(slot.attribute))
+                    return false;
+            }
+        return found;
+    };
+
+    auto const first = m.acquire_scene_item(mesh);
+    REQUIRE(names_live_attributes(first));
+
+    m.wait_for_pending_uploads();
+    REQUIRE(m.attributes.evict(mesh.cache.resources.attributes[0].attribute));
+    auto const again = m.acquire_scene_item(mesh);
+    CHECK(again.instance != first.instance);
+    CHECK(names_live_attributes(again));
 
     ctx.advance_epoch();
     co_await ctx.idle_completion();

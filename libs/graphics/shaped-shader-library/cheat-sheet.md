@@ -111,7 +111,10 @@ lib.read_modules();                         // -> module_library { paths, texts,
                                             //    directory by directory as added, each sorted by name; files() views the two vectors
 // an SGL package adds its own module dirs; every SGL compile, compile_source and compile_hit_group included, sees all of them.
 // a module file a compile reached is a dependency like an include: editing it reloads the shader.
-lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts)
+lib.start_hot_reload(cfg = {});             // AFTER every add_package (adding later asserts); does nothing in a frozen build
+// Frozen builds (SC_FROZEN_SHADERS): no source dir mounted, no reload — docs/frozen-shaders.md.
+// SC_SHADER_RECORD=<file> makes a run write a bundle of every shader it obtains; sc_embed_shader_bundle(TARGET exe) embeds
+// <build>/shader-bundles/<exe>.slibbundle, and a request it holds compiles nothing. slib::register_shader_bundle(bytes) is what that calls.
 lib.poll_hot_reload();                      // no-op unless started unthreaded; safe every frame
 lib.is_hot_reloading();                     // -> bool
 lib.generation();                           // -> u64; coarse "some shader changed" (prefer the asset's). Reads the global below
@@ -350,6 +353,10 @@ auto const g = ctx.transient.create_binding_group(cmd, layout, shaders::frame_bi
                                     //   acquiring hashes the table and takes the pipeline cache's lock
                                     // a sampler the group gathers that `layout` declares static is dropped
 scope.bind<shaders::frame_bindings>(*g);   // binds at G::group_index, on raster / compute / raytracing
+auto const d = cmd.compute.declare_array_texture_access(shaders::frame_bindings::arrays::Textures, elements);
+                                    // G::arrays::<member> -> sg::texture_array_binding / sg::buffer_array_binding, one per
+                                    //   binding array (count > 1), so a misspelled array is a COMPILE error
+                                    //   a group with no binding array has no `arrays`; a member named `arrays` is refused
 ```
 
 ### an SGL package's generated types
@@ -375,6 +382,8 @@ cmd.compute.bind_group(0, *group);        // group 0 of `main`, group 1 of an en
 //   `dst: out image_2d[.rgba8_unorm]`   -> sg::image_view_2d<sg::pixel_format::rgba8_unorm> dst   (any access: read, out, mut)
 //   `user_smp: sampler`                -> sg::sampler user_smp, which gather() hands sg by its host name (`work.user_smp`)
 //   `sampler albedo_smp:` block        -> NO field: an sg::named_sampler in declared_samplers(), which the layout carries
+//   `images: texture_2d[float4][8]`     -> also shaders::compute::work::arrays::images, an sg::texture_array_binding of host name `work.images`
+//                                          what cmd.*.declare_array_texture_access takes (a buffer/bytes array: sg::buffer_array_binding)
 // `@inline binding constants` -> shaders::compute::constants: the block byte for byte, and to_block() its own bytes:
 pass.set_inline_constants(shaders::compute::constants{.view_projection = vp}.to_block());
 // a struct a binding places in GPU memory -> shaders::compute::particle: tg members at SGL's offsets, padding as `cc::u32 _padN = {}`,

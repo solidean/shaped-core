@@ -26,7 +26,7 @@
 ///
 /// `slot_of` is the one name lookup, done once.
 /// The name-taking setters are the whole-binding ones only — those are the one-shot wiring calls.
-/// Per-element and per-range work runs off a resolved `binding_slot`, which is the point of having one.
+/// Per-element and per-range work runs off a resolved `binding_slot`, so it never repeats the lookup.
 ///
 /// **Not thread-safe** — one owner mutates it, and `snapshot()` counts as a mutation because it caches.
 ///

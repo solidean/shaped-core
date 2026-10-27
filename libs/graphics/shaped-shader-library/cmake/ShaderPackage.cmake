@@ -284,6 +284,41 @@ function(sc_add_shader_package)
     set_property(GLOBAL APPEND PROPERTY SC_SHADER_PACKAGE_GEN_DIRS "${PKG_TARGET}|${PKG_NAME}|${_gen_dir}")
 endfunction()
 
+set(SC_SHADER_BUNDLE_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/embed_shader_bundle.py"
+    CACHE INTERNAL "Generator script backing sc_embed_shader_bundle")
+
+# sc_embed_shader_bundle(TARGET <executable>)
+#
+# Under SC_FROZEN_SHADERS, embeds <build>/shader-bundles/<executable>.slibbundle into the executable, so the shaders a
+# recording run of it compiled are served without compiling them; elsewhere it does nothing.
+# A missing bundle embeds an empty one, so the build never depends on a recording having run.
+# libs/graphics/shaped-shader-library/docs/frozen-shaders.md is the flow that writes the file.
+function(sc_embed_shader_bundle)
+    cmake_parse_arguments(PARSE_ARGV 0 BUNDLE "" "TARGET" "")
+    if(NOT BUNDLE_TARGET)
+        message(FATAL_ERROR "sc_embed_shader_bundle: TARGET is required")
+    endif()
+    if(NOT SC_FROZEN_SHADERS)
+        return()
+    endif()
+
+    set(_bundle "${CMAKE_BINARY_DIR}/shader-bundles/${BUNDLE_TARGET}.slibbundle")
+    # Created empty when absent, since a DEPENDS on a file nothing makes is a build error.
+    if(NOT EXISTS "${_bundle}")
+        file(WRITE "${_bundle}" "")
+    endif()
+
+    set(_gen "${CMAKE_CURRENT_BINARY_DIR}/shader-bundles/${BUNDLE_TARGET}_bundle.cc")
+    add_custom_command(
+        OUTPUT "${_gen}"
+        COMMAND uv run "${SC_SHADER_BUNDLE_SCRIPT}" --bundle "${_bundle}" --out "${_gen}"
+        DEPENDS "${_bundle}" "${SC_SHADER_BUNDLE_SCRIPT}"
+        COMMENT "[slib] shader bundle (${BUNDLE_TARGET})"
+        VERBATIM
+    )
+    target_sources(${BUNDLE_TARGET} PRIVATE "${_gen}")
+endfunction()
+
 # Fails configure with an actionable message if a package was declared but slib is missing, and hands each
 # package's generated header to the sibling <target>-test where there is one.
 # Call once, at the bottom of the root CMakeLists.

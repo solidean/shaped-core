@@ -17,12 +17,13 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from ..core import console, profile, ui
+from ..core import console, crash_reports, profile, ui
 from ..core.logs import parse_junit, step_fields, write_sidecar, write_step_junit
 from ..core.models import Preset, Target
 from ..core.process import emsdk_env, run_step
 from ..toolchain import jsruntime as jsr
 from ..project import targets as targets_mod
+from .eligibility import nexus_filter
 
 # nexus prints this when a name filter matches no tests in a binary.
 # With a filter active that is "nothing to run here", not a failure.
@@ -224,7 +225,7 @@ def test(
                 # selects tests — and ahead of the name, so a test named like one of its commands still means the test.
                 cmd = [*launcher, str(target.artifact), "--tests"]
                 if test_name:
-                    cmd.append(test_name)
+                    cmd.append(nexus_filter(test_name))
                 # Forward verbosity to the runner: nexus' -v prints "- start <test>" before each test, so a crash or hang pinpoints the last one that started.
                 # A harmless positional for other runners.
                 if verbose:
@@ -248,6 +249,9 @@ def test(
                 # Per-binary and per-preset env layer onto the inherited environment, so PATH and the MSVC vars the child needs are never dropped.
                 run_env = preset_base_env
                 layered = {**preset_env, **(extra_env_for(name) if extra_env_for else {})}
+                # A native nexus binary keeps every crash or hang report in files too, which collect() files below.
+                if not preset.is_cross_compiling:
+                    layered.setdefault("NX_CRASH_DIR", str(crash_reports.incoming_dir(preset.build_dir)))
                 if layered:
                     run_env = {**os.environ, **(preset_base_env or {}), **layered}
 
@@ -267,11 +271,21 @@ def test(
                 if profile.enabled():
                     _harvest_test_timings(timings_path, binary=name, preset=preset.name)
 
+                kept = crash_reports.collect(preset.build_dir, target.artifact, result.stdout_log, result.stderr_log)
+                if kept is not None:
+                    ui.write_line(console.yellow(f"  crash report kept: {kept}"))
+
                 # With a name filter, "no matching tests in this binary" isn't a failure.
                 if test_name and not result.ok and _selected_no_tests(result.stderr_log):
                     if verbose:
                         ui.write_line(console.dim(f"  {name}: no tests match {test_name!r}, skipping"))
                     continue
+
+                # a failure that left no crash report keeps its logs too: the next run overwrites them
+                if not result.ok and kept is None:
+                    failed = crash_reports.keep_failure(preset.build_dir, target.artifact,
+                                                        [result.stdout_log, result.stderr_log, xml_path if write_xml else None])
+                    ui.write_line(console.yellow(f"  failed run's logs kept: {failed}"))
 
                 summary = None
                 if write_xml:

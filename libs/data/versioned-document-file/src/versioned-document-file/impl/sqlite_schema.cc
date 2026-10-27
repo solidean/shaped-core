@@ -52,7 +52,7 @@ cc::vector<known_table> known_tables()
                       .columns = {"op_hash", "required", "encoding", "decoded_size", "stored_size", "chunk_count"}});
 
     // Cascading off `snapshots` rather than living in `blobs` is deliberate.
-    // Blob lifetime is decided by a mark-and-sweep over the asset index, and a required snapshot is load-bearing data
+    // Blob lifetime is decided by a mark-and-sweep over the asset index, and a required snapshot is data
     // whose loss is unrecoverable — so a marking bug would become a data-loss bug.
     // Here the lifetime is structural: these bytes die when their snapshot row dies, and nothing else can reach them.
     tables.push_back({.name = "snapshot_chunk",

@@ -22,7 +22,7 @@ using namespace cc::primitive_defines;
 // What is checked is what each helper promises: the random stream is PCG's to the bit, a sampled direction is
 // unit and lies where its sampler says, a ray aimed at a rect lands at the distance it was aimed from, and the
 // environment is the SH sum it is written as.
-// `tests/shaders/pt_support_probe.sgl` writes eight float4s per item, in the order the checks below read them.
+// `tests/shaders/pt_support_probe.sgl` writes `results_per_item` float4s per item, in the order the checks below read them.
 //
 // The lights travel as `sv::shaders::tracer::light_record` itself, so this is also where `scene.light`'s layout meets the C++ struct.
 
@@ -141,8 +141,8 @@ cc::vector<tg::vec4f> make_sh()
 ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises", (sg::context_handle const& ctx_h))
 {
 #if defined(CC_ARCH_ARM64) && defined(_WIN32)
-    SKIP("known broken on Windows on ARM — the inline readback path fastfails; see "
-         "libs/graphics/shaped-viewer/docs/TODO.md");
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)

@@ -18,7 +18,7 @@ It is **not** a summary of the diff.
 ## What goes in it
 
 - **What this change does**, in three or four sentences, in the reviewer's own words rather than the PR body's.
-  Writing it in your own words is the point: a reviewer who cannot state the change plainly has not understood it yet, and that is worth finding out here.
+  Your own words test your understanding: a reviewer who cannot state the change plainly has not understood it yet, and that is worth finding out here.
 - **What it claims.** The PR body's own promises, named so the review can check them.
   This is where "the page has not been exercised by a human" belongs — a claim the author made that the review should test.
 - **The concepts.** Two or three ideas a reader needs before the findings make sense, each in a sentence.

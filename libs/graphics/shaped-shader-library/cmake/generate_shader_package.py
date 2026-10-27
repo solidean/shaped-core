@@ -43,7 +43,7 @@ import sgl_host_code  # noqa: E402
 from sgl_host_code import identifier_of  # noqa: E402
 
 # How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
-# initializer has to follow the declaration order, so the order here is load-bearing.
+# initializer has to follow the declaration order, so the order here is fixed.
 SAMPLER_FIELDS: tuple[tuple[str, str], ...] = (
     ("min_filter", "sg::sampler_filter::{}"),
     ("mag_filter", "sg::sampler_filter::{}"),
@@ -94,6 +94,7 @@ CONSTANTS_STAGE = "constants"
 # Splitting on byte offsets rather than lines is safe, and deliberately so.
 # `)slibsrc"` may not appear in the source at all, so no boundary can grow one.
 # Nothing requires a chunk to be a whole line either -- concatenation restores the exact byte sequence.
+# A chunk must hold whole characters, though: the generated file is written as UTF-8, and half a character is not one.
 EMBED_CHUNK_BYTES = 8000
 
 
@@ -482,8 +483,16 @@ def embed_literal(text: str) -> str:
         # An empty shader file still has to yield a literal rather than nothing.
         return ' R"slibsrc()slibsrc"'
 
-    chunks = [raw[i:i + EMBED_CHUNK_BYTES] for i in range(0, len(raw), EMBED_CHUNK_BYTES)]
-    return "".join(f'\n    R"slibsrc({chunk.decode("utf-8", "surrogateescape")})slibsrc"' for chunk in chunks)
+    chunks = []
+    start = 0
+    while start < len(raw):
+        end = min(start + EMBED_CHUNK_BYTES, len(raw))
+        # Back to the start of the character the cut lands in: a continuation byte is 0b10xxxxxx.
+        while end < len(raw) and (raw[end] & 0xC0) == 0x80:
+            end -= 1
+        chunks.append(raw[start:end])
+        start = end
+    return "".join(f'\n    R"slibsrc({chunk.decode("utf-8")})slibsrc"' for chunk in chunks)
 
 
 def storage_of(member: StructMember) -> str:
@@ -770,6 +779,8 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
             out.append(f"    sg::bound_view {binding.name};\n")
 
     out.append("\n")
+    out.append(emit_array_bindings(f"'{entry.path}' namespace {group.name}",
+                                   [(b.name, b.name, b.type, b.count) for b in group.bindings], GeneratorError))
     out.append("    /// The group index the attribute gave, so no call site writes the number.\n")
     out.append(f"    static constexpr int group_index = {group.group};\n")
     out.append("\n")
@@ -794,6 +805,30 @@ def emit_binding_group(manifest: Manifest, entry: BindingEntry) -> str:
     out.append("// So a protocol mismatch names this group rather than a scope template's constraint.\n")
     out.append(f"static_assert(sg::declared_binding_group<{group.name}>);\n")
     out.append(f"}} // namespace {manifest.namespace}\n")
+    return "".join(out)
+
+
+ARRAY_FAMILIES = {"buffer": "buffer", "bytes": "buffer", "texture": "texture", "image": "texture"}
+
+
+def emit_array_bindings(where: str, bindings: list[tuple[str, str, str, int]], error: type[Exception]) -> str:
+    """A group's `arrays` struct: one sg handle per binding array, which `declare_array_*_access` takes.
+
+    Each of `bindings` is (member, reflection name, sg::binding_type enumerator, count).
+    A misspelled member is then a compile error, where a reflection name string is a lookup at run time.
+    A group without a binding array gets no struct, so no member can collide with a name it never emits.
+    """
+    arrays = [(member, name, ARRAY_FAMILIES[kind]) for member, name, kind, count in bindings
+              if count > 1 and kind in ARRAY_FAMILIES]
+    if not arrays:
+        return ""
+    if any(member == "arrays" for member, _, _, _ in bindings):
+        raise error(f"{where} has a member named 'arrays', which its generated handles take as their struct's name")
+    out = ["    /// Its binding arrays, as `declare_array_buffer_access` / `declare_array_texture_access` name them.\n"]
+    out.append("    struct arrays\n    {\n")
+    for member, name, family in arrays:
+        out.append(f'        static constexpr sg::{family}_array_binding {member} = {{.name = "{name}"}};\n')
+    out.append("    };\n\n")
     return "".join(out)
 
 

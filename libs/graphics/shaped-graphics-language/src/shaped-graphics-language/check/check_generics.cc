@@ -53,7 +53,7 @@ void checker::collect_type_parameters(type_id type, cc::vector<type_id>& into) c
     auto const& t = out.at(type);
     if (t.kind == type_kind::type_parameter)
     {
-        if (!cc::sequence{into}.any([&](type_id p) { return p == type; }))
+        if (!into.values().any([&](type_id p) { return p == type; }))
             into.push_back(type);
         return;
     }
@@ -244,7 +244,7 @@ void checker::instantiate_generics()
     {
         auto bindings = cc::move(pending.back());
         pending.remove_back();
-        if (cc::sequence{done}.any([&](cc::vector<type_id> const& d) { return ast::impl::is_equal(d, bindings); }))
+        if (done.values().any([&](cc::vector<type_id> const& d) { return ast::impl::is_equal(d, bindings); }))
             continue;
         // every open type of the module, as these arguments make it
         auto const count = out.types.size();

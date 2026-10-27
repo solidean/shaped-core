@@ -86,6 +86,26 @@ TEST("sgl driver bindings - what the driver leaves out is zero, and a buffer it 
              "0 elements\n");
 }
 
+TEST("sgl driver bindings - a mat4 a driver binds is its 16 floats column by column, as mat4(c0, c1, c2, c3) is")
+{
+    auto const bindings = sgl::check::driver_bindings{
+        .groups = {{
+            .name = "m",
+            .members = {{.name = "general", .bytes = floats(1, 0, 2, 1, 2, 1, 0, 1, 0, 4, 1, 0, 3, 1, 0, 2)}},
+        }}};
+    auto const source
+        = cc::string("binding m:\n"
+                     "    general: mat4\n"
+                     "test {m}:\n    (m.general * float4(0.0, 1.0, 0.0, 0.0)) == float4(2.0, 1.0, 0.0, 1.0)\n"
+                     "test {m}:\n"
+                     "    let a = float4(1.0, 0.0, 2.0, 1.0)\n"
+                     "    let b = float4(2.0, 1.0, 0.0, 1.0)\n"
+                     "    let c = float4(0.0, 4.0, 1.0, 0.0)\n"
+                     "    let d = float4(3.0, 1.0, 0.0, 2.0)\n"
+                     "    determinant(m.general) == determinant(mat4(a, b, c, d))\n");
+    CHECK(driven_failures_of(source, bindings) == "");
+}
+
 TEST("sgl driver bindings - a member the binding lacks, or bytes of no whole value, are the driver's mistake")
 {
     auto source = cc::string(k_inputs);

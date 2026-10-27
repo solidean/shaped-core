@@ -10,6 +10,8 @@ enum class scl::source_language : scl::u8
     cpp,
     python,
     markdown,
+    rust, // prose only: its comments are read, its code is not
+    lean, // prose only, likewise
 };
 
 namespace scl
@@ -23,7 +25,8 @@ source_language language_from_path(cc::string_view path);
 /// A short human-readable name, for test diagnostics.
 cc::string_view source_language_name(source_language l);
 
-/// A set of languages, packed into the bits of a `u8`. `rule::languages` is one of these.
+/// A set of languages, packed into the bits of a `u8`.
+/// `rule::languages` is one of these.
 constexpr u8 language_bit(source_language l)
 {
     return u8(1u << u32(l));
@@ -31,5 +34,6 @@ constexpr u8 language_bit(source_language l)
 
 constexpr u8 k_cpp_only = language_bit(source_language::cpp);
 constexpr u8 k_all_languages = language_bit(source_language::cpp) | language_bit(source_language::python)
-                             | language_bit(source_language::markdown);
+                             | language_bit(source_language::markdown) | language_bit(source_language::rust)
+                             | language_bit(source_language::lean);
 } // namespace scl

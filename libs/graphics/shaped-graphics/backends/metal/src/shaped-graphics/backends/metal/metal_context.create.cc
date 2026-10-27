@@ -15,7 +15,7 @@ namespace
 {
 /// Whether the OS is new enough for the Metal 4 API at all.
 ///
-/// Checked before any MTL4 selector is touched, and that order is the point: this backend is compiled against the
+/// Checked before any MTL4 selector is touched, because this backend is compiled against the
 /// macOS 26 SDK, so on an older OS the selectors simply do not exist and calling one is a crash rather than a
 /// diagnosable failure.
 [[nodiscard]] bool os_supports_metal4()

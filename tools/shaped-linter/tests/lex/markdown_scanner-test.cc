@@ -107,6 +107,14 @@ TEST("shaped-linter - markdown - frontmatter only where it is unambiguous")
     {
         CHECK(shape_of("intro\n\n---\n\nbody\n") == "tbtbtb");
     }
+    SECTION("TOML frontmatter is fenced by +++")
+    {
+        CHECK(shape_of("+++\ntitle = \"x\"\n+++\nbody\n") == "yyytb");
+    }
+    SECTION("the closer repeats the opener")
+    {
+        CHECK(shape_of("+++\ntitle = \"x\"\n---\nbody\n") == "ttttb");
+    }
     SECTION("a --- inside a fenced block stays code")
     {
         CHECK(shape_of("```\n---\n```\n") == "fcfb");

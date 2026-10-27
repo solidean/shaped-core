@@ -147,8 +147,7 @@ TEST("sr::imgui_context - text arrives as decoded UTF-8 codepoints", main_thread
 {
     // Text must come from text_event, not rebuilt from key_events: an IME commits a whole phrase and a paste arrives as one event.
     //
-    // The multi-byte character is the point.
-    // It proves two things a plain "abc" would not:
+    // The multi-byte character proves two things a plain "abc" would not:
     // that imgui decoded UTF-8 rather than taking one character per byte,
     // and that a cc::string — which is not null-terminated — survived the handover to imgui's C-string API with the right length.
     auto imgui = sr::imgui_context::create();
@@ -167,7 +166,7 @@ TEST("sr::imgui_context - text arrives as decoded UTF-8 codepoints", main_thread
 
 TEST("sr::imgui_context - the scroll wheel reaches imgui on the same frame", main_thread, exclusive("sr-imgui-context"))
 {
-    // The frame it lands on is the point, not merely that it arrives.
+    // This checks the frame it lands on, not merely that it arrives.
     // imgui's ConfigInputTrickleEventQueue splits a cursor-position change and a wheel across two frames,
     // so restating the wheel's own cursor_pos — which imgui already knows from the motion events — would delay every scroll by a frame.
     auto imgui = sr::imgui_context::create();
@@ -273,7 +272,7 @@ TEST("sr::imgui_context - viewports are off unless asked for, and then move imgu
      exclusive("sr-imgui-context"),
      exclusive("sr-window-system"))
 {
-    // The whole point of the opt-in: enabling viewports changes what an imgui coordinate means, so a caller that did not ask for them must see exactly the single-viewport behaviour pinned above.
+    // Viewports are opt-in because enabling them changes what an imgui coordinate means, so a caller that did not ask for them must see exactly the single-viewport behaviour pinned above.
     auto const wsys = sr::window_system::create({.headless = true});
     auto const win = wsys->create_window({.width = 320, .height = 240});
 

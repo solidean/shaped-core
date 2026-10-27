@@ -41,6 +41,10 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
         },
         [&](sr::mouse_move_event const& m)
         {
+            // A release this window never saw still ends the drag, since every motion says what is held.
+            _orbiting = _orbiting && m.is_held(sr::mouse_button::left);
+            _panning = _panning && m.is_held(sr::mouse_button::middle);
+
             // Motion with no button held is just the cursor passing over the view.
             if (!_orbiting && !_panning)
                 return false;
@@ -96,7 +100,7 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
             return true;
         },
         [](sr::key_event const&) { return false; }, // keys and text belong to the fps controller, or to the caller
-        [](sr::text_event const&) { return false; });
+        [](sr::text_event const&) { return false; }, [](sr::file_drop_event const&) { return false; });
 }
 
 bool orbit_camera_controller::focus_on(tg::pos3d point)
@@ -233,8 +237,13 @@ bool fps_camera_controller::handle(sr::input_event const& e)
         },
         [&](sr::mouse_move_event const& m)
         {
-            if (config.look_requires_button && !_looking)
-                return false;
+            if (config.look_requires_button)
+            {
+                // A release this window never saw still ends the look, since every motion says what is held.
+                _looking = _looking && m.is_held(sr::mouse_button::right);
+                if (!_looking)
+                    return false;
+            }
             if (m.delta[0] == 0.0f && m.delta[1] == 0.0f)
                 return false;
 
@@ -258,7 +267,8 @@ bool fps_camera_controller::handle(sr::input_event const& e)
                 = cc::clamp(scaled, config.min_move_units_per_second, config.max_move_units_per_second);
             return false; // retuning the speed moves nothing until the next update
         },
-        [](sr::text_event const&) { return false; }); // text belongs to the caller
+        [](sr::text_event const&) { return false; }, // text and drops belong to the caller
+        [](sr::file_drop_event const&) { return false; });
 }
 
 bool fps_camera_controller::update(f64 dt)

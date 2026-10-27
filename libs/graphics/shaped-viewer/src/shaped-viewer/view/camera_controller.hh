@@ -157,7 +157,7 @@ struct sv::fps_state
     [[nodiscard]] sv::camera to_camera() const;
 
     /// The pose of `cam`, exactly — a position and a view direction are all an fps_state holds, so nothing is lost.
-    /// Any roll in `cam.orientation` is dropped, which is the point of going through yaw / pitch at all.
+    /// Any roll in `cam.orientation` is dropped, which is what going through yaw / pitch is for.
     [[nodiscard]] static fps_state from_camera(camera const& cam);
 };
 

@@ -25,6 +25,8 @@
 template <int D, class T>
 struct tg::plane
 {
+    using scalar_t = T;
+
     static_assert(D > 0, "plane requires a positive dimension");
 
     vec<D, T> normal;

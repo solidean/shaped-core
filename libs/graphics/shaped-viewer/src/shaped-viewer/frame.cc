@@ -133,6 +133,13 @@ void frame::register_capture(cc::string_view name, cc::function_ref<void(capture
         _viewer->apply_capture(name, body, *this);
 }
 
+void frame::hold_capture(cc::string_view reason)
+{
+    CC_ASSERT(_open, "cannot author a closed frame");
+    if (_viewer != nullptr)
+        _viewer->hold_capture(reason);
+}
+
 isize frame::pending_resource_work() const
 {
     return _viewer == nullptr ? 0 : _viewer->pending_resource_work();
@@ -141,6 +148,28 @@ isize frame::pending_resource_work() const
 isize frame::streaming_resources() const
 {
     return _viewer == nullptr ? 0 : _viewer->streaming_resources();
+}
+
+cc::span<sr::input_event const> frame::input_events() const
+{
+    return _viewer == nullptr ? cc::span<sr::input_event const>() : _viewer->input_events();
+}
+
+bool frame::imgui()
+{
+    if (_viewer == nullptr || !_open || _presented)
+        return false;
+    return _viewer->open_imgui();
+}
+
+bool frame::imgui_wants_keyboard() const
+{
+    return _viewer != nullptr && _viewer->imgui_wants_keyboard();
+}
+
+bool frame::imgui_wants_mouse() const
+{
+    return _viewer != nullptr && _viewer->imgui_wants_mouse();
 }
 
 cc::shared_async<cc::unit> frame::background_work()

@@ -1,0 +1,26 @@
+// The raster path's fixed stages: the vertex stage every material's draw shares, and the environment behind the surfaces.
+//
+// The pixel stage of a surface is generated per material permutation and compiled at run time, so it has no entry here.
+// The file joins module `raster` (shaders/sgl), which holds what those generated stages share with it.
+// sv::raster_routine builds the pipelines, and libs/graphics/shaped-viewer/docs/raster.md is the design.
+use raster
+use tracer
+
+/// One corner of one triangle of the draw's instance: three vertices per triangle, and no vertex buffer.
+@vertex fun surface_vs(@vertex_index vertex: int){raster.drawn, tracer.bindless, raster.draw} -> raster.varyings:
+    return raster.corner_of(vertex)
+
+/// What the environment pass hands its pixel stage: the position alone, whose pixel is the camera ray.
+struct environment_varyings:
+    @position position: hpos4
+
+/// Vertices 0, 1 and 2 land at (0,0), (2,0) and (0,2): one triangle covering the target, on the far plane.
+/// The raster depth is reversed, so the far plane is depth 0.
+@vertex fun environment_vs(@vertex_index vertex: int) -> environment_varyings:
+    let t = float2(((vertex << 1) & 2) as float, (vertex & 2) as float)
+    let clip = t * float2(2.0, -2.0) + float2(-1.0, 1.0)
+    return { position = hpos4(clip.x, clip.y, 0.0, 1.0) }
+
+/// The environment where no surface was drawn, which the depth test against the far plane decides.
+@pixel fun environment_ps(p: environment_varyings){raster.drawn} -> raster.targets:
+    return raster.environment(float2(p.position.x, p.position.y))

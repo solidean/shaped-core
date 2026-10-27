@@ -364,7 +364,7 @@ TEST("sqlite - an abandoned transaction leaves the database byte-identical")
     auto const before = db.serialize();
     REQUIRE(!before.empty());
 
-    // The early return is the point: nothing here says "roll back", and the write still does not land.
+    // The lambda leaves by an early return: nothing here says "roll back", and the write still does not land.
     auto const abandoned = [&]
     {
         auto tx_r = db.begin_transaction();

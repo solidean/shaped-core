@@ -71,11 +71,14 @@ A control row going stale is printed as a note, since it means the trigger has m
 
 ## What we do about it
 
-dev.py launches every wasm artifact under deno with `--no-code-cache`, in `JsRuntime.launch_prefix` in [tools/dev/lib/toolchain/jsruntime.py](../../../tools/dev/lib/toolchain/jsruntime.py).
+**Gone in Deno 2.9.7**: `run.py` reports every case clean there (checked 2026-10-17), and 2.9.7 is what `tools/deno.version` pins.
+
+dev.py launches every wasm artifact under a deno below 2.9.7, or of unknown version, with `--no-code-cache`.
+That is `JsRuntime.launch_prefix` in [tools/dev/lib/toolchain/jsruntime.py](../../../tools/dev/lib/toolchain/jsruntime.py).
 Tests, `dev.py example`, `dev.py run`, benchmarks and the listing probe all take their argv prefix from there.
 The cost is an uncached compile per launch, about 0.2 s for the rotating-cube loader.
 
 ## When to re-check
 
 Run `run.py` after a Deno bump.
-Once it reports the bug gone, drop `--no-code-cache` from `launch_prefix`.
+Once no supported deno is below 2.9.7, drop the workaround from `launch_prefix`.

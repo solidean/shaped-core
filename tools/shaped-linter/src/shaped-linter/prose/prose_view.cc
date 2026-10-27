@@ -1,9 +1,8 @@
 #include "prose_view.hh"
 
 #include <clean-core/common/utility.hh>
-#include <shaped-linter/lex/lexer.hh>
+#include <shaped-linter/lex/comment_lexer.hh>
 #include <shaped-linter/lex/markdown_scanner.hh>
-#include <shaped-linter/lex/python_lexer.hh>
 #include <shaped-linter/lex/source_buffer.hh>
 
 namespace scl
@@ -51,15 +50,15 @@ void push_line(cc::vector<prose_block>& blocks, prose_kind kind, bool continues,
     });
 }
 
-/// Strip a line comment's marker: `//`, `///`, `//!` in C++, `#` in Python.
-/// The marker is punctuation, not
-/// prose, so a rule reading column positions never sees it.
+/// Strip a line comment's marker: `//`, `///`, `//!` in C++ and Rust, `#` in Python, `--` in Lean.
+/// The marker is punctuation, not prose, so a rule reading column positions never sees it.
 source_span strip_line_marker(source_span span, cc::string_view text, source_language language)
 {
     isize skip = 0;
-    if (language == source_language::python)
+    if (language == source_language::python || language == source_language::lean)
     {
-        while (skip < text.size() && text[skip] == '#')
+        auto const marker = language == source_language::python ? '#' : '-';
+        while (skip < text.size() && text[skip] == marker)
             ++skip;
     }
     else if (text.size() >= 2 && text[0] == '/' && text[1] == '/')
@@ -184,11 +183,20 @@ prose_view extract_from_tokens(source_buffer const& buffer, source_language lang
             }
             else
             {
-                if (skip + 1 < stop && raw[skip] == '/' && raw[skip + 1] == '*')
+                // `/* … */` everywhere but Lean, whose `/- … -/` opens as `/--` or `/-!` for its doc forms.
+                auto const inner = language == source_language::lean ? '-' : '*';
+                if (skip + 1 < stop && raw[skip] == '/' && raw[skip + 1] == inner)
+                {
                     skip += 2;
-                else if (skip < stop && raw[skip] == '*' && (skip + 1 >= stop || raw[skip + 1] != '/'))
+                    if (language == source_language::lean)
+                        while (skip < stop && (raw[skip] == '-' || raw[skip] == '!'))
+                            ++skip;
+                }
+                else if (inner == '*' && skip < stop && raw[skip] == '*' && (skip + 1 >= stop || raw[skip + 1] != '/'))
+                {
                     skip += 1; // the decorative leader of a continuation line
-                if (stop >= skip + 2 && raw[stop - 2] == '*' && raw[stop - 1] == '/')
+                }
+                if (stop >= skip + 2 && raw[stop - 2] == inner && raw[stop - 1] == '/')
                     stop -= 2;
             }
 
@@ -262,15 +270,10 @@ prose_stats measure_file_prose(cc::string_view text, cc::string_view path)
     auto const language = language_from_path(path);
     auto const buffer = source_buffer::from_text(cc::string(text), path, 0);
 
-    token_stream tokens; // markdown has no lexer and needs none
-    if (language != source_language::markdown)
-    {
-        auto lexed = language == source_language::python ? lex_python(buffer) : lex(buffer);
-        if (lexed.has_error())
-            return {};
-        tokens = cc::move(lexed.value());
-    }
+    auto tokens = lex_for(buffer, language); // markdown has no lexer and needs none
+    if (tokens.has_error())
+        return {};
 
-    return measure_prose(extract_prose(buffer, language, tokens));
+    return measure_prose(extract_prose(buffer, language, tokens.value()));
 }
 } // namespace scl

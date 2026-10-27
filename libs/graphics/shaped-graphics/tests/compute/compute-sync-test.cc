@@ -93,10 +93,12 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     // sg asks the dispatch which elements of a bound array it touches, since the index is the shader's to pick.
+    // The declaration is in force while it lives, and the submit ends it.
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    cmd->compute.declare_array_buffer_access("lanes.sources", reads);
+    auto const declared
+        = cmd->compute.declare_array_buffer_access(shaders::binding_arrays::lanes::arrays::sources, reads);
     cmd->compute.dispatch_threads(count);
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));
@@ -187,7 +189,7 @@ ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    cmd->compute.declare_array_buffer_access("blocks.tables", reads);
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::bytes::blocks::arrays::tables, reads);
     cmd->compute.dispatch_threads(count);
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));

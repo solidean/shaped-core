@@ -322,8 +322,8 @@ CNET_IO_TEST("cnet - a self-signed certificate is refused by the machine's own r
     auto fixture = tls_fixture();
     CHECK(fixture.ready());
 
-    // The default trust is this machine's, and nothing this test made is in it -- which is the whole point of a
-    // store nobody can add to from a config file.
+    // The default trust is this machine's, and nothing this test made is in it, since nobody can add to that
+    // store from a config file.
     auto server_side = tls_accept(fixture.accepted->value(), {.identity = identity});
     auto client_side = tls_connect(fixture.connected->value(), "localhost");
 

@@ -12,6 +12,7 @@
 #include <shaped-shader-library/filesystem/embedded_filesystem.hh>
 #include <shaped-shader-library/filesystem/impl/path.hh>
 #include <shaped-shader-library/filesystem/real_filesystem.hh>
+#include <shaped-shader-library/impl/shader_bundle.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <shaped-shader-library/shader_library.hh>
 
@@ -256,6 +257,10 @@ void slib::shader_library::start_hot_reload(reload_config config)
 {
     CC_ASSERT(_watcher == nullptr, "hot reload is already running");
 
+    // A frozen build mounts no source directory, so there is nothing a watcher could see change.
+    if (SLIB_FROZEN_SHADERS)
+        return;
+
     // start() forces unthreaded where the platform has no threads, so decide it here rather than let the
     // watcher believe it has a thread and sleep on whoever pumps it.
     bool const threaded = CC_HAS_THREADS && !config.unthreaded;
@@ -394,7 +399,7 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
     else
     {
         _mounts.mount(package.name, std::make_shared<embedded_filesystem>(package.embedded_files));
-        if (!package.source_dir.empty())
+        if (!SLIB_FROZEN_SHADERS && !package.source_dir.empty())
             _mounts.mount(package.name,
                           std::make_shared<real_filesystem>(cc::string::create_copy_of(package.source_dir)));
     }
@@ -411,7 +416,7 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
                 continue;
             auto virtual_dir = impl::join_path(package.name, dir.path);
             CC_ASSERT(virtual_dir.has_value(), "a module directory must not escape its package");
-            if (fs == nullptr && !dir.path.empty() && !dir.source_dir.empty())
+            if (!SLIB_FROZEN_SHADERS && fs == nullptr && !dir.path.empty() && !dir.source_dir.empty())
                 _mounts.mount(virtual_dir.value(),
                               std::make_shared<real_filesystem>(cc::string::create_copy_of(dir.source_dir)));
             _module_dirs.push_back(cc::move(virtual_dir.value()));
@@ -521,6 +526,26 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          sg::shader_format format,
                                          cc::span<shader_option const> options) const
 {
+    // What an SGL source's `use` reaches, read as it is now: the modules are files like an include is.
+    auto const modules = language == shader_language::sgl ? read_modules() : module_library();
+    auto const module_files = modules.files();
+
+    // An SGL source's key covers everything its compile reads, so a bundled one skips the front end too.
+    // Other text is keyed once flattened, below, since what its includes say is only known then.
+    auto key = cc::optional<cc::hash128>();
+    if (language == shader_language::sgl)
+    {
+        key = impl::bundle_key(language, format, stage, entry_point, options, file_namespace, source, module_files);
+        if (auto bundled = impl::find_bundled_shader(key.value()); bundled.has_value())
+        {
+            // The front end that says which modules a source uses never ran, so the hit depends on all of them, as its key does.
+            for (auto i = isize(0); i < modules.paths.size(); ++i)
+                outcome.dependencies.push_back({.path = modules.paths[i], .revision = modules.revisions[i]});
+            outcome.shader = cc::make_async_from_value(cc::move(bundled.value()));
+            return;
+        }
+    }
+
     auto const compiler = find_shared_compiler(language, format);
     if (compiler == nullptr)
     {
@@ -567,9 +592,6 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         return text;
     };
 
-    // What an SGL source's `use` reaches, read as it is now: the modules are files like an include is.
-    auto const modules = language == shader_language::sgl ? read_modules() : module_library();
-    auto const module_files = modules.files();
     shader_source_description desc = {.source = cc::move(source),
                                       .entry_point = cc::string::create_copy_of(entry_point),
                                       .stage = stage,
@@ -651,8 +673,24 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
         }
         desc.source = cc::move(rewritten.value());
     }
+
+    if (!key.has_value())
+    {
+        key = impl::bundle_key(language, format, stage, desc.entry_point, options, file_namespace, desc.source, {});
+        if (auto bundled = impl::find_bundled_shader(key.value()); bundled.has_value())
+        {
+            outcome.shader = cc::make_async_from_value(cc::move(bundled.value()));
+            return;
+        }
+    }
+#if SLIB_FROZEN_SHADERS
+    CC_LOG_INFO("'{}' ({}) is not in this binary's shader bundle, so it compiles now", label, entry_point);
+#endif
+
     outcome.shader = compiler->compile(desc);
     if (pending.has_value())
         outcome.shader = with_interface(cc::move(outcome.shader), cc::move(pending.value()));
+    if (impl::is_recording_shaders())
+        outcome.shader = impl::recorded_shader(key.value(), cc::move(outcome.shader));
     _backlog.track(outcome.shader);
 }

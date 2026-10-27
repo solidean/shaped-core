@@ -85,6 +85,8 @@ private:
 template <class T>
 struct tg::hit_interval
 {
+    using scalar_t = T;
+
     T start = {};
     T end = {};
 

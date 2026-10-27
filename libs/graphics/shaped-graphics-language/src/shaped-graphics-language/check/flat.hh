@@ -215,6 +215,8 @@ struct sgl::check::flat_int_literal
 {
     i32 value = 0;
     bool is_unsigned = false;
+    /// Written in hex, which the targets keep where the value is no negative int: a bit pattern reads as one only there.
+    bool is_hex = false;
 
     constexpr bool operator==(flat_int_literal const&) const = default;
 };

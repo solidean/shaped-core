@@ -329,6 +329,9 @@ struct sgl::check::member_info
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.
     bool has_interpolate = false;
+    /// Carries `@per_draw`: a stage link the vertex stage writes the same in every invocation of a draw, which crosses
+    /// flat and which the pixel stage reads as uniform (CHK-393).
+    bool is_per_draw = false;
     /// On a `@pixel struct`, whether the member is a color target or another output; `color` everywhere else.
     pixel_output output = pixel_output::color;
     /// `@edge_factors` or `@inside_factors`: a tessellation factor of a factors struct (CHK-305); `none` everywhere else.
@@ -465,6 +468,8 @@ struct sgl::check::constant_info
     i32 integer = 0;
     /// An `integer` of type `uint`, written with its suffix: `const mask = 0xff00u`.
     bool is_unsigned = false;
+    /// An `integer` written in hex, which the targets keep.
+    bool is_hex = false;
     f64 real = 0;
     /// A position in the `cases` of `type`, for an `enum_case`.
     i32 case_index = -1;
@@ -707,6 +712,8 @@ enum class sgl::check::target_kind : sgl::u8
     /// On a call: the prelude's `undefined()`, a value of the type the parameter it meets has, which nobody reads
     /// (CHK-341).
     undefined_value,
+    /// On a cast: `x as texel[F]` to a texel of another width than `x`'s (CHK-391).
+    texel_conversion,
 };
 
 /// What an expression refers to, for an editor: go to definition, hover, rename.

@@ -5,7 +5,7 @@ test ray(origin = pos3(0.0, 0.0, 0.0), direction = vec3(0.0, 0.0, 1.0)).t_min ==
 
 // a free call, whose first argument is of a prelude type, so the type's declaring scope is searched too
 @expect(error = "unknown-name")
-test apply_rows(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0), float3(1.0, 2.0, 3.0), 1.0).x == 1.0
+test apply_point(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0), float3(1.0, 2.0, 3.0)).x == 1.0
 
 // a call through the first argument's type, written as a method call
 @expect(error = "unknown-member")

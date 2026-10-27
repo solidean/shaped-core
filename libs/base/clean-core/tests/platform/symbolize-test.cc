@@ -141,10 +141,9 @@ TEST("symbolize - this test's own name is in its own stack", nx::config::recorde
     //
     // It paid off: a Windows x64 failure under `dev.py check`'s parallel load left a recording showing every frame
     // walked and resolved, and only frame 0 — this helper's own — naming a function from another translation unit.
-    // That is `cc::symbolizer` taking no lock around DbgHelp, which is documented single-threaded, while the sibling
-    // symbolize tests resolve concurrently.
-    // So a red run here is most likely that race rather than a stack-walking regression; clean-core's ../../docs/TODO.md
-    // carries the evidence and the fix.
+    // That was `cc::symbolizer` taking no lock around DbgHelp, which is documented single-threaded, while the sibling
+    // symbolize tests resolved concurrently.
+    // symbolize.cc now serializes every DbgHelp call, so a red run here is no longer explained by that race.
     CC_RECORD("frames_walked", count);
     CC_RECORD("helper_address", reinterpret_cast<void const*>(&capture_here_for_symbolize_test));
 

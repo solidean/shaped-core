@@ -592,7 +592,7 @@ struct sort_step_result
 /// and so does the partial-insertion probe.
 /// That is precisely what makes the two reported subranges safe to hand to two threads.
 ///
-/// CC_FORCE_INLINE is load-bearing rather than a hint.
+/// CC_FORCE_INLINE is required, not a hint.
 /// Left to itself the compiler emits this out of line, and sort_loop then pays a real call per iteration where
 /// it used to be one fused loop — which measured.
 template <sort_fallback Fallback, class RangeT, class CompareF, class ShouldSortF>

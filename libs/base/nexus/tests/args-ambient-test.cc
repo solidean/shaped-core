@@ -5,8 +5,8 @@
 
 // The ambient accessors.
 //
-// These run inside a nexus binary, so the captured argv is whatever `dev.py test` invoked — which is
-// exactly the point of the last test here, and the reason none of the others assert on a specific value.
+// These run inside a nexus binary, so the captured argv is whatever `dev.py test` invoked.
+// The last test here pins that, and none of the others assert on a specific value.
 
 using namespace cc::primitive_defines;
 

@@ -195,7 +195,8 @@ TEST("sgl emit - an unrolled index's arithmetic shifted in HLSL is written as an
                                        "        m |= (i + 1) << n\n"
                                        "    io.target[id.x] = m\n";
     auto const hlsl = text_of(source, target::hlsl_dx12);
-    CHECK(hlsl.contains("m = m | (int((0 + 1)) << n);\n")).dump("hlsl", hlsl);
-    CHECK(hlsl.contains("m = m | (int((2 + 1)) << n);\n")).dump("hlsl", hlsl);
-    CHECK(!hlsl.contains("((0 + 1) << n)")).dump("hlsl", hlsl);
+    // the copy's `i + 1` is a constant, which F1 folds to the literal it is (LEGAL-58)
+    CHECK(hlsl.contains("m = m | (int(1) << n);\n")).dump("hlsl", hlsl);
+    CHECK(hlsl.contains("m = m | (int(3) << n);\n")).dump("hlsl", hlsl);
+    CHECK(!hlsl.contains("(1 << n)")).dump("hlsl", hlsl);
 }

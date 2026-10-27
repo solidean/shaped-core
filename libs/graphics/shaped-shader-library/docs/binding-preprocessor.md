@@ -50,7 +50,7 @@ That is the whole argument for this pass.
 ## What the spikes already settled
 
 `libs/graphics/shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc` is DXC behaviour pinned as tests.
-Five of its findings are load-bearing here and are worth re-reading before changing anything:
+Five of its findings constrain this design and are worth re-reading before changing anything:
 
 - **Q8** — without an explicit `register()`, a stage that references a subset of the declarations gets different DXIL registers than one that references more.
   This is why the pass exists.
@@ -186,7 +186,7 @@ Q8 applies here too, which is why the attribute must write a `register()` at all
 **The two reflections disagree on a block that does not fill its last 16-byte row.**
 DXIL rounds a constant buffer up to a whole row, while a SPIR-V push-constant block ends at its last member, so `{11 floats}` is 48 bytes on dx12 and 44 on vulkan.
 The mirror rounds as DXIL does, so pushing it into that block trips sg's size check on vulkan alone.
-Until the pass pads such a block itself, its struct must end on a row, as `nn_output.hlsl`'s trailing `_pad0` does.
+Until the pass pads such a block itself, its struct must end on a row, as `nrd_repack.hlsl`'s trailing `_pad` does.
 The generator also emits the block's C++ mirror, from the struct the `ConstantBuffer` names, so `sizeof` is true rather than asserted.
 That struct must be declared in the same file, which is what a mirror needs and what every block in the tree already does.
 

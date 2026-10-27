@@ -647,7 +647,7 @@ TEST("sgl describe - a ray-tracing pipeline's sizes count an enum as a word, as 
     CHECK(p.max_payload_size == 12);
     CHECK(p.max_attribute_size == 12);
     // the intersection's needs are the pipeline's, though no record names it
-    CHECK(cc::sequence{p.features}.any([](cc::string const& f) { return f == "extended_image_formats"; }));
+    CHECK(p.features.values().any([](cc::string const& f) { return f == "extended_image_formats"; }));
 }
 
 TEST("sgl describe - a pipeline with the host's hit groups takes the attribute cap")
@@ -724,13 +724,13 @@ hit_group lit for rs:
     // reached from the closest hit alone, at the index its declaration gives it
     REQUIRE(p.samplers.size() == 1);
     CHECK(p.samplers[0] == "clamped");
-    CHECK(cc::sequence{p.frozen}.any([](cc::string const& line) { return line.starts_with("samplers = clamped#1@"); }));
+    CHECK(p.frozen.values().any([](cc::string const& line) { return line.starts_with("samplers = clamped#1@"); }));
     // what a host's callable must take, by name and shape
     REQUIRE(d.callables.size() == 1);
     CHECK(p.host_callable_parameter == "operand");
     CHECK(p.host_callable_shape == d.callables[0].parameter_shape);
     auto const callables = cc::format("callables = doubled, .host operand@{}", p.host_callable_shape);
-    CHECK(cc::sequence{p.frozen}.any([&](cc::string const& line) { return line == callables; }));
+    CHECK(p.frozen.values().any([&](cc::string const& line) { return line == callables; }));
 }
 
 namespace

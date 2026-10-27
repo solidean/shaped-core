@@ -30,7 +30,7 @@
 /// The destination is the caller's own memory, so there is always somewhere for the bytes to land.
 ///
 /// Dropping the *future* is the other direction and does still cancel, since nothing can observe the result then.
-/// See libs/graphics/shaped-graphics/docs/TODO.md for how far that cancellation could be pushed.
+/// How far that cancellation could be pushed is issue: perf-sg-download-cancel-per-window.
 struct sg::backend::vulkan::vulkan_async_download_job
 {
     std::shared_ptr<vulkan_buffer const> buffer_source;
@@ -70,7 +70,7 @@ struct sg::backend::vulkan::vulkan_async_download_job
     ///
     /// `family` is the ordering constraint the scheduler enforces: two readbacks of one source must run in `sequence`
     /// order, because their completion values were reserved in that order and a timeline only moves forwards.
-    /// Across families the order is free, which is the whole point — a large readback no longer holds up a small one
+    /// Across families the order is free, so a large readback no longer holds up a small one
     /// behind it.
     u64 family = 0;
     u64 sequence = 0;
