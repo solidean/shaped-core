@@ -81,7 +81,8 @@ expiry state, independent of how it was allocated:
 
 A **transient** buffer is auto-expired when its epoch advances (its bump storage is about to be reused).
 A **persistent** buffer can be expired **explicitly** to free memory early without hunting down every
-`shared_ptr`. Using an expired buffer in a transfer or a binding is a hard error (asserted). A transient
+`shared_ptr`.
+Using an expired buffer in a transfer or a binding is a hard error (asserted). A transient
 `binding_group` has the analogous rule — binding one past its epoch asserts, since the ring may have
 recycled its descriptor slots.
 

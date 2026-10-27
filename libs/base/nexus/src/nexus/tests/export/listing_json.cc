@@ -101,6 +101,14 @@ cc::string nx::write_test_listing_json(cc::string_view suite_name,
 
                 t.write("filter_matches", config.filter_matches(decl));
                 t.write("eligible", eligible);
+
+                // What `dev.py check` reads to run a thorough test on the changes it declared itself about.
+                t.write("thorough_only", tc.thorough_only);
+                {
+                    auto globs = t.write_array("rerun_on", json::layout::compact);
+                    for (int i = 0; i < tc.rerun_on_count && i < config::max_rerun_on_globs; ++i)
+                        globs.write(cc::string_view(tc.rerun_on_globs[i]));
+                }
             }
         }
 

@@ -5,6 +5,7 @@
 #include <clean-core/string/string.hh>
 #include <clean-core/thread/async.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/impl/rec_session.hh>
 #include <nexus/test.hh>
@@ -13,7 +14,6 @@
 #include <nexus/tests/schedule.hh>
 #include <nexus/tests/thread_scope.hh>
 
-#include <thread>
 
 // The log rule, judged on nested runs: each inner test's verdict is data here rather than a failure of this binary.
 // Every inner run is judged inside its own execute_tests, so none of what it logs reaches the outer run's verdict.
@@ -259,8 +259,8 @@ TEST("log rule - a thread attributed to the test reports to it", no_scheduler)
         []
         {
             nx::expect_warning("log rule probe: from a worker");
-            auto worker
-                = std::thread(nx::attributed_to_current_test([] { CC_LOG_WARNING("log rule probe: from a worker"); }));
+            auto worker = cc::native_thread::start(
+                nx::attributed_to_current_test([] { CC_LOG_WARNING("log rule probe: from a worker"); }));
             worker.join();
             CHECK(true);
         });
@@ -415,9 +415,9 @@ TEST("log rule - NX_ALLOW_LOGS reaches a record logged under no test", no_schedu
     if (CC_HAS_THREADS == 0)
         SKIP("needs a second thread");
 
-    // A bare std::thread carries no test context, so what it logs has no owner — the shape a driver callback takes
+    // A bare cc::native_thread carries no test context, so what it logs has no owner — the shape a driver callback takes
     // when it fires on a thread the runtime owns, after the test that provoked it has ended.
-    auto worker = std::thread([] { CC_LOG_WARNING("log rule probe: allowed outside any test"); });
+    auto worker = cc::native_thread::start([] { CC_LOG_WARNING("log rule probe: allowed outside any test"); });
     worker.join();
 
     // The assertion is this binary's own verdict: reaching the end of the run without an unattributed failure is it.

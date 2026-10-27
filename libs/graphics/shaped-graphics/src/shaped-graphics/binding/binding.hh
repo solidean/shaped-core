@@ -182,7 +182,7 @@ struct sg::binding
     ///
     /// **Empty means not known, not "no stage".** A hand-written binding that never says is treated as visible
     /// everywhere, which is what dx12 and vulkan did unconditionally before this field existed.
-    /// It matters because WebGPU cannot be permissive here: its default limits allow zero storage buffers in the
+    /// WebGPU cannot be that permissive: its default limits allow zero storage buffers in the
     /// vertex stage, so a storage binding wrongly marked vertex-visible fails validation on a conformant device.
     shader_stages visibility;
 

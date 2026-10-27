@@ -272,3 +272,16 @@ void cc::report_async_backlogs(char const* reason) noexcept
 
     std::fflush(stderr);
 }
+
+cc::async_backlog& cc::async_abandoned_work()
+{
+    // never destroyed: abandoned work may still settle while statics are torn down at exit
+    static auto* const b = new async_backlog("cc.async.abandoned");
+    return *b;
+}
+
+void cc::impl::async_track_abandoned(async_node_base* node)
+{
+    async_node_traits::inc_weak(node);
+    async_abandoned_work().track_node(async_node_weak::adopt(node));
+}

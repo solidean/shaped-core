@@ -60,7 +60,8 @@ Customization points
 - `struct cc::hash<T>` / `struct cc::less<T>` specializations are **gone**. The
   hash customization point is now a **hidden friend `u64 hash(T const&)`** (see
   [common/hash.hh](../../../libs/base/clean-core/src/clean-core/common/hash.hh)).
-  Ordering, when actually needed, is a hidden-friend `operator<=>`. Don't port
+  Ordering, when actually needed, is a hidden-friend `operator<=>`.
+  Don't port
   the old specialization structs.
 - Equality: define one hidden-friend `operator==`; C++20 synthesizes `!=` and the reversed operand orders.
   The old hand-written 6–8 operator overloads are no longer needed.
@@ -72,13 +73,15 @@ What a *port* specifically trips on, beyond that:
 - **Qualified out-of-line definitions** (`template <class T> struct cc::foo { … };`), not `namespace cc { … }` blocks around the type.
   Namespace blocks are used only for free-function *declarations*; see `default_node_allocator` and `make_unique`.
 - Prefer `cc::` utilities over `std::`: `cc::move`, `cc::forward`, `cc::exchange` (in `common/utility.hh`), `cc::span`, `cc::vector`, `cc::optional`, `cc::result`, `cc::string`.
-- Byte views exist — don't hand-roll `reinterpret_cast`. `cc::span` has
+- Byte views exist — don't hand-roll `reinterpret_cast`.
+  `cc::span` has
   `s.as_bytes()` / `s.as_mutable_bytes()` (and `reinterpret_as<U>()` /
   `try_reinterpret_as<U>()`); `cc::string` / `cc::string_view` have `as_span()` /
   `as_bytes()` (plus `as_mutable_span()` / `as_mutable_bytes()` on `string`); and free
   `cc::as_bytes(c)` / `cc::as_mutable_bytes(c)` byte-view any container exposing
   `.data()`/`.size()` (all `cc`/`std` containers, string, string_view). To byte-view a
-  bare C array or pointer+len, wrap in `cc::span` first, then `.as_bytes()`. `cc::byte`
+  bare C array or pointer+len, wrap in `cc::span` first, then `.as_bytes()`.
+  `cc::byte`
 - `always_false<T>` from the old clean-core does **not** exist.
   For an unsupported-specialization guard, a plain primary-template `static_assert(!std::is_array_v<T>, "…")` usually covers the case without a dependent-false helper.
 
@@ -94,7 +97,8 @@ Header idioms to copy
 
 Layout / build / tests
 - Library layout is `libs/<category>/<lib>` with colocated `.hh`/`.cc` under
-  `src/<lib>/<area>/`. Add new public types to `fwd.hh`.
+  `src/<lib>/<area>/`.
+  Add new public types to `fwd.hh`.
 - `CMakeLists.txt` lists headers (FILE_SET) and test sources explicitly — adding
   a file without registering it means it silently isn't built.
 - Tests use nexus (`TEST` / `SECTION` / `CHECK` / `REQUIRE`), in a file named `<type>-test.cc`.
@@ -113,4 +117,4 @@ It lives in `memory/` next to the `node_allocation` it wraps, not in `container/
 ## Keep this current
 
 Every time you port something and hit a difference that isn't listed above, add it to the Gotchas section.
-This list is the whole point of the skill: it should get more complete with each migration.
+The skill is mostly this list, so it should get more complete with each migration.

@@ -179,7 +179,7 @@ ASYNC_EXAMPLE("vdoc/cube-editor")
                     orbiting = b.is_down;
             }
             else if (e.is_mouse_move() && orbiting)
-                camera.orbit(e.as_mouse_move().delta);
+                camera.orbit(e.as_mouse_move().logical_delta());
             else if (e.is_mouse_wheel())
                 camera.zoom(e.as_mouse_wheel().delta[1]);
         }

@@ -186,7 +186,7 @@ TEST("sv::resolve_material - final blocks every finer frequency")
     CHECK(r.attributes[0].frequency == sv::material_frequency::material);
     CHECK(constant_of(r) == 0.25f);
 
-    // The same binding without `final` loses to the mesh's texture, which is what makes the flag the load-bearing part.
+    // The same binding without `final` loses to the mesh's texture, which is what makes the flag the part under test.
     auto loose = cc::vector<sv::material_attribute_binding>();
     loose.push_back(sv::material_attribute_binding::of("roughness", 0.25f));
     auto const open = sv::material::create("open", sv::material_type_id(0), loose);
@@ -377,7 +377,7 @@ TEST("sv::resolve_material - a sample transform's numbers are values, and only w
     // Having a transform at all changes the generated code, so it forks the permutation once.
     CHECK(identity.permutation_key != half.permutation_key);
 
-    // ...but two different transforms do NOT, which is the whole point of putting the numbers in the block.
+    // ...but two different transforms do NOT, because the numbers live in the block.
     // A material that only rescales its normal map re-uses the shader, exactly as gold and copper do.
     CHECK(half.permutation_key == quarter.permutation_key);
     CHECK(half.parameter_key != quarter.parameter_key);

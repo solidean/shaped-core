@@ -48,9 +48,11 @@ TEST("sgl expect - an expectation nothing meets is an error, and a diagnostic ou
     CHECK(outcome_of("fun f() -> int => true\n@expect(error = \"type-mismatch\") test 1 < 2\n")
           == "type-mismatch user:[true] expected int, got bool\n"
              "unmet-expectation user:[\"type-mismatch\"] no error of kind type-mismatch stands in this test\n");
-    // a warning is no error, and the other way round; the warning is still the test's, as every diagnostic in it is
+    // a warning is no error, and the other way round
+    // An unmet expectation hands back what the test took, since that is the likeliest reason it went unmet.
     CHECK(outcome_of("@expect(error = \"no-effect\") test:\n    1 + 2\n    true\n")
-          == "unmet-expectation user:[\"no-effect\"] no error of kind no-effect stands in this test\n");
+          == "unmet-expectation user:[\"no-effect\"] no error of kind no-effect stands in this test\n"
+             "no-effect user:[1 + 2]\n");
     // CHK-232: one expected error brings others with it, and the test takes them all
     CHECK(outcome_of("@expect(error = \"unknown-name\") test:\n    let x = missing\n    x + 1\n    true\n") == "");
     // CHK-231: an empty kind can meet nothing, so it is refused where it is written

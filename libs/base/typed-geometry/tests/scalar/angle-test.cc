@@ -76,7 +76,7 @@ TEST("tg angle - ordering")
 
     SECTION("a full turn is greater, not equal — angle never wraps")
     {
-        // The whole point of the type is that it is a unit-checked number, not a modular [0, 2pi) value.
+        // The type is a unit-checked number, not a modular [0, 2pi) value.
         CHECK(tg::angle_f::make_from_degree(370) > tg::angle_f::make_from_degree(10));
         CHECK(tg::angle_f::make_from_degree(370) != tg::angle_f::make_from_degree(10));
     }

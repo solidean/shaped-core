@@ -167,6 +167,18 @@ struct machine
     {
         if (index.leaves.size() != 1 || index.leaves[0].kind != value_kind::scalar_int)
             return type_error("an array index that is no int");
+        // a lane of a vector, one scalar per field, past whose last lane is the same program error (CHK-395)
+        if (is_valid(type) && m.at(type).kind == type_kind::structure && m.at(type).has_swizzles)
+        {
+            auto const lanes = m.at(m.at(type).members);
+            auto const at = isize(index.leaves[0].as_int());
+            if (at < 0 || at >= lanes.size())
+                return fail(run_status::program_error,
+                            cc::format("the index {} is out of bounds of {}", at, m.name_of(type)));
+            count = leaf_count_of(m, lanes[0].type);
+            offset = at * count;
+            return {};
+        }
         if (!is_valid(type) || m.at(type).kind != type_kind::array)
             return type_error("an element of what is no array");
         auto const& info = m.at(type);
@@ -780,7 +792,8 @@ struct machine
                 if (auto const f = element_offset(type, index, at, count); !f.is_normal())
                     return f;
                 offset += at;
-                type = m.at(type).element;
+                // a vector's lane is of its fields' type, and an array's element of its element type
+                type = m.at(type).kind == type_kind::array ? m.at(type).element : m.at(m.at(type).members)[0].type;
                 continue;
             }
             auto const members = members_of(m, type);

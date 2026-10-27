@@ -44,7 +44,7 @@ cc::shared_async<cc::unit> raster_box_filter_mipmap_routine::init(sg::routine_in
         .color_targets = {{.format = params()}},
     });
 
-    // Awaited HERE rather than polled in execute, which is the whole point of the split: `ready` means ready, so a
+    // Awaited HERE rather than polled in execute, so `ready` means ready, and a
     // caller that got the routine handed to it never sees it decline for a few frames while a pipeline finishes.
     co_await cc::async_settled(_pipeline);
     co_return;

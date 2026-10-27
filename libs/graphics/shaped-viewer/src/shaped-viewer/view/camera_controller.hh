@@ -56,11 +56,11 @@ enum class sv::camera_style
 /// Sensitivities and limits for orbit_camera_controller.
 struct sv::camera_controller_config
 {
-    /// Degrees of azimuth / elevation per pixel of drag.
-    f64 orbit_degrees_per_pixel = 0.4;
+    /// Degrees of azimuth / elevation per logical pixel of drag, so a drag turns as far at every pixel density.
+    f64 orbit_degrees_per_logical_pixel = 0.4;
 
-    /// Target motion per pixel of drag, scaled by `distance` so a pan feels the same at every zoom.
-    f64 pan_units_per_pixel = 0.0025;
+    /// Target motion per logical pixel of drag, scaled by `distance` so a pan feels the same at every zoom.
+    f64 pan_units_per_logical_pixel = 0.0025;
 
     /// Distance multiplier per wheel tick.
     f64 zoom_per_wheel_tick = 1.1;
@@ -157,15 +157,15 @@ struct sv::fps_state
     [[nodiscard]] sv::camera to_camera() const;
 
     /// The pose of `cam`, exactly — a position and a view direction are all an fps_state holds, so nothing is lost.
-    /// Any roll in `cam.orientation` is dropped, which is the point of going through yaw / pitch at all.
+    /// Any roll in `cam.orientation` is dropped, which is what going through yaw / pitch is for.
     [[nodiscard]] static fps_state from_camera(camera const& cam);
 };
 
 /// Sensitivities and limits for fps_camera_controller.
 struct sv::fps_camera_controller_config
 {
-    /// Degrees of yaw / pitch per pixel of mouse motion while looking.
-    f64 look_degrees_per_pixel = 0.2;
+    /// Degrees of yaw / pitch per logical pixel of mouse motion while looking.
+    f64 look_degrees_per_logical_pixel = 0.2;
 
     /// The base speed a held movement key travels at, in units per second.
     /// Live rather than fixed: the wheel retunes it, the way a fly camera's throttle works everywhere.

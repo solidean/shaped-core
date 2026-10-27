@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/common/macros.hh>
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/small_vector.hh>
 #include <clean-core/container/span.hh>
@@ -94,6 +95,18 @@ public:
     /// See libs/graphics/shaped-graphics/docs/concepts/bindings.md.
     [[nodiscard]] bool portability_checks() const { return _portability_checks.load(cc::memory_order_relaxed); }
     void set_portability_checks(bool enabled) { _portability_checks.store(enabled, cc::memory_order_relaxed); }
+
+    /// Whether `dispatch_rays` checks every instance of every bound tlas against the hit records it reaches.
+    /// A record past the shader table or of the wrong kind is undefined behavior on every backend.
+    /// On metal a record past the table can fault the GPU, so `dispatch_rays` skips a dispatch that reaches one.
+    /// So this is a correctness check rather than a portability one, and `portability_checks` does not govern it.
+    /// **On by default wherever `CC_ASSERT` is compiled in**, and off in release builds.
+    /// It costs a copy of each tlas's instances at build, and a walk of them per shader table and command list.
+    /// A caller whose shaders trace with a geometry multiplier other than the ray count turns it off, since the check assumes that multiplier.
+    /// Set it before building the tlases and creating the binding groups it should cover.
+    /// See libs/graphics/shaped-graphics/docs/concepts/raytracing-pipeline.md.
+    [[nodiscard]] bool hit_record_checks() const { return _hit_record_checks.load(cc::memory_order_relaxed); }
+    void set_hit_record_checks(bool enabled) { _hit_record_checks.store(enabled, cc::memory_order_relaxed); }
 
     /// Whether `ctx.create_swapchain` can be given a `headless_extent` on this context.
     ///
@@ -574,8 +587,8 @@ protected:
 
     // Streaming transfers, reached via ctx.stream — the weaker tier.
     //
-    // The implementation must NOT give these the automatic command-list synchronization the async pair carries: the
-    // whole point is that a streamed extent costs a later reader nothing.
+    // The implementation must NOT give these the automatic command-list synchronization the async pair carries: a
+    // streamed extent must cost a later reader nothing.
     // Keeping the destination's storage alive across the copy is still required, and must not go through the same
     // stamp, or the reader wait comes back with it.
     //
@@ -803,6 +816,7 @@ protected:
     cc::atomic<bool> _device_loss_claimed = false;
     cc::atomic<bool> _device_lost = false;
     cc::atomic<bool> _portability_checks = false;
+    cc::atomic<bool> _hit_record_checks = CC_ASSERT_ENABLED != 0;
     cc::atomic<bool> _render_pass_split_warnings = true;
 
     // What live_resource counts; a texture or buffer outliving the context would release into freed memory.

@@ -249,9 +249,13 @@ enum class load_shape
 
 /// The load of mesh attribute `binding` through the descriptor named `desc`, as a float expression of `components` lanes.
 /// It reads the buffer through a local `<desc>_buffer`, since only a name may stand as a non-uniform index.
-[[nodiscard]] cc::string mesh_load(mesh_attribute_binding const& binding, cc::string_view desc, int components, bool rotates)
+[[nodiscard]] cc::string mesh_load(mesh_attribute_binding const& binding,
+                                   cc::string_view desc,
+                                   int components,
+                                   bool rotates,
+                                   cc::string_view mark)
 {
-    auto const buffer = cc::format("tracer.bindless.buffers[nonuniform {}_buffer]", desc);
+    auto const buffer = cc::format("tracer.bindless.buffers[{}{}_buffer]", mark, desc);
     if (shape_of(binding.frequency) == load_shape::flat)
         return cc::format("material.load_element_{}({}, {}, {})", load_suffix(components), buffer, desc,
                           element_expression(binding.frequency));
@@ -261,7 +265,7 @@ enum class load_shape
                       element_expression(binding.frequency));
 }
 
-/// What differs between the stages a material's body is spelled for: how a texture picks its level.
+/// What differs between the stages a material's body is spelled for: how a texture picks its level, and whether an index is marked.
 ///
 /// Everything else — the loads, the fragment, the bindless tables and the sampler palette among them — is the same text for a traced hit and a rasterized pixel.
 struct body_spelling
@@ -269,13 +273,16 @@ struct body_spelling
     /// Whether every sample names level 0, which a hit has to since it has no derivatives, or lets the pixel's derivatives pick it.
     /// A pixel's cutout does not read through these loads: `raster.is_cut` reads `tracer.instance_opacity`, at level 0 as a hit does.
     bool explicit_level = true;
+    /// What an index into a bindless table is written behind: `nonuniform ` at a hit, where the lanes of a wave hit
+    /// different instances, and nothing in a pixel, whose instance is `@per_draw` (`raster.varyings`).
+    cc::string_view mark = "nonuniform ";
 };
 
 /// The spelling a hit group and a wavefront shade kernel read their attributes in.
 constexpr auto traced_spelling = body_spelling{};
 
 /// The spelling a raster pixel stage reads its attributes in.
-constexpr auto raster_spelling = body_spelling{.explicit_level = false};
+constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = ""};
 
 /// `fun sv_attribute_<name>(ctx)`: the load of attribute `index`, out of the parameter block, a mesh attribute or a texture.
 [[nodiscard]] cc::string attribute_function(resolved_material const& r,
@@ -301,7 +308,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
         auto const& s = slot_for(layout, index, material_slot_kind::constant);
         auto const load = components == 1 ? cc::string("load") : cc::format("load{}", components);
         auto const raw
-            = cc::format("tracer.bindless.buffers[nonuniform block].{}(ctx.param_offset + {}u)", load, s.offset);
+            = cc::format("tracer.bindless.buffers[{}block].{}(ctx.param_offset + {}u)", spelling.mark, load, s.offset);
         auto value = raw;
         if (a.format.scalar == scalar_type::f32)
             value = cc::format("reinterpret_as_float({})", raw);
@@ -315,13 +322,13 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
     {
         auto const& s = slot_for(layout, index, material_slot_kind::attribute_descriptor);
         cc::format_append(out,
-                          "    let desc = material.load_attribute_desc(tracer.bindless.buffers[nonuniform block], "
+                          "    let desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
                           "ctx.param_offset + {}u)\n",
-                          s.offset);
+                          spelling.mark, s.offset);
         out += "    let desc_buffer = desc.buffer as int\n";
         auto const rotates = a.interpolation == attribute_interpolation::rotation;
         cc::format_append(out, "    return {}\n",
-                          as_format(mesh_load(*a.attribute, "desc", components, rotates), a.format));
+                          as_format(mesh_load(*a.attribute, "desc", components, rotates, spelling.mark), a.format));
         break;
     }
 
@@ -331,20 +338,19 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
         auto const& tex = slot_for(layout, index, material_slot_kind::texture_index);
         auto const& uv_slot = slot_for(layout, index, material_slot_kind::attribute_descriptor);
         cc::format_append(out,
-                          "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[nonuniform block], "
+                          "    let uv_desc = material.load_attribute_desc(tracer.bindless.buffers[{}block], "
                           "ctx.param_offset + {}u)\n",
-                          uv_slot.offset);
+                          spelling.mark, uv_slot.offset);
         out += "    let uv_desc_buffer = uv_desc.buffer as int\n";
         // A uv is only ever a triangle attribute, so the two shapes are the barycentric one and the flat one.
-        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false));
-        cc::format_append(
-            out, "    let image = tracer.bindless.buffers[nonuniform block].load(ctx.param_offset + {}u) as int\n",
-            tex.offset);
+        cc::format_append(out, "    let uv = {}\n", mesh_load(*a.uv, "uv_desc", 2, false, spelling.mark));
+        cc::format_append(out, "    let image = tracer.bindless.buffers[{}block].load(ctx.param_offset + {}u) as int\n",
+                          spelling.mark, tex.offset);
         // An explicit level where there are no derivatives, at a hit.
         // The texel is named because a constant selector reads it twice.
-        cc::format_append(
-            out, "    let texel = tracer.bindless.textures_2d[nonuniform image].sample(uv, tracer.bindless.{}{})\n",
-            sgl_palette_sampler(a.sample->sampler), spelling.explicit_level ? ", level = 0.0" : "");
+        cc::format_append(out, "    let texel = tracer.bindless.textures_2d[{}image].sample(uv, tracer.bindless.{}{})\n",
+                          spelling.mark, sgl_palette_sampler(a.sample->sampler),
+                          spelling.explicit_level ? ", level = 0.0" : "");
 
         auto value = texel_expression(a.sample->swizzle, a.format);
 
@@ -354,11 +360,11 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false};
             auto const& tf = slot_for(layout, index, material_slot_kind::sample_transform);
             auto const lanes = component_swizzle(components);
             cc::format_append(out,
-                              "    let scale = reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4("
-                              "ctx.param_offset + {}u))\n"
-                              "    let bias = reinterpret_as_float(tracer.bindless.buffers[nonuniform block].load4("
-                              "ctx.param_offset + {}u))\n",
-                              tf.offset, tf.offset + 16);
+                              "    let scale = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
+                              "ctx.param_offset + {1}u))\n"
+                              "    let bias = reinterpret_as_float(tracer.bindless.buffers[{0}block].load4("
+                              "ctx.param_offset + {2}u))\n",
+                              spelling.mark, tf.offset, tf.offset + 16);
             value = cc::format("{} * scale.{} + bias.{}", value, lanes, lanes);
         }
         cc::format_append(out, "    return {}\n", as_format(cc::move(value), a.format));

@@ -13,4 +13,4 @@ See [blessed-stdlib-headers.md](../../../../base/clean-core/docs/blessed-stdlib-
 sg's `.shaped-lint.yml` allows `<atomic>` until this lands, and `routine/reload_generation.cc` shows the target shape.
 
 The migration is mechanical, since with threads `cc::atomic` **is** `std::atomic`.
-It is load-bearing on the wasm builds without threads, where every one of those atomics keeps its interlock for a concurrency that cannot happen.
+It pays off on the wasm builds without threads, where every one of those atomics keeps its interlock for a concurrency that cannot happen.

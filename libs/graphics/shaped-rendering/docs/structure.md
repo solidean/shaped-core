@@ -29,9 +29,9 @@ This is where the graphics family meets the operating system.
 
 ```text
 sr::window_system      [done]  platform init + the event pump; creates windows; main-thread bound, one per process
-sr::window             [done]  one OS window: native handle, pixel size, minimized state, latched close request
+sr::window             [done]  one OS window: native handle, pixel and logical size, minimized state, latched close request
 multiple windows       [done]  per-window state and id-keyed dispatch; wsys->windows() enumerates them
-sr::input_event        [done]  keyboard (physical + character), text/IME, mouse move/button/wheel, relative mode
+sr::input_event        [done]  keyboard (physical + character), text/IME, mouse move/button/wheel, file drops, relative mode
                                one globally-ordered stream per frame, drained through wsys->events()
 sr::cursor_shape       [done]  the pointer's shape, set on the system (process-global, like the platform's)
 clipboard              [done]  get/set text on the system clipboard
@@ -39,7 +39,7 @@ window position       [done]  position()/set_position(); write-through, so a get
 window focus          [done]  is_focused() as of the last poll, focus() to ask for it
 borderless / topmost  [done]  window_description: has_decoration, is_always_on_top, has_taskbar_icon, is_focusable
 fullscreen            [planned]
-HiDPI                  [planned]  SDL_WINDOW_HIGH_PIXEL_DENSITY once a per-monitor-DPI UI needs it
+HiDPI                 [done]  high-density windows: pixel width()/height() and input, logical sizes and desktop coords
 gamepad                [planned]  SDL_JOYSTICK is currently compiled out; see issues/feat-sr-gamepad-input.md
 ```
 
@@ -110,6 +110,9 @@ sr::svgf_denoise_routine     [done]     temporal, native; temporal, variance and
 sr::oidn_denoise_routine     [done]     spatial, trained; Intel's weights in our own shaders, named only
                                         (far too slow for `automatic`)
 sr::fsr_upscale_routine      [done]     AMD FSR 3.1's upscaler, its host code driven through sg; any GPU, dx12 and vulkan, not WARP yet
+sr::metalfx_upscale_routine  [done]     Apple MetalFX's temporal upscaler through sg's metal native scope
+sr::metalfx_rr_routine       [done]     MetalFX's denoised scaler, the counterpart of dlss_rr, through the same scope
+metalfx frame interpolation  [planned]  MetalFX's frame interpolator, sr's first frame generation
 sr::dlss_rr_routine          [done]     NVIDIA Ray Reconstruction through sg's dx12 native scope; SDK fetched on request
 sr::nrd_denoise_routine      [done]     NVIDIA's split-signal planner executed through sg; dx12, sources fetched on request
 fsr_rr                       [planned]  FidelityFX's split-signal denoiser; waits for the tracer

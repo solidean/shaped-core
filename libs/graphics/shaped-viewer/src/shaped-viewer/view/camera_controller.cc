@@ -51,14 +51,16 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
             if (m.delta[0] == 0.0f && m.delta[1] == 0.0f)
                 return false;
 
-            auto const dx = f64(m.delta[0]);
-            auto const dy = f64(m.delta[1]); // screen y grows downward
+            // Logical units, so a drag orbits and pans as far on a Retina display as on any other.
+            auto const delta = m.logical_delta();
+            auto const dx = f64(delta[0]);
+            auto const dy = f64(delta[1]); // screen y grows downward
 
             if (_orbiting)
             {
-                orbit.azimuth += tg::angle_d::make_from_degree(dx * config.orbit_degrees_per_pixel);
+                orbit.azimuth += tg::angle_d::make_from_degree(dx * config.orbit_degrees_per_logical_pixel);
                 // Dragging down lowers the eye, so the scene tips the way the cursor goes.
-                orbit.elevation -= tg::angle_d::make_from_degree(dy * config.orbit_degrees_per_pixel);
+                orbit.elevation -= tg::angle_d::make_from_degree(dy * config.orbit_degrees_per_logical_pixel);
 
                 // The view direction must never align with +y, which is what camera::orbiting needs and the clamp gives.
                 auto const limit = config.max_elevation.degree();
@@ -72,7 +74,7 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
                 // Pan across the plane the camera faces, so the target follows the cursor rather than the world axes.
                 // Scaled by distance, so one drag covers the same fraction of the screen at every zoom.
                 auto const b = orbit.to_camera().basis();
-                auto const k = config.pan_units_per_pixel * orbit.distance;
+                auto const k = config.pan_units_per_logical_pixel * orbit.distance;
                 orbit.target += b.right * (-dx * k) + b.up * (dy * k);
             }
             return true;
@@ -100,7 +102,7 @@ bool orbit_camera_controller::handle(sr::input_event const& e)
             return true;
         },
         [](sr::key_event const&) { return false; }, // keys and text belong to the fps controller, or to the caller
-        [](sr::text_event const&) { return false; });
+        [](sr::text_event const&) { return false; }, [](sr::file_drop_event const&) { return false; });
 }
 
 bool orbit_camera_controller::focus_on(tg::pos3d point)
@@ -247,9 +249,10 @@ bool fps_camera_controller::handle(sr::input_event const& e)
             if (m.delta[0] == 0.0f && m.delta[1] == 0.0f)
                 return false;
 
-            pose.yaw += tg::angle_d::make_from_degree(f64(m.delta[0]) * config.look_degrees_per_pixel);
+            auto const delta = m.logical_delta();
+            pose.yaw += tg::angle_d::make_from_degree(f64(delta[0]) * config.look_degrees_per_logical_pixel);
             // Screen y grows downward, so moving the mouse down looks down.
-            pose.pitch -= tg::angle_d::make_from_degree(f64(m.delta[1]) * config.look_degrees_per_pixel);
+            pose.pitch -= tg::angle_d::make_from_degree(f64(delta[1]) * config.look_degrees_per_logical_pixel);
 
             // The view direction must never align with +y, or the right axis is undefined and the horizon flips.
             auto const limit = config.max_pitch.degree();
@@ -267,7 +270,8 @@ bool fps_camera_controller::handle(sr::input_event const& e)
                 = cc::clamp(scaled, config.min_move_units_per_second, config.max_move_units_per_second);
             return false; // retuning the speed moves nothing until the next update
         },
-        [](sr::text_event const&) { return false; }); // text belongs to the caller
+        [](sr::text_event const&) { return false; }, // text and drops belong to the caller
+        [](sr::file_drop_event const&) { return false; });
 }
 
 bool fps_camera_controller::update(f64 dt)

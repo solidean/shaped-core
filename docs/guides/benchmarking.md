@@ -98,7 +98,7 @@ BENCHMARK("sort - ours against the standard's")
 }
 ```
 
-Measuring them together is the point: two numbers from separate runs happened at different times on a machine whose
+They are measured together because two numbers from separate runs happened at different times on a machine whose
 state changed in between.
 
 **A ratio whose interval spans 1.0 prints as `~same`, not as a number.**

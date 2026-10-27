@@ -23,15 +23,17 @@ cc::string sgl::check::name_mint::mint(cc::string_view desired)
 {
     auto const base = desired.empty() ? cc::string_view("_") : desired;
     auto name = cc::string(base);
+    // a name ending in `_` takes its number directly, since a second underscore makes a name C++ reserves
+    auto const separator = base.ends_with('_') ? cc::string_view() : cc::string_view("_");
     if (is_taken(name))
     {
         auto& suffix = next_suffix[base];
         suffix = cc::max(suffix, 1);
-        name = cc::format("{}_{}", base, suffix);
+        name = cc::format("{}{}{}", base, separator, suffix);
         while (is_taken(name))
         {
             ++suffix;
-            name = cc::format("{}_{}", base, suffix);
+            name = cc::format("{}{}{}", base, separator, suffix);
         }
         ++suffix;
     }

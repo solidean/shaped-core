@@ -1,7 +1,8 @@
 # versioned-document — Cheat Sheet
 
 Structured documents that are versioned, mergeable and verifiable.
-Namespace `vdoc`. Depends on clean-core only.
+Namespace `vdoc`.
+Depends on clean-core only.
 
 **Recording domain:** `vdoc`.
 Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see [logging](../../base/clean-core/docs/logging.md).
@@ -163,7 +164,7 @@ vdoc::advance_snapshot(graph, cache, parent, child); // moves the entry onto a S
 
 cache.clear_unpinned();                              // invisible: costs speed, never a result
 cache.erase(id); cache.is_pinned(id); cache.size();
-cache.unpin(id);                                     // a snapshot that stopped being load-bearing, bytes kept
+cache.unpin(id);                                     // a snapshot no longer required, bytes kept
 cache.take(id);                                      // removes and hands it over; advance_snapshot's primitive
 ```
 

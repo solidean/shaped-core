@@ -617,7 +617,7 @@ void metal_stream_system::create(metal_context& ctx)
     _drain.notify_on_drained(&ctx);
 
     // What a job held back on a direct-queue submission is woken by.
-    // Its default queue is Apple's, which is the point: the wake must arrive whether or not anything of ours is
+    // Its default queue is Apple's, so the wake arrives whether or not anything of ours is
     // running.
     _listener = MTL::SharedEventListener::alloc()->init();
 

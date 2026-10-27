@@ -60,7 +60,7 @@ ASYNC_EXAMPLE("vdoc/cube-viewer")
                     dragging = b.is_down && !app->imgui().wants_mouse();
             }
             else if (e.is_mouse_move() && dragging)
-                camera.orbit(e.as_mouse_move().delta);
+                camera.orbit(e.as_mouse_move().logical_delta());
             else if (e.is_mouse_wheel() && !app->imgui().wants_mouse())
                 camera.zoom(e.as_mouse_wheel().delta[1]);
         }

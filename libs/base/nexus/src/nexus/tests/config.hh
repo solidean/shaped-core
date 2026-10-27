@@ -54,6 +54,8 @@ namespace nx::config
 // The most exclusion tags one test may carry.
 // A raw array of literals rather than a container: cfg stays trivially copyable, and config.hh stays the light header every test TU includes.
 inline constexpr int max_exclusion_tags = 4;
+// The most rerun_on globs one test may carry, an array for the same reason.
+inline constexpr int max_rerun_on_globs = 4;
 } // namespace nx::config
 
 struct nx::config::cfg
@@ -81,6 +83,12 @@ struct nx::config::cfg
     char const* exclusion_tags[max_exclusion_tags] = {};
     int exclusion_tag_count = 0;
     bool exclusive_global = false; // excludes every other test, not just fellow tag holders
+
+    // Globs over repo-relative paths: a change touching one makes `dev.py check` run this test at full strength.
+    // Opt-in per test and read by dev.py from the test listing, never by the runner itself.
+    // `rerun_on_count` counts what was asked for, like exclusion_tag_count.
+    char const* rerun_on_globs[max_rerun_on_globs] = {};
+    int rerun_on_count = 0;
 
     // Bucket this test's cc::rec events so nx::test_recording() can read them back.
     // OFF by default, because attribution is paid per test whether or not the test ever asks — see
@@ -165,13 +173,36 @@ constexpr struct
 } owns_recorder;
 
 // This test runs only under --thorough, and a default run skips it rather than leaving it out.
-// For a test whose whole point is ground a default run cannot afford, so there is no narrower version of it worth running.
+// For a test that exists to cover ground a default run cannot afford, so there is no narrower version of it worth running.
 // A test that CAN be narrowed stays a normal test and branches on nx::is_thorough() instead.
 // Honoured wherever the body runs, a child dispatched through nx::invoke_tests included.
 constexpr struct
 {
     void apply(cfg& result) const { result.thorough_only = true; }
 } thorough_only;
+
+// `dev.py check` runs this test at full strength (--thorough) whenever the change touches `glob`.
+//
+// A repo-relative path or glob, gitignore-shaped: `**` crosses directories, `*` and `?` do not, and a bare path is one file or one tree.
+// Opt-in per test, written by the author who knows what the test is about: a boolean fuzzer names the one file implementing the cut it exercises,
+// a viewer sweep names its surface tree.
+// A thorough test without one is never run by `check`, only by --thorough.
+// `check` refuses a glob matching no tracked file, so a moved file cannot silently disarm the rule.
+// Repeat it for several.
+constexpr auto rerun_on(char const* glob)
+{
+    struct trigger
+    {
+        char const* glob;
+        void apply(cfg& result) const
+        {
+            if (result.rerun_on_count < max_rerun_on_globs)
+                result.rerun_on_globs[result.rerun_on_count] = glob;
+            ++result.rerun_on_count; // counted even when it does not fit, so the overflow is reportable
+        }
+    };
+    return trigger{glob};
+}
 
 // A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.
 // It runs when a filter names it exactly, or when the runner is put in manual mode via --manual.
@@ -206,7 +237,7 @@ constexpr struct
 
 // An example demonstrates an API in practice rather than pinning an invariant, and is swept only via --examples.
 // Naming it exactly also runs it, as long as no bucket flag was given; like a manual test it otherwise stays out of automatic runs.
-// Its body needs no CHECK at all — being free of the testable-only bias is the point — but a CHECK that fails still fails.
+// Its body needs no CHECK at all, so it is free of the testable-only bias, but a CHECK that fails still fails.
 // EXAMPLE in test.hh is the macro.
 constexpr struct
 {
@@ -265,7 +296,7 @@ constexpr auto exclusive(char const* tag = nullptr)
 // Its body is driven directly, in schedule order, alongside the other tests asking for the same.
 //
 // Required by a test that stands up its own cc scheduler, or that nests an nx::execute_tests run — neither may sit under the run's own.
-// Touching an async without one then asserts, which is the point: this is how a test proves it owns that decision.
+// Touching an async without one then asserts, so a test proves it owns that decision.
 // Not the way to ask for the main thread: nx::main_thread says that, and says the thing that gets checked.
 constexpr struct
 {

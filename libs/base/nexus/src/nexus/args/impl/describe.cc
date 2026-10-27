@@ -38,7 +38,7 @@ nx::impl::described_command nx::impl::describer::run(args_builder& builder)
         out.options.push_back(describe_option(b));
     }
 
-    // Inherited globals are completable at this depth too, which is the whole point of marking them.
+    // Marked globals are inherited, so they are completable at this depth too.
     for (auto* up = builder._parent; up != nullptr; up = up->_parent)
         for (auto const& b : up->_bindings)
             if (!b.hidden && b.kind == binding_kind::option && b.is_global)

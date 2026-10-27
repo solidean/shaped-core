@@ -26,7 +26,7 @@
 ///
 /// `slot_of` is the one name lookup, done once.
 /// The name-taking setters are the whole-binding ones only — those are the one-shot wiring calls.
-/// Per-element and per-range work runs off a resolved `binding_slot`, which is the point of having one.
+/// Per-element and per-range work runs off a resolved `binding_slot`, so it never repeats the lookup.
 ///
 /// **Not thread-safe** — one owner mutates it, and `snapshot()` counts as a mutation because it caches.
 ///
@@ -206,14 +206,16 @@ private:
 
     // The buffer each binding outside a binding array last bound, by slot, and the tlas each element binds, by slot and
     // element, which each snapshot hands on.
-    // Kept only where the context's portability checks are on.
+    // The buffers are kept only where the context's portability checks are on, and the tlases where its hit-record
+    // checks are.
     cc::vector<impl::buffer_use> _slot_uses;
     cc::vector<cc::vector<tlas_handle>> _slot_tlases;
     void record_use(binding_slot slot, int first_element, cc::span<raw_view const> views);
 
     // Stamped by the persistent scope right after the backend creates the group: the device's
-    // feature::float32_filtering, and whether the context's portability checks are on.
+    // feature::float32_filtering, and whether the context's portability and hit-record checks are on.
     friend class sg::context_persistent_scope;
     bool _float32_filtering = true;
     bool _records_buffer_uses = false;
+    bool _records_tlases = false;
 };

@@ -274,7 +274,7 @@ def _containment_key(job: Job) -> tuple[float, float]:
 def classify(jobs: list[Job]) -> None:
     """Mark which jobs enclose another, and how deep each driver job sits.
 
-    Only a driver job can be FOUND to be an aggregate, and that restriction is the load-bearing part.
+    Only a driver job can be FOUND to be an aggregate, and the marking rests on that restriction.
     Enclosing another job means something for a driver span, which wraps its children on one call stack: a build step really does account for the compiles inside it.
     Between two external jobs it means nothing at all: a six-second compile encloses a fast one that ran on a different core.
     Reading that as structure would file most of the fan-out as "container" and empty out the leaf table.

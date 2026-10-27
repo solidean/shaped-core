@@ -128,6 +128,52 @@ def test_new_writes_a_valid_issue(base: Path):
     assert cli(a, "new", "nope", "x")[0] == 2
 
 
+def test_new_refuses_a_docs_folder_as_owner(base: Path):
+    a, _ = setup(base)
+    code, _, err = cli(a, "new", "bug", "nested", "--in", "docs")
+    assert code == 2 and "docs/docs/issues" in err and "--force" in err, err
+    assert not (a / "docs/docs").exists()
+    code, out, _ = cli(a, "new", "bug", "nested", "--in", "docs", "--force")
+    assert code == 0 and out.strip() == "docs/docs/issues/bug-nested.md", out
+    code, out, _ = cli(a, "new", "bug", "spelled-out", "--in", "docs/issues")
+    assert code == 0 and out.strip() == "docs/issues/bug-spelled-out.md", "docs/issues itself names its owner, as before"
+
+
+def test_claim_refuses_an_issue_check_would_fail(base: Path):
+    a, _ = setup(base)
+    remote = base / "remote.git"
+    before = git(remote, "rev-parse", "main")
+    assert cli(a, "new", "feat", "ahead", "--ref", "file:src/not-yet.cc")[0] == 0
+    code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 2 and "refs file src/not-yet.cc, which does not exist" in err and "without the gate" in err, err
+    assert git(remote, "rev-parse", "main") == before, "nothing was pushed"
+    # present here but not on the remote: every other checkout would fail the gate, so the claim judges the remote's tree
+    write(a / "src/not-yet.cc", "x\n")
+    code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 2 and "refs file src/not-yet.cc, which does not exist" in err, err
+    git(a, "add", "src/not-yet.cc")
+    git(a, "commit", "-q", "-m", "the file")
+    code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 2 and "refs file src/not-yet.cc" in err, "committed but not pushed is still missing on the remote"
+    git(a, "push", "-q", "origin", "main")
+    code, _, err = cli(a, "claim", "feat-ahead")
+    assert code == 0, err
+
+
+def test_claim_refuses_a_parent_only_this_checkout_has(base: Path):
+    a, _ = setup(base)
+    write(a / "docs/issues/epic-local.md", issue_text("Only here"))
+    assert cli(a, "new", "feat", "child", "--parent", "epic-local")[0] == 0
+    assert cli(a, "check")[0] == 0, "the checkout itself is consistent"
+    code, _, err = cli(a, "claim", "feat-child")
+    assert code == 2 and "parent epic-local does not exist" in err, err
+    git(a, "add", "docs/issues/epic-local.md")
+    git(a, "commit", "-q", "-m", "the epic")
+    git(a, "push", "-q", "origin", "main")
+    code, _, err = cli(a, "claim", "feat-child")
+    assert code == 0, err
+
+
 def test_check_finds_what_is_wrong(base: Path):
     a, _ = setup(base)
     write(a / "docs/issues/oops.md", "# T\n")
@@ -136,7 +182,9 @@ def test_check_finds_what_is_wrong(base: Path):
     write(a / "docs/issues/feat-child.md", issue_text("Child", "parent: feat-shiny", "blocked-by: [bug-ghost]"))
     write(a / "lib/docs/issues/bug-crash.md", issue_text("Twin"))
     write(a / "docs/issues/bug-notitle.md", "---\nclaimed-by: X\n---\n\nno title\n")
-    write(a / "docs/issues/bug-stale-ref.md", issue_text("Stale", "refs:", "  - file: src/lib.cc:3-9", "  - file: gone.cc"))
+    write(a / ".gitignore", "/fetched/\n")
+    write(a / "docs/issues/bug-stale-ref.md",
+          issue_text("Stale", "refs:", "  - file: src/lib.cc:3-9", "  - file: gone.cc", "  - file: fetched/sdk.h"))
     write(a / "src/use.cc", "// issue: bug-ghost\nx(); // TEMPORARY(bug-older)\n// issue: other:bug-unknown-repo\n")
     code, out, _ = cli(a, "check")
     assert code == 1
@@ -150,6 +198,7 @@ def test_check_finds_what_is_wrong(base: Path):
                      "src/use.cc:2: marker names bug-older, which is closed"):
         assert expected in out, f"missing {expected!r} in:\n{out}"
     assert "bug-unknown-repo" not in out, "a marker into a repository that is not checked out is not judged"
+    assert "fetched/sdk.h" not in out, "a ref to a path git ignores names a fetched file, which may be absent here"
 
 
 def test_claim_pushes_exactly_one_commit(base: Path):
@@ -309,13 +358,16 @@ def test_serve_edits_files_and_pushes_on_request(base: Path):
 def test_close_moves_and_relinks(base: Path):
     a, _ = setup(base)
     write(a / "docs/notes.md", "See [the crash](issues/bug-crash.md#repro) and [shiny](issues/feat-shiny.md).\n")
-    write(a / "docs/issues/feat-shiny.md", issue_text("Shiny", "parent: epic-big") + "Related: [notes](../notes.md).\n")
+    write(a / "docs/issues/feat-shiny.md",
+          issue_text("Shiny", "parent: epic-big", "claimed-by: Alice", "claimed-at: 2026-03-01T09:00Z")
+          + "Related: [notes](../notes.md).\n")
     write(a / "docs/issues/epic-big.md", issue_text("Big"))
     code, _, err = cli(a, "close", "feat-shiny", "--date", "2026-03-05", "--resolution", "obsolete")
     assert code == 0, err
     moved = a / "docs/issues/closed/2026/03/feat-shiny.md"
     text = moved.read_text(encoding="utf-8")
     assert "closed: 2026-03-05\nresolution: obsolete" in text and "[notes](../../../../notes.md)" in text, text
+    assert "claimed-by" not in text and "claimed-at" not in text, "closing ends the claim: " + text
     notes = (a / "docs/notes.md").read_text(encoding="utf-8")
     assert "(issues/bug-crash.md#repro)" in notes and "(issues/closed/2026/03/feat-shiny.md)" in notes, notes
     assert cli(a, "check")[0] == 0

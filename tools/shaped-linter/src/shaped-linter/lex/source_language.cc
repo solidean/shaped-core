@@ -27,6 +27,10 @@ source_language language_from_path(cc::string_view path)
         return source_language::python;
     if (ext == ".md")
         return source_language::markdown;
+    if (ext == ".rs")
+        return source_language::rust;
+    if (ext == ".lean")
+        return source_language::lean;
     return source_language::cpp;
 }
 
@@ -40,6 +44,10 @@ cc::string_view source_language_name(source_language l)
         return "python";
     case source_language::markdown:
         return "markdown";
+    case source_language::rust:
+        return "rust";
+    case source_language::lean:
+        return "lean";
     }
     return "unknown";
 }

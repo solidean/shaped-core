@@ -101,6 +101,10 @@ Concretely:
 - **Cut ruthlessly.** Short lines are not the goal, concision is.
   A long comment split across many lines is still a long comment.
   If it explains several unrelated concerns, split it or move the rationale to a higher-level doc.
+- **Say the consequence, never that something matters.**
+  `which is the whole point`, `This matters because`, `, which matters` and their kin assert weight instead of showing it.
+  `Allocation-free, so a handler builds no vector` carries the reason in the words the declaration spent on itself.
+  shaped-linter's `no-whole-point` and `no-why-it-matters` flag the stock phrases, and `no-stock-words` the words overuse has burned (`load-bearing`).
 
 ---
 
@@ -516,11 +520,12 @@ Each explicit UB usage must be heavily documented and justified.
   The implicit conversion to `isize` is fine; the cast is pure noise.
   If a linter complains, turn that check off in [.clang-tidy](../.clang-tidy) with a rationale comment — don't decorate every call site.
   The cast belongs only inside arithmetic a library performs for its callers — `offset * isize(sizeof(T))` in a container header.
-  There the signedness of the whole expression is the point.
+  There it keeps the whole expression signed.
 - Avoid "magic sentinels" like `-1` for invalid states.
   Prefer `optional` or `variant` unless there's a justified performance or memory reason.
 - Give each distinct index / handle / id role its own strong enum:
-  `enum class name : int { invalid = -1 };`. The compiler then rejects mixing roles (passing an `op_index` where a `type_index` is wanted),
+  `enum class name : int { invalid = -1 };`.
+  The compiler then rejects mixing roles (passing an `op_index` where a `type_index` is wanted),
   and the named `invalid` member replaces a bare `-1` sentinel.
   This is the positive form of the rule above:
   when a raw `int` index would otherwise carry an `-1` "none", reach for a strong enum instead.
@@ -591,7 +596,8 @@ Two rules follow:
 
 - **Use `cc::atomic`, never `std::atomic` directly** ([clean-core/thread/atomic.hh](../libs/base/clean-core/src/clean-core/thread/atomic.hh)).
   With threads it *is* `std::atomic`; without them it is a plain value with the same API,
-  so a refcount bump is an `add` instead of a `lock xadd`. A hand-written `std::atomic` stays atomic in a build that provably has no concurrency, and no flag can reach it.
+  so a refcount bump is an `add` instead of a `lock xadd`.
+  A hand-written `std::atomic` stays atomic in a build that provably has no concurrency, and no flag can reach it.
   `<atomic>` is blessed to appear in our headers but not to be called into — see [blessed-stdlib-headers.md](../libs/base/clean-core/docs/blessed-stdlib-headers.md).
 - **Never gate API on the flag.** Threaded types keep their full surface and fall back to running on the calling thread; document the fallback instead of `#if`-ing the declaration away.
   `cc::threaded_actor` is the model: same API, and unthreaded the caller drives it.
@@ -665,7 +671,7 @@ one semantic point per line, no reflowed blocks, free line length.
 - **A reference to something that no longer exists is dangling, and gets deleted** — a discarded prototype, a subsystem that was removed, a plan, a handover note, "an earlier version did X".
   The reader cannot look any of it up, so it reads as a live part of the system that they simply cannot find.
   If a removed approach still matters, it is a constraint on the *current* design: state that constraint and drop the history.
-- **Delete backstory by default.** The genuine Chesterton's fence exists — the comment without which someone *will* remove something load-bearing — but it is rare.
+- **Delete backstory by default.** The genuine Chesterton's fence exists — the comment without which someone *will* remove something the code needs — but it is rare.
   On this tree, invented reasoning outnumbers the real cautionary tale by something like 20:1, so the prior is that it goes.
   Keep it only when you can name the concrete mistake the reader would otherwise make, and then state the mistake, not the history.
 - **Litmus test:** if the sentence would read naturally in the PR description or the commit message, it does not belong inline.

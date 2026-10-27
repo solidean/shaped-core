@@ -79,6 +79,26 @@ public:
     [[nodiscard]] bool settled_before_writing() const { return _settled_before_writing; }
     void mark_settled_before_writing() { _settled_before_writing = true; }
 
+    /// The sequence frame being rendered, 0 for a still.
+    [[nodiscard]] i32 frame_index() const { return _frame; }
+
+    /// The clock every frame body sees during this capture: the request's instant for the frame being rendered.
+    /// It holds still while a frame converges, so a body animating off `frame::seconds` changes nothing until it is written.
+    [[nodiscard]] double seconds() const { return _request.seconds_at(_frame); }
+
+    /// Whether the frame being rendered is the last one the run writes.
+    [[nodiscard]] bool is_last_frame() const { return !_request.is_sequence() || _frame + 1 >= _request.frames; }
+
+    /// Whether the frame being rendered is written at all, or only rendered for the history of the ones that are.
+    [[nodiscard]] bool writes_frame() const { return !_request.is_sequence() || _frame % _request.stride == 0; }
+
+    /// Moves a sequence on to its next frame, with a timeout of its own.
+    void advance_frame();
+
+    /// How many written frames of a sequence ran out of time before they settled.
+    [[nodiscard]] i32 unsettled_frames() const { return _unsettled_frames; }
+    void note_unsettled_frame() { ++_unsettled_frames; }
+
 private:
     sr::capture_request _request;
     cc::vector<cc::string> _registered;
@@ -93,8 +113,11 @@ private:
     /// What the frame being authored is held for; empty when nothing holds it.
     cc::string _hold_reason;
 
-    /// The request's `clock_seconds` as the loop opened.
+    /// The request's `clock_seconds` as the loop opened, or as the current sequence frame began.
     double _start_seconds = 0.0;
+
+    i32 _frame = 0;
+    i32 _unsettled_frames = 0;
 };
 
 namespace sv::impl

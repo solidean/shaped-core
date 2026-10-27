@@ -50,7 +50,7 @@ def build_overrides(p: argparse.ArgumentParser) -> None:
 def profile(p: argparse.ArgumentParser) -> None:
     """The profiling flags, repeated per subcommand so they bind on either side of it.
 
-    `SUPPRESS` is load-bearing: a normal default would have the subparser write its own None over a value given before the subcommand.
+    `SUPPRESS` is required: a normal default would have the subparser write its own None over a value given before the subcommand.
     dev.py declares the same three flags globally, and these only shadow them when actually passed.
     """
     p.add_argument(

@@ -150,7 +150,7 @@ TEST("sgl emit - the cube's pixel stage as HLSL for dx12")
              "    const float fill = saturate(dot(n, normalize(float3(-0.7, 0.15, 0.6))));\n"
              "    const float3 lit = p.color * (0.25 + 0.8 * key + 0.25 * fill);\n"
              "    target result;\n"
-             "    result.color = float4(lit.x, lit.y, lit.z, 1.0);\n"
+             "    result.color = float4(lit, 1.0);\n"
              "    return result;\n"
              "}\n");
 }
@@ -180,7 +180,7 @@ TEST("sgl emit - the cube's pixel stage as HLSL for vulkan")
              "    const float fill = saturate(dot(n, normalize(float3(-0.7, 0.15, 0.6))));\n"
              "    const float3 lit = p.color * (0.25 + 0.8 * key + 0.25 * fill);\n"
              "    target result;\n"
-             "    result.color = float4(lit.x, lit.y, lit.z, 1.0);\n"
+             "    result.color = float4(lit, 1.0);\n"
              "    return result;\n"
              "}\n");
 }
@@ -207,7 +207,7 @@ TEST("sgl emit - the cube's pixel stage as WGSL, where `target` is reserved")
              "    let key: f32 = saturate(dot(n, normalize(vec3f(0.45, 0.8, -0.4))));\n"
              "    let fill: f32 = saturate(dot(n, normalize(vec3f(-0.7, 0.15, 0.6))));\n"
              "    let lit: vec3f = p.color * (0.25 + 0.8 * key + 0.25 * fill);\n"
-             "    return target_(vec4f(lit.x, lit.y, lit.z, 1.0));\n"
+             "    return target_(vec4f(lit, 1.0));\n"
              "}\n");
 }
 
@@ -278,7 +278,7 @@ TEST("sgl emit - the cube's pixel stage as MSL")
              "    const float fill = saturate(dot(n, normalize(float3(-0.7, 0.15, 0.6))));\n"
              "    const float3 lit = p.color * (0.25 + 0.8 * key + 0.25 * fill);\n"
              "    target result;\n"
-             "    result.color = float4(lit.x, lit.y, lit.z, 1.0);\n"
+             "    result.color = float4(lit, 1.0);\n"
              "    return result;\n"
              "}\n");
 }

@@ -425,7 +425,7 @@ CC_RETURN_IF_ERROR(expr);                 // early-return the error from the cur
 
 ```cpp
 #include <clean-core/function/function_ref.hh>   // cc::function_ref<R(Args...)> — NON-owning, trivially copyable
-void process(cc::function_ref<int(int)> f);      // bind any lambda/fn-ptr/functor; must outlive the ref
+void process(cc::function_ref<int(int)> f);      // a function / fn-ptr is held by value; any other callable by reference, must outlive the ref
 f(42);  f.is_valid();  bool(f);
 
 #include <clean-core/function/unique_function.hh> // cc::unique_function<R(Args...)> — owning, MOVE-ONLY
@@ -441,6 +441,7 @@ uf();  uf.is_valid();                     // backed by cc::node_allocation (very
 auto al = cc::allocation<int>::create_defaulted(n, res);  // create_empty/_filled/_uninitialized/_copy_of
 al.obj_span();  al.resource();  al.is_valid();  al.alloc_size_bytes();
 cc::memory_resource;  cc::default_memory_resource;        // pluggable allocator interface (default backed by mimalloc)
+cc::set_allocation_failure_handler(fn);  // void fn(isize min, isize max, isize align): a failed allocate_bytes calls it, every build; it may throw
 cc::system_memory_resource;                               // malloc/free opt-out; pass &it as `res` to bypass mimalloc
 // CC_HAS_MIMALLOC is 0 under SC_MIMALLOC=OFF (the sanitize presets), and the default IS the system resource there.
 // Only mimalloc resizes in place; the system resource always returns -1, so never assume the default can.
@@ -466,7 +467,7 @@ auto s = cc::make_shared<T>(args...);              // only way to construct (str
 cc::weak_ptr<T> w = s;  w.lock();                   // weak (if Traits::supports_weak); lock() -> shared_ptr or empty
 // custom Traits (all static, on T*) for intrusive counts: node_size/node_align + init_control/inc_strong/
 // release_strong->{destroy,free}/destroy_object/free_storage (+weak: inc_weak/release_weak->bool/try_lock_strong).
-// release_strong {true,false} => destroy_object THEN release_weak (order is load-bearing); {true,true} => both, skip
+// release_strong {true,false} => destroy_object THEN release_weak (order is fixed); {true,true} => both, skip
 // release_weak. Base-keyed Traits serves derived T via upcast (cc::async keys one on async_node_base);
 // from_alive(T*) MINTS a handle from a pointer known alive (strong > 0).
 T* raw = s.release();  auto back = cc::shared_ptr<T>::adopt(raw);   // MOVE a count out of / into a handle: count-neutral
@@ -869,6 +870,13 @@ cc::mark_current_thread_as_main();        //   claims cc::thread_id::main for th
 cc::register_at_thread_exit(fn, userdata); // void(*)(void*), run at thread exit, last registered first; register from a COLD path
                                           //   the way a hot thread_local stays trivially destructible (MSVC/clang-cl guard every access to one that is not)
 
+#include <clean-core/thread/native_thread.hh> // the escape hatch: work goes to cc::async or a threaded_actor, never a raw thread
+auto t = cc::native_thread::start([&] { ... });              // an OS thread with an 8 MiB stack on EVERY platform (std::thread: 512 KiB on macOS)
+auto t = cc::native_thread::start(fn, {.name = "io", .stack_bytes = 16 << 20}); // named from inside, before the body runs
+t.join();                                 // required before destruction or reassignment — no detach; joinable() until then
+                                          // without threads: start runs the body inline, so join returns at once
+                                          // <thread> is denied repo-wide; yield/sleep are cc::this_thread_yield / cc::this_thread_sleep_secs
+
 #include <clean-core/thread/spin.hh>
 cc::spin_pause();                         // CPU spin-wait hint, for a SHORT bounded spin; never a substitute for blocking
                                           // not a scheduling yield: nothing goes to the OS, and it is a no-op where unsupported
@@ -1045,6 +1053,7 @@ co_await cc::async_settled(backlog.settled());           // pinned at the CALL; 
 cc::async_backlog::settled(span_of_backlog_ptrs);        // several at once — list UPSTREAM first (compile before its store)
 backlog.outstanding_count();                             // started + unsettled; racy, diagnostics/tests
 backlog.tracked_count();                                 // entries held, live or not; tracking compacts, so bounded without settling
+cc::async_abandoned_work();                                // process-wide: async_all's members left running on a failure, a torn-down parked node's running deps
 // COLD nodes are neither waited for nor started. A manual node its producer ABANDONS keeps a settled() parked forever.
 // ambient context — "which logical task is this work part of?", from anywhere inside a frame
 // (#include <clean-core/thread/async_ambient.hh>). cc propagates one opaque word and never inspects it.
@@ -1061,6 +1070,8 @@ cc::async_ambient_install_scope const i(h); // install it there for a block; tak
 h.reset();                       // drop the hold now. NOT `h = {}`: a default-constructed handle captures again
 cc::async_is_polling();          // inside a poll? i.e. would a throw from here be caught and become a node error,
                                  // or escape a worker thread and terminate — the question before reporting by throw
+cc::async_poll_depth();          // how many polls this thread is nested in: a thread blocked on a node polls others one
+                                 // level deeper, so a thread_local per-call state compares depths to spot a foreign call
 // DRIVE-SITE: a subtree driven from one work item is billed to that item's context, and an inline-driven dep
 // inherits its driver's. A node stores it only as a resume token, written once when it is queued/parked/yielded —
 // never by a thread merely WAKING it, so a shared dep completing under B cannot contaminate A's continuation.
@@ -1069,7 +1080,8 @@ cc::async_is_polling();          // inside a poll? i.e. would a throw from here 
 // co_await / co_return (#include <clean-core/thread/async_coroutine.hh> — INCLUDING it is what enables coroutines)
 // A coroutine IS a compute frame: the node stores one coroutine_handle (8 B, always inline). T must be MOVABLE.
 // Take coroutine parameters BY VALUE — they are captured by declared type, so a reference dangles across a suspend.
-cc::shared_async<int> load(cc::string p) { auto const& b = co_await read(p); co_return parse(b); } // COLD (= lazy)
+cc::shared_async<int> load(cc::string p) { auto const r = read(p); auto const& b = co_await r; co_return parse(b); } // COLD (= lazy)
+// HOLD the async before binding a reference: `auto const& b = co_await read(p);` dangles once the temporary handle dies
 cc::async_scheduled<int> spawn(cc::string p) { co_return 1; }  // eager at initial suspend; converts to shared_async
 auto a = cc::async_start(load(p));    // "and go": idempotent; no-op if nothing could route (stays cold, drives later)
 int const& v = co_await a;            // -> U const& into the node; a FAILED dep short-circuits (locals destroyed,
@@ -1448,6 +1460,8 @@ CC_HAS_THREAD_SANITIZER                             // 0/1 (common/macros.hh) �
                                                     // instrumentation genuinely CHANGES: a stack walk sees frames
                                                     // that are not the source's, and a thread TSan started has no
                                                     // unwindable top. Not a way to skip a test that is merely slow.
+CC_HAS_ADDRESS_SANITIZER                            // 0/1 (common/macros.hh) — ASan's allocator ABORTS on a request it
+                                                    // cannot grant, so an allocation failure never reaches its handler
 
 #include <clean-core/platform/leak_annotations.hh> // tell LeakSanitizer a leak is deliberate; no-op without it
 cc::leak_intentionally(p);                          // this object is never freed on purpose (state WHY at the site)
@@ -1461,6 +1475,9 @@ cc::add_crash_context_hook(&fn);                    // void()noexcept printed be
 cc::report_all_thread_stacks("why");                // the SAME report with nothing having crashed — for a wait that
                                                     // never finished, where the thread that noticed is never the one
                                                     // that matters. Suspends the others while it walks them.
+cc::set_crash_report_files({.directory = d, .name = "app"}); // every report ALSO a file d/app-<time>-<pid>.txt,
+                                                    // + a .dmp minidump on Windows; nexus sets it from NX_CRASH_DIR
+cc::last_crash_report_path();                       // -> string_view: the last one's path without extension, or empty
 ```
 
 ### System info & resource metrics (see [systems/system-info](docs/systems/system-info.md))
@@ -1637,11 +1654,12 @@ cc::seek_dir  cc::stream_flush_fn             // the public flush contract; see 
   `value()`/`error()` assert on the wrong state; use `CC_RETURN_IF_ERROR` to
   propagate.
 - **Move-only types:** `unique_vector`, `unique_array`, `unique_function`,
-  `any_error`, `allocation`, `node_allocation`. Plain `vector`/`array`/`string`
+  `any_error`, `allocation`, `node_allocation`.
+  Plain `vector`/`array`/`string`
   copy *deeply* (value semantics) — reach for the `unique_*` variant to forbid copies.
-- **`function_ref` is non-owning** — the referenced callable must outlive it
-  (binding a temporary is UB). `CC_DEFER` captures by reference — keep captured
-  state alive.
+- **`function_ref` is non-owning** — a lambda or functor must outlive it (storing one bound to a temporary is UB).
+  A function or function pointer is held by value.
+- **`CC_DEFER` captures by reference** — keep captured state alive.
 - **`create_uninitialized` requires a trivial `T`.**
 - **`cc::tuple` and `cc::pair` default-construct their elements VALUE-initialized**, unlike `cc::vector`'s uninitialized resizes.
 - **`cc::variant` has no valueless state**, not even after `take<T>()` — that leaves a moved-from alternative behind, at the same index.

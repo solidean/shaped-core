@@ -351,7 +351,7 @@ private:
 /// A 2D layer of a view — where drawings are instanced in the view's logical pixels, y down.
 ///
 /// Nothing occludes what a canvas draws, and later instances draw over earlier ones.
-/// A logical pixel is the window's content scale in texture pixels, so a drawing keeps its physical size on any display.
+/// A logical pixel is the window's display scale in texture pixels, so a drawing keeps its physical size on any display.
 class sv::canvas_ref
 {
 public:
@@ -423,6 +423,10 @@ public:
     /// After that whatever the user orbited it to wins.
     void initial_camera(sv::camera const& cam);
     void initial_orbit(orbit_state const& o);
+
+    /// Puts the orbit controller at `o` now, as `initial_orbit` does on a view's first frame, cancelling any glide in progress.
+    /// Called once, it is a jump the user keeps orbiting from; called every frame, it pins the camera as `camera` would.
+    void reset_orbit(orbit_state const& o);
 
     /// The pose a FLY view starts at, applied only the first time this id is seen — `initial_orbit`'s counterpart.
     /// Seeding the fly controller directly rather than going through a camera is what keeps the yaw and pitch exact: a
@@ -646,6 +650,7 @@ struct sv::view_api
     void camera(sv::camera const& cam) { self().default_view().camera(cam); }
     void initial_camera(sv::camera const& cam) { self().default_view().initial_camera(cam); }
     void initial_orbit(orbit_state const& o) { self().default_view().initial_orbit(o); }
+    void reset_orbit(orbit_state const& o) { self().default_view().reset_orbit(o); }
     void initial_fps(fps_state const& pose) { self().default_view().initial_fps(pose); }
     void camera_style(sv::camera_style style) { self().default_view().camera_style(style); }
     void camera_cut() { self().default_view().camera_cut(); }

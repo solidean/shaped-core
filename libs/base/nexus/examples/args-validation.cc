@@ -53,7 +53,7 @@ nx::args_builder build(server_options& o)
     return args;
 }
 
-/// Parse one line and report what came of it, so the whole point reads as a table.
+/// Parse one line and report what came of it, so the example's output reads as a table.
 void show(cc::string_view label, cc::span<cc::string_view const> line)
 {
     auto options = server_options();

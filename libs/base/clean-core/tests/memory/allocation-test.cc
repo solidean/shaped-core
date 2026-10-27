@@ -404,3 +404,44 @@ TEST("memory_resource - only mimalloc resizes in place")
 
     res.deallocate_bytes(p, usable, 16, res.userdata);
 }
+
+#if CC_HAS_64BIT_POINTERS
+namespace
+{
+struct allocation_refused
+{
+    isize min_bytes = 0;
+};
+
+void throw_refused(isize min_bytes, isize, isize)
+{
+    throw allocation_refused{.min_bytes = min_bytes};
+}
+} // namespace
+
+// a request no 64-bit system grants, so the infallible allocation fails through the handler, in every build ASan does not own
+TEST("allocation - a failed allocate_bytes calls the installed handler, which may throw")
+{
+    if constexpr (CC_HAS_ADDRESS_SANITIZER != 0)
+        SKIP("ASan's allocator aborts on a request it cannot grant, before the handler is reached");
+
+    auto constexpr huge = isize(1) << 60;
+    cc::set_allocation_failure_handler(throw_refused);
+    for (auto const* resource : {cc::default_memory_resource, &cc::system_memory_resource})
+    {
+        byte* p = nullptr;
+        auto refused = isize(0);
+        try
+        {
+            (void)resource->allocate_bytes(&p, huge, huge, 64, resource->userdata);
+        }
+        catch (allocation_refused const& e)
+        {
+            refused = e.min_bytes;
+        }
+        CHECK(refused == huge);
+        CHECK(p == nullptr);
+    }
+    cc::set_allocation_failure_handler(nullptr);
+}
+#endif

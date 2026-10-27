@@ -767,7 +767,7 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
     REQUIRE(asset.has_value());
     REQUIRE(asset.value().meshes.size() == 1);
 
-    // The whole point of the CPU/GPU split: what the loader produced needs no adaptation to become a resource.
+    // With the CPU/GPU split, what the loader produced needs no adaptation to become a resource.
     auto const mesh = m.create_mesh(asset.value().meshes[0]);
     CHECK(mesh.geometry != sv::mesh_id::invalid);
     CHECK(mesh.triangle_count == 2);
@@ -950,8 +950,8 @@ ASYNC_INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seede
         = u32_at(cc::span<byte const>(m.build_instance_parameters(m.get_instance(instance))), slot_offset);
     CHECK(while_pending != element_of(m, texture));
 
-    // Once it lands the same block names the real thing, with no permutation change in between — which is the point
-    // of substituting at the slot rather than letting the sample lose to a coarser rank.
+    // Once it lands the same block names the real thing, with no permutation change in between, because the
+    // pending texture is substituted at the slot rather than letting the sample lose to a coarser rank.
     m.wait_for_pending_uploads();
     CHECK(m.textures.get(texture).state != sv::residency::pending);
     auto const once_resident

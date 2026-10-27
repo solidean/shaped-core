@@ -160,7 +160,7 @@ def run(args: argparse.Namespace, ctx: Context) -> None:
             if args.pin:
                 command.append("--benchmark-pin")
 
-            # Mirrored: reading the report as it comes out is the entire point of the command.
+            # Mirrored, so the report reads as it comes out.
             result = dev.run_step(
                 command, step_type="benchmark", name=target,
                 build_dir=preset.build_dir, cwd=ctx.root,

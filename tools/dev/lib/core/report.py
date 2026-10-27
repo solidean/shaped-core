@@ -63,13 +63,17 @@ def print_build_failure(results: list[StepResult], presets: list[Preset], root: 
 
 
 def summarize_build(
-    build_steps: list[StepResult], built_files: int, presets: list[Preset]
+    build_steps: list[StepResult], built_files: int, presets: list[Preset], *, targets: int | None
 ) -> None:
-    """Print the success summary for a build phase (callers handle failures)."""
+    """Print the success summary for a build phase (callers handle failures).
+
+    `targets` is how many were asked for, since one step builds them all; None means the whole project.
+    """
     total_s = sum(r.duration_s for r in build_steps)
+    what = f"{targets} target(s)" if targets is not None else "all targets"
     ui.write_line(
         console.green(
-            f"\nBuilt {built_files} file(s) across {len(build_steps)} target(s), "
+            f"\nBuilt {built_files} file(s) for {what}, "
             f"{len(presets)} preset(s) in {fmt_dur(total_s)}."
         ))
 
@@ -238,7 +242,7 @@ def summarize_check_timing(
 
     `check` is the longest thing anyone runs here, and until now it reported only a total — so "it takes forever" could
     not be turned into "which preset, and was it the build or the tests".
-    That is the whole point of this: it is a measurement, not a gate, and it never changes the verdict.
+    This answers that: it is a measurement, not a gate, and it never changes the verdict.
 
     A preset whose tests exceed `slow_test_s` is called out, because a suite that slow is a bug report waiting to be
     written rather than a fact about the machine.

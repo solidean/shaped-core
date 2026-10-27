@@ -219,6 +219,15 @@ A pattern with the top bit set belongs in a `uint`, or is built with `int.from_b
 Folding literals, which the [literal-types](../../incubator/literal-types.md) incubator sketches, makes that expression an error rather than a silent `0`.
 Refusing it now means nothing written today changes meaning when folding lands, which is CHK-257's reason carried over to the day `int` gained a `/`.
 
+## CHK-394
+
+`1 + 2` was the `int` sum of two literals, so it did not take a `float` parameter that `3` takes, and `(1 + 2) * 0.5` had no overload.
+Folding makes "what is the type of `1 + 2`" stop being a question: it is the literal `3`, which converts as `3` does.
+The value is the language's, not a target's: an integer is held in 64 bits as a written literal is, and is judged where its type settles, so an overflow is an error rather than a silent wrap.
+A float folds in 64 bits and rounds once to the type it settles at; a target that computed the same expression in 32 bits could round twice, which this rounding never does.
+Only the prelude's operators fold, since a program's own operator is a function whose body the literals are handed to.
+The incubator's open questions stay open: whether a literal type survives inside a tuple, and what a generic function sees.
+
 ## CHK-81
 
 A literal converting by a call of the type's name gets defaults, named arguments, named-only parameters and the evaluation order from the call rules.
@@ -391,6 +400,14 @@ It may come later as sugar over these parameters, and the [stage-interfaces](../
 
 The two axes and their names are WGSL's, which are exactly what every target has: HLSL's qualifiers and MSL's attributes spell the same combinations.
 An integer member must say `.flat` rather than being flat by default, because which vertex's value wins is part of what it means: a primitive id is right only because the first vertex's is taken.
+
+## CHK-393
+
+Every stage input is non-uniform by CHK-283, which is right for what varies per pixel and wrong for a value one draw hands every pixel.
+A renderer that pulls its instance through a flat varying then marks every bindless index `nonuniform`, and some hardware pays a loop per marked access.
+The mark is an explicit claim that the vertex stage proves, rather than an inference across the stages of a pipeline, so the source says why an index is unmarked.
+Uniform across a draw is enough: Vulkan defines dynamic uniformity over the invocations of one draw command, a quad never spans two primitives, and so never two draws.
+The rule is strict and relaxable: inferring the claim from what a vertex stage writes would accept every program it accepts now.
 
 ## CHK-275
 

@@ -19,6 +19,9 @@ add_library(shaped-rendering
     src/shaped-rendering/nrd_denoise_routine.cc
     src/shaped-rendering/oidn_denoise_routine.cc
     src/shaped-rendering/fsr_upscale_routine.cc
+    src/shaped-rendering/metalfx_rr_routine.cc
+    src/shaped-rendering/metalfx_upscale_routine.cc
+    src/shaped-rendering/impl/metalfx_passes.cc
     src/shaped-rendering/impl/tza.cc
     src/shaped-rendering/impl/oidn_network.cc
     src/shaped-rendering/compression/bc_compress_routine.cc
@@ -60,6 +63,11 @@ target_sources(shaped-rendering
     src/shaped-rendering/oidn_denoise_routine.hh
     src/shaped-rendering/fsr_upscale_routine.hh
     src/shaped-rendering/impl/fsr_backend.hh
+    src/shaped-rendering/metalfx_rr_routine.hh
+    src/shaped-rendering/metalfx_upscale_routine.hh
+    src/shaped-rendering/impl/metalfx_backend.hh
+    src/shaped-rendering/impl/metalfx_passes.hh
+    src/shaped-rendering/impl/jitter_sequence.hh
     src/shaped-rendering/impl/denoise_images.hh
     src/shaped-rendering/compression/bc_compress_routine.hh
     src/shaped-rendering/raster_box_filter_mipmap_routine.hh
@@ -174,6 +182,20 @@ else()
     unset(SC_DLSS_RUNTIME CACHE)
 endif()
 
+# Apple MetalFX's temporal upscaler, wherever the Metal backend is built.
+#
+# It encodes through sg's Metal native scope and links the framework through metal-cpp-metalfx, both PRIVATE: no
+# public header of ours names a Metal type.
+# Without the backend the routine still exists and reports `unsupported`, as the DLSS member does without its SDK.
+if(TARGET shaped-graphics-metal AND TARGET metal-cpp-metalfx)
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/metalfx_backend.cc)
+    target_link_libraries(shaped-rendering PRIVATE shaped-graphics-metal metal-cpp-metalfx)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_METALFX=1)
+else()
+    target_sources(shaped-rendering PRIVATE src/shaped-rendering/impl/metalfx_null.cc)
+    target_compile_definitions(shaped-rendering PUBLIC SR_HAS_METALFX=0)
+endif()
+
 # AMD FSR 3.1's upscaler, where its sources were fetched (extern/fidelityfx).
 #
 # AMD's host code joins this library's objects and reaches the GPU only through the backend in impl/fsr_backend.cc.
@@ -272,6 +294,8 @@ sc_add_shader_package(
         fsr_prepare_depth.sgl:*
         fsr_clear_float.sgl:*
         fsr_clear_uint.sgl:*
+        metalfx_prepare.sgl:*
+        metalfx_copy_out.sgl:*
         box_filter_mipmap.sgl:*
 )
 
@@ -386,6 +410,8 @@ if(SC_BUILD_TESTS)
             tests/nn-resample-test.cc
             tests/slug-routine-test.cc
             tests/slug-traced-test.cc
+            tests/metalfx-test.cc
+            tests/dlss-rr-jitter-test.cc
         )
         target_link_libraries(shaped-rendering-test PRIVATE ${_sr_test_backends})
 
@@ -440,6 +466,29 @@ if(SC_BUILD_TESTS)
         else()
             target_sources(shaped-rendering-test PRIVATE tests/oidn_reference_null.cc)
         endif()
+    endif()
+
+    # SGL against the hand-written HLSL each of these shaders was ported from, timed on a dx12 device.
+    # The HLSL is kept under tests/bench/shaders as it stood before the port, and nothing but the benchmark reads it.
+    if(_sr_test_backends AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
+        target_sources(shaped-rendering-test PRIVATE tests/bench/sgl-against-hlsl-benchmark.cc)
+        sc_add_shader_package(
+            TARGET     shaped-rendering-test
+            NAME       sr_bench_hlsl_shaders
+            NAMESPACE  sr_bench::hlsl
+            SOURCE_DIR tests/bench/shaders
+            LANGUAGE   hlsl
+            SHADERS
+                atrous_denoise.hlsl:compute:main_cs
+                atrous_denoise.hlsl:binding:atrous_bindings
+                atrous_denoise.hlsl:constants:gConstants
+                svgf_atrous.hlsl:compute:main_cs
+                svgf_atrous.hlsl:binding:svgf_atrous_bindings
+                svgf_atrous.hlsl:constants:gConstants
+                nn_conv.hlsl:compute:main_cs
+                nn_conv.hlsl:binding:nn_conv_bindings
+                nn_conv.hlsl:constants:gConstants
+        )
     endif()
 
     # slib imports dxcompiler.dll wherever DXC was fetched, so the binary does not start without it, and dxil.dll signs what it emits.

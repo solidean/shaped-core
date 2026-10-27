@@ -1,5 +1,6 @@
 #pragma once
 
+#include <babel-data/data/json.hh>
 #include <babel-serializer/fwd.hh>
 #include <clean-core/common/utility.hh> // cc::memcpy
 #include <clean-core/container/pinned_data.hh>
@@ -227,17 +228,53 @@ struct babel::gltf::asset_info
 /// read_options::resolve_uri, and stays unresolved without it.
 struct babel::gltf::buffer
 {
+    i32 json_node = -1;  // its object in data::json, which data::json_of reads
     cc::string uri;      // exactly as written; empty for the GLB BIN chunk
     i64 byte_length = 0; // the declared byteLength
     /// The buffer's bytes; a zero-copy subview of the read input whenever they came from it.
     /// resolved implies data.size() == byte_length, so a caller never has to re-check the length.
     cc::pinned_data<byte const> data;
     bool resolved = false; // false with empty data means "an external URI nobody fetched"
+    /// EXT_meshopt_compression's placeholder: a buffer whose every view decodes from another one.
+    /// The reader leaves it unresolved and fetches nothing for it, uri or not.
+    bool is_fallback = false;
+};
+
+/// How EXT_meshopt_compression packed a bufferView.
+enum class babel::gltf::meshopt_mode : babel::u8
+{
+    attributes, // vertex data, `byte_stride` bytes per element
+    triangles,  // a triangle list's indices
+    indices,    // any other index sequence
+};
+
+/// The filter EXT_meshopt_compression applied to attributes before packing them.
+enum class babel::gltf::meshopt_filter : babel::u8
+{
+    none,
+    octahedral,  // unit vectors, as signed normalized 8- or 16-bit components
+    quaternion,  // unit quaternions, as signed normalized 16-bit components
+    exponential, // floats, as a shared 8-bit exponent and a 24-bit mantissa per component
+    color,       // colors, as 8- or 16-bit YCoCg
+};
+
+/// A bufferView's EXT_meshopt_compression, as the file wrote it.
+/// The packed bytes are `byte_length` bytes of `buffer` from `byte_offset`, and decode to `count` elements of `byte_stride` bytes.
+struct babel::gltf::meshopt_compression
+{
+    buffer_index buffer = buffer_index::invalid;
+    i64 byte_offset = 0;
+    i64 byte_length = 0;
+    i64 byte_stride = 0;
+    i64 count = 0;
+    meshopt_mode mode = meshopt_mode::attributes;
+    meshopt_filter filter = meshopt_filter::none;
 };
 
 /// One `bufferViews` entry: a window into a buffer, optionally with a vertex stride.
 struct babel::gltf::buffer_view
 {
+    i32 json_node = -1; // its object in data::json, which data::json_of reads
     buffer_index buffer = buffer_index::invalid;
     i64 byte_offset = 0;
     i64 byte_length = 0;
@@ -246,12 +283,22 @@ struct babel::gltf::buffer_view
     i64 byte_stride = 0;
     buffer_target target = buffer_target::none;
     cc::string name;
+
+    /// The view's EXT_meshopt_compression; absent for a plain view.
+    /// `buffer`, `byte_offset` and `byte_length` above are then the fallback's, and name no bytes worth reading.
+    cc::optional<meshopt_compression> meshopt;
+    /// The extension that decodes this view, EXT_meshopt_compression or one the caller registered; empty for a plain view.
+    cc::string decoded_by;
+    /// What that extension decoded: `byte_length` bytes, the whole view, which view_of reads in place of the buffer.
+    /// Absent when it could not decode it, which `data::issues` records; view_of then refuses the view.
+    cc::optional<cc::pinned_data<byte const>> decoded;
 };
 
 /// One `accessors` entry: typed elements inside a bufferView.
 /// Sparse accessors are rejected by read, so a parsed accessor is always dense.
 struct babel::gltf::accessor
 {
+    i32 json_node = -1;                                         // its object in data::json, which data::json_of reads
     buffer_view_index buffer_view = buffer_view_index::invalid; // invalid == the spec's implicit all-zero data
     i64 byte_offset = 0;                                        // relative to the bufferView's own byte_offset
     component_type component = component_type::invalid;
@@ -265,6 +312,12 @@ struct babel::gltf::accessor
     i32 bound_count = 0;
 
     cc::string name;
+
+    /// The registered extension that decodes this accessor; empty for one read through its bufferView.
+    cc::string decoded_by;
+    /// What it decoded: `count` elements, `element_size()` apart, which view_of reads in place of a bufferView.
+    /// Absent when it could not decode them, which `data::issues` records; view_of then refuses the accessor.
+    cc::optional<cc::pinned_data<byte const>> decoded;
 
     /// Components per element: 1 / 2 / 3 / 4 / 4 / 9 / 16 by `type`.
     [[nodiscard]] int component_count() const
@@ -347,6 +400,7 @@ struct babel::gltf::attribute
 /// One primitive of a mesh: a run of attributes plus the optional index and material references.
 struct babel::gltf::primitive
 {
+    i32 json_node = -1;      // its object in data::json, which data::json_of reads
     i32 first_attribute = 0; // run in data.attributes
     i32 attribute_count = 0;
     accessor_index indices = accessor_index::invalid;  // invalid == a non-indexed draw
@@ -357,6 +411,7 @@ struct babel::gltf::primitive
 /// One `meshes` entry: a run of primitives.
 struct babel::gltf::mesh
 {
+    i32 json_node = -1;      // its object in data::json, which data::json_of reads
     i32 first_primitive = 0; // run in data.primitives
     i32 primitive_count = 0;
     cc::string name;
@@ -365,6 +420,7 @@ struct babel::gltf::mesh
 /// One `nodes` entry of the scene graph.
 struct babel::gltf::node
 {
+    i32 json_node = -1;  // its object in data::json, which data::json_of reads
     i32 first_child = 0; // run in data.node_children
     i32 child_count = 0;
     mesh_index mesh = mesh_index::invalid;
@@ -398,6 +454,7 @@ struct babel::gltf::node
 /// One `scenes` entry: a run of root nodes.
 struct babel::gltf::scene
 {
+    i32 json_node = -1; // its object in data::json, which data::json_of reads
     i32 first_node = 0; // run in data.scene_nodes
     i32 node_count = 0;
     cc::string name;
@@ -415,6 +472,7 @@ struct babel::gltf::texture_ref
 /// The KHR_materials_* extensions are not interpreted; their raw JSON is skipped.
 struct babel::gltf::material
 {
+    i32 json_node = -1; // its object in data::json, which data::json_of reads
     tg::vec4f base_color_factor = tg::vec4f(1, 1, 1, 1);
     f32 metallic_factor = 1;
     f32 roughness_factor = 1;
@@ -438,6 +496,7 @@ struct babel::gltf::material
 /// One `textures` entry: an image plus how to sample it.
 struct babel::gltf::texture
 {
+    i32 json_node = -1;                             // its object in data::json, which data::json_of reads
     sampler_index sampler = sampler_index::invalid; // invalid == the spec's default sampler
     image_index source = image_index::invalid;
     cc::string name;
@@ -447,6 +506,7 @@ struct babel::gltf::texture
 /// Hand `data` to babel::image::read when you want them.
 struct babel::gltf::image
 {
+    i32 json_node = -1;   // its object in data::json, which data::json_of reads
     cc::string uri;       // exactly as written; empty for a bufferView-backed image
     cc::string mime_type; // "image/png" / "image/jpeg"; may be empty for a URI image
     buffer_view_index buffer_view = buffer_view_index::invalid;
@@ -459,6 +519,7 @@ struct babel::gltf::image
 /// One `samplers` entry.
 struct babel::gltf::sampler
 {
+    i32 json_node = -1; // its object in data::json, which data::json_of reads
     filter mag_filter = filter::none;
     filter min_filter = filter::none;
     wrap_mode wrap_s = wrap_mode::repeat;
@@ -473,6 +534,7 @@ struct babel::gltf::sampler
 /// `intensity` is in candela for a point or spot and in lux for a directional light, as the extension specifies.
 struct babel::gltf::light
 {
+    i32 json_node = -1; // its object in data::json, which data::json_of reads
     light_type type = light_type::unknown;
 
     /// linear RGB
@@ -616,11 +678,28 @@ struct babel::gltf::data
     cc::vector<issue> issues;
 
     /// `extensionsUsed` / `extensionsRequired`, recorded verbatim.
-    /// KHR_lights_punctual is the one extension this reader interprets.
-    /// Any other required one never reaches a caller: read fails on it, because the spec says a client that cannot
-    /// support a required extension must refuse the file.
+    /// KHR_lights_punctual and EXT_meshopt_compression are the extensions this reader interprets.
+    /// Any other required one never reaches a caller unless it is one of `read_options::extensions`: read fails
+    /// on it, because the spec says a client that cannot support a required extension must refuse the file.
     cc::vector<cc::string> extensions_used;
     cc::vector<cc::string> extensions_required;
+
+    /// The parsed JSON itself, for what this reader does not model: a vendor extension, `extras`, anything unknown.
+    /// Empty unless read_options::keep_json_document was set; each element's `json_node` names its object here either way.
+    babel::json::document json;
+
+    /// The element's own JSON object, `extensions` and `extras` included.
+    /// An invalid ref for an element built by hand, and for every element when the read did not keep the document.
+    /// The ref points into this data, so it is good for as long as the data is neither moved nor destroyed.
+    template <class Element>
+    [[nodiscard]] babel::json::ref json_of(Element const& e) const
+    {
+        return json.node_count() > 0 ? babel::json::ref(&json, e.json_node) : babel::json::ref();
+    }
+    [[nodiscard]] babel::json::ref json_root() const
+    {
+        return json.node_count() > 0 ? json.root() : babel::json::ref();
+    }
 
     cc::vector<buffer> buffers;
     cc::vector<buffer_view> buffer_views;
@@ -757,6 +836,48 @@ namespace babel::gltf
 
 } // namespace babel::gltf
 
+/// What a buffer-view hook decodes: the view and its extension's JSON object, in the document as read so far.
+/// Every buffer is resolved, and every bufferView and accessor parsed, when a hook runs.
+struct babel::gltf::buffer_view_decode
+{
+    data const& doc;
+    buffer_view_index view = buffer_view_index::invalid;
+    babel::json::ref extension;
+};
+
+/// What an accessor hook decodes: the accessor and its extension's JSON object.
+/// Every bufferView is decoded by then, so a hook may read through view_of.
+struct babel::gltf::accessor_decode
+{
+    data const& doc;
+    accessor_index accessor = accessor_index::invalid;
+    babel::json::ref extension;
+};
+
+/// A hook's answer: the decoded bytes, nullopt to leave the element undecoded (recorded as an issue), or an error failing the read.
+namespace babel::gltf
+{
+using decoded_bytes = cc::result<cc::optional<cc::pinned_data<byte const>>>;
+}
+
+/// A glTF extension the caller implements, registered through read_options::extensions.
+///
+/// Registering one is what lets a file require it, and what keeps its use off the issue list.
+/// An extension that only adds information needs no hook: the caller reads it afterwards, through data::json_of.
+/// One that changes how bytes decode states it here, and view_of then reads what its hook returned.
+/// At most one extension may decode any one element; a second is an error, the reader's own included.
+struct babel::gltf::extension
+{
+    cc::string_view name;
+
+    /// Decodes a bufferView carrying the extension into exactly its `byteLength` bytes.
+    cc::function_ref<decoded_bytes(buffer_view_decode const&)> decode_buffer_view;
+
+    /// Decodes an accessor carrying the extension into its `count` elements, tightly packed.
+    /// Runs after every bufferView is decoded; an accessor may carry the extension in place of a bufferView.
+    cc::function_ref<decoded_bytes(accessor_decode const&)> decode_accessor;
+};
+
 /// Reader knobs.
 /// Every default means "touch nothing outside the input bytes".
 struct babel::gltf::read_options
@@ -767,6 +888,22 @@ struct babel::gltf::read_options
     /// The URI arrives exactly as written: percent-decoding and joining against a base path are the
     /// resolver's job, because babel owns no filesystem policy.
     cc::function_ref<cc::result<cc::pinned_data<byte const>>(cc::string_view uri)> resolve_uri;
+
+    /// Extensions the caller implements, beside the ones this reader does: see gltf::extension.
+    /// A file may require one and still read, and using one is not recorded as an issue.
+    /// A name must be unique among them and must not be one this reader implements itself.
+    /// The extensions, their names and their hooks must outlive the read.
+    cc::span<extension const> extensions;
+
+    /// Keep the parsed JSON in data::json, for json_of to reach what this reader does not model.
+    /// Off by default: the document costs about as much memory again as the parsed structure, for a reader that never asks.
+    bool keep_json_document = false;
+
+    /// The most bytes the reader's own decoders may produce together; more is an error before anything is decoded.
+    /// Today that is EXT_meshopt_compression, whose few packed bytes can declare any size.
+    /// A caller's hooks allocate their own output, so they are not counted here.
+    /// The largest `i64` disables the check.
+    i64 max_decoded_bytes = i64(1) << 30;
 };
 
 namespace babel::gltf

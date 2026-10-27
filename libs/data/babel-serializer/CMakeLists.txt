@@ -18,6 +18,7 @@ add_library(babel-serializer
     src/babel-serializer/image/dds_decode.cc
     src/babel-serializer/image/hdr.cc
     src/babel-serializer/image/image.cc
+    src/babel-serializer/image/ktx2.cc
     src/babel-serializer/image/jpg.cc
     src/babel-serializer/image/pfm.cc
     src/babel-serializer/image/png.cc
@@ -54,6 +55,7 @@ target_sources(babel-serializer
     src/babel-serializer/image/hdr.hh
     src/babel-serializer/image/image.hh
     src/babel-serializer/image/jpg.hh
+    src/babel-serializer/image/ktx2.hh
     src/babel-serializer/image/pfm.hh
     src/babel-serializer/image/png.hh
     src/babel-serializer/image/tga.hh
@@ -99,6 +101,10 @@ target_link_libraries(babel-serializer PRIVATE spng stb)
 # PRIVATE, and ufbx.h is included by geometry/fbx.cc alone.
 target_link_libraries(babel-serializer PRIVATE ufbx)
 
+# meshoptimizer's decoders are committed in-source too (extern/meshoptimizer): babel::gltf's EXT_meshopt_compression.
+# PRIVATE, and meshoptimizer.h is included by geometry/gltf.cc alone.
+target_link_libraries(babel-serializer PRIVATE meshoptimizer)
+
 # Enable conforming preprocessor for MSVC
 target_compile_options(babel-serializer
     PUBLIC
@@ -121,6 +127,8 @@ if(SC_BUILD_TESTS)
 
         tests/geometry/fbx-test.cc
         tests/geometry/gltf-test.cc
+        tests/geometry/gltf-meshopt-test.cc
+        tests/geometry/gltf-extension-test.cc
         tests/geometry/obj-test.cc
         tests/geometry/stl-test.cc
 
@@ -128,6 +136,7 @@ if(SC_BUILD_TESTS)
         tests/image/dds-test.cc
         tests/image/hdr-test.cc
         tests/image/image-test.cc
+        tests/image/ktx2-test.cc
         tests/image/pfm-test.cc
         tests/image/tga-test.cc
 

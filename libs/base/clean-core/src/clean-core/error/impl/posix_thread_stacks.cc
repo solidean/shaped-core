@@ -218,7 +218,7 @@ void write_number(u64 value, bool hex)
     {
         if (::sem_timedwait(&g_answered, &deadline) != 0)
         {
-            // EINTR is this process's own signals arriving, and waiting through them is the point.
+            // EINTR is this process's own signals arriving, so keep waiting through them.
             if (errno == EINTR)
                 continue;
             return false;

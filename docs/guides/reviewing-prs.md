@@ -508,6 +508,15 @@ Many persistent textures get their lower mip levels as render targets but never 
 The views stayed per epoch, at a create and a destroy per frame for a persistent target, and the reason went into the design doc.
 Before recommending a longer-lived cache, name the usage pattern each row of the benchmark stands for, and the one it leaves out.
 
+**A memo keyed on an object is priced on how often that object is rebuilt.**
+A review recommended remembering, on each TLAS, the shader tables it had already been checked against, so a steady frame would skip a per-list walk of every instance:
+
+```raw
+But usually the TLAS is rebuild every frame. Would once per command list not make more sense then?
+```
+
+A rebuild is a new object, so the memo would never hit, and the per-list walk was already the right granularity.
+
 ### Out-of-order execution invalidates every collapsed maximum
 
 When a change lets work complete out of submission order, find every place that folds a set of values into one number and waits on it.
@@ -709,7 +718,7 @@ The item needed to say the templated version must keep passing the index.
 **The failure is counting from a grep's output rather than from the set the claim is about** — comments, files outside the population, the same file twice.
 One draft carried three wrong counts, and the argument each supported was correct all three times; the finding survives, the credibility does not.
 **Either enumerate the set in the comment, or drop the number.**
-A list of nine paths is checkable and self-correcting while you write it; where a count really is the point, produce it with a command whose output you paste.
+A list of nine paths is checkable and self-correcting while you write it; where the reader needs the count itself, produce it with a command whose output you paste.
 
 ### A number carried out of its source is restated as the quantity it measures
 

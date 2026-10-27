@@ -42,6 +42,11 @@ rules:
     files: [src/clean-core/common/time.cc, src/clean-core/thread/thread.cc]
 
   - kind: allow-include
+    value: <thread>
+    reason: std::this_thread::yield and sleep_for are the portable yield and sleep behind cc::this_thread_yield / cc::this_thread_sleep_secs; threads themselves start through cc::native_thread
+    files: src/clean-core/thread/thread.cc
+
+  - kind: allow-include
     value: [<cstddef>, <cstdint>]
     reason: fwd.hh is where the sized aliases everyone else uses are declared from
     files: src/clean-core/fwd.hh
@@ -221,6 +226,11 @@ rules:
     files: src/clean-core/error/crash_handler.cc
 
   - kind: allow-include
+    value: [<fcntl.h>, <sys/stat.h>, <io.h>, <direct.h>, <unistd.h>, <ctime>]
+    reason: a report file opened, pointed stderr at and named for the time from inside a fault handler, where no allocating stream may run
+    files: src/clean-core/error/crash_handler.cc
+
+  - kind: allow-include
     value: <mutex>
     reason: guards the process-wide DbgHelp session, which is not thread-safe — cc::mutex is layered above this file
     files: src/clean-core/platform/native.cc
@@ -344,6 +354,11 @@ rules:
     value: <pthread.h>
     reason: pthread_setname_np — the POSIX half of cc::set_current_thread_name
     files: src/clean-core/thread/thread.cc
+
+  - kind: allow-include
+    value: [<pthread.h>, <limits.h>, <unistd.h>, <process.h>, <cerrno>]
+    reason: pthread_create with a stack size (PTHREAD_STACK_MIN, sysconf for the page) and _beginthreadex are the only ways to choose a thread's stack — cc::native_thread is the one place that starts an OS thread
+    files: src/clean-core/thread/native_thread.cc
 
   # =========================================================================================================
   # Vendored third-party, each in the one TU that wraps it

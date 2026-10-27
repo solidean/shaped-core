@@ -595,7 +595,7 @@ Build and coexist as many pools as you like; only one may be the installed compu
 A node is a **16 B header** followed by a payload slot; `async<int>` is **64 B — one cache line**, cacheline-aligned so unrelated nodes never share a line.
 
 The `async<T const, E>` layer in between adds nothing: single, non-virtual, member-less inheritance, so the base subobject stays at offset 0 and `sizeof(async<T const, E>) == sizeof(async<T, E>)`.
-That equality is load-bearing rather than incidental: the ops descriptor's size class is computed off the typed node, while `make_shared` allocates the derived one.
+That equality is required, not incidental: the ops descriptor's size class is computed off the typed node, while `make_shared` allocates the derived one.
 So it is pinned by a `static_assert` in `async<T, E>` and by the 64 B guards in the tests.
 
 * **16 B header** — one `atomic<u64>` intrusive refcount plus one `atomic<u64>` control word.
@@ -862,6 +862,12 @@ co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs
 
 A backlog answers "is it done", not "whose is it": work it tracks still carries the context of whatever started it, which is what attributes its logging and profiling.
 
+**`cc::async_abandoned_work()` is the one backlog the runtime fills itself**, with work an awaiter stopped waiting for.
+`cc::async_all` returns on its first failed member, and the members still running go there.
+So do the scheduled or running deps of a parked node torn down because its last handle dropped.
+Both are cold paths: a successful `async_all`, a completion and a poll never touch it.
+A component whose teardown must know that nothing it started still runs settles it after its own backlog, since abandoned work is otherwise awaited by nobody.
+
 ## Ambient context
 
 One opaque word rides the graph, so code anywhere inside a frame can ask **"which logical task is this work part of?"**.
@@ -888,7 +894,7 @@ auto const id = cc::async_ambient_lookup(other_tag());
 
 A node stores the context only as a **resume token**, so a suspended computation resumes under the context it suspended in.
 The token is written **once**, by a thread executing or creating the node — never by one merely waking it.
-That exclusion is load-bearing rather than an optimization.
+That exclusion is for correctness, not an optimization.
 Without it a shared dependency completing under B would stamp B onto A's private continuation, and propagate through A's whole remaining subgraph.
 
 There are exactly three write sites, all inside the per-node spinlock those paths already take:
@@ -910,7 +916,7 @@ That is `cc::impl::async_poll_work_item`, which every dequeue site goes through 
 The three write sites above are what earn that: a node reaching a queue always carries its own token.
 So a null one there means "no context" rather than "inherit whoever dequeued me".
 
-That distinction is invisible on a worker, whose ambient is null anyway, and load-bearing for `participate_until_ready`.
+That distinction is invisible on a worker, whose ambient is null anyway, and required by `participate_until_ready`.
 A participant parks INSIDE the logical task it is blocked on and steals while parked.
 Without the root, every unrelated item it picks up is billed to that task — which a consumer keying off the chain reads as real nesting.
 nexus is the one that shows it: its invocation-cycle guard walks the chain, so a stolen test node chained under a blocked test reports a cycle that does not exist.

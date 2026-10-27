@@ -23,7 +23,7 @@ constexpr isize view_entry_budget = 256;
 
 view_store::view_store()
 {
-    // The two tiers are the point: a view's textures are megabytes and its identity is a handful of bytes, so they
+    // Two tiers, because a view's textures are megabytes and its identity a handful of bytes, so they
     // must not expire on the same schedule.
     _entries.set_limits({.max_idle_frames_payload = view_payload_idle_frames,
                          .max_idle_frames_entry = view_idle_frames,
@@ -89,6 +89,14 @@ u32 view_store::accumulated_frames(view_id id, u64 temporal_id) const
 
     auto const* const slot = st->temporal.get_ptr(temporal_id);
     return slot == nullptr ? 0 : slot->accum_frame;
+}
+
+view_store::accumulation_history view_store::history_of(view_id id, u64 temporal_id) const
+{
+    auto const* const st = _entries.peek_ptr(id);
+    auto const* const slot = st == nullptr ? nullptr : st->temporal.get_ptr(temporal_id);
+    return slot == nullptr ? accumulation_history{}
+                           : accumulation_history{.restarts = slot->restarts, .loading_frames = slot->loading_frames};
 }
 
 u32 view_store::min_accumulated_samples(view_id id) const

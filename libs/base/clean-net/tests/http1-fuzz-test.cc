@@ -150,7 +150,8 @@ struct parse_outcome
 constexpr isize k_max_message = 160;
 } // namespace
 
-TEST("cnet - the http/1.1 parser reads the same message however it is split")
+TEST("cnet - the http/1.1 parser reads the same message however it is split",
+     nx::config::rerun_on("libs/base/clean-net/src/clean-net/http/impl/http1.*"))
 {
     auto test = nx::fuzz::test::create();
 

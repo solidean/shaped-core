@@ -4,9 +4,13 @@
 # to them — so they are grouped by what they are about rather than by the language they run on.
 
 target_sources(shaped-linter-core PRIVATE
+    impl/phrase_match.cc
     no-bare-todo/no_bare_todo.cc
     no-flow-prose/no_flow_prose.cc
     no-long-prose-line/no_long_prose_line.cc
+    no-stock-words/no_stock_words.cc
+    no-whole-point/no_whole_point.cc
+    no-why-it-matters/no_why_it_matters.cc
 )
 
 if(SC_BUILD_TESTS)
@@ -14,5 +18,7 @@ if(SC_BUILD_TESTS)
         no-bare-todo/no_bare_todo-test.cc
         no-flow-prose/no_flow_prose-test.cc
         no-long-prose-line/no_long_prose_line-test.cc
+        no-whole-point/no_whole_point-test.cc
+        no-why-it-matters/no_why_it_matters-test.cc
     )
 endif()

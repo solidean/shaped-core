@@ -57,7 +57,7 @@ namespace cc::impl
 /// Installs the signal handler, reserves the slot, and warms the unwinder.
 ///
 /// Called from cc::install_crash_handler, and idempotent.
-/// Reserving now is the point: the collector runs when the process is already in trouble, and neither it nor the
+/// It reserves now because the collector runs when the process is already in trouble, and neither it nor the
 /// handler may allocate.
 void install_posix_thread_stack_reporter();
 

@@ -15,7 +15,7 @@
 //   - a drag as a FAN: every frame branches from the SAME state, and only the last becomes history;
 //   - the same drag CHAINED: each frame extends the previous one, and the intermediates are dropped on release.
 //
-// The two drag shapes look identical to a user and cost very differently, which is the point of measuring both.
+// The two drag shapes look identical to a user and cost very differently, so both are measured.
 //
 // Run e.g.
 //   uv run dev.py benchmark "bench-vdoc-edit-latency" --timeout 0
@@ -209,7 +209,7 @@ struct stage_shares
 
 /// What a latency measurement is allowed to cost, and why it does not batch.
 ///
-/// **`batch = false` is the whole point.** One sample has to be ONE edit, because the claim under test is about the
+/// **`batch = false`:** one sample has to be ONE edit, because the claim under test is about the
 /// tail: a batch mean smooths away exactly the slow frame a budget is spent against.
 /// A clock pair costs ~14 ns against an edit of tens of microseconds, so per-iteration timing is free here.
 ///
@@ -342,7 +342,7 @@ stage_shares one_fanned_drag(session& s, isize frames)
 ///
 /// The behaviour a user sees is identical — one history entry, produced on release — but every frame is now a
 /// single-parent child, which is the shape both the snapshot and the incremental apply are built for.
-/// Measuring the two side by side is the point: they look the same and cost very differently.
+/// Measured side by side with the fan, because they look the same and cost very differently.
 stage_shares one_chained_drag(session& s, isize frames)
 {
     auto out = stage_shares();

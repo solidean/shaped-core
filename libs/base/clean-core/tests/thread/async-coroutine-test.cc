@@ -148,6 +148,56 @@ TEST("async coroutine - parks on a manual dependency and resumes after the push"
     CHECK(*co->try_value() == 42);
 }
 
+namespace
+{
+struct alignas(64) cache_line_local
+{
+    int value = 0;
+};
+
+struct alignas(256) wide_local
+{
+    int value = 0;
+};
+
+/// Holds an over-aligned local across a suspend, so it lives in the coroutine frame; yields -1 if it is misaligned there.
+template <class Local>
+cc::shared_async<int> coro_over_aligned(cc::shared_async<int> dep)
+{
+    auto local = Local();
+    local.value = co_await dep;
+    co_return reinterpret_cast<isize>(&local) % isize(alignof(Local)) == 0 ? local.value : -1;
+}
+} // namespace
+
+// A frame holds every local that spans a suspend, so the frame must be as aligned as its most aligned local.
+// A frame allocated at a fixed 16 bytes left an alignas(64) worker misaligned in a consumer's export, which UBSan caught.
+// Many frames are alive at once, so a correct answer cannot come from one lucky allocation.
+TEST("async coroutine - an over-aligned local stays aligned in the frame")
+{
+    auto const ext = cc::make_async_manual<int>();
+    auto coros = cc::vector<cc::shared_async<int>>();
+    for (auto i = 0; i < 16; ++i)
+    {
+        coros.push_back(coro_over_aligned<cache_line_local>(ext));
+        coros.push_back(coro_over_aligned<wide_local>(ext));
+    }
+
+    cc::singlethreaded_scheduler sched;
+    cc::async_worker_scope scope(sched);
+    for (auto const& co : coros)
+        co->schedule();
+    sched.drain();
+    ext->push_value(7);
+    sched.drain();
+
+    for (auto const& co : coros)
+    {
+        REQUIRE(co->is_ready());
+        CHECK(*co->try_value() == 7);
+    }
+}
+
 ASYNC_TEST("async coroutine - async_yield reschedules and resumes")
 {
     auto steps = 0;
@@ -498,6 +548,39 @@ TEST("async coroutine - a coroutine parked forever is torn down with the node")
     CHECK(destroyed == 1); // the frame destroys the suspended coroutine, which destroys its locals
 }
 
+namespace
+{
+/// A link of a chain `n` coroutines long, each parked on the next, the last on `bottom`.
+cc::shared_async<int> parked_chain(int n, cc::shared_async<int> bottom, int* destroyed)
+{
+    auto const probe = destruction_probe(destroyed);
+    if (n == 0)
+        co_return co_await bottom;
+    co_return co_await parked_chain(n - 1, cc::move(bottom), destroyed);
+}
+} // namespace
+
+// Each parked frame holds the next node, so tearing one down drops the last reference to the next.
+// A consumer's surface tree walks parked this way 1000 deep, and their teardown recursed until the stack overflowed.
+TEST("async coroutine - a chain of 200000 parked coroutines tears down without recursing per link")
+{
+    auto destroyed = 0;
+    {
+        auto const ext = cc::make_async_manual<int>();
+        auto co = parked_chain(200'000, ext, &destroyed);
+
+        cc::singlethreaded_scheduler sched;
+        cc::async_worker_scope scope(sched);
+        co->schedule();
+        sched.drain();
+        CHECK(!co->is_ready());
+        CHECK(destroyed == 0);
+
+        co = {};
+        CHECK(destroyed == 200'001); // every link, before the drop returned
+    }
+}
+
 // ============================================================================
 // on a real pool
 // ============================================================================
@@ -530,6 +613,44 @@ TEST("async coroutine - a coroutine fan-out tree is correct on a pool")
 {
     cc::async_thread_pool pool;
     CHECK(cc::async_blocking_get_on(pool, coro_sum_tree(10)) == 1024);
+}
+
+namespace
+{
+cc::shared_async<int> coro_await(cc::shared_async<int> dep)
+{
+    co_return co_await dep;
+}
+
+cc::shared_async<int> coro_count_failed(cc::vector<cc::shared_async<int>> awaiters)
+{
+    auto failed = 0;
+    for (auto const& a : awaiters)
+        if ((co_await cc::async_as_result(a)).has_error())
+            ++failed;
+    co_return failed;
+}
+} // namespace
+
+// A dependency can fail on another thread between an awaiter's check for a failure and its check for readiness.
+// Ready then includes failed, so an awaiter that checked in that order resumed and read the value of a failed node.
+// The window is a few instructions, so this races many awaiters against the failure, round after round.
+TEST("async coroutine - a dependency failing while it is awaited on a pool fails every awaiter")
+{
+    cc::async_thread_pool pool;
+    auto const rounds = nx::is_thorough() ? 20000 : 2000;
+    for (auto round = 0; round < rounds; ++round)
+    {
+        auto const dep = cc::make_async_manual<int>();
+        auto awaiters = cc::vector<cc::shared_async<int>>();
+        for (auto i = 0; i < 8; ++i)
+        {
+            awaiters.push_back(coro_await(dep));
+            awaiters.back()->schedule_on(pool);
+        }
+        dep->push_error(cc::async_error::make_error(cc::any_error("failed while awaited")));
+        REQUIRE(cc::async_blocking_get_on(pool, coro_count_failed(cc::move(awaiters))) == 8);
+    }
 }
 
 ASYNC_TEST("async coroutine - async_take moves a move-only value out of the node")

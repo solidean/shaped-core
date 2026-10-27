@@ -43,6 +43,11 @@ option(SC_USE_VENDORED_SPNG "Build the in-tree vendored libspng (OFF expects an 
 # Linked PRIVATE by babel, so ufbx.h never reaches a babel public header.
 option(SC_USE_VENDORED_UFBX "Build the in-tree vendored ufbx (OFF expects an external `ufbx` target)" ON)
 
+# meshoptimizer's decoders, committed in-source: the vertex and index codecs and the vertex filters, three files and one header.
+# They are babel-serializer's EXT_meshopt_compression, the glTF extension that packs vertex and index buffers.
+# The libspng tier again: a few files with no build machinery and no dependencies; linked PRIVATE by babel.
+option(SC_USE_VENDORED_MESHOPTIMIZER "Build the in-tree vendored meshoptimizer decoders (OFF expects an external `meshoptimizer` target)" ON)
+
 # Mbed TLS, committed in-source: the TLS handshake and record layer behind clean-net's TLS connections.
 # Vendored rather than fetched because a build that cannot do HTTPS is not a working build of clean-net -- the same
 # always-present argument zstd and zlib make, and the reason there is no configuration in which this may be absent.
@@ -151,6 +156,10 @@ endif()
 
 if(SC_USE_VENDORED_UFBX)
     add_subdirectory(ufbx)
+endif()
+
+if(SC_USE_VENDORED_MESHOPTIMIZER)
+    add_subdirectory(meshoptimizer)
 endif()
 
 if(SC_USE_VENDORED_MBEDTLS)

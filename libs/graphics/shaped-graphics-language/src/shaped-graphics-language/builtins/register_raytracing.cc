@@ -320,9 +320,9 @@ written write_query(call_context const& ctx)
     case query_op::proceed:
         return {.text = is_hlsl ? cc::format("{}.Proceed()", q) : cc::format("{}.next()", q)};
     case query_op::candidate_is_triangle:
-        return {.text = is_hlsl ? cc::format("({}.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)", q)
-                                : cc::format("({}.get_candidate_intersection_type() == intersection_type::triangle)", q),
-                .binds = precedence::primary};
+        return {.text = is_hlsl ? cc::format("{}.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE", q)
+                                : cc::format("{}.get_candidate_intersection_type() == intersection_type::triangle", q),
+                .binds = precedence::comparison};
     case query_op::commit_triangle:
         return {.text = is_hlsl ? cc::format("{}.CommitNonOpaqueTriangleHit()", q)
                                 : cc::format("{}.commit_triangle_intersection()", q)};
@@ -603,6 +603,29 @@ spelling query_spelling(query_op op)
             .hlsl_names = k_query_hlsl,
             .msl_names = k_query_msl};
 }
+
+/// `RayQuery<…>` around `flags`, each by DXR's name, which is `ray_flags`' own name in capitals behind `RAY_FLAG_`.
+cc::string hlsl_ray_query_type(u32 flags)
+{
+    constexpr cc::string_view names[] = {
+        "FORCE_OPAQUE",
+        "FORCE_NON_OPAQUE",
+        "ACCEPT_FIRST_HIT_AND_END_SEARCH",
+        "SKIP_CLOSEST_HIT_SHADER",
+        "CULL_BACK_FACING_TRIANGLES",
+        "CULL_FRONT_FACING_TRIANGLES",
+        "CULL_OPAQUE",
+        "CULL_NON_OPAQUE",
+        "SKIP_TRIANGLES",
+        "SKIP_PROCEDURAL_PRIMITIVES",
+    };
+    auto text = cc::string();
+    auto bit = 0;
+    for (auto const name : names)
+        if ((flags >> bit++) & 1u)
+            text.appendf("{}RAY_FLAG_{}", text.empty() ? "" : " | ", name);
+    return cc::format("RayQuery<{}>", text.empty() ? cc::string("RAY_FLAG_NONE") : text);
+}
 } // namespace
 
 void sgl::builtins::register_raytracing(registry& r)
@@ -652,6 +675,8 @@ void sgl::builtins::register_raytracing(registry& r)
         .doc = "/// One trace in flight, which only raytracing.sgl steps through.",
         .hlsl = "RayQuery<RAY_FLAG_NONE>",
         .msl = "intersection_query<triangle_data, instancing>",
+        // the template's flags are ORed with the trace's, and a driver may specialize on them
+        .hlsl_flagged = hlsl_ray_query_type,
     });
 
     auto const add = [&](cc::string signature, evaluator evaluate, query_op op, cc::string_view doc)
@@ -667,6 +692,8 @@ void sgl::builtins::register_raytracing(registry& r)
             .writes_through = advances ? written_argument::first : written_argument::none,
             .features = check::feature_set(check::feature::ray_query),
             .declares_only = op == query_op::begin,
+            .flags_argument = op == query_op::trace ? 6 : -1,
+            .reads_only = !advances && op != query_op::begin,
         });
     };
     add("fun ray_query_begin() -> ray_query", nothing, query_op::begin, "/// A query nothing traced yet.");

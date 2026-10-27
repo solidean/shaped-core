@@ -10,6 +10,7 @@
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
+#include <imgui/imgui.h>
 #include <nexus/async-test.hh>
 #include <nexus/rec.hh>
 #include <nexus/test.hh>
@@ -413,7 +414,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
     co_await cc::async_settled(sv::background_work(ctx));
     CHECK(traced_before_timeout);
 
-    // Nothing at the requested path is the whole point: that absence is what dev.py reads as a failed capture.
+    // Nothing at the requested path, because that absence is what dev.py reads as a failed capture.
     CHECK(cc::file_read_stream_adapter::open(path).has_error());
 
     // And the partial is a complete file, decodable, so it is worth opening.
@@ -463,6 +464,52 @@ INVOCABLE_TEST("sv - a capture waits for every frame that holds it", (sg::contex
     CHECK(frames == 5);
     CHECK(cc::file_read_stream_adapter::open(path).has_value());
     cc::remove_file(path);
+}
+
+// A sequence capture shows the request's clock, not the wall's, and moves it only once a frame is written.
+//
+// The body animating off `frame::seconds` is the whole of what a video needs, so the clock it sees is the contract:
+// the start time, then one step of 1 / fps per frame, never a wall-clock instant in between.
+// A stride writes only some frames, and still renders every one, so the history a temporal denoiser sees is the same.
+INVOCABLE_TEST("sv - a sequence capture steps the frame clock and writes every stride-th frame",
+               (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto const pattern = cc::format("{}/sv-capture-sequence_%03d.jpg", cc::temp_directory_path());
+    for (auto i = 0; i < 5; ++i)
+        cc::remove_file(sr::capture_frame_path(pattern, i)); // leftovers from an earlier run would make the checks vacuous
+
+    auto const request = sr::capture_request{.active = true,
+                                             .output_path = pattern,
+                                             .size = tg::vec2i(32, 24),
+                                             .accumulate = 1,
+                                             .timeout_seconds = 120.0,
+                                             .frames = 5,
+                                             .fps = 4.0,
+                                             .start_seconds = 1.0,
+                                             .stride = 2};
+
+    auto seen = cc::vector<double>();
+    for (auto f : sv::interactive(ctx, "sv-test/capture-sequence", {}, request))
+    {
+        // a view with nothing traced settles on its first frame, so each frame here is one sequence frame, unheld
+        (void)f.window().view();
+        seen.push_back(f.seconds());
+
+        REQUIRE(seen.size() < 200); // the fifth frame ends the run; this only keeps a hang from becoming a timeout
+    }
+
+    REQUIRE(seen.size() == 5);
+    for (auto i = 0; i < 5; ++i)
+        CHECK(seen[i] == 1.0 + 0.25 * i).context(cc::format("frame {} saw {}s", i, seen[i]));
+
+    for (auto i = 0; i < 5; ++i)
+    {
+        auto const path = sr::capture_frame_path(pattern, i);
+        CHECK(cc::file_read_stream_adapter::open(path).has_value() == (i % 2 == 0)).context(path);
+        cc::remove_file(path);
+    }
 }
 
 // A light's id is hashed under the frame's id stack exactly as a view's is, so the same name under two scopes names
@@ -628,4 +675,47 @@ INVOCABLE_TEST("sv - a frame loop with nothing to trace still lands its streamed
     // "it drains" quietly stops testing anything.
     CHECK(streamed_at_peak > 0).context("nothing was ever in flight, so this test would pass with the sweep removed");
     CHECK(resident).context(cc::format("the payloads were still in flight after {} frames", frames));
+}
+
+// frame::imgui on a headless viewer: the first call brings imgui up, every frame after opens exactly one imgui frame, and the viewer takes the context down with it.
+// Headless still draws the UI, sized to the offscreen target, so a capture shows what the window would.
+ASYNC_INVOCABLE_TEST("sv - frame imgui opens one imgui frame per frame and ends with the viewer",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    REQUIRE(ImGui::GetCurrentContext() == nullptr);
+
+    {
+        auto v_r = sv::viewer::try_create(ctx, "sv-test/imgui", {.width = 160, .height = 120, .headless = true});
+        REQUIRE(v_r.has_value());
+        auto viewer = cc::move(v_r.value());
+
+        auto frames = 0;
+        auto first_frame_count = 0;
+        for (auto f : viewer.frames())
+        {
+            REQUIRE(f.imgui());
+            // a second call joins the imgui frame the first opened rather than starting another
+            REQUIRE(f.imgui());
+            if (frames == 0)
+                first_frame_count = ImGui::GetFrameCount();
+            CHECK(ImGui::GetFrameCount() == first_frame_count + frames);
+            CHECK(ImGui::GetIO().DisplaySize.x == 160.0f);
+
+            ImGui::Begin("options");
+            ImGui::Text("frame %d", frames);
+            ImGui::End();
+
+            // nothing feeds a headless viewer input, so imgui never wants any
+            CHECK(!f.imgui_wants_keyboard());
+            CHECK(!f.imgui_wants_mouse());
+
+            if (++frames == 4)
+                viewer.request_close();
+        }
+        CHECK(frames == 4);
+        CHECK(ImGui::GetCurrentContext() != nullptr);
+        co_await cc::async_settled(sv::background_work(ctx));
+    }
+    CHECK(ImGui::GetCurrentContext() == nullptr);
 }

@@ -18,7 +18,7 @@ The result surfaces as a small, copyable value type (the query analogue of a `by
 - `co_await ctx.idle_completion()` then `try_get_ticks()` / `try_get_seconds()` — the whole-device path.
   It settles only after the recording list is submitted.
 
-## How the dx12 backend implements it (the load-bearing decisions)
+## How the dx12 backend implements it
 
 **Leased heaps, bump-allocated slots.**
 A [`dx12_query_system`](../../backends/dx12/src/shaped-graphics/backends/dx12/dx12_query.hh) owns a free-list **pool** of small (4096-slot) `ID3D12QueryHeap`s.

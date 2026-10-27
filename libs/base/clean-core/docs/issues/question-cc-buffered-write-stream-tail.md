@@ -18,7 +18,7 @@ A truncated scan is flat-filled from the last value read, so it read as a bug in
 **A silent failure whose symptom points somewhere else is the thing to fix**, and the fix is not obvious.
 
 - A destructor cannot do it: the write position lives in the stream, and the adapter holds only the buffer, so it has nothing to flush with.
-- Moving it into the stream's destructor puts a non-trivial destructor on a type whose whole point is that every operation inlines.
+- Moving it into the stream's destructor puts a non-trivial destructor on a type built so that every operation inlines.
   It also swallows the one error — a full disk — that must not be swallowed.
 - A whole-file helper was considered and rejected: too easy to get wrong, and it does not fit the filesystem abstraction this is heading toward.
 

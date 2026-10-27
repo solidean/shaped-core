@@ -48,8 +48,9 @@ struct sr::window_description
     /// Copied at creation; set_title changes it later.
     cc::string title = "shaped window";
 
-    /// Client-area size in pixels; both must be > 0.
-    /// This is the drawable size a swapchain matches, not the outer frame size.
+    /// Client-area size in logical units (points on macOS); both must be > 0.
+    /// The window is created high-density, so on a 2x display its back buffer comes out twice this in each axis — window::width()/height() report that pixel size.
+    /// This is the client area, not the outer frame size.
     int width = 1280;
     int height = 720;
 
@@ -80,6 +81,12 @@ struct sr::window_description
 
 /// A single OS window.
 ///
+/// Two units are in play, and every member names which one it takes.
+/// **Pixels** are what a swapchain is sized in: width()/height() and every input_event position.
+/// **Logical units** are what the window manager places and sizes windows in: window_description's size, logical_size, set_size, and the desktop coordinates of position and display_info.
+/// pixel_density converts between them, and is 1 wherever the platform does no high-density scaling (Windows, X11, a headless system).
+/// Input is pixels rather than the logical units SDL reports, because a renderer compares a cursor against rendered pixels, and a conversion owed at every hit test is the one that gets forgotten.
+///
 /// Created from a window_system, which must outlive it.
 /// Destroying the window closes it immediately.
 /// Every method must run on the thread that created that system — see window_system.
@@ -104,22 +111,37 @@ public:
     /// Invalid under a headless window_system, and for a windowing system sr has no mapping for — nothing can present against those.
     [[nodiscard]] sg::native_window native_window() const;
 
-    /// Client-area size in pixels, as of the last poll_events.
+    /// Client-area size in pixels, as of the last poll_events — the size a swapchain on this window has.
     /// Both are 0 while minimized — skip the frame rather than sizing a swapchain against that.
     [[nodiscard]] int width() const { return _width; }
     [[nodiscard]] int height() const { return _height; }
 
+    /// Client-area size in logical units, as of the last poll_events or the last set_size — the unit window_description and set_size take.
+    /// (0, 0) while minimized, like width()/height().
+    [[nodiscard]] tg::vec2i logical_size() const { return _logical_size; }
+
+    /// Pixels per logical unit, as of the last poll_events: 2 on a Retina display, 1 wherever the platform does no high-density scaling.
+    /// It changes when the window moves to a display of another density, together with width()/height().
+    /// Not necessarily whole — a fractionally scaled wayland output has 1.5.
+    [[nodiscard]] float pixel_density() const { return _pixel_density; }
+
+    /// Pixels per logical UI unit: pixel_density times the content scale of the display the window is on (see display_info::content_scale).
+    /// What a UI multiplies its sizes by to come out at the size the user chose — 2 on a Retina Mac, 1.5 on Windows at 150%.
+    [[nodiscard]] float display_scale() const { return _display_scale; }
+
     /// Top-left of the client area in desktop coordinates, as of the last poll_events or the last set_position.
+    /// Desktop coordinates are logical units, the same space display_info reports in.
     /// Multi-monitor desktops put origins wherever they like, so a coordinate may be negative.
     [[nodiscard]] tg::pos2i position() const { return _position; }
 
-    /// Moves the window so its client area starts at `position`.
+    /// Moves the window so its client area starts at `position`, in desktop coordinates.
     /// Takes effect immediately, and position() reads back the new value without waiting for a poll.
     /// The window manager may refuse or adjust the move — the next poll_events reports where it actually landed.
     void set_position(tg::pos2i position);
 
-    /// Resizes the client area; both components must be > 0.
-    /// Like set_position, this is write-through: width()/height() read back the request at once, and the next poll_events reports what the window manager granted.
+    /// Resizes the client area to `size` logical units; both components must be > 0.
+    /// Like set_position, this is write-through: logical_size() reads back the request at once, and width()/height() the request at the current pixel_density.
+    /// The next poll_events reports what the window manager granted.
     void set_size(tg::vec2i size);
 
     /// Whether the window is minimized and so has no drawable area.
@@ -192,6 +214,9 @@ private:
     friend class window_system;
     friend struct cc::node_allocation<window>; // cc::make_unique constructs through it
 
+    /// Re-reads logical_size, pixel_density and display_scale from the backend, keeping width()/height() as they are.
+    void refresh_scale();
+
     window_system* _system = nullptr;
 
     /// The backend's window object, opaque here because its type is not part of this API.
@@ -207,6 +232,9 @@ private:
     cc::string _title;
     int _width = 0;
     int _height = 0;
+    tg::vec2i _logical_size = tg::vec2i(0, 0);
+    float _pixel_density = 1.0f;
+    float _display_scale = 1.0f;
     tg::pos2i _position = tg::pos2i(0, 0);
     bool _is_minimized = false;
     bool _is_focused = false;
@@ -217,7 +245,7 @@ private:
 
 /// One monitor attached to the desktop, as of the last poll_events.
 ///
-/// All coordinates are in the same desktop space as window::position, so a window is on the display whose bounds contain it.
+/// All coordinates are in the same desktop space as window::position — logical units, not pixels — so a window is on the display whose bounds contain it.
 /// A multi-monitor desktop puts origins wherever the user arranged them, which is why a coordinate here may be negative.
 struct sr::display_info
 {
@@ -230,7 +258,13 @@ struct sr::display_info
     tg::pos2i work_position;
     tg::vec2i work_size;
 
-    /// Pixels per logical unit — 1 on a standard-density display, 2 on a typical HiDPI one.
+    /// Pixels per logical unit on this display — 2 on a Retina display, 1 wherever the platform does no high-density scaling.
+    /// A window on this display reports the same value as window::pixel_density.
+    float pixel_density = 1.0f;
+
+    /// The UI scale the user chose for this display, on top of pixel_density — 1.5 on Windows at 150%.
+    /// 1 on macOS, where the density alone does the scaling.
+    /// This is what ImGuiPlatformMonitor::DpiScale means; window::display_scale is the product of the two.
     float content_scale = 1.0f;
 };
 

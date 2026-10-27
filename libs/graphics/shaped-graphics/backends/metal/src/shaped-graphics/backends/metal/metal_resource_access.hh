@@ -18,7 +18,7 @@
 /// D3D12 decays a buffer to COMMON at ExecuteCommandLists, so cross-list ordering rides on that decay and only
 /// intra-list hazards ever produce a barrier.
 /// Metal has no decay rule, and with `HazardTrackingModeUntracked` resources it has no driver-inferred synchronization
-/// either — that is the whole point of asking for untracked.
+/// either, which is what untracked asks for.
 /// So a write recorded in one list and a read recorded in the next are unsynchronized unless something says otherwise,
 /// and the last writer has to survive its own list.
 /// `current` is what carries it.

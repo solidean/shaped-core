@@ -97,7 +97,7 @@ uv run dev.py test shaped-graphics-dx12-test --repeat 100
 Runs the same selection up to N times and **stops at the first failing iteration**, naming it.
 Build and target discovery happen once, so an iteration costs only the binaries — far cheaper than a shell loop around `dev.py`.
 
-Stopping on failure is the point, not a convenience.
+Stopping on failure keeps the evidence of that failure on disk.
 Run logs and JUnit XML are written per target and **overwritten every run**, so a loop that keeps going destroys the evidence of the failure it just found.
 Halting leaves that iteration's `run-logs/` and `*.results.xml` exactly as the failing run left them, which is what `test_diag` and `--mirror-test-output` then read.
 
@@ -141,7 +141,8 @@ The default is chosen by platform:
 | Linux    | `relwithdebinfo-linux-clang`         | on                       |
 | macOS    | `macos-arm-llvm-relwithdebinfo`      | on                       |
 
-Override with `--preset`. **It is a per-subcommand flag — it goes *after* the subcommand** (`uv run dev.py test --preset release-clang`).
+Override with `--preset`.
+**It is a per-subcommand flag — it goes *after* the subcommand** (`uv run dev.py test --preset release-clang`).
 `--emsdk-path` (for WASM) is likewise per-subcommand.
 Only `--verbose`, `--mirror-output`, `--mirror-test-output`, `--collect-logs`, and `--colored` / `--plain` are global, before the subcommand.
 The `--profile*` flags of [Profiling a run](#profiling-a-run) are the one exception to the split: they are declared both globally and per-subcommand, so they bind on either side.
@@ -322,6 +323,18 @@ For each step, in both modes, it:
 then prints a one-line trace per step plus a pass/fail summary.
 On failure it prints the exact diagnostic selector to run.
 
+### Crash reports
+
+**A test binary that crashes or hangs leaves a folder under `build/<preset>/crashes/`**, which dev.py names on its `crash report kept:` line.
+It holds the crash handler's report, a minidump on Windows, the run's `.ccrec` recording, the captured stdout and stderr, and the very binary and PDB that crashed.
+The run logs above are overwritten by the next run and the binary by the next build, so this folder is what a flake that will not come back is read from.
+dev.py sets `NX_CRASH_DIR` for every native test binary, and nexus hands it to `cc::set_crash_report_files`; a timeout's induced report lands there too.
+A binary that fails without crashing leaves a `<binary>-<date>-<time>-failed` folder there too: its captured output and its JUnit report, which the next run would overwrite.
+The binaries are hard links into `crashes/.binaries/`, one copy per build however many reports share it.
+The newest 20 reports per preset are kept, within 2 GB ([crash_reports.py](../../tools/dev/lib/core/crash_reports.py)).
+Open a minidump against the binary beside it, never the build directory's, which a rebuild has replaced: `lldb` inside the folder, then `target create <binary>.exe --core <report>.dmp`.
+WinDbg takes the folder as both paths, `windbg -z <report>.dmp -i . -y .`.
+
 So the loop is **dev.py, then diagnose with the `repo_tools` MCP tools**:
 
 | After a... | Tool         | Typical call                                                       |
@@ -376,6 +389,7 @@ uv run dev.py check --commit <rev>   # check a commit or range instead
 uv run dev.py check --since <rev>    # everything changed since <rev>, working tree included
 uv run dev.py check crossrefs  # run just one (or several) checks by name
 uv run dev.py check --list     # list the registered checks
+uv run dev.py ship             # pull, gate and push, every submodule with unpushed work and its bump included
 ```
 
 ### The default scope is the branch, not the working tree
@@ -389,13 +403,25 @@ A gate scoped to dirty files alone *empties as you work*: commit, and the workin
 That is precisely the run that matters — the one before pushing — and it was the one saying least.
 
 The consequence to know is that `check` re-examines files you committed earlier on the branch, so a rule that changed since then surfaces now rather than never.
-That is the point, and it is also why the first `check` on an old branch can report more than you expect.
+That is by design, and it is also why the first `check` on an old branch can report more than you expect.
 
 `--dirty-only` is the tight edit loop's scope and is still what `dev.py lint` and `dev.py format` default to; `--all` is the whole tree; `--since <rev>` picks a different base.
 **There is no working-tree fallback.**
 With no merge base to find — `main` with no `origin/main`, say — `check` refuses and asks for one of those flags rather than quietly inspecting less.
 
-Registered checks, **in the order they run**:
+### A gate runs when the change touches what it watches
+
+Every gate declares what it is about: `watches`, a set of repo-relative globs, or `always`, for a gate whose inputs are the whole tree.
+The registry refuses a gate with neither, and one with both.
+"Always run" is the safe default and the slow one, so a gate states it rather than falls into it.
+A gate runs when a path the scope touched matches one of its globs, deletions and the old name of a rename included.
+`check --list` prints what each watches, and a run names every gate it skipped, so a wrong rule is visible rather than silent.
+A glob that matches no tracked file is an error: the file it named has moved, and the gate would otherwise stop running without anyone noticing.
+
+`--all` runs everything, and so does naming a gate on the command line.
+CI runs everything, which is where a missing rule is caught.
+
+Registered checks (`check --list` shows what each watches); the fixers run in this order under `--fix`:
 
 | Check        | What it does                                                                   | `--fix`? |
 |--------------|--------------------------------------------------------------------------------|----------|
@@ -412,7 +438,7 @@ Registered checks, **in the order they run**:
 `check` is the longest command here, so it reports where the time went rather than only a total.
 
 ```raw
-static gates: lint 57.0 s, shaped-lint 2.7 s, format 906 ms, crossrefs 1.5 s  (total 62.2 s)
+static gates: lint 57.0 s, shaped-lint 2.7 s, format 906 ms, crossrefs 1.5 s  (work 62.2 s)
 
 timing, per preset:
   relwithdebinfo-clang  build    2.0 s   test   72.5 s  (18 binaries)
@@ -422,17 +448,30 @@ timing, per preset:
   total 332.5 s across 4 preset(s)
 ```
 
-One line for the static gates, and one per preset for the build-and-test tail split into its two halves.
+One line for the static gates, whose total is work rather than wall clock since they ran together, and one per preset for the build-and-test tail split into its two halves.
 Neither changes the verdict — they are a measurement of the run that just happened.
 
 A preset whose tests exceed the budget in `tools/dev/cmd/check.py` is called out by name.
 The budget is a ceiling a run must not cross rather than a target it should hit: tighten it as the suite gets faster, and never raise it to silence a warning.
 
-**That order is a correctness property, not a listing convention.**
+### Concurrent by default, ordered where a gate writes
+
+The static gates are independent, so the read-only ones run at the same time.
+Under `--fix` the gates that write run after them, serially and in registry order: a fixer's rewrite is what the later ones must see.
+Without `--fix` nothing writes, so every static gate is read-only and they all run together.
+A gate that must not overlap another declares an `exclusive` tag, `"gpu"` for anything that opens a device, and gates sharing a tag take turns.
+Mirrored or verbose output would interleave into noise, so `--mirror-output` and `--verbose` runs stay serial.
+
+**The fixer order is a correctness property, not a listing convention.**
 A lint fix is a byte-range edit — dropping a `cc::` qualifier shortens a line and strands the continuation lines aligned under where it used to end.
 A clang-tidy fix can also land in a header the commit had not otherwise touched, which `format` only sees as dirty once that write has happened.
 Running `format` after both fixers is what makes `check --fix` one finished pass instead of a pass plus "now go run format".
-Naming checks explicitly does not change it: `check format lint` runs `lint` first, same as the full gate.
+Naming checks explicitly does not change it: `check format lint --fix` runs `lint` first, same as the full gate.
+
+**A gate never builds for itself.**
+A gate that needs a target declares it in `builds`, and the runner builds every selected gate's targets in one invocation before any gate runs.
+Two ninja processes in one build directory fight over the cores and over ninja's own bookkeeping, so one balanced build stands ahead of the gates instead.
+A failed build fails the gates that declared it and no other.
 
 `lint` runs the clang-tidy gates via [tools/lint/clang-tidy.py](../../tools/lint/clang-tidy.py).
 The gates are a strict, must-be-zero whitelist in [tools/lint/clang-tidy-gates.yml](../../tools/lint/clang-tidy-gates.yml).
@@ -449,11 +488,10 @@ Its scope is `libs/`, `docs/`, `tools/`, `.claude/` and the root meta files.
 These rot silently, because a moved file breaks links in *other*, untouched files, so the scan is always full-repo and `--all` does not affect it.
 It reports each offender as `file:line: reason`.
 
-**`shader-grammar` builds a target even under `--no-test`.**
-It is the one gate that is not purely static.
+**`shader-grammar` runs a test binary even under `--no-test`.**
 The binding pass exists twice — in C++ for the runtime rewriter, in Python for the package generator — and one shared corpus is what keeps the two agreeing.
 Running only the Python half would let a divergence through to the suite, which is the thing this gate runs ahead of.
-So it builds `shaped-shader-library-test` and runs the corpus case, `--no-test` or not.
+So it declares `shaped-shader-library-test` in `builds` and runs the corpus case, `--no-test` or not.
 It also fails when that case runs zero times: it selects one test by name, and a runner given a name that matches nothing exits 0.
 
 **`fixed-int-gen` is a generated-file gate that runs before `format`, and needs no build.**
@@ -462,16 +500,36 @@ The step runs the generator with `--check`, or `--write` under `--fix`, and pass
 The generator formats its own output with it, so a regenerated file is already what `format` would leave, and standing ahead of `format` is the ordinary place for a fixer.
 [its docstring](../../libs/base/typed-geometry/tools/gen-fixed-int.py) has the rule that picks what is generated.
 
-**`sgl-prelude` builds a target too, and it is the one fixer that stands behind `format`.**
+**`sgl-prelude` needs the `sgl` tool, and it is the one fixer that stands behind `format`.**
 SGL's builtins live in a C++ registry, and `libs/graphics/shaped-graphics-language/prelude/builtins.sgl` is that registry written out and committed.
 slib's `libs/graphics/shaped-shader-library/src/shaped-shader-library/impl/pipeline_fields.hh` is the prelude's mirror of sg's raster pipeline description, written out the same way.
-The step builds the `sgl` tool and runs `sgl prelude --check` and `sgl pipeline-fields --check` on the two files; under `--fix` it runs `--write` instead.
+The step declares `sgl` in `builds` and runs `sgl prelude --check` and `sgl pipeline-fields --check` on the two files; under `--fix` it runs `--write` instead.
 Standing behind `format` breaks nothing: `builtins.sgl` is SGL, which no other gate reads, and the C++ file opens with `// clang-format off`, so the ordering argument above does not reach either.
-It sits with `shader-grammar` for the reason that one does — it needs a build, so every static gate runs first.
 Where the tool cannot be built — `SC_BUILD_TOOLS` off, or an emscripten preset — the step says so and passes, and the library's own test still compares the two texts.
 [adding-a-builtin.md](../../libs/graphics/shaped-graphics-language/docs/adding-a-builtin.md) is what the registry is.
 
 `test` is the slow tail and runs **only after the static checks pass** — no point building a tree that already fails a cheap lint — and `--no-test` skips it.
+It is an `always` gate: which binaries a change selects is its own question, answered inside it from the CMake graph.
+
+**Which test binaries run comes from the CMake File API, not from paths anyone writes down.**
+Every preset is built in full, so a compile break anywhere still fails; the selection is what *runs*.
+A changed file belongs to the targets that list it as a source, or else to every target defined in the deepest directory whose CMakeLists contains it.
+The directory fallback is what catches a shader file or a corpus no target lists.
+The test binaries among those targets' transitive dependents are the ones that run, and the rest are named as skipped.
+A clean-core edit runs everything, a shaped-viewer edit runs its own binary, and a moved file moves in the reply too, so nothing rots.
+
+Two policies in [cmd/check.py](../../tools/dev/cmd/check.py) say what the graph cannot.
+A **build input** (a `CMakeLists.txt`, a `.cmake`, the presets, the harness files that run the tests) feeds every target, so it runs every binary.
+**Prose** (a `.md`, `docs/`, the rest of `dev.py`, the review and issue tools) is read by no test, so it runs none.
+A changed file that is neither and that no target owns runs everything, and the run says which file made it; the rules narrow, they never guess.
+`--all` runs everything.
+
+**A thorough test runs when the change touches what it declared with `rerun_on`.**
+`check` never runs a thorough test on the graph's say-so, since a clean-core edit would then run every thorough test in the repo.
+A test opts in with `nx::config::rerun_on("<glob>")`, written by its author: a fuzzer names the one file implementing what it exercises, a viewer sweep names its surface tree.
+dev.py reads the triggers from each binary's `--list-tests-json` listing, runs the matching tests by name with `--thorough` on the default preset alone, and fails if fewer ran than were selected.
+A glob matching no tracked file is an error, so a moved file cannot silently disarm the rule.
+[test-runtime.md](../../libs/base/nexus/docs/test-runtime.md) has the declaration.
 It builds and runs the suite across five build variants:
 
 - **debug** — `-O0` plus mimalloc's `MI_DEBUG` heap, `CC_ASSERT` on, and **precompiled headers off**
@@ -487,6 +545,40 @@ On failure it prints the `test_diag` selector, same as `dev.py test`.
 Windows has no sanitizer leg — see [Sanitizers](#sanitizers) for why.
 
 New gates plug into the check registry in [cmd/check.py](../../tools/dev/cmd/check.py) without changing the command surface.
+
+### A gate that passed before on identical inputs is skipped
+
+Selection asks whether a change could affect a gate; the memo asks whether the gate already passed on exactly these inputs.
+A watched gate is keyed on the content id of every tracked file its globs match, a dirty file hashed from disk, plus a stamp naming its tool, so a clang-format upgrade is a new key.
+A test binary is keyed per preset on the hash of its artifact, which already folds in every source it compiled from.
+The platform and the GPU driver version are part of that key too, because a driver update is the change git never sees.
+A gate or binary whose key matches a recorded pass is skipped and named; a failure forgets the pass.
+An `always` gate and a thorough trigger are never memoized, and `--all` or a gate named on the command line bypasses the reads.
+The cache is `build/check-memo.json`, and deleting it can never affect correctness: a miss is a run.
+This is what makes a second `check` after a docs tweak, a flaky test or a no-op merge cost only what changed.
+
+### `ship`: pull, gate, push, submodules included
+
+`uv run dev.py ship` is the pull, gate, push chain as one command, and the one that should end a piece of work; `check` itself never pushes.
+It knows its own verdict, so there is no wrapper exit code to misread and no push after a gate that was not read.
+
+1. It refuses uncommitted work, here and in every submodule.
+   What gets pushed is commits, and this is also what keeps an edit out of a running gate.
+2. It finds the submodules carrying unpushed commits on the branch `.gitmodules` names, and merges each one's `origin/<branch>` when it moved.
+3. It merges this repository's `origin/<branch>` and syncs the other submodules; a conflict anywhere stops it with the merge in progress, as git would leave it.
+4. A shipping submodule with a `dev.py` of its own runs its own `check --fix` first, since its rules require that gate and the parent's does not run it.
+5. It commits the moved pointers as one commit of their own, with a file the project derives from a submodule (the `presets` gate's) refreshed in it.
+   `--bump <path>` adds a submodule whose work is pushed already but whose pointer is not.
+6. It runs the project's own `dev.py check --fix`, whatever registry the project wired, so the extra roots cover the submodules' prose and links.
+7. It pushes the submodules first, so every pointer names a commit its remote has, then this repository.
+   A rejected push means `origin/<branch>` moved during the gate, so it merges again and reruns the static gates on top of what came in; three rounds, then it stops and says the branch is busy.
+   The tests do not rerun: they passed on this change, and what came in was gated by whoever pushed it.
+
+A gate that rewrites a file stops before any push with a request to commit it; nothing is committed on the tool's own initiative beyond the bump and the closes.
+`--dry-run` says what would be bumped and pushed.
+
+`--closes <id>[,<id>] [--resolution fixed]` closes those issues in a commit of their own after the bump and ahead of the gate, so the push that resolves them is the one that closes them.
+If the gate fails, nothing is pushed; [issue-tracking.md](issue-tracking.md#closed) has the rule.
 
 ### Re-checking a commit or a range
 
@@ -653,7 +745,7 @@ A trace has **two processes**, because the two halves of a run are shaped differ
 
 The two are always allocated independently, so a compile edge is never pushed down a row by the step that spawned it, and either block can be collapsed in the viewer to look at the other.
 
-Every track is **strictly ordered** in the emitted trace, which matters more than it sounds.
+Every track is **strictly ordered** in the emitted trace.
 A viewer nests two slices on one track the moment they overlap by a single microsecond, drawing the second as a sub-row of the first.
 One rounding artefact therefore turns a clean lane into a staircase that reads as a broken layout.
 Timestamps come from a monotonic counter anchored once to the wall clock, rather than from the system clock.
@@ -829,7 +921,7 @@ It is a separate full build of the repo at 5-15x test time, so one platform carr
 That is enough to stop the preset rotting between manual runs, without paying for it three times.
 The macOS preset works and is run by hand; there is no CI leg for either.
 
-Three things to know before reading a report.
+Four things to know before reading a report.
 
 **TSan models no fence at all.**
 `cc::atomic_thread_fence` is a no-op to the tool.
@@ -844,6 +936,11 @@ It is the counterpart of `lsan-suppressions.txt` beside it; the compile-time `sa
 **A stack walk is not the source's.**
 TSan starts threads through a trampoline the walker cannot get past, and rewrites every access, so `cc::capture_stack` reports frames that are correct but not the ones the code suggests.
 `CC_HAS_THREAD_SANITIZER` exists for exactly that, and for nothing else — it is not a way to skip a test that is merely slow under the tool.
+
+**On macOS the TSan preset links the system libc++, not Homebrew's.**
+The runtime intercepts only the system `libc++abi`, so a binary bound to Homebrew's never shows it `__cxa_guard_release`.
+Every first use of a function-local static then reports as a race, though the guard serializes it.
+So `macos-arm-llvm-sanitize-thread` clears the base preset's `-lc++abi` link flags, and builds against the newer headers but links what the OS ships.
 
 ## Useful flags
 

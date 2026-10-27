@@ -84,7 +84,8 @@ namespace sg
 {
 
 /// Customization point for `vertex_input_layout::create<V>()`: specialize for a vertex struct `V` with a
-/// `static vertex_type_layout get()`. Example:
+/// `static vertex_type_layout get()`.
+/// Example:
 ///
 ///     template <> struct sg::vertex_layout_of<my_vertex> {
 ///         static sg::vertex_type_layout get() {

@@ -10,8 +10,11 @@
 #include <clean-core/thread/async.hh> // cc::ambient_async_scheduler
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/thread_pump.hh> // cc::thread_pump_all
+#include <imgui/imgui.h>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-rendering/imgui_context.hh>
+#include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/input.hh>
 #include <shaped-rendering/shaders.hh> // sr::add_shader_packages (blit)
 #include <shaped-rendering/window.hh>
@@ -49,6 +52,7 @@ constexpr tg::vec4f clear_color = tg::vec4f(0.02f, 0.02f, 0.03f, 1.0f);
         [](sr::mouse_move_event const& m) { return result_t(m.cursor_pos); },   //
         [](sr::mouse_button_event const& b) { return result_t(b.cursor_pos); }, //
         [](sr::mouse_wheel_event const& w) { return result_t(w.cursor_pos); },  //
+        [](sr::file_drop_event const& d) { return result_t(d.cursor_pos); },    //
         [](sr::key_event const&) { return result_t(); },                        //
         [](sr::text_event const&) { return result_t(); });
 }
@@ -227,6 +231,19 @@ struct viewer::impl
     };
     cc::optional<pick_readback> pick_in_flight;
 
+    /// Dear ImGui, brought up by the first `frame::imgui` and null until then, so a viewer without a UI pays nothing.
+    cc::unique_ptr<sr::imgui_context> imgui;
+
+    /// Whether this frame's imgui frame is open, between its begin and the record in finish_frame.
+    bool imgui_frame_open = false;
+
+    /// What the last imgui frame wanted, read by route_input before this frame's imgui frame begins.
+    bool imgui_wants_keyboard = false;
+    bool imgui_wants_mouse = false;
+
+    /// The last drawn frame's delta, for the imgui frame a first `frame::imgui` call opens late.
+    double last_delta = 0.0;
+
     /// The views the previous frame authored, so a per-frame controller update can reach each of them exactly once.
     /// `last_hit_regions` cannot serve: one view may own several regions, and a fly controller integrated twice over the
     /// same delta moves twice as far.
@@ -392,6 +409,13 @@ isize viewer::streaming_resources() const
     return _impl->resources.settling_count();
 }
 
+cc::span<sr::input_event const> viewer::input_events() const
+{
+    if (_impl->window_system == nullptr)
+        return {};
+    return _impl->window_system->events();
+}
+
 cc::shared_async<cc::unit> viewer::background_work()
 {
     return sv::background_work(*_impl->ctx);
@@ -422,6 +446,68 @@ void viewer::hold_capture(cc::string_view reason)
 {
     if (auto* const session = _impl->capture.get(); session != nullptr)
         session->hold(reason);
+}
+
+bool viewer::open_imgui()
+{
+    auto& im = *_impl;
+    if (im.imgui == nullptr)
+    {
+        // imgui keeps one global context, so a second viewer, or an application with its own, cannot have another.
+        if (ImGui::GetCurrentContext() != nullptr)
+        {
+            CC_LOG_ERROR("frame::imgui: an imgui context exists already, and imgui allows one per process");
+            return false;
+        }
+        im.imgui = cc::make_unique<sr::imgui_context>(sr::imgui_context::create());
+    }
+    if (!im.imgui_frame_open)
+        begin_imgui_frame(im.last_delta);
+    return true;
+}
+
+bool viewer::imgui_wants_keyboard() const
+{
+    return _impl->imgui_wants_keyboard;
+}
+
+bool viewer::imgui_wants_mouse() const
+{
+    return _impl->imgui_wants_mouse;
+}
+
+void viewer::begin_imgui_frame(double delta)
+{
+    auto& im = *_impl;
+
+    // A frame that never reached its record, a device loss in between, still holds imgui's frame open.
+    if (im.imgui_frame_open)
+        im.imgui->end_frame();
+
+    // imgui divides by the step, and the first frame and a converging capture frame have none.
+    auto const dt = float(delta > 0.0 ? delta : 1.0 / 60.0);
+    if (im.config.headless)
+        im.imgui->begin_frame({.display_size = tg::vec2i(im.config.width, im.config.height), .delta_time = dt});
+    else
+        im.imgui->begin_frame(*im.window, dt);
+    im.imgui_frame_open = true;
+}
+
+void viewer::record_imgui(sg::render_target_view const& output)
+{
+    auto& im = *_impl;
+    im.imgui->end_frame();
+    im.imgui_frame_open = false;
+    im.imgui_wants_keyboard = im.imgui->wants_keyboard();
+    im.imgui_wants_mouse = im.imgui->wants_mouse();
+
+    // Its uploads go before the scope opens, as imgui_routine asks.
+    auto const prepared = sr::imgui_routine::prepare(*im.current_cmd, ImGui::GetDrawData());
+    auto pass = im.current_cmd->raster.render_to({.color_targets = {output.preserved()}});
+
+    // The pipeline builds over the first frames, and a capture must not settle on an image the UI is missing from.
+    if (sr::imgui_routine::execute(pass, prepared) != sg::routine_outcome::executed)
+        hold_capture("the imgui pipeline is building");
 }
 
 sv::impl::view_state& viewer::state_of(view_id id)
@@ -618,6 +704,14 @@ void viewer::route_input()
         if (e.is_mouse_button())
             im.last_modifiers = e.as_mouse_button().modifiers;
 
+        // What imgui wants, the views leave alone: a wheel over an imgui window scrolls it, a key typed into a field flies nothing.
+        // A drag a view already holds keeps going, since imgui wants no mouse it did not press itself.
+        auto const is_mouse = e.is_mouse_move() || e.is_mouse_button() || e.is_mouse_wheel();
+        if (!im.active_view.has_value() && !im.moving_view.has_value() && im.imgui_wants_mouse && is_mouse)
+            continue;
+        if (im.imgui_wants_keyboard && (e.is_key() || e.is_text()))
+            continue;
+
         // Ctrl+wheel magnifies the image under the cursor instead of moving a camera, and is consumed here so the
         // controller never also zooms.
         // It is a pure readout: nothing it writes reaches a trace, so a converged image stays converged while it is
@@ -721,6 +815,10 @@ frame viewer::acquire_frame()
     // texture, which is all its reclaim needs.
     im.views.begin_frame(u64(im.ctx->current_epoch()));
     apply_pick();
+
+    // imgui sees this poll's input before its frame opens below; routing reads the last frame's wants, the only answer there is yet.
+    if (im.imgui != nullptr && im.window_system != nullptr)
+        im.imgui->process_events(*im.window_system);
     route_input();
 
     if (im.config.headless)
@@ -751,9 +849,11 @@ frame viewer::acquire_frame()
     // Sampled once, here, so every view in the frame sees the same instant.
     // The first drawn frame has no predecessor, so its delta is 0 rather than the loop's start-up cost, and it is also
     // where the elapsed clock starts — a hand-driven loop opens with begin_frame and nothing else.
-    auto const now = cc::current_time_steady_secs();
+    // A capture shows its request's instant instead of the wall clock's, so it renders the same image on any machine.
+    auto const capturing = im.capture != nullptr;
+    auto const now = capturing ? im.capture->seconds() : cc::current_time_steady_secs();
     if (im.frame_index == 0)
-        im.start_time = now;
+        im.start_time = capturing ? 0.0 : now;
     auto const delta = im.frame_index == 0 ? 0.0 : now - im.last_frame_time;
     im.last_frame_time = now;
     ++im.frame_index;
@@ -799,6 +899,11 @@ frame viewer::acquire_frame()
     f._delta_seconds = delta;
     f._id = im.frame_index;
     f._open = true;
+
+    // Once a body has asked for imgui, every drawn frame opens one, so a UI drawn only some frames still gets its input.
+    im.last_delta = delta;
+    if (im.imgui != nullptr)
+        begin_imgui_frame(delta);
     return f;
 }
 
@@ -881,16 +986,9 @@ void viewer::finish_frame(frame& f)
     if (im.capture != nullptr && !im.capture->is_done())
         def.sample_target = im.capture->request().accumulate;
 
-    // A canvas places its drawings in logical pixels, so it takes the content scale of the display the window is on —
-    // the one whose rectangle holds the window's top-left corner, which is also where a new window opens.
-    if (im.window != nullptr && im.window_system != nullptr)
-        for (auto const& d : im.window_system->displays())
-        {
-            auto const p = im.window->position();
-            if (p[0] >= d.position[0] && p[1] >= d.position[1] && p[0] < d.position[0] + d.size[0]
-                && p[1] < d.position[1] + d.size[1] && d.content_scale > 0.0f)
-                def.content_scale = d.content_scale;
-        }
+    // A canvas places its drawings in logical pixels, and the window's display scale is how many back-buffer pixels one of those covers.
+    if (im.window != nullptr)
+        def.display_scale = im.window->display_scale();
 
     im.last_frame_views.clear();
     for (auto& v : def.views)
@@ -1118,6 +1216,10 @@ void viewer::finish_frame(frame& f)
         // After the traces, so the depth read back is the one this frame wrote.
         read_back_pick(def, plan);
 
+        // Over everything the views composited, so the UI is never hidden behind a pane.
+        if (im.imgui_frame_open)
+            record_imgui(output);
+
         if (im.config.headless)
         {
             im.ctx->submit_command_list(cc::move(im.current_cmd));
@@ -1227,6 +1329,49 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     if (!settled && !session.is_out_of_time())
         return;
 
+    auto const write = [&](cc::string const& path)
+    {
+        // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
+        CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
+
+        auto const failure
+            = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
+        if (failure.has_error())
+            CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
+        else if (!failure.value().empty())
+            CC_LOG_ERROR("capture: {}", failure.value());
+    };
+
+    // A sequence writes every frame to its own path, settled or not, since a sequence with a hole cannot be encoded.
+    // A frame that ran out of time is warned about as it is written, and counted again once the run ends.
+    if (session.request().is_sequence())
+    {
+        if (session.writes_frame())
+        {
+            if (!settled)
+            {
+                session.note_unsettled_frame();
+                CC_LOG_WARNING("capture: frame {} gave up after {}s at {}/{} samples per pixel{}",
+                               session.frame_index(), session.elapsed_seconds(), lowest, session.request().accumulate,
+                               held.empty() ? cc::string() : cc::format(", held for {}", held));
+            }
+            write(sr::capture_frame_path(session.request().output_path, session.frame_index()));
+        }
+
+        if (!session.is_last_frame())
+        {
+            session.advance_frame();
+            return;
+        }
+
+        if (session.unsettled_frames() > 0)
+            CC_LOG_WARNING("capture: {} of the sequence's written frames ran out of time before they settled",
+                           session.unsettled_frames());
+        session.mark_done();
+        request_close();
+        return;
+    }
+
     if (settled)
         session.mark_settled_before_writing();
 
@@ -1243,14 +1388,7 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
                        held.empty() ? cc::string() : cc::format(", held for {}", held), path,
                        session.request().output_path);
 
-    // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
-    CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
-
-    auto const failure = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
-    if (failure.has_error())
-        CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
-    else if (!failure.value().empty())
-        CC_LOG_ERROR("capture: {}", failure.value());
+    write(path);
 
     session.mark_done();
     request_close();

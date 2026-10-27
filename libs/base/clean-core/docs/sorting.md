@@ -130,7 +130,7 @@ auto const sorted = cc::sort_async(values);                                  // 
 auto const next = cc::make_async_lazy([&values](cc::unit) { … }, sorted);    // composes as a dependency
 ```
 
-**Composing is the point, not the raw number.**
+**It is built for composing, not for the raw number.**
 `cc::sort_async` never blocks and never drives itself — a scheduler does, and a handle nobody schedules is a sort that never happens.
 There is deliberately no blocking convenience either.
 `pool.blocking_get` asserts when called from a worker of that same pool, so the wrapper would be a trap that fires exactly in the composition case it exists for.

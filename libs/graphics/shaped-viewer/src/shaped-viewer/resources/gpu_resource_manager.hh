@@ -251,8 +251,7 @@ public:
     ///
     /// For a caller that needs residency before it can proceed and has no frame loop to wait for — a test tracing a
     /// scene it just built, or a tool doing one pass over an asset.
-    /// A viewer never calls this: letting the transfers run at their own pace is the whole point, and a placeholder
-    /// covers the gap.
+    /// A viewer never calls this: it lets the transfers run at their own pace, and a placeholder covers the gap.
     void wait_for_pending_uploads();
 
     /// How many payloads are still in flight, across every manager.
@@ -304,7 +303,7 @@ public:
     /// traces with it and before `freeze()` — every index it returns is minted here.
     /// The buffer it is uploaded into is the record's own and persistent, which is what lets an unchanged working set leave
     /// the staging group clean and its snapshot cached.
-    /// That persistence is load-bearing: a fresh transient buffer per frame re-minted the whole bindless table on every
+    /// That persistence is required: a fresh transient buffer per frame re-minted the whole bindless table on every
     /// trace, and exhausted the descriptor heap within a second of `interactive-showcase-manual-test`.
     [[nodiscard]] shaders::tracer::instance_record describe_instance(sg::command_list& cmd,
                                                                      mesh_id mesh,

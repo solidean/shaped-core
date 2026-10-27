@@ -23,14 +23,6 @@
 #       exits non-zero. Links nothing graphical, so it builds on a leg where the real target could not.
 #       REASON replaces the closing advice to reconfigure, for a stub that reconfiguring would not help.
 
-# The generated main, byte for byte what every hand-written tests/main.cc holds.
-set(SC_EXAMPLE_MAIN_CONTENT
-"#include <nexus/run.hh>
-
-int main(int argc, char** argv) { return nx::run(argc, argv); }
-"
-    CACHE INTERNAL "Body of the generated example main.cc")
-
 function(sc_add_example target)
     if(NOT SC_BUILD_EXAMPLES)
         return()
@@ -56,7 +48,10 @@ function(sc_add_example target)
         set(_main "${EX_MAIN}")
     else()
         set(_main "${CMAKE_CURRENT_BINARY_DIR}/examples/${target}/main.cc")
-        file(CONFIGURE OUTPUT "${_main}" CONTENT "${SC_EXAMPLE_MAIN_CONTENT}" @ONLY)
+        # The generated main, byte for byte what every hand-written tests/main.cc holds.
+        # A local rather than a cache entry: the cache cannot hold a newline, and warned about it on every configure.
+        set(_main_content "#include <nexus/run.hh>\n\nint main(int argc, char** argv) { return nx::run(argc, argv); }\n")
+        file(CONFIGURE OUTPUT "${_main}" CONTENT "${_main_content}" @ONLY)
     endif()
 
     add_executable(${target} "${_main}" ${EX_SOURCES})

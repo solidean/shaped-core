@@ -51,7 +51,7 @@ auto imgui = sr::imgui_context::create();
 // Per frame:
 wsys->poll_events();
 imgui.process_events(*wsys);          // feed this frame's input
-imgui.begin_frame(*win, dt);          // size from the window; hands it imgui's text-input intent
+imgui.begin_frame(*win, dt);          // logical size + pixel density from the window; hands it imgui's text-input intent
 ImGui::ShowDemoWindow();
 imgui.end_frame();
 
@@ -213,9 +213,18 @@ Three things are worth knowing:
 - **A wheel event deliberately carries no position.**
   imgui already has the cursor from the motion events, and with `ConfigInputTrickleEventQueue` (imgui's default) a position change followed by a wheel is split across two frames —
   restating it would delay every scroll by a frame.
-  A *button* event does send its position, because there the trickle is the point: the click lands at the position it happened at.
+  A *button* event does send its position, because there the trickle makes the click land at the position it happened at.
 
 Ask `wants_keyboard()` / `wants_mouse()` before acting on the same input yourself, or a camera will spin while the user drags a slider.
+
+## High-density displays
+
+imgui works in the window's logical units, the way Dear ImGui's own SDL and macOS backends do.
+`begin_frame(window&, dt)` sets `DisplaySize` to `window::logical_size()` and `DisplayFramebufferScale` to `window::pixel_density()`.
+`process_event` divides mouse positions, which `sr` reports in pixels, by that density.
+imgui rasterizes its fonts at the framebuffer scale, so text on a Retina display is drawn from 2x glyphs rather than magnified ones.
+The routine scales scissor rects by `ImDrawData::FramebufferScale`, so nothing else changes in the drawing.
+A viewport window reports its own density through `Platform_GetWindowFramebufferScale`, which is what keeps a viewport dragged onto a display of another density crisp.
 
 ## Cursors and the clipboard
 
@@ -256,11 +265,11 @@ Moving an OS window and presenting its new content are separate events, and in b
 Put a vsync-blocking main present in that gap and it becomes a full frame: everything inside a window being dragged — dock markers most visibly — lags the window by however far it moved.
 This is the ordering imgui's own examples use, and the order `render_imgui` runs them in.
 
-Only the *present* order is load-bearing, which is why the main list is recorded afterwards rather than before.
+Only the *present* order is constrained, which is why the main list is recorded afterwards rather than before.
 `render_viewports` submits a command list per viewport, and one submitted while the main list is still open makes the two concurrent —
 the font atlas both sample is then reverted to its canonical layout at every viewport submit, which sg reports as a hidden cost of concurrent recording.
 
-**Both changes are load-bearing, and neither is optional once the flag is on.**
+**Neither change is optional once the flag is on.**
 
 - **Every imgui coordinate becomes desktop-space.**
   Mouse positions and `ImGui::SetNextWindowPos` are no longer relative to the main window.

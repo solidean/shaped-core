@@ -81,7 +81,8 @@ namespace
     return L"-O3";
 }
 
-/// `-T <prefix>_<model>`. Fails if the stage has no profile prefix.
+/// `-T <prefix>_<model>`.
+/// Fails if the stage has no profile prefix.
 [[nodiscard]] cc::result<cc::string> target_profile(shader_description const& desc)
 {
     char const* prefix = stage_prefix(desc.stage);

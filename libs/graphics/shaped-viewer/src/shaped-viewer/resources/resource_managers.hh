@@ -129,7 +129,7 @@ struct sv::mesh_record
 
     /// The object-space box, when the payload declared one — the summary half of the record.
     ///
-    /// It outlives the payload, which is the point: a pending mesh is drawn as the shared placeholder box scaled onto
+    /// It outlives the payload, so a pending mesh is drawn as the shared placeholder box scaled onto
     /// this, and a mesh whose bounds nobody stated is skipped instead, since guessing an extent would place it wrong.
     cc::optional<tg::aabb3f> bounds;
 };
@@ -285,7 +285,7 @@ struct sv::quadric_set_record
     sg::blas_handle blas;
 
     /// The extent in the batch's own frame, when the payload declared one — the summary half of the record.
-    /// It outlives the payload, which is the point: a pending batch is drawn as the placeholder box scaled onto this, and one
+    /// It outlives the payload, so a pending batch is drawn as the placeholder box scaled onto this, and one
     /// whose bounds nobody stated is skipped instead, since guessing an extent would place it wrong.
     cc::optional<tg::aabb3f> bounds;
 };

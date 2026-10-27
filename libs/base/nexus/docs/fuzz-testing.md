@@ -140,7 +140,7 @@ You can also pin specific behaviors directly with `eval_op_to<T>` / `eval_op_boo
 ## Fuzzing over external, shared state
 
 The engine drives your operations against whatever state they close over.
-When that state is an external, **shared** resource — a GPU context, a database handle, a global allocator — two properties of the engine become load-bearing:
+When that state is an external, **shared** resource — a GPU context, a database handle, a global allocator — two properties of the engine affect that resource directly:
 
 - **It runs thousands of programs against the same shared object.** Generation tries many random sequences, and minimization *replays* candidate after candidate.
   They all hit the one resource your operations captured.

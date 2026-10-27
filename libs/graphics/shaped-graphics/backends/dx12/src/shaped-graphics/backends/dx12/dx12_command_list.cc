@@ -39,7 +39,7 @@ dx12_command_list::dx12_command_list(dx12_context& ctx,
 namespace
 {
 /// Folds one timeline's completion value into a list's wait set: raise the entry that shares its group, or add one.
-/// Waits on different timelines cannot be merged — that is the whole point of a group — so the set grows with the
+/// Waits on different timelines cannot be merged — each group is its own — so the set grows with the
 /// number of distinct resources the list touches that actually have a transfer pending, which is small.
 /// A value the fence has already reached is no wait at all: the fence only moves forward, and a list submitted after
 /// that is seen runs after the transfer finished.

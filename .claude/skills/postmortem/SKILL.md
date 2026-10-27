@@ -27,11 +27,11 @@ session, but still report anything high-leverage elsewhere.
 - Unclear or misleading APIs and naming that obscured intent.
 - Information-locality failures — the thing you needed lived far from where you
   needed it (docs in one place, the rule in another).
-- Load-bearing assumptions confirmed only indirectly — a conclusion the session
+- Assumptions confirmed only indirectly — a conclusion the session
   leaned on but verified via passing tests or inference rather than a stated
   guarantee (flag as latent risk).
 
-## Discipline (this matters more than coverage)
+## Discipline over coverage
 
 - **Not exhaustive — sparse output is the goal.**
   Two sharp findings beat eight padded ones.

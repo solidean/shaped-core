@@ -266,7 +266,7 @@ private:
 };
 
 /// std::atomic_flag's API over a plain bool.
-/// Constinit-able and trivially destructible like the real one — load-bearing for the static spinlocks that must outlive static destruction (see node_allocation.cc).
+/// Constinit-able and trivially destructible like the real one — required by the static spinlocks that must outlive static destruction (see node_allocation.cc).
 struct cc::atomic_flag
 {
     constexpr atomic_flag() noexcept = default;

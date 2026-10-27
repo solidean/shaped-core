@@ -9,7 +9,7 @@
 // Each brings up ONE context and invokes every INVOCABLE_TEST in the binary against it, so the suite costs one device per adapter that runs rather than one per test.
 // Both carry the debug layer, and a validation message fails the test that provoked it through the log rule.
 //
-// Two adapters, which is the point of having drivers at all:
+// Two adapters, one driver each:
 //   - hardware: the real GPU; SKIPs when none is available, and FAILs when one is and creation still fails.
 //   - WARP (software): the sweep on a host with no GPU, and a second pass under --thorough on one that has it.
 //

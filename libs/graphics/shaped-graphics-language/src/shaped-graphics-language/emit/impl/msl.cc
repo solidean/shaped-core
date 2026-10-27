@@ -528,6 +528,8 @@ public:
         write_bound_resources(out, p);
         for (auto i = isize(0); i < p.e.stage_inputs.size(); ++i)
         {
+            if (!p.stage_input_read[i])
+                continue;
             auto const local = p.e.stage_inputs[i].local;
             out.appendf("    const {} {} = {};\n", type_text(p, *this, p.e.at(local).type), p.locals[index_of(local)],
                         stage_input_value(p, i));

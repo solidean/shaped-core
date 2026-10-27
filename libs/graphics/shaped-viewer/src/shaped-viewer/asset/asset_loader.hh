@@ -118,7 +118,7 @@ struct sv::asset_loader_config
     i64 max_file_bytes = default_max_file_bytes;
 
     /// Called per candidate mesh, with the name it would carry.
-    /// Returning false skips it before its payloads are read, which is the point of doing this during the parse.
+    /// Returning false skips it before its payloads are read, since this runs during the parse.
     /// Unset means every mesh is imported.
     cc::unique_function<bool(cc::string_view name)> include_mesh;
 

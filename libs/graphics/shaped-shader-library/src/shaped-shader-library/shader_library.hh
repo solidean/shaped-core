@@ -89,7 +89,8 @@ public:
     /// Mounts `package` at its own name and writes its generated asset handles back.
     ///
     /// Mounts the embedded files, then a real_filesystem on the package's source_dir over them whenever that path is non-empty.
-    /// A directory that is not there finds nothing, which is what lets a shipped build land on the embedded copy with no mode flag.
+    /// A directory that is not there finds nothing, which is what lets a shipped build land on the embedded copy.
+    /// A frozen build (`SLIB_FROZEN_SHADERS`) mounts the embedded files alone, so no shader is ever read from disk.
     void add_package(shader_package const& package);
 
     /// Mounts `fs` for the package instead of the default embedded+source pair.
@@ -111,6 +112,7 @@ public:
 
     /// Starts watching every file the assets are built from, staging a recompile whenever one changes.
     /// Call after every add_package: the watcher walks the asset list, which registration grows.
+    /// A frozen build (`SLIB_FROZEN_SHADERS`) has nothing on disk to watch, so there this does nothing.
     ///
     /// The filesystem notifies where it can, and the watcher is otherwise asleep; where it cannot, it rescans on `interval_ms`.
     ///
@@ -218,7 +220,8 @@ private:
     [[nodiscard]] std::shared_ptr<shader_compiler const> find_shared_compiler(shader_language language,
                                                                               sg::shader_format format) const;
 
-    /// The package that owns `virtual_path`. Every asset path lies under exactly one.
+    /// The package that owns `virtual_path`.
+    /// Every asset path lies under exactly one.
     [[nodiscard]] package_entry const& package_of(cc::string_view virtual_path) const;
 
     /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, rewrite bindings, compile.

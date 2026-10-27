@@ -39,7 +39,7 @@ struct sv::stable_id
 namespace sv
 {
 /// The part of an id a human reads: everything before the first `##`, or the whole string when it holds none.
-/// An id that is nothing but a suffix ("##7") has no display name at all, which is the point of writing it that way.
+/// An id written as nothing but a suffix ("##7") has no display name at all.
 [[nodiscard]] constexpr cc::string_view display_name_of(cc::string_view id)
 {
     auto const marker = id.find(cc::string_view("##"));

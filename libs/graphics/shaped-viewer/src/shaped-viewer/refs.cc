@@ -721,6 +721,15 @@ void view_ref::initial_orbit(orbit_state const& o)
     }
 }
 
+void view_ref::reset_orbit(orbit_state const& o)
+{
+    auto& st = _frame->state_of(_view);
+    st.camera_seeded = true;
+    st.controller.cancel_focus();
+    st.controller.orbit = o;
+    st.camera = o.to_camera();
+}
+
 void view_ref::initial_fps(fps_state const& pose)
 {
     auto& st = _frame->state_of(_view);

@@ -23,7 +23,7 @@ It reaches the output as the `help` text of the CLI declaration in [schedule.cc]
 Arg parsing lives in `test_schedule_config::create_from_args` ([schedule.cc](../src/nexus/tests/schedule.cc)), declared with [nx::args](args.md).
 `--help` is generated from that same declaration, so the two cannot describe different programs.
 
-Two properties of the declaration are load-bearing for this compatibility layer:
+This compatibility layer rests on two properties of the declaration:
 
 * **Unknown arguments are captured, not rejected**, via `allow_unknown`.
   That is what keeps "any other arg is a filter" true, and what lets a test whose name begins with a dash be selected at all.

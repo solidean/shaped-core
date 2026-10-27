@@ -12,7 +12,7 @@ struct unit;
 
 // Turning results into something a person reads in five seconds.
 //
-// The whole point of this layer is that reading the number CARELESSLY still reads it correctly.
+// This layer makes reading the number CARELESSLY still read it correctly.
 // A benchmark that prints 123.4571 ns is claiming seven digits it does not have, and the reader who compares two runs
 // digit by digit concludes something changed when nothing did.
 

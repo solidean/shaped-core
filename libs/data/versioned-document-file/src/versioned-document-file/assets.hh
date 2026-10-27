@@ -149,7 +149,7 @@ struct vdoc::file::asset_record
 {
     /// The same string a document property holds.
     cc::string asset_id;
-    /// Load-bearing: what the asset is.
+    /// Authoritative: what the asset is.
     cc::string kind;
     /// Addressed by (name, index) — see asset_part.
     /// Stored order is preserved verbatim, because it is what disambiguates parts sharing a name.

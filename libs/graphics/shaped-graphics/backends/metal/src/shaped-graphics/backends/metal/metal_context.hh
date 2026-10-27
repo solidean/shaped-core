@@ -121,6 +121,10 @@ public:
     /// Shared storage, written once at creation and never again, so it needs no access tracking.
     [[nodiscard]] MTL::Buffer* zero_hit_group_offsets() const { return _zero_hit_group_offsets; }
 
+    /// The fence a native scope hands foreign code (see metal_native_scope.hh).
+    /// One per context is enough: a wait finds the latest update encoded before it, and lists commit in queue order.
+    [[nodiscard]] MTL::Fence* native_scope_fence() const { return _native_scope_fence; }
+
     /// Metal has every stage sg models except the two geometry-pipeline ones, which it has never had.
     [[nodiscard]] bool supports(sg::feature f) const override;
 
@@ -207,6 +211,10 @@ public:
 
     /// Raise the GPU side of the completion generation; `metal_feedback_sink` is the only caller.
     void notify_completion_signal();
+
+    /// How many times the completion waiter has parked.
+    /// It grows with the signals and wakes the waiter is given, so a test reads a spin as a count that runs away.
+    [[nodiscard]] u64 completion_park_count() const { return _completion.park_count.load(cc::memory_order_relaxed); }
 
     /// Publish one commit's failure on the deferred error channel; `metal_feedback_sink` is the only caller.
     ///
@@ -381,6 +389,7 @@ private:
     metal_staging_ring _upload_ring;
     metal_staging_ring _download_ring;
     MTL::Buffer* _zero_hit_group_offsets = nullptr;
+    MTL::Fence* _native_scope_fence = nullptr;
 
     /// What a completion-signal waiter parks on, and what the GPU's notification handlers wake it through.
     ///
@@ -413,6 +422,9 @@ private:
         /// The highest generation `wake_completion_signal` has been given.
         /// Compared against the caller's own `wake_generation`, which is the counter it read before parking.
         u64 host_generation = 0;
+
+        /// How many times the waiter has called `park_for_completion_signal`, read by `completion_park_count`.
+        cc::atomic<u64> park_count = 0;
     };
 
     mutable completion_signal _completion;

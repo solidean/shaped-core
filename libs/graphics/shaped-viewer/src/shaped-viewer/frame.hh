@@ -2,6 +2,7 @@
 
 #include <clean-core/common/utility.hh> // cc::move, for the frame a frame_scope adopts
 #include <clean-core/container/set.hh>
+#include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/string/format.hh>
@@ -96,6 +97,33 @@ public:
     /// for the finished image has to see this reach 0 as well.
     [[nodiscard]] isize streaming_resources() const;
 
+    /// What the user did since the previous frame, oldest first — every event, including those the built-in camera controllers already acted on.
+    /// Empty on a headless viewer, which polls nothing.
+    /// The span and the text inside it live until the next frame is acquired.
+    [[nodiscard]] cc::span<sr::input_event const> input_events() const;
+
+    /// Opens Dear ImGui for this frame, so the body calls `ImGui::` directly; false on a closed frame, where nothing may be drawn.
+    ///
+    ///     if (f.imgui())
+    ///     {
+    ///         ImGui::Begin("options");
+    ///         ImGui::Checkbox("wireframe", &wireframe);
+    ///         ImGui::End();
+    ///     }
+    ///
+    /// The first call brings the context up, and from then on every frame feeds imgui its input and draws the UI over the whole window, after the views.
+    /// One viewer per process may use it: imgui keeps one global context.
+    /// Its windows place themselves in window pixels, and a headless capture draws them too, at the capture's size.
+    ///
+    /// The built-in cameras skip what imgui wants: a wheel over an imgui window scrolls it rather than zooming a view.
+    /// `input_events` still reports every event, so a body acting on keys itself checks `imgui_wants_keyboard` first.
+    [[nodiscard]] bool imgui();
+
+    /// Whether imgui wanted the keyboard or the mouse as of the last imgui frame: a text field has focus, or the cursor is over an imgui window.
+    /// False until `imgui` has been called once.
+    [[nodiscard]] bool imgui_wants_keyboard() const;
+    [[nodiscard]] bool imgui_wants_mouse() const;
+
     /// `sv::background_work` for the context this viewer draws on.
     /// What it covers follows the viewer's internals, which is why it says only "done" and never what the work was.
     /// **Lazy**: start it with `cc::async_start` after the frame loop, never inside a frame, where under `SC_THREADS=OFF` a scheduled node crashed the frame's submit.
@@ -103,9 +131,12 @@ public:
 
     /// Seconds since the frame loop started, sampled once when this frame was acquired.
     /// Every view in the frame animates off that one instant, so they cannot drift apart within a frame.
+    ///
+    /// **During a capture this is the request's clock, not the wall's**: `SC_CAPTURE_TIME`, plus `i / SC_CAPTURE_FPS` on frame `i` of a sequence.
+    /// It holds still while a frame converges, so a body animating off it is the whole of what a video capture needs.
     [[nodiscard]] double seconds() const { return _seconds; }
 
-    /// Seconds since the previous drawn frame; 0 for the first.
+    /// Seconds since the previous drawn frame; 0 for the first, and during a capture 0 on every frame that re-renders the same instant.
     /// A frame the window could not draw is not a previous frame, so resuming from a minimized window reports the whole idle gap here — clamp it before integrating anything.
     [[nodiscard]] double delta_seconds() const { return _delta_seconds; }
 

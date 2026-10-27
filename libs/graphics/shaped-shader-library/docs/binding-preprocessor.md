@@ -50,7 +50,7 @@ That is the whole argument for this pass.
 ## What the spikes already settled
 
 `libs/graphics/shaped-shader-compiler-dxc/tests/portable-hlsl-spike-test.cc` is DXC behaviour pinned as tests.
-Five of its findings are load-bearing here and are worth re-reading before changing anything:
+Five of its findings constrain this design and are worth re-reading before changing anything:
 
 - **Q8** — without an explicit `register()`, a stage that references a subset of the declarations gets different DXIL registers than one that references more.
   This is why the pass exists.

@@ -293,19 +293,21 @@ ASYNC_INVOCABLE_TEST("sr - denoise automatic resolves to a supported member",
     CHECK(support.svgf);
     CHECK(sr::resolve_denoise_method(ctx, on_a_mean, sr_test::every_guide()) == sr::denoise_method::atrous);
 
-    // WHICH temporal member depends on the machine, which is the whole point of `automatic`: a vendor member outranks
+    // WHICH temporal member `automatic` picks depends on the machine: a vendor member outranks
     // the native one where its SDK was fetched and the adapter carries it, and svgf is what everything else gets.
     // Asserting `svgf` outright would have been a test that passes only where no vendor member is present.
     //
     // Written as the whole ORDER rather than as one name, because naming the runner-up is a test that passes only on
     // the machines where no better member is present.
     auto const temporal = sr::resolve_denoise_method(ctx, on_fresh_frames, sr_test::every_guide());
-    auto const expected = support.dlss_rr ? sr::denoise_method::dlss_rr
-                        : support.fsr_rr  ? sr::denoise_method::fsr_rr
-                        : support.nrd     ? sr::denoise_method::nrd
-                                          : sr::denoise_method::svgf;
+    auto const expected = support.dlss_rr    ? sr::denoise_method::dlss_rr
+                        : support.metalfx_rr ? sr::denoise_method::metalfx_rr
+                        : support.fsr_rr     ? sr::denoise_method::fsr_rr
+                        : support.nrd        ? sr::denoise_method::nrd
+                                             : sr::denoise_method::svgf;
     CHECK(temporal == expected)
-        .context(cc::format("supported: dlss_rr {}, fsr_rr {}, nrd {}", support.dlss_rr, support.fsr_rr, support.nrd));
+        .context(cc::format("supported: dlss_rr {}, metalfx_rr {}, fsr_rr {}, nrd {}", support.dlss_rr,
+                            support.metalfx_rr, support.fsr_rr, support.nrd));
     CHECK(sr::is_temporal(temporal));
 
     // A named member resolves to itself whether or not it is supported: refusing it is execute's job, and it must

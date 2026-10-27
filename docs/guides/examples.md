@@ -181,6 +181,15 @@ Without that, renaming a callback would go on producing the default view under t
 Any change to what the image depends on restarts the accumulation, so a callback writing a slightly different value every frame never converges: the run spends its whole timeout and then fails.
 `capture_context::first_frame` is where one-shot setup goes.
 
+### Animations and frame sequences
+
+**A capture runs on the request's clock, not the wall's**, and `frame::seconds` reports it.
+A still shows `SC_CAPTURE_TIME` (default 0), so an animated example captures the same instant on any machine.
+`SC_CAPTURE_FRAMES` asks for a sequence instead: frame `i` shows `SC_CAPTURE_TIME + i / SC_CAPTURE_FPS`.
+Each frame finishes by the same `accumulate` rule a still does before the clock moves, so an example animating off `frame::seconds` needs no capture code for a video.
+`SC_CAPTURE_OUT` is then a pattern, `%05d` as ffmpeg reads it, and `SC_CAPTURE_STRIDE` writes only every n-th frame while still rendering all of them.
+`dev.py example` does not drive sequences yet; a consumer's own tool sets the variables and encodes the frames.
+
 ### Refreshing the reference images
 
 ```bash
@@ -247,7 +256,7 @@ The main thread's loop also sweeps the thread pumps, which is what lets an unthr
 [libs/base/clean-net/examples/download.cc](../../libs/base/clean-net/examples/download.cc) is the worked case.
 `no_scheduler` is refused on it, as on every async test.
 
-**The name is a slash path**, and it is load-bearing.
+**The name is a slash path**, and three things key off it.
 It is the CLI argument, the gallery entry and the capture slug, so it is written as its own identifier rather than as a sentence.
 As the slug it names both `build/<preset>/captures/` and the committed reference image.
 By convention the first segment is the library the example is about.

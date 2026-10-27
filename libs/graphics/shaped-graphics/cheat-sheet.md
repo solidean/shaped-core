@@ -120,8 +120,9 @@ ctx.implementation_of(f)                           // sg::feature_implementation
                                                    //   dx12_config::withhold_raytracing = a context reporting neither, for a test of the no-RT path
 sg::to_string(f)  sg::feature_from_string(name)    // "ray_query" <-> feature::ray_query; sg::k_all_features lists them in enum order
 ctx.limits()                                       // -> sg::device_limits const& — { max_binding_groups, max_sample_count }
-ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
                                                    //   FLOORS a portable caller sizes against, not the most the hardware could do
+ctx.set_portability_checks(true)                   // refuse what WebGPU refuses: a buffer written and read in one dispatch / draw; off by default, costs every draw
+ctx.set_hit_record_checks(bool)                    // dispatch_rays checks the hit records each tlas instance reaches; default = CC_ASSERT_ENABLED (see dispatch_rays)
 ctx.threading()                                    // sg::thread_model — which ops are concurrency-safe
 ctx.is_on_device_thread()                          // -> bool; may this thread make a bound call (always true under multi_threaded)
 ctx.device_home()                                  // cc::async_scheduler* — where sg's asyncs move before touching the device; main under main_thread
@@ -891,9 +892,11 @@ table.ray_count()  table.hit_records()   // -> int / span<hit_shader_handle cons
 cmd.raytracing.bind_pipeline(raytracing_pipeline const&)          // void — sets the DXR state object + global root signature
 cmd.raytracing.bind_group(int group_index, binding_group const&) // void — like compute; bind a tlas here (surfaces accel_read)
 cmd.raytracing.dispatch_rays(table, raygen_index, w, h=1, d=1)   // void — traces w*h*d rays (product <= 2^30)
-//   under ctx.portability_checks(): every instance of every bound tlas is checked against the records it reaches
+//   under ctx.hit_record_checks() (default ON where CC_ASSERT is compiled in, OFF in release): every instance of every bound tlas is checked against the records it reaches
 //   (exists; procedural iff its blas holds AABBs; stride == ray_count for a blas of 2+ geometries) — LOGS an error once per table+tlas per list, never asserts.
-//   assumes every trace's multiplier == ray_count; hand-written HLSL passing another (e.g. 0) keeps the checks off
+//   a record PAST THE TABLE's end SKIPS the dispatch (logged; every later dispatch of that pair in the list too) — metal can fault the GPU on it.
+//   a record of the wrong kind logs and still dispatches.
+//   assumes every trace's multiplier == ray_count; hand-written HLSL passing another (e.g. 0) sets ctx.set_hit_record_checks(false)
 //   Sees only tlases built and groups (staging groups included) created while the checks were on.
 //   metal: ONE tlas per dispatch (the first bound one's hit-group offsets; a second logs a warning);
 //   an empty closest-hit slot is no function there, so a kernel must not call it (slib fills SGL's)
@@ -1053,7 +1056,7 @@ dctx.create_dx12_command_list()           // -> cc::result<std::unique_ptr<dx12_
 // the sg::context virtuals are thin forwarders to these backend-typed methods
 // escape hatch: dynamic_cast<sg::backend::vulkan::vulkan_context*>(ctx.get()) — "here be dragons"
 
-// foreign code recording onto an sg list (a vendor SDK, a capture tool) — dx12 only, see docs/concepts/barriers.md
+// foreign code recording onto an sg list (a vendor SDK, a capture tool) — dx12 and metal, see docs/concepts/barriers.md
 #include <shaped-graphics/backends/dx12/dx12_native_scope.hh>
 auto const native = sg::backend::dx12::dx12_native_scope::open(cmd,   // -> dx12_native_scope (RAII; no rendering scope open)
     {{.texture = tex, .access = sg::access_flag::shader_write, .stages = sg::pipeline_stage_flag::compute}},
@@ -1063,4 +1066,13 @@ native.resource(tex)                   // -> ID3D12Resource*; ASSERTS on a handl
 // open transitions each declared resource and records that as its state; ~scope forgets the list's bind state
 // sg never rebinds by itself: bind a pipeline again before the next draw or dispatch — one that does not ASSERTS
 // under-declaring corrupts the tracker: declare everything the foreign call touches, and nothing it does not
+
+// the Metal twin — foreign encoders meet sg's at a fence, see docs/concepts/barriers.md
+#include <shaped-graphics/backends/metal/metal_native_scope.hh>
+auto const native = sg::backend::metal::metal_native_scope::open(cmd, textures, buffers); // -> metal_native_scope (RAII)
+native.command_buffer() / native.device() / native.compiler()  // -> MTL4::CommandBuffer* / MTL::Device* / MTL4::Compiler*
+native.fence()                         // -> MTL::Fence*: the foreign work MUST wait for it first and update it last
+native.texture(tex) / native.buffer(buf)  // -> MTL::Texture* / MTL::Buffer*; ASSERTS on a handle the scope did not declare
+// MetalFX: set the effect's `fence` to native.fence() and it does both halves itself
+// record no sg work while the scope is alive — an sg encoder opened inside it ASSERTS; let the scope go first
 ```

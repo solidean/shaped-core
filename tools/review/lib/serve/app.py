@@ -292,7 +292,7 @@ class ReviewApp:
     def prebuild(self) -> None:
         """Renders every entry into the cache, so the first click on each is a hit too.
 
-        Called off the request path, on a background thread: the point is to spend the cost while the reader is
+        Called off the request path, on a background thread, so the cost is spent while the reader is
         still looking at the page they are on, and a prebuild that blocked startup would just move the wait.
         After a change only the entries whose key moved render again, which after an autosave is one.
         Failures are swallowed on purpose — a broken entry renders as a panel through the normal path, and a

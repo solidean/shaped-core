@@ -7,10 +7,10 @@ refs:
   - symbol: sg::backend::dx12::dx12_native_scope
 ---
 
-# The native scope is dx12 only
+# Vulkan has no native scope
 
 `dx12_native_scope` is the declared escape hatch foreign code records through (see [barriers](../concepts/barriers.md)).
-Vulkan has no equivalent, so a vendor denoiser can only run on dx12.
+Metal has one too (`metal_native_scope`, for MetalFX); Vulkan has no equivalent, so a vendor member cannot run there.
 The vulkan shape is the same declaration plus `vkCmdPipelineBarrier2`, and it wants writing when a member needs it.
 
 Two smaller gaps in the dx12 one:

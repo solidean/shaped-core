@@ -63,7 +63,7 @@ ASYNC_INVOCABLE_TEST("sg - two readbacks recorded concurrently each get their ow
         ctx->submit_command_list(cc::move(seed));
     }
 
-    // Both lists are open here, which is the whole point: the ring hands out space to A then B...
+    // Both lists are open here, so the ring hands out space to A then B...
     auto a = ctx->create_command_list();
     auto b = ctx->create_command_list();
     REQUIRE(a != nullptr);
