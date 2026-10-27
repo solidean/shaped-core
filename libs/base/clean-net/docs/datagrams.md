@@ -82,16 +82,17 @@ Natively that is a reactor `readable` operation, which completes when the socket
 `receive_batch` may run on several threads at once and each datagram goes to exactly one of them, so a game thread may poll while the callback drains on the reactor thread.
 A callback that finds the poller already took everything simply receives 0.
 
-**What each costs**, measured by the `cnet - datagrams: polling against the arrival callback` benchmark in `tests/datagram-test.cc`.
-Windows loopback, release build, a Ryzen 9 9950X3D at 13% load; a burst is 16 datagrams of 64 bytes, sent and then drained:
+**What each costs**, measured by the `cnet - datagrams: polling against the arrival callback, over loopback` benchmark in `tests/datagram-test.cc`.
+Windows loopback, release build, a Ryzen 9 9950X3D at 13% load; a burst is 16 datagrams of 64 bytes, sent and then drained.
+The io_system is unthreaded and the benchmark pumps it, so a wake there is a pump on the same thread; with a reactor thread add the cross-thread handoff, which this does not measure.
 
 | | per iteration |
 |---|---|
-| a poll with nothing waiting | 0.32 µs |
-| a burst, drained by polling | 58.7 µs |
-| a burst, drained by the callback | 61.2 µs |
+| a poll with nothing waiting | 0.3156 µs |
+| a burst, drained by polling | 58.74 µs |
+| a burst, drained by the callback | 61.17 µs |
 
-So a frame that finds nothing costs one failed syscall, and the callback adds about 2.4 µs per wake over polling: the reactor's wait, the completion, and four small allocations.
+So a frame that finds nothing costs one failed syscall, and the callback adds about 2.4 µs per wake over polling: the reactor's wait, the completion, and about four small allocations.
 That is per burst, not per datagram, since one wake drains whatever has arrived.
 
 There is no `wait_writable`.
