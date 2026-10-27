@@ -450,7 +450,8 @@ So the set is held still across each commit, as it already was across each chang
 `sg metal - async uploads commit while earlier ones settle` is the race: it crashed on its first run under validation before, and passes thirty in a row since.
 
 The metal binary passes under GPU validation.
-In `shaped-graphics-test`, the two sampler tests in `tests/pipeline/sampler-test.cc` read zeroes under it and pass without it; that is open.
+In `shaped-graphics-test`, the two sampler tests in `tests/pipeline/sampler-test.cc` read zeroes under it and pass without it.
+That is open as [bug-metal-sampler-tests-read-zeroes-under-validation](../../docs/issues/bug-metal-sampler-tests-read-zeroes-under-validation.md).
 
 ### Commit feedback is the one programmatic channel
 
