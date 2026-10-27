@@ -171,6 +171,34 @@ TEST("sr - modifiers carry forward from key events onto mouse events", main_thre
     CHECK(b.cursor_pos[1] == 34.0f);
 }
 
+TEST("sr - every event carries the density its positions were converted at", main_thread, exclusive("sr-window-system"))
+{
+    auto const wsys = sr::window_system::create({.headless = true});
+    auto const win = wsys->create_window({.title = "w"});
+    auto const id = impl::backend_window_id(*win);
+
+    // The dummy driver's density is 1, the field's default too, so this pins the plumbing rather than a conversion.
+    SDL_Event click = {};
+    click.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    click.button.windowID = SDL_WindowID(id);
+    click.button.button = SDL_BUTTON_LEFT;
+    click.button.down = true;
+    auto key = key_down(id, SDL_SCANCODE_K);
+    auto unaddressed = key_down(0, SDL_SCANCODE_K);
+
+    push(click);
+    push(key);
+    push(unaddressed);
+    wsys->poll_events();
+
+    REQUIRE(wsys->events().size() == 3);
+    CHECK(wsys->events()[0].is_mouse_button());
+    CHECK(wsys->events()[0].pixel_density == win->pixel_density());
+    CHECK(wsys->events()[1].pixel_density == win->pixel_density());
+    CHECK(wsys->events()[2].window == nullptr);
+    CHECK(wsys->events()[2].pixel_density == 1.0f);
+}
+
 TEST("sr - committed text arrives as its own event, copied", main_thread, exclusive("sr-window-system"))
 {
     auto const wsys = sr::window_system::create({.headless = true});

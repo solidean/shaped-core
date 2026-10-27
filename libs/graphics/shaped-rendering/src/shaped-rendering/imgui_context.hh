@@ -84,7 +84,6 @@ public:
 
     /// Feeds one event.
     /// process_events is the usual entry point; take this when the caller filters the stream itself, e.g. to route events to a viewport before imgui sees them.
-    /// Positions are divided by the window's current pixel_density, so in the frame a window moves to a display of another density, events queued before the move land off by that ratio.
     void process_event(input_event const& event);
 
     /// Whether imgui wants the keyboard or the mouse this frame — true while a text field has focus or the cursor is over a window.

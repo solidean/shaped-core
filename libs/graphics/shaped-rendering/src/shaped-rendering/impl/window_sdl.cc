@@ -605,6 +605,13 @@ void window_system::poll_events()
     // Last frame's events die here, which is the lifetime events() documents.
     _events.clear();
 
+    // Every event carries the density its positions were converted at, the window's as of that point in the stream.
+    auto const push = [&](window* w, auto&& payload)
+    {
+        _events.push_back(
+            {.window = w, .pixel_density = density_of(w), .payload = cc::forward<decltype(payload)>(payload)});
+    };
+
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
@@ -617,12 +624,11 @@ void window_system::poll_events()
             // rather than as of whenever the queue happened to be drained.
             _modifiers = impl::modifiers_from_sdl(event.key.mod);
 
-            _events.push_back({.window = window_from_id(event.key.windowID),
-                               .payload = key_event{.scancode = impl::scancode_from_sdl(event.key.scancode),
-                                                    .character = impl::character_from_keycode(event.key.key),
-                                                    .modifiers = _modifiers,
-                                                    .is_down = event.key.down,
-                                                    .is_repeat = event.key.repeat}});
+            push(window_from_id(event.key.windowID), key_event{.scancode = impl::scancode_from_sdl(event.key.scancode),
+                                                               .character = impl::character_from_keycode(event.key.key),
+                                                               .modifiers = _modifiers,
+                                                               .is_down = event.key.down,
+                                                               .is_repeat = event.key.repeat});
             break;
 
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
@@ -641,8 +647,7 @@ void window_system::poll_events()
         case SDL_EVENT_TEXT_INPUT:
             // SDL owns the text only until the next pump, so it is copied rather than referenced.
             if (event.text.text != nullptr)
-                _events.push_back({.window = window_from_id(event.text.windowID),
-                                   .payload = text_event{.text = cc::string(event.text.text)}});
+                push(window_from_id(event.text.windowID), text_event{.text = cc::string(event.text.text)});
             break;
 
         // SDL reports mouse coordinates in logical units and sr in pixels.
@@ -651,12 +656,11 @@ void window_system::poll_events()
         {
             auto* const w = window_from_id(event.motion.windowID);
             auto const density = density_of(w);
-            _events.push_back({.window = w,
-                               .payload = mouse_move_event{
-                                   .cursor_pos = impl::pixels_from_logical(event.motion.x, event.motion.y, density),
-                                   .delta = impl::pixels_from_logical_delta(event.motion.xrel, event.motion.yrel, density),
-                                   .pixel_density = density,
-                                   .held_buttons = impl::held_buttons_from_sdl(event.motion.state)}});
+            push(w, mouse_move_event{
+                        .cursor_pos = impl::pixels_from_logical(event.motion.x, event.motion.y, density),
+                        .delta = impl::pixels_from_logical_delta(event.motion.xrel, event.motion.yrel, density),
+                        .pixel_density = density,
+                        .held_buttons = impl::held_buttons_from_sdl(event.motion.state)});
             break;
         }
 
@@ -664,13 +668,12 @@ void window_system::poll_events()
         case SDL_EVENT_MOUSE_BUTTON_UP:
         {
             auto* const w = window_from_id(event.button.windowID);
-            _events.push_back({.window = w,
-                               .payload = mouse_button_event{.button = impl::mouse_button_from_sdl(event.button.button),
-                                                             .modifiers = _modifiers,
-                                                             .is_down = event.button.down,
-                                                             .clicks = int(event.button.clicks),
-                                                             .cursor_pos = impl::pixels_from_logical(
-                                                                 event.button.x, event.button.y, density_of(w))}});
+            push(w, mouse_button_event{
+                        .button = impl::mouse_button_from_sdl(event.button.button),
+                        .modifiers = _modifiers,
+                        .is_down = event.button.down,
+                        .clicks = int(event.button.clicks),
+                        .cursor_pos = impl::pixels_from_logical(event.button.x, event.button.y, density_of(w))});
             break;
         }
 
@@ -678,12 +681,10 @@ void window_system::poll_events()
         {
             // The scroll amount is in ticks, not a distance, so only the position converts.
             auto* const w = window_from_id(event.wheel.windowID);
-            _events.push_back(
-                {.window = w,
-                 .payload = mouse_wheel_event{
-                     .delta = tg::vec2f(impl::wheel_amount(event.wheel.x, event.wheel.direction),
-                                        impl::wheel_amount(event.wheel.y, event.wheel.direction)),
-                     .cursor_pos = impl::pixels_from_logical(event.wheel.mouse_x, event.wheel.mouse_y, density_of(w))}});
+            push(w, mouse_wheel_event{.delta = tg::vec2f(impl::wheel_amount(event.wheel.x, event.wheel.direction),
+                                                         impl::wheel_amount(event.wheel.y, event.wheel.direction)),
+                                      .cursor_pos = impl::pixels_from_logical(event.wheel.mouse_x, event.wheel.mouse_y,
+                                                                              density_of(w))});
             break;
         }
 
@@ -693,10 +694,9 @@ void window_system::poll_events()
             if (event.drop.data != nullptr)
             {
                 auto* const w = window_from_id(event.drop.windowID);
-                _events.push_back({.window = w,
-                                   .payload = file_drop_event{.path = cc::string(event.drop.data),
-                                                              .cursor_pos = impl::pixels_from_logical(
-                                                                  event.drop.x, event.drop.y, density_of(w))}});
+                push(w, file_drop_event{
+                            .path = cc::string(event.drop.data),
+                            .cursor_pos = impl::pixels_from_logical(event.drop.x, event.drop.y, density_of(w))});
             }
             break;
 

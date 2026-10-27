@@ -93,6 +93,8 @@ wsys->displays();                 // -> vector<display_info>: position/size/work
 for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
 {
     e.window;                          // -> sr::window*, null if none was focused
+    e.pixel_density;                   // -> float, what the event's positions were converted at; divide by THIS for logical units
+                                       //    (window->pixel_density() may have changed mid-poll on a display move); 1 if no window
     e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event, file_drop_event>
 
     e.payload.visit(                   // THE way to consume an event; every handler must return the same type

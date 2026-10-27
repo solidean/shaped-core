@@ -314,6 +314,10 @@ struct sr::input_event
     /// Never dangles within one frame: a window destroyed mid-frame drops its events from this span.
     sr::window* window = nullptr;
 
+    /// The pixel density the event's positions and deltas were converted at: the window's as of the event's place in the stream, 1 for an event naming no window.
+    /// Divide by it, not by window::pixel_density, to get logical units — the window's own changes mid-poll when it moves to another display.
+    float pixel_density = 1.0f;
+
     /// What happened, as one of the six event payloads.
     ///
     /// Visiting it is the way to consume an event: each handler receives its payload named and typed, with no probe first.

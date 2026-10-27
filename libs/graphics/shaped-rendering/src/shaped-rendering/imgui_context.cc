@@ -420,8 +420,7 @@ void imgui_context::process_event(input_event const& event)
         if (event.window == nullptr)
             return cursor_pos;
 
-        auto const logical
-            = tg::pos2f(cursor_pos[0] / event.window->pixel_density(), cursor_pos[1] / event.window->pixel_density());
+        auto const logical = tg::pos2f(cursor_pos[0] / event.pixel_density, cursor_pos[1] / event.pixel_density);
         if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0)
             return logical;
 
