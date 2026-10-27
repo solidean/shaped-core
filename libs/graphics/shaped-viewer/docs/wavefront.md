@@ -2,7 +2,7 @@
 
 **Built, and the default for now.**
 The megakernel in [tracer_pipeline.sgl](../shaders/tracer_pipeline.sgl), one ray-tracing pipeline whose raygen walks every path to its end in registers, stays as `render_mode::megakernel`.
-The intended direction is a hybrid default — rasterized primaries, lit by the megakernel — with the wavefront as the best-quality mode.
+The intended direction is a hybrid default — rasterized primaries, lit by inline traces and a radiance cache — with the wavefront as the best-quality mode.
 [Which tracer is the default](#which-tracer-is-the-default) says why.
 This document is the wavefront's shape, the decisions behind it, the alternatives that were weighed and rejected, and what it measured.
 
@@ -344,7 +344,7 @@ The GPU tests' physical expectations, and `wavefront-trace-test.cc`'s comparison
 ### Which tracer is the default
 
 The wavefront is the default today, and very likely not for good.
-The intended default is the hybrid: rasterized primaries, lit by the megakernel, the cheaper tracer on the shallow paths that lighting needs.
+The intended default is the hybrid: rasterized primaries, lit by inline traces over few bounces and a radiance cache ([hybrid-renderer.md](plans/hybrid-renderer.md)).
 The wavefront is meant to become the best-quality mode, the one an image converges in where quality matters more than the frame rate.
 Neither change has landed; [the roadmap](plans/rendering-roadmap.md) orders the work toward them.
 

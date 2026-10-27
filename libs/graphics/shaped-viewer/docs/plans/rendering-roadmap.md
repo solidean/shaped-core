@@ -14,7 +14,7 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 ## The intended default
 
 The wavefront tracer is the default today, and very likely not for good.
-The intended default is the hybrid: rasterized primaries, lit by the megakernel, which is the cheaper tracer on the shallow paths lighting needs.
+The intended default is the hybrid: rasterized primaries, lit by inline traces over few bounces and a radiance cache — [hybrid-renderer.md](hybrid-renderer.md) is its plan.
 The wavefront is meant to become the best-quality mode, the one an image converges in where quality matters more than the frame rate.
 Neither has landed; the items below are the way there, and [wavefront.md](../wavefront.md#which-tracer-is-the-default) keeps the reasoning.
 
@@ -31,9 +31,9 @@ Today it is unshadowed and reflects only the SH environment; a device without ra
   Done for raster: a raster layer draws on a device without ray tracing, building no acceleration structure, and only a traced layer acquires the tracer.
   **The polyfill exists on webgpu alone**, where the wavefront is out of scope, so a dx12 or vulkan device without ray tracing has none.
   Bringing it there is an sg item (`feat-sg-ray-query-polyfill-dx12-vulkan`); until it lands, the hybrid there falls back to the raster path's direct lighting.
-- **A G-buffer holding all of OpenPBR is too much.**
-  A visibility buffer is the approach to try first — instance and primitive per pixel, the hit rebuilt where it is lit, which is the wavefront's own hit record.
-  Its cost is real, so it is the first candidate rather than the decision; the design review weighs it.
+- **A G-buffer holding all of OpenPBR is too much, and the hybrid takes a thin one instead of a visibility buffer.**
+  The raster pass evaluates the material once and writes a reduced closure; [hybrid-renderer.md](hybrid-renderer.md#the-thin-g-buffer) has the layout.
+- **No ReSTIR, in any form, until NVIDIA answers on its patents.** The radiance cache comes first, and it must be an open design no patent covers.
 
 ## Next, in order
 
@@ -42,9 +42,8 @@ Today it is unshadowed and reflects only the SH environment; a device without ra
 2. **The step when the camera stops.**
    The first still frame starts the full-size temporal history over, so it is denoised from one sample.
 3. **Ray cones**, so a hit picks a texture's mip level instead of always sampling level 0.
-4. **A design review of the rendering modes and the radiance cache**, run with the review tool.
-   - Interactive: rasterized primaries, then ray-traced lighting through a radiance cache, possibly on the megakernel.
-     The raster path's G-buffer is its input; what it lacks for that is the material itself, likely as a visibility buffer ([raster.md](../raster.md#the-g-buffer-seam)).
+4. **A design review of [hybrid-renderer.md](hybrid-renderer.md)**, run with the review tool.
+   - Interactive: rasterized primaries into a thin G-buffer, GPU-culled, then one inline-traced lighting kernel ending in a radiance cache.
    - Final: the wavefront tracer converging without the cache, with power-weighted light selection.
    - Later: special handling for mirrors and caustics.
 
