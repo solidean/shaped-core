@@ -25,6 +25,10 @@
 #include <mswsock.h>
 // clang-format on
 #else
+#if defined(__APPLE__)
+// Apple declares the RFC 3542 IPv6 socket options, IPV6_DONTFRAG among them, only when asked to, before the headers.
+#define __APPLE_USE_RFC_3542 1
+#endif
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -505,7 +509,13 @@ namespace
     return set_int_option(s, IPPROTO_IP, IP_MTU_DISCOVER, IP_PMTUDISC_DO, "setting IP_MTU_DISCOVER");
 #elif defined(IP_DONTFRAG)
     if (family == ip_family::v6)
+    {
+#if defined(IPV6_DONTFRAG)
         return set_int_option(s, IPPROTO_IPV6, IPV6_DONTFRAG, 1, "setting IPV6_DONTFRAG");
+#else
+        return cc::error(unsupported_here("refusing to fragment an IPv6 datagram"));
+#endif
+    }
     return set_int_option(s, IPPROTO_IP, IP_DONTFRAG, 1, "setting IP_DONTFRAG");
 #else
     (void)s;
