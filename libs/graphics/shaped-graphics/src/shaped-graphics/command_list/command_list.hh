@@ -282,7 +282,8 @@ private:
     u32 _last_array_declaration_id = 0;
 
     void check_raster_aliasing(bool indexed);
-    void check_hit_records(raytracing_shader_table const& table);
+    // Whether any bound tlas reaches a hit record past the end of `table`, which dispatch_rays must not submit.
+    bool check_hit_records(raytracing_shader_table const& table);
 
     cc::string _rendering_target_set;                       // of the open rendering, or empty
     cc::optional<raster_target_formats> _rendering_formats; // of the open rendering, or empty when none is open
@@ -319,10 +320,12 @@ private:
 
     // Each shader table and tlas dispatch_rays has checked against each other in this list, so a list logs a mismatch once.
     // Held rather than pointed at, so neither address can be reused by another table or tlas while the list records.
+    // The verdict is kept too, so a second dispatch of a pair that reaches past the table is skipped as the first was.
     struct checked_trace
     {
         raytracing_shader_table_handle table;
         tlas_handle tlas;
+        bool past_table_end = false;
     };
     cc::vector<checked_trace> _checked_traces;
 };

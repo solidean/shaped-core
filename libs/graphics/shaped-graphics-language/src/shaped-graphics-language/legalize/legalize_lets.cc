@@ -953,7 +953,7 @@ struct let_simplifier
         {
             if (!is_known(e(), list[i]) || is_dropped(list[i]))
                 continue;
-            // a copy, since a split inside its bodies appends statements and may move the one this names
+            // A copy: the recursion below adds statements, which can move the one a reference would point at.
             auto const s = e().at(list[i]);
             for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { split_in(inner, u, depth + 1); });
 

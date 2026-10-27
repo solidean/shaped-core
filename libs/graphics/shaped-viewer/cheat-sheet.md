@@ -25,7 +25,7 @@ Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see
 ## Per-frame description — what to render
 
 ```cpp
-sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 content_scale; u32 sample_target; def[i] -> view_data& } — a whole frame, as two flat pools
+sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 display_scale; u32 sample_target; def[i] -> view_data& } — a whole frame, as two flat pools
 sv::view_data                    // { view_id id; vec2i resolution; bool resolution_follows_layout; camera; vector<layer> layers; refresh_policy refresh; vector<temporal_input>; }
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
@@ -702,7 +702,7 @@ c.update(dt) -> bool             // advance that glide (config.focus_seconds, ea
 c.is_focusing()                  // whether update would still move the camera
 c.camera() / c.is_dragging()     // the resulting camera / whether a drag is in progress
 sv::primary_hit_position(record, pixel, resolution, depth, near) // -> optional<pos3d>: a texel of the trace's primary depth back to world; none = escaped
-sv::camera_controller_config     // { f64 orbit_degrees_per_pixel, pan_units_per_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
+sv::camera_controller_config     // { f64 orbit_degrees_per_logical_pixel, pan_units_per_logical_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
 ```
 
 Left drag orbits, middle drag pans the target (scaled by distance, so one drag covers the same screen fraction at every zoom), the wheel scales the distance geometrically.
@@ -728,7 +728,7 @@ c.handle(sr::input_event) -> bool  // apply one event ALREADY routed to this vie
 c.update(dt) -> bool             // integrate the held keys over dt seconds; true if the camera moved. Call EVERY frame, event or not
 c.camera() / c.is_looking() / c.is_moving()
 c.release_input()                // drop every held key + the look — for a view that lost focus and will never see the key-up
-sv::fps_camera_controller_config // { f64 look_degrees_per_pixel, move_units_per_second, fast_multiplier, slow_multiplier, speed_per_wheel_tick,
+sv::fps_camera_controller_config // { f64 look_degrees_per_logical_pixel, move_units_per_second, fast_multiplier, slow_multiplier, speed_per_wheel_tick,
                                  //   min/max_move_units_per_second; angle_d max_pitch; bool look_requires_button; }
 ```
 
@@ -1120,6 +1120,26 @@ for (auto f : sv::interactive("main"))
 // or, with no ceremony at all: the default window's default view's 3D scene
 for (auto f : sv::interactive("simple"))
     f.add_scene().add_mesh(mesh);
+```
+
+### Dear ImGui over the window
+
+`f.imgui()` opens imgui for the frame, and the body calls `ImGui::` (and `ImPlot::`, after its own `CreateContext`) directly.
+The first call brings the context up; from then on every frame feeds it input and draws the UI over the whole window, after the views.
+The built-in cameras skip what imgui wants; `input_events()` still has every event, so a body handling keys itself checks `f.imgui_wants_keyboard()`.
+One viewer per process can use it, since imgui keeps one global context; a headless capture draws the UI too.
+
+```cpp
+for (auto f : sv::interactive("tool"))
+{
+    if (f.imgui())
+    {
+        ImGui::Begin("options");
+        ImGui::SliderFloat("exposure", &exposure, -4, 4);
+        ImGui::End();
+    }
+    f.add_scene().add_mesh(mesh);
+}
 ```
 
 ## Driving the renderer by hand

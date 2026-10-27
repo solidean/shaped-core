@@ -508,6 +508,15 @@ Many persistent textures get their lower mip levels as render targets but never 
 The views stayed per epoch, at a create and a destroy per frame for a persistent target, and the reason went into the design doc.
 Before recommending a longer-lived cache, name the usage pattern each row of the benchmark stands for, and the one it leaves out.
 
+**A memo keyed on an object is priced on how often that object is rebuilt.**
+A review recommended remembering, on each TLAS, the shader tables it had already been checked against, so a steady frame would skip a per-list walk of every instance:
+
+```raw
+But usually the TLAS is rebuild every frame. Would once per command list not make more sense then?
+```
+
+A rebuild is a new object, so the memo would never hit, and the per-list walk was already the right granularity.
+
 ### Out-of-order execution invalidates every collapsed maximum
 
 When a change lets work complete out of submission order, find every place that folds a set of values into one number and waits on it.
