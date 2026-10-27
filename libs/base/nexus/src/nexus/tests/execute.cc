@@ -760,9 +760,14 @@ void note_leaked_async_work(test_context& ctx, nx::test_declaration const& decl,
 {
     auto const outstanding = leftover.outstanding;
     // Said on the console as well, as a failed check is: the run's summary names only the test, not why it failed.
+    // The detail too, since a failure's report shows its expanded line alone; SC_ASYNC_AMBIENT_TRACE's stacks are read here.
     if (is_outermost_execution())
+    {
         CC_LOG_ERROR("\"{}\" left async work running — {} async item(s) still carry its context; await or cancel them",
                      decl.name, outstanding);
+        for (auto const& line : leftover.detail)
+            CC_LOG_ERROR("  {}", line);
+    }
     ctx.off_thread_failed_checks.fetch_add(1, cc::memory_order_relaxed);
     ctx.off_thread_errors.lock(
         [&](cc::vector<test_error>& errors)
