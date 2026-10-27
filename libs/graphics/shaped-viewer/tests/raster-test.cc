@@ -91,7 +91,11 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
     auto permutations = cc::vector<sv::material_permutation const*>();
     permutations.push_back(permutation);
     auto draws = cc::vector<sv::raster_draw>();
-    draws.push_back({.instance = 0, .triangle_count = u32(mesh_rec->geometry.triangle_count), .permutation = 0});
+    draws.push_back({.instance = 0,
+                     .triangle_count = u32(mesh_rec->geometry.triangle_count),
+                     .permutation = 0,
+                     .first_index = u32(mesh_rec->geometry.first_index),
+                     .base_vertex = u32(mesh_rec->geometry.base_vertex)});
 
     auto const targets = gbuffer_of(ctx, size);
     auto const record = sv::camera_record_of(cam);
@@ -127,6 +131,7 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
                    .instance_table = instance_table,
                    .lights = light_buffer,
                    .draws = draws,
+                   .index_pool = resources.meshes.index_pool(),
                    .permutations = permutations,
                    .bindless = &bindless,
                    .targets = targets});

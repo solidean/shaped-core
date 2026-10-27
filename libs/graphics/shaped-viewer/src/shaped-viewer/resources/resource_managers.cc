@@ -82,6 +82,12 @@ constexpr isize initial_pool_indices = isize(3) << 16;
     return geometry_usage(ctx) | sg::buffer_usage::copy_src;
 }
 
+// The index pool is also what an indexed raster draw binds.
+[[nodiscard]] sg::buffer_usages index_pool_usage(sg::context const& ctx)
+{
+    return pool_usage(ctx) | sg::buffer_usage::index_buffer;
+}
+
 // A mesh's payload streams into buffers of its own, and is copied into the pools once it landed.
 constexpr auto staging_usage = sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src;
 
@@ -176,7 +182,7 @@ void mesh_manager::_ensure_pools()
         return;
 
     _vertex_pool = _ctx.persistent.create_buffer<tg::pos3f>(initial_pool_vertices, pool_usage(_ctx));
-    _index_pool = _ctx.persistent.create_buffer<u32>(initial_pool_indices, pool_usage(_ctx));
+    _index_pool = _ctx.persistent.create_buffer<u32>(initial_pool_indices, index_pool_usage(_ctx));
     _vertex_ranges.grow(initial_pool_vertices);
     _index_ranges.grow(initial_pool_indices);
 
@@ -253,7 +259,7 @@ void mesh_manager::_grow_index_pool(isize min_capacity)
 {
     auto const old_capacity = _index_ranges.capacity();
     auto const capacity = grown_capacity(old_capacity, min_capacity);
-    auto grown = _ctx.persistent.create_buffer<u32>(capacity, pool_usage(_ctx));
+    auto grown = _ctx.persistent.create_buffer<u32>(capacity, index_pool_usage(_ctx));
 
     // As `_grow_vertex_pool`, for the indices.
     auto cmd = _ctx.create_command_list();

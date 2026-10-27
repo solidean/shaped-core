@@ -51,16 +51,16 @@ binding drawn:
     instance: uint
     pad0: uint3
 
-/// What the vertex stage hands the pixel stage: which triangle, where in it, and where in the world.
+/// What the vertex stage hands the pixel stage: which instance, and where on it, in its own space and in the world.
 ///
-/// The triangle and its barycentrics are what a traced hit reports, so a pixel builds the same `material.shading_context` a hit does.
+/// The draw is indexed, so a corner is shared by the triangles meeting there and cannot say which triangle it is.
+/// The pixel stage takes its triangle from `@primitive_id` and finds the barycentrics of `object` in it, which is what a traced hit reports.
 struct varyings:
     @position position: hpos4
     /// the row of `drawn.instances`, which the vertex stage reads from `draw`, so a pixel indexes by it unmarked
     @per_draw instance: uint
-    @interpolate(.flat) primitive: uint
-    /// `(1 - b.x - b.y, b.x, b.y)` of a traced hit at the same point: the weight of each corner, in order
-    barycentrics: float3
+    /// the point in the mesh's own space, where the barycentrics are found: the corners are stored there, and it is near the origin
+    object: float3
     world: float3
 
 /// What a raster frame writes per pixel: the lit image and the primary hit's G-buffer.

@@ -50,16 +50,22 @@ struct sv::raster_gbuffer
 };
 
 /// One draw of a raster frame: every triangle of one row of the instance table, through one permutation's pixel stage.
+///
+/// An indexed draw over `raster_frame_desc::index_pool`: the row's geometry range, as its instance record names it.
 struct sv::raster_draw
 {
     /// The row of `raster_frame_desc::instance_table` the draw is.
     u32 instance = 0;
 
-    /// How many triangles the row's geometry holds; the draw is three vertices per triangle and no vertex buffer.
+    /// How many triangles the row's geometry holds.
     u32 triangle_count = 0;
 
     /// Which of `raster_frame_desc::permutations` shades it.
     u32 permutation = 0;
+
+    /// Where the row's indices start in the index pool, and the vertex they are relative to.
+    u32 first_index = 0;
+    u32 base_vertex = 0;
 };
 
 /// Everything one raster frame binds and draws.
@@ -83,6 +89,9 @@ struct sv::raster_frame_desc
     sr::slug_atlas const* decal_atlas = nullptr;
 
     cc::span<raster_draw const> draws;
+
+    /// The mesh manager's index pool, which every draw is indexed through; `mesh_manager::index_pool`.
+    sg::buffer<u32> index_pool;
 
     /// The permutations the draws shade with; each must be a triangle one.
     /// One whose pixel stage has not compiled is drawn through `fallback`, as a trace substitutes a hit group.

@@ -723,6 +723,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
 
 /// The raster path's pixel stage of one triangle permutation: `sv_raster`, over the triangle module `raster`'s vertex stage drew.
 ///
+/// The draw is indexed, so a pixel learns its triangle from `@primitive_id`, which is why it requires `primitive_index`.
 /// The cutout reads the instance's opacity record through `tracer.instance_opacity`, the reader a hit's any-hit cuts through.
 /// So a pixel cuts what a hit does wherever the type's cutoff is above 0; coverage, a cutoff of 0, is cut below one half (`raster.is_cut`).
 /// The type's declared occlusion reaches `raster.shade` the same way, and 1 where it declares none.
@@ -730,12 +731,13 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
                                                material_parameter_layout const& layout,
                                                material_opacity const& opacity)
 {
-    auto src = source_header(r, geometry_kind::triangles, {}, "raster");
+    auto src = source_header(r, geometry_kind::triangles, "require primitive_index\n", "raster");
     auto supplied_frame = cc::string();
     src += material_body(r, layout, supplied_frame, raster_spelling);
 
-    src += "@pixel fun sv_raster(p: raster.varyings){raster.drawn, tracer.bindless, slug.tables} -> raster.targets:\n"
-           "    let ctx = raster.pixel_context(p)\n";
+    src += "@pixel fun sv_raster(p: raster.varyings, @primitive_id primitive: int){raster.drawn, tracer.bindless, "
+           "slug.tables} -> raster.targets:\n"
+           "    let ctx = raster.pixel_context(p, primitive as uint)\n";
     if (opacity.can_cut_out())
         src += "    if raster.is_cut(p, ctx) => discard\n";
     auto const occlusion = r.type->occlusion_attribute.empty()

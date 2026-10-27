@@ -9,16 +9,18 @@ This document is what a raster frame draws, how it shares its materials with the
 ## What a frame is
 
 ```
-one draw per triangle item ─▶ environment where nothing was drawn
-   (vertex: pull the corner, project)      (depth test against the far plane)
-   (pixel: the material, then raster.shade)
+one indexed draw per triangle item ─▶ environment where nothing was drawn
+   (vertex: pull the vertex, project)              (depth test against the far plane)
+   (pixel: @primitive_id, barycentrics, the material, then raster.shade)
 ```
 
-- **One draw per scene item**, three vertices per triangle and no vertex or index buffer bound.
-  The vertex stage, `surface_vs` of [raster_pass.sgl](../shaders/raster_pass.sgl), pulls its corner the way a hit reads its triangle, through the instance record.
-  It reads the mesh manager's central pools, so one vertex stage serves every mesh, whatever attributes it carries.
+- **One indexed draw per scene item**, through the mesh manager's central index pool, at the mesh's first index and base vertex; no vertex buffer is bound.
+  The vertex stage, `surface_vs` of [raster_pass.sgl](../shaders/raster_pass.sgl), pulls its vertex out of the central vertex pool.
+  So one vertex stage serves every mesh, whatever attributes it carries.
+  It hands on the point in the mesh's own space and in the world, since a shared vertex cannot say which triangle it is.
 - **The pixel stage is generated per material permutation**, `raster_source` beside the hit group and the wavefront's shade kernel.
-  It builds the hit's `material.shading_context` from the triangle and its barycentrics, evaluates the material, and hands the surface to `raster.shade`.
+  It takes its triangle from `@primitive_id`, which requires the device's `primitive_index`, and finds its barycentrics from the object-space point.
+  Then it builds the hit's `material.shading_context`, evaluates the material, and hands the surface to `raster.shade`.
 - **The depth test is reversed.** A surface tests at `near / depth`, cleared to 0 at infinity and passing `greater`.
   A float's spacing shrinks toward 0 as fast as that does, so the step it resolves stays about 6e-8 · depth wherever the surface is.
   The standard `1 - near / depth` would step by about 6e-8 · depth² / near instead: 6 units at 1000 with the default near plane of 0.01.
@@ -166,7 +168,6 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
   The quality fix is mips generated to keep the fraction above the cutoff, with the cutout then sampled through them.
 - **Lights seen by the camera**: a rect light marked visible to the camera is not drawn.
 - **Overdraw**: there is no depth prepass, so an occluded surface is shaded before the one in front of it lands.
-- **Vertex reuse**: the vertex stage runs three times per triangle, since no index buffer is bound.
 - **Upscaling**: a raster layer never draws at a scaled extent.
 - **Light linking** is reserved in the records and read by neither path.
 - **A vulkan rendering scope splits once per fresh upload**: a draw's bindings are barriered at the draw, inside the scope.

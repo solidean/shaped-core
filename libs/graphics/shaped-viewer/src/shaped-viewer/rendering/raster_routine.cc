@@ -327,6 +327,11 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     // The first draw applies them, and a later one finds them current unless its pipeline touches them at new stages.
     // The environment draw binds no table, so it leaves them dormant, and a pass with nothing else to draw ends them silently.
     auto const declared = d.bindless->declare_raster_access(cmd);
+    if (!d.draws.empty())
+    {
+        CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
+        pass.bind_index_buffer(d.index_pool.as_index_buffer());
+    }
     for (auto const& draw : d.draws)
     {
         CC_ASSERT(isize(draw.permutation) < pipelines.size(), "a raster draw names a permutation the frame holds");
@@ -337,7 +342,9 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         pass.bind_group(bindless_group, *d.bindless->group());
         pass.bind_group(2, *tables);
         pass.set_inline_constants(raster::draw{.instance = draw.instance, .pad0 = {}}.to_block());
-        pass.draw({.vertex_range = {.offset = 0, .size = isize(draw.triangle_count) * 3}});
+        // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
+        pass.draw_indexed({.index_range = {.offset = isize(draw.first_index), .size = isize(draw.triangle_count) * 3},
+                           .vertex_offset = int(draw.base_vertex)});
     }
 
     pass.bind_pipeline(*self->_environment);

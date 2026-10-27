@@ -904,8 +904,11 @@ struct raster_scene
             skipped_quadrics = true;
             continue;
         }
-        draws.push_back(
-            {.instance = u32(i), .triangle_count = resolved.triangle_counts[i], .permutation = permutation_of[group]});
+        draws.push_back({.instance = u32(i),
+                         .triangle_count = resolved.triangle_counts[i],
+                         .permutation = permutation_of[group],
+                         .first_index = resolved.records[i].first_index,
+                         .base_vertex = resolved.records[i].base_vertex});
     }
 
     // Quadric batches are not drawn yet; issue: feat-sv-raster-quadric-batches
@@ -959,6 +962,7 @@ struct raster_scene
               .decal_shapes = decal_buffers.shapes,
               .decal_atlas = decal_buffers.atlas,
               .draws = draws,
+              .index_pool = resources.meshes.index_pool(),
               .permutations = permutations,
               .fallback = &resources.shaders.acquire_fallback(),
               .bindless = &bindless,

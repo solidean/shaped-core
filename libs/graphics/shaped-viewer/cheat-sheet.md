@@ -877,7 +877,7 @@ sv::emitter_record_of(instance, cdf, triangles, blocks, emission) // -> emitter_
 sv::impl::emitter_estimate_of(emission, block, sources)          // -> optional<emitter_estimate>: selection's mean radiance, `unseen` where it rests on a stand-in for black; empty, so camera-only, where the emission is proven dark or not finite (rendering/impl/emitters.hh)
 sv::raster_routine::execute(cmd, raster_frame_desc)  // one draw per raster_draw through its permutation's raster pixel stage, into a raster_gbuffer; declines while the vertex stage builds
 sv::raster_frame_desc                                // { raster frame constants; background, instance_table, lights, decals; draws; permutations; fallback; bindless; targets }
-sv::raster_draw                                      // { u32 instance, triangle_count, permutation } — three vertices per triangle, no vertex buffer
+sv::raster_draw                                      // { u32 instance, triangle_count, permutation, first_index, base_vertex } — indexed through raster_frame_desc::index_pool, no vertex buffer
 sv::raster_gbuffer                                   // { color rgba32f; normal, albedo, specular_albedo rgba16f; depth r32f; roughness r16f; motion rg32f; primary_depth r32f }
                                                      //   the layer's slots, every one render_target-capable; THE seam a hybrid lighting pass reads
 sv::default_frame_constants()                        // -> shaders::tracer::frame_constants: 16 spp, 5 bounces, rng_seed 1, all else 0 — the generated 256-byte block

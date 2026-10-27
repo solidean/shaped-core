@@ -53,44 +53,50 @@ fun project(cam: scene.camera, p: float3, near: float) -> hpos4:
     let y = dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)
     return hpos4(x, y, near, depth)
 
-/// Corner `vertex % 3` of triangle `vertex / 3` of the draw's instance, pulled out of the central pools.
+/// Vertex `vertex` of the draw's instance, pulled out of the vertex pool.
 ///
-/// No vertex buffer and no index buffer are bound: the draw is three vertices per triangle, and each reads its own corner the way a hit reads all three.
-/// That is what lets one pipeline draw every mesh, whatever its attributes.
-fun corner_of(vertex: int){drawn, tracer.bindless, draw} -> varyings:
+/// The draw is indexed through the index pool, and `vertex` already carries the mesh's base vertex, so it is the pool's own index.
+/// No vertex buffer is bound, which is what lets one pipeline draw every mesh, whatever its attributes.
+fun vertex_of(vertex: int){drawn, tracer.bindless, draw} -> varyings:
     let f = drawn.frame[0]
     let instance = draw.instance
     let inst = scene.instance(..drawn.instances[instance as int])
-    let primitive = (vertex / 3) as uint
-    let k = vertex % 3
-
-    let indices = inst.indices as int
-    let corners = material.triangle_corners(inst, tracer.bindless.buffers[indices], primitive)
-    let mut index = corners.x
-    let mut bary = float3(1.0, 0.0, 0.0)
-    if k == 1:
-        index = corners.y
-        bary = float3(0.0, 1.0, 0.0)
-    else if k == 2:
-        index = corners.z
-        bary = float3(0.0, 0.0, 1.0)
-
     let vertices = inst.vertices as int
-    let object = material.position_of(inst, tracer.bindless.buffers[vertices], index)
+    let object = reinterpret_as_float(tracer.bindless.buffers[vertices].load3((vertex as uint) * 12))
     let world = to_world_point(inst, object)
     return {
         position = project(scene.camera(..f.camera), world, f.near_plane)
         instance = instance
-        primitive = primitive
-        barycentrics = bary
+        object = object
         world = world
     }
 
-/// The shading context of the pixel's triangle, as `tracer.triangle_context` makes one for a hit there.
-fun pixel_context(p: varyings){drawn, tracer.bindless} -> material.shading_context:
+/// The weights of `a`, `b` and `c`, in that order, that put the point of their plane nearest `q` together.
+///
+/// Through the triangle's normal rather than the edges' dot products, which cancel on a thin triangle.
+/// A degenerate triangle covers no pixel, and takes its first corner whole.
+fun barycentrics_of(q: float3, a: float3, b: float3, c: float3) -> float3:
+    let e0 = b - a
+    let e1 = c - a
+    let n = cross(e0, e1)
+    let nn = dot(n, n)
+    if nn <= 0.0 => return float3(1.0, 0.0, 0.0)
+    let d = q - a
+    let v = dot(cross(d, e1), n) / nn
+    let w = dot(cross(e0, d), n) / nn
+    return float3(1.0 - v - w, v, w)
+
+/// The shading context of the pixel's triangle `primitive`, as `tracer.triangle_context` makes one for a hit there.
+fun pixel_context(p: varyings, primitive: uint){drawn, tracer.bindless} -> material.shading_context:
     let inst = scene.instance(..drawn.instances[p.instance as int])
     let indices = inst.indices as int
-    return material.make_context(inst, tracer.bindless.buffers[indices], p.primitive, float2(p.barycentrics.y, p.barycentrics.z))
+    let vertices = inst.vertices as int
+    let corner = material.triangle_corners(inst, tracer.bindless.buffers[indices], primitive)
+    let o0 = material.position_of(inst, tracer.bindless.buffers[vertices], corner.x)
+    let o1 = material.position_of(inst, tracer.bindless.buffers[vertices], corner.y)
+    let o2 = material.position_of(inst, tracer.bindless.buffers[vertices], corner.z)
+    let bary = barycentrics_of(p.object, o0, o1, o2)
+    return material.shading_context(inst.param_buffer, inst.param_offset, primitive, corner, bary)
 
 /// Whether a cutout material removes this pixel, read through `tracer.instance_opacity` as the tracer's any-hit reads it.
 ///

@@ -6,9 +6,9 @@
 use raster
 use tracer
 
-/// One corner of one triangle of the draw's instance: three vertices per triangle, and no vertex buffer.
+/// One vertex of the draw's instance: an indexed draw through the index pool, and no vertex buffer.
 @vertex fun surface_vs(@vertex_index vertex: int){raster.drawn, tracer.bindless, raster.draw} -> raster.varyings:
-    return raster.corner_of(vertex)
+    return raster.vertex_of(vertex)
 
 /// What the environment pass hands its pixel stage: the position alone, whose pixel is the camera ray.
 struct environment_varyings:
