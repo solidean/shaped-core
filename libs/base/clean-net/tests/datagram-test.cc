@@ -457,7 +457,10 @@ CNET_IO_TEST("cnet - with a reactor thread, the arrival callback runs there and 
     CHECK(pump_until([&] { return inside.load(); }));
     b = {};
     CHECK(finished.load());
-    CHECK(ran_elsewhere.load());
+
+    // A build without threads has no reactor thread, and then the pumping thread is where the callback belongs.
+    if (io->has_reactor_thread())
+        CHECK(ran_elsewhere.load());
 
     a = {};
     io->stop();
