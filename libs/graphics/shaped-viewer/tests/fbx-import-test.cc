@@ -3,6 +3,7 @@
 #include <clean-core/common/utility.hh> // cc::memcpy
 #include <clean-core/container/pinned_data.hh>
 #include <clean-core/container/vector.hh>
+#include <clean-core/math/bit.hh>
 #include <clean-core/platform/file_path.hh>
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/string.hh>
@@ -999,8 +1000,7 @@ TEST("sv::asset_loader - NaN normals weld like any other value, rather than pili
         out += type;
         return out;
     };
-    auto const zero = 0.0;
-    auto const nan = zero / zero;
+    auto const nan = cc::bit_cast<f64>(u64(0x7FF8'0000'0000'0000ull));
 
     auto w = babel::test::fbx_binary_writer();
     w.begin("Objects");
