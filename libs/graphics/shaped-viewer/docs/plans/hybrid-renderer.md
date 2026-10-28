@@ -182,7 +182,11 @@ Both run occlusion culling and the prepass, include the TLAS build, and trace on
 | hybrid, forward | 2.65 ms |
 | hybrid, deferred | 2.35 ms |
 
-**Deferred is about 11% faster here**, with four permutations of the plain `pbr` type, so the forward pixel stage carries little material code into its waves.
+**With the bounce of phase 4, deferred is about 40% faster**: 3.87 ms against forward's 6.34 ms in the same run, the denoiser not counted.
+A bounce in a random direction diverges far worse inside a pixel stage, which holds up the raster pipeline, than in a compute kernel.
+Both stay as options for now; `examples/hybrid-sponza.cc` shows them beside the wavefront.
+
+Before the bounce, **deferred was about 11% faster**, with four permutations of the plain `pbr` type, so the forward pixel stage carries little material code into its waves.
 A scene of many lights, many permutations or heavy materials is what would move the comparison, and the reduced closure is what deferred pays in the image.
 The raster rows of that run are slower than the prepass measurement in raster.md: the hybrid's frames, interleaved with them, run the GPU warmer.
 

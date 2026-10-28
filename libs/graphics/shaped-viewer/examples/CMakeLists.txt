@@ -25,7 +25,7 @@ if(_sv_mode STREQUAL "none")
     return()
 endif()
 if(_sv_mode STREQUAL "stub")
-    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals raster tg-objects)
+    foreach(_stem hello-cube load-asset openpbr-spheres mesh-structure mesh-structure-dense quadric-gallery quadric-arrows lights light-stage drawings decals raster hybrid-sponza tg-objects)
         sc_add_example_backend_stub(shaped-viewer-${_stem}-example "${SC_EXAMPLE_BACKEND}" SUPPORTS dx12)
     endforeach()
     return()
@@ -45,7 +45,11 @@ sc_add_single_file_examples(shaped-viewer
     drawings.cc
     decals.cc
     raster.cc
+    hybrid-sponza.cc
     tg-objects.cc
     LINK shaped-viewer
     PCH SG NEXUS
 )
+
+# Sponza is fetched on request (extern/sponza/fetch-sponza.py), and the example says so when it is missing.
+target_compile_definitions(shaped-viewer-hybrid-sponza-example PRIVATE SV_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install")
