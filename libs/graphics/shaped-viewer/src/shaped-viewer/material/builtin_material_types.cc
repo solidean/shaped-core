@@ -210,7 +210,9 @@ surface.emission_color = color
                                   .occlusion_attribute = "occlusion",
                                   .emission_color_attribute = "emission_color",
                                   .emission_scale_attribute = "emission_luminance",
-                                  .base_color_attribute = "base_color"});
+                                  .base_color_attribute = "base_color",
+                                  .roughness_attribute = "specular_roughness",
+                                  .metalness_attribute = "base_metalness"});
 }
 
 [[nodiscard]] material_type make_pbr()
@@ -234,7 +236,9 @@ surface.emission_color = color
                                   .signature = cc::move(signature),
                                   .shader = cc::string(pbr_shader),
                                   .emission_color_attribute = "emissive",
-                                  .base_color_attribute = "base_color"});
+                                  .base_color_attribute = "base_color",
+                                  .roughness_attribute = "roughness",
+                                  .metalness_attribute = "metallic"});
 }
 
 [[nodiscard]] material_type make_unlit()

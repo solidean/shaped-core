@@ -126,6 +126,15 @@ struct sv::material_emission
     [[nodiscard]] bool declares() const { return color.kind != material_value_kind::none; }
 };
 
+/// Where a permutation's secondary material lives: what a hybrid's secondary hit reads as data, rather than run the material's code.
+/// Each value is the type's attribute of that role, `material_type::base_color_attribute` and its neighbors, and kind `none` where the type names none.
+struct sv::material_secondary
+{
+    material_emission_factor base_color;
+    material_emission_factor roughness;
+    material_emission_factor metalness;
+};
+
 /// A material permutation as an SGL hit group, plus the parameter layout it reads.
 struct sv::generated_material_shader
 {
@@ -150,8 +159,8 @@ struct sv::generated_material_shader
 
     material_parameter_layout layout;
 
-    /// Where this permutation's base color lives, as `material_type::base_color_attribute` names it; kind `none` where the type names none.
-    material_emission_factor base_color;
+    /// Where this permutation's secondary material lives.
+    material_secondary secondary;
 
     /// Where this permutation's cutout opacity lives, and `none` where it cannot cut out.
     ///

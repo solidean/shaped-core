@@ -147,7 +147,8 @@ struct material_parameter_layout; // the parameter block one permutation reads
 enum class material_value_kind : u32;
 struct material_opacity;         // where a permutation's cutout opacity lives, for the one generic reader
 struct material_emission_factor; // where one factor of a permutation's emission lives
-struct material_emission; // where a permutation's emission lives, which is what lets its instances light the scene
+struct material_emission;  // where a permutation's emission lives, which is what lets its instances light the scene
+struct material_secondary; // where a permutation's base color, roughness and metalness live, which a secondary hit reads
 struct generated_material_shader; // that permutation as an SGL hit group, plus its layout
 struct material_shader_options;
 class material_library;

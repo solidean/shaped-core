@@ -205,7 +205,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 
             out.records.push_back(resources.describe_instance(cmd, item.quadrics, item.instance));
             place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity,
-                                  out.hit_groups[permutation]->base_color);
+                                  out.hit_groups[permutation]->secondary);
             out.parameter_blocks.push_back(item.instance);
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
             out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_geometry().triangle_count) : 0);
@@ -271,7 +271,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // This is where every index a hit reads is minted, so it must stay ahead of `freeze()` and on the list that traces.
         out.records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
         place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity,
-                              out.hit_groups[permutation]->base_color);
+                              out.hit_groups[permutation]->secondary);
         out.parameter_blocks.push_back(item.instance);
         out.triangle_counts.push_back(triangle_count);
         out.bounds.push_back(object_bounds);

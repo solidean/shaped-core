@@ -173,7 +173,7 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
             auto inst = sg::tlas_instance{.blas = blases[i], .instance_id = u32(i), .hit_group_offset = 0};
             pack_transform(inst, transforms[i]);
             sv::place_instance_record(records.back(), inst, permutations[draws[i].permutation]->opacity,
-                                      permutations[draws[i].permutation]->base_color);
+                                      permutations[draws[i].permutation]->secondary);
             instances.push_back(inst);
         }
         auto const cam = camera_at(frame);

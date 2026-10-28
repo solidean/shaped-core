@@ -15,7 +15,7 @@
 // The hybrid: rasterized primary hits, lit by the tracer's next-event estimate with inline shadow rays.
 //
 // Both ways of lighting them are held to the megakernel's two-bounce light on the Cornell box with its two blocks, which shadow the floor and each other.
-// Its walls are diffuse, so the hybrid's secondary material, a diffuse surface of the base color, is the tracer's own there but for a faint specular lobe.
+// Its walls are `pbr`, whose base color, roughness and metalness the hybrid's secondary material reads, so its secondary hits are the tracer's own surfaces.
 // One frame is one light sample per pixel, so each is the mean of many frames, as the tracer's own reference is.
 
 namespace
@@ -103,7 +103,7 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
 
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
         records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
-        sv::place_instance_record(records.back(), instances[0], permutation->opacity, permutation->base_color);
+        sv::place_instance_record(records.back(), instances[0], permutation->opacity, permutation->secondary);
 
         auto fc = sv::default_frame_constants();
         fc.camera = record;

@@ -84,7 +84,7 @@ const value_texture = 3u
 /// What `instance.opacity_offset` and `opacity_uv_offset` name when they are not a parameter-block offset.
 const no_offset = 0xffffffffu
 
-/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 144 bytes.
+/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 200 bytes.
 /// `gpu_resource_manager::describe_instance` fills the first seven fields, and `view_renderer` the opacity and the placement.
 ///
 /// Keep the two in lockstep: this is a byte layout, not a description of one.
@@ -116,8 +116,9 @@ struct instance:
     /// A bounce ray that meets an instance with one weighs its emission against next-event estimation.
     emitter: uint
 
-    /// Where the base color lives in the parameter block and how it is read, as an emitter record reads its color: `sv::material_emission_factor` says per field.
-    /// A hybrid's secondary hit is lit through it, `tracer.instance_base_color`; `value_none` reads mid-gray.
+    /// Where the secondary material lives in the parameter block and how each value is read, as an emitter record reads its color.
+    /// `sv::material_emission_factor` says per field, and `sv::material_secondary` is the whole.
+    /// A hybrid's secondary hit is lit through it, `tracer.instance_base_color` and its neighbors; `value_none` reads each value's default.
     base_kind: uint
     base_offset: uint
     base_uv_offset: uint
@@ -125,6 +126,20 @@ struct instance:
     base_channels: uint
     base_sampler: uint
     base_transform: uint
+    rough_kind: uint
+    rough_offset: uint
+    rough_uv_offset: uint
+    rough_frequency: uint
+    rough_channels: uint
+    rough_sampler: uint
+    rough_transform: uint
+    metal_kind: uint
+    metal_offset: uint
+    metal_uv_offset: uint
+    metal_frequency: uint
+    metal_channels: uint
+    metal_sampler: uint
+    metal_transform: uint
 
     /// The rows of the object-to-world transform the instance is placed by, which a hit stored for later shading needs.
     to_world_x: float4

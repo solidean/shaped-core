@@ -317,6 +317,18 @@ fun instance_base_color(inst: scene.instance, ctx: material.shading_context){tra
     let c = emission_factor(inst.base_kind, inst.base_offset, inst.base_uv_offset, inst.base_frequency, inst.base_channels, inst.base_sampler, inst.base_transform, 3u, ctx)
     return saturate(c)
 
+/// The specular roughness of `inst` where `ctx` sits, read as `instance_base_color` reads its color; -1 for a type that declares none, whose secondary hit stays matte.
+fun instance_roughness(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float:
+    if inst.rough_kind == scene.value_none => return -1.0
+    let r = emission_factor(inst.rough_kind, inst.rough_offset, inst.rough_uv_offset, inst.rough_frequency, inst.rough_channels, inst.rough_sampler, inst.rough_transform, 1u, ctx)
+    return saturate(r.x)
+
+/// The metalness of `inst` where `ctx` sits, read as `instance_base_color` reads its color; 0 for a type that declares none.
+fun instance_metalness(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float:
+    if inst.metal_kind == scene.value_none => return 0.0
+    let m = emission_factor(inst.metal_kind, inst.metal_offset, inst.metal_uv_offset, inst.metal_frequency, inst.metal_channels, inst.metal_sampler, inst.metal_transform, 1u, ctx)
+    return saturate(m.x)
+
 /// One factor of an emission at `ctx`, `lanes` wide: a constant of the parameter block, a mesh attribute, or a texture, as `kind` says.
 /// `channels` holds up to three swizzle selectors a byte each, and a one-lane factor comes back in `.x`, its other lanes meaning nothing.
 /// `scene.value_none` is a factor of 1.

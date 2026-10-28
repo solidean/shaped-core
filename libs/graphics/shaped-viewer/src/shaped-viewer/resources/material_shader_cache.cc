@@ -107,18 +107,17 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
                                             generated.source, "sv_material", label);
 
     auto entry = _by_key.entry(key);
-    return entry.get_or_emplace(
-        material_permutation{.key = generated.key,
-                             .layout = cc::move(generated.layout),
-                             .kind = kind,
-                             .opacity = procedural ? material_opacity() : generated.opacity,
-                             .emission = generated.emission,
-                             .hit_group = cc::move(hit_group),
-                             .source = cc::move(generated.source),
-                             .shade_source = cc::move(generated.shade_source),
-                             .raster_source = cc::move(generated.raster_source),
-                             .hybrid_source = cc::move(generated.hybrid_source),
-                             .base_color = procedural ? material_emission_factor() : generated.base_color,
-                             .label = cc::move(label)});
+    return entry.get_or_emplace(material_permutation{.key = generated.key,
+                                                     .layout = cc::move(generated.layout),
+                                                     .kind = kind,
+                                                     .opacity = procedural ? material_opacity() : generated.opacity,
+                                                     .emission = generated.emission,
+                                                     .hit_group = cc::move(hit_group),
+                                                     .source = cc::move(generated.source),
+                                                     .shade_source = cc::move(generated.shade_source),
+                                                     .raster_source = cc::move(generated.raster_source),
+                                                     .hybrid_source = cc::move(generated.hybrid_source),
+                                                     .secondary = procedural ? material_secondary() : generated.secondary,
+                                                     .label = cc::move(label)});
 }
 } // namespace sv

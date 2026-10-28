@@ -40,11 +40,11 @@ namespace sv
 /// Writes into `record` what `gpu_resource_manager::describe_instance` leaves to the trace: the placement, and how its cutout opacity is read.
 ///
 /// The placement is copied from `instance`, the TLAS instance the record describes, so the two cannot disagree.
-/// `opacity` and `base_color` are the permutation's the instance shades with THIS trace, which only the trace knows: a stand-in's cuts out nothing.
+/// `opacity` and `secondary` are the permutation's the instance shades with THIS trace, which only the trace knows: a stand-in's cuts out nothing.
 void place_instance_record(shaders::tracer::instance_record& record,
                            sg::tlas_instance const& instance,
                            material_opacity const& opacity,
-                           material_emission_factor const& base_color = {});
+                           material_secondary const& secondary = {});
 
 static_assert(u32(light_path::distant_disc) == 3, "the frame block's path table has one slot per light_path");
 

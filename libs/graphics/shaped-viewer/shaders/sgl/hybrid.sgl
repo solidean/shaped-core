@@ -63,11 +63,14 @@ struct bounce:
     wi: float3
     /// the met instance's base color, `tracer.instance_base_color`; mid-gray on a quadric, which has no triangle context to read it through
     albedo: float3
+    /// its specular roughness, or -1 for none, which leaves it matte; and its metalness
+    roughness: float
+    metalness: float
 
 /// One bounce from `p`: a direction drawn from the closure `b`, traced inline to what it meets.
 /// Only a reflection continues: a refracted direction would have to follow the ray through the surface, which nothing here does yet.
 fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> bounce:
-    let mut result = bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5))
+    let mut result = bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0)
     let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
     let s = openpbr.bsdf_sample_direction(b, wo_local, u)
     if s.pdf <= 0.0 or s.direction.z <= 0.0 or not s.valid => return result
@@ -94,6 +97,8 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
         let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
         result.n = normalize(cross(w1 - w0, w2 - w0))
         result.albedo = tracer.instance_base_color(inst, ctx)
+        result.roughness = tracer.instance_roughness(inst, ctx)
+        result.metalness = tracer.instance_metalness(inst, ctx)
         result.lights += emitter_light(inst, ctx, w1 - w0, w2 - w0, wi, h.t, s.pdf)
     else:
         result.n = normalize(raster.to_world_vector(inst, h.normal))
@@ -133,7 +138,7 @@ fun emitter_light(inst: scene.instance, ctx: material.shading_context, edge1: fl
     let w = if light_pdf > 0.0 => pt.mis_weight(bsdf_pdf, light_pdf) else 1.0
     return tracer.emitter_radiance(e, ctx) * w
 
-/// The surface a bounce met, as `direct` lights it: a diffuse closure of its base color, its frame, and the direction back along the bounce.
+/// The surface a bounce met, as `direct` lights it: a closure of its base color, roughness and metalness, its frame, and the direction back along the bounce.
 /// That is the secondary material the plan reads from data rather than from the material's code, so no permutation's code runs past the primary hit.
 struct secondary:
     b: openpbr.bsdf
@@ -148,7 +153,10 @@ struct secondary:
 fun secondary_of(bounced: bounce) -> secondary:
     let mut surface = openpbr.default_surface()
     surface.base_color = bounced.albedo
-    surface.specular_weight = 0.0
+    surface.base_metalness = bounced.metalness
+    // A type that names no roughness keeps the matte secondary it always had.
+    surface.specular_weight = if bounced.roughness < 0.0 => 0.0 else 1.0
+    surface.specular_roughness = max(bounced.roughness, 0.0)
     let f = openpbr.make_frame(bounced.n)
     let wo_local = if bounced.hit => openpbr.to_local(f, -bounced.wi) else float3(0.0, 0.0, -1.0)
     return { b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local }

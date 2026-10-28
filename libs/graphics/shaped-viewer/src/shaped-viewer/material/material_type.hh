@@ -20,6 +20,8 @@ struct sv::material_type_description
     cc::string emission_color_attribute = {};
     cc::string emission_scale_attribute = {};
     cc::string base_color_attribute = {};
+    cc::string roughness_attribute = {};
+    cc::string metalness_attribute = {};
 };
 
 /// A family of materials: what a shader needs per pixel, and the code that turns it into a shaded surface.
@@ -87,6 +89,11 @@ struct sv::material_type
     /// Which declared float3 attribute is this type's base color, or empty for none, which a secondary hit reads as mid-gray.
     /// The hybrid lights a secondary hit as a diffuse surface of this color, read by one reader for every material rather than by its code.
     cc::string base_color_attribute;
+
+    /// Which declared float attributes are this type's specular roughness and metalness, or empty for none.
+    /// A secondary hit reads them beside the base color; one without a roughness stays matte, and one without a metalness is a dielectric.
+    cc::string roughness_attribute;
+    cc::string metalness_attribute;
 
     cc::hash128 hash;
 

@@ -59,7 +59,7 @@ struct sv::material_permutation
     cc::string hybrid_source;
 
     /// Where this permutation's base color lives, which every instance shading with it copies into its record for a secondary hit to read.
-    material_emission_factor base_color;
+    material_secondary secondary;
 
     /// What a compile error calls this permutation: the material type's name, and whether it is the quadric form.
     cc::string label;
