@@ -484,7 +484,8 @@ struct checker
     void tell_apart(located_diagnostic& d, type_id expected, type_id got);
     void unsupported(i32 file, source_span where, cc::string_view construct);
     /// `report`, unless a diagnostic of that kind already stands there: for what every tree inlining one body finds.
-    void report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail);
+    /// Gives the one standing there or the one made.
+    located_diagnostic& report_once(diagnostic_kind kind, i32 file, source_span where, cc::string_view detail);
     [[nodiscard]] isize error_count() const;
 
     [[nodiscard]] ast::attribute const* find_attribute(i32 file,
@@ -760,6 +761,8 @@ struct checker
     void merge_entry_diagnostics();
     /// CHK-403: an entry point that expects a diagnostic is judged by it alone, and is never built.
     void drop_expecting_entry_points();
+    /// CHK-403: so no pipeline, hit group or callables table names one.
+    void judge_expecting_in_pipelines();
     /// CHK-270, CHK-311 and CHK-312: every constant of the tree folded, and what WGSL would refuse of it reported.
     void judge_constants(flat_entry_point const& structured);
     /// The prelude symbol that declares `id`; `none` for a record no declaration names.

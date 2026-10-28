@@ -63,8 +63,12 @@ struct stage_violation
     symbol_id callee = symbol_id::none;
     /// The call written in the tree's own body that reaches it, the call itself where it stands there.
     call_site written = {};
-    /// `any_hit` or `intersection` for an atomic in a decision an inline trace inlined (CHK-404); `none` otherwise.
+    /// `any_hit` or `intersection` for a write through a binding in a traversal's decision (CHK-404); `none` otherwise.
     stage decision = stage::none;
+    /// The decision is one an inline trace calls, rather than the entry point itself.
+    bool is_inlined_decision = false;
+    /// The write is an assignment to a buffer's element, `call` its place; `callee` is then none.
+    bool is_buffer_store = false;
 };
 
 /// Reads the checked ASTs through the side tables and writes the STRUCTURED form of one entry point's flat tree.
@@ -191,8 +195,17 @@ struct flattener
         if (record != nullptr && record->is_quad_operation && entry.entry_stage == stage::compute)
             quad_calls.push_back({.file = file(), .call = call, .callee = callee});
         // CHK-404: a decision runs as often as the traversal asks it, whichever stage's loop asks
-        if (record != nullptr && record->is_atomic && inlined_decision != stage::none)
-            stage_violations.push_back({.file = file(), .call = call, .callee = callee, .decision = inlined_decision});
+        if (auto const decision = decision_stage();
+            decision != stage::none && record != nullptr
+            && (record->is_atomic || record->is_image_store || record->is_bytes_store))
+        {
+            stage_violations.push_back({.file = file(),
+                                        .call = call,
+                                        .callee = callee,
+                                        .decision = decision,
+                                        .is_inlined_decision = inlined_decision != stage::none});
+            return;
+        }
         // EMIT-163: what only a pixel stage needs of the device, which every target then judges alike
         if (record != nullptr && entry.entry_stage == stage::pixel && !record->pixel_features.is_empty())
         {
@@ -206,6 +219,41 @@ struct flattener
         if (s.info >= 0 && (c.out.functions[s.info].stages & stage_bit(entry.entry_stage)) == 0)
             stage_violations.push_back({.file = file(), .call = call, .callee = callee});
     }
+    /// What a traversal decides how often to run, which then writes no memory through a binding (CHK-404): an
+    /// `@any_hit` or `@intersection` entry point, or the decision an inline trace's loop is calling.
+    [[nodiscard]] stage decision_stage() const
+    {
+        if (inlined_decision != stage::none)
+            return inlined_decision;
+        auto const is_decision = entry.entry_stage == stage::any_hit || entry.entry_stage == stage::intersection;
+        return is_decision ? entry.entry_stage : stage::none;
+    }
+
+    /// CHK-404: an assignment to a buffer's element, or to a part of one, from a decision.
+    void judge_decision_store(flat_expr_id place, ast::expr_id target)
+    {
+        auto const decision = decision_stage();
+        for (auto depth = 0; decision != stage::none && is_valid(place) && depth < k_max_inline_depth; ++depth)
+        {
+            auto const& node = entry.at(place).node;
+            if (node.is<flat_buffer_element>())
+            {
+                stage_violations.push_back({.file = file(),
+                                            .call = target,
+                                            .decision = decision,
+                                            .is_inlined_decision = inlined_decision != stage::none,
+                                            .is_buffer_store = true});
+                return;
+            }
+            if (auto const* const member = node.try_as<flat_member>())
+                place = member->object;
+            else if (auto const* const element = node.try_as<flat_element>())
+                place = element->object;
+            else
+                return;
+        }
+    }
+
     flat_entry_point entry;
     /// The tree is a test, whose own lines of type bool are checks (CHK-225); a function it calls has none.
     bool is_test = false;
@@ -770,6 +818,7 @@ struct flattener
             is_failed = true;
             return;
         }
+        judge_decision_store(operand, assign.target);
         auto const operand_type = entry.at(operand).type;
         if (op != "=")
         {
@@ -2699,6 +2748,7 @@ struct flattener
             flat_expr_id const arguments[] = {read_of_place(place, assign.target), value};
             value = builtin_call(assign.value, callee, arguments);
         }
+        judge_decision_store(place, assign.target);
         add_stmt(from, flat_assign{.place = place, .value = value});
     }
 
@@ -3181,16 +3231,17 @@ struct flattener
 
 /// CHK-389: once, however many trees inline the function the loop stands in.
 /// A loop of an inlined function names the call it was reached through, whose arguments may be what its bounds read.
-void report_unroll(checker& c, flattener::unroll_report const& u)
+located_diagnostic& report_unroll(checker& c, flattener::unroll_report const& u)
 {
-    for (auto const& d : c.out.diagnostics)
+    for (auto& d : c.out.diagnostics)
         if (d.what.kind == u.kind && d.file == u.file && d.what.where == u.where)
-            return;
+            return d;
     auto& d = c.report(u.kind, u.file, u.where, u.detail);
     if (ast::is_valid(u.site.call))
         d.notes.push_back({.file = u.site.file,
                            .where = c.span_of(u.site.file, u.site.call),
                            .message = "reached through this call, whose arguments stand in for its parameters"});
+    return d;
 }
 } // namespace
 
@@ -3252,8 +3303,9 @@ void checker::flatten_test(i32 index)
     for (auto const& v : f.subgroup_calls)
         report_reached(v, ": a run is one invocation, and has no subgroup");
 
+    // what a test reaches is of every compile, even where an entry point's tree judged it first
     for (auto const& u : f.unroll_reports)
-        report_unroll(*this, u);
+        report_unroll(*this, u).entry_points.clear();
 
     // A test that expects a diagnostic is never run (CHK-232), so its tree is judged for its constants alone.
     // Nothing else of the tree is reported: what it expects stands in its text, where the check pass found it already.
@@ -3270,7 +3322,8 @@ void checker::flatten_test(i32 index)
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
         report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
-                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
+                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect")
+            .entry_points.clear();
     for (auto const& v : f.stage_violations)
         report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
                cc::format("{} takes derivatives across a quad of pixels, and a test runs one invocation",
@@ -3437,6 +3490,30 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         f.flatten_stmt(stmt);
 
     // CHK-322: what the body calls needs a device's feature, which the entry point declares like one of its signature
+    // CHK-402: what is judged of this entry point's inlined body is its own, which a compile of a sibling leaves out.
+    // One that another tree judged first without an entry point, a test's, stays of every compile.
+    auto const of_entry = [&](auto&& make) -> located_diagnostic&
+    {
+        auto const before = out.diagnostics.size();
+        auto& d = make();
+        if ((out.diagnostics.size() > before || !d.entry_points.empty()) && !d.entry_points.values().contains(id))
+            d.entry_points.push_back(id);
+        return d;
+    };
+    // once, however many entry points inline the function it stands in, the same detail naming every one of them
+    auto const report_of_entry
+        = [&](diagnostic_kind kind, i32 file, source_span where, cc::string detail) -> located_diagnostic&
+    {
+        return of_entry(
+            [&]() -> located_diagnostic&
+            {
+                for (auto& d : out.diagnostics)
+                    if (d.what.kind == kind && d.file == file && d.what.where == where && d.detail == detail)
+                        return d;
+                return report(kind, file, where, cc::move(detail));
+            });
+    };
+
     auto used = feature_set();
     for (auto const& u : f.feature_uses)
         used |= u.features;
@@ -3448,10 +3525,11 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             continue;
         if (!declared.has(needed))
         {
-            auto& d = report(diagnostic_kind::feature_not_declared, s.file,
-                             ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
-                             cc::format("{} needs {}, which neither its file, a binding it lists nor its body requires",
-                                        s.name, name_of(needed)));
+            auto& d = report_of_entry(diagnostic_kind::feature_not_declared, s.file,
+                                      ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                                      cc::format("{} needs {}, which neither its file, a binding it lists nor its body "
+                                                 "requires",
+                                                 s.name, name_of(needed)));
             for (auto const& u : f.feature_uses)
                 if (u.features.has(needed))
                 {
@@ -3468,59 +3546,79 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     out.functions[s.info].features |= used;
     f.entry.features |= used;
     for (auto const& u : f.unroll_reports)
-        report_unroll(*this, u);
+        of_entry([&]() -> located_diagnostic& { return report_unroll(*this, u); });
     // CHK-227: once, however many trees inline the function the assert stands in
     for (auto const& a : f.effectful_asserts)
-        report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
-                    "an assert whose condition writes a buffer, prints, or calls a builtin with an effect");
+        of_entry(
+            [&]() -> located_diagnostic&
+            {
+                return report_once(diagnostic_kind::unsupported_yet, a.file, span_of(a.file, a.expr),
+                                   "an assert whose condition writes a buffer, prints, or calls a builtin with an "
+                                   "effect");
+            });
     for (auto const& v : f.stage_violations)
     {
-        // CHK-404: an atomic runs as often as its function, which traversal decides for a decision
-        auto const* const record = out.builtin_function(out.at(v.callee).intrinsic);
-        auto const is_atomic = record != nullptr && record->is_atomic;
-        auto const decision = v.decision != stage::none ? v.decision : info.entry_stage;
-        // an image's texel atomic is the prelude's internal `texel_max`, which the program wrote as `.max`
-        auto written = cc::string_view(out.at(v.callee).name);
-        if (written.starts_with("texel_"))
-            written = written.subview(6);
-        auto const what = v.decision != stage::none
-                            ? cc::format("an inline trace of {} calls this as its {} decision", s.name,
-                                         decision == stage::any_hit ? "any-hit" : "intersection")
-                            : cc::format("{} is an {} entry point", s.name, check::stage_name(decision));
-        if (is_atomic && decision == stage::any_hit)
-            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-                   cc::format("{}, which runs an implementation-defined number of times: for candidates the traversal "
-                              "later rejects, and more than once per candidate unless the geometry sets "
-                              "NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of; so the atomic {} "
-                              "would "
-                              "run a number of times no spec defines",
-                              what, written));
-        else if (is_atomic && decision == stage::intersection)
-            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-                   cc::format("{}, which runs as often as the traversal reaches its box, an implementation-defined "
-                              "number of times; so the atomic {} would run a number of times no spec defines",
-                              what, written));
+        auto const where = span_of(v.file, v.call);
+        if (v.decision == stage::none)
+        {
+            report_of_entry(diagnostic_kind::stage_not_allowed, v.file, where,
+                            cc::format("a {} entry point reaches this, and {} is @stages without it",
+                                       check::stage_name(info.entry_stage), out.at(v.callee).name));
+            continue;
+        }
+        // CHK-345: a traversal fuses an intersection and an any hit whose own trees reported it already
+        if (traversal != nullptr)
+            continue;
+        // CHK-404: a write runs as often as its function, which traversal decides for a decision
+        auto const* const record = v.is_buffer_store ? nullptr : out.builtin_function(out.at(v.callee).intrinsic);
+        auto const is_any_hit = v.decision == stage::any_hit;
+        auto const what
+            = v.is_inlined_decision
+                ? cc::format("an inline trace calls this as its {} decision", is_any_hit ? "any-hit" : "intersection")
+                : cc::format("this is reached from an {} entry point", check::stage_name(v.decision));
+        auto const how_often
+            = is_any_hit
+                ? cc::string("which runs an implementation-defined number of times: for candidates the traversal "
+                             "later rejects, and more than once per candidate unless the geometry sets "
+                             "NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent of")
+                : cc::string("which runs as often as the traversal reaches its box, an implementation-defined "
+                             "number of times");
+        auto written = cc::string();
+        if (v.is_buffer_store)
+            written = "this store to a buffer would write a number of times no spec defines, and race with itself";
+        else if (record != nullptr && record->is_atomic)
+        {
+            // an image's texel atomic is the prelude's internal `texel_max`, which the program wrote as `.max`
+            auto name = cc::string_view(out.at(v.callee).name);
+            if (name.starts_with("texel_"))
+                name = name.subview(6);
+            written = cc::format("the atomic {} would run a number of times no spec defines", name);
+        }
         else
-            report(diagnostic_kind::stage_not_allowed, v.file, span_of(v.file, v.call),
-                   cc::format("{} is a {} entry point, and {} is @stages without it", s.name,
-                              check::stage_name(info.entry_stage), out.at(v.callee).name));
+            written = cc::format("the {} would write a number of times no spec defines", out.at(v.callee).name);
+        report_of_entry(
+            diagnostic_kind::stage_not_allowed, v.file, where,
+            cc::format("{}, {}; a decision writes no memory through a binding, so {}", what, how_often, written));
     }
     // CHK-380: HLSL forms a compute stage's quads from its threads' ids, which only one axis keeps consecutive
     auto const is_linear = info.workgroup[0] % 4 == 0 && info.workgroup[1] == 1 && info.workgroup[2] == 1;
     for (auto const& q : is_linear ? cc::span<stage_violation const>() : cc::span<stage_violation const>(f.quad_calls))
-        report(diagnostic_kind::invalid_entry_point, q.file, span_of(q.file, q.call),
-               cc::format("{} forms quads along one axis, so a compute entry point that reaches it has a workgroup of "
-                          "(x, 1, 1) whose x is a multiple of 4, and {}'s is ({}, {}, {})",
-                          out.at(q.callee).name, s.name, info.workgroup[0], info.workgroup[1], info.workgroup[2]));
+        report_of_entry(diagnostic_kind::invalid_entry_point, q.file, span_of(q.file, q.call),
+                        cc::format("{} forms quads along one axis, so a compute entry point that reaches it has a "
+                                   "workgroup of (x, 1, 1) whose x is a multiple of 4, and one reaching it has ({}, "
+                                   "{}, "
+                                   "{})",
+                                   out.at(q.callee).name, info.workgroup[0], info.workgroup[1], info.workgroup[2]));
     auto const reaches_discard = info.entry_stage != stage::pixel && !f.discards.empty();
     for (auto const& d : info.entry_stage != stage::pixel ? cc::span<origin const>(f.discards) : cc::span<origin const>())
-        report(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
-               cc::format("{} is a {} entry point, and only a pixel stage discards", s.name,
-                          check::stage_name(info.entry_stage)));
+        report_of_entry(diagnostic_kind::stage_not_allowed, d.file, span_of(d.file, d.expr),
+                        cc::format("a {} entry point reaches this, and only a pixel stage discards",
+                                   check::stage_name(info.entry_stage)));
     if ((info.stages & stage_bit(info.entry_stage)) == 0)
-        report(diagnostic_kind::stage_not_allowed, s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
-               cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
-                          check::stage_name(info.entry_stage)));
+        report_of_entry(diagnostic_kind::stage_not_allowed, s.file,
+                        ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
+                        cc::format("{} is a {} entry point, and its own @stages leaves that out", s.name,
+                                   check::stage_name(info.entry_stage)));
     // CHK-213: a gap of this pass is reported, so an entry point never vanishes without a word.
     if (f.is_failed && !f.meets_error)
         unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,

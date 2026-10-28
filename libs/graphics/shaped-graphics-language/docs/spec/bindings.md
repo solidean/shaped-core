@@ -256,7 +256,8 @@ A cube and a multisampled texture take none, and neither does a 1D one, which Me
 A gather's component, an offset and a comparison's level are constants, because some target takes each only as written (CHK-280).
 
 A store is refused in a vertex stage, where core WebGPU has no writable storage.
-It is refused in an any hit and an intersection too, which run any number of times per ray and in any order, so what they store has no defined result.
+It is refused in a traversal's decision too: an any hit, an intersection, or what an inline trace calls as one.
+Those run any number of times per ray and in any order, so a decision writes no memory through a binding (CHK-404).
 Every target writes storage images from the other ray-tracing stages, dx12, vulkan and metal alike, and WebGPU has no ray-tracing pipeline to refuse.
 
 **A texture may name the sampler it is sampled with, and a call then leaves it out.**
@@ -455,7 +456,7 @@ Its operations are builtins that take it first, called as methods: `add`, `subtr
 `and` and `or` are keywords, so the bitwise updates carry the `bit_` their operators lack.
 Every one is relaxed, the one ordering WGSL has, and a vertex stage has none, since WebGPU has no writable storage there (CHK-296).
 A pixel and a compute stage take them, and so do the ray-tracing stages that run once per launch, ray or call: a raygen, a miss, a closest hit and a callable.
-An any hit and an intersection run as often as the traversal decides, so an atomic there counts something no spec defines, and is `stage-not-allowed` (CHK-404).
+An any hit and an intersection run as often as the traversal decides, so they write no memory through a binding, and an atomic there is `stage-not-allowed` as a store is (CHK-404).
 So is one in a decision an inline trace calls, in any stage.
 The host holds a buffer of atomics as the plain integers it is.
 Floats, 64 bits and a vertex stage are [the incubator's](incubator/atomics.md).

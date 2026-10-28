@@ -486,7 +486,7 @@ A needless mark is judged over every entry point of the program, since one share
 ## CHK-402
 
 Each entry point is a separate shader, compiled on its own by a host that may never build its siblings.
-A diagnostic judged of one entry point's inlined body says nothing of another's, so failing the other's compile for it would refuse a correct shader.
+A diagnostic judged of one entry point's inlined body, whichever pass judged it, says nothing of another's, so failing the other's compile for it would refuse a correct shader.
 A whole-file check still shows every one, since an editor and a test run speak for the file.
 A function no entry point reaches is left alone, though a check could judge it with its parameters unproven.
 That would demand a mark on every library helper that derives an index from a parameter, which is exactly the index CHK-401 lets the callers prove.
@@ -759,6 +759,8 @@ An any hit runs for each candidate the traversal asks about, including candidate
 DXR and Vulkan may run it more than once for one candidate, unless the geometry sets `NO_DUPLICATE_ANYHIT_INVOCATION`, and Metal has no such flag.
 An intersection runs as often as the traversal reaches its box, which the acceleration structure's build decides.
 So a counter in either holds a number no spec defines, and one that differs between devices and between builds of one structure.
+A plain store is worse: the same undefined count, and a read-modify-write that races with itself besides, so the rule is one for every write through a binding rather than one for atomics.
 Every target compiles the atomic itself in all six stages, so the refusal is SGL's, and its detail says why rather than only that the stage is left out.
 An inline trace runs the same two decisions inside a loop of its own stage, as often as the same traversal asks, so the rule follows the decision rather than the entry point.
-A traversal-cost heat map is the one use of that undefined number, and it would come back as a relaxation that breaks no program.
+What it gives up is every write whose count the program tolerates: a traversal-cost heat map, and multi-hit collection appending each candidate through an atomic counter.
+Both would come back as a relaxation that breaks no program, the second better served by a decision that answers through its payload.

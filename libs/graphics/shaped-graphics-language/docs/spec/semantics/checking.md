@@ -802,6 +802,7 @@ fun f() -> float:
 * **CHK-403** `@expect(error = "kind")` or `@expect(warning = "kind")` on an entry point, of any stage, takes the diagnostics judged of its inlined body (CHK-402), wherever in the program they stand.
   It takes them as a test's expectation takes those inside the test (CHK-232), and one none of them meets is `unmet-expectation`.
   Such an entry point is judged by them alone and never built, as such a test is never run.
+  So a declaration that names one is `invalid-pipeline` at the name: a pipeline's stage, a hit group's shader, a ray-tracing pipeline's `raygen` or `miss`, and a callables table's entry.
   On a function that is no entry point it is `invalid-attribute-arguments`.
 
 ## Features
@@ -944,7 +945,10 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   A `nonuniform` mark settles it, and is needless only where every copy in every entry point of the program is uniform.
   A `uniform` mark there is `uniform-index-varies` where a copy is proven varying.
   The index of an element a resource parameter stands for is the one its caller wrote, and is judged there.
-* **CHK-402** A diagnostic of the uniformity pass belongs to the entry points whose inlined bodies it was judged of ([why](why/checking.md#chk-402)).
+* **CHK-402** Every diagnostic judged of an entry point's inlined body belongs to the entry points it was judged of ([why](why/checking.md#chk-402)).
+  Those are the uniformity pass's and the flattener's: a builtin or a write the stage refuses (CHK-193, CHK-404), and a `discard` outside a pixel stage.
+  So are a quad operation in a compute stage of the wrong shape, an unrolled loop, an effectful `assert`, and a feature the body needs undeclared.
+  One judged of a test's body as well stays the program's.
   A compile of one entry point reports the program's diagnostics and its own, and never another entry point's: a vertex stage never answers for a helper only a pixel stage calls.
   A check of the whole file, `sgl test` and the language server among them, reports every entry point's, each once.
   A function no entry point of the program reaches is not judged, since an index it derives from a parameter is its callers' to prove.
@@ -963,7 +967,10 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-296** `atomic[T]` is an atomic of `uint` or `int`, and of any other `T` `wrong-kind-of-name`.
   It is the element of a `mut buffer` or a member of a `@workgroup` binding, arrays of them included; in a read-only buffer or a constant block it is `wrong-kind-of-name`.
   Its builtins are `@stages(.pixel, .compute, .raygen, .miss, .closest_hit, .callable)`.
-* **CHK-404** An atomic's builtin reached from a traversal's decision is `stage-not-allowed`, whose detail says how often the decision runs ([why](why/checking.md#chk-404)).
+* **CHK-404** A traversal's decision writes no memory through a binding ([why](why/checking.md#chk-404)).
+  Each such write it reaches is `stage-not-allowed`, whose detail says how often the decision runs.
+  A write is an atomic, an image store, a `mut bytes` store, and an assignment to an element of a `mut buffer` or to a part of one, through a binding or a resource parameter.
+  The payload, the decision's result and its locals it writes freely, since they are how it answers.
   A decision is an `@any_hit` or an `@intersection` entry point, and a function an inline trace calls as one: a parameter that takes a candidate or a box makes it so, in any stage.
   The other ray-tracing stages take every atomic of a `mut buffer` and of an `@atomic` image; none of them lists workgroup memory (CHK-294).
 * **CHK-297** An expression of an atomic's type stands only as a builtin's argument; anywhere else, and as the place of an assignment, it is `wrong-kind-of-name`.
@@ -1494,7 +1501,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `missing-field`, `unknown-field`, `duplicate-field` | CHK-178 |
 | `invalid-entry-point` | CHK-87, CHK-88, CHK-89, CHK-93, CHK-271, CHK-273, CHK-276, CHK-294, CHK-301 to CHK-306, CHK-326 to CHK-328, CHK-342, CHK-380 |
 | `nesting-too-deep` | CHK-268 |
-| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343 |
+| `invalid-pipeline` | CHK-175 to CHK-185, CHK-187, CHK-276, CHK-307, CHK-308, CHK-328, CHK-330, CHK-331, CHK-332, CHK-343, CHK-403 |
 | `shadows-unshadowable` | CHK-220, CHK-266 |
 | `test-captures-runtime-value` | CHK-228 |
 | `test-must-end-in-check` | CHK-226 |

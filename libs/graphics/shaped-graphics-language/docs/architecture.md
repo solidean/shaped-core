@@ -82,9 +82,10 @@ It stays one pass because nothing the prelude checks depends on the program: a l
 `tests/check/checked-prelude-test.cc` compares the two paths over the corpus, the samples and sg's shaders.
 
 **A diagnostic judged of an inlined body belongs to the entry points it was judged of** (CHK-402).
-The uniformity pass judges each entry point's flat tree, so its diagnostics carry `located_diagnostic::entry_points`, and identical ones merge into one that names them all.
+The flattener and the uniformity pass judge each entry point's flat tree, so their diagnostics carry `located_diagnostic::entry_points`, and identical ones merge into one that names them all.
+Their details name the stage rather than the entry point, which is what lets a helper two entry points share yield one.
 An index into a binding array is judged last, by `judge_indices`, over every copy the entry points inlined of it (CHK-401).
-The front end keeps those apart as `entry_diagnostics`, so `compile_to_text` reports the program's and its own entry point's, and `describe` the program's alone.
+The front end keeps those apart as `entry_diagnostics`, so `compile_to_text` reports the program's and its own entry point's, and `describe`, which serves them all, every one.
 A file-level reader, `sgl test`, the corpus and the language server, reports them all.
 
 **The check pass is a tracer.**
@@ -154,7 +155,7 @@ The interpreter reads those `var`s when a check is false, and `sgl::test::run_te
 
 `sgl::test_source` is the driver of a whole file's tests, what `sgl test` and the corpus run; `text_request::run_tests` makes a failing test an error of `compile_to_text`.
 `@expect` is judged in the front end, once every phase's diagnostics are in one list.
-An entry point's `@expect(error = "kind")` takes the diagnostics judged of its inlined body, wherever they stand, and such an entry point is never built (CHK-403).
+An entry point's `@expect(error = "kind")` takes every diagnostic judged of its inlined body, wherever it stands, and such an entry point is never built, nor named by a pipeline (CHK-403).
 
 ## Builtins and the prelude
 

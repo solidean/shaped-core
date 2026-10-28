@@ -991,3 +991,58 @@ void checker::drop_expecting_entry_points()
             return false;
         });
 }
+
+void checker::judge_expecting_in_pipelines()
+{
+    if (out.entry_expectations.empty())
+        return;
+    auto const is_expecting = [&](symbol_id id)
+    { return out.entry_expectations.values().any([&](entry_expectation const& x) { return x.function == id; }); };
+    // a declaration keeps no span per stage it names, so its values are read again for the names they hold
+    auto const judge_value = [&](i32 file, ast::expr_id value)
+    {
+        if (!ast::is_valid(value))
+            return;
+        auto const where = span_of(file, value);
+        auto const text = text_of(file, where);
+        auto at = isize(0);
+        while (at < text.size())
+        {
+            auto const is_name_char = [&](isize i) { return cc::is_alphanumeric(text[i]) || text[i] == '_'; };
+            if (!is_name_char(at))
+            {
+                ++at;
+                continue;
+            }
+            auto const first = at;
+            while (at < text.size() && is_name_char(at))
+                ++at;
+            // `.host` and an enum's case name no entry point
+            if (first > 0 && text[first - 1] == '.')
+                continue;
+            auto const* const found = names_seen_from(file).get_ptr(text.subview({.offset = first, .size = at - first}));
+            if (found == nullptr)
+                continue;
+            for (auto const candidate : *found)
+                if (is_expecting(candidate))
+                {
+                    report(diagnostic_kind::invalid_pipeline, file,
+                           {.offset = where.offset + u32(first), .length = u32(at - first)},
+                           cc::format("{} expects a diagnostic, so it is never built", out.at(candidate).name));
+                    break;
+                }
+        }
+    };
+    for (auto const& p : out.pipelines)
+    {
+        auto const& s = out.at(p.symbol);
+        auto const& ast = ast_of(s.file);
+        auto const* const d = ast.at(s.declaration).node.try_as<ast::pipeline_decl>();
+        if (d == nullptr)
+            continue;
+        for (auto const& setting : ast.at(d->settings))
+            judge_value(s.file, setting.value);
+        for (auto const& stage : ast.at(d->stages))
+            judge_value(s.file, stage.value);
+    }
+}

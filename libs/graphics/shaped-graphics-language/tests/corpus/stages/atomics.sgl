@@ -100,3 +100,38 @@ test:
     counters.slots[1].load() == 0
     claim_once(5u)
     counters.slots[1].load() == 5
+
+// a traversal runs its decisions as often as it decides, so an any hit or an intersection writes no memory through a
+// binding, and an atomic there is refused (CHK-404)
+require raytracing_pipeline
+
+binding traced:
+    counts: mut buffer[atomic[uint]]
+    plain: mut buffer[uint]
+
+struct radiance:
+    color: float
+
+struct sphere_attributes:
+    t: float
+
+@expect(error = "stage-not-allowed")
+@any_hit fun counting_hit(c: triangle_candidate, p: mut radiance){traced} -> hit_decision:
+    traced.counts[0].add(1u)
+    return hit_decision.accept
+
+@expect(error = "stage-not-allowed")
+@intersection fun counting_box(b: procedural_box){traced} -> report[sphere_attributes]:
+    traced.counts[1].add(1u)
+    return report.none()
+
+// a plain store counts as badly, and races besides
+@expect(error = "stage-not-allowed")
+@any_hit fun storing_hit(c: triangle_candidate, p: mut radiance){traced} -> hit_decision:
+    traced.plain[0] = traced.plain[0] + 1u
+    return hit_decision.accept
+
+// the stages that run once per ray take every atomic
+@miss fun counting_miss(p: mut radiance){traced}:
+    traced.counts[2].add(1u)
+    p.color = 0.0
