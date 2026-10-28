@@ -17,4 +17,5 @@
 #include <clean-net/http/polite_client.hh>
 #include <clean-net/tls/tls.hh>
 #include <clean-net/transport/connect.hh>
+#include <clean-net/transport/datagram.hh>
 #include <clean-net/ws/websocket.hh>

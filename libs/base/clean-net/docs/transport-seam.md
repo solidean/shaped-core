@@ -22,7 +22,8 @@ All of them are per-platform, need privileges, and cannot run in a unit test.
 - **`cnet::connection_backend`** — one end of an established connection: receive, send, half-close, close, and the two
   endpoints.
 - **`cnet::listener_backend`** — accept, and what it bound to.
-- **`cnet::transport`** — where connections and listeners come from.
+- **`cnet::datagram_backend`** — one datagram socket: the two batch calls, and a one-shot readiness wait.
+- **`cnet::transport`** — where connections, listeners and datagram sockets come from.
 
 `cnet::stream_connection` and `cnet::stream_listener` are handles over the first two, so **every caller writes the same code
 whatever is underneath**.
@@ -112,7 +113,7 @@ reaches the operation either way.
 
 ## Not built yet
 
-A virtual multi-peer network for multiplayer, and the datagram half of all of this.
+A message channel and a reliability layer for multiplayer, above the datagrams [datagrams.md](datagrams.md) describes.
 Their requirements are in [docs/todo/cnet-datagrams.md](../../../../docs/todo/cnet-datagrams.md), and building them
-before there is a reliability layer to test would be building against a guess.
+before something needs them would be building against a guess.
 
