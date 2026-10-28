@@ -313,8 +313,8 @@ def a_pipeline_names_every_stage_in_pipeline_definitions_field_order():
     entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)], pipelines=[(FILE, TESSELLATED)])
     source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries)
     # a designated initializer follows the declaration, which is not the order a vertex passes the stages
-    fields = [".vertex = &ns::shadow::vs,", ".pixel = &ns::shadow::ps,", ".geometry = &ns::shadow::gs,",
-              ".tessellation_control = &ns::shadow::tc,", ".tessellation_evaluation = &ns::shadow::te,"]
+    fields = [".vertex = &::ns::shadow::vs,", ".pixel = &::ns::shadow::ps,", ".geometry = &::ns::shadow::gs,",
+              ".tessellation_control = &::ns::shadow::tc,", ".tessellation_evaluation = &::ns::shadow::te,"]
     positions = []
     for f in fields:
         expect_in(f, source, "a stage of the pipeline")
@@ -356,11 +356,11 @@ def a_pipelines_layout_holds_the_file_samplers_any_stage_reaches():
     entries = sgl_description.SglEntries(bindings=[(file, GROUP)], pipelines=[(file, pipeline)])
     source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries)
     expect_in("sg::bound_sampler const k_shadow_tessellated_samplers[] = {\n    " + EDGE_ROW, source, "the table")
-    expect_in("acquire_pipeline_layout<ns::shadow::shadow>(k_shadow_tessellated_samplers);", source, "the layout takes it")
+    expect_in("acquire_pipeline_layout<::ns::shadow::shadow>(k_shadow_tessellated_samplers);", source, "the layout takes it")
     # a pipeline that reaches none passes none
     plain = sgl_host_code.emit_pipelines_impl("pkg", "ns", sgl_description.SglEntries(
         bindings=[(file, GROUP)], pipelines=[(file, TESSELLATED)]))
-    expect_in("acquire_pipeline_layout<ns::shadow::shadow>();", plain, "no sampler")
+    expect_in("acquire_pipeline_layout<::ns::shadow::shadow>();", plain, "no sampler")
 
 
 # ---- options --------------------------------------------------------------------------------------------------------
