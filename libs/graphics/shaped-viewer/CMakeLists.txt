@@ -65,6 +65,8 @@ add_library(shaped-viewer
     src/shaped-viewer/asset/impl/gltf_import.cc
     src/shaped-viewer/asset/impl/obj_import.cc
     src/shaped-viewer/asset/impl/stl_import.cc
+    src/shaped-viewer/asset/impl/fbx_import.cc
+    src/shaped-viewer/asset/impl/asset_shared.cc
     src/shaped-viewer/asset/impl/asset_materials.cc
 )
 
@@ -148,7 +150,7 @@ target_include_directories(shaped-viewer
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-# babel-serializer is what reads the asset formats sv imports (glTF, OBJ) and decodes their images.
+# babel-serializer is what reads the asset formats sv imports (glTF, OBJ, STL, FBX) and decodes their images.
 # PUBLIC because `asset_loader` takes an already-parsed `babel::gltf::data` / `babel::obj::data`, so a caller who reads a
 # document for their own reasons can hand it straight over rather than re-reading it.
 # A legal direction — data/ sits below graphics/ — and the first time sv links anything below shaped-rendering.
@@ -258,6 +260,7 @@ if(SC_BUILD_TESTS)
         tests/emitter-test.cc
         tests/value-summary-test.cc
         tests/asset-loading-test.cc
+        tests/fbx-import-test.cc
     )
     # Over three times sg's WARP allowance: an unoptimized build runs the suite for five to six minutes, nearly all of it
     # the SGL compiler, unoptimized, compiling each test's material permutations afresh.
@@ -274,6 +277,13 @@ if(SC_BUILD_TESTS)
         nexus
         babel-serializer # the capture test decodes the image back, which is how it catches a truncated write
     )
+
+    # geometry/fbx_fixtures.hh, the FBX scenes babel's own tests read, which the importer's tests import.
+    target_include_directories(shaped-viewer-test PRIVATE "${BABEL_TEST_DIR}")
+
+    # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the import test that reads the real scene when present.
+    cmake_path(SET _sv_test_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/bistro/.install")
+    target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR="${_sv_test_bistro_dir}")
 
     sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
 

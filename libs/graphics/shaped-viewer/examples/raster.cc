@@ -61,9 +61,10 @@ struct sphere_mesh
     {
         for (auto s = 0; s < segments; ++s)
         {
-            for (auto const i : {index_of(r, s), index_of(r + 1, s), index_of(r + 1, s + 1)})
+            // Counterclockwise seen from outside, so every face's geometric normal points outward.
+            for (auto const i : {index_of(r, s), index_of(r + 1, s + 1), index_of(r + 1, s)})
                 out.indices.push_back(i);
-            for (auto const i : {index_of(r, s), index_of(r + 1, s + 1), index_of(r, s + 1)})
+            for (auto const i : {index_of(r, s), index_of(r, s + 1), index_of(r + 1, s + 1)})
                 out.indices.push_back(i);
         }
     }

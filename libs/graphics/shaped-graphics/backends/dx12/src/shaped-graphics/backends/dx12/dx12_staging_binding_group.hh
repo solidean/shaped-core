@@ -12,7 +12,7 @@
 /// dx12 staging_binding_group: the group's descriptors held in a private **non-shader-visible** heap, one per layout slot.
 /// A set writes exactly one descriptor there — the cost of changing one binding no longer scales with the table's size.
 /// `mint` allocates a persistent range in the context's shader-visible heap and fills it with a single
-/// `CopyDescriptorsSimple`, which is why a 4096-element bindless table is affordable to re-snapshot.
+/// `CopyDescriptorsSimple`, which is why a bindless table of many thousands of elements is affordable to re-snapshot.
 ///
 /// The staging heap is per-group rather than sub-allocated: it is plain CPU memory with exactly one owner, and it lives
 /// as long as the staging group does.

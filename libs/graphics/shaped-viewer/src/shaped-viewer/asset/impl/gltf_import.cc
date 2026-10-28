@@ -2,7 +2,6 @@
 #include <babel-serializer/image/image.hh>
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/container/map.hh>
-#include <clean-core/container/set.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/asset/asset_loader.hh>
@@ -76,63 +75,6 @@ constexpr int max_node_depth = 256;
     }
 }
 
-/// One decoded image expanded to tightly packed rgba8.
-///
-/// Every decode lands on rgba8 whatever the file held, because that is the one shape `texture_data` and the bindless
-/// table agree on today.
-/// A 16-bit PNG keeps its high byte and an f32 image is clamped, both of which lose precision the importer has nowhere
-/// to put — block compression and wider formats are a `derived` recipe, not this.
-[[nodiscard]] cc::result<cc::vector<byte>> to_rgba8(babel::image::image const& img)
-{
-    if (img.is_empty() || img.channels < 1 || img.channels > 4)
-        return cc::error("gltf: image has no usable pixels");
-
-    auto const pixel_count = isize(img.width) * isize(img.height);
-    auto out = cc::vector<byte>::create_filled(pixel_count * 4, byte(255));
-
-    auto const sample = [&](isize index) -> byte
-    {
-        switch (img.comp)
-        {
-        case babel::image::component::u8:
-            return img.pixels[index];
-        case babel::image::component::u16:
-        {
-            // Host-endian u16 pairs; the high byte is the 8-bit value.
-            auto const lo = u32(img.pixels[index * 2]);
-            auto const hi = u32(img.pixels[index * 2 + 1]);
-            return byte((lo | (hi << 8)) >> 8);
-        }
-        case babel::image::component::f32:
-        {
-            auto const v = img.samples_f32()[index];
-            auto const clamped = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
-            return byte(u32(clamped * 255.0f + 0.5f));
-        }
-        }
-        return byte(0);
-    };
-
-    for (auto p = isize(0); p < pixel_count; ++p)
-        for (auto c = 0; c < img.channels; ++c)
-        {
-            auto const value = sample(p * isize(img.channels) + c);
-            // 1 channel is grey and 2 is grey+alpha, so the single value fills rgb rather than r alone.
-            if (img.channels <= 2 && c == 0)
-            {
-                out[p * 4 + 0] = value;
-                out[p * 4 + 1] = value;
-                out[p * 4 + 2] = value;
-            }
-            else if (img.channels <= 2)
-                out[p * 4 + 3] = value;
-            else
-                out[p * 4 + c] = value;
-        }
-
-    return cc::move(out);
-}
-
 /// Everything one import needs to carry between its passes.
 struct gltf_importer
 {
@@ -186,7 +128,7 @@ struct gltf_importer
             return {};
         }
 
-        auto pixels = to_rgba8(decoded_image.value());
+        auto pixels = impl::to_rgba8(decoded_image.value());
         if (pixels.has_error())
         {
             note(cc::format("gltf: image {} decoded to no usable pixels", int(index)));
@@ -712,44 +654,6 @@ struct gltf_importer
         out.lights.push_back({.id = l.name, .light = light, .range = l.range});
     }
 
-    /// Makes every light id unique within the asset: a name that is empty or shared becomes `name##i`, or `light##i`
-    /// for an empty one, with `i` its index in `lights` — which keeps what a human reads while giving each its own
-    /// identity.
-    ///
-    /// Which names are shared is settled before any is renamed, since renaming the first of two would otherwise leave the
-    /// second looking unique.
-    /// A generated id can still meet a name the file already uses — `a##1` beside two `a`s — so every final id goes
-    /// into a set, and a taken one bumps its suffix until it is new.
-    void disambiguate_light_ids()
-    {
-        auto shared = cc::vector<u8>::create_filled(out.lights.size(), u8(0));
-        for (auto i = isize(0); i < out.lights.size(); ++i)
-            for (auto j = isize(0); j < out.lights.size(); ++j)
-                if (j != i && out.lights[j].id == out.lights[i].id)
-                    shared[i] = 1;
-
-        // The names that stay as they are claim their ids first, so a generated one never takes a name the file chose.
-        auto taken = cc::set<cc::string>();
-        for (auto i = isize(0); i < out.lights.size(); ++i)
-            if (!out.lights[i].id.empty() && shared[i] == 0)
-                taken.insert(out.lights[i].id);
-
-        for (auto i = isize(0); i < out.lights.size(); ++i)
-        {
-            auto& id = out.lights[i].id;
-            if (!id.empty() && shared[i] == 0)
-                continue;
-
-            auto const base = id.empty() ? cc::string("light") : cc::string(id);
-            auto suffix = i;
-            auto candidate = cc::format("{}##{}", base, suffix);
-            while (taken.contains(candidate))
-                candidate = cc::format("{}##{}", base, ++suffix);
-            taken.insert(candidate);
-            id = cc::move(candidate);
-        }
-    }
-
     void visit(bg::node_index index, i32 parent, tg::affine_transform3f const& parent_world, int depth)
     {
         auto const raw = isize(int(index));
@@ -849,7 +753,7 @@ cc::result<asset_data> impl::import_gltf(babel::gltf::data const& doc,
 
     importer.build_materials();
     importer.walk_nodes();
-    importer.disambiguate_light_ids();
+    impl::disambiguate_light_ids(importer.out.lights);
 
     if (importer.out.is_empty())
         return cc::error(cc::format("shaped-viewer: nothing to import from '{}'", importer.out.name));

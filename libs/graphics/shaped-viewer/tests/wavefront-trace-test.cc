@@ -57,7 +57,8 @@ cc::shared_async<cc::vector<tg::vec3f>> trace_frames(sg::context& ctx, sg::textu
         }
         if (!ready)
         {
-            REQUIRE(cc::current_time_steady_secs() - start < 60.0);
+            // A cold compile of every wavefront kernel takes an unoptimized build about a minute on its own.
+            REQUIRE(cc::current_time_steady_secs() - start < 120.0);
             sv_test::drive_ambient_work();
             continue;
         }

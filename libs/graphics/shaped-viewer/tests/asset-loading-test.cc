@@ -228,7 +228,8 @@ TEST("sv - uri helpers do the joining and decoding babel deliberately does not")
     CHECK(sv::asset_format_of_uri("car.glb").value() == sv::asset_format::gltf);
     CHECK(sv::asset_format_of_uri("car.gltf").value() == sv::asset_format::gltf);
     CHECK(sv::asset_format_of_uri("car.obj").value() == sv::asset_format::obj);
-    CHECK(!sv::asset_format_of_uri("car.fbx").has_value());
+    CHECK(sv::asset_format_of_uri("car.fbx").value() == sv::asset_format::fbx);
+    CHECK(!sv::asset_format_of_uri("car.usd").has_value());
 }
 
 TEST("sv::asset_loader - an OBJ import triangulates, dedups and splits at usemtl")

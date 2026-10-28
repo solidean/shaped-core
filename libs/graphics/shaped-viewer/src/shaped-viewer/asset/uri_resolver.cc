@@ -1,3 +1,4 @@
+#include <clean-core/common/macros.hh>  // CC_OS_WINDOWS
 #include <clean-core/common/utility.hh> // cc::move
 #include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/char_predicates.hh>
@@ -56,6 +57,7 @@ uri_resolver_provider g_resolve_uri;
     }
     return false;
 }
+
 } // namespace
 
 void set_resolve_uri(uri_resolver_provider provider)
@@ -68,9 +70,21 @@ cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri)
     return g_resolve_uri ? g_resolve_uri(uri) : impl::resolve_uri_from_filesystem(uri);
 }
 
-cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::string_view uri)
+uri_resolver_provider filesystem_resolver(filesystem_resolver_options options)
+{
+    return [max_bytes = options.max_file_bytes](cc::string_view uri)
+    { return impl::resolve_uri_from_filesystem(uri, max_bytes); };
+}
+
+cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::string_view uri, i64 max_bytes)
 {
     auto const path = percent_decode(uri);
+
+#ifdef CC_OS_WINDOWS
+    // `NUL` opens, states a size of 0 and reads as empty, which no check below can tell from an empty file.
+    if (names_windows_device(path))
+        return cc::error(cc::format("shaped-viewer: '{}' names a device, not a regular file", path));
+#endif
 
     // The adapter owns the buffer the stream reads through, so it must outlive the stream.
     auto adapter = cc::file_read_stream_adapter::open(path);
@@ -78,12 +92,69 @@ cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::st
         return cc::error(cc::format("shaped-viewer: cannot open '{}'", path));
 
     auto stream = adapter.value().stream();
-    auto bytes = stream.read_all();
-    if (bytes.has_error())
+
+    // "Regular" inferred from the stream below stands in for a file-kind query; issue: feat-cc-file-kind-query
+    // The size the source states, checked against the ceiling before a byte is read.
+    auto const size = stream.size();
+    if (size.has_error() || size.value() < 0)
+        return cc::error(cc::format("shaped-viewer: '{}' is not a regular file", path));
+    if (size.value() > max_bytes)
+        return cc::error(
+            cc::format("shaped-viewer: '{}' is {} bytes, over the {} a load reads", path, size.value(), max_bytes));
+
+    auto bytes = cc::vector<byte>();
+    bytes.resize_to_uninitialized(size.value());
+    if (stream.read_exact(bytes).has_error())
         return cc::error(cc::format("shaped-viewer: cannot read '{}'", path));
 
+    // A regular file ends where it said it would; a device that states 0 and keeps yielding does not.
+    auto probe = byte(0);
+    auto const more = stream.read(cc::span<byte>(&probe, 1));
+    if (more.has_error() || more.value() != 0)
+        return cc::error(cc::format("shaped-viewer: '{}' is not a regular file", path));
+
     // Moved into the pin rather than copied, so a large `.glb` is read once and never duplicated.
-    return cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(bytes.value())));
+    return cc::pinned_data<byte const>(cc::make_pinned_data(cc::move(bytes)));
+}
+
+bool impl::names_windows_device(cc::string_view path)
+{
+    // A path rule that belongs in clean-core; issue: feat-cc-file-kind-query
+    if (path.size() >= 4 && is_separator(path[0]) && is_separator(path[1]) && path[2] == '.' && is_separator(path[3]))
+        return true;
+
+    auto const is_device = [](cc::string_view component)
+    {
+        auto end = isize(0);
+        while (end < component.size() && component[end] != '.' && component[end] != ':')
+            ++end;
+        while (end > 0 && component[end - 1] == ' ')
+            --end;
+        auto upper = cc::string(component.subview({.offset = 0, .size = end}));
+        auto* const c = upper.data();
+        for (auto i = isize(0); i < upper.size(); ++i)
+            c[i] = cc::to_upper(c[i]);
+        auto const u = cc::string_view(upper);
+        if (u == "CON" || u == "PRN" || u == "AUX" || u == "NUL" || u == "CONIN$" || u == "CONOUT$")
+            return true;
+        if (u.size() < 4 || !(u.starts_with("COM") || u.starts_with("LPT")))
+            return false;
+        auto const digit = u.subview(3);
+        // 1-9, and the superscripts Windows also accepts there: U+00B9, U+00B2 and U+00B3 in UTF-8.
+        return (digit.size() == 1 && digit[0] >= '1' && digit[0] <= '9') || digit == "\xC2\xB9" || digit == "\xC2\xB2"
+            || digit == "\xC2\xB3";
+    };
+
+    auto start = isize(0);
+    for (auto i = isize(0); i <= path.size(); ++i)
+    {
+        if (i < path.size() && !is_separator(path[i]))
+            continue;
+        if (is_device(path.subview({.offset = start, .size = i - start})))
+            return true;
+        start = i + 1;
+    }
+    return false;
 }
 
 cc::string impl::percent_decode(cc::string_view uri)

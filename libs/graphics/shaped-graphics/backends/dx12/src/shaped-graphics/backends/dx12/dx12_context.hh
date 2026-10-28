@@ -138,7 +138,8 @@ struct sg::backend::dx12::dx12_config
     isize async_download_window_bytes = isize(16) * 1024 * 1024;
 
     /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
-    int descriptor_heap_capacity = 1 << 16;
+    /// A bindless group takes its whole table per snapshot, so this must hold several of the largest one; D3D12 allows 1,000,000.
+    int descriptor_heap_capacity = 1 << 18;
 
     /// Share (0..1) of the descriptor heap reserved for the per-epoch-reclaimed transient ring; the rest is the persistent bump region.
     float descriptor_transient_fraction = 0.25f;
