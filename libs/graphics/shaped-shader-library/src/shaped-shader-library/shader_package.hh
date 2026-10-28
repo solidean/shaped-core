@@ -16,6 +16,10 @@ struct slib::shader_definition
     cc::string_view entry_point;
     /// The options of its SGL source the entry point reaches, by name; an acquire keys its compiles on these alone.
     cc::span<cc::string_view const> options;
+    /// The C++ namespace its SGL file's generated types stand in, which its render target is named under and its
+    /// frozen bundle key covers; empty for HLSL and WGSL.
+    /// The generator writes it, so it is spelled exactly as the generated `target::name` is.
+    cc::string_view file_namespace;
 
     /// The generated global that call sites read; shader_library::add_package fills it in.
     /// Required — add_package asserts on a definition that names no global.
@@ -39,10 +43,6 @@ struct slib::shader_package
 {
     /// Identifies the package and, by default, where it mounts.
     cc::string_view name;
-
-    /// The C++ namespace the package's generated symbols live in.
-    /// An SGL file's stand in a namespace of its own within it, which is what its render target is named under.
-    cc::string_view host_namespace;
 
     shader_language language = shader_language::hlsl;
 

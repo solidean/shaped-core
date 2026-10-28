@@ -32,12 +32,14 @@ slib::shader_asset::shader_asset(std::weak_ptr<shader_library> library,
                                  cc::string virtual_path,
                                  sg::shader_stage stage,
                                  cc::string entry_point,
-                                 cc::vector<cc::string> options)
+                                 cc::vector<cc::string> options,
+                                 cc::string file_namespace)
   : _library(cc::move(library)),
     _virtual_path(cc::move(virtual_path)),
     _stage(stage),
     _entry_point(cc::move(entry_point)),
-    _options(cc::move(options))
+    _options(cc::move(options)),
+    _file_namespace(cc::move(file_namespace))
 {
 }
 
@@ -119,7 +121,7 @@ sg::async_compiled_shader slib::shader_asset::acquire(sg::shader_format format, 
 
     // A first acquire for this format and option set compiles off the lock, as a reload does.
     // A compile runs the front end and may wait on a persistent cache, which no other acquire of this asset should queue behind.
-    auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, key);
+    auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, _file_namespace, format, key);
 
     // Whoever installs first wins, and a compile that lost the race is dropped.
     // A file edited since the compile read it staged either a reload that skipped this entry, which held no shader yet, or none at all, since nothing watched the file.
@@ -261,7 +263,7 @@ void slib::shader_asset::stage_reload()
     for (auto const& [format, options] : pairs)
     {
         // Read, preprocess and compile off the lock, so a consumer's acquire only ever waits for the swap below.
-        auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, format, options);
+        auto outcome = library->compile_shader(_virtual_path, _stage, _entry_point, _file_namespace, format, options);
 
         // Drive the compile here, on the watcher's own thread.
         // A cc::async node is cold until a scheduler runs it, and nothing else ever looks at this one — a consumer only sees it after promotion, and promotion needs it ready.

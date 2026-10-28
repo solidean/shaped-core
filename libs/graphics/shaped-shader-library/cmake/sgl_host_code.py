@@ -159,7 +159,6 @@ def identifier_of(path: str) -> str:
     """The path as one C++ identifier, directory included.
 
     post-process/manga_render.sgl becomes post_process_manga_render, since '/' and '-' both map to '_'.
-    shader_library.cc folds a path the same way, to name a render target under its file's namespace.
     """
     stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     directory = path.rsplit("/", 1)[0] if "/" in path else ""
@@ -178,13 +177,22 @@ def file_namespace(namespace: str, entries: SglEntries, path: str) -> str:
     return namespace if entries.module else f"{namespace}::{identifier_of(path)}"
 
 
+def anchored(qualified: str) -> str:
+    """`qualified` reached from the global namespace.
+
+    Every reference into a package or file namespace takes this, since a file's namespace named like the package's root
+    (sr.sgl in `sr::sgl_shaders`) hides that root from code generated inside it.
+    """
+    return qualified if qualified.startswith("::") else f"::{qualified}"
+
+
 def options_type_of(namespace: str, entries: SglEntries, path: str) -> str:
     """The qualified name of a file's options struct, or empty where the file has no options.
 
     Qualified, since a wrapper's own `options` alias would otherwise change what the name means inside it.
     """
     struct = entries.option_structs.get(path, "")
-    return f"::{file_namespace(namespace, entries, path)}::{struct}" if struct else ""
+    return anchored(f"{file_namespace(namespace, entries, path)}::{struct}") if struct else ""
 
 
 def cpp_name(sgl_name: str, namespace: str = "") -> str:
@@ -1082,7 +1090,7 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
         out.append("    /// One buffer per stream, in slot order; only a buffer of that stream's element fits its field.\n")
         out.append("    struct buffers\n    {\n")
         for stream, _, _ in streams:
-            out.append(f"        sg::buffer<{namespace}::{name}::{stream}> {stream};\n")
+            out.append(f"        sg::buffer<{anchored(f'{namespace}::{name}::{stream}')}> {stream};\n")
         out.append("\n")
         out.append("        /// What `bind_vertex_buffers` takes, in slot order.\n")
         out.append(f"        [[nodiscard]] cc::fixed_array<sg::vertex_buffer_view, {len(streams)}> views() const;\n")
@@ -1103,7 +1111,7 @@ def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: 
     slot_of = {stream: slot for slot, (stream, _, _) in enumerate(streams)}
 
     def owner(stream: str) -> str:
-        return qualified if single else f"{qualified}::{stream}"
+        return anchored(qualified if single else f"{qualified}::{stream}")
 
     out = [f"\nsg::vertex_input_layout {qualified}::layout()\n{{\n"]
     out.append("    return {.slots = {")
@@ -1325,7 +1333,7 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries) -> st
         refuse_option_layouts(package, f"`pipeline {p['name']}` of '{file.path}'", file.path, groups, entries)
 
         def handle(entry: str) -> str:
-            return f"&{space}::{entry}" + (".asset" if (file.path, entry) in wrappers else "")
+            return f"&{anchored(f'{space}::{entry}')}" + (".asset" if (file.path, entry) in wrappers else "")
 
         out.append("\nnamespace\n{\n")
         if p["targets"]:
@@ -1333,7 +1341,7 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries) -> st
             out.append(f"constexpr cc::string_view k_{key}_targets[] = {{{names}}};\n")
         frozen = ",\n".join(f'    "{line}"' for line in p["frozen"])
         out.append(f"constexpr cc::string_view k_{key}_frozen[] = {{\n{frozen},\n}};\n")
-        group_types = ", ".join(cpp_name(g, space) for g in groups)
+        group_types = ", ".join(cpp_name(g, anchored(space)) for g in groups)
         samplers = p.get("samplers", [])
         if samplers:
             where = f"shader package '{package}': `pipeline {p['name']}` of '{file.path}'"
@@ -1366,9 +1374,9 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries) -> st
                 out.append(f"        .{s} = {handle(p[s])},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")
         if p["vertex_input"]:
-            out.append(f"        .vertex_input = &{cpp_name(p['vertex_input'], space)}::layout,\n")
+            out.append(f"        .vertex_input = &{cpp_name(p['vertex_input'], anchored(space))}::layout,\n")
         if p["target_set"]:
-            out.append(f"        .target_set = {cpp_name(p['target_set'], space)}::name,\n")
+            out.append(f"        .target_set = {cpp_name(p['target_set'], anchored(space))}::name,\n")
         if p["targets"]:
             out.append(f"        .targets = k_{key}_targets,\n")
         out.append(f"        .apply = &{key}_apply,\n")
@@ -1464,7 +1472,7 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
         def handle(entry: str) -> str:
             if not entry:
                 return "nullptr"
-            return f"&{space}::{entry}" + (".asset" if (file.path, entry) in wrappers else "")
+            return f"&{anchored(f'{space}::{entry}')}" + (".asset" if (file.path, entry) in wrappers else "")
 
         out.append("\nnamespace\n{\n")
         ray_set = file.ray_set(p["rays"])
@@ -1500,7 +1508,7 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
                            f".closest_hits = k_{key}_{group_name}_closest, .any_hits = k_{key}_{group_name}_any"
                            f"{traversals}}},\n")
             out.append("};\n")
-        group_types = ", ".join(cpp_name(g, space) for g in groups)
+        group_types = ", ".join(cpp_name(g, anchored(space)) for g in groups)
         # the file samplers any of its shaders reaches, which the layout carries as a raster pipeline's does
         samplers = p.get("samplers", [])
         if samplers:

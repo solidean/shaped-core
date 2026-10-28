@@ -298,6 +298,7 @@ if(SC_BUILD_TESTS)
             host_layout.sgl:*
             twin_a.sgl:*
             twin_b.sgl:*
+            slib_test.sgl:*
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

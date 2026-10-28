@@ -1,0 +1,43 @@
+// A file named after the root of its package's namespace, whose own namespace then hides that root inside it.
+// Generated code reaches the package from the global namespace, so this file compiling is the test.
+
+@inline binding constants:
+    scale: float
+
+@vertex struct point:
+    position: float3
+
+@vertex struct quad:
+    corner: float3
+    @per_instance offset: float3
+
+struct pixel_input:
+    @position position: hpos4
+
+@pixel struct target:
+    color: float4
+
+@vertex fun point_vs(v: point){constants} -> pixel_input:
+    return {
+        position = hpos4(v.position.x * constants.scale, v.position.y, v.position.z, 1.0)
+    }
+
+@vertex fun quad_vs(v: quad) -> pixel_input:
+    return {
+        position = hpos4(v.corner.x + v.offset.x, v.corner.y + v.offset.y, 0.0, 1.0)
+    }
+
+@pixel fun main_ps(p: pixel_input) -> target:
+    return {
+        color = float4(1.0, 0.0, 0.0, 1.0)
+    }
+
+pipeline points:
+    vertex = point_vs
+    pixel = main_ps
+    format = .rgba8_unorm
+
+pipeline quads:
+    vertex = quad_vs
+    pixel = main_ps
+    format = .rgba8_unorm

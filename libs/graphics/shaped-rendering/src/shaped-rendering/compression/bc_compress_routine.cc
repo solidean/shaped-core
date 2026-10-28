@@ -10,6 +10,8 @@ namespace sr
 {
 namespace
 {
+namespace shaders = sgl_shaders::compression_bc;
+
 /// The unsigned linear member of `format`'s family, which is what an instance of the routine is keyed by.
 /// A signed BC4 or BC5 shares its unsigned sibling's encoder: only the endpoints' encoding differs, which a constant says.
 sg::pixel_format family_of(sg::pixel_format format)
@@ -105,8 +107,6 @@ cc::shared_async<cc::unit> bc_compress_routine::init(sg::routine_init_scope scop
     CC_ASSERT(is_supported_target(params()) && family_of(params()) == params(),
               "a bc_compress_routine instance is keyed by a family's unsigned linear member, as execute acquires it");
     auto& ctx = scope.context();
-    namespace shaders = sgl_shaders::compression_bc;
-
     // Each entry point is a type of its own, so what init needs of the chosen one is taken out here.
     auto asset = slib::shader_asset_handle();
     auto layout = sg::pipeline_layout_handle();
@@ -146,8 +146,8 @@ cc::shared_async<cc::unit> bc_compress_routine::init(sg::routine_init_scope scop
         co_return;
     }
 
-    _group_layout = is_wide(params()) ? ctx.cached.acquire_binding_group_layout<sgl_shaders::compression_bc::bc_io16>()
-                                      : ctx.cached.acquire_binding_group_layout<sgl_shaders::compression_bc::bc_io8>();
+    _group_layout = is_wide(params()) ? ctx.cached.acquire_binding_group_layout<shaders::bc_io16>()
+                                      : ctx.cached.acquire_binding_group_layout<shaders::bc_io8>();
     _pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = layout});
     co_await cc::async_settled(_pipeline);
     auto const* const built = _pipeline->try_value();
@@ -195,31 +195,29 @@ sg::routine_outcome bc_compress_routine::execute(sg::command_list& cmd,
     {
         auto const buffer = ctx.transient.create_buffer<tg::vec<4, u32>>(row_blocks * blocks_high, usage);
         group = ctx.transient.create_binding_group(
-            cmd, self->_group_layout,
-            sgl_shaders::compression_bc::bc_io16{.source = source_view, .blocks = buffer.as_readwrite_buffer()});
+            cmd, self->_group_layout, shaders::bc_io16{.source = source_view, .blocks = buffer.as_readwrite_buffer()});
         blocks = buffer.raw();
     }
     else
     {
         auto const buffer = ctx.transient.create_buffer<tg::vec<2, u32>>(row_blocks * blocks_high, usage);
         group = ctx.transient.create_binding_group(
-            cmd, self->_group_layout,
-            sgl_shaders::compression_bc::bc_io8{.source = source_view, .blocks = buffer.as_readwrite_buffer()});
+            cmd, self->_group_layout, shaders::bc_io8{.source = source_view, .blocks = buffer.as_readwrite_buffer()});
         blocks = buffer.raw();
     }
 
     cmd.compute.bind_pipeline(**built);
     cmd.compute.bind_group(0, *group);
     cmd.compute.set_inline_constants(
-        sgl_shaders::compression_bc::bc_constants{.blocks_wide = blocks_wide,
-                                                  .blocks_high = blocks_high,
-                                                  .row_blocks = int(row_blocks),
-                                                  .width = width,
-                                                  .height = height,
-                                                  .srgb = sg::is_srgb_format(source.format()) ? 1 : 0,
-                                                  .bc1_cut_out = opts.bc1_alpha == bc1_alpha::cut_out ? 1 : 0,
-                                                  .channel_range = range == bc_source_range::minus_one_to_one ? 1 : 0,
-                                                  .snorm = is_snorm_target(target.format()) ? 1 : 0}
+        shaders::bc_constants{.blocks_wide = blocks_wide,
+                              .blocks_high = blocks_high,
+                              .row_blocks = int(row_blocks),
+                              .width = width,
+                              .height = height,
+                              .srgb = sg::is_srgb_format(source.format()) ? 1 : 0,
+                              .bc1_cut_out = opts.bc1_alpha == bc1_alpha::cut_out ? 1 : 0,
+                              .channel_range = range == bc_source_range::minus_one_to_one ? 1 : 0,
+                              .snorm = is_snorm_target(target.format()) ? 1 : 0}
             .to_block());
     cmd.compute.dispatch_threads(blocks_wide, blocks_high);
 

@@ -929,6 +929,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
                 out.append(f'     .entry_point = "{point}",\n')
                 if (file.path, point) in option_tables:
                     out.append(f"     .options = {option_tables[(file.path, point)]},\n")
+                if manifest.language == "sgl":
+                    out.append(f'     .file_namespace = "{manifest.namespace}::{file.stem}",\n')
                 # A wrapped SGL entry point holds its handle as `asset`.
                 wrapped = (file.path, point) in sgl_host_code.entry_wrappers(sgl)
                 member = f"{point}.asset" if wrapped else point
@@ -958,7 +960,6 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     out.append(f"slib::shader_package const& {manifest.namespace}::package()\n{{\n")
     out.append("    static slib::shader_package const pkg = {\n")
     out.append(f'        .name = "{manifest.name}",\n')
-    out.append(f'        .host_namespace = "{manifest.namespace}",\n')
     out.append(f"        .language = slib::shader_language::{manifest.language},\n")
     out.append(f'        .source_dir = "{manifest.source_dir.as_posix()}",\n')
     out.append("        .embedded_files = k_embedded_files,\n")

@@ -28,21 +28,6 @@ namespace
 // The generated package symbols are process-wide globals, so two libraries would fight over who owns the assets they point at.
 bool g_library_alive = false;
 
-/// The namespace an SGL file's generated types stand in: the package's, then the file's path folded into one identifier.
-/// sgl_host_code.py's identifier_of folds it the same way: the extension dropped, and '/' and '-' each a '_'.
-cc::string file_namespace_of(cc::string_view host_namespace, cc::string_view path)
-{
-    if (host_namespace.empty())
-        return {};
-    auto const name_start = path.rfind('/') + 1;
-    auto const extension = path.rfind('.');
-    auto const stem = extension > name_start ? path.subview({.start = 0, .end = extension}) : path;
-    auto out = cc::format("{}::", host_namespace);
-    for (auto const c : stem)
-        out.push_back(c == '/' || c == '-' ? '_' : c);
-    return out;
-}
-
 /// The name a compiler reflects `b` under: the identifier the text spells it with.
 cc::string_view emitted_name_of(sg::binding const& b)
 {
@@ -388,9 +373,7 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
     for (auto const& existing : _packages)
         CC_ASSERT(existing.name != package.name, "this shader package was already added");
 
-    _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name),
-                                      .host_namespace = cc::string::create_copy_of(package.host_namespace),
-                                      .language = package.language});
+    _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name), .language = package.language});
 
     if (fs != nullptr)
     {
@@ -433,9 +416,9 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
         auto options = cc::vector<cc::string>();
         for (auto const name : definition.options)
             options.push_back(cc::string(name));
-        auto asset
-            = std::make_shared<shader_asset>(_alive, cc::move(virtual_path.value()), definition.stage,
-                                             cc::string::create_copy_of(definition.entry_point), cc::move(options));
+        auto asset = std::make_shared<shader_asset>(
+            _alive, cc::move(virtual_path.value()), definition.stage, cc::string::create_copy_of(definition.entry_point),
+            cc::move(options), cc::string::create_copy_of(definition.file_namespace));
         *definition.asset = asset;
         _assets.push_back(cc::move(asset));
     }
@@ -479,6 +462,7 @@ void slib::shader_library::note_dependencies_changed()
 slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::string_view virtual_path,
                                                                            sg::shader_stage stage,
                                                                            cc::string_view entry_point,
+                                                                           cc::string_view file_namespace,
                                                                            sg::shader_format format,
                                                                            cc::span<shader_option const> options) const
 {
@@ -497,8 +481,7 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
 
     // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
-                  file_namespace_of(package.host_namespace, impl::relative_to(virtual_path, package.name)),
-                  package.language, stage, entry_point, format, options);
+                  file_namespace, package.language, stage, entry_point, format, options);
     return outcome;
 }
 
