@@ -4,6 +4,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <sgl_modules/hybrid.hh>
 #include <shaped-graphics/all.hh>
+#include <shaped-viewer/impl/gpu_marks.hh>
 #include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/resources/gpu_resource_manager.hh>
@@ -74,7 +75,9 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
                 .specular = thin_target(sg::pixel_format::rgba8_unorm),
                 .extra = thin_target(sg::pixel_format::rgba8_unorm)};
 
+    impl::gpu_mark(cmd, "before the hybrid");
     auto const tlas = cmd.raytracing.build_tlas(d.instances);
+    impl::gpu_mark(cmd, "tlas");
 
     // A binding cannot be empty, so a frame with no lights binds one zeroed record that `light_count == 0` never reads.
     auto lights = d.lights;
@@ -136,6 +139,7 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
               .shading = deferred ? raster_shading::thin : raster_shading::traced,
               .thin = thin,
               .traced = deferred ? sg::binding_group_handle() : traced});
+    impl::gpu_mark(cmd, "raster");
     if (outcome != sg::routine_outcome::executed || !deferred)
         return outcome;
 
@@ -156,6 +160,7 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
     cmd.compute.set_inline_constants(
         shaders::hybrid::pass{.size = tg::vec2f(f32(extent[0]), f32(extent[1])), .pad = tg::vec2f(0, 0)}.to_block());
     cmd.compute.dispatch_threads(extent[0], extent[1]);
+    impl::gpu_mark(cmd, "deferred lighting");
     return outcome;
 }
 } // namespace sv

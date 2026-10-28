@@ -307,19 +307,31 @@ The per-ray figures carry the wavefront's stored-state traffic, which one inline
 ### What a whole frame measured
 
 `hybrid-benchmark.cc` times the viewer's whole moving frame on Sponza, output 1920x1200 at the quality preset, the camera walking the nave.
+It breaks the frame down by stage through `sv::impl::gpu_mark`, a stand-in for GPU scopes in sg ([debt-sv-gpu-stage-marks](../issues/debt-sv-gpu-stage-marks.md)).
 Each contender runs alone: four views' histories and path state at once overflowed the laptop's memory, and every number came out near double.
-On the laptop RTX 5070 in October 2026:
 
-| frame | GPU time |
+**A laptop GPU's heat moves these numbers by a factor of two**: the same frame measured 15.7 ms after three heavy contenders and 8.5 ms on its own.
+So a comparison is only good between runs of one session, each measured cool.
+
+Hybrid deferred with svgf and FSR, cool, on the laptop RTX 5070 in October 2026:
+
+| stage | GPU time |
 |---|---|
-| hybrid deferred, svgf + FSR | 15.9 ms |
-| hybrid deferred, dlss_rr | 33.9 ms |
-| hybrid forward, dlss_rr | 54.8 ms |
-| wavefront, dlss_rr | 111.4 ms |
+| TLAS build | 0.18 ms |
+| raster: culling, prepass and the thin G-buffer | 0.54 ms |
+| deferred lighting | 5.16 ms |
+| blend into the mean | 0.05 ms |
+| svgf and FSR | 2.47 ms |
+| **the whole frame** | **8.5 ms** |
 
-**Only deferred with svgf and FSR fits the 16.6 ms budget, and barely.**
-The hybrid's own frame at the smaller extent is a few milliseconds, so most of the rest is reconstruction and the viewer around it.
-dlss_rr costs about 18 ms more than svgf and FSR, which is the next thing to break down by GPU pass.
+What the lighting's parts cost, each measured by removing it alone:
+- the secondary hit's light and environment samples, about 3.0 ms;
+- the cutout test in every ray, about 2.5 ms;
+- the primary light sample, about 2.2 ms;
+- the secondary base color's texture read, 0.3 ms.
+
+Measured warm, forward's raster pass, which is its lighting, took 48.5 ms against deferred's 19.5 ms of lighting in the same run, and dlss_rr 10.4 ms against svgf and FSR's 2.3 ms.
+Both want a cool measurement before they decide anything.
 
 ## Phasing
 

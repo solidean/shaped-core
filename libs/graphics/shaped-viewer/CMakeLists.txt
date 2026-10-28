@@ -124,6 +124,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/resources/instance_data.hh
     src/shaped-viewer/impl/content_hash.hh
     src/shaped-viewer/impl/keyed_cache.hh
+    src/shaped-viewer/impl/gpu_marks.hh
     src/shaped-viewer/impl/view_state.hh
     src/shaped-viewer/impl/wavefront_pacing.hh
     src/shaped-viewer/resources/resource_managers.hh

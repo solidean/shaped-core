@@ -13,6 +13,7 @@
 #include <shaped-rendering/slug_routine.hh> // sr::slug_instance
 #include <shaped-viewer/drawing/decal.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
+#include <shaped-viewer/impl/gpu_marks.hh>
 #include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <shaped-viewer/rendering/impl/emitters.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
@@ -1126,6 +1127,7 @@ struct raster_batch
         return sg::routine_outcome::declined;
     if (frame_output.raw() != nullptr && !sr::mix_routine::execute(cmd, frame_output, color, 1.0f))
         return sg::routine_outcome::declined;
+    impl::gpu_mark(cmd, "mix");
 
     motion->last_camera = fc.camera;
     motion->has_last_camera = true;
@@ -1805,6 +1807,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             };
             auto const outcome
                 = sr::reconstruct_routine::execute(cmd, inputs, ds.frame->scaled_denoise, upscale_settings);
+            impl::gpu_mark(cmd, "reconstruct (scaled)");
 
             // The mean is not this frame's image, so a frame the upscale did not land presents the last one that did.
             if (outcome.is_denoised())

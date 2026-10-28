@@ -9,6 +9,7 @@
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/impl/gpu_marks.hh> // TEMPORARY(debt-sv-gpu-stage-marks)
 
 using namespace cc::primitive_defines;
 
@@ -174,25 +175,52 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
             sv_test::drive_ambient_work();
         }
 
-        auto spans = cc::vector<cc::pair<sg::gpu_timestamp, sg::gpu_timestamp>>();
+        // Each frame's stages, as the marks the viewer records along it divide it: each mark ends the stage it names.
+        auto frames = cc::vector<sv::impl::gpu_marks>();
         for (auto f = 1; f <= k_frames; ++f)
         {
+            frames.push_back({});
+            sv::impl::active_gpu_marks = &frames.back();
             auto cmd = ctx.create_command_list();
-            auto const from = cmd->query.record_gpu_timestamp();
+            sv::impl::gpu_mark(*cmd, "start");
             auto const outcome = execute(*cmd, f);
-            auto const to = cmd->query.record_gpu_timestamp();
+            sv::impl::gpu_mark(*cmd, "the rest of the frame");
+            sv::impl::active_gpu_marks = nullptr;
             ctx.submit_command_list(cc::move(cmd));
             ctx.advance_epoch();
             REQUIRE(outcome == sg::routine_outcome::executed);
-            spans.push_back({from, to});
         }
         co_await ctx.idle_completion();
 
-        auto seconds = 0.0;
-        for (auto const& [from, to] : spans)
-            seconds += to.try_get_seconds().value() - from.try_get_seconds().value();
+        // Per stage, in the order the first frame met them, the mean over the frames that recorded it.
+        struct stage
+        {
+            cc::string_view name;
+            f64 seconds = 0.0;
+        };
+        auto stages = cc::vector<stage>();
+        auto total = 0.0;
+        for (auto const& fr : frames)
+        {
+            total += fr.marks.back().at.try_get_seconds().value() - fr.marks.front().at.try_get_seconds().value();
+            for (auto i = isize(1); i < fr.marks.size(); ++i)
+            {
+                auto const dt = fr.marks[i].at.try_get_seconds().value() - fr.marks[i - 1].at.try_get_seconds().value();
+                auto found = false;
+                for (auto& st : stages)
+                    if (st.name == fr.marks[i].stage)
+                    {
+                        st.seconds += dt;
+                        found = true;
+                    }
+                if (!found)
+                    stages.push_back({.name = fr.marks[i].stage, .seconds = dt});
+            }
+        }
         CC_LOG_INFO("sponza {}x{} moving: {} {} ms per frame", k_output[0], k_output[1], c.name,
-                    1e3 * seconds / f64(k_frames));
+                    1e3 * total / f64(k_frames));
+        for (auto const& st : stages)
+            CC_LOG_INFO("    {}: {} ms", st.name, 1e3 * st.seconds / f64(k_frames));
     }
 
     co_await cc::async_settled(sv::background_work(ctx));
