@@ -312,6 +312,7 @@ if(SC_BUILD_TESTS)
             tests/raster-without-raytracing-test.cc
             tests/wavefront-benchmark.cc
             tests/raster-benchmark.cc
+            tests/hybrid-benchmark.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc

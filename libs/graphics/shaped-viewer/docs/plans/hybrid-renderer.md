@@ -304,6 +304,23 @@ The indirect light is upsampled to the render extent by depth and normal before 
 With raster at a guessed 2–3 ms and reconstruction at a guessed 2–3 ms, the frame lands near 11–13 ms.
 The per-ray figures carry the wavefront's stored-state traffic, which one inline kernel does not, so phase 3 is expected to beat them; phase 3 measures it.
 
+### What a whole frame measured
+
+`hybrid-benchmark.cc` times the viewer's whole moving frame on Sponza, output 1920x1200 at the quality preset, the camera walking the nave.
+Each contender runs alone: four views' histories and path state at once overflowed the laptop's memory, and every number came out near double.
+On the laptop RTX 5070 in October 2026:
+
+| frame | GPU time |
+|---|---|
+| hybrid deferred, svgf + FSR | 15.9 ms |
+| hybrid deferred, dlss_rr | 33.9 ms |
+| hybrid forward, dlss_rr | 54.8 ms |
+| wavefront, dlss_rr | 111.4 ms |
+
+**Only deferred with svgf and FSR fits the 16.6 ms budget, and barely.**
+The hybrid's own frame at the smaller extent is a few milliseconds, so most of the rest is reconstruction and the viewer around it.
+dlss_rr costs about 18 ms more than svgf and FSR, which is the next thing to break down by GPU pass.
+
 ## Phasing
 
 Each phase lands with its tests, and its measurement on Sponza and on one large geometry scene.
