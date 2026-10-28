@@ -26,7 +26,7 @@ MANIFEST_NAME = "dependency.yml"
 
 # `source` says how we obtain the upstream; `track` says how "what is current" is defined.
 # They are separate because stb, ImPlot and ImGuizmo are ordinary git clones whose newest version is a branch head, not a tag.
-SOURCES = {"git", "github-release", "github-files", "url"}
+SOURCES = {"git", "github-release", "github-files", "url", "nuget"}
 TRACKS = {"tags", "default-branch", "github-releases", "sqlite", "none"}
 DIGEST_ALGOS = {"git-commit", "sha256", "sha3-256"}
 # The keys `unavailable_on` may name a host by.
@@ -92,6 +92,9 @@ class Upstream:
             return f"{self.repo}/releases/download/{self.tag}/{self.asset}"
         if self.source == "url":
             return self.download or f"https://sqlite.org/{self.year}/{self.asset}"
+        if self.source == "nuget":
+            # `repo` is the package id; nuget.org serves a pinned version at this address, whatever is newest.
+            return f"https://www.nuget.org/api/v2/package/{self.repo}/{self.version}"
         raise ValueError(f"{self.name}: source {self.source!r} has no archive URL")
 
     @property

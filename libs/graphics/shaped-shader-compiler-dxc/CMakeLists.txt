@@ -64,7 +64,7 @@ if(SC_BUILD_TESTS)
         tests/portable-hlsl-spike-test.cc
         tests/constant-packing-spike-test.cc
     )
-    sc_nexus_binary(shaped-shader-compiler-dxc-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    sg_warp_test_binary(shaped-shader-compiler-dxc-test)
 
     # Both of these compile to DXIL and assert what comes back from its reflection container, which needs the Windows
     # SDK's d3d12shader.h — a header the Linux DXC release does not ship.

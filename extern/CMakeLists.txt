@@ -106,6 +106,10 @@ option(SC_USE_VENDORED_DLSS "Wrap the fetched NVIDIA DLSS SDK in extern/dlss/.in
 # Unlike DLSS it is SOURCE, and its build compiles its own shaders with the dxc.exe extern/dxc pins.
 option(SC_USE_VENDORED_NRD "Build the fetched NRD in extern/nrd/.install (OFF expects an external `NRD` target)" ON)
 
+# WARP from NuGet is fetched ON REQUEST like DLSS: its terms are testing-only and forbid redistributing it.
+# Nothing links it; the directory only publishes where the DLL is, for shaped-graphics to stage beside its WARP test binaries.
+option(SC_USE_VENDORED_WARP "Stage the fetched WARP in extern/warp/.install beside the dx12 test binaries" ON)
+
 # The OIDN library is only the reference shaped-rendering-test's oracle compares sr::denoise_method::oidn against, and nothing we ship links it.
 # So it is fetched ON REQUEST — `uv run extern/oidn/fetch-oidn.py` — rather than on every configure, and the oracle tests SKIP without the `oidn` target.
 option(SC_USE_VENDORED_OIDN "Wrap the fetched Open Image Denoise in extern/oidn/.install (OFF expects an external `oidn` target)" ON)
@@ -238,4 +242,10 @@ endif()
 
 if(_sc_host_side_deps AND SC_USE_VENDORED_DLSS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/dlss/.install/pin.txt")
     add_subdirectory(dlss)
+endif()
+
+# Reset first, so uninstalling it takes effect at the next configure rather than leaving the old path cached.
+set(SC_PINNED_WARP_DLL "" CACHE INTERNAL "The pinned WARP the dx12 test binaries load")
+if(WIN32 AND SC_USE_VENDORED_WARP AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/warp/.install/pin.txt")
+    add_subdirectory(warp)
 endif()

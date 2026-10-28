@@ -8,7 +8,11 @@
 # CI failed an example's build on exactly that, with a source DLL that had been built hundreds of steps earlier.
 #
 # So nothing here writes a shared file.
-# Each DLL is copied to a temp file named for the executable staging it, then renamed into place.
+# Each DLL is copied to a temp folder named for the executable staging it, then renamed into place.
+#
+# **A copy keeps its source's write time**, and a destination with the right bytes but another time is staged again.
+# WARP rejects the pipeline blobs a copy of itself with another write time wrote, so copies of one DLL beside
+# several binaries have to be indistinguishable for them to share a pipeline cache.
 # A rename replaces the destination whole rather than writing into it, so two stagers can only race to install the same
 # bytes — and when a rename loses to one that already put identical bytes there, that is success.
 #
@@ -27,15 +31,20 @@ if(CMAKE_SCRIPT_MODE_FILE)
         get_filename_component(_name "${_src}" NAME)
         set(_dst "${SC_STAGE_DEST}/${_name}")
 
+        file(TIMESTAMP "${_src}" _src_time "%Y-%m-%dT%H:%M:%S" UTC)
         if(EXISTS "${_dst}")
             execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${_src}" "${_dst}" RESULT_VARIABLE _differs)
-            if(_differs EQUAL 0)
+            file(TIMESTAMP "${_dst}" _dst_time "%Y-%m-%dT%H:%M:%S" UTC)
+            if(_differs EQUAL 0 AND _dst_time STREQUAL _src_time)
                 continue()
             endif()
         endif()
 
-        set(_tmp "${_dst}.${SC_STAGE_TAG}.staging")
-        file(COPY_FILE "${_src}" "${_tmp}")
+        # file(COPY) rather than COPY_FILE, since only it keeps the write time; it copies into a folder, under the source's name.
+        set(_tmp_dir "${_dst}.${SC_STAGE_TAG}.staging")
+        file(REMOVE_RECURSE "${_tmp_dir}")
+        file(COPY "${_src}" DESTINATION "${_tmp_dir}")
+        set(_tmp "${_tmp_dir}/${_name}")
 
         # A rename can still fail while something else holds the destination — another stager's rename, or a scanner
         # opening a freshly written DLL — so it is retried briefly rather than failing the build on the first refusal.
@@ -43,6 +52,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
         foreach(_attempt RANGE 1 50)
             file(RENAME "${_tmp}" "${_dst}" RESULT _rename)
             if(_rename EQUAL 0)
+                file(REMOVE_RECURSE "${_tmp_dir}")
                 set(_installed TRUE)
                 break()
             endif()
@@ -50,7 +60,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
             # Another stager may have installed these very bytes meanwhile, which is all this step wanted.
             execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${_src}" "${_dst}" RESULT_VARIABLE _differs)
             if(_differs EQUAL 0)
-                file(REMOVE "${_tmp}")
+                file(REMOVE_RECURSE "${_tmp_dir}")
                 set(_installed TRUE)
                 break()
             endif()
@@ -59,7 +69,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
         endforeach()
 
         if(NOT _installed)
-            file(REMOVE "${_tmp}")
+            file(REMOVE_RECURSE "${_tmp_dir}")
             message(FATAL_ERROR "could not stage ${_name} into ${SC_STAGE_DEST}: ${_rename}")
         endif()
     endforeach()

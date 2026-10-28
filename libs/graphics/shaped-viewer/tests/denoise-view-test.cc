@@ -243,6 +243,12 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's
                      (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
+    // TEMPORARY(bug-sv-megakernel-emitter-capture-dark): Windows' own WARP traces the first wavefront capture wrong about one run in eight.
+    // Every input the trace reads matches a passing run, and the pinned WARP extern/warp/fetch-warp.py fetches passes, so only the system one skips.
+    // docs/bugs-external/warp-raytracing-wrong-capture has the evidence.
+    if (!SG_HAS_PINNED_WARP && ctx.metrics.adapter().is_software)
+        SKIP("Windows' WARP traces this scene wrong about one run in eight; issue: "
+             "bug-sv-megakernel-emitter-capture-dark");
 
     {
         auto probe = ctx.create_command_list();

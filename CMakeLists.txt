@@ -101,6 +101,11 @@ option(SC_CHECK_WIDE_ARITH "Check typed-geometry's fixed_int width claims and pr
 # Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH, and turned on by the same debug-nopch presets.
 option(SC_CHECK_GEOMETRY_SPECIAL_CASES "Log typed-geometry's geometric special-case assumptions at runtime" OFF)
 
+# Let a context link's releases be watched, so nexus names who still holds a test's context when it reports leftover async work.
+# Off, the release path is exactly what it is without the feature; on, every release of a context link pays one load and a compare.
+# Whole-build for the same ODR reason as SC_CHECK_WIDE_ARITH: the release is inline.
+option(SC_ASYNC_AMBIENT_TRACE "Let nexus name who holds a test's context when it reports leftover async work" OFF)
+
 # Test clean-simd at every lane width it generates flat, rather than at one 256-bit type per element.
 # Every width is every kernel instantiated four times over, which is most of clean-simd-test's compile time.
 # Only the test binary sees it, so unlike the checks above it is no ODR hazard; the debug-nopch presets turn it on.

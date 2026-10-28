@@ -1,5 +1,6 @@
 #pragma once
 
+#include <clean-core/container/span.hh>
 #include <clean-core/error/result.hh>
 #include <clean-net/address/endpoint.hh>
 #include <clean-net/common/error.hh>
@@ -126,6 +127,26 @@ void drain_datagrams(native_socket s);
 /// Defaulted to v6-only, and set explicitly rather than left alone: the OS default differs by platform and by
 /// sysctl, so a caller that does not say gets a different socket on two machines.
 [[nodiscard]] cc::result<cc::unit, error> set_v6_only(native_socket s, bool v6_only);
+
+/// Apply what a datagram socket is set up with, before it is bound.
+///
+/// Also turns off Windows' habit of failing the NEXT receive with WSAECONNRESET after a send drew an ICMP "port
+/// unreachable", which would make a peer that went away look like a broken socket.
+/// An option the caller set and the OS refused fails this; `traffic_class` is best effort and never does.
+[[nodiscard]] cc::result<cc::unit, error> apply_datagram_options(native_socket s,
+                                                                 ip_family family,
+                                                                 datagram_options const& options);
+
+/// Read whatever datagrams are waiting into a prefix of `records`, without blocking.
+///
+/// Each record is stamped from `stamp` right after the syscall that read it.
+/// A failure the OS reports about an earlier send -- a peer that refused -- is loss rather than an error, and skipped.
+/// Batched into one syscall where the platform has one (`recvmmsg`), one per datagram elsewhere.
+[[nodiscard]] cc::result<isize, error> receive_datagrams(native_socket s, cc::span<datagram> records, clock& stamp);
+
+/// Send `packets` in order without blocking, with `cnet::datagram_socket::send_batch`'s partial-batch rule.
+/// Batched into one syscall where the platform has one (`sendmmsg`), one per datagram elsewhere.
+[[nodiscard]] cc::result<isize, error> send_datagrams(native_socket s, cc::span<outgoing_datagram const> packets);
 
 /// Disable Nagle's algorithm.
 ///

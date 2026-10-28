@@ -151,6 +151,24 @@ class stream_connection;
 /// Something inbound connections arrive on.
 /// Absent on wasm, where a program cannot listen at all.
 class stream_listener;
+
+/// One received datagram in caller-owned memory: the room, what filled it, who sent it, and when.
+struct datagram;
+
+/// One datagram to send: where to, and the bytes.
+struct outgoing_datagram;
+
+/// What a datagram socket is set up with: buffer sizes, don't-fragment, traffic class, address reuse.
+struct datagram_options;
+
+/// One datagram socket, whatever is carrying it -- the seam a virtual or simulated one stands in through.
+class datagram_backend;
+
+/// A socket for whole messages with no connection and no delivery promise, polled in batches.
+///
+/// Named for what it is rather than for UDP, since over a virtual network there is no UDP at all.
+/// Absent on wasm, where a browser has no datagram socket of any kind.
+class datagram_socket;
 } // namespace cnet
 
 // ---- TLS -----------------------------------------------------------------------------------------------

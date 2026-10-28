@@ -46,6 +46,7 @@ So each entry carries the answer as something runnable.
 | [webgpu-timestamp-write-index-sentinel](webgpu-timestamp-write-index-sentinel/readme.md) | emdawnwebgpu + Dawn, against wgpu | not yet filed, worked around in shaped-graphics |
 | [deno-code-cache-stale-same-length-source](deno-code-cache-stale-same-length-source/readme.md) | Deno 2.9.6 | gone in 2.9.7, worked around in dev.py below it |
 | [warp-arm64-pac-fastfail](warp-arm64-pac-fastfail/readme.md) | WARP on Windows 11 arm64 | trigger not yet isolated, worked around in shaped-graphics |
+| [warp-raytracing-wrong-capture](warp-raytracing-wrong-capture/readme.md) | system WARP 10.0.26100.9711, x64 | gone in NuGet WARP 1.0.21, its test skipped on WARP in shaped-viewer |
 | [libcxx-float-h-guard-vs-macos27-math-h](libcxx-float-h-guard-vs-macos27-math-h/readme.md) | Homebrew LLVM 22 libc++, macOS 27 SDK | fixed upstream in LLVM 23, worked around in the build |
 
 ## Retiring one

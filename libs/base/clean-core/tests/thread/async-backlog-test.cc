@@ -7,6 +7,7 @@
 #include <clean-core/thread/async_coroutine.hh>
 #include <clean-core/thread/async_thread_pool.hh>
 #include <clean-core/thread/atomic.hh>
+#include <clean-core/thread/native_thread.hh>
 #include <clean-core/thread/thread.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -399,5 +400,59 @@ TEST("async backlog - a parked awaiter torn down hands the work it awaited, stil
     while (cc::async_abandoned_work().outstanding_count() > before && cc::current_time_steady_secs() - t1 < 10.0)
         cc::this_thread_yield();
     CHECK(cc::async_abandoned_work().outstanding_count() == before);
+}
+
+namespace
+{
+/// A capture whose destruction takes a while, and says where it is: 1 begun, 2 ended.
+struct slow_capture
+{
+    cc::atomic<int>* stage = nullptr;
+
+    explicit slow_capture(cc::atomic<int>* s) : stage(s) {}
+    slow_capture(slow_capture&& rhs) noexcept : stage(cc::exchange(rhs.stage, nullptr)) {}
+    slow_capture& operator=(slow_capture&&) = delete;
+    ~slow_capture()
+    {
+        if (stage == nullptr)
+            return;
+        stage->store(1);
+        cc::this_thread_sleep_secs(0.05);
+        stage->store(2);
+    }
+};
+} // namespace
+
+// Its last handle gone, the node reads as gone to a weak lock, but its teardown still runs on the thread that dropped it.
+// What that teardown releases, captures and context, is part of the work: settled must not return before it ends.
+TEST("async backlog - settled waits for a node dropped unresolved to finish its teardown",
+     nx::config::no_scheduler,
+     exclusive())
+{
+    cc::async_thread_pool pool(2);
+    cc::scoped_compute_async_scheduler const as_compute(pool);
+
+    auto stage = cc::atomic<int>(0);
+    auto backlog = cc::async_backlog("teardown");
+    auto node = cc::make_async_lazy([held = slow_capture(&stage)] { return 0; });
+    backlog.track(node);
+
+    auto dropper = cc::native_thread::start([n = cc::move(node)]() mutable { n = {}; });
+    // bounded only so that a dropper that never runs fails instead of hanging
+    auto const t0 = cc::current_time_steady_secs();
+    while (stage.load() == 0 && cc::current_time_steady_secs() - t0 < 10.0)
+        cc::this_thread_yield();
+    REQUIRE(stage.load() == 1);
+    CHECK(backlog.outstanding_count() == 1); // no strong handle is left, and it still counts
+
+    auto const settled = cc::async_start(backlog.settled());
+    CHECK(!settled->is_ready()); // the capture's destructor sleeps, so the teardown is still running here
+    auto const t1 = cc::current_time_steady_secs();
+    while (!settled->is_ready() && cc::current_time_steady_secs() - t1 < 10.0)
+        cc::this_thread_yield();
+    CHECK(settled->is_ready());
+    CHECK(stage.load() == 2);
+    CHECK(backlog.outstanding_count() == 0);
+    dropper.join();
 }
 #endif
