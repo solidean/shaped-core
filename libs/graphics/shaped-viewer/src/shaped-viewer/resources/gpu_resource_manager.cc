@@ -287,11 +287,9 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
             auto const& record = attributes.get(slot.attribute);
 
             // Tightly packed from offset 0 within its own buffer, so the stride is just the element size.
-            auto desc = cc::vector<byte>();
-            append_pod(desc, u32(acquire_buffer(record.data.as_readonly_buffer())));
-            append_pod(desc, u32(0));
-            append_pod(desc, slot.element_stride);
-            write(slot.offset, desc);
+            u32 const desc[attribute_desc_size / sizeof(u32)]
+                = {u32(acquire_buffer(record.data.as_readonly_buffer())), 0u, slot.element_stride};
+            write(slot.offset, cc::span<u32 const>(desc).as_bytes());
             break;
         }
 
@@ -316,9 +314,8 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
                     : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
                                                          : record.texture);
 
-            auto index = cc::vector<byte>();
-            append_pod(index, u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view())));
-            write(slot.offset, index);
+            auto const index = u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view()));
+            write(slot.offset, cc::span<u32 const>(&index, 1).as_bytes());
             break;
         }
         }
@@ -329,6 +326,10 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 
 void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_record& r)
 {
+    if (r.built_in == _record_stamp)
+        return;
+    r.built_in = _record_stamp;
+
     auto bytes = build_instance_parameters(r);
 
     // A material whose every attribute is sourced from somewhere needing no parameter has an empty block, and a zero-sized

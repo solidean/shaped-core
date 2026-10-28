@@ -965,6 +965,71 @@ ASYNC_INVOCABLE_TEST("sv - a texture still streaming samples a placeholder seede
     co_await ctx.idle_completion();
 }
 
+ASYNC_INVOCABLE_TEST("sv - a parameter block is built once per epoch, so a texture landing mid-epoch shows the next "
+                     "one",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+
+    auto m = sv::gpu_resource_manager::create(ctx);
+    m.advance_to(ctx.current_epoch());
+
+    auto lib = sv::material_library::create();
+    sv::register_builtin_material_types(lib);
+    auto const type = lib.acquire_type(sv::builtin_material::openpbr).value();
+    auto const id = lib.acquire(sv::material::create("plain", type, {}));
+
+    // The mesh lands first, so describing it builds the block, while the texture it samples is still pending.
+    auto const positions = cc::vector<tg::pos3f>{tg::pos3f(0, 0, 0), tg::pos3f(1, 0, 0), tg::pos3f(0, 1, 0)};
+    auto data = sv::mesh{.name = "tri", .geometry = sv::triangle_geometry::create_from_positions(positions)};
+    data.attributes.push_back(
+        sv::mesh_attribute::create("uv", sv::attribute_frequency::per_vertex,
+                                   cc::vector<tg::vec2f>{tg::vec2f(0, 0), tg::vec2f(1, 0), tg::vec2f(0, 1)}));
+    auto textured = m.create_mesh(data);
+    m.wait_for_pending_uploads();
+
+    auto const pixels = cc::vector<byte>::create_filled(4 * 4 * 4, byte(0xFF));
+    auto const texture = m.acquire_texture(sv::texture_data::create(pixels, sg::pixel_format::rgba8_unorm, 4, 4));
+    textured.textures.push_back({.name = "base_color", .source = {.texture = texture, .uv_attribute = "uv"}});
+    textured.material = id;
+
+    auto const resolved = sv::resolve_material(lib, id, textured);
+    auto const generated = sv::generate_material_shader(resolved);
+    auto const instance = m.acquire_instance(resolved, generated.layout);
+    auto const slot_offset = [&]
+    {
+        for (auto const& sl : generated.layout.slots)
+            if (sl.name == "base_color" && sl.kind == sv::material_slot_kind::texture_index)
+                return sl.offset;
+        FAIL("no such texture slot");
+        return 0;
+    }();
+    auto const named = [&] { return u32_at(cc::span<byte const>(m.get_instance(instance).uploaded), slot_offset); };
+
+    auto cmd = ctx.create_command_list();
+    REQUIRE(m.textures.get(texture).state == sv::residency::pending);
+    (void)m.describe_instance(*cmd, textured.geometry, instance);
+    auto const placeholder = named();
+    CHECK(placeholder != element_of(m, texture));
+
+    // Landed, but this epoch's block is built: describing it again reuses that build rather than re-minting mid-epoch.
+    m.wait_for_pending_uploads();
+    REQUIRE(m.textures.get(texture).state != sv::residency::pending);
+    (void)m.describe_instance(*cmd, textured.geometry, instance);
+    CHECK(named() == placeholder);
+    ctx.submit_command_list(cc::move(cmd));
+
+    ctx.advance_epoch();
+    m.advance_to(ctx.current_epoch());
+    auto next = ctx.create_command_list();
+    (void)m.describe_instance(*next, textured.geometry, instance);
+    CHECK(named() == element_of(m, texture));
+    ctx.submit_command_list(cc::move(next));
+
+    ctx.advance_epoch();
+    co_await ctx.idle_completion();
+}
+
 ASYNC_INVOCABLE_TEST("sv::mesh - a mesh remembers what placing it produced, and whether it arrived",
                      (sg::context_handle const& ctx_h))
 {

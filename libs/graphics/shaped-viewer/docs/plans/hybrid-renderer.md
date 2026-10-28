@@ -349,7 +349,9 @@ Before and after, in one session:
 | hybrid deferred, dlss_rr | 24.1 ms | **13.6 ms** | 15.6 ms | 5.6 ms |
 | hybrid forward, dlss_rr | 20.1 ms | 17.8 ms | 11.8 ms | 6.1 ms |
 
-About half of the remaining 5 ms of recording is the instance records, `describe_instance` rebuilding every instance's parameters each frame.
+About 1.5 ms of the remaining 5 ms of recording was the instance records: `describe_instance` rebuilt every item's parameter block, twice a frame.
+A block is now built once per epoch per instance record, which items with the same material share, and recording fell to 4.1 to 4.6 ms.
+What is left of it is `resolve_scene` itself, still walked twice a frame, once to acquire before the snapshot and once to trace.
 
 **dlss_rr itself costs about 4.2 ms**, measured alone after a short run, where the whole frame is 10.8 ms.
 After a long run its frames slow to about 35 ms, the hybrid's own stages too, which nothing in them explains.

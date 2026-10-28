@@ -166,7 +166,7 @@ m.attributes.acquire(mesh_attribute)   // -> attribute_id; uploads the bytes int
 m.attributes.get(id)                   // -> attribute_record {buffer<byte> data; attribute_format format; attribute_frequency frequency; element_count; optional<value_summary> summary;}
 
 m.acquire_instance(resolved, layout)   // -> instance_id, content-keyed on resolved.parameter_key; layout from generate_material_shader over `resolved`
-m.get_instance(id)                     // -> instance_record {i32 size_bytes; vector<instance_slot> slots; buffer<byte> parameters; vector<byte> uploaded;}
+m.get_instance(id)                     // -> instance_record {i32 size_bytes; vector<instance_slot> slots; buffer<byte> parameters; vector<byte> uploaded; u64 built_in;}
 m.contains_instance(id) / m.instance_count()
 sv::instance_slot                      // { material_slot_kind kind; i32 offset, size_bytes; vector<byte> constant; attribute_id attribute; u32 element_stride; texture_id texture; }
 m.build_instance_parameters(record)    // -> vector<byte> for THIS epoch; acquires every descriptor and texture index it writes
@@ -180,7 +180,7 @@ m.acquire_scene_item(sv::resident_mesh)  // -> scene_item; the material resolved
 m.acquire_scene_item(sv::mesh)         // -> the same, from CPU bytes: create_mesh followed by the resolution above
                                        //   cached on the mesh: placing it again reuses the item until its content, a resident id or the material changes
 m.describe_instance(cmd, mesh_id, instance_id)  // -> shaders::tracer::instance_record, the per-item record a hit reads by its instance id
-                                       //   rebuilds the block for THIS epoch, uploads it on cmd only if it changed, and mints all four indices
+                                       //   builds the block once per epoch, uploads it on cmd only if it changed, and mints all four indices
 m.attributes_resident(instance_id)              // -> bool; until true the item shades through the fallback, binding no still-streaming attribute
 sv::shaders::tracer::instance_record   // { param_buffer, param_offset, vertices, indices, base_vertex, first_index, link_mask, opacity…, placement } — generated from scene.instance, 116 bytes
 ```
@@ -193,6 +193,7 @@ Gotchas:
 - **The bindless tables are module `tracer`'s binding `bindless`**, so their sizes are changed there and nowhere else.
   A sampled texture is acquired into `textures_2d`; geometry, attributes and parameter blocks into `buffers`.
 - **Every index in a block is THIS EPOCH's**, never a pinned one — which is why a block is rebuilt per frame rather than cached across frames.
+  Within an epoch it is built once, so a texture landing mid-epoch shows from the next one.
   That is what makes the access declaration correct by construction: nothing a hit reads reached the GPU without an acquire.
 - **`describe_instance` must be called on the list that traces with it, and before `freeze()`** — it is where those indices are minted.
 - **The block's bytes are the epoch's; its buffer is not.** The record owns a persistent buffer and re-uploads only when the bytes actually differ.

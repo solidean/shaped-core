@@ -65,4 +65,9 @@ struct sv::instance_record
 
     /// what was last uploaded into `parameters`, so an unchanged block costs a compare rather than a copy
     cc::vector<byte> uploaded;
+
+    /// The manager's epoch stamp the block was last built in.
+    /// Within an epoch a rebuild acquires the same indices again, so the items sharing this record, and every later recording
+    /// of the epoch, reuse that build — even one a texture landing in between would have changed, which waits for the next epoch.
+    u64 built_in = 0;
 };
