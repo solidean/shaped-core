@@ -333,6 +333,13 @@ What the lighting's parts cost, each measured by removing it alone:
 **The cutout cost is the candidate decisions, not their texture reads**: forcing every instance opaque recovers all of it, and sampling the opacity at mip 4 none.
 Opacity micromaps are the answer, for the tracer and the hybrid alike — [feat-sg-opacity-micromaps](../../../shaped-graphics/docs/issues/feat-sg-opacity-micromaps.md).
 
+**Two numbers per contender, since back to back and alone disagree**: throughput over the wall clock, and a breakdown with each frame alone on the GPU.
+Back to back, hybrid deferred with svgf and FSR takes 18.8 ms a frame against 8.8 ms of GPU work: the viewer's CPU side, recording 405 draws, the resolve and the uploads, is what limits it.
+
+**dlss_rr itself costs about 4.2 ms**, measured alone after a short run, where the whole frame is 10.8 ms.
+After a long run its frames slow to about 35 ms, the hybrid's own stages too, which nothing in them explains.
+The GPU's memory stands at 7.7 of 8 GB in both setups, so dlss_rr's own allocations most likely push Sponza into paging; what fills it is not measured yet.
+
 Measured warm, forward's raster pass, which is its lighting, took 48.5 ms against deferred's 19.5 ms of lighting in the same run, and dlss_rr 10.4 ms against svgf and FSR's 2.3 ms.
 Both want a cool measurement before they decide anything.
 

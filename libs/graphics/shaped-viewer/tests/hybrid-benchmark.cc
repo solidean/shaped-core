@@ -17,7 +17,7 @@ using namespace cc::primitive_defines;
 //
 // Every frame moves the camera along the nave, so every frame is one a user orbiting sees: drawn at the upscaler's input extent and upscaled to the output.
 // Each contender runs alone, its view and history freed before the next: four views' histories and path state at once overflow a laptop GPU's memory.
-// GPU time, bracketed by timestamps around the viewer's whole frame.
+// GPU time, bracketed by timestamps around the viewer's whole frame, each frame alone on the GPU.
 // A benchmark rather than a test: it asserts nothing, and libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md records what it measured.
 
 namespace
@@ -175,6 +175,20 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
             sv_test::drive_ambient_work();
         }
 
+        // Throughput first: frames back to back, as a viewer draws them, over the wall clock from the first submit until the GPU idles.
+        // Their own timestamps would overstate them, since a member's work may run on past its frame and into the next one's stages.
+        auto const wall_start = cc::current_time_steady_secs();
+        for (auto f = 1; f <= k_frames; ++f)
+        {
+            auto cmd = ctx.create_command_list();
+            auto const outcome = execute(*cmd, f);
+            ctx.submit_command_list(cc::move(cmd));
+            ctx.advance_epoch();
+            REQUIRE(outcome == sg::routine_outcome::executed);
+        }
+        co_await ctx.idle_completion();
+        auto const wall = cc::current_time_steady_secs() - wall_start;
+
         // Each frame's stages, as the marks the viewer records along it divide it: each mark ends the stage it names.
         auto frames = cc::vector<sv::impl::gpu_marks>();
         for (auto f = 1; f <= k_frames; ++f)
@@ -189,8 +203,9 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
             ctx.submit_command_list(cc::move(cmd));
             ctx.advance_epoch();
             REQUIRE(outcome == sg::routine_outcome::executed);
+            // Each frame alone on the GPU, so no work of the frame before it lands inside this one's stages.
+            co_await ctx.idle_completion();
         }
-        co_await ctx.idle_completion();
 
         // Per stage, in the order the first frame met them, the mean over the frames that recorded it.
         struct stage
@@ -217,8 +232,11 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
                     stages.push_back({.name = fr.marks[i].stage, .seconds = dt});
             }
         }
-        CC_LOG_INFO("sponza {}x{} moving: {} {} ms per frame", k_output[0], k_output[1], c.name,
-                    1e3 * total / f64(k_frames));
+        auto const* const samples = store.peek_ptr(id)->temporal.get_ptr(sv::temporal_id::frame_samples(0));
+        auto const input = samples != nullptr ? samples->scaled_denoise.extent() : tg::vec2i(0, 0);
+        CC_LOG_INFO("sponza {}x{} moving: {} {} ms per frame alone on the GPU, {} ms back to back, drawn at {}x{}",
+                    k_output[0], k_output[1], c.name, 1e3 * total / f64(k_frames), 1e3 * wall / f64(k_frames), input[0],
+                    input[1]);
         for (auto const& st : stages)
             CC_LOG_INFO("    {}: {} ms", st.name, 1e3 * st.seconds / f64(k_frames));
     }
