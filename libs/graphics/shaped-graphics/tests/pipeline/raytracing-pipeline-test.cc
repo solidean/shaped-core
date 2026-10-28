@@ -134,6 +134,73 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces two ray types, one
         }
 }
 
+ASYNC_INVOCABLE_TEST("sg - SGL atomics in a raygen, a closest hit and a miss count each stage's invocations exactly",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using counted_t = shaders::raytracing_pipeline_counted_path_t;
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
+        co_await shaders::raytracing_pipeline.counted_path.description(*ctx));
+    REQUIRE(pipeline != nullptr);
+    auto table_desc = counted_t::table_description(pipeline);
+    auto const row = counted_t::add_row(table_desc, counted_t::hit_groups_t::counted);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    auto const input = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+    auto const counts = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(4 + grid), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = input.raw(), .vertex_count = 6, .is_opaque = false};
+    auto const blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                 sg::accel_build_flag::fast_trace, counted_t::ray_count);
+    auto const offset = table->offset_of(row);
+    sg::tlas_instance const instances[] = {
+        {.blas = blas, .instance_id = 10, .hit_group_offset = offset},
+        {.blas = blas, .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2}, .instance_id = 20, .hit_group_offset = offset},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+    auto const traced = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::traced>(),
+        shaders::traced{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
+    auto const tallies
+        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::tallies>(),
+                                              shaders::tallies{.counts = counts.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *traced);
+    cmd->raytracing.bind_group(1, *tallies);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+    auto const back = cmd->download.data_from_buffer(counts);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto expected_hits = 0u;
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+            expected_hits += expected_at(x, y).is_hit ? 1u : 0u;
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 4 + grid);
+    CHECK(got[0] == u32(grid * grid));
+    CHECK(got[1] == expected_hits);
+    CHECK(got[2] == u32(grid * grid) - expected_hits);
+    // of the launches of one column, exactly one claimed its slot, with its row plus one
+    CHECK(got[3] == u32(grid));
+    for (auto x = 0; x < grid; ++x)
+    {
+        auto const row_plus_one = got[4 + x];
+        CHECK((row_plus_one >= 1u && row_plus_one <= u32(grid))).context(cc::format("column {}", x));
+    }
+}
+
 // The same scene through `pictured_path`, whose raygen stores each cell into an image and whose miss marks another:
 // the ray-tracing stages a ray runs once each store into storage images as a compute stage does.
 ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's raygen and miss store into images",

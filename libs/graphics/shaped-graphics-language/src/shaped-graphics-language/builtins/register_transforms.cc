@@ -81,7 +81,7 @@ void determinant(leaves in, result& out)
     out.push_back(scalar::of(f32(sum)));
 }
 
-/// The four columns are the matrix's sixteen leaves already.
+/// The columns, one behind the other, are the matrix's leaves already, for a `mat4` and a `mat3` alike.
 void from_columns(leaves in, result& out)
 {
     for (auto const& leaf : in)
@@ -97,6 +97,39 @@ written write_from_columns(call_context const& c)
     if (c.target == language::hlsl)
         return {.text = cc::format("transpose({})", text)};
     return {.text = text};
+}
+
+/// Row `row` of `matrix * (x, y, z)`, for a `mat3`, whose element (row r, column c) is leaf c * 3 + r.
+f32 transformed3(leaves matrix, isize row, f32 x, f32 y, f32 z)
+{
+    return matrix[row].as_float() * x + matrix[3 + row].as_float() * y + matrix[6 + row].as_float() * z;
+}
+
+void transform_float3(leaves in, result& out)
+{
+    for (auto row = isize(0); row < 3; ++row)
+        out.push_back(scalar::of(transformed3(in, row, in[9].as_float(), in[10].as_float(), in[11].as_float())));
+}
+
+void multiply_mat3(leaves in, result& out)
+{
+    for (auto column = isize(0); column < 3; ++column)
+    {
+        auto const at = 9 + column * 3;
+        for (auto row = isize(0); row < 3; ++row)
+            out.push_back(
+                scalar::of(transformed3(in, row, in[at].as_float(), in[at + 1].as_float(), in[at + 2].as_float())));
+    }
+}
+
+/// HLSL's constructor takes rows, so the columns it is handed are transposed back.
+written write_mat3_of_columns(call_context const& c)
+{
+    auto const columns = cc::format("{}, {}, {}", c.arguments[0].text, c.arguments[1].text, c.arguments[2].text);
+    auto const mat3 = c.builtins.at(c.builtins.find_type("mat3")).spelled_in(c.target);
+    if (c.target == language::hlsl)
+        return {.text = cc::format("transpose({}({}))", mat3, columns)};
+    return {.text = cc::format("{}({})", mat3, columns)};
 }
 
 /// A matrix times what stands to its right: HLSL has a function for it, and every other target the operator.
@@ -135,6 +168,7 @@ constexpr cc::string_view k_transpose[] = {"transpose"};
 
 void add_product(registry& r,
                  cc::string_view name,
+                 cc::string_view matrix,
                  cc::string_view parameter,
                  cc::string_view rhs,
                  cc::string_view result_type,
@@ -142,7 +176,8 @@ void add_product(registry& r,
                  custom_writer write)
 {
     r.add(function_record{
-        .signature = cc::format("@pure @operator(\"*\") fun {}(m: mat4, {}: {}) -> {}", name, parameter, rhs, result_type),
+        .signature
+        = cc::format("@pure @operator(\"*\") fun {}(m: {}, {}: {}) -> {}", name, matrix, parameter, rhs, result_type),
         .evaluate = evaluate,
         .write = {.kind = spelling_kind::custom, .custom = write, .hlsl_names = k_mul},
     });
@@ -154,10 +189,10 @@ void sgl::builtins::register_transforms(registry& r)
     r.add_comment("// A matrix stands on the left; what it does to its right side depends on what that is:\n"
                   "// a position takes the translation (w = 1) and keeps its w, a direction does not (w = 0) and drops "
                   "it.");
-    add_product(r, "transform_position", "p", "pos3", "hpos4", transform_position, write_position);
-    add_product(r, "transform_direction", "v", "vec3", "vec3", transform_direction, write_direction);
-    add_product(r, "transform_float4", "v", "float4", "float4", transform_float4, write_product);
-    add_product(r, "multiply_mat4", "b", "mat4", "mat4", multiply_mat4, write_product);
+    add_product(r, "transform_position", "mat4", "p", "pos3", "hpos4", transform_position, write_position);
+    add_product(r, "transform_direction", "mat4", "v", "vec3", "vec3", transform_direction, write_direction);
+    add_product(r, "transform_float4", "mat4", "v", "float4", "float4", transform_float4, write_product);
+    add_product(r, "multiply_mat4", "mat4", "b", "mat4", "mat4", multiply_mat4, write_product);
 
     r.add_comment("// a matrix of its four columns");
     r.add(function_record{
@@ -170,4 +205,15 @@ void sgl::builtins::register_transforms(registry& r)
     r.add_comment("// what a matrix is on its own; every target has it under this name");
     impl::add_function(r, "determinant", {"m", "mat4"}, "float", determinant, {},
                        "/// The factor `m` scales a volume by, negative where it mirrors and 0 where it flattens one.");
+
+    r.add_comment("// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector");
+    r.add(function_record{
+        .signature = "@pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3",
+        .doc = "/// The matrix of three columns, `c0` first.",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_mat3_of_columns, .hlsl_names = k_transpose},
+    });
+    add_product(r, "transform_float3", "mat3", "v", "float3", "float3", transform_float3, write_product);
+    add_product(r, "transform_direction3", "mat3", "v", "vec3", "vec3", transform_float3, write_product);
+    add_product(r, "multiply_mat3", "mat3", "b", "mat3", "mat3", multiply_mat3, write_product);
 }

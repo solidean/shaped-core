@@ -65,6 +65,23 @@ TEST("sgl emit - select takes its condition first in HLSL, and last in WGSL and 
     CHECK(msl.contains("const float2 mixed = select(w, v, v > w);\n"));
 }
 
+TEST("sgl emit - select of scalars takes a bool condition on every target, as MSL's own does")
+{
+    constexpr auto scalars = "binding work:\n"
+                             "    counts: mut buffer[uint]\n"
+                             "\n"
+                             "@compute(64) fun main_cs(@thread_id id: int3){work}:\n"
+                             "    let k = work.counts[id.x]\n"
+                             "    let c = k > 3u\n"
+                             "    let f = select(c, 1.0, 2.0)\n"
+                             "    work.counts[id.x] = select(c, k, 7u) + (f as uint)\n";
+    CHECK(text_of(scalars, target::hlsl_dx12).contains("work_counts[id.x] = select(c, k, 7u) + uint(f);\n"));
+    CHECK(text_of(scalars, target::hlsl_vulkan).contains("const float f = select(c, 1.0, 2.0);\n"));
+    CHECK(text_of(scalars, target::wgsl).contains("work_counts[id.x] = select(7u, k, c) + u32(f);\n"));
+    CHECK(text_of(scalars, target::msl).contains("work_counts[id.x] = select(7u, k, c) + uint(f);\n"));
+    CHECK(text_of(scalars, target::msl).contains("const float f = select(2.0, 1.0, c);\n"));
+}
+
 TEST("sgl emit - a one-value constructor and a scalar beside a vector are each target's own")
 {
     auto const hlsl = text_of(k_vectors, target::hlsl_dx12);
@@ -228,6 +245,24 @@ TEST("sgl emit - a bare literal shifted in HLSL is written as the int it is, whi
     CHECK(hlsl.contains("1u << ")).dump("hlsl", hlsl);
     // The other targets type a literal by its context, and are left alone.
     CHECK(text_of(source, target::wgsl).contains("int(1)") == false);
+}
+
+TEST("sgl emit - mix of vectors takes a vector t on every target, which HLSL calls lerp")
+{
+    constexpr auto blended = "struct pixel_input:\n"
+                             "    @position position: hpos4\n"
+                             "    uv: float3\n"
+                             "\n"
+                             "@pixel struct target:\n"
+                             "    color: float4\n"
+                             "\n"
+                             "@pixel fun main_ps(p: pixel_input) -> target:\n"
+                             "    let m = mix(p.uv, float3(1.0), p.uv)\n"
+                             "    return { color = float4(..m, 1.0) }\n";
+    CHECK(text_of(blended, target::hlsl_dx12).contains("const float3 m = lerp(p.uv, (float3)1.0, p.uv);\n"));
+    CHECK(text_of(blended, target::hlsl_vulkan).contains("const float3 m = lerp(p.uv, (float3)1.0, p.uv);\n"));
+    CHECK(text_of(blended, target::wgsl).contains("let m: vec3f = mix(p.uv, vec3f(1.0), p.uv);\n"));
+    CHECK(text_of(blended, target::msl).contains("const float3 m = mix(p.uv, float3(1.0), p.uv);\n"));
 }
 
 TEST("sgl emit - is_nan and is_inf are a test of the bits on every target")

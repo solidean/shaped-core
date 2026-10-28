@@ -181,6 +181,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::device_coherence:
         // Inferred from the floor rather than probed: `coherent(device)` is MSL 3.2, older than the macOS / iOS 26 floor.
         return true;
+    case sg::feature::helper_lane_query:
+        // `simd_is_helper_thread()` is in every MSL the macOS / iOS 26 floor compiles, so nothing is probed.
+        return true;
     }
     return false;
 }

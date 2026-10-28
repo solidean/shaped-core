@@ -331,3 +331,198 @@ TEST("sgl check - a test that reaches a pipeline's trace is unsupported")
     CHECK(r.starts_with("unsupported-yet"));
     CHECK(r.contains("a test that reaches trace_ray, which only the ray-tracing stages run"));
 }
+
+TEST("sgl check - a mat3 is no ray payload, hit attribute or callable's parameter")
+{
+    // CHK-397: what a ray, a hit or a callable carries is ray data a target lays out
+    constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
+    constexpr auto framed = "struct framed:\n    m: mat3\n";
+    CHECK(reports(cc::format("{}rays framed_rays:\n    primary: framed\n", framed))
+              .contains(cc::format("user:[framed] a mat3 in a ray payload, framed.m: mat3, {}", why)));
+    CHECK(reports(cc::format("{}@miss fun gone(p: mut framed):\n    p.m = p.m\n", framed))
+              .contains(cc::format("user:[gone] a mat3 crossing a stage edge, in framed.m: mat3, {}", why)));
+    CHECK(reports(cc::format("{}@closest_hit fun hit(h: procedural_hit[framed], p: mut radiance):\n"
+                             "    p.color = h.attributes.m * p.color\n",
+                             framed))
+              .contains(
+                  cc::format("a mat3 crossing a stage edge, in procedural_hit[framed].attributes.m: mat3, {}", why)));
+    CHECK(reports(cc::format("{}@intersection fun box(b: procedural_box) -> report[framed]:\n    return "
+                             "report.none()\n",
+                             framed))
+              .contains(cc::format("a mat3 crossing a stage edge, in report[framed].attributes.m: mat3, {}", why)));
+    CHECK(reports(cc::format("{}@callable fun turn(f: mut framed):\n    f.m = f.m * f.m\n", framed))
+              .contains(cc::format("user:[turn] a mat3 crossing a stage edge, in framed.m: mat3, {}", why)));
+}
+
+namespace
+{
+/// A ray type, a binding with a counter and storage to write, and the stage `stage` whose body counts with `call`.
+cc::string counting(cc::string_view stage, cc::string_view call)
+{
+    auto const signature
+        = stage == "raygen"      ? cc::string_view("@raygen fun counter(@launch_id id: int3)")
+        : stage == "miss"        ? cc::string_view("@miss fun counter(p: mut radiance)")
+        : stage == "closest_hit" ? cc::string_view("@closest_hit fun counter(h: triangle_hit, p: mut radiance)")
+        : stage == "callable"    ? cc::string_view("@callable fun counter(p: mut radiance)")
+        : stage == "any_hit"     ? cc::string_view("@any_hit fun counter(c: triangle_candidate, p: mut radiance)")
+                                 : cc::string_view("@intersection fun counter(b: procedural_box)");
+    auto const result = stage == "any_hit"      ? cc::string_view(" -> hit_decision")
+                      : stage == "intersection" ? cc::string_view(" -> report[hit_attributes]")
+                                                : cc::string_view();
+    auto const tail = stage == "any_hit"      ? cc::string_view("    return hit_decision.accept\n")
+                    : stage == "intersection" ? cc::string_view("    return report.none()\n")
+                                              : cc::string_view();
+    return cc::format("require raytracing_pipeline\n"
+                      "struct radiance:\n    color: float\n"
+                      "struct hit_attributes:\n    t: float\n"
+                      "binding counted:\n"
+                      "    counts: mut buffer[atomic[uint]]\n"
+                      "    plain: mut buffer[uint]\n"
+                      "    raw: mut bytes\n"
+                      "    dst: out image_2d[.rgba8_unorm]\n"
+                      "{}{{counted}}{}:\n"
+                      "    {}\n"
+                      "{}",
+                      signature, result, call, tail);
+}
+} // namespace
+
+TEST("sgl check - no hit group or ray-tracing pipeline names an entry point that expects a diagnostic")
+{
+    // CHK-403: such an entry point is never built, so a table naming it would hold a hole
+    constexpr auto expecting = "@expect(error = \"stage-not-allowed\")\n"
+                               "@any_hit fun counted(c: triangle_candidate, p: mut radiance) -> hit_decision:\n"
+                               "    return hit_decision.accept\n"
+                               "@expect(error = \"stage-not-allowed\")\n"
+                               "@miss fun dark(p: mut radiance):\n    p.color = float3(0.0, 0.0, 0.0)\n";
+    CHECK(!reports(expecting).contains("invalid-pipeline"));
+    CHECK(reports(cc::string(expecting)
+                  + "hit_group counting for path_rays:\n    surface = (closest_hit = shade, any_hit = counted)\n")
+              .contains("invalid-pipeline user:[counted] counted expects a diagnostic, so it is never built"));
+    CHECK(reports(cc::string(expecting)
+                  + "@raytracing pipeline path:\n    rays = path_rays\n    raygen = primary\n    miss.surface = dark\n"
+                    "    miss.occlusion = lit\n")
+              .contains("invalid-pipeline user:[dark] dark expects a diagnostic, so it is never built"));
+}
+
+TEST("sgl check - an atomic stands in a raygen, a miss, a closest hit and a callable, which each run once per ray")
+{
+    // CHK-404
+    for (auto const stage : {"raygen", "miss", "closest_hit", "callable"})
+        for (auto const call : {"counted.counts[0].add(1u)", "let k = counted.counts[0].compare_exchange_strong(0u, 1u)",
+                                "let r = counted.counts[0].compare_exchange_weak(0u, 1u)"})
+            CHECK(reports_for(counting(stage, call)) == "").context(cc::format("{}: {}", stage, call));
+}
+
+TEST("sgl check - an atomic in an any hit or an intersection counts what traversal decides, and is refused")
+{
+    for (auto const call : {"counted.counts[0].add(1u)", "let r = counted.counts[0].compare_exchange_weak(0u, 1u)"})
+    {
+        CHECK(reports_for(counting("any_hit", call))
+                  .contains("this is reached from an any_hit entry point, which runs an implementation-defined number "
+                            "of times: for candidates the traversal later rejects, and more than once per candidate "
+                            "unless the geometry sets NO_DUPLICATE_ANYHIT_INVOCATION, which Metal has no equivalent "
+                            "of; "
+                            "a decision writes no memory through a binding, so the atomic "))
+            .context(call);
+        CHECK(reports_for(counting("intersection", call))
+                  .contains("this is reached from an intersection entry point, which runs as often as the traversal "
+                            "reaches its box, an implementation-defined number of times; a decision writes no memory "
+                            "through a binding, so the atomic "))
+            .context(call);
+    }
+    CHECK(reports_for(counting("any_hit", "counted.counts[0].add(1u)")).starts_with("stage-not-allowed"));
+    CHECK(reports_for(counting("any_hit", "counted.counts[0].add(1u)"))
+              .contains("so the atomic add would run a number of times no spec defines"));
+}
+
+TEST("sgl check - a decision writes no memory through a binding, whatever writes it")
+{
+    // CHK-404: a store runs as often as an atomic does, and a plain read-modify-write races besides
+    for (auto const stage : {"any_hit", "intersection"})
+    {
+        auto const plain = reports_for(counting(stage, "counted.plain[0] = counted.plain[0] + 1u"));
+        CHECK(plain.contains("stage-not-allowed user:[counted.plain[0]]")).context(stage);
+        CHECK(plain.contains("so this store to a buffer would write a number of times no spec defines, and race with "
+                             "itself"))
+            .context(stage);
+        CHECK(reports_for(counting(stage, "counted.plain[0] += 1u")).contains("store to a buffer")).context(stage);
+        CHECK(reports_for(counting(stage, "counted.raw.store(0u, 1u)"))
+                  .contains("so the store would write a number of times no spec defines"))
+            .context(stage);
+        CHECK(reports_for(counting(stage, "counted.dst.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))"))
+                  .contains("so the store would write a number of times no spec defines"))
+            .context(stage);
+    }
+    // the stages that run once per launch, ray or call store as any other stage does
+    for (auto const stage : {"raygen", "miss", "closest_hit", "callable"})
+        for (auto const call : {"counted.plain[0] = counted.plain[0] + 1u", "counted.raw.store(0u, 1u)",
+                                "counted.dst.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))"})
+            CHECK(reports_for(counting(stage, call)) == "").context(cc::format("{}: {}", stage, call));
+}
+
+TEST("sgl check - an atomic in a decision an inline trace calls is refused as one in an any hit or an intersection")
+{
+    // CHK-404: the traversal decides how often its loop calls the decision, whichever stage holds the loop
+    constexpr auto scene = "require ray_query\n"
+                           "require image_atomics\n"
+                           "struct sphere_attributes:\n    t: float\n"
+                           "binding scene:\n"
+                           "    triangles: acceleration_structure[.triangles]\n"
+                           "    boxes: acceleration_structure[.procedural]\n"
+                           "    counts: mut buffer[atomic[uint]]\n"
+                           "    @atomic depth: mut image_2d[.r32_uint]\n"
+                           "    hits: mut buffer[uint]\n"
+                           "    picture: out image_2d[.rgba8_unorm]\n";
+    auto const traced = [&](cc::string_view decision, cc::string_view trace)
+    {
+        return reports_for(cc::format("{}{}"
+                                      "@compute(64) fun tracer(@thread_id id: int3){{scene}}:\n"
+                                      "    let r = ray(origin = pos3(id.x as float, 0.0, -1.0), direction = vec3(0.0, "
+                                      "0.0, "
+                                      "1.0))\n"
+                                      "    scene.hits[id.x] = if {} => 1u else 0u\n",
+                                      scene, decision, trace));
+    };
+    constexpr auto any_hit = "fun cutout(c: triangle_candidate){scene} -> hit_decision:\n"
+                             "    scene.counts[0].add(1u)\n"
+                             "    return hit_decision.accept\n";
+    CHECK(traced(any_hit, "scene.triangles.trace(r, cutout).is_hit")
+              .contains("stage-not-allowed user:[scene.counts[0].add(1u)] an inline trace calls this as its any-hit "
+                        "decision, which runs an implementation-defined number of times"));
+    // an image's texel atomic is named as the program wrote it
+    constexpr auto texel = "fun cutout(c: triangle_candidate){scene} -> hit_decision:\n"
+                           "    scene.depth[int2(0, 0)].max(3u)\n"
+                           "    return hit_decision.accept\n";
+    CHECK(traced(texel, "scene.triangles.trace(r, cutout).is_hit")
+              .contains("so the atomic max would run a number of times no spec defines"));
+    constexpr auto intersection = "fun sphere(b: procedural_box){scene} -> report[sphere_attributes]:\n"
+                                  "    scene.counts[1].add(1u)\n"
+                                  "    return report.none()\n";
+    CHECK(traced(intersection, "scene.boxes.trace(r, sphere).is_hit")
+              .contains("an inline trace calls this as its intersection decision, which runs as often as the "
+                        "traversal reaches its box"));
+    // a store is refused as an atomic is, which the compute stage holding the trace would take outside a decision
+    constexpr auto stored = "fun cutout(c: triangle_candidate){scene} -> hit_decision:\n"
+                            "    scene.hits[0] = 1u\n"
+                            "    return hit_decision.accept\n";
+    CHECK(traced(stored, "scene.triangles.trace(r, cutout).is_hit")
+              .contains("stage-not-allowed user:[scene.hits[0]] an inline trace calls this as its any-hit decision"));
+    constexpr auto texel_store = "fun cutout(c: triangle_candidate){scene} -> hit_decision:\n"
+                                 "    scene.picture.store(int2(0, 0), float4(1.0, 1.0, 1.0, 1.0))\n"
+                                 "    return hit_decision.accept\n";
+    CHECK(traced(texel_store, "scene.triangles.trace(r, cutout).is_hit")
+              .contains("so the store would write a number of times no spec defines"));
+    // what a decision answers with, its locals and its result, it writes freely
+    constexpr auto answering = "fun cutout(c: triangle_candidate){scene} -> hit_decision:\n"
+                               "    let mut keep = c.t < 4.0\n"
+                               "    keep = keep and c.t > 0.5\n"
+                               "    if keep => return hit_decision.accept\n"
+                               "    return hit_decision.ignore\n";
+    CHECK(traced(answering, "scene.triangles.trace(r, cutout).is_hit") == "");
+    // the same function called plainly, as no decision, counts what its caller decides
+    constexpr auto plain = "fun bump(){scene} -> bool:\n"
+                           "    scene.counts[0].add(1u)\n"
+                           "    return true\n";
+    CHECK(traced(plain, "bump()") == "");
+}

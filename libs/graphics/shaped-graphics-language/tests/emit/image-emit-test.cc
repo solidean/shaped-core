@@ -165,6 +165,40 @@ TEST("sgl emit - an atomic image's update is the target's own atomic on the texe
              "target-lacks-feature reduce needs image_atomics, which WebGPU does not have\n");
 }
 
+TEST("sgl emit - an atomic image's compare-exchange is HLSL's own, and a loop over MSL's weak one")
+{
+    // EMIT-161 on a texel: MSL's texture atomic hands back four wide, and the loop retries a failure that read `expected`
+    constexpr auto source = "require image_atomics\n"
+                            "\n"
+                            "binding set:\n"
+                            "    @atomic depth: mut image_2d[.r32_uint]\n"
+                            "    @atomic offsets: mut image_2d_array[.r32_sint]\n"
+                            "\n"
+                            "@compute(8, 8) fun claim(@thread_id id: int3){set}:\n"
+                            "    let a = set.depth[id.xy].compare_exchange_strong(0u, 7u)\n"
+                            "    let b = set.offsets[id.xy, layer = 2].compare_exchange_strong(0, id.x)\n"
+                            "    set.depth[id.xy].store(a + (b as uint))\n";
+    auto const dx12 = text_of(source, target::hlsl_dx12);
+    CHECK(dx12.contains("    InterlockedCompareExchange(set_depth[id.xy], 0u, 7u, atomic_before);\n"
+                        "    const uint a = atomic_before;\n"));
+    CHECK(dx12.contains("    InterlockedCompareExchange(set_offsets[int3(id.xy, 2)], 0, id.x, atomic_before_1);\n"));
+
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    const uint2 exchange_texel = uint2(id.xy);\n"
+                       "    const uint exchange_expected = 0u;\n"
+                       "    const uint exchange_desired = 7u;\n"
+                       "    uint4 exchange_before = uint4(exchange_expected);\n"
+                       "    while (!set_depth.atomic_compare_exchange_weak(exchange_texel, &exchange_before, "
+                       "uint4(exchange_desired)) && exchange_before.x == exchange_expected)\n"
+                       "    {\n"
+                       "    }\n"
+                       "    const uint a = exchange_before.x;\n"));
+    CHECK(msl.contains("    const uint exchange_layer = uint(2);\n"));
+    CHECK(msl.contains("    while (!set_offsets.atomic_compare_exchange_weak(exchange_texel_1, exchange_layer, "
+                       "&exchange_before_1, int4(exchange_desired_1)) && exchange_before_1.x == "
+                       "exchange_expected_1)\n"));
+}
+
 TEST("sgl emit - an image's subscript is the load or the store it stands for")
 {
     // EMIT-151: HLSL subscripts the image itself, and a compound assignment loads the texel into the expression

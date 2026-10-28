@@ -220,6 +220,7 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
     }
 
     auto const int_type = type_of_builtin(builtins::k_int, file, where);
+    auto const uint_type = type_of_builtin(builtins::k_uint, file, where);
     auto result = object;
     for (auto const& a : arguments)
     {
@@ -229,14 +230,20 @@ type_id checker::check_index(function_scope& scope, ast::expr_id id, ast::index 
                           : ast::expr_id::none;
         auto const index = check_expr(scope, a.value);
         binding_index = outer_index;
-        if (index != error_type && index != int_type)
+        // CHK-287: an `int` or a `uint`, which every target indexes by alike
+        if (index != error_type && index != int_type && index != uint_type)
             report(diagnostic_kind::type_mismatch, file, span_of(file, a.value),
-                   cc::format("{} is indexed by an int, and this is a {}",
+                   cc::format("{} is indexed by an int or a uint, and this is a {}",
                               kind == type_kind::buffer ? "a buffer" : "an array", out.name_of(index)));
         // CHK-309: a constant index names one element, and one past the end is refused by every target
         auto const count = out.at(result).count;
-        if (auto const at = index == int_type ? constant_index(file, a.value) : cc::optional<i32>();
-            kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
+        auto at = cc::optional<i64>();
+        if (index == int_type)
+            if (auto const signed_at = constant_index(file, a.value); signed_at.has_value())
+                at = signed_at.value();
+        if (index == uint_type)
+            at = constant_unsigned_index(file, a.value);
+        if (kind == type_kind::array && count > 0 && at.has_value() && (at.value() < 0 || at.value() >= count))
             report(diagnostic_kind::invalid_constant_argument, file, span_of(file, a.value),
                    cc::format("{} is no index into {}, whose elements are 0 ..< {}", at.value(), out.name_of(result),
                               count));
@@ -1770,7 +1777,9 @@ type_id checker::resolve_overload(function_scope& scope,
                               signature_text(spelling, expected)));
         }
         else
-            report(diagnostic_kind::no_matching_overload, file, where, call_text(file, spelling, arguments));
+            report(diagnostic_kind::no_matching_overload, file, where,
+                   cc::format("{}{}", call_text(file, spelling, arguments),
+                              miss_hint(scope, callee, candidates, arguments, spelling)));
         return error_type;
     }
     auto const best = best_of(cc::move(matches));
@@ -1849,10 +1858,11 @@ type_id checker::resolve_overload(function_scope& scope,
     {
         // CHK-300: the mark is what an index into a binding array is written with, and on anything else it means nothing
         auto const* const record = out.builtin_function(out.at(chosen).intrinsic);
-        if (record != nullptr && record->is_nonuniform_mark && id != binding_index)
+        if (record != nullptr && record->mark != builtins::index_mark::none && id != binding_index)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, where,
-                   "`nonuniform i` marks an index into a binding array, and stands only as one: `t[nonuniform i]`");
+                   cc::format("`{0} i` marks an index into a binding array, and stands only as one: `t[{0} i]`",
+                              record->name));
             return error_type;
         }
         return result;
@@ -2042,6 +2052,154 @@ void checker::note_near_misses(i32 file,
     }
 }
 
+cc::string checker::miss_hint(function_scope& scope,
+                              ast::expr_id callee,
+                              cc::span<symbol_id const> candidates,
+                              call_arguments const& arguments,
+                              cc::string_view spelling)
+{
+    auto const file = scope.file;
+    auto const is_condition = [&](type_id type)
+    {
+        auto const* const record = out.builtin_type_of(type);
+        return record != nullptr && record->leaf_kind == value_kind::boolean;
+    };
+    // a dot call writes its receiver ahead of the name, where no mark can stand
+    auto const is_dot_call = ast::is_valid(callee) && ast_of(file).at(callee).node.is<ast::member>();
+    auto const argument_text = [&](isize i) { return text_of(file, span_of(file, arguments.written[i].expr)); };
+    auto rotated_chain = i32(-1);
+    auto rotated_types = cc::vector<type_id>();
+    for (auto const candidate : candidates)
+    {
+        if (out.at(candidate).state != symbol_state::checked)
+            continue;
+        auto const parameters
+            = cc::vector<parameter>::create_copy_of(out.at(out.functions[out.at(candidate).info].parameters));
+        auto is_generic = false;
+        for (auto const& p : parameters)
+            is_generic = is_generic || is_open(p.type);
+        if (is_generic)
+            continue;
+
+        // CHK-316: the marks alone are off, and each place is of its parameter's type exactly
+        auto const bound = bind_arguments(parameters, arguments);
+        if (bound.failure == miss_reason::none)
+        {
+            auto flipped = cc::vector<isize>();
+            auto is_marks_away = true;
+            for (auto p = isize(0); is_marks_away && p < parameters.size(); ++p)
+            {
+                auto const i = bound.slots[p];
+                if (i < 0)
+                    continue;
+                if (parameters[p].is_mut != arguments.written[i].is_mut)
+                {
+                    is_marks_away = arguments.types[i] == parameters[p].type;
+                    flipped.push_back(p);
+                }
+                else
+                    is_marks_away = chain_of(file, parameters[p], arguments, i).has_value();
+            }
+            if (is_marks_away && !flipped.empty())
+            {
+                // a missing mark is the fix only where what it would mark is a place a body could assign
+                for (auto const p : flipped)
+                {
+                    auto why = cc::string();
+                    if (parameters[p].is_mut
+                        && !judge_place(scope, arguments.written[bound.slots[p]].expr, "a mut argument", &why))
+                        return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, and `{}` "
+                                          "is none: {}",
+                                          parameters[p].name, argument_text(bound.slots[p]), why);
+                }
+                if (flipped.size() == 1 && !is_dot_call)
+                {
+                    auto const& p = parameters[flipped[0]];
+                    if (p.is_mut)
+                        return cc::format(": {} is a mut parameter, so its argument is a place marked `mut`, as in "
+                                          "`mut {}`",
+                                          p.name, argument_text(bound.slots[flipped[0]]));
+                    return cc::format(": {} is no mut parameter, so its argument takes no `mut`", p.name);
+                }
+
+                // several marks, or a dot call, are shown as the whole call written with every mark right
+                auto missing = cc::vector<cc::string_view>();
+                auto extra = cc::vector<cc::string_view>();
+                auto is_toggled = cc::vector<bool>::create_filled(arguments.written.size(), false);
+                for (auto const p : flipped)
+                {
+                    (parameters[p].is_mut ? missing : extra).push_back(parameters[p].name);
+                    is_toggled[bound.slots[p]] = true;
+                }
+                auto const listed = [](cc::span<cc::string_view const> names)
+                {
+                    auto text = cc::string();
+                    for (auto i = isize(0); i < names.size(); ++i)
+                    {
+                        if (i > 0)
+                            text += i + 1 == names.size() ? " and " : ", ";
+                        text += names[i];
+                    }
+                    return text;
+                };
+                auto call = cc::format("{}(", spelling);
+                for (auto i = isize(0); i < arguments.written.size(); ++i)
+                {
+                    if (i > 0)
+                        call += ", ";
+                    if (!arguments.names[i].empty())
+                        call += cc::format("{} = ", arguments.names[i]);
+                    if (arguments.written[i].is_mut != is_toggled[i])
+                        call += "mut ";
+                    call += argument_text(i);
+                }
+                call += ")";
+                auto said = cc::vector<cc::string>();
+                if (!missing.empty())
+                    said.push_back(
+                        missing.size() == 1
+                            ? cc::format("{} is a mut parameter, so its argument is a place marked `mut`", missing[0])
+                            : cc::format("{} are mut parameters, so their arguments are places marked `mut`",
+                                         listed(missing)));
+                if (!extra.empty())
+                    said.push_back(
+                        extra.size() == 1
+                            ? cc::format("{} is no mut parameter, so its argument takes no `mut`", extra[0])
+                            : cc::format("{} are no mut parameters, so their arguments take no `mut`", listed(extra)));
+                return cc::format(": {}, as in `{}`", said.size() == 1 ? said[0] : said[0] + "; " + said[1], call);
+            }
+        }
+
+        // CHK-365: `select(a, b, cond)` is WGSL's order, and SGL's condition stands first
+        auto const n = arguments.written.size();
+        if (n >= 2 && isize(parameters.size()) == n && is_condition(parameters[0].type) && arguments.names.size() == n
+            && arguments.types[n - 1] == parameters[0].type)
+        {
+            // the candidate the moved arguments convert to most directly is the one the call meant
+            auto is_rotated = true;
+            auto total = i32(0);
+            for (auto i = isize(0); is_rotated && i < n; ++i)
+            {
+                auto const chain = arguments.names[i].empty() && !arguments.written[i].is_mut && !parameters[i].is_mut
+                                     ? chain_of(file, parameters[i], arguments, i == 0 ? n - 1 : i - 1)
+                                     : cc::nullopt;
+                is_rotated = chain.has_value();
+                total += chain.has_value() ? chain.value() : 0;
+            }
+            if (is_rotated && (rotated_chain < 0 || total < rotated_chain))
+            {
+                rotated_chain = total;
+                rotated_types.clear();
+                for (auto const& p : parameters)
+                    rotated_types.push_back(p.type);
+            }
+        }
+    }
+    if (rotated_chain >= 0)
+        return cc::format(": its condition comes first, as in {}", signature_text(spelling, rotated_types));
+    return {};
+}
+
 cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call_arguments const& arguments)
 {
     // Read in place, by position: a literal argument may compile another function, and `out.parameters` then moves.
@@ -2055,6 +2213,8 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
     // what `chain_of` reads of a parameter, copied without its name since a compile may move the original
     auto const shape_of
         = [&](isize p) { return parameter{.type = out.at(range)[p].type, .is_mut = out.at(range)[p].is_mut}; };
+    auto const* const record = out.builtin_function(out.at(candidate).intrinsic);
+    auto const takes_literal_at_default = record != nullptr && record->takes_literal_at_default;
     auto bound = bind_arguments(out.at(range), arguments);
     if (bound.failure != miss_reason::none)
         return cc::nullopt;
@@ -2081,6 +2241,9 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
         }
         auto const length = chain_of(file, shape_of(p), arguments, i);
         if (!length.has_value())
+            return cc::nullopt;
+        // CHK-396: `T(x)` of a literal is `x as T`, which takes the literal at its default type alone
+        if (length.value() > 0 && arguments.numbers[i].is_number && takes_literal_at_default)
             return cc::nullopt;
         result.chains[i] = length.value();
     }

@@ -107,6 +107,60 @@ ASYNC_INVOCABLE_TEST("sg - a discarded pixel still takes part in its quad's deri
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - a strong compare-exchange in a pixel stage leaves helper pixels out, and the draw ends",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::helper_lane_query))
+        SKIP("this context cannot tell a helper invocation, which a pixel stage's strong compare-exchange needs");
+
+    // `derivative_ps`'s 4 × 2 target, where each pixel claims its own slot before the derivative.
+    // Column 0 discards first and goes on as helpers, whose compare-exchange stores nothing and must not loop forever.
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 6);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics.discard_claim);
+    auto const owners = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(8), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const group
+        = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::pixel_claims>(),
+                                               shaders::pixel_claims{.owners = owners.as_readwrite_buffer()});
+
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 4,
+                                                          .height = 2,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::tag_target::name,
+                                                          .clear_color = tg::vec4f(-1, -1, -1, -1)},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_group(0, *group);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+    auto cmd = ctx->create_command_list();
+    auto const back = cmd->download.data_from_buffer(owners);
+    ctx->submit_command_list(cc::move(cmd));
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 8);
+
+    // each drawn pixel found its slot empty and claimed it; the derivative still saw the helper, as without the claim
+    for (auto y = 0; y < 2; ++y)
+    {
+        CHECK(pixels[0].rgba_float(0, y) == tg::vec4f(-1, -1, -1, -1)).context(cc::format("row {}", y));
+        CHECK(got[4 * y] == 0u).context(cc::format("row {}", y));
+        CHECK(pixels[0].rgba_float(1, y)[0] == 2.0f).context(cc::format("row {}", y));
+        for (auto x = 1; x < 4; ++x)
+        {
+            CHECK(pixels[0].rgba_float(x, y)[1] == 0.0f).context(cc::format("pixel ({}, {})", x, y));
+            CHECK(got[x + 4 * y] == 7u).context(cc::format("pixel ({}, {})", x, y));
+        }
+    }
+}
+
 ASYNC_INVOCABLE_TEST("sg - a depth the pixel stage writes is the one tested, plain or promised to only move away",
                      (sg::context_handle const& ctx))
 {

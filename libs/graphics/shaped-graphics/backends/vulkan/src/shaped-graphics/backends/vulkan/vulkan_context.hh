@@ -290,6 +290,8 @@ public:
         // SPIR-V's `Coherent` decoration is core, and storage-image atomics on r32 integer formats are required.
         case sg::feature::device_coherence:
         case sg::feature::image_atomics:
+        // `HelperInvocation` is a core built-in; `OpAtomicCompareExchange` is strong, so no loop asks it
+        case sg::feature::helper_lane_query:
             return true;
         }
         return false;

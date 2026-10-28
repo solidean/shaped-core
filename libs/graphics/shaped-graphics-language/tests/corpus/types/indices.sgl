@@ -1,0 +1,48 @@
+// an index is an `int` or a `uint`, into an array and into a buffer alike (CHK-287)
+
+test:
+    let xs = [1.0, 2.0, 4.0]
+    let i = 2u
+    xs[i] == 4.0
+    xs[1u] == 2.0
+    xs[0] + xs[1u] == 3.0
+
+test:
+    let mut grid: int[2, 3] = [[1, 2, 3], [4, 5, 6]]
+    let row = 1u
+    grid[row, 2] = 9
+    grid[1, 2u] == 9
+    grid[row][0] == 4
+
+// a constant uint index names one element too, and one past the end is refused
+const last: uint = 2u
+
+test [1, 2, 3][last] == 3
+
+@expect(error = "invalid-constant-argument")
+test [1, 2, 3][3u] == 0
+
+// so is an index any expression of constants folds to, as WGSL folds it when it creates the shader
+test [1, 2, 3][1 + 1] == 3
+
+@expect(error = "invalid-constant-argument")
+test [1, 2, 3][1 + 2] == 0
+
+@expect(error = "invalid-constant-argument")
+test [1, 2, 3][uint(3)] == 0
+
+// a float is no index
+@expect(error = "type-mismatch")
+test [1, 2, 3][1.0] == 2
+
+// every target indexes a buffer by a uint as it does by an int
+binding work:
+    offsets: buffer[uint]
+    values: buffer[float]
+    totals: mut buffer[float]
+
+@compute(64) fun gather(@thread_id id: int3){work}:
+    let at = work.offsets[id.x]
+    let mut taps = float[4].filled(0.0)
+    taps[at % 4u] = work.values[at]
+    work.totals[at] += taps[at & 3u] + work.values[at + 1u]

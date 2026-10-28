@@ -154,7 +154,8 @@ public:
         case sg::feature::shader_int16:
         case sg::feature::device_coherence:
         case sg::feature::image_atomics:
-            // WGSL has no 16-bit integers, no coherence qualifier and no atomic texel, on any device.
+        case sg::feature::helper_lane_query:
+            // WGSL has no 16-bit integers, no coherence qualifier, no atomic texel and no test for a helper invocation.
             return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
