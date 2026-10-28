@@ -104,8 +104,9 @@ struct backlog_registry
 cc::mutex<backlog_registry>& backlogs()
 {
     // Function-local, so a backlog constructed during dynamic initialization still finds a live registry.
-    static cc::mutex<backlog_registry> registry;
-    return registry;
+    // Never destroyed, so one destroyed during static destruction still does — a context kept in a static owns one.
+    static auto* const registry = new cc::mutex<backlog_registry>();
+    return *registry;
 }
 } // namespace
 
