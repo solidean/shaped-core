@@ -102,9 +102,9 @@ struct constant_folder
         if (call == nullptr || !call->is_pure || !is_known(e(), call->arguments))
             return cc::nullopt;
         auto const* const record = m().builtin_function(call->intrinsic);
-        if (record == nullptr || record->evaluate == nullptr || record->uses_derivatives
-            || record->is_subgroup_operation || record->is_quad_operation || record->is_barrier || record->is_atomic
-            || record->differs_between_invocations || record->bytes_words > 0 || record->is_nonuniform_mark)
+        if (record == nullptr || record->evaluate == nullptr || record->uses_derivatives || record->is_subgroup_operation
+            || record->is_quad_operation || record->is_barrier || record->is_atomic || record->differs_between_invocations
+            || record->bytes_words > 0 || record->mark != builtins::index_mark::none)
             return cc::nullopt;
         // only an integer or a bool result: a float would be rounded here where a target rounds on its own
         auto const result_kind = scalar_kind_of(x.type);
@@ -953,7 +953,8 @@ struct let_simplifier
         {
             if (!is_known(e(), list[i]) || is_dropped(list[i]))
                 continue;
-            auto const& s = e().at(list[i]);
+            // A copy: the recursion below adds statements, which can move the one a reference would point at.
+            auto const s = e().at(list[i]);
             for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { split_in(inner, u, depth + 1); });
 
             // a let of a construction

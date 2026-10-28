@@ -67,7 +67,7 @@ cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), width, height);
 An instance of the type is the file symbol's member, `shaders::<stem>.<pipeline>`; the rest are static.
 **A group index is typed per pipeline**, so another pipeline's group, or a bare `int`, does not compile as an argument of `add_row`.
 **`hit_record_stride` is the caller's to pass**, since the BLAS is built before any table exists: metal bakes it into the structure, and a wrong one reaches the wrong record there.
-`dispatch_rays` logs that mismatch under `ctx.portability_checks()`.
+`dispatch_rays` logs that mismatch under `ctx.hit_record_checks()`, which is on wherever `CC_ASSERT` is.
 
 ## Everything is registered in one fixed order
 

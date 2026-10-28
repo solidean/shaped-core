@@ -222,6 +222,8 @@ public:
         case sg::feature::device_coherence:       // `globallycoherent` is core HLSL
         case sg::feature::image_atomics:          // typed UAV atomics on r32 integer formats are required
         case sg::feature::texture_compression_bc: // BC1-BC7 are required at feature level 11_0
+        // `IsHelperLane()` needs SM 6.6 and SGL compiles at SM 6.8; `InterlockedCompareExchange` is strong, so no loop asks it
+        case sg::feature::helper_lane_query:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;

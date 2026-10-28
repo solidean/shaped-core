@@ -129,3 +129,25 @@ TEST("sgl driver - is_same_path reads a path lexically, and a uri that does not 
     CHECK(!sgl::is_same_path("file:///a%zz.sgl", "file:///b%zz.sgl"));
     CHECK(!sgl::is_same_path("file:///a%zz.sgl", ""));
 }
+
+TEST("sgl driver - a pipeline names no entry point that expects a diagnostic, since that one is never built")
+{
+    // CHK-403
+    constexpr auto source = "require binding_arrays\n"
+                            "binding textures:\n    maps: texture_2d[float4][16]\n    s: sampler\n"
+                            "@vertex struct vertex_in:\n    position: float3\n"
+                            "struct varyings:\n"
+                            "    @position position: hpos4\n    uv: float2\n    @interpolate(.flat) picked: int\n"
+                            "@pixel struct target:\n    color: float4\n"
+                            "@vertex fun main_vs(v: vertex_in) -> varyings:\n"
+                            "    return {position = hpos4(..v.position, 1.0), uv = float2(0.0, 0.0), picked = 0}\n"
+                            "@expect(error = \"non-uniform-index\")\n"
+                            "@pixel fun bad_ps(v: varyings){textures} -> target:\n"
+                            "    return {color = textures.maps[v.picked].sample(v.uv, textures.s)}\n";
+    CHECK(sgl::test_source(source, "e.sgl").errors == "");
+    auto const named = sgl::test_source(cc::string(source)
+                                            + "pipeline p:\n    vertex = main_vs\n    pixel = bad_ps\n"
+                                              "    format = .rgba8_unorm\n",
+                                        "e.sgl");
+    CHECK(named.errors == "e.sgl:20:13: error: invalid-pipeline: bad_ps expects a diagnostic, so it is never built\n");
+}

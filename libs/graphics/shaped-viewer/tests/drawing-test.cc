@@ -422,7 +422,7 @@ TEST("sv::drawing_manager - a set that does not fit opens a page, and a full man
 TEST("sv - a canvas layer's drawings become one 2D job in its target, in logical pixels")
 {
     auto def = sv::viewer_definition{};
-    def.content_scale = 2.0f;
+    def.display_scale = 2.0f;
     def.views.push_back(
         view_with("canvas", tg::vec2i(200, 100), sv::layer_kind::canvas, {sv::drawing_placement{.record_count = 1}}));
     def.root_view = sv::view_index(0);
@@ -441,7 +441,7 @@ TEST("sv - a canvas layer's drawings become one 2D job in its target, in logical
     CHECK(draws[0].kind == sv::draw_kind::drawings);
     CHECK(draws[0].job == 0);
 
-    // logical (0, 0) is the top-left corner, and logical (100, 50) the bottom-right, at a content scale of 2
+    // logical (0, 0) is the top-left corner, and logical (100, 50) the bottom-right, at a display scale of 2
     auto const clip = [&](f32 x, f32 y)
     {
         auto const p = job.object_to_clip * tg::vec4f(x, y, 0, 1);

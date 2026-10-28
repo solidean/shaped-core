@@ -498,6 +498,62 @@ TEST("sgl emit - a binding array takes consecutive registers, and a marked index
     CHECK(sgl::emit::dump_errors(emit_source(arrays, 0, target::wgsl)).contains("binding_arrays"));
 }
 
+TEST("sgl emit - a `uniform` mark is the plain index on every target, beside a `nonuniform` one")
+{
+    // CHK-400: the author's word is all the mark is, so no target is told anything of it
+    constexpr auto marked = "require binding_arrays\n"
+                            "\n"
+                            "binding mats:\n"
+                            "    texs: texture_2d[float4][4]\n"
+                            "\n"
+                            "binding work:\n"
+                            "    counts: mut buffer[int]\n"
+                            "    values: mut buffer[float4]\n"
+                            "\n"
+                            "@compute(64) fun cs(@thread_id id: int3){mats, work}:\n"
+                            "    let k = work.counts[0] % 4\n"
+                            "    let j = work.counts[id.x] % 4\n"
+                            "    work.values[id.x] = mats.texs[uniform k].load(int2(0, 0)) + "
+                            "mats.texs[nonuniform j].load(int2(0, 0))\n";
+    auto const dx12 = text_of(marked, target::hlsl_dx12);
+    CHECK(dx12.contains("mats_texs[k].Load(int3(int2(0, 0), 0)) + mats_texs[NonUniformResourceIndex(j)].Load("));
+    auto const vulkan = text_of(marked, target::hlsl_vulkan);
+    CHECK(vulkan.contains("mats_texs[k].Load(int3(int2(0, 0), 0)) + mats_texs[NonUniformResourceIndex(j)].Load("));
+    auto const msl = text_of(marked, target::msl);
+    CHECK(msl.contains("mats_texs[k].read(uint2(int2(0, 0)), uint(0)) + mats_texs[j].read("));
+    CHECK(!msl.contains("uniform"));
+    // WebGPU has no binding arrays, so WGSL refuses by the feature whatever the marks
+    CHECK(sgl::emit::dump_errors(emit_source(marked, 0, target::wgsl)).contains("binding_arrays"));
+}
+
+TEST("sgl emit - a binding array and a buffer in it are indexed by a uint as by an int")
+{
+    constexpr auto arrays = "require binding_arrays\n"
+                            "\n"
+                            "binding materials:\n"
+                            "    @sampler(smp) albedo: texture_2d[float4][8]\n"
+                            "    params: buffer[float4][2]\n"
+                            "    smp: sampler\n"
+                            "\n"
+                            "struct pixel_input:\n"
+                            "    @position position: hpos4\n"
+                            "    uv: float2\n"
+                            "    @interpolate(.flat) material: uint\n"
+                            "\n"
+                            "@pixel struct target:\n"
+                            "    color: float4\n"
+                            "\n"
+                            "@pixel fun ps(p: pixel_input){materials} -> target:\n"
+                            "    let tint = materials.params[1u][p.material]\n"
+                            "    return {color = materials.albedo[nonuniform p.material].sample(p.uv) * tint}\n";
+    CHECK(text_of(arrays, target::hlsl_dx12)
+              .contains("materials_albedo[NonUniformResourceIndex(p.material)].Sample(materials_smp, p.uv) * tint"));
+    CHECK(text_of(arrays, target::hlsl_dx12).contains("const float4 tint = materials_params[1u][p.material];\n"));
+    auto const msl = text_of(arrays, target::msl);
+    CHECK(msl.contains("materials_params[1u][p.material]"));
+    CHECK(msl.contains("materials_albedo[p.material].sample("));
+}
+
 TEST("sgl emit - a `for` end that takes derivatives is evaluated once, ahead of the loop")
 {
     // LEGAL-7: re-tested after a divergent `break`, the sample would run in part of a quad

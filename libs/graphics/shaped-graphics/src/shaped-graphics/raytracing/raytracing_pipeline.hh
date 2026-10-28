@@ -10,7 +10,7 @@
 /// The shaders of one hit group.
 /// `closest_hit` and `any_hit` run for triangle geometry; `intersection` makes the group procedural, for custom primitives.
 /// Whether `intersection` is present picks the hit-group type: a triangle BLAS must not run a group that has one, and a procedural BLAS must.
-/// A mismatch is undefined behavior the backend may not catch; `context::portability_checks` reports it at dispatch_rays.
+/// A mismatch is undefined behavior the backend may not catch; `context::hit_record_checks` reports it at dispatch_rays.
 /// All three may be absent: an empty group is a triangle group that accepts every hit and runs nothing.
 struct sg::hit_shader
 {

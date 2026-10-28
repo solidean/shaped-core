@@ -24,6 +24,10 @@ namespace
 struct divergence
 {
     bool is = false;
+    /// Proven to differ: it comes from what each invocation is handed, through values or through the control flow
+    /// (CHK-399).
+    /// Where `is` holds without it, the pass can prove it neither the same nor different.
+    bool varies = false;
     /// The node that made it so: a branch, a loop's exit, or the read of a value that differs.
     origin where = {};
     /// Of a value, what it is said of: "comes from the stage input id".
@@ -38,8 +42,11 @@ struct divergence
     [[nodiscard]] static divergence none() { return {}; }
 };
 
+/// The one that says more: a proven difference before an unproven one, and either before none.
 divergence first_of(divergence const& a, divergence const& b)
 {
+    if (b.varies && !a.varies)
+        return b;
     return a.is ? a : b;
 }
 
@@ -89,17 +96,15 @@ struct uniformity_pass
     };
     cc::vector<violation> violations;
 
-    /// CHK-300: an index into a binding array, divergent and unmarked, or marked and uniform.
+    /// CHK-300: every index into a binding array, which `judge_indices` judges once every entry point has its own.
     struct index_finding
     {
+        flat_expr_id element;
         flat_expr_id index;
-        bool is_marked = false;
+        builtins::index_mark mark = {};
         divergence value;
     };
     cc::vector<index_finding> index_findings;
-    /// The marked indices some invocation does need the mark at, which a copy of the same index inlined elsewhere does
-    /// not make needless.
-    cc::vector<origin> needed_marks;
 
     /// CHK-393: a value a vertex stage returns of a `@per_draw` member, which may differ within a draw.
     struct per_draw_finding
@@ -124,12 +129,12 @@ struct uniformity_pass
         return member.member >= 0 && member.member < members.size() && members[member.member].is_per_draw;
     }
 
-    /// True for `nonuniform i`, the one call that marks an index.
-    [[nodiscard]] bool is_marked(flat_expr_id index) const
+    /// The mark `index` is, `uniform i` or `nonuniform i`; none for any other index.
+    [[nodiscard]] builtins::index_mark mark_of(flat_expr_id index) const
     {
         auto const* const c = e.at(index).node.try_as<flat_call>();
         auto const* const record = c != nullptr ? m.builtin_function(c->intrinsic) : nullptr;
-        return record != nullptr && record->is_nonuniform_mark;
+        return record != nullptr ? record->mark : builtins::index_mark::none;
     }
 
     /// What a walk of statements hands on: how the flow leaves them, and whether any of them jumps out.
@@ -142,9 +147,9 @@ struct uniformity_pass
     /// A local takes `stored`, in control flow `flow`.
     void settle_local(local_id id, divergence const& stored, divergence const& flow)
     {
-        auto const d = stored.is ? stored : set_under(flow);
+        auto const d = first_of(stored, set_under(flow));
         auto& slot = locals[index_of(id)];
-        if (d.is && !slot.is)
+        if ((d.is && !slot.is) || (d.varies && !slot.varies))
         {
             slot = d;
             is_changed = true;
@@ -158,8 +163,11 @@ struct uniformity_pass
         if (!flow.is)
             return {};
         if (flow.where.file < prelude_count && !flow.tested_why.empty())
-            return {.is = true, .where = flow.tested_where, .why = flow.tested_why};
-        return {.is = true, .where = flow.where, .why = cc::string("is set where the control flow differs")};
+            return {.is = true, .varies = flow.varies, .where = flow.tested_where, .why = flow.tested_why};
+        return {.is = true,
+                .varies = flow.varies,
+                .where = flow.where,
+                .why = cc::string("is set where the control flow differs")};
     }
 
     [[nodiscard]] builtins::function_record const* record_of(flat_call const& c) const
@@ -243,13 +251,8 @@ struct uniformity_pass
                 // an element of a binding array is the resource the index picks, read once per wave
                 if (is_reporting && reconverges && e.at(element.object).node.is<flat_binding_member>()
                     && is_resource(m.at(x.type).kind))
-                {
-                    auto const marked = is_marked(element.index);
-                    if (index.is != marked)
-                        index_findings.push_back({.index = element.index, .is_marked = marked, .value = index});
-                    else if (marked)
-                        needed_marks.push_back(e.at(element.index).from);
-                }
+                    index_findings.push_back(
+                        {.element = id, .index = element.index, .mark = mark_of(element.index), .value = index});
                 // a resource is the same in every invocation that names it, whatever index named it
                 if (is_resource(m.at(x.type).kind))
                     result = {};
@@ -297,14 +300,20 @@ struct uniformity_pass
         if (is_judged && flow.is && is_reporting)
             violations.push_back({.call = id, .flow = flow});
         // CHK-377: what the subgroup agrees on may still differ between the subgroups of a workgroup
-        if (record->is_subgroup_operation && !result.is)
+        // CHK-399: so it is unproven however much its argument varied, and `uniform` may say it is the same
+        if (record->agrees_in_subgroup)
+            result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
+        else if (record->is_subgroup_operation && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
         // what another thread did to it first is what an atomic gives
         if (record->is_atomic && !result.is)
             result = {.is = true, .where = e.at(id).from, .why = cc::format("is what {} gave", record->name)};
         // CHK-283: a ray-tracing stage's launch index, its ray and its hit are each invocation's own
-        if (record->differs_between_invocations && !result.is)
-            result = {.is = true, .where = e.at(id).from, .why = cc::string("comes from what the stage is handed")};
+        if (record->differs_between_invocations && !result.varies)
+            result = {.is = true,
+                      .varies = true,
+                      .where = e.at(id).from,
+                      .why = cc::string("comes from what the stage is handed")};
         if (!arguments.empty() && !result.is)
             result = stored_to(id, arguments[0]);
         write_through(id, *record, arguments, result, flow);
@@ -348,6 +357,7 @@ struct uniformity_pass
         // a payload or a parameter comes back from the shaders the call ran, which read what their invocation is handed
         auto const written = is_first ? given
                                       : divergence{.is = true,
+                                                   .varies = true,
                                                    .where = e.at(id).from,
                                                    .why = cc::string("is what the shaders the call ran wrote back")};
         settle_local(l->local, written, flow);
@@ -398,6 +408,7 @@ struct uniformity_pass
         if (!d.is)
             return {};
         return {.is = true,
+                .varies = d.varies,
                 .where = where,
                 .why = cc::format("this branch tests a value that {}", d.why),
                 .tested_where = d.where,
@@ -469,13 +480,15 @@ struct uniformity_pass
     {
         auto result = flow_out{.flow = flow};
         s.node.visit(
+            // a `let` is its value where it stands, so it takes no control dependence; a `var`, a `let mut` assigned in
+            // some branches, does
             [&](flat_let const& l)
             {
                 auto const* const c = e.at(l.value).node.try_as<flat_construct>();
                 auto const& local = e.at(l.local);
                 if (c == nullptr || flow.is || local.is_mut || local.kind != local_kind::let)
                 {
-                    settle_local(l.local, value(l.value, flow), flow);
+                    settle_local(l.local, value(l.value, flow), divergence::none());
                     return;
                 }
                 auto& each = fields[index_of(l.local)];
@@ -486,7 +499,7 @@ struct uniformity_pass
                     each.push_back(value(a, flow));
                     whole = first_of(whole, each.back());
                 }
-                settle_local(l.local, whole, flow);
+                settle_local(l.local, whole, divergence::none());
             },
             [&](flat_var const& v) { settle_local(v.local, value(v.value, flow), flow); },
             [&](flat_assign const& a)
@@ -573,6 +586,7 @@ struct uniformity_pass
                 if (flow.is && !returned.is)
                 {
                     returned = {.is = true,
+                                .varies = flow.varies,
                                 .where = s.from,
                                 .why = cc::string("some invocations return here, and the others go on"),
                                 .tested_where = flow.tested_where,
@@ -638,14 +652,18 @@ void checker::judge_uniformity(flat_entry_point const& structured)
         // CHK-283: what differs between invocations from the start, which is every parameter but the workgroup's id
         for (auto i = isize(0); i < e.locals.size(); ++i)
             if (e.locals[i].kind == local_kind::parameter)
-                pass.locals[i] = {.is = true, .why = cc::format("comes from the stage's parameter {}", e.locals[i].name)};
+                pass.locals[i] = {.is = true,
+                                  .varies = true,
+                                  .why = cc::format("comes from the stage's parameter {}", e.locals[i].name)};
         if (is_valid(e.input))
-            pass.locals[0] = {.is = true, .why = cc::string("comes from the stage's input struct")};
+            pass.locals[0] = {.is = true, .varies = true, .why = cc::string("comes from the stage's input struct")};
         for (auto const& input : e.stage_inputs)
             pass.locals[index_of(input.local)]
                 = input.input == stage_input::workgroup_id
                     ? divergence::none()
-                    : divergence{.is = true, .why = cc::format("comes from the stage input {}", e.at(input.local).name)};
+                    : divergence{.is = true,
+                                 .varies = true,
+                                 .why = cc::format("comes from the stage input {}", e.at(input.local).name)};
 
         // a local only ever becomes divergent, so the walks settle within one per local
         for (auto rounds = isize(0); rounds <= e.locals.size(); ++rounds)
@@ -663,42 +681,54 @@ void checker::judge_uniformity(flat_entry_point const& structured)
     if (asks_reconverged && asks_barrier)
         pass.violations.push_back_range(judged(false).violations);
 
-    // an index a parameter names several times is one index where it was written
-    auto reported_indices = cc::vector<origin>();
+    // judged once every entry point has its own copies, since one written index is judged over all of them (CHK-401)
     for (auto const& f : pass.index_findings)
     {
         auto const& index = e.at(f.index);
-        auto is_seen = false;
-        for (auto const& r : reported_indices)
-            is_seen = is_seen || r == index.from;
-        if (is_seen)
-            continue;
-        reported_indices.push_back(index.from);
-        auto const where = span_of(index.from.file, index.from.expr);
-        if (f.is_marked)
+        auto at = index.from;
+        auto written = index.from;
+        if (f.mark != builtins::index_mark::none)
+            written = e.at(e.at(index.node.as<flat_call>().arguments)[0]).from;
+        // the index as the access writes it, rather than what an inlined callee made of it: `maps[slot_of(m)]`
+        // an element a resource parameter stands for keeps the index its caller wrote, which is where the mark goes
+        // a pinned index leaves the element the origin of the call it is the receiver of: `maps[i % 16].load(xy)`
+        auto const& element = e.at(f.element).from;
+        auto const* subscript = static_cast<ast::index const*>(nullptr);
+        for (auto x = element.expr; ast::is_valid(x) && subscript == nullptr;)
         {
-            // a mark of a module or the prelude serves every program that calls it, which this one cannot speak for,
-            // and a copy of the index inlined elsewhere may need it
-            auto is_needed = index.from.file != out.program_file();
-            for (auto const& n : pass.needed_marks)
-                is_needed = is_needed || n == index.from;
-            if (is_needed)
-                continue;
-            report(diagnostic_kind::needless_nonuniform, index.from.file, where,
-                   "this index is the same in every invocation, so marking it `nonuniform` pays for nothing");
-            continue;
+            auto const& node = ast_of(element.file).at(x).node;
+            subscript = node.try_as<ast::index>();
+            if (auto const* const c = node.try_as<ast::call>())
+                x = c->callee;
+            else if (auto const* const m = node.try_as<ast::member>())
+                x = m->object;
+            else
+                x = ast::expr_id::none;
         }
-        auto const text = text_of(index.from.file, where);
-        auto is_operand = true;
-        for (auto const ch : text)
-            is_operand = is_operand && (cc::is_alphanumeric(ch) || ch == '_' || ch == '.');
-        auto& d = report(diagnostic_kind::non_uniform_index, index.from.file, where,
-                         cc::format("an index into a binding array that may differ between invocations: mark it "
-                                    "`nonuniform {}`, or make it the same in all of them",
-                                    is_operand ? cc::string(text) : cc::format("({})", text)));
-        auto const& from = f.value.where;
-        auto const span = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt);
-        d.notes.push_back({.file = from.file, .where = span, .message = cc::format("this value {}", f.value.why)});
+        if (subscript != nullptr && ast_of(element.file).at(subscript->arguments).size() == 1)
+        {
+            at = {.file = element.file, .expr = ast_of(element.file).at(subscript->arguments)[0].value};
+            written = at;
+            auto const* const mark = ast_of(at.file).at(at.expr).node.try_as<ast::call>();
+            if (f.mark != builtins::index_mark::none && mark != nullptr && ast_of(at.file).at(mark->arguments).size() == 1)
+                written.expr = ast_of(at.file).at(mark->arguments)[0].value;
+        }
+        auto use = index_use{.entry = e.function,
+                             .index = at,
+                             .written = written,
+                             .mark = f.mark,
+                             .is_uniform = !f.value.is,
+                             .varies = f.value.varies};
+        if (f.value.is)
+        {
+            auto const& from = f.value.where;
+            use.why = {.file = from.file,
+                       .where = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt),
+                       .message = cc::format("this value {}", f.value.why)};
+        }
+        for (auto const& site : e.at(e.at(f.element).inlined_through))
+            use.through.push_back(site);
+        index_uses.push_back(cc::move(use));
     }
     auto const members = judges_per_draw ? out.at(out.at(e.result).members) : cc::span<member_info const>();
     auto reported_returns = cc::vector<per_draw_report>();
@@ -750,6 +780,8 @@ void checker::judge_uniformity(flat_entry_point const& structured)
                              record->name.starts_with("sample") ? ": sample before the branch, or name the level or "
                                                                   "the gradients"
                                                                 : ": take them before the branch"));
+        // CHK-402: a compile of another entry point does not report it
+        d.entry_points.push_back(e.function);
         // a branch of the prelude is no line of the program, so the note names the program's call that reached it
         auto const& from = v.flow.where;
         auto site = call_site();
@@ -769,5 +801,248 @@ void checker::judge_uniformity(flat_entry_point const& structured)
         }
         auto const span = ast::is_valid(from.expr) ? span_of(from.file, from.expr) : span_of(from.file, from.stmt);
         d.notes.push_back({.file = from.file, .where = span, .message = v.flow.why});
+    }
+}
+
+namespace
+{
+/// `text` as a mark takes it: bare where it is one operand, and in parentheses otherwise.
+cc::string operand_text(cc::string_view text)
+{
+    auto is_operand = true;
+    for (auto const ch : text)
+        is_operand = is_operand && (cc::is_alphanumeric(ch) || ch == '_' || ch == '.');
+    return is_operand ? cc::string(text) : cc::format("({})", text);
+}
+} // namespace
+
+void checker::judge_indices()
+{
+    auto const span_of_origin
+        = [&](origin const& o) { return ast::is_valid(o.expr) ? span_of(o.file, o.expr) : span_of(o.file, o.stmt); };
+    // the function a call names, which is the one holding the index where it is the innermost call
+    auto const callee_name = [&](call_site const& site) -> cc::string
+    {
+        auto const* const call = ast_of(site.file).at(site.call).node.try_as<ast::call>();
+        if (call == nullptr || !ast::is_valid(call->callee))
+            return {};
+        auto const& callee = ast_of(site.file).at(call->callee).node;
+        if (auto const* const n = callee.try_as<ast::name>())
+            return cc::string(text_of(site.file, n->where));
+        if (auto const* const m = callee.try_as<ast::member>())
+            return cc::string(text_of(site.file, m->name));
+        return {};
+    };
+
+    auto judged = cc::vector<origin>();
+    for (auto const& first : index_uses)
+    {
+        auto is_seen = false;
+        for (auto const& o : judged)
+            is_seen = is_seen || o == first.index;
+        if (is_seen)
+            continue;
+        judged.push_back(first.index);
+
+        auto copies = cc::vector<index_use const*>();
+        for (auto const& u : index_uses)
+            if (u.index == first.index)
+                copies.push_back(&u);
+        auto const where = span_of_origin(first.index);
+        auto const written = operand_text(text_of(first.written.file, span_of_origin(first.written)));
+
+        // CHK-300: a mark that pays for nothing is a warning only where no entry point of the program needs it
+        if (first.mark == builtins::index_mark::nonuniform)
+        {
+            // a mark of a module or the prelude serves every program that calls it, which this one cannot speak for
+            auto is_needless = first.index.file == out.program_file();
+            for (auto const* const u : copies)
+                is_needless = is_needless && u->is_uniform;
+            if (!is_needless)
+                continue;
+            auto& d = report(diagnostic_kind::needless_nonuniform, first.index.file, where,
+                             "this index is the same in every invocation, so marking it `nonuniform` pays for nothing");
+            for (auto const* const u : copies)
+                if (!d.entry_points.values().contains(u->entry))
+                    d.entry_points.push_back(u->entry);
+            continue;
+        }
+
+        // every other verdict is one entry point's, over the copies its own body inlined (CHK-401)
+        auto entries = cc::vector<symbol_id>();
+        for (auto const* const u : copies)
+            if (!entries.values().contains(u->entry))
+                entries.push_back(u->entry);
+        for (auto const entry : entries)
+        {
+            index_use const* uniform = nullptr;
+            index_use const* varying = nullptr;
+            index_use const* unproven = nullptr;
+            for (auto const* const u : copies)
+            {
+                if (u->entry != entry)
+                    continue;
+                if (u->is_uniform && uniform == nullptr)
+                    uniform = u;
+                else if (u->varies && varying == nullptr)
+                    varying = u;
+                else if (!u->is_uniform && !u->varies && unproven == nullptr)
+                    unproven = u;
+            }
+            auto const* const differing = varying != nullptr ? varying : unproven;
+            if (differing == nullptr || (first.mark == builtins::index_mark::uniform && varying == nullptr))
+                continue;
+
+            // the call where the copies part: the outermost one that differs between them
+            auto const parted_calls = [&](located_diagnostic& d, index_use const& other)
+            {
+                auto at = isize(0);
+                while (at < uniform->through.size() && at < other.through.size()
+                       && uniform->through[at] == other.through[at])
+                    ++at;
+                if (at >= uniform->through.size() || at >= other.through.size())
+                    return;
+                auto const& same = uniform->through[at];
+                auto const& differs = other.through[at];
+                d.notes.push_back({.file = same.file,
+                                   .where = span_of(same.file, same.call),
+                                   .message = cc::string("this call gives it a value the same in every invocation")});
+                d.notes.push_back({.file = differs.file,
+                                   .where = span_of(differs.file, differs.call),
+                                   .message = cc::string("and this one a value that may differ between them")});
+            };
+
+            located_diagnostic* d = nullptr;
+            if (first.mark == builtins::index_mark::uniform)
+            {
+                // CHK-400: the author's word stands where the pass cannot prove otherwise, and only there
+                d = &report(diagnostic_kind::uniform_index_varies, first.index.file, where,
+                            cc::format("this index is marked `uniform`, and it differs between invocations: mark it "
+                                       "`nonuniform {}` instead",
+                                       written));
+                if (uniform != nullptr)
+                    parted_calls(*d, *varying);
+            }
+            else if (uniform != nullptr)
+            {
+                auto const function
+                    = differing->through.empty() ? cc::string("the function") : callee_name(differing->through.back());
+                d = &report(diagnostic_kind::mixed_index, first.index.file, where,
+                            cc::format("some calls give this index into a binding array a value the same in every "
+                                       "invocation, and others one that may differ: split {0} in two, one of which "
+                                       "marks it `nonuniform {1}`, or mark it `nonuniform {1}` here and pay for the "
+                                       "mark "
+                                       "on the uniform calls too",
+                                       function.empty() ? cc::string("the function") : function, written));
+                parted_calls(*d, *differing);
+            }
+            else if (varying != nullptr)
+                d = &report(diagnostic_kind::non_uniform_index, first.index.file, where,
+                            cc::format("an index into a binding array that may differ between invocations: mark it "
+                                       "`nonuniform {}`, or make it the same in all of them",
+                                       written));
+            else
+                d = &report(diagnostic_kind::unproven_index, first.index.file, where,
+                            cc::format("an index into a binding array that the compiler cannot prove the same in every "
+                                       "invocation: mark it `uniform {0}` where it is, or `nonuniform {0}` where it "
+                                       "may "
+                                       "differ",
+                                       written));
+            d->notes.push_back(differing->why);
+            d->entry_points.push_back(entry);
+        }
+    }
+    index_uses.clear();
+}
+
+void checker::merge_entry_diagnostics()
+{
+    auto merged = cc::vector<located_diagnostic>();
+    for (auto& d : out.diagnostics)
+    {
+        located_diagnostic* same = nullptr;
+        if (!d.entry_points.empty())
+            for (auto& m : merged)
+                if (!m.entry_points.empty() && m.what == d.what && m.file == d.file && m.detail == d.detail
+                    && ast::impl::is_equal(m.notes, d.notes))
+                    same = &m;
+        if (same == nullptr)
+        {
+            merged.push_back(cc::move(d));
+            continue;
+        }
+        for (auto const e : d.entry_points)
+            if (!same->entry_points.values().contains(e))
+                same->entry_points.push_back(e);
+    }
+    out.diagnostics = cc::move(merged);
+}
+
+void checker::drop_expecting_entry_points()
+{
+    if (out.entry_expectations.empty())
+        return;
+    out.entry_points.remove_all_where(
+        [&](flat_entry_point const& e)
+        {
+            for (auto const& x : out.entry_expectations)
+                if (x.function == e.function)
+                    return true;
+            return false;
+        });
+}
+
+void checker::judge_expecting_in_pipelines()
+{
+    if (out.entry_expectations.empty())
+        return;
+    auto const is_expecting = [&](symbol_id id)
+    { return out.entry_expectations.values().any([&](entry_expectation const& x) { return x.function == id; }); };
+    // a declaration keeps no span per stage it names, so its values are read again for the names they hold
+    auto const judge_value = [&](i32 file, ast::expr_id value)
+    {
+        if (!ast::is_valid(value))
+            return;
+        auto const where = span_of(file, value);
+        auto const text = text_of(file, where);
+        auto at = isize(0);
+        while (at < text.size())
+        {
+            auto const is_name_char = [&](isize i) { return cc::is_alphanumeric(text[i]) || text[i] == '_'; };
+            if (!is_name_char(at))
+            {
+                ++at;
+                continue;
+            }
+            auto const first = at;
+            while (at < text.size() && is_name_char(at))
+                ++at;
+            // `.host` and an enum's case name no entry point
+            if (first > 0 && text[first - 1] == '.')
+                continue;
+            auto const* const found = names_seen_from(file).get_ptr(text.subview({.offset = first, .size = at - first}));
+            if (found == nullptr)
+                continue;
+            for (auto const candidate : *found)
+                if (is_expecting(candidate))
+                {
+                    report(diagnostic_kind::invalid_pipeline, file,
+                           {.offset = where.offset + u32(first), .length = u32(at - first)},
+                           cc::format("{} expects a diagnostic, so it is never built", out.at(candidate).name));
+                    break;
+                }
+        }
+    };
+    for (auto const& p : out.pipelines)
+    {
+        auto const& s = out.at(p.symbol);
+        auto const& ast = ast_of(s.file);
+        auto const* const d = ast.at(s.declaration).node.try_as<ast::pipeline_decl>();
+        if (d == nullptr)
+            continue;
+        for (auto const& setting : ast.at(d->settings))
+            judge_value(s.file, setting.value);
+        for (auto const& stage : ast.at(d->stages))
+            judge_value(s.file, stage.value);
     }
 }

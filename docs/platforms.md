@@ -259,6 +259,20 @@ nexus fails a passing test that logs an undeclared warning, so in a test it is a
 
 Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, and turned on by the same `debug-nopch` presets.
 
+## Who holds a test's context (`SC_ASYNC_AMBIENT_TRACE`)
+
+`SC_ASYNC_AMBIENT_TRACE` (default `OFF`) lets a context link's releases be watched; it reaches C++ as `CC_ASYNC_AMBIENT_TRACE`, 0 or 1.
+nexus uses it when a pass ends with async work still carrying the test's context, which fails the pass either way.
+It watches the test's link from just before its count, waits up to a quarter second for the leftover work to let go, and adds the stack of each release to the failure.
+So the report says whether the work was a straggler that let go a moment later or a real leak, and which code held it.
+
+Off, the release path is exactly what it is without the feature.
+On, every release of a context link loads the watched link and compares, and only a watched link takes the slow path.
+`cc::async_ambient_watch_releases` is the hook; it returns false in a build without the switch, so a caller needs no `#if`.
+
+Whole-build like `SC_CHECK_WIDE_ARITH`, for the same ODR reason, since the release is inline; the `debug-nopch` presets turn it on.
+A Release build captures stacks without names, as every capture there does; a build with names, or a sidecar, is what reads them.
+
 ## Exhaustive SIMD tests (`SC_SIMD_EXHAUSTIVE_TESTS`)
 
 `SC_SIMD_EXHAUSTIVE_TESTS` (default `OFF`) runs clean-simd's tests at every lane width rather than one; it reaches `clean-simd-test` as `CIMD_EXHAUSTIVE_TESTS`, 0 or 1.

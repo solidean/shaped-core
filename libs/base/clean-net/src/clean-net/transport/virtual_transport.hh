@@ -37,6 +37,9 @@ public:
     [[nodiscard]] cc::result<cc::unique_ptr<stream_listener>, error> listen(endpoint const& where,
                                                                             tcp_listen_options const& options) override;
 
+    [[nodiscard]] cc::result<cc::unique_ptr<datagram_socket>, error> bind_datagram(endpoint const& where,
+                                                                                   datagram_options const& options) override;
+
     virtual_network(virtual_network const&) = delete;
     virtual_network& operator=(virtual_network const&) = delete;
     ~virtual_network();

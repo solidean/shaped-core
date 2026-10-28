@@ -70,7 +70,7 @@
 // Compilation modes
 // =========================================================================================================
 // Conditionally defined: CC_HAS_RTTI, CC_HAS_CPP_EXCEPTIONS
-// Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS, CC_HAS_MIMALLOC, CC_HAS_THREAD_SANITIZER
+// Always defined, 0 or 1: CC_ASSERT_ENABLED, CC_HAS_THREADS, CC_HAS_MIMALLOC, CC_HAS_THREAD_SANITIZER, CC_HAS_ADDRESS_SANITIZER
 // Always defined, 0 to 2: CC_SOURCE_SITES
 // From CMake: CC_DEBUG, CC_RELEASE, CC_RELWITHDEBINFO, CC_SINGLE_THREADED, CC_NO_MIMALLOC, CC_SOURCE_SITES_OPAQUE, CC_SOURCE_SITES_OFF
 //
@@ -126,6 +126,24 @@
 #define CC_HAS_THREAD_SANITIZER 1
 #else
 #define CC_HAS_THREAD_SANITIZER 0
+#endif
+#endif
+
+// CC_HAS_ADDRESS_SANITIZER - This translation unit is compiled with AddressSanitizer (0 or 1).
+//
+// Here for what ASan's allocator changes rather than merely checks: it aborts the process on a request it cannot
+// grant, so an allocation failure never reaches code that would handle it.
+// Not a knob to skip a test with because it is slow under the tool, as for CC_HAS_THREAD_SANITIZER.
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define CC_HAS_ADDRESS_SANITIZER 1
+#endif
+#endif
+#if !defined(CC_HAS_ADDRESS_SANITIZER)
+#if defined(__SANITIZE_ADDRESS__)
+#define CC_HAS_ADDRESS_SANITIZER 1
+#else
+#define CC_HAS_ADDRESS_SANITIZER 0
 #endif
 #endif
 

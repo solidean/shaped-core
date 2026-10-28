@@ -220,6 +220,31 @@ cc::string_view unsigned_twin(registry const& r, language l, cc::string_view typ
     return {};
 }
 
+/// Whether every invocation of the subgroup gets the same result: a vote, a reduction, or a broadcast of one lane,
+/// whose lane is a constant (CHK-378).
+/// A scan, a shuffle and a quad operation give each invocation its own.
+bool is_agreeing(subgroup_op op)
+{
+    switch (op)
+    {
+    case subgroup_op::all:
+    case subgroup_op::any:
+    case subgroup_op::ballot:
+    case subgroup_op::add:
+    case subgroup_op::mul:
+    case subgroup_op::min:
+    case subgroup_op::max:
+    case subgroup_op::bit_and:
+    case subgroup_op::bit_or:
+    case subgroup_op::bit_xor:
+    case subgroup_op::broadcast:
+    case subgroup_op::broadcast_first:
+        return true;
+    default:
+        return false;
+    }
+}
+
 /// EMIT-146: the target's own operation, a lane converted to the target's lane type.
 written write_subgroup(call_context const& ctx)
 {
@@ -322,6 +347,7 @@ void sgl::builtins::register_subgroups(registry& r)
                           .wgsl_names = k_wgsl_names,
                           .msl_names = k_msl_names},
                 .is_subgroup_operation = true,
+                .agrees_in_subgroup = is_agreeing(info.op),
                 .is_quad_operation = info.name.starts_with("quad_"),
                 .constant_lane_below = info.op == subgroup_op::broadcast || info.op == subgroup_op::shuffle_xor
                                             || info.op == subgroup_op::shuffle_up || info.op == subgroup_op::shuffle_down

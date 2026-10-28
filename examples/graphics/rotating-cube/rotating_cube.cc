@@ -387,7 +387,7 @@ ASYNC_EXAMPLE("shaped-graphics/rotating-cube")
                         dragging = b.is_down;
                 }
                 else if (e.is_mouse_move() && dragging)
-                    camera.orbit(e.as_mouse_move().delta);
+                    camera.orbit(e.as_mouse_move().logical_delta());
                 else if (e.is_mouse_wheel())
                     camera.zoom(e.as_mouse_wheel().delta[1]);
             }
