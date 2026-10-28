@@ -1,8 +1,12 @@
 #include "raster_test_support.hh"
 #include "viewer_test_env.hh"
 
+#include <babel-serializer/image/image.hh>
 #include <clean-core/common/macros.hh> // CC_ARCH_ARM64
-#include <clean-core/record/log.hh>    // CC_LOG_INFO
+#include <clean-core/platform/environment.hh>
+#include <clean-core/platform/file_path.hh>
+#include <clean-core/record/log.hh> // CC_LOG_INFO
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/string/format.hh>
 #include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <typed-geometry/scalar/scalar.hh> // tg::abs
@@ -244,4 +248,63 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
         CHECK(tg::abs(f32(hybrid.albedo[center].r) - 0.73f) < 1e-2f);
     }
     co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// The hybrid as a view's layer: each lighting accumulates its frames until a capture's sample target, as a traced layer does.
+ASYNC_INVOCABLE_TEST("sv - a hybrid layer accumulates to a capture's target, forward and deferred",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    constexpr auto size = tg::vec2i(96, 64);
+    sv::hybrid_lighting const lightings[] = {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred};
+    for (auto const lighting : lightings)
+    {
+        auto const path = cc::format("{}/sv-hybrid-capture-{}.png", cc::temp_directory_path(), int(lighting));
+        auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+        auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
+        auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
+        auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", size[0], size[1]));
+        auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "64");
+        auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
+
+        auto const mesh = shadowed_cornell_box();
+        auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+        camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+
+        auto const start = cc::current_time_steady_secs();
+        for (auto f : sv::interactive(ctx, "sv-test/hybrid-capture"))
+        {
+            auto view = f.window().view();
+            view.camera(camera);
+            f.register_capture("front", [](sv::capture_context const&) {});
+            auto scene = view.add_scene();
+            scene.add_mesh(mesh);
+            scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(40);
+            scene.settings({.mode = sv::render_mode::hybrid, .hybrid_lighting = lighting});
+            REQUIRE(cc::current_time_steady_secs() - start < 35.0);
+        }
+        co_await cc::async_settled(sv::background_work(ctx));
+
+        auto reread = cc::file_read_stream_adapter::open(path);
+        REQUIRE(reread.has_value());
+        cc::read_stream in = reread.value();
+        auto const decoded = babel::image::read(in);
+        REQUIRE(decoded.has_value());
+        auto const& img = decoded.value();
+        REQUIRE(img.width == size[0]);
+        REQUIRE(img.height == size[1]);
+
+        // The left wall red and the right one green, as the tracer draws them.
+        auto const at = [&](int x, int y, int c) { return int(img.pixels[(y * img.width + x) * img.channels + c]); };
+        CHECK(at(22, 32, 0) > at(22, 32, 1) + 20);
+        CHECK(at(74, 32, 1) > at(74, 32, 0) + 20);
+        cc::remove_file(path);
+    }
 }

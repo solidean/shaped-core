@@ -13,6 +13,7 @@
 #include <shaped-rendering/slug_routine.hh> // sr::slug_instance
 #include <shaped-viewer/drawing/decal.hh>
 #include <shaped-viewer/drawing/drawing_manager.hh>
+#include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <shaped-viewer/rendering/impl/emitters.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/raster_routine.hh>
@@ -833,7 +834,7 @@ void mark_unwritten(impl::temporal_slot* slot)
 {
     if (!ctx.supports(sg::feature::raytracing_pipeline))
         return sg::feature::raytracing_pipeline;
-    if (mode == render_mode::wavefront && !ctx.supports(sg::feature::ray_query))
+    if ((mode == render_mode::wavefront || mode == render_mode::hybrid) && !ctx.supports(sg::feature::ray_query))
         return sg::feature::ray_query;
     return {};
 }
@@ -866,6 +867,56 @@ struct raster_scene
     u64 hash = 0;
 };
 
+/// A layer's raster draws: its triangle permutations, each once, and one draw per triangle row of `resolved`.
+struct raster_batch
+{
+    cc::vector<material_permutation const*> permutations;
+    cc::vector<raster_draw> draws;
+};
+
+/// The draws of `resolved` a raster pass makes, warning once per `slot` of the quadric batches it skips.
+[[nodiscard]] raster_batch raster_batch_of(resolved_view const& resolved,
+                                           impl::view_state const& rec,
+                                           impl::temporal_slot& slot)
+{
+    auto batch = raster_batch{};
+    auto permutation_of = cc::vector<u32>();
+    permutation_of.resize_to_defaulted(resolved.hit_groups.size());
+    for (auto i = isize(0); i < resolved.hit_groups.size(); ++i)
+    {
+        if (resolved.hit_groups[i]->kind != geometry_kind::triangles)
+            continue;
+        permutation_of[i] = u32(batch.permutations.size());
+        batch.permutations.push_back(resolved.hit_groups[i]);
+    }
+
+    auto skipped_quadrics = false;
+    for (auto i = isize(0); i < resolved.instances.size(); ++i)
+    {
+        auto const group = resolved.instances[i].hit_group_offset / 2;
+        if (resolved.hit_groups[group]->kind != geometry_kind::triangles)
+        {
+            skipped_quadrics = true;
+            continue;
+        }
+        batch.draws.push_back({.instance = u32(i),
+                               .triangle_count = resolved.triangle_counts[i],
+                               .permutation = permutation_of[group],
+                               .first_index = resolved.records[i].first_index,
+                               .base_vertex = resolved.records[i].base_vertex,
+                               .bounds = resolved.bounds[i]});
+    }
+
+    // Quadric batches are not drawn yet; issue: feat-sv-raster-quadric-batches
+    if (skipped_quadrics && !slot.raster_skip_reported)
+    {
+        CC_LOG_WARNING("a raster layer of view '{}' holds quadric batches, which the raster path does not draw yet",
+                       rec.display_name);
+        slot.raster_skip_reported = true;
+    }
+    return batch;
+}
+
 /// Draws one frame of raster layer `l` of `v`, layer index `layer`, into `slot` and the G-buffer slots `rec` keeps beside it.
 ///
 /// The slots must exist at `resolution`: the plan's resolve allocates them, and the single-view path ensures them itself.
@@ -890,44 +941,7 @@ struct raster_scene
         return s;
     };
     auto* const motion = slot_of(temporal_id::motion_guide(layer));
-
-    // Only the triangle permutations are drawn, each once however many rows shade with it.
-    auto permutations = cc::vector<material_permutation const*>();
-    auto permutation_of = cc::vector<u32>();
-    permutation_of.resize_to_defaulted(resolved.hit_groups.size());
-    for (auto i = isize(0); i < resolved.hit_groups.size(); ++i)
-    {
-        if (resolved.hit_groups[i]->kind != geometry_kind::triangles)
-            continue;
-        permutation_of[i] = u32(permutations.size());
-        permutations.push_back(resolved.hit_groups[i]);
-    }
-
-    auto draws = cc::vector<raster_draw>();
-    auto skipped_quadrics = false;
-    for (auto i = isize(0); i < resolved.instances.size(); ++i)
-    {
-        auto const group = resolved.instances[i].hit_group_offset / 2;
-        if (resolved.hit_groups[group]->kind != geometry_kind::triangles)
-        {
-            skipped_quadrics = true;
-            continue;
-        }
-        draws.push_back({.instance = u32(i),
-                         .triangle_count = resolved.triangle_counts[i],
-                         .permutation = permutation_of[group],
-                         .first_index = resolved.records[i].first_index,
-                         .base_vertex = resolved.records[i].base_vertex,
-                         .bounds = resolved.bounds[i]});
-    }
-
-    // Quadric batches are not drawn yet; issue: feat-sv-raster-quadric-batches
-    if (skipped_quadrics && !slot.raster_skip_reported)
-    {
-        CC_LOG_WARNING("a raster layer of view '{}' holds quadric batches, which the raster path does not draw yet",
-                       rec.display_name);
-        slot.raster_skip_reported = true;
-    }
+    auto const batch = raster_batch_of(resolved, rec, slot);
 
     // The camera, with the aspect of the resolution the frame settled on, as a trace would describe it.
     auto const fc = make_frame_constants(v, l, *scene.lights, resolution);
@@ -971,9 +985,9 @@ struct raster_scene
               .decals = decal_buffers.decals,
               .decal_shapes = decal_buffers.shapes,
               .decal_atlas = decal_buffers.atlas,
-              .draws = draws,
+              .draws = batch.draws,
               .index_pool = resources.meshes.index_pool(),
-              .permutations = permutations,
+              .permutations = batch.permutations,
               .fallback = &resources.shaders.acquire_fallback(),
               .bindless = &bindless,
               .targets = {.color = slot.texture,
@@ -999,6 +1013,113 @@ struct raster_scene
     slot.reset_hash = stand_ins.pending ? cc::combine_hash(scene.hash, u64(1)) : scene.hash;
     slot.accum_frame = 1;
     slot.samples = stand_ins.pending ? 0 : accumulation_sample_cap;
+    return outcome;
+}
+
+/// Draws one frame of hybrid layer `l` of `v` and blends it into `slot`'s mean, its G-buffer into the slots `rec` keeps beside it.
+///
+/// A frame is one light sample per pixel, so the layer accumulates while its image holds still, as a traced layer does, and draws nothing once it holds `target`.
+/// `fc` is the frame block a trace of the layer would upload, and `slot` must already have restarted on its hash.
+/// The G-buffer slots hold the latest frame's, which a still image redraws the same.
+[[nodiscard]] sg::routine_outcome hybrid_layer(sg::command_list& cmd,
+                                               view_data const& v,
+                                               layer const& l,
+                                               u8 layer,
+                                               tg::vec2i resolution,
+                                               raster_scene const& scene,
+                                               shaders::tracer::frame_constants fc,
+                                               u32 target,
+                                               impl::view_state& rec,
+                                               impl::temporal_slot& slot,
+                                               gpu_resource_manager& resources)
+{
+    slot.sample_target = target;
+    if (!frame_samples(slot, target, false))
+        return sg::routine_outcome::executed;
+
+    auto& ctx = cmd.context();
+    auto const& resolved = *scene.resolved;
+    auto const slot_of = [&](u64 id)
+    {
+        auto* const s = rec.temporal.get_ptr(id);
+        CC_ASSERT(s != nullptr && s->texture.raw() != nullptr, "a hybrid layer's G-buffer slot was not allocated");
+        return s;
+    };
+    auto* const motion = slot_of(temporal_id::motion_guide(layer));
+    auto const batch = raster_batch_of(resolved, rec, slot);
+
+    fc.previous_camera = motion->has_last_camera ? motion->last_camera : fc.camera;
+    fc.near_plane = f32(v.camera.projection.near_plane);
+    fc.rng_seed = seed_of(slot);
+
+    auto const background
+        = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
+    cmd.upload.pod_to_buffer(background, *scene.background);
+    auto const instance_table = upload_instances(cmd, resolved);
+    auto const light_buffer = upload_lights(cmd, *scene.lights);
+    auto const emitter_buffer = upload_emitters(cmd, resolved);
+    auto const decal_buffers = upload_decals(cmd, *scene.decals, resources.drawings.decal_atlas());
+
+    auto frozen = resources.try_freeze();
+    if (frozen.has_error())
+    {
+        CC_LOG_ERROR("the bindless tables could not be snapshot for a hybrid layer: {}", frozen.error().to_string());
+        return sg::routine_outcome::declined;
+    }
+    auto const& bindless = frozen.value();
+
+    // This frame alone, which the mean then takes in by its weight.
+    auto const color = ctx.transient.create_texture_2d(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = resolution[0],
+         .height = resolution[1],
+         .usage = sg::texture_usage::render_target | sg::texture_usage::texture | sg::texture_usage::image});
+    auto* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
+
+    auto stand_ins = stand_in_report{};
+    auto const outcome = hybrid_routine::execute(
+        cmd, {.lighting = l.settings.hybrid_lighting,
+              .frame = fc,
+              .background = background,
+              .instances = resolved.instances,
+              .instance_table = instance_table,
+              .lights = light_buffer,
+              .emitters = emitter_buffer,
+              .decals = decal_buffers.decals,
+              .decal_shapes = decal_buffers.shapes,
+              .decal_atlas = decal_buffers.atlas,
+              .draws = batch.draws,
+              .index_pool = resources.meshes.index_pool(),
+              .permutations = batch.permutations,
+              .fallback = &resources.shaders.acquire_fallback(),
+              .bindless = &bindless,
+              .targets = {.color = color,
+                          .normal = slot_of(temporal_id::normal_guide(layer))->texture,
+                          .depth = slot_of(temporal_id::depth_guide(layer))->texture,
+                          .albedo = slot_of(temporal_id::albedo_guide(layer))->texture,
+                          .specular_albedo = slot_of(temporal_id::specular_albedo_guide(layer))->texture,
+                          .roughness = slot_of(temporal_id::roughness_guide(layer))->texture,
+                          .motion = motion->texture,
+                          .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d()},
+              .stand_ins = &stand_ins,
+              .visibility = &slot.raster_visibility});
+    if (outcome == sg::routine_outcome::declined)
+        return outcome;
+
+    // A frame the blend could not take in yet is drawn for nothing, and counts nothing.
+    if (!sr::mix_routine::execute(cmd, slot.texture, color, 1.0f / f32(slot.accum_frame + 1)))
+        return outcome;
+
+    motion->last_camera = fc.camera;
+    motion->has_last_camera = true;
+
+    // As a trace: one drawn through a stand-in still compiling, or short of an emitter still loading, restarts next frame.
+    slot.stand_in_hash = stand_ins.hash;
+    if (stand_ins.pending || resolved.emitters_pending)
+        slot.reset_hash = cc::combine_hash(slot.reset_hash, u64(1));
+    slot.drew_since_restart = true;
+    slot.accum_frame = next_frame_count(slot);
+    slot.samples = slot.accum_frame;
     return outcome;
 }
 } // namespace
@@ -1028,6 +1149,8 @@ cc::shared_async<cc::unit> view_renderer::init(sg::routine_init_scope scope)
     // fade a good many frames after the first trace — so the compile has long since finished by then.
     // It compiles per destination format, and what it fades is a denoised slot, which view_data declares half float.
     sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba16_float);
+    // A hybrid layer blends each frame into its full-float mean.
+    sr::mix_routine::prewarm(ctx, sg::pixel_format::rgba32_float);
 
     // This runs again on every reload, which is exactly when an accumulated image stops being comparable to a fresh one.
     ++_shader_generation;
@@ -1209,7 +1332,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // So is what the last frame stood in for a permutation not compiled, which only the routine decides.
     auto const hash
         = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation),
-                           cc::make_hash(u32(mode), slot->stand_in_hash));
+                           cc::make_hash(u32(mode), u32(l.settings.hybrid_lighting), slot->stand_in_hash));
 
     // The same, with the camera left out: what a temporal denoiser's history restarts on.
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
@@ -1262,6 +1385,13 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (slot->reset_hash != hash)
         restart_for_image(*slot, hash);
     slot->reset_hash = hash;
+
+    // A hybrid frame is a raster frame lit by inline traces: it accumulates as a trace does, and nothing below is its yet.
+    if (mode == render_mode::hybrid)
+        return hybrid_layer(
+            cmd, v, l, tr.layer, tr.resolution,
+            {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash}, fc,
+            effective_sample_target(def.sample_target), rec, *slot, resources);
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
     // temporal ones only when the layer may denoise temporally.
@@ -1853,8 +1983,9 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     if (mode != render_mode::megakernel)
         fc.samples_per_pixel = 0;
     auto const bg = background_gpu::from(scene->background);
-    auto const hash = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
-                                       cc::make_hash(u32(mode), slot.stand_in_hash));
+    auto const hash
+        = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
+                           cc::make_hash(u32(mode), u32(scene->settings.hybrid_lighting), slot.stand_in_hash));
 
     if (!self.is_ready())
         return slot.texture; // nothing traced this frame; the caller re-presents what the slot already holds
@@ -1882,6 +2013,16 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     if (acc.resized || slot.reset_hash != hash)
         restart_for_image(slot, hash);
     slot.reset_hash = hash;
+
+    if (mode == render_mode::hybrid)
+    {
+        for (auto const& s : impl::raster_slots)
+            (void)ensure_temporal(ctx, store, v.id, s.id(layer), v.resolution, s.format);
+        (void)hybrid_layer(cmd, v, *scene, layer, v.resolution,
+                           {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash},
+                           fc, effective_sample_target(0), store.get_or_create(v.id), slot, resources);
+        return slot.texture;
+    }
 
     // As `trace`: a mean whose pixels all hold the cap is the image, and a frame there traces nothing.
     slot.sample_target = effective_sample_target(0);

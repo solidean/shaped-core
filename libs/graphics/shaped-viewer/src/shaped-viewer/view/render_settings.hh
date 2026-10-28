@@ -61,6 +61,24 @@ enum class sv::render_mode : sv::u8
     /// Quadric batches are not drawn yet.
     /// libs/graphics/shaped-viewer/docs/raster.md is the design.
     raster,
+
+    /// Rasterized primary hits, lit by the tracer's next-event estimate with shadow rays traced inline: direct light only, so nothing bounces yet.
+    ///
+    /// One light sample per pixel and frame, so a still image accumulates toward the tracer's direct light, as a traced layer accumulates its paths.
+    /// It writes the primary hit's G-buffer every frame, as `raster` does; `render_settings::hybrid_lighting` says where the lighting runs.
+    /// It needs `ray_query` and `raytracing_pipeline` both, and does not denoise yet.
+    /// libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md is the design.
+    hybrid,
+};
+
+/// Where a hybrid frame lights its primary hits; the two are built to be measured against each other.
+enum class sv::hybrid_lighting : sv::u8
+{
+    /// In the material's own pixel stage, through its full closure, tracing as it goes: nothing but the guides is stored.
+    forward,
+
+    /// In a compute kernel over the thin G-buffer, through the closure the G-buffer reduces the material to.
+    deferred,
 };
 
 /// View-wide render settings — everything that applies to a whole view rather than a single scene item.
@@ -81,6 +99,10 @@ struct sv::render_settings
 
     /// Which path tracer traces this layer, or `raster` to draw it instead; switching restarts its image.
     render_mode mode = render_mode::automatic;
+
+    /// Where a `hybrid` layer lights its primary hits, which no other mode reads.
+    /// Switching restarts its image, since the deferred lighting reduces the material and so converges elsewhere.
+    hybrid_lighting hybrid_lighting = hybrid_lighting::deferred;
 
     /// How many rounds a still frame of the wavefront tracer runs, each moving every live path one segment.
     ///

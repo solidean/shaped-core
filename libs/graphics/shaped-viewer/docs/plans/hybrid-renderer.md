@@ -166,7 +166,8 @@ So both light through the tracer's light selection and its inline shadow ray, an
 
 The images differ by what the reduced closure loses, and the frame times by everything above.
 
-**Both are built**, as `sv::hybrid_routine` (rendering/hybrid_routine.hh) with `hybrid_lighting::forward` and `::deferred`, and neither is a `render_mode` yet.
+**Both are built**, as `sv::hybrid_routine` (rendering/hybrid_routine.hh) with `hybrid_lighting::forward` and `::deferred`, behind `render_mode::hybrid`.
+**A smooth metal or mirror reads black and sparkling until phase 4**: it sees the environment only through the uniform environment sample, which seldom lands in its lobe.
 `hybrid-test.cc` holds each, averaged over 128 frames, to the megakernel's direct light on the Cornell box with its blocks: the worst block is within 3.3% for both.
 
 What they measured, in `raster-benchmark.cc` on Intel's Sponza at 1920x1080 on a laptop RTX 5070 in October 2026.
@@ -306,7 +307,8 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
 2. **sg indirect draws, then GPU culling** in raster mode: frustum first, then two-phase occlusion and the per-permutation bins.
 3. **`render_mode::hybrid` with direct light and shadows alone**: the thin G-buffer, the lighting kernel, the guides, denoised.
    - 3a, done: both lightings at the routine level, tested and measured ([Forward or deferred](#forward-or-deferred)).
-   - 3b: the mode in the view renderer, accumulating while still and denoised.
+   - 3b, done: `render_mode::hybrid`, with `render_settings::hybrid_lighting` choosing forward or deferred, accumulating while still; the raster example shows both.
+   - 3c: denoised, from the G-buffer slots it already writes.
 4. **The indirect ray** with the secondary material, ending in the environment past its hit.
 5. **The radiance cache**, ending the indirect ray in it, once counsel has confirmed its design.
 6. **Reconstruction**: `dlss_rr` on the scaled stream, the MetalFX member.

@@ -11,16 +11,7 @@
 #include <shaped-viewer/rendering/raster_routine.hh>
 #include <shaped-viewer/rendering/traced_group.hh>
 #include <shaped-viewer/scene/background.hh>
-
-/// Where a hybrid frame lights its primary hits; the two are built to be measured against each other.
-enum class sv::hybrid_lighting : sv::u8
-{
-    /// In the material's own pixel stage, through its full closure, tracing as it goes: nothing but the guides is stored.
-    forward,
-
-    /// In a compute kernel over the thin G-buffer, through the closure the G-buffer reduces the material to.
-    deferred,
-};
+#include <shaped-viewer/view/render_settings.hh> // sv::hybrid_lighting
 
 /// Everything one hybrid frame binds and draws: a raster frame's draws, and the trace's scene beside them.
 struct sv::hybrid_frame_desc
