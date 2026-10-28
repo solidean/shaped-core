@@ -73,6 +73,8 @@ sock->on_arrival([&](cnet::datagram_socket& s) {
 - **It runs on the reactor thread**, or on whichever thread drives `cc::thread_pump_all()` when the io_system has none — so it must be quick.
 - **Replacing, clearing and destroying wait** for a call already running on another thread; from inside the callback they do not, since waiting there would never end.
   After `io_system::stop()` it is never called again.
+- **A throw stops that callback only.** It is logged as an error and the callback is not called again until it is set anew; every other socket on the io_system carries on.
+- **What it records answers to whoever set it**: the record owner in effect at `on_arrival` is restored around each call, so a test's declared log lines reach it from the reactor thread.
 
 Underneath, it is a loop of one-shot readiness waits, `datagram_backend::wait_readable`: wait, call, wait again.
 Natively that is a reactor `readable` operation, which completes when the socket has something to read and reads nothing.

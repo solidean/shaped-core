@@ -2,6 +2,7 @@
 
 #include <clean-core/common/time.hh> // cc::current_time_steady_secs
 #include <clean-core/container/vector.hh>
+#include <clean-core/error/exception_base.hh>
 #include <clean-core/function/function_ref.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/mutex.hh>
@@ -435,6 +436,51 @@ CNET_IO_TEST("cnet - a callback may destroy its own socket")
     send_numbered(*a, where, 1);
     CHECK(pump_until([&] { return w.io->pending_count() == 0; }));
     CHECK(calls == 1);
+}
+
+CNET_IO_TEST("cnet - a throwing arrival callback stops only itself, and other sockets keep being called")
+{
+    // Threaded, because a throw that escaped on the reactor thread would end it, and every socket with it.
+    auto io = io_system::create();
+    auto net = virtual_network(*io);
+    auto a = datagram_socket::try_create(net, loopback_any_port()).value();
+    auto b = datagram_socket::try_create(net, loopback_any_port()).value();
+    auto c = datagram_socket::try_create(net, loopback_any_port()).value();
+
+    nx::expect_error("the arrival callback of the datagram socket on * threw*", nx::exactly(1));
+
+    auto b_calls = cc::atomic<int>(0);
+    b->on_arrival(
+        [&](datagram_socket&)
+        {
+            b_calls.fetch_add(1);
+            throw cc::exception("thrown on purpose");
+        });
+    send_numbered(*a, b->local(), 1);
+    CHECK(pump_until([&] { return b_calls.load() == 1; }));
+
+    auto c_called = cc::atomic<bool>(false);
+    auto in = inbox(4);
+    c->on_arrival(
+        [&](datagram_socket& s)
+        {
+            (void)s.receive_batch(in.all());
+            c_called.store(true);
+        });
+    send_numbered(*a, c->local(), 1);
+    CHECK(pump_until([&] { return c_called.load(); }));
+
+    // Not called again: a second datagram to b is left unread rather than calling the callback that threw.
+    send_numbered(*a, b->local(), 1);
+    c_called.store(false);
+    send_numbered(*a, c->local(), 1);
+    CHECK(pump_until([&] { return c_called.load(); }));
+    CHECK(b_calls.load() == 1);
+
+    a = {};
+    b = {};
+    c = {};
+    io->stop();
 }
 
 CNET_IO_TEST("cnet - with a reactor thread, the arrival callback runs there and a destroy waits it out")

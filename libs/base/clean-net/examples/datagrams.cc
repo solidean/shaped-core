@@ -92,13 +92,13 @@ void echo_over_loopback()
 
 void over_a_bad_link()
 {
-    // A link with 40 ms of latency and a quarter of the datagrams lost, on a clock this example moves by hand.
-    // The same seed loses the same datagrams on every run; over eight datagrams the share it loses is far from a quarter.
+    // A link with 40 ms of latency, 5 ms of jitter and a quarter of the datagrams lost, on a clock this example moves by hand.
+    // The same seed loses the same datagrams on every run: this one loses two of the eight, and the jitter delivers one out of order.
     auto clk = cnet::manual_clock(0);
     auto io = cnet::io_system::create({.unthreaded = true, .time_source = &clk});
     auto net = cnet::virtual_network(*io);
     auto link
-        = cnet::simulated_transport(*io, net, {.latency_ms = 40, .jitter_ms = 5, .loss_probability = 0.25f, .seed = 11});
+        = cnet::simulated_transport(*io, net, {.latency_ms = 40, .jitter_ms = 5, .loss_probability = 0.25f, .seed = 20});
 
     auto const here = cnet::endpoint(cnet::ip_address::loopback(cnet::ip_family::v4), 0);
     auto a = cnet::datagram_socket::try_create(link, here).value();

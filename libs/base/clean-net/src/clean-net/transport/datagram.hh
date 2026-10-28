@@ -69,7 +69,8 @@ struct cnet::outgoing_datagram
 
 /// What a datagram socket is set up with.
 ///
-/// An option left at its default is not touched, so the socket keeps whatever the OS would have given it.
+/// An option left at its default is not touched, so the socket keeps whatever the OS would have given it, except
+/// `v6_only`, which is always applied to an IPv6 socket.
 /// An option a caller set and the OS refuses fails the bind, except `traffic_class`, which is best effort, and
 /// `reuse_address` on Windows, which is ignored.
 struct cnet::datagram_options
@@ -151,9 +152,11 @@ public:
     /// datagrams unread it is called again at once.
     /// It runs on the io_system's reactor thread, or on whichever thread drives `cc::thread_pump_all()` when there is
     /// none -- so it must be quick, and handing the datagrams to another thread is its usual job.
+    /// What it records answers to the record owner in effect where it was set, not to the thread running it.
     ///
     /// An invalid function clears it.
-    /// One that throws is not called again until it is set anew.
+    /// One that throws is not called again until it is set anew; the throw is logged as an error, and every other
+    /// socket on the io_system carries on.
     /// Replacing or clearing it, and destroying the socket, wait for a call already running on another thread; from
     /// inside the callback they do not wait.
     /// After `io_system::stop()` it is never called again.

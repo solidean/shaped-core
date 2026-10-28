@@ -30,8 +30,8 @@ struct cnet::link_conditions
     f32 duplicate_probability = 0;
 
     /// Datagram paths only, and ignored on a stream, whose whole promise is that order is kept.
-    /// Reordering on top of what jitter already does: a reordered datagram takes one to two times its own delay again, and at least a millisecond, so later ones
-    /// overtake it.
+    /// Reordering on top of what jitter already does: a reordered datagram takes one to two times its own delay again,
+    /// and at least a millisecond, so later ones overtake it.
     f32 reorder_probability = 0;
 
     /// A delay proportional to the bytes each operation moves; 0 means none.

@@ -1,5 +1,6 @@
 #include "datagram.hh"
 
+#include <clean-core/record/async_scope.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
 #include <clean-core/thread/atomic.hh>
@@ -9,6 +10,8 @@
 #include <clean-net/impl/async_glue.hh>
 #include <clean-net/impl/native_socket.hh>
 #include <clean-net/transport/stream.hh>
+
+#include <exception>
 
 // A datagram socket is two halves that share nothing but the backend.
 //
@@ -38,6 +41,10 @@ struct datagram_socket::arrival_state
 
         /// Bumped by every replace and clear, so a wait armed for an older callback does nothing when it lands.
         u64 generation = 0;
+
+        /// The record owner in effect where the callback was set, restored around each call.
+        /// So what the callback records, and the error a throw from it logs, answer to that code rather than to the reactor thread.
+        cc::rec::trace_id owner = {};
 
         /// Cancels the one wait in flight.
         cancel_token pending;
@@ -94,6 +101,7 @@ void on_readable(cc::shared_ptr<arrival_state> const& a, u64 generation, cc::sha
 
     auto callback = cc::shared_ptr<cc::unique_function<void(datagram_socket&)>>();
     auto* socket = static_cast<datagram_socket*>(nullptr);
+    auto owner = cc::rec::trace_id();
     auto const live = a->state.lock(
         [&](arrival_state::slots& s)
         {
@@ -102,16 +110,45 @@ void on_readable(cc::shared_ptr<arrival_state> const& a, u64 generation, cc::sha
                 return false;
             callback = s.callback;
             socket = s.socket;
+            owner = s.owner;
             a->busy.fetch_add(1);
             return true;
         });
     if (!live)
         return;
 
+    // Read before the call: a callback may destroy its own socket and then throw.
+    auto const where = socket->local();
     {
+        cc::rec::owner_scope const attributed(owner);
         auto const leave = busy_release{*a};
         auto const calling = thread_mark(t_calling, a.get());
-        (*callback)(*socket);
+
+        // Caught here, since nothing above does until the reactor's own loop, and that one ends the reactor thread.
+        // A throw stops this callback only: not arming again is what the header promises.
+        try
+        {
+            (*callback)(*socket);
+        }
+        catch (cc::exception const& e)
+        {
+            CC_LOG_ERROR("the arrival callback of the datagram socket on {} threw, and is not called again: {}", where,
+                         e.message());
+            return;
+        }
+        catch (std::exception const& e)
+        {
+            CC_LOG_ERROR("the arrival callback of the datagram socket on {} threw, and is not called again: {}", where,
+                         e.what());
+            return;
+        }
+        catch (...)
+        {
+            CC_LOG_ERROR("the arrival callback of the datagram socket on {} threw a non-std::exception value, and is not "
+                         "called again",
+                         where);
+            return;
+        }
     }
 
     // With the generation this wait was armed for: a callback replaced meanwhile, here or on another thread, has armed
@@ -182,6 +219,7 @@ void arm(cc::shared_ptr<arrival_state> const& a, u64 generation)
             s.callback = callback.is_valid()
                            ? cc::make_shared<cc::unique_function<void(datagram_socket&)>>(cc::move(callback))
                            : cc::shared_ptr<cc::unique_function<void(datagram_socket&)>>();
+            s.owner = cc::rec::current_owner_id();
             if (socket_gone)
             {
                 s.socket = nullptr;

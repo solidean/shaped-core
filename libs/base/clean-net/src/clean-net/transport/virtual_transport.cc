@@ -1,5 +1,6 @@
 #include "virtual_transport.hh"
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
@@ -572,8 +573,8 @@ public:
                     auto const& from = d.queue[d.head];
                     auto& r = records[filled];
                     auto const n = cc::min(from.bytes.size(), r.buffer.size());
-                    for (isize i = 0; i < n; ++i)
-                        r.buffer[i] = from.bytes[i];
+                    if (n > 0)
+                        cc::memcpy(r.buffer.data(), from.bytes.data(), n);
                     r.size = n;
                     r.peer = from.from;
                     r.received_at_ns = from.arrived_at_ns;
@@ -706,8 +707,8 @@ private:
 
         auto copy = virtual_datagram{.from = from, .bytes = {}, .arrived_at_ns = now};
         copy.bytes.resize_to_defaulted(p.bytes.size());
-        for (isize i = 0; i < p.bytes.size(); ++i)
-            copy.bytes[i] = p.bytes[i];
+        if (p.bytes.size() > 0)
+            cc::memcpy(copy.bytes.data(), p.bytes.data(), p.bytes.size());
 
         auto* const waiting = target->inbox.lock(
             [&](virtual_datagram_inbox& d)

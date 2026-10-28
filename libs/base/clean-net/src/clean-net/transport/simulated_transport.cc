@@ -1,5 +1,6 @@
 #include "simulated_transport.hh"
 
+#include <clean-core/common/utility.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
@@ -422,8 +423,8 @@ struct sim_datagram_state
                                       .truncated = d.truncated,
                                       .release_ns = d.received_at_ns + delay};
             held.bytes.resize_to_defaulted(d.size);
-            for (isize i = 0; i < d.size; ++i)
-                held.bytes[i] = d.buffer[i];
+            if (d.size > 0)
+                cc::memcpy(held.bytes.data(), d.buffer.data(), d.size);
 
             // Insertion keeps the queue ordered; a test link holds a handful, so a shift is cheaper than a heap.
             auto at = q.items.size();
@@ -551,8 +552,8 @@ public:
                     auto const& h = q.items[filled];
                     auto& r = records[filled];
                     auto const n = cc::min(h.bytes.size(), r.buffer.size());
-                    for (isize i = 0; i < n; ++i)
-                        r.buffer[i] = h.bytes[i];
+                    if (n > 0)
+                        cc::memcpy(r.buffer.data(), h.bytes.data(), n);
                     r.size = n;
                     r.peer = h.peer;
                     r.received_at_ns = h.release_ns;
