@@ -67,9 +67,9 @@ ASYNC_INVOCABLE_TEST("sg - SGL's strong and weak compare-exchange each claim eve
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // `insert` takes the strong one, and `insert_weak` the weak one in its retry loop: the same table either way
-    auto const strong = co_await shaders::sync.insert.acquire_pipeline(*ctx);
-    auto const weak = co_await shaders::sync.insert_weak.acquire_pipeline(*ctx);
-    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::table>();
+    auto const strong = co_await shaders::sync::insert.acquire_pipeline(*ctx);
+    auto const weak = co_await shaders::sync::insert_weak.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::sync::table>();
     for (auto const is_weak : {false, true})
     {
         auto const* const kind = is_weak ? "weak" : "strong";
@@ -82,10 +82,11 @@ ASYNC_INVOCABLE_TEST("sg - SGL's strong and weak compare-exchange each claim eve
         auto const winners = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_defaulted(groups), usage);
 
         auto cmd = ctx->create_command_list();
-        auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
-                                                               shaders::table{.slots = slots.as_readwrite_buffer(),
-                                                                              .found_at = found_at.as_readwrite_buffer(),
-                                                                              .winners = winners.as_readwrite_buffer()});
+        auto const group
+            = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                  shaders::sync::table{.slots = slots.as_readwrite_buffer(),
+                                                                       .found_at = found_at.as_readwrite_buffer(),
+                                                                       .winners = winners.as_readwrite_buffer()});
         cmd->compute.bind_pipeline(is_weak ? *weak : *strong);
         cmd->compute.bind_group(0, *group);
         cmd->compute.dispatch_threads(count);

@@ -123,18 +123,18 @@ ASYNC_INVOCABLE_TEST("sg - a strong compare-exchange in a pixel stage leaves hel
     auto vertices = cc::vector<corner>();
     push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 6);
     auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics.discard_claim);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::discard_claim);
     auto const owners = ctx->persistent.create_buffer_from_data(
         cc::vector<u32>::create_defaulted(8), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
-    auto const group
-        = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::pixel_claims>(),
-                                               shaders::pixel_claims{.owners = owners.as_readwrite_buffer()});
+    auto const group = ctx->persistent.create_binding_group(
+        ctx->cached.acquire_binding_group_layout<shaders::pixel_semantics::pixel_claims>(),
+        shaders::pixel_semantics::pixel_claims{.owners = owners.as_readwrite_buffer()});
 
     auto const pixels = co_await sg_test::draw_offscreen(*ctx,
                                                          {.width = 4,
                                                           .height = 2,
                                                           .colors = {sg::pixel_format::rgba32_float},
-                                                          .target_set = shaders::tag_target::name,
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
                                                           .clear_color = tg::vec4f(-1, -1, -1, -1)},
                                                          [&](sg::rendering_scope& scope)
                                                          {

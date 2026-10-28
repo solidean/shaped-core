@@ -145,9 +145,9 @@ ASYNC_INVOCABLE_TEST("sg - SGL atomics in a raygen, a closest hit and a miss cou
     if (!ctx->supports(sg::feature::raytracing_pipeline))
         SKIP("this device has no ray-tracing pipelines");
 
-    using counted_t = shaders::raytracing_pipeline_counted_path_t;
+    using counted_t = shaders::raytracing_pipeline::counted_path_t;
     auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(
-        co_await shaders::raytracing_pipeline.counted_path.description(*ctx));
+        co_await shaders::raytracing_pipeline::counted_path.description(*ctx));
     REQUIRE(pipeline != nullptr);
     auto table_desc = counted_t::table_description(pipeline);
     auto const row = counted_t::add_row(table_desc, counted_t::hit_groups_t::counted);
@@ -173,11 +173,13 @@ ASYNC_INVOCABLE_TEST("sg - SGL atomics in a raygen, a closest hit and a miss cou
     };
     auto const tlas = cmd->raytracing.build_tlas(instances);
     auto const traced = ctx->transient.create_binding_group(
-        *cmd, ctx->cached.acquire_binding_group_layout<shaders::traced>(),
-        shaders::traced{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
-    auto const tallies
-        = ctx->transient.create_binding_group(*cmd, ctx->cached.acquire_binding_group_layout<shaders::tallies>(),
-                                              shaders::tallies{.counts = counts.as_readwrite_buffer()});
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::traced>(),
+        shaders::raytracing_pipeline::traced{.world = tlas->as_view(),
+                                             .hits = hits.as_readwrite_buffer(),
+                                             .ids = ids.as_readwrite_buffer()});
+    auto const tallies = ctx->transient.create_binding_group(
+        *cmd, ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::tallies>(),
+        shaders::raytracing_pipeline::tallies{.counts = counts.as_readwrite_buffer()});
     cmd->raytracing.bind_pipeline(*pipeline);
     cmd->raytracing.bind_group(0, *traced);
     cmd->raytracing.bind_group(1, *tallies);
