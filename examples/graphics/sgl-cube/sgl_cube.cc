@@ -49,7 +49,7 @@ using namespace cc::primitive_defines;
 
 namespace
 {
-using cube_vertex = shaders::cube_vertex; // generated from cube.sgl's `@vertex struct`
+using cube_vertex = shaders::cube::cube_vertex; // generated from cube.sgl's `@vertex struct`
 
 constexpr int cube_vertex_count = 24; // four per face: a shared corner carries three different normals
 constexpr int cube_index_count = 36;
@@ -158,7 +158,7 @@ struct orbit_camera
                                                                                       sg::pixel_format color_format)
 {
     // The target's format is the one part cube.sgl leaves to the host, so it is the one thing stated here.
-    auto const built = ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = color_format});
+    auto const built = ctx.cached.acquire_raster_pipeline(shaders::cube::pipeline, {.color = color_format});
     // Settled rather than awaited for its value: the compiler's diagnostics ride the async's failure channel, and
     // "it did not build" alone throws away the one thing worth reading.
     co_await cc::async_settled(built);
@@ -330,12 +330,12 @@ ASYNC_EXAMPLE("shaped-graphics/sgl-cube")
                                                                  .height = rt.height(),
                                                                  .usage = sg::texture_usage::depth_stencil});
 
-            auto pass = cmd->raster.render_to(shaders::target{.color = rt.cleared(tg::vec4f(0.09f, 0.10f, 0.13f, 1.0f)),
+            auto pass = cmd->raster.render_to(shaders::cube::target{.color = rt.cleared(tg::vec4f(0.09f, 0.10f, 0.13f, 1.0f)),
                                                               .depth_stencil = depth.as_depth_stencil_view().cleared(1.0f)});
             pass.bind_pipeline(*pipeline);
             pass.bind_vertex_buffers({vertices.as_vertex_buffer()});
             pass.bind_index_buffer(index_buffer.as_index_buffer());
-            pass.set_inline_constants(shaders::constants{.view_projection = spun.view_projection(rt.aspect_ratio())}.to_block());
+            pass.set_inline_constants(shaders::cube::constants{.view_projection = spun.view_projection(rt.aspect_ratio())}.to_block());
             pass.draw_indexed({.index_range = {.offset = 0, .size = cube_index_count}});
         }
         auto const after = cmd->query.record_gpu_timestamp();

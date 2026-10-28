@@ -127,9 +127,9 @@ ASYNC_INVOCABLE_TEST("sr - the denoise network runs end to end", (sg::context_ha
     // Compiled first, and awaited on the assets themselves: a shader builds on the library's own scheduler rather
     // than on the context's backlog, so polling the latter would wait forever.
     // A member does this through its routine's init; a test has no routine, so it does it here.
-    for (auto const& asset : {sr::sgl_shaders::nn_conv.main_cs.asset, sr::sgl_shaders::nn_io.input_cs.asset,
-                              sr::sgl_shaders::nn_io.output_cs.asset, sr::sgl_shaders::nn_pool.main_cs.asset,
-                              sr::sgl_shaders::nn_upsample.main_cs.asset})
+    for (auto const& asset : {sr::sgl_shaders::nn_conv::main_cs.asset, sr::sgl_shaders::nn_io::input_cs.asset,
+                              sr::sgl_shaders::nn_io::output_cs.asset, sr::sgl_shaders::nn_pool::main_cs.asset,
+                              sr::sgl_shaders::nn_upsample::main_cs.asset})
     {
         auto const shader = asset->acquire(ctx);
         co_await cc::async_settled(shader);
@@ -256,9 +256,9 @@ ASYNC_INVOCABLE_TEST("sr - the network agrees with OIDN's own filter", (sg::cont
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    for (auto const& asset : {sr::sgl_shaders::nn_conv.main_cs.asset, sr::sgl_shaders::nn_io.input_cs.asset,
-                              sr::sgl_shaders::nn_io.output_cs.asset, sr::sgl_shaders::nn_pool.main_cs.asset,
-                              sr::sgl_shaders::nn_upsample.main_cs.asset})
+    for (auto const& asset : {sr::sgl_shaders::nn_conv::main_cs.asset, sr::sgl_shaders::nn_io::input_cs.asset,
+                              sr::sgl_shaders::nn_io::output_cs.asset, sr::sgl_shaders::nn_pool::main_cs.asset,
+                              sr::sgl_shaders::nn_upsample::main_cs.asset})
     {
         auto const shader = asset->acquire(ctx);
         co_await cc::async_settled(shader);

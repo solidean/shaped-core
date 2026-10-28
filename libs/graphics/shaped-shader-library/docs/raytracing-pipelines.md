@@ -31,9 +31,9 @@ hit_group textured for path_rays:
 ```
 
 ```cpp
-using path_t = shaders::raytracing_pipeline_path_t;          // <file stem>_<pipeline>_t
+using path_t = shaders::raytracing_pipeline::path_t;         // <file stem>::<pipeline>_t
 
-auto const desc = co_await shaders::raytracing_pipeline.path.description(ctx);
+auto const desc = co_await shaders::raytracing_pipeline::path.description(ctx);
 auto const pipeline = co_await ctx.cached.acquire_raytracing_pipeline(desc);
 
 auto table_desc = path_t::table_description(pipeline);        // raygen, a miss per ray type, every callable
@@ -87,9 +87,9 @@ A declaration may leave its hit groups open, `hit_groups = (.host)`, and a calla
 The host then supplies them through `slib::raytracing_host_parts {hit_groups, callables}`, which `description` takes.
 
 ```cpp
-using open_t = shaders::raytracing_open_open_path_t;
+using open_t = shaders::raytracing_open::open_path_t;
 auto const hits = co_await slib::compile_hit_group(ctx.get(), &library, &open_t::definition(), source, "material", "runtime.sgl");
-auto const desc = co_await shaders::raytracing_open.open_path.description(*ctx, {.hit_groups = hits});
+auto const desc = co_await shaders::raytracing_open::open_path.description(*ctx, {.hit_groups = hits});
 // …
 auto const row = open_t::add_row(table_desc, open_t::first_host_hit_group);
 ```

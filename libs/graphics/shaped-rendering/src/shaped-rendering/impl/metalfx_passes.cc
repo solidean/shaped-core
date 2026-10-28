@@ -35,11 +35,11 @@ cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& ou
     out = {};
 
     // Every pipeline is asked for before any is awaited, so the compiles overlap.
-    auto const prepare = sgl_shaders::metalfx_prepare.main_cs.acquire_pipeline(ctx);
-    auto copies = cc::vector<decltype(sgl_shaders::metalfx_copy_out.main_cs.acquire_pipeline(ctx))>();
+    auto const prepare = sgl_shaders::metalfx_prepare::main_cs.acquire_pipeline(ctx);
+    auto copies = cc::vector<decltype(sgl_shaders::metalfx_copy_out::main_cs.acquire_pipeline(ctx))>();
     for (auto const format : k_staged_formats)
-        copies.push_back(sgl_shaders::metalfx_copy_out.main_cs.acquire_pipeline(
-            ctx, sgl_shaders::metalfx_copy_out_options{.output_format = format}));
+        copies.push_back(sgl_shaders::metalfx_copy_out::main_cs.acquire_pipeline(
+            ctx, sgl_shaders::metalfx_copy_out::options{.output_format = format}));
 
     co_await cc::async_settled(prepare);
     auto const* const pipeline = prepare->try_value();
@@ -48,7 +48,7 @@ cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& ou
         CC_LOG_ERROR("metalfx: the metalfx_prepare pipeline did not build");
         co_return false;
     }
-    out.prepare_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::metalfx_prepare_io>();
+    out.prepare_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::metalfx_prepare::metalfx_prepare_io>();
     out.prepare = *pipeline;
 
     for (auto i = isize(0); i < copies.size(); ++i)
@@ -61,10 +61,10 @@ cc::shared_async<bool> metalfx_build_passes(sg::context& ctx, metalfx_passes& ou
             CC_LOG_ERROR("metalfx: the copy out to pixel_format {} did not build", int(format));
             co_return false;
         }
-        auto const values = sgl_shaders::metalfx_copy_out_options{.output_format = format};
+        auto const values = sgl_shaders::metalfx_copy_out::options{.output_format = format};
         out.copies.push_back({.format = format,
                               .layout = ctx.cached.acquire_binding_group_layout(
-                                  sgl_shaders::metalfx_copy_out_io::declared_bindings(values)),
+                                  sgl_shaders::metalfx_copy_out::metalfx_copy_out_io::declared_bindings(values)),
                               .pipeline = *copy_pipeline});
     }
     co_return true;
@@ -108,15 +108,17 @@ void metalfx_record_prepare(sg::command_list& cmd,
 
     auto const group = ctx.transient.create_binding_group(
         cmd, passes.prepare_layout,
-        sgl_shaders::metalfx_prepare_io{.linear_depth = depth.as_texture_view(),
-                                        .motion = motion.as_texture_view(),
-                                        .device_depth = images.depth.as_image_view<sg::pixel_format::r32_float>(),
-                                        .packed_motion = images.motion.as_image_view<sg::pixel_format::rg16_float>(),
-                                        .exposure = images.exposure.as_image_view<sg::pixel_format::r16_float>()});
+        sgl_shaders::metalfx_prepare::metalfx_prepare_io{
+            .linear_depth = depth.as_texture_view(),
+            .motion = motion.as_texture_view(),
+            .device_depth = images.depth.as_image_view<sg::pixel_format::r32_float>(),
+            .packed_motion = images.motion.as_image_view<sg::pixel_format::rg16_float>(),
+            .exposure = images.exposure.as_image_view<sg::pixel_format::r16_float>()});
     cmd.compute.bind_pipeline(*passes.prepare);
     cmd.compute.bind_group(0, *group);
     cmd.compute.set_inline_constants(
-        sgl_shaders::metalfx_prepare_constants{.near_plane = metalfx_near_plane, .exposure = exposure}.to_block());
+        sgl_shaders::metalfx_prepare::metalfx_prepare_constants{.near_plane = metalfx_near_plane, .exposure = exposure}
+            .to_block());
     cmd.compute.dispatch_threads(extent[0], extent[1], 1);
 }
 
@@ -145,7 +147,8 @@ void metalfx_record_copy_out(sg::command_list& cmd,
 {
     auto const group = cmd.context().transient.create_binding_group(
         cmd, copy.layout,
-        sgl_shaders::metalfx_copy_out_io{.source = images.staged.as_texture_view(), .target = output.as_any_image_view()});
+        sgl_shaders::metalfx_copy_out::metalfx_copy_out_io{.source = images.staged.as_texture_view(),
+                                                           .target = output.as_any_image_view()});
     auto const extent = extent_of(output);
     cmd.compute.bind_pipeline(*copy.pipeline);
     cmd.compute.bind_group(0, *group);

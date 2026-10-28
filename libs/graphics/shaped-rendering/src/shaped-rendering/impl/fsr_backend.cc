@@ -754,17 +754,17 @@ bool fsr_stream::record_clear(sg::command_list& cmd, FfxClearFloatJobDescription
     {
         auto bits = u32(0);
         cc::memcpy(&bits, &job.color[0], sizeof(bits));
-        auto const group = ctx->transient.create_binding_group(cmd, clear->program.layout,
-                                                               sgl_shaders::fsr_clear_uint_target{.target = target});
+        auto const group = ctx->transient.create_binding_group(
+            cmd, clear->program.layout, sgl_shaders::fsr_clear_uint::fsr_clear_uint_target{.target = target});
         cmd.compute.bind_group(0, *group);
-        cmd.compute.set_inline_constants(sgl_shaders::fsr_clear_uint_constants{.value = bits}.to_block());
+        cmd.compute.set_inline_constants(sgl_shaders::fsr_clear_uint::fsr_clear_uint_constants{.value = bits}.to_block());
     }
     else
     {
-        auto const group = ctx->transient.create_binding_group(cmd, clear->program.layout,
-                                                               sgl_shaders::fsr_clear_float_target{.target = target});
+        auto const group = ctx->transient.create_binding_group(
+            cmd, clear->program.layout, sgl_shaders::fsr_clear_float::fsr_clear_float_target{.target = target});
         cmd.compute.bind_group(0, *group);
-        auto const value = sgl_shaders::fsr_clear_float_constants{
+        auto const value = sgl_shaders::fsr_clear_float::fsr_clear_float_constants{
             .value = tg::vec4f(job.color[0], job.color[1], job.color[2], job.color[3])};
         cmd.compute.set_inline_constants(value.to_block());
     }
@@ -970,12 +970,13 @@ bool fsr_dispatch(fsr_stream& stream, sg::command_list& cmd, upscale_inputs cons
         auto const& pass = stream.programs->prepare_depth;
         auto const group = ctx.transient.create_binding_group(
             cmd, pass.layout,
-            sgl_shaders::fsr_prepare_depth_io{
+            sgl_shaders::fsr_prepare_depth::fsr_prepare_depth_io{
                 .linear_depth = in.depth.as_texture_view(),
                 .device_depth = stream.device_depth.as_image_view<sg::pixel_format::r32_float>()});
         cmd.compute.bind_pipeline(*pass.pipeline);
         cmd.compute.bind_group(0, *group);
-        cmd.compute.set_inline_constants(sgl_shaders::fsr_prepare_depth_constants{.near_plane = k_near_plane}.to_block());
+        cmd.compute.set_inline_constants(
+            sgl_shaders::fsr_prepare_depth::fsr_prepare_depth_constants{.near_plane = k_near_plane}.to_block());
         cmd.compute.dispatch_threads(stream.input_extent[0], stream.input_extent[1], 1);
     }
 

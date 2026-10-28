@@ -161,10 +161,12 @@ public:
     };
 
     /// Reads, preprocesses and compiles one shader for `format`, with `options` given to an SGL source's options.
+    /// `file_namespace` is the source's `shader_definition::file_namespace`.
     /// A missing file, a missing compiler, or a compile error all come back as an async error on `shader` — never a throw.
     [[nodiscard]] compile_outcome compile_shader(cc::string_view virtual_path,
                                                  sg::shader_stage stage,
                                                  cc::string_view entry_point,
+                                                 cc::string_view file_namespace,
                                                  sg::shader_format format,
                                                  cc::span<shader_option const> options = {}) const;
 
@@ -212,7 +214,6 @@ private:
     struct package_entry
     {
         cc::string name;
-        cc::string host_namespace;
         shader_language language = shader_language::hlsl;
     };
 
@@ -227,12 +228,14 @@ private:
     /// The shared body of `compile_shader` and `compile_source`: resolve includes, preprocess, rewrite bindings, compile.
     /// The two differ only in where the text came from and what its includes are searched against, so everything after that is here.
     /// `package_root` is empty for a source belonging to no package, which simply drops one search root.
+    /// `file_namespace` is where the file's generated types stand, as the generator wrote it into the file's definitions;
+    /// empty for such a source, and for any that is not SGL.
     void _compile_text(compile_outcome& outcome,
                        cc::string source,
                        cc::string_view label,
                        cc::string_view source_dir,
                        cc::string_view package_root,
-                       cc::string_view host_namespace,
+                       cc::string_view file_namespace,
                        shader_language language,
                        sg::shader_stage stage,
                        cc::string_view entry_point,

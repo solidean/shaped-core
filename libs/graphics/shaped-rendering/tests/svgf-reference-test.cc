@@ -159,8 +159,8 @@ struct temporal_result
 /// The temporal pass under `flags`, run on the GPU, its three outputs read back.
 cc::shared_async<temporal_result> run_temporal(sg::context& ctx, svgf_inputs const& in, u32 flags)
 {
-    auto const pipeline = co_await settled(sr::sgl_shaders::svgf.temporal_cs.acquire_pipeline(ctx));
-    auto const layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::svgf_temporal_images>();
+    auto const pipeline = co_await settled(sr::sgl_shaders::svgf::temporal_cs.acquire_pipeline(ctx));
+    auto const layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::svgf::svgf_temporal_images>();
     auto cmd = ctx.create_command_list();
     auto gpu = gpu_inputs{.ctx = ctx, .cmd = *cmd};
     auto const out_history = gpu.target();
@@ -168,7 +168,7 @@ cc::shared_async<temporal_result> run_temporal(sg::context& ctx, svgf_inputs con
     auto const out_normal_depth = gpu.target();
     auto const group = ctx.transient.create_binding_group(
         *cmd, layout,
-        sr::sgl_shaders::svgf_temporal_images{
+        sr::sgl_shaders::svgf::svgf_temporal_images{
             .color = gpu.texture(in.color).as_texture_view(),
             .albedo = gpu.texture(in.albedo).as_texture_view(),
             .specular_albedo = gpu.texture(in.specular).as_texture_view(),
@@ -183,13 +183,14 @@ cc::shared_async<temporal_result> run_temporal(sg::context& ctx, svgf_inputs con
             .normal_depth = out_normal_depth.as_image_view<sg::pixel_format::rgba32_float>()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
-    cmd->compute.set_inline_constants(sr::sgl_shaders::svgf_temporal_constants{.flags = flags,
-                                                                               .color_alpha_min = k_color_alpha_min,
-                                                                               .moments_alpha_min = k_moments_alpha_min,
-                                                                               .max_history = k_max_history,
-                                                                               .normal_similarity = k_normal_similarity,
-                                                                               .depth_similarity = k_depth_similarity}
-                                          .to_block());
+    cmd->compute.set_inline_constants(
+        sr::sgl_shaders::svgf::svgf_temporal_constants{.flags = flags,
+                                                       .color_alpha_min = k_color_alpha_min,
+                                                       .moments_alpha_min = k_moments_alpha_min,
+                                                       .max_history = k_max_history,
+                                                       .normal_similarity = k_normal_similarity,
+                                                       .depth_similarity = k_depth_similarity}
+            .to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));
 
@@ -268,29 +269,29 @@ constexpr auto k_depth_sigma = 0.5;
 /// One filter pass under `flags`, written into an image of `format` and read back.
 cc::shared_async<cc::vector<tg::vec4f>> run_filter(sg::context& ctx, svgf_inputs const& in, u32 flags, sg::pixel_format format)
 {
-    auto const values = sr::sgl_shaders::svgf_options{.target_format = format};
-    auto const pipeline = co_await settled(sr::sgl_shaders::svgf.atrous_cs.acquire_pipeline(ctx, values));
+    auto const values = sr::sgl_shaders::svgf::options{.target_format = format};
+    auto const pipeline = co_await settled(sr::sgl_shaders::svgf::atrous_cs.acquire_pipeline(ctx, values));
     auto const layout
-        = ctx.cached.acquire_binding_group_layout(sr::sgl_shaders::svgf_atrous_images::declared_bindings(values),
-                                                  sr::sgl_shaders::svgf_atrous_images::declared_samplers());
+        = ctx.cached.acquire_binding_group_layout(sr::sgl_shaders::svgf::svgf_atrous_images::declared_bindings(values),
+                                                  sr::sgl_shaders::svgf::svgf_atrous_images::declared_samplers());
     auto cmd = ctx.create_command_list();
     auto gpu = gpu_inputs{.ctx = ctx, .cmd = *cmd};
     auto const target = gpu.target(format);
     auto const group = ctx.transient.create_binding_group(
         *cmd, layout,
-        sr::sgl_shaders::svgf_atrous_images{.source = gpu.texture(in.history).as_texture_view(),
-                                            .normal_depth = gpu.texture(in.normal_depth).as_texture_view(),
-                                            .albedo = gpu.texture(in.albedo).as_texture_view(),
-                                            .specular_albedo = gpu.texture(in.specular).as_texture_view(),
-                                            .color = gpu.texture(in.color).as_texture_view(),
-                                            .target = target.as_any_image_view()});
+        sr::sgl_shaders::svgf::svgf_atrous_images{.source = gpu.texture(in.history).as_texture_view(),
+                                                  .normal_depth = gpu.texture(in.normal_depth).as_texture_view(),
+                                                  .albedo = gpu.texture(in.albedo).as_texture_view(),
+                                                  .specular_albedo = gpu.texture(in.specular).as_texture_view(),
+                                                  .color = gpu.texture(in.color).as_texture_view(),
+                                                  .target = target.as_any_image_view()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
-    cmd->compute.set_inline_constants(sr::sgl_shaders::svgf_atrous_constants{.step = k_step,
-                                                                             .flags = flags,
-                                                                             .luminance_sigma = k_luminance_sigma,
-                                                                             .normal_power = k_normal_power,
-                                                                             .depth_sigma = k_depth_sigma}
+    cmd->compute.set_inline_constants(sr::sgl_shaders::svgf::svgf_atrous_constants{.step = k_step,
+                                                                                   .flags = flags,
+                                                                                   .luminance_sigma = k_luminance_sigma,
+                                                                                   .normal_power = k_normal_power,
+                                                                                   .depth_sigma = k_depth_sigma}
                                           .to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));
@@ -340,23 +341,23 @@ ASYNC_INVOCABLE_TEST("sr - svgf's variance pass computes what its description sa
     auto const in = make_svgf_inputs();
     constexpr auto spatial_below = 4.0;
 
-    auto const pipeline = co_await settled(sr::sgl_shaders::svgf.variance_cs.acquire_pipeline(ctx));
-    auto const layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::svgf_variance_images>();
+    auto const pipeline = co_await settled(sr::sgl_shaders::svgf::variance_cs.acquire_pipeline(ctx));
+    auto const layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::svgf::svgf_variance_images>();
     auto cmd = ctx.create_command_list();
     auto gpu = gpu_inputs{.ctx = ctx, .cmd = *cmd};
     auto const target = gpu.target();
     auto const group = ctx.transient.create_binding_group(
         *cmd, layout,
-        sr::sgl_shaders::svgf_variance_images{
+        sr::sgl_shaders::svgf::svgf_variance_images{
             .history = gpu.texture(in.history).as_texture_view(),
             .moments = gpu.texture(in.moments, sg::pixel_format::rg32_float).as_texture_view(),
             .normal_depth = gpu.texture(in.normal_depth).as_texture_view(),
             .target = target.as_image_view<sg::pixel_format::rgba32_float>()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
-    cmd->compute.set_inline_constants(sr::sgl_shaders::svgf_variance_constants{.normal_power = k_normal_power,
-                                                                               .depth_sigma = k_depth_sigma,
-                                                                               .spatial_below = spatial_below}
+    cmd->compute.set_inline_constants(sr::sgl_shaders::svgf::svgf_variance_constants{.normal_power = k_normal_power,
+                                                                                     .depth_sigma = k_depth_sigma,
+                                                                                     .spatial_below = spatial_below}
                                           .to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));

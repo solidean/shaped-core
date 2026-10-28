@@ -155,31 +155,33 @@ cc::shared_async<cc::vector<tg::vec4f>> run_atrous(sg::context& ctx,
                                                    atrous_inputs const& in,
                                                    sg::pixel_format format)
 {
-    auto const values = sr::sgl_shaders::atrous_denoise_options{.target_format = format};
-    auto const pipeline = co_await settled(sr::sgl_shaders::atrous_denoise.main_cs.acquire_pipeline(ctx, values));
+    auto const values = sr::sgl_shaders::atrous_denoise::options{.target_format = format};
+    auto const pipeline = co_await settled(sr::sgl_shaders::atrous_denoise::main_cs.acquire_pipeline(ctx, values));
     auto const layout = ctx.cached.acquire_binding_group_layout(
-        sr::sgl_shaders::atrous_images::declared_bindings(values), sr::sgl_shaders::atrous_images::declared_samplers());
+        sr::sgl_shaders::atrous_denoise::atrous_images::declared_bindings(values),
+        sr::sgl_shaders::atrous_denoise::atrous_images::declared_samplers());
 
     auto cmd = ctx.create_command_list();
     auto gpu = gpu_inputs{.ctx = ctx, .cmd = *cmd};
     auto const target = gpu.target(format);
     auto const group = ctx.transient.create_binding_group(
         *cmd, layout,
-        sr::sgl_shaders::atrous_images{.source = gpu.texture(in.source).as_texture_view(),
-                                       .albedo = gpu.texture(in.albedo).as_texture_view(),
-                                       .specular_albedo = gpu.texture(in.specular).as_texture_view(),
-                                       .normal = gpu.texture(in.normal).as_texture_view(),
-                                       .depth = gpu.texture(in.depth).as_texture_view(),
-                                       .sample_counts = gpu.texture(in.counts).as_texture_view(),
-                                       .target = target.as_any_image_view()});
+        sr::sgl_shaders::atrous_denoise::atrous_images{.source = gpu.texture(in.source).as_texture_view(),
+                                                       .albedo = gpu.texture(in.albedo).as_texture_view(),
+                                                       .specular_albedo = gpu.texture(in.specular).as_texture_view(),
+                                                       .normal = gpu.texture(in.normal).as_texture_view(),
+                                                       .depth = gpu.texture(in.depth).as_texture_view(),
+                                                       .sample_counts = gpu.texture(in.counts).as_texture_view(),
+                                                       .target = target.as_any_image_view()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
-    cmd->compute.set_inline_constants(sr::sgl_shaders::atrous_constants{.step = k.step,
-                                                                        .flags = k.flags,
-                                                                        .luminance_scale = f32(k.luminance_scale),
-                                                                        .normal_power = f32(k.normal_power),
-                                                                        .depth_sigma = f32(k.depth_sigma)}
-                                          .to_block());
+    cmd->compute.set_inline_constants(
+        sr::sgl_shaders::atrous_denoise::atrous_constants{.step = k.step,
+                                                          .flags = k.flags,
+                                                          .luminance_scale = f32(k.luminance_scale),
+                                                          .normal_power = f32(k.normal_power),
+                                                          .depth_sigma = f32(k.depth_sigma)}
+            .to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
     ctx.submit_command_list(cc::move(cmd));
     co_return co_await read_back(ctx, target);
@@ -241,19 +243,22 @@ ASYNC_INVOCABLE_TEST("sr - the depth fsr reads is near over the view depth, and 
     depth[4] = tg::vec4f(-2, 0, 0, 0);
     constexpr auto near_plane = 0.25f;
 
-    auto const pipeline = co_await settled(sr::sgl_shaders::fsr_prepare_depth.main_cs.acquire_pipeline(ctx));
-    auto const layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::fsr_prepare_depth_io>();
+    auto const pipeline = co_await settled(sr::sgl_shaders::fsr_prepare_depth::main_cs.acquire_pipeline(ctx));
+    auto const layout
+        = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::fsr_prepare_depth::fsr_prepare_depth_io>();
     auto cmd = ctx.create_command_list();
     auto in = gpu_inputs{.ctx = ctx, .cmd = *cmd};
     auto const target = ctx.persistent.create_texture_2d(
         {.format = sg::pixel_format::r32_float, .width = k_w, .height = k_h, .usage = k_usage});
-    auto const group = ctx.transient.create_binding_group(
-        *cmd, layout,
-        sr::sgl_shaders::fsr_prepare_depth_io{.linear_depth = in.texture(depth).as_texture_view(),
-                                              .device_depth = target.as_image_view<sg::pixel_format::r32_float>()});
+    auto const group
+        = ctx.transient.create_binding_group(*cmd, layout,
+                                             sr::sgl_shaders::fsr_prepare_depth::fsr_prepare_depth_io{
+                                                 .linear_depth = in.texture(depth).as_texture_view(),
+                                                 .device_depth = target.as_image_view<sg::pixel_format::r32_float>()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
-    cmd->compute.set_inline_constants(sr::sgl_shaders::fsr_prepare_depth_constants{.near_plane = near_plane}.to_block());
+    cmd->compute.set_inline_constants(
+        sr::sgl_shaders::fsr_prepare_depth::fsr_prepare_depth_constants{.near_plane = near_plane}.to_block());
     cmd->compute.dispatch_threads(k_w, k_h, 1);
 
     auto const readback = sg::data_future<f32>(cmd->download.bytes_from_texture(target.raw()));

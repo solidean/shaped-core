@@ -19,8 +19,8 @@ ASYNC_INVOCABLE_TEST("sg - SGL's workgroup memory, barriers and atomics agree ac
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await shaders::sync.reduce.acquire_pipeline(*ctx);
-    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::tally>();
+    auto const pipeline = co_await shaders::sync::reduce.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::sync::tally>();
 
     constexpr auto groups = 4;
     constexpr auto count = groups * 64;
@@ -34,9 +34,9 @@ ASYNC_INVOCABLE_TEST("sg - SGL's workgroup memory, barriers and atomics agree ac
 
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
-                                                           shaders::tally{.values = values.as_readonly_buffer(),
-                                                                          .sums = sums.as_readwrite_buffer(),
-                                                                          .bins = bins.as_readwrite_buffer()});
+                                                           shaders::sync::tally{.values = values.as_readonly_buffer(),
+                                                                                .sums = sums.as_readwrite_buffer(),
+                                                                                .bins = bins.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);
@@ -67,9 +67,9 @@ ASYNC_INVOCABLE_TEST("sg - SGL's strong and weak compare-exchange each claim eve
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // `insert` takes the strong one, and `insert_weak` the weak one in its retry loop: the same table either way
-    auto const strong = co_await shaders::sync.insert.acquire_pipeline(*ctx);
-    auto const weak = co_await shaders::sync.insert_weak.acquire_pipeline(*ctx);
-    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::table>();
+    auto const strong = co_await shaders::sync::insert.acquire_pipeline(*ctx);
+    auto const weak = co_await shaders::sync::insert_weak.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::sync::table>();
     for (auto const is_weak : {false, true})
     {
         auto const* const kind = is_weak ? "weak" : "strong";
@@ -82,10 +82,11 @@ ASYNC_INVOCABLE_TEST("sg - SGL's strong and weak compare-exchange each claim eve
         auto const winners = ctx->persistent.create_buffer_from_data(cc::vector<i32>::create_defaulted(groups), usage);
 
         auto cmd = ctx->create_command_list();
-        auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
-                                                               shaders::table{.slots = slots.as_readwrite_buffer(),
-                                                                              .found_at = found_at.as_readwrite_buffer(),
-                                                                              .winners = winners.as_readwrite_buffer()});
+        auto const group
+            = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                  shaders::sync::table{.slots = slots.as_readwrite_buffer(),
+                                                                       .found_at = found_at.as_readwrite_buffer(),
+                                                                       .winners = winners.as_readwrite_buffer()});
         cmd->compute.bind_pipeline(is_weak ? *weak : *strong);
         cmd->compute.bind_group(0, *group);
         cmd->compute.dispatch_threads(count);
@@ -131,8 +132,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
     if (!ctx->supports(sg::feature::binding_arrays))
         SKIP("this context has no binding arrays");
 
-    auto const pipeline = co_await shaders::binding_arrays.gather.acquire_pipeline(*ctx);
-    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::lanes>();
+    auto const pipeline = co_await shaders::binding_arrays::gather.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::binding_arrays::lanes>();
 
     constexpr auto count = 64;
     auto const source = [&](i32 lane)
@@ -151,8 +152,9 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
         *cmd, group_layout,
-        shaders::lanes{.sources = {s0.as_readonly_buffer(), s1.as_readonly_buffer(), s2.as_readonly_buffer()},
-                       .merged = merged.as_readwrite_buffer()});
+        shaders::binding_arrays::lanes{
+            .sources = {s0.as_readonly_buffer(), s1.as_readonly_buffer(), s2.as_readonly_buffer()},
+            .merged = merged.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     // sg asks the dispatch which elements of a bound array it touches, since the index is the shader's to pick.
@@ -160,7 +162,8 @@ ASYNC_INVOCABLE_TEST("sg - an SGL binding array is filled with a view per elemen
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    auto const declared = cmd->compute.declare_array_buffer_access(shaders::lanes::arrays::sources, reads);
+    auto const declared
+        = cmd->compute.declare_array_buffer_access(shaders::binding_arrays::lanes::arrays::sources, reads);
     cmd->compute.dispatch_threads(count);
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));
@@ -195,17 +198,17 @@ ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and
             records.push_back(u32(100 + i));
             records.push_back(u32(200 + i));
         }
-        auto const pipeline = co_await shaders::bytes.repack.acquire_pipeline(*ctx);
-        auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raw>();
+        auto const pipeline = co_await shaders::bytes::repack.acquire_pipeline(*ctx);
+        auto const layout = ctx->cached.acquire_binding_group_layout<shaders::bytes::raw>();
         auto const in = ctx->persistent.create_buffer_from_data(cc::move(records), sg::buffer_usage::readonly_buffer);
         auto const out
             = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count * 4),
                                                       sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
         auto cmd = ctx->create_command_list();
-        auto const group
-            = ctx->transient.create_binding_group(*cmd, layout,
-                                                  shaders::raw{.records = as_bytes(in, false).as_readonly<byte>(),
-                                                               .repacked = as_bytes(out, true).as_readwrite<byte>()});
+        auto const group = ctx->transient.create_binding_group(
+            *cmd, layout,
+            shaders::bytes::raw{.records = as_bytes(in, false).as_readonly<byte>(),
+                                .repacked = as_bytes(out, true).as_readwrite<byte>()});
         cmd->compute.bind_pipeline(*pipeline);
         cmd->compute.bind_group(0, *group);
         cmd->compute.dispatch_threads(count);
@@ -226,8 +229,8 @@ ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and
     // Three blocks, each thread reading its own word of the block its index picks.
     if (!ctx->supports(sg::feature::binding_arrays))
         co_return;
-    auto const pipeline = co_await shaders::bytes.pick.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::blocks>();
+    auto const pipeline = co_await shaders::bytes::pick.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::bytes::blocks>();
     auto const block = [&](u32 k)
     {
         auto data = cc::vector<u32>();
@@ -243,15 +246,15 @@ ASYNC_INVOCABLE_TEST("sg - SGL bytes are loaded and stored a word at a time, and
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
         *cmd, layout,
-        shaders::blocks{.tables = {as_bytes(b0, false).as_readonly<byte>(), as_bytes(b1, false).as_readonly<byte>(),
-                                   as_bytes(b2, false).as_readonly<byte>()},
-                        .merged = merged.as_readwrite_buffer()});
+        shaders::bytes::blocks{.tables = {as_bytes(b0, false).as_readonly<byte>(), as_bytes(b1, false).as_readonly<byte>(),
+                                          as_bytes(b2, false).as_readonly<byte>()},
+                               .merged = merged.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     auto const reads = cc::vector<sg::array_buffer_access>{{.index = 0, .access = sg::access_flag::shader_read},
                                                            {.index = 1, .access = sg::access_flag::shader_read},
                                                            {.index = 2, .access = sg::access_flag::shader_read}};
-    auto const declared = cmd->compute.declare_array_buffer_access(shaders::blocks::arrays::tables, reads);
+    auto const declared = cmd->compute.declare_array_buffer_access(shaders::bytes::blocks::arrays::tables, reads);
     cmd->compute.dispatch_threads(count);
     auto const back = cmd->download.data_from_buffer(merged);
     ctx->submit_command_list(cc::move(cmd));
@@ -271,8 +274,8 @@ ASYNC_INVOCABLE_TEST("sg - SGL's quad swap, subgroup sum and uniform load agree 
     if (!ctx->supports(sg::feature::subgroups))
         SKIP("this context has no subgroup operations");
 
-    auto const pipeline = co_await shaders::subgroups.reduce.acquire_pipeline(*ctx);
-    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::wave_io>();
+    auto const pipeline = co_await shaders::subgroups::reduce.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::subgroups::wave_io>();
 
     constexpr auto groups = 4;
     constexpr auto count = groups * 64;
@@ -285,10 +288,11 @@ ASYNC_INVOCABLE_TEST("sg - SGL's quad swap, subgroup sum and uniform load agree 
     auto const sums = ctx->persistent.create_buffer_from_data(cc::vector<u32>::create_defaulted(count), usage);
 
     auto cmd = ctx->create_command_list();
-    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
-                                                           shaders::wave_io{.values = values.as_readonly_buffer(),
-                                                                            .swapped = swapped.as_readwrite_buffer(),
-                                                                            .sums = sums.as_readwrite_buffer()});
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, group_layout,
+                                              shaders::subgroups::wave_io{.values = values.as_readonly_buffer(),
+                                                                          .swapped = swapped.as_readwrite_buffer(),
+                                                                          .sums = sums.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);
@@ -324,8 +328,8 @@ ASYNC_INVOCABLE_TEST("sg - SGL's subgroup sum after a loop each lane leaves at i
         SKIP("this context has no subgroup operations");
 
     // CHK-284: a loop left only by `break` reconverges after it, so the sum sees every lane's count
-    auto const pipeline = co_await shaders::subgroups.reduce_after_loop.acquire_pipeline(*ctx);
-    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::wave_staggered>();
+    auto const pipeline = co_await shaders::subgroups::reduce_after_loop.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::subgroups::wave_staggered>();
 
     constexpr auto count = 4 * 128;
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
@@ -335,7 +339,7 @@ ASYNC_INVOCABLE_TEST("sg - SGL's subgroup sum after a loop each lane leaves at i
     auto cmd = ctx->create_command_list();
     auto const group = ctx->transient.create_binding_group(
         *cmd, group_layout,
-        shaders::wave_staggered{.sums = sums.as_readwrite_buffer(), .sizes = sizes.as_readwrite_buffer()});
+        shaders::subgroups::wave_staggered{.sums = sums.as_readwrite_buffer(), .sizes = sizes.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);

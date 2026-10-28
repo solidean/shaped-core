@@ -20,8 +20,8 @@ cc::shared_async<cc::unit> mix_routine::init(sg::routine_init_scope scope)
     _group_layout = nullptr;
     _pipeline = {};
 
-    auto const values = sgl_shaders::mix_options{.destination_format = params()};
-    auto const pipeline = sgl_shaders::mix.main_cs.acquire_pipeline(ctx, values);
+    auto const values = sgl_shaders::mix::options{.destination_format = params()};
+    auto const pipeline = sgl_shaders::mix::main_cs.acquire_pipeline(ctx, values);
     co_await cc::async_settled(pipeline);
     if (pipeline->try_value() == nullptr)
     {
@@ -31,8 +31,8 @@ cc::shared_async<cc::unit> mix_routine::init(sg::routine_init_scope scope)
     }
 
     // Both published together, after the build: readiness is what makes them visible to execute.
-    _group_layout = ctx.cached.acquire_binding_group_layout(sgl_shaders::mix_images::declared_bindings(values),
-                                                            sgl_shaders::mix_images::declared_samplers());
+    _group_layout = ctx.cached.acquire_binding_group_layout(sgl_shaders::mix::mix_images::declared_bindings(values),
+                                                            sgl_shaders::mix::mix_images::declared_samplers());
     _pipeline = pipeline;
     co_return;
 }
@@ -57,14 +57,14 @@ bool mix_routine::execute(sg::command_list& cmd, sg::texture_2d const& destinati
     auto const extent = extent_of(destination);
 
     auto const group = ctx.transient.create_binding_group(cmd, self->_group_layout,
-                                                          sgl_shaders::mix_images{
+                                                          sgl_shaders::mix::mix_images{
                                                               .source = source.as_texture_view(),
                                                               .destination = destination.as_any_image_view(),
                                                           });
 
     cmd.compute.bind_pipeline(**built);
     cmd.compute.bind_group(0, *group);
-    cmd.compute.set_inline_constants(sgl_shaders::mix_constants{.weight = weight}.to_block());
+    cmd.compute.set_inline_constants(sgl_shaders::mix::mix_constants{.weight = weight}.to_block());
     cmd.compute.dispatch_threads(extent[0], extent[1], 1);
     return true;
 }

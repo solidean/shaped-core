@@ -373,9 +373,7 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
     for (auto const& existing : _packages)
         CC_ASSERT(existing.name != package.name, "this shader package was already added");
 
-    _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name),
-                                      .host_namespace = cc::string::create_copy_of(package.host_namespace),
-                                      .language = package.language});
+    _packages.push_back(package_entry{.name = cc::string::create_copy_of(package.name), .language = package.language});
 
     if (fs != nullptr)
     {
@@ -418,9 +416,9 @@ void slib::shader_library::add_package(shader_package const& package, filesystem
         auto options = cc::vector<cc::string>();
         for (auto const name : definition.options)
             options.push_back(cc::string(name));
-        auto asset
-            = std::make_shared<shader_asset>(_alive, cc::move(virtual_path.value()), definition.stage,
-                                             cc::string::create_copy_of(definition.entry_point), cc::move(options));
+        auto asset = std::make_shared<shader_asset>(
+            _alive, cc::move(virtual_path.value()), definition.stage, cc::string::create_copy_of(definition.entry_point),
+            cc::move(options), cc::string::create_copy_of(definition.file_namespace));
         *definition.asset = asset;
         _assets.push_back(cc::move(asset));
     }
@@ -464,6 +462,7 @@ void slib::shader_library::note_dependencies_changed()
 slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::string_view virtual_path,
                                                                            sg::shader_stage stage,
                                                                            cc::string_view entry_point,
+                                                                           cc::string_view file_namespace,
                                                                            sg::shader_format format,
                                                                            cc::span<shader_option const> options) const
 {
@@ -482,7 +481,7 @@ slib::shader_library::compile_outcome slib::shader_library::compile_shader(cc::s
 
     // Where an `#include "..."` is looked for, most specific first: the shader's own directory, then the package's own root, then the mount root.
     _compile_text(outcome, cc::move(source.value()), virtual_path, impl::parent_path(virtual_path), package.name,
-                  package.host_namespace, package.language, stage, entry_point, format, options);
+                  file_namespace, package.language, stage, entry_point, format, options);
     return outcome;
 }
 
@@ -503,7 +502,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
                                          cc::string_view label,
                                          cc::string_view source_dir,
                                          cc::string_view package_root,
-                                         cc::string_view host_namespace,
+                                         cc::string_view file_namespace,
                                          shader_language language,
                                          sg::shader_stage stage,
                                          cc::string_view entry_point,
@@ -519,7 +518,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
     auto key = cc::optional<cc::hash128>();
     if (language == shader_language::sgl)
     {
-        key = impl::bundle_key(language, format, stage, entry_point, options, host_namespace, source, module_files);
+        key = impl::bundle_key(language, format, stage, entry_point, options, file_namespace, source, module_files);
         if (auto bundled = impl::find_bundled_shader(key.value()); bundled.has_value())
         {
             // The front end that says which modules a source uses never ran, so the hit depends on all of them, as its key does.
@@ -631,7 +630,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
             target_set = cc::format("sgl_modules::{}", target_set);
         }
         else if (!target_set.empty())
-            target_set = host_namespace.empty() ? cc::string() : cc::format("{}::{}", host_namespace, target_set);
+            target_set = file_namespace.empty() ? cc::string() : cc::format("{}::{}", file_namespace, target_set);
     }
     // A preprocessor that renamed the entry point says so, and the compile has to ask for the name the text declares.
     if (!preprocessed.value().entry_point.empty())
@@ -660,7 +659,7 @@ void slib::shader_library::_compile_text(compile_outcome& outcome,
 
     if (!key.has_value())
     {
-        key = impl::bundle_key(language, format, stage, desc.entry_point, options, host_namespace, desc.source, {});
+        key = impl::bundle_key(language, format, stage, desc.entry_point, options, file_namespace, desc.source, {});
         if (auto bundled = impl::find_bundled_shader(key.value()); bundled.has_value())
         {
             outcome.shader = cc::make_async_from_value(cc::move(bundled.value()));

@@ -116,9 +116,9 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     _surfaces.clear();
     _environment = nullptr;
 
-    auto const surface_vs = shaders::raster_pass.surface_vs->acquire(ctx);
-    auto const environment_vs = shaders::raster_pass.environment_vs->acquire(ctx);
-    auto const environment_ps = shaders::raster_pass.environment_ps->acquire(ctx);
+    auto const surface_vs = shaders::raster_pass::surface_vs->acquire(ctx);
+    auto const environment_vs = shaders::raster_pass::environment_vs->acquire(ctx);
+    auto const environment_ps = shaders::raster_pass::environment_ps->acquire(ctx);
     co_await cc::async_settled(surface_vs);
     co_await cc::async_settled(environment_vs);
     co_await cc::async_settled(environment_ps);
@@ -135,7 +135,7 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
 
     // Behind every surface: drawn at depth 0, tested against the far plane the clear left, and writing no depth of its own.
     auto const environment = ctx.cached.acquire_raster_pipeline({
-        .layout = shaders::raster_pass.environment_ps.acquire_layout(ctx),
+        .layout = shaders::raster_pass::environment_ps.acquire_layout(ctx),
         .vertex_shader = *compiled_environment_vs,
         .fragment_shader = *compiled_environment_ps,
         .topology = sg::primitive_topology::triangle_list, // no vertex input: the vertex index

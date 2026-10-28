@@ -95,10 +95,11 @@ cc::shared_async<cc::unit> atrous_denoise_routine::init(sg::routine_init_scope s
 
 atrous_denoise_routine::pass atrous_denoise_routine::build_pass(sg::context& ctx, sg::pixel_format target)
 {
-    auto const values = sgl_shaders::atrous_denoise_options{.target_format = target};
+    auto const values = sgl_shaders::atrous_denoise::options{.target_format = target};
     return {.group_layout = ctx.cached.acquire_binding_group_layout(
-                sgl_shaders::atrous_images::declared_bindings(values), sgl_shaders::atrous_images::declared_samplers()),
-            .pipeline = sgl_shaders::atrous_denoise.main_cs.acquire_pipeline(ctx, values)};
+                sgl_shaders::atrous_denoise::atrous_images::declared_bindings(values),
+                sgl_shaders::atrous_denoise::atrous_images::declared_samplers()),
+            .pipeline = sgl_shaders::atrous_denoise::main_cs.acquire_pipeline(ctx, values)};
 }
 
 reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
@@ -175,7 +176,7 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
 
         auto const& pass = i == last ? self->_output : self->_scratch;
         auto const group = ctx.transient.create_binding_group(cmd, pass.group_layout,
-                                                              sgl_shaders::atrous_images{
+                                                              sgl_shaders::atrous_denoise::atrous_images{
                                                                   .source = source.as_texture_view(),
                                                                   .albedo = albedo,
                                                                   .specular_albedo = specular_albedo,
@@ -187,7 +188,7 @@ reconstruct_outcome atrous_denoise_routine::execute(sg::command_list& cmd,
 
         cmd.compute.bind_pipeline(**pass.pipeline->try_value());
         cmd.compute.bind_group(0, *group);
-        cmd.compute.set_inline_constants(sgl_shaders::atrous_constants{
+        cmd.compute.set_inline_constants(sgl_shaders::atrous_denoise::atrous_constants{
             .step = 1 << i,
             .flags = flags,
             .luminance_scale = luminance_scale,

@@ -20,26 +20,26 @@ struct shape_program
 /// Each shape reads and writes through a binding of its own, which is why this is a switch over generated types.
 [[nodiscard]] shape_program program_of(sg::context& ctx,
                                        mipmap_variant shape,
-                                       sgl_shaders::box_filter_mipmap_options const& values)
+                                       sgl_shaders::box_filter_mipmap::options const& values)
 {
-    auto const& file = sgl_shaders::box_filter_mipmap;
+    namespace file = sgl_shaders::box_filter_mipmap;
     switch (shape)
     {
     case mipmap_variant::tex_1d:
-        return {.pipeline = file.main_1d_cs.acquire_pipeline(ctx, values),
-                .bindings = sgl_shaders::mipmap_1d::declared_bindings(values)};
+        return {.pipeline = file::main_1d_cs.acquire_pipeline(ctx, values),
+                .bindings = file::mipmap_1d::declared_bindings(values)};
     case mipmap_variant::tex_1d_array:
-        return {.pipeline = file.main_1d_array_cs.acquire_pipeline(ctx, values),
-                .bindings = sgl_shaders::mipmap_1d_array::declared_bindings(values)};
+        return {.pipeline = file::main_1d_array_cs.acquire_pipeline(ctx, values),
+                .bindings = file::mipmap_1d_array::declared_bindings(values)};
     case mipmap_variant::tex_2d:
-        return {.pipeline = file.main_2d_cs.acquire_pipeline(ctx, values),
-                .bindings = sgl_shaders::mipmap_2d::declared_bindings(values)};
+        return {.pipeline = file::main_2d_cs.acquire_pipeline(ctx, values),
+                .bindings = file::mipmap_2d::declared_bindings(values)};
     case mipmap_variant::tex_2d_array:
-        return {.pipeline = file.main_2d_array_cs.acquire_pipeline(ctx, values),
-                .bindings = sgl_shaders::mipmap_2d_array::declared_bindings(values)};
+        return {.pipeline = file::main_2d_array_cs.acquire_pipeline(ctx, values),
+                .bindings = file::mipmap_2d_array::declared_bindings(values)};
     case mipmap_variant::tex_3d:
-        return {.pipeline = file.main_3d_cs.acquire_pipeline(ctx, values),
-                .bindings = sgl_shaders::mipmap_3d::declared_bindings(values)};
+        return {.pipeline = file::main_3d_cs.acquire_pipeline(ctx, values),
+                .bindings = file::mipmap_3d::declared_bindings(values)};
     case mipmap_variant::count_:
         break;
     }
@@ -58,31 +58,31 @@ struct shape_program
     {
     case mipmap_variant::tex_1d:
         return transient.create_binding_group(cmd, layout,
-                                              sgl_shaders::mipmap_1d{
+                                              sgl_shaders::box_filter_mipmap::mipmap_1d{
                                                   .source = source.as_texture<sg::tv_1d>(),
                                                   .target = sg::any_texture_view<sg::tv_1d>(target),
                                               });
     case mipmap_variant::tex_1d_array:
         return transient.create_binding_group(cmd, layout,
-                                              sgl_shaders::mipmap_1d_array{
+                                              sgl_shaders::box_filter_mipmap::mipmap_1d_array{
                                                   .source = source.as_texture<sg::tv_1d_array>(),
                                                   .target = sg::any_texture_view<sg::tv_1d_array>(target),
                                               });
     case mipmap_variant::tex_2d:
         return transient.create_binding_group(cmd, layout,
-                                              sgl_shaders::mipmap_2d{
+                                              sgl_shaders::box_filter_mipmap::mipmap_2d{
                                                   .source = source.as_texture<sg::tv_2d>(),
                                                   .target = sg::any_texture_view<sg::tv_2d>(target),
                                               });
     case mipmap_variant::tex_2d_array:
         return transient.create_binding_group(cmd, layout,
-                                              sgl_shaders::mipmap_2d_array{
+                                              sgl_shaders::box_filter_mipmap::mipmap_2d_array{
                                                   .source = source.as_texture<sg::tv_2d_array>(),
                                                   .target = sg::any_texture_view<sg::tv_2d_array>(target),
                                               });
     case mipmap_variant::tex_3d:
         return transient.create_binding_group(cmd, layout,
-                                              sgl_shaders::mipmap_3d{
+                                              sgl_shaders::box_filter_mipmap::mipmap_3d{
                                                   .source = source.as_texture<sg::tv_3d>(),
                                                   .target = sg::any_texture_view<sg::tv_3d>(target),
                                               });

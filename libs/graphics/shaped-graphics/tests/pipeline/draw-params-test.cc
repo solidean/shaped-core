@@ -24,15 +24,15 @@ constexpr int rows = 4;
 /// One point per column and one row per instance, at pixel centres.
 struct point_grid
 {
-    sg::buffer<shaders::indexed_point::per_vertex> vertices;
-    sg::buffer<shaders::indexed_point::per_instance> instances;
+    sg::buffer<shaders::draws::indexed_point::per_vertex> vertices;
+    sg::buffer<shaders::draws::indexed_point::per_instance> instances;
 
     explicit point_grid(sg::context& ctx)
     {
-        auto v = cc::vector<shaders::indexed_point::per_vertex>();
+        auto v = cc::vector<shaders::draws::indexed_point::per_vertex>();
         for (auto c = 0; c < columns; ++c)
             v.push_back({.column = -1.0f + (2.0f * float(c) + 1.0f) / float(columns)});
-        auto i = cc::vector<shaders::indexed_point::per_instance>();
+        auto i = cc::vector<shaders::draws::indexed_point::per_instance>();
         for (auto r = 0; r < rows; ++r)
             i.push_back({.row = 1.0f - (2.0f * float(r) + 1.0f) / float(rows)});
         vertices = ctx.persistent.create_buffer_from_data(cc::move(v), sg::buffer_usage::vertex_buffer);
@@ -42,7 +42,7 @@ struct point_grid
     void bind(sg::rendering_scope& scope) const
     {
         scope.bind_vertex_buffers(
-            shaders::indexed_point::buffers{.per_vertex = vertices, .per_instance = instances}.views());
+            shaders::draws::indexed_point::buffers{.per_vertex = vertices, .per_instance = instances}.views());
     }
 };
 
@@ -51,7 +51,7 @@ sg_test::offscreen grid_target()
     return {.width = columns,
             .height = rows,
             .colors = {sg::pixel_format::rgba32_float},
-            .target_set = shaders::index_target::name,
+            .target_set = shaders::draws::index_target::name,
             .clear_color = tg::vec4f(-1, -1, -1, -1)};
 }
 
@@ -71,7 +71,7 @@ ASYNC_INVOCABLE_TEST("sg - a draw's first vertex, first instance and instance co
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws.indexed_points);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::indexed_points);
     auto const grid = point_grid(*ctx);
 
     // Vertices 3 to 6 of instances 1 and 2, then vertex 12 alone of instance 3.
@@ -103,7 +103,7 @@ ASYNC_INVOCABLE_TEST("sg - an indexed draw adds its vertex offset to 16- and 32-
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws.indexed_points);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::indexed_points);
     auto const grid = point_grid(*ctx);
 
     // Row 0: 16-bit indices 0, 2, 4 from the second index pair on, offset by 5, reach columns 5, 7 and 9.
@@ -147,10 +147,10 @@ ASYNC_INVOCABLE_TEST("sg - vertex buffers bound from a first slot other than 0 f
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws.indexed_points);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::indexed_points);
     auto const grid = point_grid(*ctx);
     // A second instance buffer whose rows run bottom to top, bound alone at slot 1 between two draws.
-    auto reversed = cc::vector<shaders::indexed_point::per_instance>();
+    auto reversed = cc::vector<shaders::draws::indexed_point::per_instance>();
     for (auto r = rows - 1; r >= 0; --r)
         reversed.push_back({.row = 1.0f - (2.0f * float(r) + 1.0f) / float(rows)});
     auto const reversed_rows
@@ -180,20 +180,21 @@ ASYNC_INVOCABLE_TEST("sg - inline constants set between two draws reach each its
     if (!sg_test::shaders_reach(*ctx))
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws.tagged_points);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::tagged_points);
     auto const grid = point_grid(*ctx);
 
     // Column 2 drawn tagged 7, then column 5 tagged 9, in one scope.
-    auto const pixels = co_await sg_test::draw_offscreen(*ctx, grid_target(),
-                                                         [&](sg::rendering_scope& scope)
-                                                         {
-                                                             scope.bind_pipeline(*pipeline);
-                                                             grid.bind(scope);
-                                                             scope.set_inline_constants(shaders::draw_tag{.tag = 7.0f});
-                                                             scope.draw({.vertex_range = {.offset = 2, .size = 1}});
-                                                             scope.set_inline_constants(shaders::draw_tag{.tag = 9.0f});
-                                                             scope.draw({.vertex_range = {.offset = 5, .size = 1}});
-                                                         });
+    auto const pixels
+        = co_await sg_test::draw_offscreen(*ctx, grid_target(),
+                                           [&](sg::rendering_scope& scope)
+                                           {
+                                               scope.bind_pipeline(*pipeline);
+                                               grid.bind(scope);
+                                               scope.set_inline_constants(shaders::draws::draw_tag{.tag = 7.0f});
+                                               scope.draw({.vertex_range = {.offset = 2, .size = 1}});
+                                               scope.set_inline_constants(shaders::draws::draw_tag{.tag = 9.0f});
+                                               scope.draw({.vertex_range = {.offset = 5, .size = 1}});
+                                           });
 
     CHECK(pixels[0].rgba_float(2, 0) == tg::vec4f(2, 0, 7, 1));
     CHECK(pixels[0].rgba_float(5, 0) == tg::vec4f(5, 0, 9, 1));
@@ -207,9 +208,9 @@ ASYNC_INVOCABLE_TEST("sg - an inline constants block that ends short of its alig
         SKIP("no compiler builds this binary's shaders into a format this context accepts");
 
     // Otherwise the block is the size WGSL rounds it to, and this test is the one above.
-    static_assert(sizeof(shaders::tinted_tag) % 16 != 0);
+    static_assert(sizeof(shaders::draws::tinted_tag) % 16 != 0);
 
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws.tinted_points);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::draws::tinted_points);
     auto const grid = point_grid(*ctx);
 
     auto const pixels = co_await sg_test::draw_offscreen(
@@ -218,7 +219,7 @@ ASYNC_INVOCABLE_TEST("sg - an inline constants block that ends short of its alig
         {
             scope.bind_pipeline(*pipeline);
             grid.bind(scope);
-            scope.set_inline_constants(shaders::tinted_tag{.tint = tg::vec4f(0, 0, 0, 4), .tag = 7.0f});
+            scope.set_inline_constants(shaders::draws::tinted_tag{.tint = tg::vec4f(0, 0, 0, 4), .tag = 7.0f});
             scope.draw({.vertex_range = {.offset = 2, .size = 1}});
         });
 

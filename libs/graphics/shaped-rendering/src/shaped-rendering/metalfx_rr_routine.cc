@@ -45,7 +45,7 @@ bool metalfx_rr_routine::is_available(sg::context const& ctx)
 {
     if (!impl::metalfx_denoised_available(ctx))
         return false;
-    auto const asset = sgl_shaders::metalfx_prepare.main_cs.asset;
+    auto const asset = sgl_shaders::metalfx_prepare::main_cs.asset;
     return asset != nullptr && asset->can_acquire(ctx);
 }
 

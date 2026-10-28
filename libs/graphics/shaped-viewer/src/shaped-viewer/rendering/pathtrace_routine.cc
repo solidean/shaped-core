@@ -24,7 +24,7 @@ namespace sv
 namespace
 {
 namespace tracer = sv::shaders::tracer;
-using path_t = sv::shaders::tracer_pipeline_path_t;
+using path_t = sv::shaders::tracer_pipeline::path_t;
 
 /// The records a caller's `hit_group_offset` counts per permutation: a surface record and a shadow one.
 /// The pipeline's ray set has the same two ray types, so a row of its table is as wide.
@@ -159,7 +159,7 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
             variant.host.hit_groups.push_back(shader);
 
     // Stated now and started, never waited on: the frames until it lands decline.
-    variant.pending_description = sv::shaders::tracer_pipeline.path.description(ctx, variant.host);
+    variant.pending_description = sv::shaders::tracer_pipeline::path.description(ctx, variant.host);
     (void)ctx.backlog.start(variant.pending_description);
     (void)_variants.entry(key).get_or_emplace(cc::move(variant));
     return nullptr;

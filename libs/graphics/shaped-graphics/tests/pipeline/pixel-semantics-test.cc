@@ -19,7 +19,7 @@ namespace shaders = sg::test::sgl_shaders;
 
 namespace
 {
-using corner = shaders::tagged_corner;
+using corner = shaders::pixel_semantics::tagged_corner;
 
 /// The two triangles of the clip-space rect `r` (left, bottom, right, top), counter-clockwise, every vertex at `depth`.
 /// The first triangle is the lower-right one and the second the upper-left, and each takes its tags in order.
@@ -55,17 +55,19 @@ ASYNC_INVOCABLE_TEST("sg - a flat member takes the first vertex of its triangle"
     int const tags[] = {10, 11, 12, 20, 21, 22};
     push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, tags);
     auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics.flat_tags);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::flat_tags);
 
-    auto const pixels = co_await sg_test::draw_offscreen(
-        *ctx,
-        {.width = 4, .height = 4, .colors = {sg::pixel_format::rgba32_float}, .target_set = shaders::tag_target::name},
-        [&](sg::rendering_scope& scope)
-        {
-            scope.bind_pipeline(*pipeline);
-            scope.bind_vertex_buffer(buffer.as_vertex_buffer());
-            scope.draw({.vertex_range = {.offset = 0, .size = 6}});
-        });
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 4,
+                                                          .height = 4,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::tag_target::name},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*pipeline);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
 
     CHECK(pixels[0].rgba_float(3, 2)[0] == 10.0f);
     CHECK(pixels[0].rgba_float(0, 1)[0] == 20.0f);
@@ -83,13 +85,13 @@ ASYNC_INVOCABLE_TEST("sg - a discarded pixel still takes part in its quad's deri
     auto vertices = cc::vector<corner>();
     push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0);
     auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics.discard_derivative);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::discard_derivative);
 
     auto const pixels = co_await sg_test::draw_offscreen(*ctx,
                                                          {.width = 4,
                                                           .height = 2,
                                                           .colors = {sg::pixel_format::rgba32_float},
-                                                          .target_set = shaders::tag_target::name,
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
                                                           .clear_color = tg::vec4f(-1, -1, -1, -1)},
                                                          [&](sg::rendering_scope& scope)
                                                          {
@@ -121,18 +123,18 @@ ASYNC_INVOCABLE_TEST("sg - a strong compare-exchange in a pixel stage leaves hel
     auto vertices = cc::vector<corner>();
     push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 6);
     auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics.discard_claim);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::discard_claim);
     auto const owners = ctx->persistent.create_buffer_from_data(
         cc::vector<u32>::create_defaulted(8), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
-    auto const group
-        = ctx->persistent.create_binding_group(ctx->cached.acquire_binding_group_layout<shaders::pixel_claims>(),
-                                               shaders::pixel_claims{.owners = owners.as_readwrite_buffer()});
+    auto const group = ctx->persistent.create_binding_group(
+        ctx->cached.acquire_binding_group_layout<shaders::pixel_semantics::pixel_claims>(),
+        shaders::pixel_semantics::pixel_claims{.owners = owners.as_readwrite_buffer()});
 
     auto const pixels = co_await sg_test::draw_offscreen(*ctx,
                                                          {.width = 4,
                                                           .height = 2,
                                                           .colors = {sg::pixel_format::rgba32_float},
-                                                          .target_set = shaders::tag_target::name,
+                                                          .target_set = shaders::pixel_semantics::tag_target::name,
                                                           .clear_color = tg::vec4f(-1, -1, -1, -1)},
                                                          [&](sg::rendering_scope& scope)
                                                          {
@@ -193,8 +195,8 @@ ASYNC_INVOCABLE_TEST("sg - a depth the pixel stage writes is the one tested, pla
     for (auto c = 0; c < width; ++c)
         push_rect(vertices, sg_test::clip_pixel(c, 0, width, 1), columns[c].rasterized, columns[c].written);
     auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
-    auto const plain = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics.depth_written);
-    auto const pushed = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics.depth_pushed);
+    auto const plain = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::depth_written);
+    auto const pushed = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::depth_pushed);
 
     // The two pipelines write different target sets, one per @pixel struct, so each draws in its own scope.
     auto const pixels
@@ -207,7 +209,7 @@ ASYNC_INVOCABLE_TEST("sg - a depth the pixel stage writes is the one tested, pla
                                                   [&](sg::command_list& cmd, sg_test::offscreen_targets const& targets)
                                                   {
                                                       auto first = targets.cleared();
-                                                      first.target_set = shaders::written_depth::name;
+                                                      first.target_set = shaders::pixel_semantics::written_depth::name;
                                                       {
                                                           auto scope = cmd.raster.render_to(first);
                                                           scope.bind_pipeline(*plain);
@@ -215,7 +217,7 @@ ASYNC_INVOCABLE_TEST("sg - a depth the pixel stage writes is the one tested, pla
                                                           scope.draw({.vertex_range = {.offset = 0, .size = 12}});
                                                       }
                                                       auto second = targets.preserved();
-                                                      second.target_set = shaders::pushed_depth::name;
+                                                      second.target_set = shaders::pixel_semantics::pushed_depth::name;
                                                       auto scope = cmd.raster.render_to(second);
                                                       scope.bind_pipeline(*pushed);
                                                       scope.bind_vertex_buffer(buffer.as_vertex_buffer());
@@ -238,9 +240,9 @@ ASYNC_INVOCABLE_TEST("sg - a sample mask the pixel stage writes keeps the sample
     auto vertices = cc::vector<corner>();
     push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 0b0101);
     auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
-    auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics.sample_masked);
-    auto const read = co_await shaders::pixel_semantics.read_samples.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::samples>();
+    auto const draw = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::sample_masked);
+    auto const read = co_await shaders::pixel_semantics::read_samples.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::pixel_semantics::samples>();
 
     auto const target
         = ctx->persistent.create_texture_2d_ms({.format = sg::pixel_format::rgba8_unorm,
@@ -255,13 +257,14 @@ ASYNC_INVOCABLE_TEST("sg - a sample mask the pixel stage writes keeps the sample
     {
         auto scope
             = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(0, 0, 0, 1))},
-                                     .target_set = shaders::masked::name});
+                                     .target_set = shaders::pixel_semantics::masked::name});
         scope.bind_pipeline(*draw);
         scope.bind_vertex_buffer(buffer.as_vertex_buffer());
         scope.draw({.vertex_range = {.offset = 0, .size = 6}});
     }
     auto const group = ctx->transient.create_binding_group(
-        *cmd, layout, shaders::samples{.target = target.as_texture_view(), .values = values.as_readwrite_buffer()});
+        *cmd, layout,
+        shaders::pixel_semantics::samples{.target = target.as_texture_view(), .values = values.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*read);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(1);
@@ -285,8 +288,8 @@ ASYNC_INVOCABLE_TEST("sg - gather returns a 2 x 2 footprint's texels in the one 
 
     // A 2 × 2 texture, rows top to bottom: 51 102 / 153 204, which unorm reads as 0.2 0.4 / 0.6 0.8.
     // gather at its centre returns bottom-left, bottom-right, top-right, top-left: 0.6, 0.8, 0.4, 0.2.
-    auto const pipeline = co_await shaders::pixel_semantics.gather_centre.acquire_pipeline(*ctx);
-    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::gathered>();
+    auto const pipeline = co_await shaders::pixel_semantics::gather_centre.acquire_pipeline(*ctx);
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::pixel_semantics::gathered>();
     auto const source
         = ctx->persistent.create_texture_2d({.format = sg::pixel_format::rgba8_unorm,
                                              .width = 2,
@@ -299,7 +302,8 @@ ASYNC_INVOCABLE_TEST("sg - gather returns a 2 x 2 footprint's texels in the one 
     auto cmd = ctx->create_command_list();
     cmd->upload.bytes_to_texture(source.raw(), cc::as_bytes(cc::span<u8 const>(texels)));
     auto const group = ctx->transient.create_binding_group(
-        *cmd, layout, shaders::gathered{.source = source.as_texture_view(), .values = values.as_readwrite_buffer()});
+        *cmd, layout,
+        shaders::pixel_semantics::gathered{.source = source.as_texture_view(), .values = values.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(1);

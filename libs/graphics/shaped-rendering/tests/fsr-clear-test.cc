@@ -73,12 +73,15 @@ constexpr u32 k_bits = 0x3f800000u;
 [[nodiscard]] cc::shared_async<cc::vector<byte>> cleared_as_routine(sg::context& ctx, sr::impl::cleared_format format)
 {
     if (format.is_uint)
-        co_return co_await cleared<decltype(sr::sgl_shaders::fsr_clear_uint.main_cs), sr::sgl_shaders::fsr_clear_uint_target>(
-            ctx, sr::sgl_shaders::fsr_clear_uint.main_cs, {.target_format = format.format},
-            sr::sgl_shaders::fsr_clear_uint_constants{.value = k_bits}, format.format);
-    co_return co_await cleared<decltype(sr::sgl_shaders::fsr_clear_float.main_cs), sr::sgl_shaders::fsr_clear_float_target>(
-        ctx, sr::sgl_shaders::fsr_clear_float.main_cs, {.target_format = format.format},
-        sr::sgl_shaders::fsr_clear_float_constants{.value = tg::vec4f(k_value[0], k_value[1], k_value[2], k_value[3])},
+        co_return co_await cleared<decltype(sr::sgl_shaders::fsr_clear_uint::main_cs),
+                                   sr::sgl_shaders::fsr_clear_uint::fsr_clear_uint_target>(
+            ctx, sr::sgl_shaders::fsr_clear_uint::main_cs, {.target_format = format.format},
+            sr::sgl_shaders::fsr_clear_uint::fsr_clear_uint_constants{.value = k_bits}, format.format);
+    co_return co_await cleared<decltype(sr::sgl_shaders::fsr_clear_float::main_cs),
+                               sr::sgl_shaders::fsr_clear_float::fsr_clear_float_target>(
+        ctx, sr::sgl_shaders::fsr_clear_float::main_cs, {.target_format = format.format},
+        sr::sgl_shaders::fsr_clear_float::fsr_clear_float_constants{
+            .value = tg::vec4f(k_value[0], k_value[1], k_value[2], k_value[3])},
         format.format);
 }
 } // namespace

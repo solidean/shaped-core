@@ -11,8 +11,8 @@ cc::shared_async<cc::unit> raster_box_filter_mipmap_routine::init(sg::routine_in
 {
     auto& ctx = scope.context();
 
-    auto const vs = sgl_shaders::raster_box_filter_mipmap.main_vs->acquire(ctx);
-    auto const ps = sgl_shaders::raster_box_filter_mipmap.main_ps->acquire(ctx);
+    auto const vs = sgl_shaders::raster_box_filter_mipmap::main_vs->acquire(ctx);
+    auto const ps = sgl_shaders::raster_box_filter_mipmap::main_ps->acquire(ctx);
 
     // Settled rather than awaited for the value: a shader that did not compile is this routine's verdict to report,
     // not an error to propagate — fail_init says so in the vocabulary a caller already branches on.
@@ -33,10 +33,11 @@ cc::shared_async<cc::unit> raster_box_filter_mipmap_routine::init(sg::routine_in
 
     // Only the pixel stage lists a group: the single-mip view of the level being read.
     // No sampler, since the filter loads its four texels, which is what makes the tap positions exact on an odd-sized level.
-    _group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::raster_mipmap_source>();
+    _group_layout
+        = ctx.cached.acquire_binding_group_layout<sgl_shaders::raster_box_filter_mipmap::raster_mipmap_source>();
 
     _pipeline = ctx.cached.acquire_raster_pipeline(sg::raster_pipeline_description{
-        .layout = sgl_shaders::raster_box_filter_mipmap.main_ps.acquire_layout(ctx),
+        .layout = sgl_shaders::raster_box_filter_mipmap::main_ps.acquire_layout(ctx),
         .vertex_shader = *compiled_vs,
         .fragment_shader = *compiled_ps,
         .topology = sg::primitive_topology::triangle_list, // no vertex input: the vertex index places the triangle
@@ -82,8 +83,8 @@ sg::routine_outcome raster_box_filter_mipmap_routine::execute(sg::command_list& 
     {
         auto const group = ctx.transient.create_binding_group(
             cmd, self->_group_layout,
-            sgl_shaders::raster_mipmap_source{.level
-                                              = texture.as_texture_view({.mips = {.start = level - 1, .count = 1}})});
+            sgl_shaders::raster_box_filter_mipmap::raster_mipmap_source{
+                .level = texture.as_texture_view({.mips = {.start = level - 1, .count = 1}})});
 
         // Discarded rather than preserved: the pass covers the whole level, so loading what is there costs
         // bandwidth for texels every one of which is about to be overwritten.

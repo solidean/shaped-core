@@ -20,7 +20,7 @@ namespace
 cc::shared_async<sg::raster_pipeline_handle> rect_pipeline(sg::context& ctx,
                                                            cc::unique_function<void(sg::raster_pipeline_description&)> edit)
 {
-    co_return co_await ctx.cached.acquire_raster_pipeline(shaders::rects.floating, {}, cc::move(edit));
+    co_return co_await ctx.cached.acquire_raster_pipeline(shaders::rects::floating, {}, cc::move(edit));
 }
 
 auto const white = tg::vec4f(1, 1, 1, 1);
@@ -79,7 +79,7 @@ ASYNC_INVOCABLE_TEST("sg - cull_mode and front_face together decide which windin
                                                          {.width = width,
                                                           .height = height,
                                                           .colors = {sg::pixel_format::rgba16_float},
-                                                          .target_set = shaders::rect_target::name},
+                                                          .target_set = shaders::rects::rect_target::name},
                                                          [&](sg::rendering_scope& scope)
                                                          {
                                                              for (auto x = 0; x < width; ++x)
@@ -128,7 +128,7 @@ ASYNC_INVOCABLE_TEST("sg - a wireframe fill leaves a triangle's interior empty",
                                                          {.width = 2 * size,
                                                           .height = size,
                                                           .colors = {sg::pixel_format::rgba16_float},
-                                                          .target_set = shaders::rect_target::name},
+                                                          .target_set = shaders::rects::rect_target::name},
                                                          [&](sg::rendering_scope& scope)
                                                          {
                                                              scope.bind_pipeline(*solid);
@@ -198,7 +198,7 @@ ASYNC_INVOCABLE_TEST("sg - each primitive_topology assembles one vertex list int
                                                              {.width = size,
                                                               .height = size,
                                                               .colors = {sg::pixel_format::rgba16_float},
-                                                              .target_set = shaders::rect_target::name},
+                                                              .target_set = shaders::rects::rect_target::name},
                                                              [&](sg::rendering_scope& scope)
                                                              {
                                                                  scope.bind_pipeline(*pipeline);
@@ -240,7 +240,7 @@ ASYNC_INVOCABLE_TEST("sg - a second scope's target_op keeps, clears or discards 
             {.width = width,
              .height = 1,
              .colors = {sg::pixel_format::rgba16_float},
-             .target_set = shaders::rect_target::name,
+             .target_set = shaders::rects::rect_target::name,
              .clear_color = red},
             [&](sg::command_list& cmd, sg_test::offscreen_targets const& targets)
             {
@@ -295,7 +295,7 @@ ASYNC_INVOCABLE_TEST("sg - a viewport maps clip space onto its pixels, and a sci
         {.width = width,
          .height = height,
          .colors = {sg::pixel_format::rgba16_float},
-         .target_set = shaders::rect_target::name},
+         .target_set = shaders::rects::rect_target::name},
         [&](sg::rendering_scope& scope)
         {
             scope.bind_pipeline(*pipeline);
