@@ -953,7 +953,8 @@ struct let_simplifier
         {
             if (!is_known(e(), list[i]) || is_dropped(list[i]))
                 continue;
-            auto const& s = e().at(list[i]);
+            // A copy: the recursion below adds statements, which can move the one a reference would point at.
+            auto const s = e().at(list[i]);
             for_each_body_of(e(), s, [&](ast::range_of<flat_stmt_id> inner) { split_in(inner, u, depth + 1); });
 
             // a let of a construction

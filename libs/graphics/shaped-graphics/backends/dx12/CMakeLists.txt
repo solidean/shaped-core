@@ -99,7 +99,8 @@ target_include_directories(shaped-graphics-dx12
 # d3d12/dxgi/dxguid ship with the Windows SDK on the default lib path;
 # d3dcompiler is only needed once we compile shaders (not yet).
 # pdh: the GPU Engine performance counters, which are the only route to GPU busy time on Windows.
-target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxguid pdh)
+# version: the loaded WARP's file version, which is the driver version a pipeline blob is keyed on there.
+target_link_libraries(shaped-graphics-dx12 PUBLIC shaped-graphics d3d12 dxgi dxguid pdh version)
 
 # Names dx12_common.hh, this backend's single SDK gate, rather than <d3d12.h> and friends.
 # The gate opens and closes its own `byte` bracket and keeps its clean-core headers above it, so the PCH inherits the sanitization instead of racing it.
@@ -157,7 +158,7 @@ if(SC_BUILD_TESTS)
         tests/dx12-raytracing-test.cc
         tests/dx12-query-test.cc
     )
-    sc_nexus_binary(shaped-graphics-dx12-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    sg_warp_test_binary(shaped-graphics-dx12-test)
 
     target_link_libraries(shaped-graphics-dx12-test PRIVATE shaped-graphics-dx12 nexus)
 

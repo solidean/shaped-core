@@ -26,6 +26,14 @@ sr::input_event drag(sr::mouse_button held, float dx, float dy)
     return {.payload = sr::mouse_move_event{.delta = tg::vec2f(dx, dy), .held_buttons = sr::mouse_button_bit(held)}};
 }
 
+// A drag as a window of `density` pixels per logical unit reports it: the same hand motion, scaled.
+sr::input_event drag_at_density(sr::mouse_button held, float dx, float dy, float density)
+{
+    return {.payload = sr::mouse_move_event{.delta = tg::vec2f(dx * density, dy * density),
+                                            .pixel_density = density,
+                                            .held_buttons = sr::mouse_button_bit(held)}};
+}
+
 sr::input_event wheel(float ticks)
 {
     return {.payload = sr::mouse_wheel_event{.delta = tg::vec2f(0, ticks)}};
@@ -50,7 +58,7 @@ TEST("sv - orbit controller turns a drag into azimuth and elevation")
     auto c = sv::orbit_camera_controller{};
     c.orbit.azimuth = tg::angle_d::make_from_degree(0);
     c.orbit.elevation = tg::angle_d::make_from_degree(0);
-    auto const step = c.config.orbit_degrees_per_pixel;
+    auto const step = c.config.orbit_degrees_per_logical_pixel;
 
     // Motion before a button goes down is the cursor merely passing over the view.
     CHECK(!c.handle(motion(50, 50)));
@@ -69,6 +77,35 @@ TEST("sv - orbit controller turns a drag into azimuth and elevation")
     (void)c.handle(button(sr::mouse_button::left, false));
     CHECK(!c.is_dragging());
     CHECK(!c.handle(motion(100, 100))); // the drag is over; nothing follows the cursor
+}
+
+TEST("sv - a drag turns the camera as far at every pixel density")
+{
+    // A Retina window reports twice the pixels for the same hand motion; the controllers work in logical units.
+    auto const orbit_after = [](float density)
+    {
+        auto c = sv::orbit_camera_controller{};
+        c.orbit.azimuth = tg::angle_d::make_from_degree(0);
+        c.orbit.elevation = tg::angle_d::make_from_degree(0);
+        (void)c.handle(button(sr::mouse_button::left, true));
+        (void)c.handle(drag_at_density(sr::mouse_button::left, 10, 5, density));
+        return c.orbit;
+    };
+    auto const flat = orbit_after(1.0f);
+    auto const retina = orbit_after(2.0f);
+    CHECK(abs_of(flat.azimuth.degree() - retina.azimuth.degree()) < eps);
+    CHECK(abs_of(flat.elevation.degree() - retina.elevation.degree()) < eps);
+
+    auto const yaw_after = [](float density)
+    {
+        auto c = sv::fps_camera_controller{};
+        c.config.look_requires_button = false;
+        c.pose.yaw = tg::angle_d::make_from_degree(0);
+        (void)c.handle(drag_at_density(sr::mouse_button::right, 10, 0, density));
+        return c.pose.yaw.degree();
+    };
+    CHECK(abs_of(yaw_after(1.0f) - yaw_after(2.0f)) < eps);
+    CHECK(yaw_after(2.0f) != 0.0);
 }
 
 TEST("sv - orbit controller keeps the eye off the pole")
@@ -259,7 +296,7 @@ TEST("sv - orbit_state and camera::orbiting agree")
 TEST("sv - fps controller turns a right-drag into yaw and pitch")
 {
     auto c = sv::fps_camera_controller{};
-    auto const step = c.config.look_degrees_per_pixel;
+    auto const step = c.config.look_degrees_per_logical_pixel;
 
     // Motion before the button goes down is the cursor merely passing over the view.
     CHECK(!c.handle(motion(50, 50)));

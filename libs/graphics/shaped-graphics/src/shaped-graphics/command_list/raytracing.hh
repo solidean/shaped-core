@@ -41,7 +41,7 @@ public:
     /// Build a TLAS over `instances`.
     /// Each instance's `blas` must be non-null and already built, and the TLAS holds every referenced blas_handle alive.
     /// `instance_id` / `hit_group_offset` are 24-bit, and assert on overflow.
-    /// Under `context::portability_checks` the TLAS also keeps each instance's BLAS, offset and mask, which is what dispatch_rays checks.
+    /// Under `context::hit_record_checks` the TLAS also keeps each instance's BLAS, offset and mask, which is what dispatch_rays checks.
     /// Throws sg::allocation_exception if the result buffer cannot be allocated.
     /// Requires is_supported().
     [[nodiscard]] tlas_handle build_tlas(cc::span<tlas_instance const> instances,
@@ -68,9 +68,11 @@ public:
     /// Each dimension must be >= 1, and their product <= 2^30.
     /// Requires a bound pipeline, and `table` must have been built for it.
     ///
-    /// Under `context::portability_checks`, every instance of every bound tlas is checked against the hit records it reaches.
+    /// Under `context::hit_record_checks`, every instance of every bound tlas is checked against the hit records it reaches.
     /// Each must exist, and be procedural exactly when the instance's BLAS holds AABBs.
-    /// A mismatch logs an error, once per table and tlas in a list, and the dispatch still runs, since hot reload can change a hit group under a running program.
+    /// A mismatch logs an error, once per table and tlas in a list, rather than asserting, since hot reload can change a hit group under a running program.
+    /// **A dispatch reaching a record past the table's end is skipped**, every time in that list, since metal can fault the GPU on it.
+    /// One reaching only records of the wrong kind still runs.
     /// Only a tlas built, and a group or staging group created, while the checks were on is seen.
     void dispatch_rays(raytracing_shader_table const& table, raygen_index raygen, int width, int height = 1, int depth = 1);
 

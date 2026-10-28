@@ -160,9 +160,12 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
         return cc::error(cc::move(unsupported.value()));
     _ctx._stats.add(stat::binding_groups_created);
     auto const checked = _ctx.portability_checks();
+    auto const traced = _ctx.hit_record_checks();
     auto group = _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
     if (group.has_value() && checked)
         impl::record_buffer_uses(*group.value(), views);
+    if (group.has_value() && traced)
+        impl::record_tlases(*group.value(), views);
     return group;
 }
 
@@ -190,9 +193,12 @@ cc::result<binding_group_handle> context_transient_scope::try_create_binding_gro
     _ctx._stats.add(stat::binding_groups_created);
     // Only a slot needs the layout to name its binding, and only where the checks are on.
     auto const checked = _ctx.portability_checks() ? layout : binding_group_layout_handle();
+    auto const traced = _ctx.hit_record_checks();
     auto group = _ctx.try_create_binding_group(cc::move(layout), views, samplers, lifetime_scope::transient);
     if (group.has_value() && checked != nullptr)
         impl::record_buffer_uses(*group.value(), *checked, views);
+    if (group.has_value() && traced)
+        impl::record_tlases(*group.value(), views);
     return group;
 }
 } // namespace sg

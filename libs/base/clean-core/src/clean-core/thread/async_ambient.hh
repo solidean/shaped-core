@@ -6,6 +6,14 @@
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/impl/async_tls.hh>
 
+// Whether a link's releases can be watched (cc::async_ambient_watch_releases), always 0 or 1.
+// SC_ASYNC_AMBIENT_TRACE asks for it, whole-build: async_ambient_drop is inline, and compiled both ways in one program it is an ODR violation.
+#ifdef CC_ASYNC_AMBIENT_TRACE_REQUESTED
+#define CC_ASYNC_AMBIENT_TRACE 1
+#else
+#define CC_ASYNC_AMBIENT_TRACE 0
+#endif
+
 // Ambient context for cc::async: "which logical task is this work part of?", answerable from anywhere inside a frame.
 // The node-side half — how a context reaches a frame running on an arbitrary worker — is in async_node.hh / async.cc.
 // This file is the composition layer above it, and knows nothing about nodes.
@@ -65,12 +73,31 @@ inline void async_ambient_retain(void* a)
         static_cast<async_ambient_link*>(a)->refs.fetch_add(1, cc::memory_order_relaxed);
 }
 
+#if CC_ASYNC_AMBIENT_TRACE
+/// The link cc::async_ambient_watch_releases watches, or null.
+/// Read on every drop of a link, which is all a trace build pays while nothing is watched.
+extern cc::atomic<async_ambient_link const*> async_ambient_watched;
+
+/// async_ambient_drop for the watched link, calling the watch's hook; out of line, since only that one link takes it.
+[[nodiscard]] bool async_ambient_drop_watched(async_ambient_link* l);
+#endif
+
+/// Drops one reference to `l`, and says whether it was the last; the one place a link's count goes down.
+[[nodiscard]] inline bool async_ambient_drop(async_ambient_link* l)
+{
+#if CC_ASYNC_AMBIENT_TRACE
+    if (async_ambient_watched.load(cc::memory_order_relaxed) == l) [[unlikely]]
+        return async_ambient_drop_watched(l);
+#endif
+    return l->refs.fetch_sub(1, cc::memory_order_acq_rel) == 1;
+}
+
 inline void async_ambient_release(void* a)
 {
     if (a == nullptr)
         return;
     auto* const l = static_cast<async_ambient_link*>(a);
-    if (l->refs.fetch_sub(1, cc::memory_order_acq_rel) == 1)
+    if (async_ambient_drop(l))
         async_ambient_free(l);
 }
 } // namespace cc::impl
@@ -86,6 +113,20 @@ namespace cc
 
     return static_cast<async_ambient_link const*>(head)->refs.load(cc::memory_order_acquire) - 1;
 }
+
+/// Called on the releasing thread for each release of a watched link, with how many holders it has left.
+/// It runs inside the release, which may hold a node's lock: it must not touch an async node, only record.
+using async_ambient_release_hook = void (*)(void const* link, i32 refs_left, void* user);
+
+/// Watches every release of `head` from now on, calling `hook(head, refs_left, user)` on the releasing thread.
+/// For finding who still carries a context past its owner's end; nexus names a test's leftover work with it.
+/// One watch at a time, process-wide; a child link releasing its parent counts as a release of the parent.
+/// False, watching nothing, in a build without CC_ASYNC_AMBIENT_TRACE, or while another watch is armed.
+[[nodiscard]] bool async_ambient_watch_releases(void const* head, async_ambient_release_hook hook, void* user);
+
+/// Ends the watch on `head`; returns once no hook call for it is still running, so `user` may go.
+/// A no-op unless `head` is the watched link.
+void async_ambient_unwatch_releases(void const* head);
 } // namespace cc
 
 namespace cc::impl

@@ -65,6 +65,20 @@ exceptions:
       PRIVATE behind SR_HAS_NRD and SR_HAS_DLSS, and neither reaches a public header.
       Section 4f excludes life-critical use without a separate agreement, and section 15 carries US export terms.
 
+  - identifier: LicenseRef-Microsoft-WARP-Testing
+    why: >-
+      Microsoft Software License Terms for the Direct3D WARP NuGet package, the software D3D12 adapter in extern/warp.
+      Proprietary, and narrower than any other term here: section 1a grants use only to develop and test applications,
+      for internal business purposes, on Windows.
+      Accepted because that is exactly the use — a d3d10warp.dll staged beside the dx12 test binaries so they run on a
+      WARP without the system one's ray-tracing bug — and because extern/warp is `install: on-request`, so only a person
+      or the Windows Clang CI job that ran fetch-warp.py ever has it.
+      Section 3e forbids sharing, publishing or distributing it, which is why it is gitignored, never staged beside
+      anything but a test binary, and never reaches a shipping bundle or an artifact upload.
+      Two terms are worth re-reading on any bump.
+      Section 2a lets the software send usage data to Microsoft, with only partial opt-out, and section 7 puts US users
+      under binding individual arbitration with a class-action waiver.
+
 # Licenses we will not take, listed so a refusal comes with a reason rather than a silent absence.
 denied:
   - identifier: GPL-2.0-only

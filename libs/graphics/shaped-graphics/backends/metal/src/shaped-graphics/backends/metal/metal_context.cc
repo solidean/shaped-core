@@ -105,7 +105,12 @@ void metal_context::set_inline_download_budget(isize bytes)
 void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)
 {
     if (kind == sg::device_error_kind::device_lost)
+    {
         mark_device_lost(cc::string(message));
+
+        // After the mark, so whatever this wakes finds the loss and settles as an error rather than as success.
+        _epochs.abandon_timelines();
+    }
     else
         report_device_error({.kind = kind, .message = cc::string(message)});
 }
@@ -315,8 +320,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
             options->addFeedbackHandler(^void(MTL4::CommitFeedback* feedback) {
               auto* const error = feedback->error();
               if (error != nullptr)
-                  sink->report(device_error_kind_of(NS::UInteger(error->code())),
-                               describe_error(error, "a metal command buffer failed"));
+                  sink->report(device_error_kind_of(error), describe_error(error, "a metal command buffer failed"));
 
               for (auto& download : *downloads)
               {
@@ -331,8 +335,7 @@ sg::submission_token metal_context::submit_command_list(std::unique_ptr<sg::comm
                   sink->notify_drained();
             });
 
-            MTL4::CommandBuffer const* const buffers[] = {buffer};
-            _queue->commit(buffers, 1, options);
+            _residency.commit(_queue, buffer, options);
             options->release();
 
             _epochs.signal_submission(claimed);
@@ -647,6 +650,8 @@ void metal_context::arm_completion_signal(u64 submission, u64 epoch)
 
 void metal_context::park_for_completion_signal(u64 submission, u64 epoch, u64 wake_generation)
 {
+    _completion.park_count.fetch_add(1, cc::memory_order_relaxed);
+
     // **Two GPU timelines and a host wake, and Metal cannot wait on several at once.**
     // Vulkan parks one `vkWaitSemaphores` with WAIT_ANY over all three; `MTL::SharedEvent::waitUntilSignaledValue`
     // takes a single event, so a waiter built on it would miss whichever of the others fired first.
@@ -724,8 +729,12 @@ void metal_context::wake_completion_signal(u64 generation)
     // The host source, kept apart from the GPU one so neither masks the other.
     // Raised rather than assigned: generations are handed out strictly increasing, and a later wake may already have
     // raised it further.
+    //
+    // **The generation itself, not one past it.**
+    // A park that read this generation is not owed a wake by it, and storing one past it released that park forever.
+    // The waiter then spun at a full core for the rest of the context's life, from the first lowered target on.
     auto const guard = std::lock_guard(_completion.mutex);
-    _completion.host_generation = cc::max(_completion.host_generation, generation + 1);
+    _completion.host_generation = cc::max(_completion.host_generation, generation);
     _completion.condition.notify_all();
 }
 

@@ -1,5 +1,7 @@
 #include <clean-core/error/exception.hh>
 #include <clean-core/thread/async_ambient.hh>
+#include <clean-core/thread/native_thread.hh>
+#include <clean-core/thread/thread.hh>
 #include <nexus/test.hh>
 #include <nexus/tests/execute.hh>
 #include <nexus/tests/registry.hh>
@@ -637,6 +639,55 @@ TEST("test sections - work outliving a section fails that section and ends the r
     for (auto const& e : exec.executions[0].root.subsections[0].errors)
         found |= e.expr.contains("left async work running");
     CHECK(found);
+}
+
+TEST("test sections - with SC_ASYNC_AMBIENT_TRACE, leftover work that lets go is reported with who released it",
+     no_scheduler)
+{
+    if constexpr (!CC_HAS_THREADS)
+        SKIP("needs a second thread to hold the context past the pass");
+
+    // A thread holds the test's context past its pass, and lets go a moment later, as straggling work does.
+    auto holder = cc::native_thread();
+    nx::test_registry reg;
+    reg.add_declaration( //
+        "testLeftoverLetsGo", {},
+        [&]
+        {
+            holder = cc::native_thread::start(
+                [kept = nx::capture_current_test()]() mutable
+                {
+                    cc::this_thread_sleep_secs(0.02);
+                    kept.reset();
+                });
+            CHECK(true);
+        });
+
+    auto schedule = nx::test_schedule::create({}, reg);
+    auto exec = nx::execute_tests(schedule, {});
+    holder.join();
+
+    // Leftover at the count fails the test either way; the wait for it to let go changes only what the report says.
+    CHECK(exec.count_failed_tests() == 1);
+    REQUIRE(exec.executions.size() == 1);
+    auto reported = false;
+    auto let_go = false;
+    auto released = false;
+    for (auto const& e : exec.executions[0].root.errors)
+    {
+        if (!e.expr.contains("left async work running"))
+            continue;
+        reported = true;
+        for (auto const& line : e.extra_lines)
+        {
+            let_go |= line.contains("let go within");
+            released
+                |= line.contains("released, 1 holder(s) left"); // the test's own scope still holds it while nexus counts
+        }
+    }
+    CHECK(reported);
+    CHECK(let_go == bool(CC_ASYNC_AMBIENT_TRACE));
+    CHECK(released == bool(CC_ASYNC_AMBIENT_TRACE));
 }
 
 TEST("test sections - CC_ASSERT_ALWAYS failure in root after subsections executes on all paths", no_scheduler)

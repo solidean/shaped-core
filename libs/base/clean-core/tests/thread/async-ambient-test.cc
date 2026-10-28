@@ -176,6 +176,58 @@ TEST("async-ambient - outstanding() counts holders beyond the scope")
     CHECK(s.outstanding() == 0); // back to clean — what a leak-checking consumer wants to see at scope exit
 }
 
+namespace
+{
+struct seen_releases
+{
+    cc::vector<i32> left;
+};
+
+void note_release(void const*, i32 left, void* user)
+{
+    static_cast<seen_releases*>(user)->left.push_back(left);
+}
+} // namespace
+
+TEST("async-ambient - a watch sees every release of its link, a child's release of its parent included, and only those")
+{
+    cc::async_ambient_scope const s(tag_a(), &value_a);
+    auto* const head = s.link();
+    auto seen = seen_releases();
+
+    auto const armed = cc::async_ambient_watch_releases(head, note_release, &seen);
+    if constexpr (!CC_ASYNC_AMBIENT_TRACE)
+    {
+        CHECK(!armed); // a build without SC_ASYNC_AMBIENT_TRACE watches nothing
+        return;
+    }
+    // nexus watches a test's own link as each pass ends, so another test's end may hold the one watch
+    if (!armed)
+        SKIP("another watch is armed");
+
+    cc::impl::async_ambient_retain(head);
+    cc::impl::async_ambient_retain(head);
+    cc::impl::async_ambient_release(head);
+    {
+        // the child holds its parent, and freeing the child releases it
+        cc::async_ambient_scope const child(tag_b(), &value_b);
+        auto const own = cc::async_ambient_handle();
+        CHECK(own.head() == child.link());
+    }
+    cc::impl::async_ambient_release(head);
+    cc::async_ambient_unwatch_releases(head);
+
+    // after the unwatch, nothing is seen
+    cc::impl::async_ambient_retain(head);
+    cc::impl::async_ambient_release(head);
+
+    REQUIRE(seen.left.size() == 3);
+    CHECK(seen.left[0] == 2); // the second retain's release
+    CHECK(seen.left[1] == 2); // the child's free, releasing its parent
+    CHECK(seen.left[2] == 1); // the first retain's release, the scope's own reference left
+    CHECK(s.outstanding() == 0);
+}
+
 TEST("async-ambient - a handle's reset drops its hold, and assigning an empty one captures instead")
 {
     cc::async_ambient_scope const s(tag_a(), &value_a);

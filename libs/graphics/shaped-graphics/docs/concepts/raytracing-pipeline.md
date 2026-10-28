@@ -81,15 +81,27 @@ Only metal needs it, because metal bakes the geometry term into the structure; d
 A hit group with no shaders at all is valid.
 It is a triangle group that accepts every hit and runs nothing, which is what a row holds for a ray type its hit group leaves empty.
 
-## A mismatched hit group is logged at dispatch, under the portability checks
+## A mismatched hit record is logged at dispatch, in every checked build
 
 A triangle BLAS must not reach a procedural hit group and a procedural BLAS must, and no backend checks it for you.
-With `ctx.portability_checks()` on, `dispatch_rays` walks every instance of every bound TLAS and checks each record it reaches.
+A record past the end of the table is worse: on metal the hit calls through an intersection function table past its end, which can fault the GPU.
+With `ctx.hit_record_checks()` on, `dispatch_rays` walks every instance of every bound TLAS and checks each record it reaches.
 Each must exist and match the BLAS's kind, and a BLAS of more than one geometry must have been built with the table's ray count as its stride.
 The check assumes each trace's geometry multiplier is that ray count, which an SGL-generated table's traces are.
-A hand-written shader passing another multiplier, such as `TraceRay(…, ray_type, 0, …)` sharing one record across geometries, keeps the checks off.
+A hand-written shader passing another multiplier, such as `TraceRay(…, ray_type, 0, …)` sharing one record across geometries, turns the checks off with `ctx.set_hit_record_checks(false)`.
+The switch is per context rather than per table, so that shader turns them off for every table.
+An opt-out on the shader table would let an SGL-generated table keep its check beside it, and is worth adding once a program mixes the two.
 A mismatch **logs an error rather than asserting**, since the hit groups come from shaders that hot reload can change under a running program.
-It is logged once per table and TLAS in a command list, and the dispatch still runs.
+It is logged once per table and TLAS in a command list.
+**A dispatch reaching a record past the table's end is skipped**, and logs that it was, since submitting it can fault the GPU.
+The verdict is kept for the pair, so a second dispatch of the same table and TLAS in that list is skipped too.
+A dispatch reaching only records of the wrong kind still runs.
+A BLAS built with the wrong stride counts as past the end when its records overrun the table under either its stride or the ray count.
+
+**The checks are on by default wherever `CC_ASSERT` is compiled in**, so the debug and relwithdebinfo builds, and off in release.
+A wrong record is undefined behavior on every backend rather than something only WebGPU refuses, so `portability_checks` does not govern them.
+What they cost is a copy of each TLAS's instances at build, and one walk of them per shader table and TLAS in a command list.
+That is cheap next to the traces it guards, and still a cost a release build need not pay.
 
 The check reads only what sg recorded on the CPU side, and records it only while the checks are on.
 A TLAS keeps its instances' BLAS, offset and mask, and a binding group the TLASes it binds, so both must be made after the checks were turned on.

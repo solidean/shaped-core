@@ -206,6 +206,27 @@ else()
     set(SG_WARP_TEST_BINARY_ARGS "" CACHE INTERNAL "")
 endif()
 
+# Registers a test binary that carries a dx12 WARP driver: the timeout above, and the WARP it runs on.
+# Windows' own WARP traces some scenes wrong (docs/bugs-external/warp-raytracing-wrong-capture), so where
+# `uv run extern/warp/fetch-warp.py` fetched the pinned one, its DLL is staged beside the binary and loaded instead.
+# SG_HAS_PINNED_WARP tells the binary's tests which of the two they run on, for a skip that only the system one needs.
+# A function is global once defined, so the libraries above sg register theirs through it too.
+# TIMEOUT replaces the allowance above, for a binary that needs longer still.
+function(sg_warp_test_binary target)
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "TIMEOUT" "")
+    if(arg_TIMEOUT)
+        sc_nexus_binary(${target} KINDS tests TIMEOUT ${arg_TIMEOUT})
+    else()
+        sc_nexus_binary(${target} KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    endif()
+    if(SC_PINNED_WARP_DLL)
+        sc_stage_runtime_dlls(${target} TAG ${target}-warp DLLS "${SC_PINNED_WARP_DLL}")
+        target_compile_definitions(${target} PRIVATE SG_HAS_PINNED_WARP=1)
+    else()
+        target_compile_definitions(${target} PRIVATE SG_HAS_PINNED_WARP=0)
+    endif()
+endfunction()
+
 if(WIN32)
     add_subdirectory(backends/dx12)
     list(APPEND _sg_backends shaped-graphics-dx12)
@@ -270,7 +291,7 @@ if(SC_BUILD_TESTS)
         tests/context/stats-recording-test.cc
         tests/raytracing/hit-row-test.cc
     )
-    sc_nexus_binary(shaped-graphics-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    sg_warp_test_binary(shaped-graphics-test)
 
     # Cross-backend API tests: run the sg API against each backend compiled into this binary. Each backend
     # contributes an entry-point driver under tests/backends/; the alias setup (tests/backends/backends.cc) makes

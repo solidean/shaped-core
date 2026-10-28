@@ -31,6 +31,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |
 | [stb](https://github.com/nothings/stb) | 31c1ad374564 | `MIT OR Unlicense` | babel-serializer — the JPEG codec behind babel::jpg | [stb.txt](stb.txt) |
 | [ufbx](https://github.com/ufbx/ufbx) | v0.23.1 | `MIT OR Unlicense` | babel-serializer — the FBX reader behind babel::fbx | [ufbx.txt](ufbx.txt) |
+| [WARP](https://www.nuget.org/packages/Microsoft.Direct3D.WARP) | 1.0.21 | `LicenseRef-Microsoft-WARP-Testing` | the dx12 test binaries' WARP driver, staged beside them by sg_warp_test_binary | [warp.txt](warp.txt) |
 | [xxHash](https://github.com/Cyan4973/xxHash) | v0.8.3 | `BSD-2-Clause` | clean-core — cc::hash128 (the XXH3 128-bit hash) | [xxhash.txt](xxhash.txt) |
 | [zlib](https://zlib.net) | v1.3.1 | `Zlib` | clean-core — cc::compress / cc::decompress, the Deflate algorithm | [zlib.txt](zlib.txt) |
 | [Zstandard](https://github.com/facebook/zstd) | v1.5.7 | `BSD-3-Clause` | clean-core — cc::compress / cc::decompress, the Zstandard algorithm | [zstandard.txt](zstandard.txt) |

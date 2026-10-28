@@ -115,3 +115,23 @@ TEST("sr - wheel amounts follow the platform's scroll direction")
 
     CHECK(impl::wheel_amount(0.0f, SDL_MOUSEWHEEL_FLIPPED) == 0.0f);
 }
+
+TEST("sr - mouse coordinates convert from logical units to pixels")
+{
+    // A Retina window: SDL's logical (10, 20) is pixel (20, 40), and a delta scales the same way.
+    CHECK(impl::pixels_from_logical(10.0f, 20.0f, 2.0f) == tg::pos2f(20.0f, 40.0f));
+    CHECK(impl::pixels_from_logical_delta(-1.5f, 3.0f, 2.0f) == tg::vec2f(-3.0f, 6.0f));
+
+    // A fractionally scaled output keeps sub-pixel positions rather than rounding them.
+    CHECK(impl::pixels_from_logical(3.0f, 5.0f, 1.5f) == tg::pos2f(4.5f, 7.5f));
+
+    CHECK(impl::pixels_from_logical(7.0f, 9.0f, 1.0f) == tg::pos2f(7.0f, 9.0f));
+}
+
+TEST("sr - a failed pixel density query reads as 1")
+{
+    // SDL_GetWindowPixelDensity returns 0 on error, which would collapse every mouse position onto the origin.
+    CHECK(impl::pixel_density_from_sdl(0.0f) == 1.0f);
+    CHECK(impl::pixel_density_from_sdl(2.0f) == 2.0f);
+    CHECK(impl::pixel_density_from_sdl(1.5f) == 1.5f);
+}

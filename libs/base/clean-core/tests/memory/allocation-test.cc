@@ -419,9 +419,12 @@ void throw_refused(isize min_bytes, isize, isize)
 }
 } // namespace
 
-// a request no 64-bit system grants, so the infallible allocation fails through the handler, in every build
+// a request no 64-bit system grants, so the infallible allocation fails through the handler, in every build ASan does not own
 TEST("allocation - a failed allocate_bytes calls the installed handler, which may throw")
 {
+    if constexpr (CC_HAS_ADDRESS_SANITIZER != 0)
+        SKIP("ASan's allocator aborts on a request it cannot grant, before the handler is reached");
+
     auto constexpr huge = isize(1) << 60;
     cc::set_allocation_failure_handler(throw_refused);
     for (auto const* resource : {cc::default_memory_resource, &cc::system_memory_resource})
