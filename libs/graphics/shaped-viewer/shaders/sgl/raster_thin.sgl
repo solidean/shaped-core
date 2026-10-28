@@ -99,7 +99,7 @@ fun thin(p: varyings, ctx: material.shading_context, surface_in: openpbr.surface
     let shading = openpbr.shading_frame(mut surface, face.n, v, face.authored, supplied_tangent_frame)
 
     let prev = scene.camera(..f.previous_camera)
-    let motion = float2(p.position.x, p.position.y) - scene.camera_project(prev, p.world - prev.position, f.size)
+    let motion = float2(p.position.x, p.position.y) + f.jitter - scene.camera_project(prev, p.world - prev.position, f.size)
     return thin_of(surface, shading.n, face.n, view_depth, motion, f.near_plane)
 
 /// What a pixel no surface covers holds in the thin G-buffer, as `environment` fills the lit targets.

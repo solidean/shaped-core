@@ -21,6 +21,11 @@ use tracer
     size: float2
     pad: float2
 
+/// How far this frame's samples sit from the pixels' centers, in pixels, as `raster.frame_constants::jitter` says.
+fun jitter_of(f: tracer.frame_constants) -> float2:
+    let offset = if f.fixed_jitter != 0u => f.jitter - float2(0.5, 0.5) else float2(0.0)
+    return offset
+
 /// The random stream of pixel `px` this frame, seeded as the megakernel seeds its primary ray's.
 fun pixel_rng(px: uint2, width: uint){tracer.traced} -> uint:
     return pt.hash(px.x + px.y * width + tracer.traced.frame[0].rng_seed * 9781u)
@@ -112,11 +117,11 @@ fun secondary_of(bounced: bounce) -> secondary:
     let wo_local = if bounced.hit => openpbr.to_local(f, -bounced.wi) else float3(0.0, 0.0, -1.0)
     return { b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local }
 
-/// `raster.vertex_of`, reading the frame and the instance table of `tracer.traced`.
-fun vertex_of(vertex: int, instance: uint){tracer.traced, tracer.bindless} -> raster.varyings:
+/// `raster.vertex_of`, reading the frame and the instance table of `tracer.traced`, and the image's size from `pass`.
+fun vertex_of(vertex: int, instance: uint){tracer.traced, tracer.bindless, pass} -> raster.varyings:
     let f = tracer.traced.frame[0]
     let inst = scene.instance(..tracer.traced.instances[instance as int])
-    return raster.vertex_from(inst, instance, vertex, scene.camera(..f.camera), f.near_plane)
+    return raster.vertex_from(inst, instance, vertex, scene.camera(..f.camera), f.near_plane, raster.jitter_shift(jitter_of(f), pass.size))
 
 /// `raster.pixel_context`, reading the instance table of `tracer.traced`.
 fun pixel_context(p: raster.varyings, primitive: uint){tracer.traced, tracer.bindless} -> material.shading_context:
@@ -155,5 +160,5 @@ fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr
     let color = b.emission + lit + bounced.throughput * (bounced.escaped + bounce_lit)
 
     let prev = scene.camera(..f.previous_camera)
-    let motion = pixel - scene.camera_project(prev, p.world - prev.position, pass.size)
+    let motion = pixel + jitter_of(f) - scene.camera_project(prev, p.world - prev.position, pass.size)
     return raster.lit_targets(color, face.n, view_depth, surface, motion, f.near_plane)

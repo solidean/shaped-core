@@ -46,7 +46,7 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
     if (!self.is_ready())
         return sg::routine_outcome::declined;
     auto& ctx = cmd.context();
-    auto const& t = d.targets;
+    auto t = d.targets;
     auto const deferred = d.lighting == hybrid_lighting::deferred;
     if (deferred && self->_light_thin == nullptr)
         return sg::routine_outcome::declined;
@@ -63,6 +63,9 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
                                                 .height = extent[1],
                                                 .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
     };
+    // A frame with no primary depth of its own, as one drawn for an upscaler, still writes one: the deferred kernel tells escapes by it.
+    if (t.primary_depth.raw() == nullptr)
+        t.primary_depth = thin_target(sg::pixel_format::r32_float);
     auto thin = raster_thin_targets{};
     if (deferred)
         thin = {.emission = thin_target(sg::pixel_format::rgba16_float),
@@ -106,33 +109,33 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
         cmd, ctx.cached.acquire_binding_group_layout<tracer::traced>(),
         impl::traced_group_of(trace, self->_stand_ins, tlas, lights, frame, self->_stand_ins.paths));
 
-    auto const outcome
-        = raster_routine::execute(cmd, {.frame = {.camera = d.frame.camera,
-                                                  .previous_camera = d.frame.previous_camera,
-                                                  .near_plane = d.frame.near_plane,
-                                                  .light_count = d.frame.light_count,
-                                                  .decal_count = d.frame.decal_count,
-                                                  .pixel_spread = d.frame.pixel_spread,
-                                                  .size = tg::vec2f(f32(extent[0]), f32(extent[1])),
-                                                  .pad0 = tg::vec2f(0, 0)},
-                                        .background = d.background,
-                                        .instance_table = d.instance_table,
-                                        .lights = lights,
-                                        .decals = d.decals,
-                                        .decal_shapes = d.decal_shapes,
-                                        .decal_atlas = d.decal_atlas,
-                                        .draws = d.draws,
-                                        .index_pool = d.index_pool,
-                                        .permutations = d.permutations,
-                                        .fallback = d.fallback,
-                                        .bindless = d.bindless,
-                                        .targets = t,
-                                        .stand_ins = d.stand_ins,
-                                        .visibility = d.visibility,
-                                        .culling = d.culling,
-                                        .shading = deferred ? raster_shading::thin : raster_shading::traced,
-                                        .thin = thin,
-                                        .traced = deferred ? sg::binding_group_handle() : traced});
+    auto const outcome = raster_routine::execute(
+        cmd, {.frame = {.camera = d.frame.camera,
+                        .previous_camera = d.frame.previous_camera,
+                        .near_plane = d.frame.near_plane,
+                        .light_count = d.frame.light_count,
+                        .decal_count = d.frame.decal_count,
+                        .pixel_spread = d.frame.pixel_spread,
+                        .size = tg::vec2f(f32(extent[0]), f32(extent[1])),
+                        .jitter = d.frame.fixed_jitter != 0 ? d.frame.jitter - tg::vec2f(0.5f, 0.5f) : tg::vec2f(0, 0)},
+              .background = d.background,
+              .instance_table = d.instance_table,
+              .lights = lights,
+              .decals = d.decals,
+              .decal_shapes = d.decal_shapes,
+              .decal_atlas = d.decal_atlas,
+              .draws = d.draws,
+              .index_pool = d.index_pool,
+              .permutations = d.permutations,
+              .fallback = d.fallback,
+              .bindless = d.bindless,
+              .targets = t,
+              .stand_ins = d.stand_ins,
+              .visibility = d.visibility,
+              .culling = d.culling,
+              .shading = deferred ? raster_shading::thin : raster_shading::traced,
+              .thin = thin,
+              .traced = deferred ? sg::binding_group_handle() : traced});
     if (outcome != sg::routine_outcome::executed || !deferred)
         return outcome;
 

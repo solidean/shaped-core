@@ -58,11 +58,14 @@ EXAMPLE("shaped-viewer/hybrid-sponza")
         };
 
         panel("traced", {.mode = sv::render_mode::wavefront});
+        // A moving frame is drawn at the upscaler's quality extent and upscaled, as the 60 fps budget wants.
+        auto const reconstruct = sr::reconstruct_settings{.denoiser = sr::denoise_method::automatic,
+                                                          .scale = sr::render_scale_preset::quality};
         panel("forward", {.mode = sv::render_mode::hybrid,
                           .hybrid_lighting = sv::hybrid_lighting::forward,
-                          .reconstruct = {.denoiser = sr::denoise_method::automatic}});
+                          .reconstruct = reconstruct});
         panel("deferred", {.mode = sv::render_mode::hybrid,
                            .hybrid_lighting = sv::hybrid_lighting::deferred,
-                           .reconstruct = {.denoiser = sr::denoise_method::automatic}});
+                           .reconstruct = reconstruct});
     }
 }

@@ -24,7 +24,9 @@ struct frame_constants:
     pixel_spread: float
     /// the image's size in pixels
     size: float2
-    pad0: float2
+    /// How far this frame's samples sit from the pixels' centers, in pixels: 0 but where a frame is drawn for an upscaler.
+    /// The tracer's `jitter` minus one half, so pixel `px` sees the image at `px + 0.5 + jitter`, where its ray would.
+    jitter: float2
 
 /// The scene a raster frame draws — group 0, before the manager's bindless tables at 1 and `slug.tables` at 2.
 ///

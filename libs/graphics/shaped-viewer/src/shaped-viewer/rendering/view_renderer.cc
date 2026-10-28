@@ -957,7 +957,7 @@ struct raster_batch
         .decal_count = u32(scene.decals->decals.size()),
         .pixel_spread = fc.pixel_spread,
         .size = tg::vec2f(f32(resolution[0]), f32(resolution[1])),
-        .pad0 = tg::vec2f(0, 0),
+        .jitter = tg::vec2f(0, 0),
     };
 
     auto const background
@@ -1020,23 +1020,44 @@ struct raster_batch
     return outcome;
 }
 
-/// Draws one frame of hybrid layer `l` of `v` and blends it into `slot`'s mean, its G-buffer into the slots `rec` keeps beside it.
+/// The G-buffer slots `rec` keeps for layer `layer`, which a hybrid frame at the view's own size writes; `color` is left to the frame.
+[[nodiscard]] raster_gbuffer gbuffer_slots_of(impl::view_state& rec, u8 layer)
+{
+    auto const slot_of = [&](u64 id)
+    {
+        auto* const s = rec.temporal.get_ptr(id);
+        CC_ASSERT(s != nullptr && s->texture.raw() != nullptr, "a hybrid layer's G-buffer slot was not allocated");
+        return s->texture;
+    };
+    auto const* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
+    return {.normal = slot_of(temporal_id::normal_guide(layer)),
+            .depth = slot_of(temporal_id::depth_guide(layer)),
+            .albedo = slot_of(temporal_id::albedo_guide(layer)),
+            .specular_albedo = slot_of(temporal_id::specular_albedo_guide(layer)),
+            .roughness = slot_of(temporal_id::roughness_guide(layer)),
+            .motion = slot_of(temporal_id::motion_guide(layer)),
+            .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d()};
+}
+
+/// Draws one frame of hybrid layer `l` of `v` at `extent`, its G-buffer into `guides`, and blends it into `slot`'s mean where `into_mean`.
 ///
 /// A frame is one light sample per pixel and one bounce, so the layer accumulates while its image holds still, as a traced layer does.
-/// `fc` is the frame block a trace of the layer would upload, and `slot` must already have restarted on its hash.
-/// The G-buffer slots hold the latest frame's, which a still image redraws the same.
+/// `fc` is the frame block a trace of the layer would upload, its seed and jitter set, and `slot` must already have restarted on its hash.
+/// A frame drawn for an upscaler is at the upscaler's input extent, into scratch `guides`, and is no sample of the mean.
 /// Where `frame_output` is set, it receives this frame alone, which a temporal denoiser reads.
 /// Counts nothing: the caller counts a frame that executed, as a trace counts its own.
 [[nodiscard]] sg::routine_outcome hybrid_frame(sg::command_list& cmd,
                                                view_data const& v,
                                                layer const& l,
                                                u8 layer,
-                                               tg::vec2i resolution,
+                                               tg::vec2i extent,
                                                raster_scene const& scene,
                                                shaders::tracer::frame_constants fc,
                                                impl::view_state& rec,
                                                impl::temporal_slot& slot,
                                                gpu_resource_manager& resources,
+                                               raster_gbuffer const& guides,
+                                               bool into_mean,
                                                sg::texture_2d const& frame_output,
                                                stand_in_report& stand_ins)
 {
@@ -1053,7 +1074,6 @@ struct raster_batch
 
     fc.previous_camera = motion->has_last_camera ? motion->last_camera : fc.camera;
     fc.near_plane = f32(v.camera.projection.near_plane);
-    fc.rng_seed = seed_of(slot);
 
     auto const background
         = ctx.transient.create_buffer<background_gpu>(1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
@@ -1074,42 +1094,35 @@ struct raster_batch
     // This frame alone, which the mean then takes in by its weight.
     auto const color = ctx.transient.create_texture_2d(
         {.format = sg::pixel_format::rgba32_float,
-         .width = resolution[0],
-         .height = resolution[1],
+         .width = extent[0],
+         .height = extent[1],
          .usage = sg::texture_usage::render_target | sg::texture_usage::texture | sg::texture_usage::image});
-    auto* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
+    auto targets = guides;
+    targets.color = color;
 
-    auto const outcome = hybrid_routine::execute(
-        cmd, {.lighting = l.settings.hybrid_lighting,
-              .frame = fc,
-              .background = background,
-              .instances = resolved.instances,
-              .instance_table = instance_table,
-              .lights = light_buffer,
-              .emitters = emitter_buffer,
-              .decals = decal_buffers.decals,
-              .decal_shapes = decal_buffers.shapes,
-              .decal_atlas = decal_buffers.atlas,
-              .draws = batch.draws,
-              .index_pool = resources.meshes.index_pool(),
-              .permutations = batch.permutations,
-              .fallback = &resources.shaders.acquire_fallback(),
-              .bindless = &bindless,
-              .targets = {.color = color,
-                          .normal = slot_of(temporal_id::normal_guide(layer))->texture,
-                          .depth = slot_of(temporal_id::depth_guide(layer))->texture,
-                          .albedo = slot_of(temporal_id::albedo_guide(layer))->texture,
-                          .specular_albedo = slot_of(temporal_id::specular_albedo_guide(layer))->texture,
-                          .roughness = slot_of(temporal_id::roughness_guide(layer))->texture,
-                          .motion = motion->texture,
-                          .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d()},
-              .stand_ins = &stand_ins,
-              .visibility = &slot.raster_visibility});
+    auto const outcome = hybrid_routine::execute(cmd, {.lighting = l.settings.hybrid_lighting,
+                                                       .frame = fc,
+                                                       .background = background,
+                                                       .instances = resolved.instances,
+                                                       .instance_table = instance_table,
+                                                       .lights = light_buffer,
+                                                       .emitters = emitter_buffer,
+                                                       .decals = decal_buffers.decals,
+                                                       .decal_shapes = decal_buffers.shapes,
+                                                       .decal_atlas = decal_buffers.atlas,
+                                                       .draws = batch.draws,
+                                                       .index_pool = resources.meshes.index_pool(),
+                                                       .permutations = batch.permutations,
+                                                       .fallback = &resources.shaders.acquire_fallback(),
+                                                       .bindless = &bindless,
+                                                       .targets = targets,
+                                                       .stand_ins = &stand_ins,
+                                                       .visibility = &slot.raster_visibility});
     if (outcome == sg::routine_outcome::declined)
         return outcome;
 
     // A frame the blends could not take in yet is drawn for nothing, and declines so that it counts nothing.
-    if (!sr::mix_routine::execute(cmd, slot.texture, color, 1.0f / f32(slot.accum_frame + 1)))
+    if (into_mean && !sr::mix_routine::execute(cmd, slot.texture, color, 1.0f / f32(slot.accum_frame + 1)))
         return sg::routine_outcome::declined;
     if (frame_output.raw() != nullptr && !sr::mix_routine::execute(cmd, frame_output, color, 1.0f))
         return sg::routine_outcome::declined;
@@ -1135,8 +1148,11 @@ struct raster_batch
     slot.sample_target = target;
     if (!frame_samples(slot, target, false))
         return sg::routine_outcome::executed;
+    auto seeded = fc;
+    seeded.rng_seed = seed_of(slot);
     auto stand_ins = stand_in_report{};
-    auto const outcome = hybrid_frame(cmd, v, l, layer, resolution, scene, fc, rec, slot, resources, {}, stand_ins);
+    auto const outcome = hybrid_frame(cmd, v, l, layer, resolution, scene, seeded, rec, slot, resources,
+                                      gbuffer_slots_of(rec, layer), true, {}, stand_ins);
     if (outcome == sg::routine_outcome::declined)
         return outcome;
 
@@ -1541,8 +1557,7 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // A layer that can never trace at the upscaler's extent holds no paths for it.
     if (!has_temporal || draws_over || upscale_settings.upscaler == sr::upscale_method::none)
         slot->scaled_paths = {};
-    // A hybrid frame is drawn at the view's own size: upscaling it is the hybrid plan's phase 6.
-    auto const may_scale = moving && writes_temporal && !draws_over && mode != render_mode::hybrid;
+    auto const may_scale = moving && writes_temporal && !draws_over;
     auto const input_extent = may_scale
                                 ? sr::reconstruct_input_extent(ctx, upscale_settings, tr.resolution, traceable_guides())
                                 : tr.resolution;
@@ -1603,10 +1618,12 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
             return {};
         if (!scaled)
             return s->texture;
-        return ctx.transient.create_texture_2d({.format = format,
-                                                .width = input_extent[0],
-                                                .height = input_extent[1],
-                                                .usage = sg::texture_usage::texture | sg::texture_usage::image});
+        // A render target too, since a hybrid frame rasterizes its G-buffer into it.
+        return ctx.transient.create_texture_2d(
+            {.format = format,
+             .width = input_extent[0],
+             .height = input_extent[1],
+             .usage = sg::texture_usage::texture | sg::texture_usage::image | sg::texture_usage::render_target});
     };
     auto const output = image_of(slot, true, sg::pixel_format::rgba32_float);
     auto const guide_normal = image_of(ds.normal, has_guides, sg::pixel_format::rgba16_float);
@@ -1627,11 +1644,20 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto const dispatch = [&]
     {
         // A hybrid frame draws its primary hits and lights them inline, then blends into the mean the trace would have.
+        // A scaled one draws at the upscaler's input extent into the scratch guides the upscale reads, and is no sample of the mean.
         if (mode == render_mode::hybrid)
             return hybrid_frame(
-                cmd, v, l, tr.layer, tr.resolution,
+                cmd, v, l, tr.layer, input_extent,
                 {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash}, fc, rec,
-                *slot, resources, frame_output, stand_ins);
+                *slot, resources,
+                scaled ? raster_gbuffer{.normal = guide_normal,
+                                        .depth = guide_depth,
+                                        .albedo = guide_albedo,
+                                        .specular_albedo = guide_specular_albedo,
+                                        .roughness = guide_roughness,
+                                        .motion = guide_motion}
+                       : gbuffer_slots_of(rec, tr.layer),
+                !scaled, frame_output, stand_ins);
 
         auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
             1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);

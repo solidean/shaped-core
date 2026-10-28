@@ -13,7 +13,7 @@ use scene
 use tracer
 
 /// `raster_pass.surface_vs` over `tracer.traced`, which a forward frame's pixel stage lists as group 0 in place of `raster.drawn`.
-@vertex fun hybrid_vs(@vertex_index vertex: int, @first_instance row: int){tracer.traced, tracer.bindless} -> raster.varyings:
+@vertex fun hybrid_vs(@vertex_index vertex: int, @first_instance row: int){tracer.traced, tracer.bindless, hybrid.pass} -> raster.varyings:
     return hybrid.vertex_of(vertex, row as uint)
 
 /// The thin G-buffer a deferred frame's raster pass wrote, `raster.thin_targets` but the guide slots it wrote in place.
@@ -54,7 +54,8 @@ binding thin_io:
 
     let f = tracer.traced.frame[0]
     let cam = scene.camera(..f.camera)
-    let pixel = float2((id.x as float) + 0.5, (id.y as float) + 0.5)
+    // Where the raster sampled the pixel, which is off its center on a frame drawn for an upscaler.
+    let pixel = float2((id.x as float) + 0.5, (id.y as float) + 0.5) + hybrid.jitter_of(f)
     let ray = scene.camera_ray_offset(cam, pixel, hybrid.pass.size)
     let p = cam.position + ray * (thin_io.depth.load(px) / dot(ray, normalize(cam.forward)))
 

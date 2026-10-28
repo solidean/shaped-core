@@ -46,12 +46,18 @@ fun mirroring_of(inst: scene.instance) -> float:
 /// A float's spacing shrinks toward 0 as fast as `near / w` does, so the depth test resolves a far surface as finely as a near one.
 /// That is the raster pass's own depth alone; `primary_depth` stays `1 - near / w`, the depth `sv::matrices_of` builds and the tracer writes.
 /// Up is up in clip space, which is the tracer's image read top row first.
-fun project(cam: scene.camera, p: float3, near: float) -> hpos4:
+/// `shift` moves the image in clip space, `jitter_shift` of a frame's jitter, so a pixel's center lands where its jittered ray would.
+fun project(cam: scene.camera, p: float3, near: float, shift: float2) -> hpos4:
     let offset = p - cam.position
     let depth = dot(offset, normalize(cam.forward))
     let x = dot(offset, cam.right_scaled) / dot(cam.right_scaled, cam.right_scaled)
     let y = dot(offset, cam.up_scaled) / dot(cam.up_scaled, cam.up_scaled)
-    return hpos4(x, y, near, depth)
+    return hpos4(x + shift.x * depth, y + shift.y * depth, near, depth)
+
+/// The clip-space shift that moves an image of `size` pixels by `-jitter`, so pixel `px` samples the image at `px + 0.5 + jitter`.
+/// Clip space's y is up where the image's is down.
+fun jitter_shift(jitter: float2, size: float2) -> float2:
+    return float2(-2.0 * jitter.x / size.x, 2.0 * jitter.y / size.y)
 
 /// Vertex `vertex` of row `instance` of the instance table, pulled out of the vertex pool.
 ///
@@ -60,15 +66,15 @@ fun project(cam: scene.camera, p: float3, near: float) -> hpos4:
 /// `instance` must be the same for the whole draw, which the `@per_draw` member it lands in holds the caller to.
 fun vertex_of(vertex: int, instance: uint){drawn, tracer.bindless} -> varyings:
     let f = drawn.frame[0]
-    return vertex_from(scene.instance(..drawn.instances[instance as int]), instance, vertex, scene.camera(..f.camera), f.near_plane)
+    return vertex_from(scene.instance(..drawn.instances[instance as int]), instance, vertex, scene.camera(..f.camera), f.near_plane, jitter_shift(f.jitter, f.size))
 
 /// `vertex_of` for whichever group holds the frame and the instance table: vertex `vertex` of `inst`, row `instance`, seen through `cam`.
-fun vertex_from(inst: scene.instance, instance: uint, vertex: int, cam: scene.camera, near: float){tracer.bindless} -> varyings:
+fun vertex_from(inst: scene.instance, instance: uint, vertex: int, cam: scene.camera, near: float, shift: float2){tracer.bindless} -> varyings:
     let vertices = inst.vertices as int
     let object = reinterpret_as_float(tracer.bindless.buffers[vertices].load3((vertex as uint) * 12))
     let world = to_world_point(inst, object)
     return {
-        position = project(cam, world, near)
+        position = project(cam, world, near, shift)
         instance = instance
         object = object
         world = world
@@ -243,7 +249,7 @@ fun shade(p: varyings, ctx: material.shading_context, surface_in: openpbr.surfac
         color += ambient(surface, shading.n, v) * occlusion
 
     let prev = scene.camera(..f.previous_camera)
-    let motion = float2(p.position.x, p.position.y) - scene.camera_project(prev, p.world - prev.position, f.size)
+    let motion = float2(p.position.x, p.position.y) + f.jitter - scene.camera_project(prev, p.world - prev.position, f.size)
     return lit_targets(color, n, view_depth, surface, motion, f.near_plane)
 
 /// What a lit pixel writes: `color`, and the guides of `surface` at view depth `view_depth`, whose turned geometric normal is `n`.
@@ -265,7 +271,8 @@ fun lit_targets(color: float3, n: float3, view_depth: float, surface: openpbr.su
 fun environment(pixel: float2){drawn} -> targets:
     let f = drawn.frame[0]
     let cam = scene.camera(..f.camera)
-    let dir = normalize(scene.camera_ray_offset(cam, pixel, f.size))
+    let at = pixel + f.jitter
+    let dir = normalize(scene.camera_ray_offset(cam, at, f.size))
     let prev = scene.camera(..f.previous_camera)
     return {
         color = float4(..scene.background_radiance(background_sh(), dir), 1.0)
@@ -274,6 +281,6 @@ fun environment(pixel: float2){drawn} -> targets:
         albedo = float4(0.0)
         specular_albedo = float4(0.0)
         roughness = 0.0
-        motion = pixel - scene.camera_project(prev, dir, f.size)
+        motion = at - scene.camera_project(prev, dir, f.size)
         primary_depth = 1.0
     }
