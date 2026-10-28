@@ -845,6 +845,10 @@ co_await cc::async_settled(cc::async_backlog::settled(all)); // several backlogs
 
 - **Entries are weak.** A backlog never keeps work alive, and a node that is gone or settled counts for nothing.
   Tracking compacts dead entries away once the backlog doubles past what last survived, so one nobody settles stays bounded by its live entries.
+- **Gone means torn down.** A node dropped before it resolved fails a weak lock at once, yet its teardown runs after: its frame's captures and its context go only then.
+  So such an entry counts until that teardown ends, which marks the node `torn_down`, and `settled()` polls until it has.
+  The teardown runs on the thread that dropped the last handle, or on the node's home when its options ask for that; a waiter on that home's thread runs the home meanwhile.
+  A node that resolved needs none of this: it let go of both as it resolved, so only the dropped-unresolved branch writes the mark.
 - **Cold nodes are not waited for**, since nothing may ever start them, and `settled()` never starts one.
   A node tracked cold counts once something starts it, which is how a component can track what it hands out before knowing who drives it.
 - **`settled()` waits in rounds.** Each round pins what is pending, waits for it, and sweeps again, so work a settling node tracks on its way out is still waited for.
@@ -930,6 +934,11 @@ That is what makes **prewarming legal**: work started under a scope that ends be
 cc deliberately does not assert on it.
 A consumer wanting the stricter rule reads `async_ambient_scope::outstanding()` and decides for itself what a leak means.
 A test runner in particular wants a reported failure naming the test, not the abort a cc-side assert would give it.
+
+A count says how much still carries a context, not who.
+A build with `SC_ASYNC_AMBIENT_TRACE` can watch one link's releases, `cc::async_ambient_watch_releases`, with a hook called on the releasing thread.
+Every drop of a link, a child freeing its parent included, goes through `impl::async_ambient_drop`, so the watch misses none.
+The hook may run under a node's lock, which is why it should only record; nexus captures a stack there and renders it after the unwatch.
 
 `cc::async_is_polling()` sits alongside, on the same per-thread block.
 It answers whether a **throw from here has somewhere to land**: inside a poll it becomes the node's error, outside one it escapes a worker's thread function and terminates.

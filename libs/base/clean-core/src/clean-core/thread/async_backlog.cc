@@ -39,25 +39,33 @@ namespace
 {
 enum class entry_status
 {
-    gone,    // freed or settled: nothing left to wait for
-    cold,    // alive but unstarted: kept, not waited for
-    pending, // started and unsettled
+    gone,         // settled, or torn down: nothing left to wait for
+    cold,         // alive but unstarted: kept, not waited for
+    pending,      // started and unsettled
+    tearing_down, // no strong handle left, but dropped before it resolved, and its teardown not yet finished
 };
 
-[[nodiscard]] entry_status status_of(async_node_ptr const& node)
+/// `node` is what locking `entry` gave, null once no strong handle is left.
+[[nodiscard]] entry_status status_of(async_node_ptr const& node, async_node_weak const& entry)
 {
-    if (node == nullptr || node->is_ready())
+    // A node dropped unresolved still holds its frame's captures and its context until its teardown ends.
+    if (node == nullptr)
+        return async_teardown_unfinished(entry) ? entry_status::tearing_down : entry_status::gone;
+    if (node->is_ready())
         return entry_status::gone;
     return node->is_cold() ? entry_status::cold : entry_status::pending;
 }
 
-/// Drops every gone entry, appending the pending nodes to `pinned` when given and every other handle it locked to `released`.
+/// Drops every gone entry, appending the pending nodes to `pinned` and the ones still tearing down to `tearing` when given, and every other handle it locked to `released`.
 ///
 /// Must be called under the entries' lock, and `released` dropped only after it: releasing what may be the last handle
 /// runs a node's teardown, which may track into this very backlog.
 /// O(entries) under that lock, so a backlog holding a very large number of live entries stalls every tracking thread
 /// for the duration — the scope is what makes that visible as frame stutter in a profile.
-void compact(async_backlog_entries& entries, cc::vector<async_node_ptr>* pinned, cc::vector<async_node_ptr>& released)
+void compact(async_backlog_entries& entries,
+             cc::vector<async_node_ptr>* pinned,
+             cc::vector<async_node_weak>* tearing,
+             cc::vector<async_node_ptr>& released)
 {
     auto const count = entries.nodes.size();
     CC_RECORD_SCOPE_IF(count >= compact_scope_threshold, "cc.async_backlog.compact");
@@ -66,7 +74,9 @@ void compact(async_backlog_entries& entries, cc::vector<async_node_ptr>* pinned,
     {
         auto entry = entries.nodes.pop_front();
         auto node = entry.lock();
-        auto const status = status_of(node);
+        auto const status = status_of(node, entry);
+        if (status == entry_status::tearing_down && tearing != nullptr)
+            tearing->push_back(entry);
         if (status != entry_status::gone)
             entries.nodes.push_back(cc::move(entry));
         if (status == entry_status::pending && pinned != nullptr)
@@ -149,7 +159,7 @@ void cc::async_backlog::track_node(async_node_weak node)
         {
             entries.nodes.push_back(cc::move(node));
             if (entries.nodes.size() >= entries.compact_at)
-                impl::compact(entries, nullptr, released);
+                impl::compact(entries, nullptr, nullptr, released);
         });
 }
 
@@ -169,17 +179,19 @@ cc::shared_async<cc::unit> cc::async_backlog::settled(cc::span<async_backlog con
     // The first round is swept here rather than when the node is awaited, so nothing pending hands back a resolved node.
     // Blocking on that needs no scheduler, which is what lets a teardown with none left call this at all.
     auto pinned = cc::vector<async_node_ptr>();
+    auto tearing = cc::vector<async_node_weak>();
     {
         auto released = cc::vector<async_node_ptr>();
         for (auto const& state : states)
-            state->entries.lock([&](impl::async_backlog_entries& entries) { impl::compact(entries, &pinned, released); });
+            state->entries.lock([&](impl::async_backlog_entries& entries)
+                                { impl::compact(entries, &pinned, &tearing, released); });
     }
-    if (pinned.empty())
+    if (pinned.empty() && tearing.empty())
         return cc::make_async_from_value(cc::unit{});
 
     return cc::make_async_lazy<cc::unit>(
-        [states = cc::move(states),
-         pinned = cc::move(pinned)](cc::async_context<cc::unit>& actx) mutable -> cc::async_step_status
+        [states = cc::move(states), pinned = cc::move(pinned),
+         tearing = cc::move(tearing)](cc::async_context<cc::unit>& actx) mutable -> cc::async_step_status
         {
             while (true)
             {
@@ -190,18 +202,25 @@ cc::shared_async<cc::unit> cc::async_backlog::settled(cc::span<async_backlog con
                 if (waiting)
                     return actx.wait_for_dependencies();
 
+                // A teardown has no node left to depend on, and it runs on the thread that dropped the last handle, or on its home.
+                // It is short, so the round polls again until it ends; a waiter on that home's thread runs the home meanwhile.
+                for (auto const& node : tearing)
+                    if (impl::async_teardown_unfinished(node))
+                        return actx.yield();
+
                 // The next round is whatever is pending now, which includes work the last round's nodes tracked as they settled.
                 // What the sweep drops is released after each lock, for compact's reason.
                 auto released = cc::vector<async_node_ptr>();
                 for (auto& node : pinned)
                     released.push_back(cc::move(node));
                 pinned.clear();
+                tearing.clear();
 
                 for (auto const& state : states)
                     state->entries.lock([&](impl::async_backlog_entries& entries)
-                                        { impl::compact(entries, &pinned, released); });
+                                        { impl::compact(entries, &pinned, &tearing, released); });
 
-                if (pinned.empty())
+                if (pinned.empty() && tearing.empty())
                     return actx.success(cc::unit{});
             }
         });
@@ -217,7 +236,8 @@ isize cc::async_backlog::outstanding_count() const
             for (auto i = isize(0); i < entries.nodes.size(); ++i)
             {
                 auto node = entries.nodes[i].lock();
-                if (impl::status_of(node) == impl::entry_status::pending)
+                auto const status = impl::status_of(node, entries.nodes[i]);
+                if (status == impl::entry_status::pending || status == impl::entry_status::tearing_down)
                     ++pending;
                 released.push_back(cc::move(node));
             }
