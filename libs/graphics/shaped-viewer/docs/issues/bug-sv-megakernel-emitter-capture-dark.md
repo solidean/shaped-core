@@ -3,37 +3,38 @@ created: 2026-10-21
 refs:
   - test: "sv - the wavefront tracer traces and denoises the viewer's image"
   - file: libs/graphics/shaped-viewer/tests/denoise-view-test.cc
+  - file: docs/bugs-external/warp-raytracing-wrong-capture/readme.md
 ---
 
-# A capture of the Cornell box lit by an emissive mesh sometimes comes out wrong on WARP
+# Windows' WARP traces the Cornell box capture wrong about one run in eight
 
-`denoise-view-test.cc`'s "the wavefront tracer traces and denoises the viewer's image" failed on CI's Windows Clang WARP leg on 2026-10-21 (run 39599242298).
-Its megakernel capture of the Cornell box, lit by an emissive-mesh lamp alone, averaged 11.33 against the wavefront's 18.31.
-So the megakernel went dark by about 38%, with no per-triangle emission involved.
-The capture settled in well under its timeout, so it was not an image written short of its samples.
+`denoise-view-test.cc`'s "the wavefront tracer traces and denoises the viewer's image" fails on WARP and never on hardware.
+CI's Windows Clang job has hit it since 2026-10-21, and locally it fails about one run in eight under `--thorough --repeat`.
+It is skipped on software adapters until WARP is fixed or CI runs a fixed one.
 
-It was first filed under `bug-sv-per-triangle-lamp-flake`, which turned out to be a single firefly in one of thousands of seed sets the compile's timing chose between.
-A 38% shortfall of a whole image's mean is no firefly, so this is something else.
-One candidate is a frame shaded before the lamp became a light being counted into the capture's mean; that was ruled out for the emitter tests' renders, not for a capture.
+## What it is
 
-## Reproduced locally, 2026-10-21
+A driver bug, as far as anything here can measure: [docs/bugs-external/warp-raytracing-wrong-capture](../../../../../docs/bugs-external/warp-raytracing-wrong-capture/readme.md) has the evidence.
+In short, every input the trace reads matches a passing run when read back from the GPU, and WARP 1.0.21 from NuGet passes 80 runs where the system WARP fails one in eight.
 
-`uv run dev.py test "sv - the wavefront tracer traces and denoises the viewer's image" --thorough --repeat 25` fails on the WARP leg about once in 5 to 13 runs, on relwithdebinfo, after fae2bfb19.
-Every capture that comes out right is the same to the bit from run to run, one image per adapter, so a wrong one is a discrete state rather than noise.
-Two shapes of it were seen:
-* The raw wavefront capture averaged 12.72 against the megakernel's 18.20; so either tracer can be the one that goes dark.
-* The à-trous capture, at 32 samples, came out barely smoother than the raw one (3.02 against 3.28).
-  Its image held the wrong geometry: the lamp and the green wall in place, the rest covered by a slanted dark surface cut from the lamp's edge.
-  The raw, megakernel and two-sample captures of the same run were right.
+The failing capture is the first wavefront capture of the run, always with a mean of 12.717 against the megakernel's 18.200.
+Its image has the right camera and walls, both blocks missing, and a bright slanted surface across the scene.
+CI once saw the megakernel's capture go dark instead (11.33 against 18.31), which is likely the same fault on the other tracer.
 
-Ruled out, each by experiment or by reading:
-* A capture reading another's process environment: both dx12 drivers are `exclusive("capture-environment")`, and their invocables run one after another.
-* A camera left from an earlier capture: every `sv::interactive` creates its viewer anew, nothing persists per id, and only a double-click starts a glide.
-* Owed work: every capture, the wrong ones included, wrote with `pending_work_count() + settling_count()` at 0.
-* Denoiser guides outliving a restart: they restart whenever the mean does.
+## Ruled out, by measurement
 
-On one adapter the lamp, a 2-triangle mesh, is traced as its placeholder box for a frame or two at the start of each capture, in passing runs as much as failing ones.
-A placeholder of a flat mesh is the likeliest source of the slanted surface, so the open question is how a frame of it reaches an image the capture accepts.
+- Stale samples surviving a restart: the trace hash covers every instance's transform, BLAS and record, and the restarts were seen to happen.
+- A BLAS built from a vertex buffer still streaming: the bytes the build consumed were read back and match.
+- The emitter CDF, the instance records and the material parameter blocks: identical to a passing run.
+- Uninitialized wavefront path state, and transient buffers read before written: restart clears the former, and a detector found none of the latter.
 
-Logging masks it: one line printed per traced frame passed 25 runs in a row, and the same lines buffered and printed at the capture's write passed 30.
-The next probe should record less, such as the placeholder count alone, kept per capture and checked at the write.
+## What is left
+
+The fault is inside WARP's acceleration-structure build or traversal, or something they read that no probe here covered.
+Disabling sg's placement of transient buffers made this state vanish over 138 runs, and showed a milder one once, so placement or the timing it changes is part of the trigger.
+Isolating it into a standalone `repro.cc` is what would let it be filed with Microsoft.
+
+## Closing it
+
+When the skip can go: either the system WARP on CI's image is fixed, or CI runs a fixed WARP ([feat-ci-nuget-warp](../../../../../docs/issues/feat-ci-nuget-warp.md)).
+[bug-sv-warp-megakernel-quadric-flake](bug-sv-warp-megakernel-quadric-flake.md) is very likely the same fault and should be re-checked at the same time.
