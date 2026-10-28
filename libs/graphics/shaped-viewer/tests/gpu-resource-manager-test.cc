@@ -344,7 +344,7 @@ ASYNC_INVOCABLE_TEST("sv - mip generation is queued, not done inline", (sg::cont
     // this needs the shared library and a compiler, not just a device.
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the mipmap shader");
+        SKIP("no SGL compiler for this backend to build the mipmap shader");
 
     auto m = sv::gpu_resource_manager::create(ctx);
     m.advance_to(ctx.current_epoch());
@@ -391,7 +391,7 @@ ASYNC_INVOCABLE_TEST("sv - the work budget spreads mip generation across epochs"
     // this needs the shared library and a compiler, not just a device.
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the mipmap shader");
+        SKIP("no SGL compiler for this backend to build the mipmap shader");
 
     // The microstutter guard: several textures landing at once must not record every chain in one frame.
     // 16x16 is 5 levels, so 4 dispatches each — a budget of 5 admits exactly one per epoch.
@@ -449,7 +449,7 @@ ASYNC_INVOCABLE_TEST("sv - a completed RGBA8 texture is replaced by its BC7 enco
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the mipmap and BC7 shaders");
+        SKIP("no SGL compiler for this backend to build the mipmap and BC7 shaders");
     if (!sr::bc_compress_routine::can_compress(ctx, sg::pixel_format::rgba8_unorm, sg::pixel_format::bc7_rgba_unorm))
         SKIP("this device has no BC textures");
 

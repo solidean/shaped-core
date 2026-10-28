@@ -3,6 +3,8 @@ created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/context.cc
   - file: libs/graphics/shaped-viewer/tests/cross-backend-trace-test.cc
+closed: 2026-10-28
+resolution: fixed
 ---
 
 # The path tracer is traced on dx12 and vulkan alone

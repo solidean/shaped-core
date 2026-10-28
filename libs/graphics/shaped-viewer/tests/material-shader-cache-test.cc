@@ -66,7 +66,7 @@ cc::shared_async<cc::unit> require_compiled(sg::context* ctx, sv::material_permu
     co_return;
 }
 
-/// Whether nothing here can compile: no DXC to turn the generated SGL's HLSL into DXIL.
+/// Whether nothing here can compile the generated SGL for this platform's backend.
 [[nodiscard]] bool cannot_compile()
 {
     return !sv_test::shared_env().has_compiler;
@@ -77,7 +77,7 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - the fallback stands in for a p
                      (sg::context_handle const& ctx_h))
 {
     if (cannot_compile())
-        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
+        SKIP("no SGL compiler for this backend to build the generated hit groups");
 
     auto cache = sv::material_shader_cache::create(ctx_h.get());
 
@@ -128,7 +128,7 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - two materials of one permutati
                      (sg::context_handle const& ctx_h))
 {
     if (cannot_compile())
-        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
+        SKIP("no SGL compiler for this backend to build the generated hit groups");
 
     auto lib = sv::material_library::create();
     sv::register_builtin_material_types(lib);
@@ -178,7 +178,7 @@ ASYNC_INVOCABLE_TEST("sv::material_shader_cache - every builtin type compiles as
                      (sg::context_handle const& ctx_h))
 {
     if (cannot_compile())
-        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
+        SKIP("no SGL compiler for this backend to build the generated hit groups");
 
     auto lib = sv::material_library::create();
     sv::register_builtin_material_types(lib);

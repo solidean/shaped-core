@@ -110,7 +110,7 @@ ASYNC_BENCHMARK("sv - wavefront against megakernel, GPU time per path")
     if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
         SKIP("the wavefront tracer needs inline ray queries");
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
     CC_LOG_INFO("adapter: {}", ctx.metrics.adapter().name);
 
     // Room for one view's tallies, which is what each wavefront run reads back to count its paths.

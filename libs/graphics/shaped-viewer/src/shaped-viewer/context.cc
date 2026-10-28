@@ -9,8 +9,10 @@
 #include <shaped-viewer/context.hh>
 #include <shaped-viewer/shader_library.hh>
 
-#if SV_HAS_DEFAULT_BACKEND
+#if SV_DEFAULT_BACKEND_DX12
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
+#elif SV_DEFAULT_BACKEND_METAL
+#include <shaped-graphics/backends/metal/metal_context.hh> // sg::create_metal_context
 #endif
 
 namespace sv
@@ -31,11 +33,17 @@ void set_acquire_context(context_provider provider)
 
 cc::result<sg::context_handle> impl::acquire_default_context()
 {
-#if SV_HAS_DEFAULT_BACKEND
+#if SV_DEFAULT_BACKEND_DX12
     // WARP keeps the viewer usable on a machine with no suitable GPU.
     auto ctx = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
     if (ctx.has_error())
         return cc::error("shaped-viewer: could not create a Direct3D 12 context (no adapter, and WARP was refused)");
+    return ctx.value();
+#elif SV_DEFAULT_BACKEND_METAL
+    // Metal has no software device, so a host below the Metal 4 floor has no default at all.
+    auto ctx = sg::create_metal_context();
+    if (ctx.has_error())
+        return cc::error("shaped-viewer: could not create a Metal context (no Metal 4 device)");
     return ctx.value();
 #else
     return cc::error("shaped-viewer: built with no default graphics backend — call sv::set_acquire_context to supply "
