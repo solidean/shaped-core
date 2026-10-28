@@ -17,7 +17,7 @@ using namespace cc::primitive_defines;
 // Every frame moves the camera along the nave, so every frame is one a user orbiting sees: drawn at the upscaler's input extent and upscaled to the output.
 // Each contender runs alone, its view and history freed before the next: four views' histories and path state at once overflow a laptop GPU's memory.
 // GPU time, bracketed by timestamps around the viewer's whole frame.
-// A benchmark rather than a test: it asserts nothing, and docs/plans/hybrid-renderer.md records what it measured.
+// A benchmark rather than a test: it asserts nothing, and libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md records what it measured.
 
 namespace
 {
