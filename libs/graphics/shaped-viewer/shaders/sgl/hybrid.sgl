@@ -1,4 +1,4 @@
-// The hybrid's LIGHTING: a primary hit the raster found, lit by the tracer's own next-event estimate with its shadow rays traced inline.
+// The hybrid's LIGHTING: a primary hit the raster found, lit by the tracer's own next-event estimate with its shadow rays traced inline, and one bounce.
 //
 // Two callers, measured against each other.
 // A material's forward pixel stage, `sv_hybrid`, lights its full closure where it evaluated it.
@@ -28,16 +28,89 @@ fun pixel_rng(px: uint2, width: uint){tracer.traced} -> uint:
 /// Direct light at `p` through the closure `b` in frame `f`, over the face whose turned geometric normal is `n`.
 ///
 /// One light the tracer's selection picks and one environment sample, each with its shadow ray traced inline: an unbiased estimate of every light at once.
-/// No continuation ray follows yet, so neither weighs against a BSDF sample.
-fun direct(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> float3:
+/// Where `continues`, a `bounce_from` follows, and the environment sample weighs against it, since both see the sky.
+/// A light's sample never does: lights are next-event estimation's alone, and a bounce ray reaching one adds nothing.
+/// Nothing where the viewer is behind the shading frame, which `shading_frame` leaves only a degenerate input to.
+fun direct(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, continues: bool, rng: mut uint){tracer.traced, tracer.bindless} -> float3:
+    if wo_local.z <= 0.0 => return float3(0.0)
     let mut sum = float3(0.0)
     let l = tracer.sample_light(b, f, wo_local, p, n, true, mut rng)
     if tracer.reaches(l, tracer.cutout_seed(rng, tracer.cutout_ray_light)):
         sum += l.diffuse + l.specular
-    let e = tracer.sample_environment(b, f, wo_local, p, n, true, mut rng)
+    let e = tracer.sample_environment(b, f, wo_local, p, n, not continues, mut rng)
     if tracer.reaches(e, tracer.cutout_seed(rng, tracer.cutout_ray_environment)):
         sum += e.diffuse + e.specular
     return sum
+
+/// Where one bounce from a primary hit went: what it carries there, and either the environment it escaped into or the surface it met.
+struct bounce:
+    /// the BSDF and the cosine over the pdf the direction was drawn with; zero where no bounce was drawn
+    throughput: float3
+    /// the environment along an escape, weighed against `direct`'s environment sample; zero where it met a surface
+    escaped: float3
+    /// whether it met a surface, which `at`, `n` and `albedo` then describe
+    hit: bool
+    at: float3
+    /// the met face's normal, turned toward where the bounce came from
+    n: float3
+    /// the direction the bounce left in
+    wi: float3
+    /// the met instance's base color, `tracer.instance_base_color`; mid-gray on a quadric, which has no triangle context to read it through
+    albedo: float3
+
+/// One bounce from `p`: a direction drawn from the closure `b`, traced inline to what it meets.
+/// Only a reflection continues: a refracted direction would have to follow the ray through the surface, which nothing here does yet.
+fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> bounce:
+    let mut result = bounce(float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5))
+    let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
+    let s = openpbr.bsdf_sample_direction(b, wo_local, u)
+    if s.pdf <= 0.0 or s.direction.z <= 0.0 or not s.valid => return result
+    let wi = openpbr.to_world(f, s.direction)
+    if dot(wi, n) <= 0.0 => return result
+    result.throughput = s.value * (s.direction.z / s.pdf)
+    result.wi = wi
+
+    let origin = p + n * 1e-3
+    let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(rng, tracer.cutout_ray_surface))
+    if h.kind == tracer.hit_none:
+        result.escaped = scene.background_radiance(tracer.background_sh(), wi) * pt.mis_weight(s.pdf, pt.env_pdf())
+        return result
+
+    let inst = scene.instance(..tracer.traced.instances[h.instance as int])
+    result.hit = true
+    result.at = origin + wi * h.t
+    if h.kind == tracer.hit_triangle:
+        let indices = inst.indices as int
+        let ctx = material.make_context(inst, tracer.bindless.buffers[nonuniform indices], h.primitive, h.barycentrics)
+        let w0 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
+        let w1 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
+        let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
+        result.n = normalize(cross(w1 - w0, w2 - w0))
+        result.albedo = tracer.instance_base_color(inst, ctx)
+    else:
+        result.n = normalize(raster.to_world_vector(inst, h.normal))
+    if dot(result.n, wi) > 0.0 => result.n = -result.n
+    return result
+
+/// The surface a bounce met, as `direct` lights it: a diffuse closure of its base color, its frame, and the direction back along the bounce.
+/// That is the secondary material the plan reads from data rather than from the material's code, so no permutation's code runs past the primary hit.
+struct secondary:
+    b: openpbr.bsdf
+    f: openpbr.frame
+    /// the direction back along the bounce in `f`; below it where the bounce met nothing, which `direct` then lights as nothing
+    wo_local: float3
+
+/// What `direct` lights where `bounced` landed.
+///
+/// A caller lights the primary hit and this side by side, `direct` for each, rather than one inside the other.
+/// Every call is inlined and the nesting has a limit, which a generated pixel stage around them sits close to.
+fun secondary_of(bounced: bounce) -> secondary:
+    let mut surface = openpbr.default_surface()
+    surface.base_color = bounced.albedo
+    surface.specular_weight = 0.0
+    let f = openpbr.make_frame(bounced.n)
+    let wo_local = if bounced.hit => openpbr.to_local(f, -bounced.wi) else float3(0.0, 0.0, -1.0)
+    return { b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local }
 
 /// `raster.vertex_of`, reading the frame and the instance table of `tracer.traced`.
 fun vertex_of(vertex: int, instance: uint){tracer.traced, tracer.bindless} -> raster.varyings:
@@ -54,7 +127,7 @@ fun is_cut(p: raster.varyings, ctx: material.shading_context){tracer.traced, tra
     let inst = scene.instance(..tracer.traced.instances[p.instance as int])
     return tracer.instance_opacity(inst, ctx) < 0.5
 
-/// The forward lighting: the pixel `p` covers, whose material evaluated to `surface_in`, lit by `direct` through its full closure.
+/// The forward lighting: the pixel `p` covers, whose material evaluated to `surface_in`, lit through its full closure by `direct` and one bounce.
 ///
 /// The surface is described as `raster.shade` describes it, and the targets are the same.
 /// Baked occlusion is not applied, since the environment's light is shadowed by its own ray here.
@@ -75,10 +148,11 @@ fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr
 
     let pixel = float2(p.position.x, p.position.y)
     let mut rng = pixel_rng(uint2(pixel.x as uint, pixel.y as uint), pass.size.x as uint)
-    let mut color = b.emission
-    // `shading_frame` leaves the viewer in front of the frame, so only a degenerate input fails this.
-    if wo_local.z > 0.0:
-        color += direct(b, shading, face.n, wo_local, p.world, mut rng)
+    let lit = direct(b, shading, face.n, wo_local, p.world, true, mut rng)
+    let bounced = bounce_from(b, shading, face.n, wo_local, p.world, mut rng)
+    let s2 = secondary_of(bounced)
+    let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, false, mut rng)
+    let color = b.emission + lit + bounced.throughput * (bounced.escaped + bounce_lit)
 
     let prev = scene.camera(..f.previous_camera)
     let motion = pixel - scene.camera_project(prev, p.world - prev.position, pass.size)

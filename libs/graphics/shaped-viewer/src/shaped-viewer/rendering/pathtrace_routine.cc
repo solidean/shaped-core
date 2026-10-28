@@ -167,7 +167,8 @@ pathtrace_routine::pipeline_variant const* pathtrace_routine::_variant_for(sg::c
 
 void place_instance_record(shaders::tracer::instance_record& record,
                            sg::tlas_instance const& instance,
-                           material_opacity const& opacity)
+                           material_opacity const& opacity,
+                           material_emission_factor const& base_color)
 {
     // The TLAS wire layout is already row-major 3x4, translation in column 3 — exactly the record's rows.
     auto const row = [&](int r)
@@ -187,6 +188,14 @@ void place_instance_record(shaders::tracer::instance_record& record,
     record.opacity_sampler = opacity.sampler;
     record.opacity_transform = opacity.transform;
     record.opacity_cutoff = opacity.cutoff;
+
+    record.base_kind = u32(base_color.kind);
+    record.base_offset = base_color.offset;
+    record.base_uv_offset = base_color.uv_offset;
+    record.base_frequency = base_color.frequency;
+    record.base_channels = base_color.channels[0] | (base_color.channels[1] << 8) | (base_color.channels[2] << 16);
+    record.base_sampler = base_color.sampler;
+    record.base_transform = base_color.transform;
 
     // A caller's offset counts two records per permutation, so it names the permutation the instance shades with.
     // An odd one would shade the instance through its neighbor's material, reading its parameter block in another layout.

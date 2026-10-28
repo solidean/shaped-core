@@ -69,9 +69,11 @@ binding thin_io:
     let wo_local = openpbr.to_local(shading, v)
 
     let mut rng = hybrid.pixel_rng(uint2(id.x as uint, id.y as uint), size.x as uint)
-    let mut color = float3(emission.x, emission.y, emission.z)
-    if wo_local.z > 0.0:
-        color += hybrid.direct(b, shading, n, wo_local, p, mut rng)
+    let lit = hybrid.direct(b, shading, n, wo_local, p, true, mut rng)
+    let bounced = hybrid.bounce_from(b, shading, n, wo_local, p, mut rng)
+    let s2 = hybrid.secondary_of(bounced)
+    let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, false, mut rng)
+    let color = float3(emission.x, emission.y, emission.z) + lit + bounced.throughput * (bounced.escaped + bounce_lit)
 
     tracer.traced.output.store(px, float4(..color, 1.0))
     tracer.traced.guide_normal.store(px, float4(..n, 0.0))

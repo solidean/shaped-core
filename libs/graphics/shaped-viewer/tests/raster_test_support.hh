@@ -32,13 +32,15 @@ namespace sv_test
 {
 
 /// The megakernel's direct light alone on `item` — the primary hit and its next-event estimate, nothing after — as the mean of `frames` frames.
+/// `bounces` above 1 follows each path that many segments, a next-event estimate at every hit.
 inline cc::shared_async<cc::vector<tg::vec4f>> trace_direct(sg::context& ctx,
                                                             sv::gpu_resource_manager& resources,
                                                             sv::scene_item const& item,
                                                             sv::camera const& cam,
                                                             sv::pt_light_table const& lights,
                                                             tg::vec2i size,
-                                                            int frames)
+                                                            int frames,
+                                                            int bounces = 1)
 {
     auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
     REQUIRE(mesh_rec != nullptr);
@@ -67,7 +69,7 @@ inline cc::shared_async<cc::vector<tg::vec4f>> trace_direct(sg::context& ctx,
         fc.previous_camera = fc.camera;
         lights.describe_in(fc);
         fc.samples_per_pixel = 16;
-        fc.max_bounces = 1;
+        fc.max_bounces = bounces;
         fc.rng_seed = u32(f) + 1u;
         fc.accum_frame = u32(f);
 

@@ -310,6 +310,13 @@ fun emitter_radiance(e: emitter_record, ctx: material.shading_context){traced, b
     let scale = emission_factor(e.scale_kind, e.scale_offset, e.scale_uv_offset, e.scale_frequency, e.scale_channel, e.scale_sampler, e.scale_transform, 1u, ctx)
     return max(0.0, scale.x) * max(float3(0.0), color)
 
+/// The base color of `inst` where `ctx` sits, read through the instance's base color record rather than its material's code.
+/// What a hybrid's secondary hit is lit as, a diffuse surface of this color; mid-gray for a type that declares none.
+fun instance_base_color(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float3:
+    if inst.base_kind == scene.value_none => return float3(0.5)
+    let c = emission_factor(inst.base_kind, inst.base_offset, inst.base_uv_offset, inst.base_frequency, inst.base_channels, inst.base_sampler, inst.base_transform, 3u, ctx)
+    return saturate(c)
+
 /// One factor of an emission at `ctx`, `lanes` wide: a constant of the parameter block, a mesh attribute, or a texture, as `kind` says.
 /// `channels` holds up to three swizzle selectors a byte each, and a one-lane factor comes back in `.x`, its other lanes meaning nothing.
 /// `scene.value_none` is a factor of 1.

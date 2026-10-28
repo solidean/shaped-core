@@ -883,11 +883,16 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     auto const triangles = opts.kind == geometry_kind::triangles;
     auto raster_source = triangles ? generate_raster_pixel(r, layout, opacity) : cc::string();
     auto hybrid_source = triangles ? generate_hybrid_pixel(r, layout, opacity) : cc::string();
+    // Read off the layout before it is moved into the result.
+    auto const base_color = r.type->base_color_attribute.empty()
+                              ? material_emission_factor{}
+                              : emission_factor_of(r, layout, r.type->base_color_attribute);
     return {.source = cc::move(source),
             .shade_source = cc::move(shade_source),
             .raster_source = cc::move(raster_source),
             .hybrid_source = cc::move(hybrid_source),
             .layout = cc::move(layout),
+            .base_color = base_color,
             .opacity = opacity,
             .emission = emission,
             .key = material_shader_key(r.permutation_key, opts)};

@@ -167,7 +167,10 @@ So both light through the tracer's light selection and its inline shadow ray, an
 The images differ by what the reduced closure loses, and the frame times by everything above.
 
 **Both are built**, as `sv::hybrid_routine` (rendering/hybrid_routine.hh) with `hybrid_lighting::forward` and `::deferred`, behind `render_mode::hybrid`.
-**A smooth metal or mirror reads black and sparkling until phase 4**: it sees the environment only through the uniform environment sample, which seldom lands in its lobe.
+**Phase 4's bounce is in**: one direction drawn from the closure, the environment along an escape weighed against the environment sample, and a hit lit as a diffuse surface of its base color.
+The base color is data, `material_type::base_color_attribute`, read through the instance record's `base_*` fields by `tracer.instance_base_color`, as the emitter reads its color.
+Lights are next-event estimation's alone, so a bounce meeting one adds nothing: a mirror does not show a light yet.
+`hybrid-test.cc` holds both to the megakernel's two bounces on the Cornell box, within 5.2% for the worst block.
 `hybrid-test.cc` holds each, averaged over 128 frames, to the megakernel's direct light on the Cornell box with its blocks: the worst block is within 3.3% for both.
 
 What they measured, in `raster-benchmark.cc` on Intel's Sponza at 1920x1080 on a laptop RTX 5070 in October 2026.
@@ -310,6 +313,7 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
    - 3b, done: `render_mode::hybrid`, with `render_settings::hybrid_lighting` choosing forward or deferred, accumulating while still; the raster example shows both.
    - 3c: denoised, from the G-buffer slots it already writes.
 4. **The indirect ray** with the secondary material, ending in the environment past its hit.
+   Done but for its roughness and metalness, which the secondary material does not read yet, and a refracted bounce, which ends.
 5. **The radiance cache**, ending the indirect ray in it, once counsel has confirmed its design.
 6. **Reconstruction**: `dlss_rr` on the scaled stream, the MetalFX member.
 7. **LODs and cluster culling.**

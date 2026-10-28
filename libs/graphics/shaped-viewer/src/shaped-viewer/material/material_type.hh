@@ -19,6 +19,7 @@ struct sv::material_type_description
     cc::string occlusion_attribute = {};
     cc::string emission_color_attribute = {};
     cc::string emission_scale_attribute = {};
+    cc::string base_color_attribute = {};
 };
 
 /// A family of materials: what a shader needs per pixel, and the code that turns it into a shaded surface.
@@ -82,6 +83,10 @@ struct sv::material_type
 
     /// Which declared float attribute scales the emission color, or empty for a scale of 1.
     cc::string emission_scale_attribute;
+
+    /// Which declared float3 attribute is this type's base color, or empty for none, which a secondary hit reads as mid-gray.
+    /// The hybrid lights a secondary hit as a diffuse surface of this color, read by one reader for every material rather than by its code.
+    cc::string base_color_attribute;
 
     cc::hash128 hash;
 

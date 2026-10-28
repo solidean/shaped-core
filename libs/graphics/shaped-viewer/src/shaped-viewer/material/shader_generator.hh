@@ -150,6 +150,9 @@ struct sv::generated_material_shader
 
     material_parameter_layout layout;
 
+    /// Where this permutation's base color lives, as `material_type::base_color_attribute` names it; kind `none` where the type names none.
+    material_emission_factor base_color;
+
     /// Where this permutation's cutout opacity lives, and `none` where it cannot cut out.
     ///
     /// It can cut out where its type declares an `opacity_attribute` and something other than the signature's own default supplied it.

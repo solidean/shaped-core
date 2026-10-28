@@ -255,6 +255,16 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
 
 // ---- extend: the round's segments, traced ---------------------------------------------------------------------------
 
+/// The nearest hit the segment from `origin` along `direction` meets, traced inline, the cutouts it crosses drawing from `seed`.
+fun trace_hit(origin: float3, direction: float3, seed: uint){traced, bindless} -> hit_record:
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 1e-3, t_max = 1e4)
+    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
+    if h.kind == hit_kind.triangle:
+        return hit_record(h.instance_id as uint, h.primitive_index as uint, hit_triangle, h.t, float2(h.barycentrics.y, h.barycentrics.z), float3(0.0))
+    if h.kind == hit_kind.procedural:
+        return hit_record(h.instance_id as uint, h.primitive_index as uint, hit_procedural, h.t, float2(0.0), h.procedural().attributes.normal)
+    return hit_record(0u, 0u, hit_none, -1.0, float2(0.0), float3(0.0))
+
 /// Traces the segment of the round's path at `index` and records the nearest hit it accepted.
 fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
     if index >= round_count() => return
@@ -262,16 +272,7 @@ fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
     let s = slot as int
     let r = traced.path_rays[s]
     // The path's own stream where the segment leaves, so a cutout's draw belongs to the sample and the bounce, never to the frame.
-    let cutouts = cutout_seed(traced.path_states[s].rng, cutout_ray_surface)
-    let pr = ray(origin = pos3(r.origin.x, r.origin.y, r.origin.z), direction = vec3(r.direction.x, r.direction.y, r.direction.z), t_min = 1e-3, t_max = 1e4)
-    let h = traced.world.trace(pr, any_hit = c => cutout(c, cutouts, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
-
-    if h.kind == hit_kind.triangle:
-        traced.hits[s] = hit_record(h.instance_id as uint, h.primitive_index as uint, hit_triangle, h.t, float2(h.barycentrics.y, h.barycentrics.z), float3(0.0))
-    else if h.kind == hit_kind.procedural:
-        traced.hits[s] = hit_record(h.instance_id as uint, h.primitive_index as uint, hit_procedural, h.t, float2(0.0), h.procedural().attributes.normal)
-    else:
-        traced.hits[s] = hit_record(0u, 0u, hit_none, -1.0, float2(0.0), float3(0.0))
+    traced.hits[s] = trace_hit(r.origin, r.direction, cutout_seed(traced.path_states[s].rng, cutout_ray_surface))
 
 // ---- segment: what the hit's material does not decide ---------------------------------------------------------------
 

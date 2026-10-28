@@ -13,7 +13,8 @@
 
 // The hybrid: rasterized primary hits, lit by the tracer's next-event estimate with inline shadow rays.
 //
-// Both ways of lighting them are held to the megakernel's direct light on the Cornell box with its two blocks, which shadow the floor and each other.
+// Both ways of lighting them are held to the megakernel's two-bounce light on the Cornell box with its two blocks, which shadow the floor and each other.
+// Its walls are diffuse, so the hybrid's secondary material, a diffuse surface of the base color, is the tracer's own there but for a faint specular lobe.
 // One frame is one light sample per pixel, so each is the mean of many frames, as the tracer's own reference is.
 
 namespace
@@ -101,7 +102,7 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
 
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
         records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
-        sv::place_instance_record(records.back(), instances[0], permutation->opacity);
+        sv::place_instance_record(records.back(), instances[0], permutation->opacity, permutation->base_color);
 
         auto fc = sv::default_frame_constants();
         fc.camera = record;
@@ -183,7 +184,7 @@ cc::shared_async<hybrid_readback> draw_hybrid(sg::context& ctx,
 }
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornell box as the tracer's direct light "
+ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornell box as the tracer's first bounce "
                      "does, "
                      "shadows included",
                      (sg::context_handle const& ctx_h))
@@ -205,7 +206,7 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
 
     constexpr auto size = tg::vec2i(64, 64);
     constexpr int block = 8;
-    auto const traced = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16);
+    auto const traced = co_await sv_test::trace_direct(ctx, resources, item, cam, lights, size, 16, 2);
 
     struct contender
     {
@@ -238,7 +239,7 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
                                                         bx, by, ch, h.value(), t.value()));
                 }
         CHECK(compared > 3 * 32);
-        CC_LOG_INFO("{} hybrid against the tracer's direct light on the Cornell box: worst block {} over {}", c.name,
+        CC_LOG_INFO("{} hybrid against the tracer's two bounces on the Cornell box: worst block {} over {}", c.name,
                     worst, compared);
 
         // The back wall straight ahead: white, facing the camera, 4.4 in front of it; the deferred kernel writes the albedo.
