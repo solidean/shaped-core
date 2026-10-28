@@ -1,5 +1,6 @@
 #include "datagram.hh"
 
+#include <clean-core/error/exception.hh> // std::exception, through clean-core's one route to it
 #include <clean-core/record/async_scope.hh>
 #include <clean-core/record/domain.hh>
 #include <clean-core/record/log.hh>
@@ -10,8 +11,6 @@
 #include <clean-net/impl/async_glue.hh>
 #include <clean-net/impl/native_socket.hh>
 #include <clean-net/transport/stream.hh>
-
-#include <exception>
 
 // A datagram socket is two halves that share nothing but the backend.
 //
@@ -144,7 +143,8 @@ void on_readable(cc::shared_ptr<arrival_state> const& a, u64 generation, cc::sha
         }
         catch (...)
         {
-            CC_LOG_ERROR("the arrival callback of the datagram socket on {} threw a non-std::exception value, and is not "
+            CC_LOG_ERROR("the arrival callback of the datagram socket on {} threw a non-std::exception value, and is "
+                         "not "
                          "called again",
                          where);
             return;
