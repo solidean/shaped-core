@@ -1,7 +1,14 @@
 #include "viewer_test_env.hh"
 
+#include <babel-serializer/trace/chrome_trace.hh>
 #include <clean-core/common/log.hh>
 #include <clean-core/common/time.hh>
+#include <clean-core/platform/file_path.hh>
+#include <clean-core/record/hot_functions.hh>
+#include <clean-core/record/recording.hh>
+#include <clean-core/record/sampling.hh>
+#include <clean-core/record/system.hh>
+#include <clean-core/streams/file_stream.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -24,6 +31,7 @@ namespace
 {
 constexpr auto k_output = tg::vec2i(1920, 1200);
 constexpr int k_frames = 48;
+constexpr int k_in_flight = 2;
 
 /// One way of drawing the frame, as a view's layer settings say it.
 struct contender
@@ -31,6 +39,22 @@ struct contender
     cc::string_view name;
     sv::render_settings settings;
 };
+
+/// `captured` as a Chrome trace in the temp directory, named for the contender `name`.
+void write_trace(cc::rec::recording const& captured, cc::string_view name)
+{
+    auto file = cc::string(name);
+    for (auto const ch : {' ', ',', '+'})
+        (void)file.replace_all(ch, '-');
+    auto const path = cc::format("{}/sv-hybrid-cpu-{}.json", cc::temp_directory_path(), file);
+    auto opened = cc::file_write_stream_adapter::create(path);
+    if (opened.has_error())
+        return;
+    cc::write_stream stream = opened.value().stream();
+    if (babel::chrome_trace::write(stream, captured).has_error() || stream.flush().has_error())
+        return;
+    CC_LOG_INFO("wrote {}", path);
+}
 
 /// A definition holding one view of `items` drawn under `settings`, filling the output.
 [[nodiscard]] sv::viewer_definition definition_of(sv::view_id id,
@@ -189,18 +213,47 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
         memory(cc::format("once {} is warm", c.name));
 
         // Throughput first: frames back to back, as a viewer draws them, over the wall clock from the first submit until the GPU idles.
+        // At most k_in_flight epochs in flight, as a swapchain of that many images holds a windowed viewer to.
         // Their own timestamps would overstate them, since a member's work may run on past its frame and into the next one's stages.
+        // The CPU's share is split in two: recording the frame, and handing it over, which is where any wait on the GPU would show.
+        // The recording is sampled too, and where its time went is logged and written out as a Chrome trace.
+        auto capture = cc::rec::recording_listener();
+        auto const capture_handle = cc::rec::register_listener(capture);
+        cc::rec::start_sampling({.rate_hz = 2000.0});
         auto const wall_start = cc::current_time_steady_secs();
+        auto recording = 0.0;
+        auto handing_over = 0.0;
+        auto throttled = 0.0;
         for (auto f = 1; f <= k_frames; ++f)
         {
+            auto const wait_start = cc::current_time_steady_secs();
+            co_await ctx.epochs_in_flight_completion(k_in_flight);
+            throttled += cc::current_time_steady_secs() - wait_start;
+            auto const record_start = cc::current_time_steady_secs();
             auto cmd = ctx.create_command_list();
             auto const outcome = execute(*cmd, f);
+            auto const submit_start = cc::current_time_steady_secs();
             ctx.submit_command_list(cc::move(cmd));
             ctx.advance_epoch();
+            auto const submit_end = cc::current_time_steady_secs();
+            recording += submit_start - record_start;
+            handing_over += submit_end - submit_start;
             REQUIRE(outcome == sg::routine_outcome::executed);
         }
+        auto const cpu_done = cc::current_time_steady_secs();
+        cc::rec::stop_sampling();
+        cc::rec::flush_blocking();
+        cc::rec::unregister_listener(capture_handle);
+        auto const captured = capture.take().spliced_samples();
+        CC_LOG_INFO("{} back to back, where the CPU's time went:\n{}", c.name,
+                    cc::rec::hot_functions(captured).to_string(30));
+        write_trace(captured, c.name);
         co_await ctx.idle_completion();
         auto const wall = cc::current_time_steady_secs() - wall_start;
+        CC_LOG_INFO("{} back to back on the CPU: {} ms recording, {} ms submitting and {} ms waiting for the "
+                    "GPU per frame; the GPU finished {} ms after the last submit",
+                    c.name, 1e3 * recording / f64(k_frames), 1e3 * handing_over / f64(k_frames),
+                    1e3 * throttled / f64(k_frames), 1e3 * (wall_start + wall - cpu_done));
 
         // Each frame's stages, as the marks the viewer records along it divide it: each mark ends the stage it names.
         auto frames = cc::vector<sv::impl::gpu_marks>();

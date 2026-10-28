@@ -336,7 +336,20 @@ What the lighting's parts cost, each measured by removing it alone:
 Opacity micromaps are the answer, for the tracer and the hybrid alike — [feat-sg-opacity-micromaps](../../../shaped-graphics/docs/issues/feat-sg-opacity-micromaps.md).
 
 **Two numbers per contender, since back to back and alone disagree**: throughput over the wall clock, and a breakdown with each frame alone on the GPU.
-Back to back, hybrid deferred with svgf and FSR takes 18.8 ms a frame against 8.8 ms of GPU work: the viewer's CPU side, recording 405 draws, the resolve and the uploads, is what limits it.
+Back to back, it holds at most 2 frames in flight, as a windowed viewer's swapchain does.
+
+**The CPU limited the frame, and most of it was the driver creating textures.**
+Sampled, 14 of the 21 ms a frame took to record went to creating about six transient textures and freeing the last epoch's, each blocking in the driver for 1 to 3 ms.
+sg now places transient textures in a per-epoch heap, as it does transient buffers.
+Before and after, in one session:
+
+| contender | frame before | frame after | recording before | recording after |
+|---|---|---|---|---|
+| hybrid deferred, svgf and FSR | 21.0 ms | **9.7 ms** | 14.7 ms | 5.1 ms |
+| hybrid deferred, dlss_rr | 24.1 ms | **13.6 ms** | 15.6 ms | 5.6 ms |
+| hybrid forward, dlss_rr | 20.1 ms | 17.8 ms | 11.8 ms | 6.1 ms |
+
+About half of the remaining 5 ms of recording is the instance records, `describe_instance` rebuilding every instance's parameters each frame.
 
 **dlss_rr itself costs about 4.2 ms**, measured alone after a short run, where the whole frame is 10.8 ms.
 After a long run its frames slow to about 35 ms, the hybrid's own stages too, which nothing in them explains.
