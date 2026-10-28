@@ -33,13 +33,12 @@ fun pixel_rng(px: uint2, width: uint){tracer.traced} -> uint:
 /// Direct light at `p` through the closure `b` in frame `f`, over the face whose turned geometric normal is `n`.
 ///
 /// One light the tracer's selection picks and one environment sample, each with its shadow ray traced inline: an unbiased estimate of every light at once.
-/// Where `continues`, a `bounce_from` follows, and the environment sample weighs against it, since both see the sky.
-/// A light's sample never does: lights are next-event estimation's alone, and a bounce ray reaching one adds nothing.
+/// Where `continues`, a `bounce_from` follows, and both samples weigh against it, which reaches the same lights and sky.
 /// Nothing where the viewer is behind the shading frame, which `shading_frame` leaves only a degenerate input to.
 fun direct(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, continues: bool, rng: mut uint){tracer.traced, tracer.bindless} -> float3:
     if wo_local.z <= 0.0 => return float3(0.0)
     let mut sum = float3(0.0)
-    let l = tracer.sample_light(b, f, wo_local, p, n, true, mut rng)
+    let l = tracer.sample_light(b, f, wo_local, p, n, not continues, mut rng)
     if tracer.reaches(l, tracer.cutout_seed(rng, tracer.cutout_ray_light)):
         sum += l.diffuse + l.specular
     let e = tracer.sample_environment(b, f, wo_local, p, n, not continues, mut rng)
@@ -53,6 +52,8 @@ struct bounce:
     throughput: float3
     /// the environment along an escape, weighed against `direct`'s environment sample; zero where it met a surface
     escaped: float3
+    /// the lights the bounce reached before what it met, each weighed against `direct`'s light sample
+    lights: float3
     /// whether it met a surface, which `at`, `n` and `albedo` then describe
     hit: bool
     at: float3
@@ -66,7 +67,7 @@ struct bounce:
 /// One bounce from `p`: a direction drawn from the closure `b`, traced inline to what it meets.
 /// Only a reflection continues: a refracted direction would have to follow the ray through the surface, which nothing here does yet.
 fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> bounce:
-    let mut result = bounce(float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5))
+    let mut result = bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5))
     let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
     let s = openpbr.bsdf_sample_direction(b, wo_local, u)
     if s.pdf <= 0.0 or s.direction.z <= 0.0 or not s.valid => return result
@@ -77,6 +78,7 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
 
     let origin = p + n * 1e-3
     let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(rng, tracer.cutout_ray_surface))
+    result.lights = lights_along(origin, wi, h.t, s.pdf)
     if h.kind == tracer.hit_none:
         result.escaped = scene.background_radiance(tracer.background_sh(), wi) * pt.mis_weight(s.pdf, pt.env_pdf())
         return result
@@ -92,10 +94,44 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
         let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
         result.n = normalize(cross(w1 - w0, w2 - w0))
         result.albedo = tracer.instance_base_color(inst, ctx)
+        result.lights += emitter_light(inst, ctx, w1 - w0, w2 - w0, wi, h.t, s.pdf)
     else:
         result.n = normalize(raster.to_world_vector(inst, h.normal))
     if dot(result.n, wi) > 0.0 => result.n = -result.n
     return result
+
+/// The analytic lights a bounce from `origin` along `wi` reaches, drawn at `bsdf_pdf`: the rects it crosses before `hit_t`, and on an escape, a negative `hit_t`, the discs it points into.
+/// Each is weighed against `direct`'s light sample, which draws the same direction at the light's own density.
+/// A light that casts no shadow is reached through anything, as its sample is.
+fun lights_along(origin: float3, wi: float3, hit_t: float, bsdf_pdf: float){tracer.traced} -> float3:
+    let f = tracer.traced.frame[0]
+    let mut sum = float3(0.0)
+    let begin_area = f.path_offset.y
+    for i in (begin_area as int) ..< ((begin_area + f.path_count.y) as int):
+        let l = scene.light(..tracer.traced.lights[i])
+        let mut t_light = 0.0
+        let mut cos_light = 0.0
+        if not pt.rect_intersect(l, origin, wi, mut t_light, mut cos_light) => continue
+        if hit_t >= 0.0 and t_light >= hit_t and scene.light_casts_shadows(l) => continue
+        let w = pt.mis_weight(bsdf_pdf, pt.light_pdf(l, f.light_count, t_light * t_light, cos_light))
+        sum += l.emission * scene.light_cone(l, cos_light) * w
+    let begin_disc = f.path_offset.w
+    for i in (begin_disc as int) ..< ((begin_disc + f.path_count.w) as int):
+        let l = scene.light(..tracer.traced.lights[i])
+        if not pt.in_disc(l, wi) => continue
+        if hit_t >= 0.0 and scene.light_casts_shadows(l) => continue
+        sum += l.emission * pt.mis_weight(bsdf_pdf, pt.disc_pdf(l, f.light_count))
+    return sum
+
+/// What an emissive instance `inst` sends back along a bounce that met it at `ctx`, `t` along the unit direction `wi`.
+/// `edge1` and `edge2` are the met triangle's world edges from its first corner.
+/// Weighed against `direct`'s light sample where the trace's light table holds the instance, and nothing where it does not, since then its light reaches the camera alone.
+fun emitter_light(inst: scene.instance, ctx: material.shading_context, edge1: float3, edge2: float3, wi: float3, t: float, bsdf_pdf: float){tracer.traced, tracer.bindless} -> float3:
+    if inst.emitter == scene.no_offset => return float3(0.0)
+    let e = tracer.traced.emitters[(inst.emitter - tracer.traced.frame[0].emitter_offset) as int]
+    let light_pdf = tracer.emitter_pdf(inst, ctx.primitive, edge1, edge2, wi, t)
+    let w = if light_pdf > 0.0 => pt.mis_weight(bsdf_pdf, light_pdf) else 1.0
+    return tracer.emitter_radiance(e, ctx) * w
 
 /// The surface a bounce met, as `direct` lights it: a diffuse closure of its base color, its frame, and the direction back along the bounce.
 /// That is the secondary material the plan reads from data rather than from the material's code, so no permutation's code runs past the primary hit.
@@ -157,7 +193,7 @@ fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr
     let bounced = bounce_from(b, shading, face.n, wo_local, p.world, mut rng)
     let s2 = secondary_of(bounced)
     let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, false, mut rng)
-    let color = b.emission + lit + bounced.throughput * (bounced.escaped + bounce_lit)
+    let color = b.emission + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit)
 
     let prev = scene.camera(..f.previous_camera)
     let motion = pixel + jitter_of(f) - scene.camera_project(prev, p.world - prev.position, pass.size)

@@ -169,7 +169,7 @@ The images differ by what the reduced closure loses, and the frame times by ever
 **Both are built**, as `sv::hybrid_routine` (rendering/hybrid_routine.hh) with `hybrid_lighting::forward` and `::deferred`, behind `render_mode::hybrid`.
 **Phase 4's bounce is in**: one direction drawn from the closure, the environment along an escape weighed against the environment sample, and a hit lit as a diffuse surface of its base color.
 The base color is data, `material_type::base_color_attribute`, read through the instance record's `base_*` fields by `tracer.instance_base_color`, as the emitter reads its color.
-Lights are next-event estimation's alone, so a bounce meeting one adds nothing: a mirror does not show a light yet.
+The bounce reaches the lights too, weighed by MIS against the light sample as the tracer weighs them: the rects it crosses, the discs it escapes into, and an emissive mesh it meets.
 `hybrid-test.cc` holds both to the megakernel's two bounces on the Cornell box, within 5.2% for the worst block.
 `hybrid-test.cc` holds each, averaged over 128 frames, to the megakernel's direct light on the Cornell box with its blocks: the worst block is within 3.3% for both.
 
@@ -361,7 +361,7 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
    - 3c, done: denoised through the traced layer's own flow, its G-buffer slots serving as the guides.
      A temporal member reads each frame alone and a spatial one the mean, with the crossfade between; no split signal and no upscaling yet.
 4. **The indirect ray** with the secondary material, ending in the environment past its hit.
-   Done but for its roughness and metalness, which the secondary material does not read yet, and a refracted bounce, which ends.
+   Done, lights reached by the bounce included, but for its roughness and metalness, which the secondary material does not read yet, and a refracted bounce, which ends.
 5. **The radiance cache**, ending the indirect ray in it, once counsel has confirmed its design.
 6. **Reconstruction**: `dlss_rr` on the scaled stream, the MetalFX member.
    Begun: a moving hybrid frame is drawn at the upscaler's input extent, jittered as a traced one is, and upscaled through the traced layer's own reconstruct path.
