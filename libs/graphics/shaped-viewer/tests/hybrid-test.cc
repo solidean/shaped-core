@@ -323,18 +323,12 @@ ASYNC_INVOCABLE_TEST("sv - a hybrid layer accumulates to a capture's target, for
     }
 }
 
-// A hybrid layer upscaling below native, as a traced one does: a moving frame is drawn at the upscaler's input extent,
-// jittered, and upscaled into the denoised slot, and is no sample of the mean.
-// The first frame the camera holds still restarts the mean at full size, and the next one accumulates onto it.
-ASYNC_INVOCABLE_TEST("sv - a moving hybrid layer draws at the upscaler's extent and a still one at full size",
-                     (sg::context_handle const& ctx_h))
+namespace
 {
-    auto& ctx = *ctx_h;
-    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
-        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
-    if (!sr::query_reconstruct_support(ctx).fsr)
-        SKIP("no upscaler on this device");
-
+/// A hybrid layer denoised by `method` below native: moving frames scaled into the denoised slot, then still ones at full size.
+cc::shared_async<cc::unit> moving_then_still(sg::context& ctx, sr::denoise_method method)
+{
+    CC_LOG_INFO("a moving hybrid layer, upscaled through {}", sr::to_string(method));
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const item = resources.acquire_scene_item(shadowed_cornell_box());
     resources.wait_for_pending_uploads();
@@ -350,7 +344,7 @@ ASYNC_INVOCABLE_TEST("sv - a moving hybrid layer draws at the upscaler's extent 
         scene.items.push_back(item);
         scene.settings.mode = sv::render_mode::hybrid;
         scene.settings.hybrid_lighting = sv::hybrid_lighting::deferred;
-        scene.settings.reconstruct.denoiser = sr::denoise_method::automatic;
+        scene.settings.reconstruct.denoiser = method;
         scene.settings.reconstruct.scale = sr::render_scale_preset::performance;
         // A move ends on the first still frame, so what each frame draws does not depend on the clock.
         scene.settings.motion_hold_ms = 0.0f;
@@ -429,4 +423,27 @@ ASYNC_INVOCABLE_TEST("sv - a moving hybrid layer draws at the upscaler's extent 
     (void)co_await frame(5, false);
     CHECK(accumulation().accum_frame == 2);
     co_await cc::async_settled(sv::background_work(ctx));
+    co_return;
+}
+} // namespace
+
+// A hybrid layer upscaling below native, as a traced one does: a moving frame is drawn at the upscaler's input extent,
+// jittered, and upscaled into the denoised slot, and is no sample of the mean.
+// The first frame the camera holds still restarts the mean at full size, and the next one accumulates onto it.
+// Both ways a frame is upscaled: svgf with FSR behind it, and dlss_rr, which upscales by itself.
+ASYNC_INVOCABLE_TEST("sv - a moving hybrid layer draws at the upscaler's extent and a still one at full size",
+                     (sg::context_handle const& ctx_h))
+{
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+    auto const support = sr::query_reconstruct_support(ctx);
+    auto const fsr_behind_svgf = support.fsr && support.svgf;
+    if (!fsr_behind_svgf && !support.dlss_rr)
+        SKIP("neither FSR behind svgf nor dlss_rr runs on this device");
+
+    if (fsr_behind_svgf)
+        co_await moving_then_still(ctx, sr::denoise_method::svgf);
+    if (support.dlss_rr)
+        co_await moving_then_still(ctx, sr::denoise_method::dlss_rr);
 }

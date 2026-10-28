@@ -58,7 +58,7 @@ Today it is unshadowed and reflects only the SH environment; a device without ra
 ### Upscaling while moving
 
 - A layer with drawings never upscales: their depth test reads the primary depth at the view's size.
-- `dlss_rr` is not reached by the scaled frames.
+- `dlss_rr` is reached by the scaled frames, but only a hybrid layer's test runs it against them.
 - FSR is told a 60 Hz frame time rather than the viewer's own.
 
 ### Textures

@@ -323,7 +323,8 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
 6. **Reconstruction**: `dlss_rr` on the scaled stream, the MetalFX member.
    Begun: a moving hybrid frame is drawn at the upscaler's input extent, jittered as a traced one is, and upscaled through the traced layer's own reconstruct path.
    `raster.frame_constants::jitter` moves the image in clip space so a pixel's center lands where its jittered ray would.
-   Left: `dlss_rr` on that stream, and the MetalFX member.
+   `dlss_rr` takes that stream as it is, upscaling by itself at its own ratio and jitter, and a test runs it beside svgf with FSR.
+   Left: the MetalFX member.
 7. **LODs and cluster culling.**
 
 The reference for every image test is the converging wavefront, with a bound that names what this mode approximates: the reduced closure, the secondary material, and the cache's bias.
