@@ -7,7 +7,7 @@ using namespace cc::primitive_defines;
 
 // Amazon Lumberyard's Bistro, from NVIDIA's ORCA release, loaded from its FBX and path-traced.
 //
-// A production scene in a format nothing else here reads: 2.8 million triangles over 132 materials outside, and a million over 71 inside, with every texture a DDS.
+// A production scene in a format nothing else here reads: 2.8 million triangles over 132 materials outside, and 1.3 million over 74 inside, with every texture a DDS.
 // It is NOT in the repository.
 // `uv run extern/bistro/fetch-bistro.py` downloads it once (about 850 MB), and without it this example says so and stops.
 //
@@ -18,7 +18,7 @@ using namespace cc::primitive_defines;
 // `bistro` is the exterior under a low sun: `sv::daylight`'s sky, with its sun aimed the way the file's own directional light points.
 // That sun stands behind the buildings, so the street lies in shadow and only the upper floors catch it.
 // The archive's san_giuseppe_bridge_4k.hdr is not used: sv's background is a spherical-harmonics probe, not a map.
-// `bistro-interior` is the interior at night, lit by small rects standing in for its four point lights, and by its emissive lamps.
+// `bistro-interior` is the interior with filled wine glasses (BistroInterior_Wine.fbx) at night, lit by small rects standing in for its four point lights, and by its emissive lamps.
 // FBX gives a light no physical unit; the file's intensities are taken as candela and lowered by a level tuned by eye.
 //
 // Controls
@@ -83,7 +83,7 @@ constexpr float glass_color_depth = 0.01f;
 
 [[nodiscard]] cc::string_view file_of(scene_kind kind)
 {
-    return kind == scene_kind::exterior ? SV_BISTRO_DIR "/BistroExterior.fbx" : SV_BISTRO_DIR "/BistroInterior.fbx";
+    return kind == scene_kind::exterior ? SV_BISTRO_DIR "/BistroExterior.fbx" : SV_BISTRO_DIR "/BistroInterior_Wine.fbx";
 }
 
 /// The meshes as placed: the file's own, with glass made transmissive and the interior's lamps brightened.
@@ -95,11 +95,14 @@ cc::vector<sv::mesh> placed_meshes(sv::asset const& bistro, scene_kind kind)
         meshes.push_back(mesh);
 
     // The FBX gives glass only an opacity below one, which the importer reads as coverage; the pyscene says what it is.
-    for (auto const& slot : bistro.data().materials)
-        for (auto const& g : glass_overrides)
+    for (auto const& g : glass_overrides)
+    {
+        auto matched = false;
+        for (auto const& slot : bistro.data().materials)
         {
             if (!names_material(slot.name, g.material))
                 continue;
+            matched = true;
             auto const clear = g.absorption == tg::vec3f(0, 0, 0);
             auto const color = tg::vec3f(tg::exp(-g.absorption[0] * glass_color_depth),
                                          tg::exp(-g.absorption[1] * glass_color_depth),
@@ -119,6 +122,9 @@ cc::vector<sv::mesh> placed_meshes(sv::asset const& bistro, scene_kind kind)
                 }
             }
         }
+        if (!matched)
+            CC_LOG_INFO("bistro: the glass override '{}' matches no material", g.material);
+    }
 
     if (kind != scene_kind::interior)
         return meshes;

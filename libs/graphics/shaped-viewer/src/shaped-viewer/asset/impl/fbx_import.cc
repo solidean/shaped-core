@@ -406,27 +406,32 @@ struct fbx_importer
     // ---------------------------------------------------------------------------------------------
 
     /// `v` held finite and non-negative, a NaN to 0, so no file value reaches OpenPBR as something it asserts on.
-    [[nodiscard]] f32 sanitized(bf::material const& m, f32 v)
+    /// `material` is the display name, which an issue reports.
+    [[nodiscard]] f32 sanitized(cc::string_view material, f32 v)
     {
         if (v >= 0.0f && v < 1e30f)
             return v;
-        if (clamped_materials.empty() || clamped_materials.back() != m.name)
-            clamped_materials.push_back(m.name);
+        if (clamped_materials.empty() || clamped_materials.back() != material)
+            clamped_materials.push_back(cc::string(material));
         return v >= 1e30f ? 1e30f : 0.0f;
     }
 
-    [[nodiscard]] tg::vec3f color_of(bf::material const& m, cc::string_view name, tg::vec3f fallback)
+    [[nodiscard]] tg::vec3f color_of(bf::material const& m,
+                                     cc::string_view material,
+                                     cc::string_view property,
+                                     tg::vec3f fallback)
     {
-        auto const* const p = m.find_property(name);
+        auto const* const p = m.find_property(property);
         if (p == nullptr)
             return fallback;
-        return tg::vec3f(sanitized(m, p->value[0]), sanitized(m, p->value[1]), sanitized(m, p->value[2]));
+        return tg::vec3f(sanitized(material, p->value[0]), sanitized(material, p->value[1]),
+                         sanitized(material, p->value[2]));
     }
 
-    [[nodiscard]] f32 number_of(bf::material const& m, cc::string_view name, f32 fallback)
+    [[nodiscard]] f32 number_of(bf::material const& m, cc::string_view material, cc::string_view property, f32 fallback)
     {
-        auto const* const p = m.find_property(name);
-        return p != nullptr ? sanitized(m, p->value[0]) : fallback;
+        auto const* const p = m.find_property(property);
+        return p != nullptr ? sanitized(material, p->value[0]) : fallback;
     }
 
     void build_material(bf::material const& m, cc::string_view name)
@@ -439,8 +444,8 @@ struct fbx_importer
 
         // Base color: FBX's DiffuseColor, whose texture wins over it as every sample beats a constant.
         // The Phong reading folds DiffuseFactor in; the ORCA scenes leave it at 1.
-        auto const diffuse = color_of(m, "DiffuseColor", tg::vec3f(0.8f, 0.8f, 0.8f));
-        auto const diffuse_factor = orca ? 1.0f : number_of(m, "DiffuseFactor", 1.0f);
+        auto const diffuse = color_of(m, name, "DiffuseColor", tg::vec3f(0.8f, 0.8f, 0.8f));
+        auto const diffuse_factor = orca ? 1.0f : number_of(m, name, "DiffuseFactor", 1.0f);
         bindings.push_back(binding::of("base_color", diffuse * diffuse_factor));
         auto const base
             = bind(textures, "base_color", m.find_texture("DiffuseColor"), texture_role::color, channel_swizzle());
@@ -461,7 +466,7 @@ struct fbx_importer
             // A connected map that did not decode does NOT fall back to the constant: Bistro's is a placeholder 0.5, which would make every surface half metal.
             // Neutral defaults stand in instead, and say so.
             auto const packed = m.find_texture("SpecularColor");
-            auto const specular = color_of(m, "SpecularColor", tg::vec3f(0.5f, 0.5f, 0.5f));
+            auto const specular = color_of(m, name, "SpecularColor", tg::vec3f(0.5f, 0.5f, 0.5f));
             auto roughness = specular[1];
             auto metalness = specular[2];
             if (packed != bf::texture_index::invalid)
@@ -485,8 +490,8 @@ struct fbx_importer
             // Phong's specular exponent onto a GGX roughness: Blinn-Phong n matches a Beckmann alpha of sqrt(2 / (n + 2)), and OpenPBR's roughness is the square root of alpha.
             // Shininess only stands in for an absent ShininessExponent, so it is never sanitized, or reported, when unused.
             auto const* const exponent_property = m.find_property("ShininessExponent");
-            auto const exponent = exponent_property != nullptr ? sanitized(m, exponent_property->value[0])
-                                                               : number_of(m, "Shininess", 20.0f);
+            auto const exponent = exponent_property != nullptr ? sanitized(name, exponent_property->value[0])
+                                                               : number_of(m, name, "Shininess", 20.0f);
             auto const alpha = tg::sqrt(2.0f / ((exponent > 0.0f ? exponent : 0.0f) + 2.0f));
             bindings.push_back(binding::of("specular_roughness", tg::sqrt(alpha)));
             bindings.push_back(binding::of("base_metalness", 0.0f));
@@ -508,18 +513,18 @@ struct fbx_importer
 
         // Emission: EmissiveColor (or its map) at a luminance of EmissiveFactor, read one-to-one as nits.
         // FBX gives emission no unit, and the ORCA scenes were tuned for Falcor's renderer, so a caller expecting a lit scene scales them — which is what the Bistro example does for its night shot.
-        auto const emissive = color_of(m, "EmissiveColor", tg::vec3f::zero);
+        auto const emissive = color_of(m, name, "EmissiveColor", tg::vec3f::zero);
         auto const emissive_map = m.find_texture("EmissiveColor");
         if (!is_black(emissive) || (emissive_map != bf::texture_index::invalid && cfg.import_textures))
         {
             bindings.push_back(binding::of("emission_color", emissive));
-            bindings.push_back(binding::of("emission_luminance", number_of(m, "EmissiveFactor", 1.0f)));
+            bindings.push_back(binding::of("emission_luminance", number_of(m, name, "EmissiveFactor", 1.0f)));
             bind(textures, "emission_color", emissive_map, texture_role::color, channel_swizzle());
         }
 
         // Opacity below 1 is coverage, as glTF's BLEND is read: FBX cannot say whether a surface is glass.
         auto const* const opacity_property = m.find_property("Opacity");
-        auto const opacity = opacity_property != nullptr ? sanitized(m, opacity_property->value[0]) : 1.0f;
+        auto const opacity = opacity_property != nullptr ? sanitized(name, opacity_property->value[0]) : 1.0f;
         if (opacity < 1.0f)
         {
             bindings.push_back(binding::of("opacity", opacity));

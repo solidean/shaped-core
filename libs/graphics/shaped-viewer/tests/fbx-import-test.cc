@@ -953,6 +953,13 @@ TEST("sv::asset_loader - FBX material values that are not finite and non-negativ
     CHECK(base[1] <= 1e30f);
     CHECK(constant_of<f32>(glow, "emission_luminance") == 0.0f);
     CHECK(mentions(asset.issues, "clamped"));
+
+    // An unnamed material is reported by the name it imports under, as every other issue calls it.
+    auto doc = REQUIRED_VALUE(babel::fbx::read(cc::string_view(text)));
+    for (auto& m : doc.materials)
+        m.name = {};
+    auto const unnamed = REQUIRED_VALUE(loader.load(doc, "unnamed.fbx"));
+    CHECK(mentions(unnamed.issues, "clamped: 'material"));
 }
 
 TEST("sv::asset_loader - corners hanging off one control point weld in linear time")
