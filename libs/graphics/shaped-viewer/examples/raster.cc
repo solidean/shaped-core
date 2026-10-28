@@ -211,8 +211,13 @@ EXAMPLE("shaped-viewer/raster")
         };
 
         panel("traced", {.mode = sv::render_mode::wavefront});
-        panel("forward", {.mode = sv::render_mode::hybrid, .hybrid_lighting = sv::hybrid_lighting::forward});
-        panel("deferred", {.mode = sv::render_mode::hybrid, .hybrid_lighting = sv::hybrid_lighting::deferred});
+        // Denoised, since a moving hybrid frame is one sample per pixel.
+        panel("forward", {.mode = sv::render_mode::hybrid,
+                          .hybrid_lighting = sv::hybrid_lighting::forward,
+                          .reconstruct = {.denoiser = sr::denoise_method::automatic}});
+        panel("deferred", {.mode = sv::render_mode::hybrid,
+                           .hybrid_lighting = sv::hybrid_lighting::deferred,
+                           .reconstruct = {.denoiser = sr::denoise_method::automatic}});
         panel("raster", {.mode = sv::render_mode::raster});
     }
 }

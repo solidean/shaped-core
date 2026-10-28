@@ -74,6 +74,24 @@ cc::vector<temporal_input> temporal_inputs_of(view_data const& v)
         {
             for (auto const& s : impl::raster_slots)
                 out.push_back({.id = s.id(u8(i)), .format = s.format});
+
+            // A hybrid layer denoises like a traced one, from the G-buffer slots above, which are the guides' own.
+            // It writes no split signal, so a member that would read one takes the whole radiance.
+            auto const& settings = v.layers[i].settings;
+            if (settings.mode == render_mode::hybrid && settings.reconstruct.denoiser != sr::denoise_method::none)
+            {
+                out.push_back({.id = temporal_id::denoised(u8(i)),
+                               .format = sg::pixel_format::rgba16_float,
+                               .reset_hash = denoised_reset_hash(settings)});
+                auto const method = settings.reconstruct.denoiser;
+                if (method == sr::denoise_method::automatic || sr::is_temporal(method))
+                {
+                    out.push_back({.id = temporal_id::frame_samples(u8(i)), .format = sg::pixel_format::rgba16_float});
+                    if (settings.temporal_denoise_fade_frames > 0)
+                        out.push_back(
+                            {.id = temporal_id::denoised_crossfade(u8(i)), .format = sg::pixel_format::rgba16_float});
+                }
+            }
             continue;
         }
 

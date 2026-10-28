@@ -311,7 +311,8 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
 3. **`render_mode::hybrid` with direct light and shadows alone**: the thin G-buffer, the lighting kernel, the guides, denoised.
    - 3a, done: both lightings at the routine level, tested and measured ([Forward or deferred](#forward-or-deferred)).
    - 3b, done: `render_mode::hybrid`, with `render_settings::hybrid_lighting` choosing forward or deferred, accumulating while still; the raster example shows both.
-   - 3c: denoised, from the G-buffer slots it already writes.
+   - 3c, done: denoised through the traced layer's own flow, its G-buffer slots serving as the guides.
+     A temporal member reads each frame alone and a spatial one the mean, with the crossfade between; no split signal and no upscaling yet.
 4. **The indirect ray** with the secondary material, ending in the environment past its hit.
    Done but for its roughness and metalness, which the secondary material does not read yet, and a refracted bounce, which ends.
 5. **The radiance cache**, ending the indirect ray in it, once counsel has confirmed its design.

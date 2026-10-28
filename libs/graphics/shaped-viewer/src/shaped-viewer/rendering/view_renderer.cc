@@ -668,6 +668,8 @@ void count_traced_frame(impl::temporal_slot& slot, render_settings const& settin
     slot.accum_frame = next_frame_count(slot);
     if (settings.mode == render_mode::megakernel)
         slot.samples = slot.accum_frame * megakernel_samples_per_frame(settings);
+    if (settings.mode == render_mode::hybrid)
+        slot.samples = slot.accum_frame;
 }
 
 /// Raises `slot.samples` by every wavefront sample floor that has landed, and drops one whose download failed.
@@ -1020,25 +1022,24 @@ struct raster_batch
 
 /// Draws one frame of hybrid layer `l` of `v` and blends it into `slot`'s mean, its G-buffer into the slots `rec` keeps beside it.
 ///
-/// A frame is one light sample per pixel, so the layer accumulates while its image holds still, as a traced layer does, and draws nothing once it holds `target`.
+/// A frame is one light sample per pixel and one bounce, so the layer accumulates while its image holds still, as a traced layer does.
 /// `fc` is the frame block a trace of the layer would upload, and `slot` must already have restarted on its hash.
 /// The G-buffer slots hold the latest frame's, which a still image redraws the same.
-[[nodiscard]] sg::routine_outcome hybrid_layer(sg::command_list& cmd,
+/// Where `frame_output` is set, it receives this frame alone, which a temporal denoiser reads.
+/// Counts nothing: the caller counts a frame that executed, as a trace counts its own.
+[[nodiscard]] sg::routine_outcome hybrid_frame(sg::command_list& cmd,
                                                view_data const& v,
                                                layer const& l,
                                                u8 layer,
                                                tg::vec2i resolution,
                                                raster_scene const& scene,
                                                shaders::tracer::frame_constants fc,
-                                               u32 target,
                                                impl::view_state& rec,
                                                impl::temporal_slot& slot,
-                                               gpu_resource_manager& resources)
+                                               gpu_resource_manager& resources,
+                                               sg::texture_2d const& frame_output,
+                                               stand_in_report& stand_ins)
 {
-    slot.sample_target = target;
-    if (!frame_samples(slot, target, false))
-        return sg::routine_outcome::executed;
-
     auto& ctx = cmd.context();
     auto const& resolved = *scene.resolved;
     auto const slot_of = [&](u64 id)
@@ -1078,7 +1079,6 @@ struct raster_batch
          .usage = sg::texture_usage::render_target | sg::texture_usage::texture | sg::texture_usage::image});
     auto* const primary_depth = rec.temporal.get_ptr(temporal_id::primary_depth(layer));
 
-    auto stand_ins = stand_in_report{};
     auto const outcome = hybrid_routine::execute(
         cmd, {.lighting = l.settings.hybrid_lighting,
               .frame = fc,
@@ -1108,20 +1108,43 @@ struct raster_batch
     if (outcome == sg::routine_outcome::declined)
         return outcome;
 
-    // A frame the blend could not take in yet is drawn for nothing, and counts nothing.
+    // A frame the blends could not take in yet is drawn for nothing, and declines so that it counts nothing.
     if (!sr::mix_routine::execute(cmd, slot.texture, color, 1.0f / f32(slot.accum_frame + 1)))
-        return outcome;
+        return sg::routine_outcome::declined;
+    if (frame_output.raw() != nullptr && !sr::mix_routine::execute(cmd, frame_output, color, 1.0f))
+        return sg::routine_outcome::declined;
 
     motion->last_camera = fc.camera;
     motion->has_last_camera = true;
+    return outcome;
+}
+
+/// `hybrid_frame` for the single-view path, which denoises nothing: draws nothing once `slot` holds `target`, and counts what it draws.
+[[nodiscard]] sg::routine_outcome hybrid_layer(sg::command_list& cmd,
+                                               view_data const& v,
+                                               layer const& l,
+                                               u8 layer,
+                                               tg::vec2i resolution,
+                                               raster_scene const& scene,
+                                               shaders::tracer::frame_constants const& fc,
+                                               u32 target,
+                                               impl::view_state& rec,
+                                               impl::temporal_slot& slot,
+                                               gpu_resource_manager& resources)
+{
+    slot.sample_target = target;
+    if (!frame_samples(slot, target, false))
+        return sg::routine_outcome::executed;
+    auto stand_ins = stand_in_report{};
+    auto const outcome = hybrid_frame(cmd, v, l, layer, resolution, scene, fc, rec, slot, resources, {}, stand_ins);
+    if (outcome == sg::routine_outcome::declined)
+        return outcome;
 
     // As a trace: one drawn through a stand-in still compiling, or short of an emitter still loading, restarts next frame.
     slot.stand_in_hash = stand_ins.hash;
-    if (stand_ins.pending || resolved.emitters_pending)
+    if (stand_ins.pending || scene.resolved->emitters_pending)
         slot.reset_hash = cc::combine_hash(slot.reset_hash, u64(1));
-    slot.drew_since_restart = true;
-    slot.accum_frame = next_frame_count(slot);
-    slot.samples = slot.accum_frame;
+    count_traced_frame(slot, l.settings);
     return outcome;
 }
 } // namespace
@@ -1388,12 +1411,6 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         restart_for_image(*slot, hash);
     slot->reset_hash = hash;
 
-    // A hybrid frame is a raster frame lit by inline traces: it accumulates as a trace does, and nothing below is its yet.
-    if (mode == render_mode::hybrid)
-        return hybrid_layer(
-            cmd, v, l, tr.layer, tr.resolution,
-            {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash}, fc,
-            effective_sample_target(def.sample_target), rec, *slot, resources);
 
     // The denoiser's slots, when this layer denoises: the guides and the output are declared together, and the two
     // temporal ones only when the layer may denoise temporally.
@@ -1407,9 +1424,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     //
     // Asked once rather than per slot: the three travel together, and `resolve_denoise_method` re-probes every
     // member's shaders on `automatic`.
+    // A hybrid frame writes no split signal, so a member wanting one reads the whole radiance instead.
     auto const splitting = [&]
     {
-        if (!denoising)
+        if (!denoising || mode == render_mode::hybrid)
             return false;
         // The split signals are this frame's own samples, so it is the temporal member's answer that decides.
         auto fresh = l.settings.reconstruct;
@@ -1523,7 +1541,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // A layer that can never trace at the upscaler's extent holds no paths for it.
     if (!has_temporal || draws_over || upscale_settings.upscaler == sr::upscale_method::none)
         slot->scaled_paths = {};
-    auto const may_scale = moving && writes_temporal && !draws_over;
+    // A hybrid frame is drawn at the view's own size: upscaling it is the hybrid plan's phase 6.
+    auto const may_scale = moving && writes_temporal && !draws_over && mode != render_mode::hybrid;
     auto const input_extent = may_scale
                                 ? sr::reconstruct_input_extent(ctx, upscale_settings, tr.resolution, traceable_guides())
                                 : tr.resolution;
@@ -1607,6 +1626,13 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     auto stand_ins = stand_in_report{};
     auto const dispatch = [&]
     {
+        // A hybrid frame draws its primary hits and lights them inline, then blends into the mean the trace would have.
+        if (mode == render_mode::hybrid)
+            return hybrid_frame(
+                cmd, v, l, tr.layer, tr.resolution,
+                {.resolved = &resolved, .lights = &lights, .decals = &decals, .background = &bg, .hash = hash}, fc, rec,
+                *slot, resources, frame_output, stand_ins);
+
         auto const frame = ctx.transient.create_buffer<shaders::tracer::frame_constants>(
             1, sg::buffer_usage::readonly_buffer | sg::buffer_usage::copy_dst);
         cmd.upload.pod_to_buffer(frame, fc);

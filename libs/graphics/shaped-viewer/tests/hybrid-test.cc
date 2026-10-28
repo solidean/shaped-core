@@ -252,6 +252,7 @@ ASYNC_INVOCABLE_TEST("sv::hybrid_routine - forward and deferred light the Cornel
 }
 
 // The hybrid as a view's layer: each lighting accumulates its frames until a capture's sample target, as a traced layer does.
+// The last case denoises too, through the guides the hybrid's G-buffer writes.
 ASYNC_INVOCABLE_TEST("sv - a hybrid layer accumulates to a capture's target, forward and deferred",
                      (sg::context_handle const& ctx_h))
 {
@@ -264,10 +265,20 @@ ASYNC_INVOCABLE_TEST("sv - a hybrid layer accumulates to a capture's target, for
         SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
 
     constexpr auto size = tg::vec2i(96, 64);
-    sv::hybrid_lighting const lightings[] = {sv::hybrid_lighting::forward, sv::hybrid_lighting::deferred};
-    for (auto const lighting : lightings)
+    struct case_of
     {
-        auto const path = cc::format("{}/sv-hybrid-capture-{}.png", cc::temp_directory_path(), int(lighting));
+        sv::hybrid_lighting lighting = sv::hybrid_lighting::forward;
+        sr::denoise_method denoiser = sr::denoise_method::none;
+    };
+    case_of const cases[] = {
+        {.lighting = sv::hybrid_lighting::forward, .denoiser = sr::denoise_method::none},
+        {.lighting = sv::hybrid_lighting::deferred, .denoiser = sr::denoise_method::none},
+        {.lighting = sv::hybrid_lighting::deferred, .denoiser = sr::denoise_method::automatic},
+    };
+    for (auto const& c : cases)
+    {
+        auto const path
+            = cc::format("{}/sv-hybrid-capture-{}-{}.png", cc::temp_directory_path(), int(c.lighting), int(c.denoiser));
         auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
         auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
         auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
@@ -288,7 +299,8 @@ ASYNC_INVOCABLE_TEST("sv - a hybrid layer accumulates to a capture's target, for
             auto scene = view.add_scene();
             scene.add_mesh(mesh);
             scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(40);
-            scene.settings({.mode = sv::render_mode::hybrid, .hybrid_lighting = lighting});
+            scene.settings(
+                {.mode = sv::render_mode::hybrid, .hybrid_lighting = c.lighting, .reconstruct = {.denoiser = c.denoiser}});
             REQUIRE(cc::current_time_steady_secs() - start < 35.0);
         }
         co_await cc::async_settled(sv::background_work(ctx));
