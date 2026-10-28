@@ -2,12 +2,14 @@
 created: 2026-10-28
 refs:
   - file: docs/bugs-external/warp-raytracing-wrong-capture/readme.md
+closed: 2026-10-28
+resolution: fixed
 ---
 
 # ci: run the Windows WARP legs on the NuGet WARP rather than the system one
 
 CI's Windows jobs run sv's WARP legs on the WARP that ships with the runner image, and that WARP traces wrong.
-[docs/bugs-external/warp-raytracing-wrong-capture](../bugs-external/warp-raytracing-wrong-capture/readme.md) has the evidence.
+[docs/bugs-external/warp-raytracing-wrong-capture](../../../../bugs-external/warp-raytracing-wrong-capture/readme.md) has the evidence.
 One test fails about one run in eight on it, and passes 80 runs on WARP 1.0.21 from NuGet.
 Two sv tests are skipped on software adapters because of it (bug-sv-megakernel-emitter-capture-dark, and very likely bug-sv-warp-megakernel-quadric-flake).
 
