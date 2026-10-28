@@ -9,12 +9,14 @@
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
 #include <shaped-viewer/all.hh>
+#include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <shaped-viewer/rendering/raster_routine.hh>
 
 using namespace cc::primitive_defines;
 
 // What the raster path's culling and depth prepass save on Intel's Sponza: the same frames drawn with no culling, culled by the view, and culled by occlusion too.
 // The last two again with the opaque depth laid down first, so each pixel is shaded once.
+// Then the hybrid both ways, forward and deferred, culled by occlusion after a prepass: direct light with its shadow rays traced inline.
 //
 // GPU time rather than wall time: each frame is bracketed by its own timestamps.
 // The contenders run interleaved frame by frame, since a laptop GPU's clocks drift under sustained load and a later run would come out slower.
@@ -37,10 +39,11 @@ constexpr int k_frames = 48;
 
 [[nodiscard]] sg::texture_2d target_of(sg::context& ctx, sg::pixel_format format)
 {
-    return ctx.persistent.create_texture_2d({.format = format,
-                                             .width = k_size[0],
-                                             .height = k_size[1],
-                                             .usage = sg::texture_usage::texture | sg::texture_usage::render_target});
+    return ctx.persistent.create_texture_2d(
+        {.format = format,
+         .width = k_size[0],
+         .height = k_size[1],
+         .usage = sg::texture_usage::texture | sg::texture_usage::render_target | sg::texture_usage::image});
 }
 
 /// `t` as a TLAS instance's row-major 3x4, which is what places an instance record.
@@ -78,6 +81,10 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
         transforms.push_back(mesh.transform);
     }
     resources.wait_for_pending_uploads();
+    // The hybrid traces against them; the raster frames never read them.
+    auto blases = cc::vector<sg::blas_handle>();
+    for (auto const& item : items)
+        blases.push_back(sv_test::blas_of(resources, item.mesh));
 
     // One permutation per distinct shader key, and each draw's row is its item's position.
     auto permutations = cc::vector<sv::material_permutation const*>();
@@ -133,6 +140,8 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
         cc::string_view name;
         sv::raster_culling culling = sv::raster_culling::none;
         bool depth_prepass = false;
+        /// Where set, the frame is the hybrid's, lit this way.
+        cc::optional<sv::hybrid_lighting> hybrid;
     };
     contender const contenders[] = {
         {.name = "no culling", .culling = sv::raster_culling::none, .depth_prepass = false},
@@ -140,6 +149,14 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
         {.name = "occlusion culling", .culling = sv::raster_culling::occlusion, .depth_prepass = false},
         {.name = "view culling + prepass", .culling = sv::raster_culling::view, .depth_prepass = true},
         {.name = "occlusion culling + prepass", .culling = sv::raster_culling::occlusion, .depth_prepass = true},
+        {.name = "hybrid forward",
+         .culling = sv::raster_culling::occlusion,
+         .depth_prepass = true,
+         .hybrid = sv::hybrid_lighting::forward},
+        {.name = "hybrid deferred",
+         .culling = sv::raster_culling::occlusion,
+         .depth_prepass = true,
+         .hybrid = sv::hybrid_lighting::deferred},
     };
     auto const count = cc::span<contender const>(contenders).size();
     // One record per occlusion contender, as two layers would keep them.
@@ -149,12 +166,14 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
     auto const record = [&](sg::command_list& cmd, isize c, int frame) -> bool
     {
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
+        auto instances = cc::vector<sg::tlas_instance>();
         for (auto i = isize(0); i < items.size(); ++i)
         {
             records.push_back(resources.describe_instance(cmd, items[i].mesh, items[i].instance));
-            auto inst = sg::tlas_instance{};
+            auto inst = sg::tlas_instance{.blas = blases[i], .instance_id = u32(i), .hit_group_offset = 0};
             pack_transform(inst, transforms[i]);
             sv::place_instance_record(records.back(), inst, permutations[draws[i].permutation]->opacity);
+            instances.push_back(inst);
         }
         auto const cam = camera_at(frame);
         auto const camera = sv::camera_record_of(cam);
@@ -164,6 +183,30 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
             = ctx.transient.create_buffer_from_data(cmd, records, sg::buffer_usage::readonly_buffer);
         auto const bindless = resources.freeze();
         auto stand_ins = sv::stand_in_report{};
+        if (contenders[c].hybrid.has_value())
+        {
+            auto fc = sv::default_frame_constants();
+            fc.camera = camera;
+            fc.previous_camera = camera;
+            fc.near_plane = f32(cam.projection.near_plane);
+            fc.pixel_spread = 2.0f * camera.up_scaled.length() / f32(k_size[1]);
+            fc.rng_seed = u32(frame) + 1u;
+            auto const outcome = sv::hybrid_routine::execute(cmd, {.lighting = contenders[c].hybrid.value(),
+                                                                   .frame = fc,
+                                                                   .background = background,
+                                                                   .instances = instances,
+                                                                   .instance_table = instance_table,
+                                                                   .draws = draws,
+                                                                   .index_pool = resources.meshes.index_pool(),
+                                                                   .permutations = permutations,
+                                                                   .fallback = &resources.shaders.acquire_fallback(),
+                                                                   .bindless = &bindless,
+                                                                   .targets = targets,
+                                                                   .stand_ins = &stand_ins,
+                                                                   .visibility = &visibility[c],
+                                                                   .culling = contenders[c].culling});
+            return outcome == sg::routine_outcome::executed && stand_ins.hash == 0;
+        }
         auto const outcome = sv::raster_routine::execute(
             cmd, {.frame = {.camera = camera,
                             .previous_camera = camera,

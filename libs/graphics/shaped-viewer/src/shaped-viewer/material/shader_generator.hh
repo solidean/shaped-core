@@ -137,10 +137,16 @@ struct sv::generated_material_shader
     /// range of the sorted queue, shaded through `tracer.shade_stored_triangle` or `tracer.shade_stored_quadric`.
     cc::string shade_source;
 
-    /// The raster path's pixel stage, `@pixel fun sv_raster`: the same material over the triangle module `raster`'s vertex stage drew, lit without tracing.
-    /// It writes `raster.targets` through `raster.shade`, and cuts out where the hit group's any-hit would.
+    /// The raster path's pixel stages, which cut out where the hit group's any-hit would.
+    /// `@pixel fun sv_raster` is the same material over the triangle module `raster`'s vertex stage drew, lit without tracing, into `raster.targets`.
+    /// `@pixel fun sv_gbuffer` writes the hybrid's thin G-buffer instead, `raster.thin_targets`, which a deferred frame lights after.
     /// Empty for a quadric permutation, which the raster path does not draw yet.
     cc::string raster_source;
+
+    /// The hybrid's forward pixel stage, `@pixel fun sv_hybrid`: the same material lit through `hybrid.shade`, tracing its shadow rays inline.
+    /// Its own source rather than an entry of `raster_source`, since it lists `tracer.traced` and so needs ray tracing.
+    /// Empty for a quadric permutation.
+    cc::string hybrid_source;
 
     material_parameter_layout layout;
 

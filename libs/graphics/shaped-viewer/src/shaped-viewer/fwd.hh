@@ -274,7 +274,12 @@ struct raster_gbuffer; // what a raster frame writes: the image and the primary 
 struct raster_draw;             // one draw of a raster frame (rendering/raster_routine.hh)
 struct raster_frame_desc;       // one raster frame (rendering/raster_routine.hh)
 enum class raster_culling : u8; // how far a raster frame culls (rendering/raster_routine.hh)
+enum class raster_shading : u8; // which pixel stage a raster frame's shading draws run (rendering/raster_routine.hh)
+struct raster_thin_targets;     // the hybrid's thin G-buffer (rendering/raster_routine.hh)
 class raster_routine;
+enum class hybrid_lighting : u8; // where a hybrid frame lights its primary hits (rendering/hybrid_routine.hh)
+struct hybrid_frame_desc;        // one hybrid frame (rendering/hybrid_routine.hh)
+class hybrid_routine;
 class view_renderer;
 class viewer_renderer;
 

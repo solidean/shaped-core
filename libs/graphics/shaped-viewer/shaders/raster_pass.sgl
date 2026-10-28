@@ -27,3 +27,7 @@ struct environment_varyings:
 /// The environment where no surface was drawn, which the depth test against the far plane decides.
 @pixel fun environment_ps(p: environment_varyings){raster.drawn} -> raster.targets:
     return raster.environment(float2(p.position.x, p.position.y))
+
+/// The environment where no surface was drawn, into the thin G-buffer of a deferred hybrid frame.
+@pixel fun environment_thin_ps(p: environment_varyings){raster.drawn} -> raster.thin_targets:
+    return raster.environment_thin(float2(p.position.x, p.position.y))

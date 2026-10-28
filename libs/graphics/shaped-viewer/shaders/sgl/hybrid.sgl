@@ -1,0 +1,85 @@
+// The hybrid's LIGHTING: a primary hit the raster found, lit by the tracer's own next-event estimate with its shadow rays traced inline.
+//
+// Two callers, measured against each other.
+// A material's forward pixel stage, `sv_hybrid`, lights its full closure where it evaluated it.
+// The deferred kernel `light_thin` (hybrid_pass.sgl) lights the closure the thin G-buffer reduced it to.
+// Both list `tracer.traced` as group 0: it holds the TLAS, the lights, the emitters, the instance table and the decals, which `raster.drawn` cannot.
+// libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md is the design.
+module hybrid
+
+use material
+use openpbr
+use pt
+use raster
+use scene
+use slug
+use tracer
+
+/// What a hybrid stage takes beside `tracer.traced`, whose frame block carries no image size.
+@inline binding pass:
+    /// the image's size in pixels
+    size: float2
+    pad: float2
+
+/// The random stream of pixel `px` this frame, seeded as the megakernel seeds its primary ray's.
+fun pixel_rng(px: uint2, width: uint){tracer.traced} -> uint:
+    return pt.hash(px.x + px.y * width + tracer.traced.frame[0].rng_seed * 9781u)
+
+/// Direct light at `p` through the closure `b` in frame `f`, over the face whose turned geometric normal is `n`.
+///
+/// One light the tracer's selection picks and one environment sample, each with its shadow ray traced inline: an unbiased estimate of every light at once.
+/// No continuation ray follows yet, so neither weighs against a BSDF sample.
+fun direct(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> float3:
+    let mut sum = float3(0.0)
+    let l = tracer.sample_light(b, f, wo_local, p, n, true, mut rng)
+    if tracer.reaches(l, tracer.cutout_seed(rng, tracer.cutout_ray_light)):
+        sum += l.diffuse + l.specular
+    let e = tracer.sample_environment(b, f, wo_local, p, n, true, mut rng)
+    if tracer.reaches(e, tracer.cutout_seed(rng, tracer.cutout_ray_environment)):
+        sum += e.diffuse + e.specular
+    return sum
+
+/// `raster.vertex_of`, reading the frame and the instance table of `tracer.traced`.
+fun vertex_of(vertex: int, instance: uint){tracer.traced, tracer.bindless} -> raster.varyings:
+    let f = tracer.traced.frame[0]
+    let inst = scene.instance(..tracer.traced.instances[instance as int])
+    return raster.vertex_from(inst, instance, vertex, scene.camera(..f.camera), f.near_plane)
+
+/// `raster.pixel_context`, reading the instance table of `tracer.traced`.
+fun pixel_context(p: raster.varyings, primitive: uint){tracer.traced, tracer.bindless} -> material.shading_context:
+    return raster.context_from(scene.instance(..tracer.traced.instances[p.instance as int]), p, primitive)
+
+/// `raster.is_cut`, reading the instance table of `tracer.traced`.
+fun is_cut(p: raster.varyings, ctx: material.shading_context){tracer.traced, tracer.bindless} -> bool:
+    let inst = scene.instance(..tracer.traced.instances[p.instance as int])
+    return tracer.instance_opacity(inst, ctx) < 0.5
+
+/// The forward lighting: the pixel `p` covers, whose material evaluated to `surface_in`, lit by `direct` through its full closure.
+///
+/// The surface is described as `raster.shade` describes it, and the targets are the same.
+/// Baked occlusion is not applied, since the environment's light is shadowed by its own ray here.
+fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr.surface, supplied_tangent_frame: bool){tracer.traced, tracer.bindless, slug.tables, pass} -> raster.targets:
+    let f = tracer.traced.frame[0]
+    let cam = scene.camera(..f.camera)
+    let inst = scene.instance(..tracer.traced.instances[p.instance as int])
+    let face = raster.face_of(inst, ctx, p.world, cam.position, surface_in, supplied_tangent_frame)
+    let v = normalize(cam.position - p.world)
+    let to_point = p.world - cam.position
+    let view_depth = dot(to_point, normalize(cam.forward))
+
+    let mut surface = surface_in
+    tracer.apply_decals(mut surface, p.world, face.n, f.pixel_spread * length(to_point))
+    let shading = openpbr.shading_frame(mut surface, face.n, v, face.authored, supplied_tangent_frame)
+    let b = openpbr.bsdf_prepare(surface, face.exiting, 3u)
+    let wo_local = openpbr.to_local(shading, v)
+
+    let pixel = float2(p.position.x, p.position.y)
+    let mut rng = pixel_rng(uint2(pixel.x as uint, pixel.y as uint), pass.size.x as uint)
+    let mut color = b.emission
+    // `shading_frame` leaves the viewer in front of the frame, so only a degenerate input fails this.
+    if wo_local.z > 0.0:
+        color += direct(b, shading, face.n, wo_local, p.world, mut rng)
+
+    let prev = scene.camera(..f.previous_camera)
+    let motion = pixel - scene.camera_project(prev, p.world - prev.position, pass.size)
+    return raster.lit_targets(color, face.n, view_depth, surface, motion, f.near_plane)

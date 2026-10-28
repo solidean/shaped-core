@@ -164,7 +164,23 @@ So both light through the tracer's light selection and its inline shadow ray, an
 - **Deferred**: the pixel stage writes the thin G-buffer, and one compute kernel lights it.
   Its costs are the G-buffer's bandwidth and the reduced closure.
 
-The images differ by what the reduced closure loses, and the frame times by everything above; phase 3 measures both on Sponza.
+The images differ by what the reduced closure loses, and the frame times by everything above.
+
+**Both are built**, as `sv::hybrid_routine` (rendering/hybrid_routine.hh) with `hybrid_lighting::forward` and `::deferred`, and neither is a `render_mode` yet.
+`hybrid-test.cc` holds each, averaged over 128 frames, to the megakernel's direct light on the Cornell box with its blocks: the worst block is within 3.3% for both.
+
+What they measured, in `raster-benchmark.cc` on Intel's Sponza at 1920x1080 on a laptop RTX 5070 in October 2026.
+Both run occlusion culling and the prepass, include the TLAS build, and trace one environment sample with its shadow ray per pixel, since Sponza has no lights:
+
+| frame | GPU time |
+|---|---|
+| raster, occlusion culling and prepass | 1.52 ms |
+| hybrid, forward | 2.65 ms |
+| hybrid, deferred | 2.35 ms |
+
+**Deferred is about 11% faster here**, with four permutations of the plain `pbr` type, so the forward pixel stage carries little material code into its waves.
+A scene of many lights, many permutations or heavy materials is what would move the comparison, and the reduced closure is what deferred pays in the image.
+The raster rows of that run are slower than the prepass measurement in raster.md: the hybrid's frames, interleaved with them, run the GPU warmer.
 
 ### Why not the wavefront or a pipeline
 
@@ -289,6 +305,8 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
    - 1b: indexed raster draws, the pixel stage taking `@primitive_id` and rebuilding its barycentrics from the triangle.
 2. **sg indirect draws, then GPU culling** in raster mode: frustum first, then two-phase occlusion and the per-permutation bins.
 3. **`render_mode::hybrid` with direct light and shadows alone**: the thin G-buffer, the lighting kernel, the guides, denoised.
+   - 3a, done: both lightings at the routine level, tested and measured ([Forward or deferred](#forward-or-deferred)).
+   - 3b: the mode in the view renderer, accumulating while still and denoised.
 4. **The indirect ray** with the secondary material, ending in the environment past its hit.
 5. **The radiance cache**, ending the indirect ray in it, once counsel has confirmed its design.
 6. **Reconstruction**: `dlss_rr` on the scaled stream, the MetalFX member.

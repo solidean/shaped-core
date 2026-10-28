@@ -46,6 +46,9 @@ cull ─▶ depth of every opaque draw ─▶ one indexed draw per triangle item
   A stand-in for a material that failed for good is final, since it is the image the layer will keep drawing.
 - **Nothing denoises.** `render_settings::reconstruct` is ignored, and neither the denoised slot nor the frame-samples slots are declared.
 
+**The shading draws are one of three**, by `raster_frame_desc::shading`: `lit` is this path.
+`thin` and `traced` are the hybrid's deferred G-buffer and forward lighting ([hybrid-renderer.md](plans/hybrid-renderer.md#forward-or-deferred)).
+
 `sv::raster_routine` (rendering/raster_routine.hh) is the routine; `view_renderer` drives it from the same plan trace a traced layer goes through, before any accumulation or denoising.
 
 ## No ray tracing needed

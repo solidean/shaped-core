@@ -639,6 +639,18 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 
 // ---- connect: the shadow rays ---------------------------------------------------------------------------------------
 
+/// Whether anything blocks the segment from `origin` along `direction` for `distance`, traced inline here and now.
+/// The inline counterpart of `occluded`, which traces through the pipeline's shadow miss; `seed` is what the cutouts it crosses draw from.
+fun blocked(origin: float3, direction: float3, distance: float, seed: uint){traced, bindless} -> bool:
+    let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 1e-3, t_max = distance)
+    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
+    return h.kind != hit_kind.none
+
+/// Whether `s` arrives, its shadow ray traced inline where it has one: `visible` for a caller with no pipeline.
+fun reaches(s: light_sample, seed: uint){traced, bindless} -> bool:
+    if s.tested == 0u => return true
+    return not blocked(s.origin, s.direction, s.distance, seed)
+
 /// Tests the shadow rays of the slot at `index` of `queue_shadow` and adds what arrives to its path.
 /// One thread per slot rather than per ray, so the slot's radiance has one writer.
 fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
@@ -648,9 +660,7 @@ fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
     for j in 0 ..< 2:
         let sr = traced.shadow_rays[((2u * slot) as int) + j]
         if sr.tested == 0u => continue
-        let r = ray(origin = pos3(sr.origin.x, sr.origin.y, sr.origin.z), direction = vec3(sr.direction.x, sr.direction.y, sr.direction.z), t_min = 1e-3, t_max = sr.distance)
-        let h = traced.world.trace(r, any_hit = c => cutout(c, sr.seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
-        if h.kind == hit_kind.none:
+        if not blocked(sr.origin, sr.direction, sr.distance, sr.seed):
             light.radiance += sr.radiance
             light.specular += sr.specular
     traced.path_lights[slot as int] = light

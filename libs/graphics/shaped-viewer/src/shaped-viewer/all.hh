@@ -69,6 +69,7 @@
 #include <shaped-viewer/resources/resource_managers.hh>
 
 // rendering
+#include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <shaped-viewer/rendering/layout_routine.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/render_plan.hh>
