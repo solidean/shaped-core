@@ -863,7 +863,7 @@ void checker::judge_indices()
             auto& d = report(diagnostic_kind::needless_nonuniform, first.index.file, where,
                              "this index is the same in every invocation, so marking it `nonuniform` pays for nothing");
             for (auto const* const u : copies)
-                if (!check::holds(d.entry_points, u->entry))
+                if (!d.entry_points.values().contains(u->entry))
                     d.entry_points.push_back(u->entry);
             continue;
         }
@@ -871,7 +871,7 @@ void checker::judge_indices()
         // every other verdict is one entry point's, over the copies its own body inlined (CHK-401)
         auto entries = cc::vector<symbol_id>();
         for (auto const* const u : copies)
-            if (!check::holds(entries, u->entry))
+            if (!entries.values().contains(u->entry))
                 entries.push_back(u->entry);
         for (auto const entry : entries)
         {
@@ -972,7 +972,7 @@ void checker::merge_entry_diagnostics()
             continue;
         }
         for (auto const e : d.entry_points)
-            if (!check::holds(same->entry_points, e))
+            if (!same->entry_points.values().contains(e))
                 same->entry_points.push_back(e);
     }
     out.diagnostics = cc::move(merged);

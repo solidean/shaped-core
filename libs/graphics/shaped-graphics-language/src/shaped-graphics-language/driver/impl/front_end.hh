@@ -54,7 +54,7 @@ struct front_end
     {
         auto result = errors;
         for (auto const& d : entry_diagnostics)
-            if (!d.is_warning && (function == check::symbol_id::none || check::holds(d.entry_points, function)))
+            if (!d.is_warning && (function == check::symbol_id::none || d.entry_points.values().contains(function)))
                 result += d.text;
         return result;
     }
@@ -64,7 +64,7 @@ struct front_end
     {
         auto result = warnings;
         for (auto const& d : entry_diagnostics)
-            if (d.is_warning && (function == check::symbol_id::none || check::holds(d.entry_points, function)))
+            if (d.is_warning && (function == check::symbol_id::none || d.entry_points.values().contains(function)))
                 result.push_back(d.text);
         return result;
     }

@@ -432,13 +432,13 @@ void sgl::test::contain_expected(checked_module const& m, cc::vector<located_dia
     // CHK-403: an entry point takes the diagnostics judged of its inlined body, which a compile of it would report
     auto expecting = cc::vector<symbol_id>();
     for (auto const& x : m.entry_expectations)
-        if (!check::holds(expecting, x.function))
+        if (!expecting.values().contains(x.function))
             expecting.push_back(x.function);
     for (auto const function : expecting)
     {
         auto captured = cc::vector<located_diagnostic>();
         for (auto const& d : diagnostics)
-            if (check::holds(d.entry_points, function))
+            if (d.entry_points.values().contains(function))
                 captured.push_back(d);
         // one that another entry point has too stays that one's
         diagnostics.remove_all_where([&](located_diagnostic const& d)

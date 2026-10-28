@@ -10,19 +10,6 @@
 #include <shaped-graphics-language/check/symbols.hh>
 #include <shaped-graphics-language/source/diagnostic.hh>
 
-namespace sgl::check
-{
-/// Whether `ids` holds `id`.
-/// TEMPORARY(debt-sgl-sequence-contains): clean-core has no `contains` on a span yet.
-[[nodiscard]] inline bool holds(cc::span<symbol_id const> ids, symbol_id id)
-{
-    for (auto const x : ids)
-        if (x == id)
-            return true;
-    return false;
-}
-} // namespace sgl::check
-
 /// A second place a diagnostic points at, with what to read there: the declaration a use conflicts with, a way to fix it.
 struct sgl::check::related_note
 {
