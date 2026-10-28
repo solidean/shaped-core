@@ -74,32 +74,46 @@ struct raster_readback
     cc::vector<tg::vec2f> motion;
     cc::vector<f32> primary_depth;
 
-    /// The instance count the cull dispatch left the one draw with: 1 drawn, 0 culled.
+    /// The instance count the cull dispatch left the first draw with: 1 drawn, 0 culled.
     u32 instance_count = 0;
+
+    /// Every draw's, in `items` order.
+    cc::vector<u32> instance_counts;
+
+    /// What the occlusion culling recorded each draw as, in `items` order; empty without occlusion culling.
+    cc::vector<u32> visibility;
 };
 
-/// Draws `item` once with no transform through `raster_routine`, retrying until it executes, and reads every target back.
-cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
-                                              sv::gpu_resource_manager& resources,
-                                              sv::scene_item const& item,
-                                              sv::camera const& cam,
-                                              sv::pt_light_table const& lights,
-                                              sv::background const& environment,
-                                              tg::vec2i size)
+/// Draws `items`, one row each and all through the first item's permutation, with no transform through `raster_routine`.
+/// Retries until it executes, and reads every target back.
+/// `visibility`, where set, is the occlusion culling's record, kept across calls as a layer keeps it across frames.
+cc::shared_async<raster_readback> draw_raster_items(sg::context& ctx,
+                                                    sv::gpu_resource_manager& resources,
+                                                    cc::span<sv::scene_item const> items,
+                                                    sv::camera const& cam,
+                                                    sv::pt_light_table const& lights,
+                                                    sv::background const& environment,
+                                                    tg::vec2i size,
+                                                    sg::buffer<u32>* visibility)
 {
-    auto const* const mesh_rec = resources.meshes.get_ptr(item.mesh);
-    REQUIRE(mesh_rec != nullptr);
-    auto const* const permutation = resources.shaders.find(item.shader_key);
+    REQUIRE(!items.empty());
+    auto const* const permutation = resources.shaders.find(items[0].shader_key);
     REQUIRE(permutation != nullptr);
     auto permutations = cc::vector<sv::material_permutation const*>();
     permutations.push_back(permutation);
     auto draws = cc::vector<sv::raster_draw>();
-    draws.push_back({.instance = 0,
-                     .triangle_count = u32(mesh_rec->geometry.triangle_count),
-                     .permutation = 0,
-                     .first_index = u32(mesh_rec->geometry.first_index),
-                     .base_vertex = u32(mesh_rec->geometry.base_vertex),
-                     .bounds = mesh_rec->bounds});
+    for (auto i = isize(0); i < items.size(); ++i)
+    {
+        auto const* const mesh_rec = resources.meshes.get_ptr(items[i].mesh);
+        REQUIRE(mesh_rec != nullptr);
+        REQUIRE(items[i].shader_key == items[0].shader_key);
+        draws.push_back({.instance = u32(i),
+                         .triangle_count = u32(mesh_rec->geometry.triangle_count),
+                         .permutation = 0,
+                         .first_index = u32(mesh_rec->geometry.first_index),
+                         .base_vertex = u32(mesh_rec->geometry.base_vertex),
+                         .bounds = mesh_rec->bounds});
+    }
 
     auto const targets = gbuffer_of(ctx, size);
     auto const record = sv::camera_record_of(cam);
@@ -111,8 +125,11 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
         auto cmd = ctx.create_command_list();
 
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
-        records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
-        sv::place_instance_record(records.back(), sg::tlas_instance{}, permutation->opacity);
+        for (auto const& item : items)
+        {
+            records.push_back(resources.describe_instance(*cmd, item.mesh, item.instance));
+            sv::place_instance_record(records.back(), sg::tlas_instance{}, permutation->opacity);
+        }
 
         auto const background = ctx.transient.create_buffer_from_pod(*cmd, sv::background_gpu::from(environment),
                                                                      sg::buffer_usage::readonly_buffer);
@@ -140,13 +157,19 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
                    .permutations = permutations,
                    .bindless = &bindless,
                    .targets = targets,
-                   .drawn_args = &drawn_args});
+                   .drawn_args = &drawn_args,
+                   .visibility = visibility});
 
         // Asserted only after the submit: a REQUIRE unwinding past an unsubmitted list asserts in its destructor.
         auto const ready = drawn == sg::routine_outcome::executed;
         auto args = sg::data_future<sg::draw_indexed_args>();
+        auto recorded = sg::data_future<u32>();
         if (ready)
+        {
             args = cmd->download.data_from_buffer(drawn_args);
+            if (visibility != nullptr)
+                recorded = cmd->download.data_from_buffer(*visibility);
+        }
         auto color = sg::data_future<tg::vec4f>();
         auto normal = sg::data_future<rgba16>();
         auto depth = sg::data_future<f32>();
@@ -190,10 +213,27 @@ cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
         take(primary_depth, out.primary_depth);
         auto const culled = args.try_get_data();
         REQUIRE(culled.has_value());
-        REQUIRE(culled.value().size() == 1);
-        out.instance_count = culled.value()[0].instance_count;
+        REQUIRE(culled.value().size() == items.size());
+        for (auto const& a : culled.value())
+            out.instance_counts.push_back(a.instance_count);
+        out.instance_count = out.instance_counts[0];
+        if (visibility != nullptr)
+            take(recorded, out.visibility);
         co_return out;
     }
+}
+
+/// Draws `item` alone, culled by the view only; see `draw_raster_items`.
+cc::shared_async<raster_readback> draw_raster(sg::context& ctx,
+                                              sv::gpu_resource_manager& resources,
+                                              sv::scene_item const& item,
+                                              sv::camera const& cam,
+                                              sv::pt_light_table const& lights,
+                                              sv::background const& environment,
+                                              tg::vec2i size)
+{
+    co_return co_await draw_raster_items(ctx, resources, cc::span<sv::scene_item const>(&item, 1), cam, lights,
+                                         environment, size, nullptr);
 }
 
 /// The megakernel's direct light alone on `item` — the primary hit and its next-event estimate, nothing after — as the mean of `frames` frames.
@@ -810,6 +850,87 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a draw whose box misses the view is c
         = co_await draw_raster(ctx, resources, item, camera_toward(tg::pos3d(2.5, 0, 5)), {}, sv::background{}, size);
     CHECK(aside.instance_count == 1u);
     CHECK(green_pixels(aside) > 0);
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+ASYNC_INVOCABLE_TEST("sv::raster_routine - a draw hidden behind another is culled by occlusion, and drawn again once "
+                     "it is not",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // A red square at depth 3 wide enough to fill the view, and a green one at depth 10 behind it.
+    auto const square = [](f32 half, f32 z, tg::vec3f color)
+    {
+        auto positions = cc::vector<tg::pos3f>();
+        for (auto const& p : {tg::pos3f(-half, -half, z), tg::pos3f(half, -half, z), tg::pos3f(half, half, z),
+                              tg::pos3f(-half, -half, z), tg::pos3f(half, half, z), tg::pos3f(-half, half, z)})
+            positions.push_back(p);
+        auto& lib = sv_test::shared_material_library();
+        auto const unlit = lib.acquire_type(sv::builtin_material::unlit).value();
+        auto mesh = sv::mesh{.name = "square",
+                             .geometry = sv::triangle_geometry::create_from_positions(positions),
+                             .material = lib.acquire(sv::material::create("square", unlit, {}))};
+        mesh.attributes.push_back(sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle,
+                                                             cc::vector<tg::vec3f>{color, color}));
+        return mesh;
+    };
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto items = cc::vector<sv::scene_item>();
+    items.push_back(resources.acquire_scene_item(square(3.0f, 3.0f, tg::vec3f(1, 0, 0))));
+    items.push_back(resources.acquire_scene_item(square(0.5f, 10.0f, tg::vec3f(0, 1, 0))));
+    resources.wait_for_pending_uploads();
+
+    constexpr auto size = tg::vec2i(32, 32);
+    auto const green_pixels = [](raster_readback const& r)
+    {
+        auto n = 0;
+        for (auto const& p : r.color)
+            if (p[1] > 0.5f && p[0] < 0.5f)
+                ++n;
+        return n;
+    };
+    auto const camera_at = [](tg::pos3d position)
+    {
+        auto cam = sv::camera::looking_at(position, position + tg::vec3d(0, 0, 1));
+        cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+        return cam;
+    };
+    auto const front = camera_at(tg::pos3d(0, 0, 0));
+    auto const is_pair = [](cc::vector<u32> const& v, u32 a, u32 b) { return v.size() == 2 && v[0] == a && v[1] == b; };
+    auto visibility = sg::buffer<u32>();
+
+    // With no record yet, nothing is drawn first, so the pyramid is empty and the second pass draws both.
+    auto const fresh = co_await draw_raster_items(ctx, resources, items, front, {}, sv::background{}, size, &visibility);
+    CHECK(is_pair(fresh.visibility, 1u, 1u));
+    CHECK(is_pair(fresh.instance_counts, 1u, 1u));
+    CHECK(green_pixels(fresh) == 0);
+
+    // Both are drawn first, and the pyramid over them hides the far square, which the record now says.
+    auto const settled
+        = co_await draw_raster_items(ctx, resources, items, front, {}, sv::background{}, size, &visibility);
+    CHECK(is_pair(settled.visibility, 1u, 0u));
+    CHECK(green_pixels(settled) == 0);
+
+    // From then on the far square is drawn by neither pass.
+    auto const steady = co_await draw_raster_items(ctx, resources, items, front, {}, sv::background{}, size, &visibility);
+    CHECK(is_pair(steady.visibility, 1u, 0u));
+    CHECK(is_pair(steady.instance_counts, 0u, 0u));
+    CHECK(green_pixels(steady) == 0);
+
+    // Past the near square, which is now behind the camera, the far one is disoccluded and the second pass draws it.
+    auto const past = co_await draw_raster_items(ctx, resources, items, camera_at(tg::pos3d(0, 0, 5)), {},
+                                                 sv::background{}, size, &visibility);
+    CHECK(is_pair(past.visibility, 0u, 1u));
+    CHECK(is_pair(past.instance_counts, 0u, 1u));
+    CHECK(green_pixels(past) > 0);
     co_await cc::async_settled(sv::background_work(ctx));
 }
 

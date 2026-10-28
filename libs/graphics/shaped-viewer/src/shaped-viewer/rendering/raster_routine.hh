@@ -113,8 +113,14 @@ struct sv::raster_frame_desc
     stand_in_report* stand_ins = nullptr;
 
     /// Where set, receives the arguments the frame drew from, after culling, grouped by permutation in `draws` order within each.
+    /// With occlusion culling, those of the second pass.
     /// For a test reading back what was culled.
     sg::buffer<sg::draw_indexed_args>* drawn_args = nullptr;
+
+    /// Where set, the frame culls by occlusion too, and this is what each draw was last frame: 1 visible, 0 not.
+    /// The caller keeps it from frame to frame, one per layer, and the routine rewrites it each frame.
+    /// It is recreated, everything not visible, whenever the frame holds another count of draws; a stale one costs draws and never hides one.
+    sg::buffer<u32>* visibility = nullptr;
 };
 
 /// The raster path: one indexed draw per scene item, through each material permutation's generated pixel stage, into a G-buffer.
@@ -163,6 +169,16 @@ private:
 
     /// `raster_cull.sgl`'s kernel; null where it failed to build, and a frame then draws every item.
     sg::compute_pipeline_handle _cull;
+
+    /// The two-phase occlusion kernels of `raster_cull.sgl`, all four or none; without them a frame culls by the view alone.
+    struct occlusion_kernels
+    {
+        sg::compute_pipeline_handle cull_first;
+        sg::compute_pipeline_handle pyramid_seed;
+        sg::compute_pipeline_handle pyramid_down;
+        sg::compute_pipeline_handle cull_second;
+    };
+    cc::optional<occlusion_kernels> _occlusion;
 
     /// One permutation's pixel stage and the pipeline over it, compiled and built on first use, polled rather than waited on.
     struct surface_pipeline

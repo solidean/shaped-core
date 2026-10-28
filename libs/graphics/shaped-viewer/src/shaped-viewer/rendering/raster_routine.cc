@@ -160,6 +160,32 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     _cull = cull_built != nullptr ? *cull_built : nullptr;
     if (_cull == nullptr)
         CC_LOG_ERROR("the raster cull kernel did not build, so a raster frame draws every item");
+
+    _occlusion = {};
+    auto const kernel = [&](auto const& entry) -> cc::shared_async<sg::compute_pipeline_handle>
+    { return entry.acquire_pipeline(ctx); };
+    auto const first = kernel(shaders::raster_cull.cull_first);
+    auto const seed = kernel(shaders::raster_cull.pyramid_seed);
+    auto const down = kernel(shaders::raster_cull.pyramid_down);
+    auto const second = kernel(shaders::raster_cull.cull_second);
+    co_await cc::async_settled(first);
+    co_await cc::async_settled(seed);
+    co_await cc::async_settled(down);
+    co_await cc::async_settled(second);
+    auto const built_of = [](auto const& pending) -> sg::compute_pipeline_handle
+    {
+        auto const* const value = pending->try_value();
+        return value != nullptr ? *value : nullptr;
+    };
+    auto kernels = occlusion_kernels{.cull_first = built_of(first),
+                                     .pyramid_seed = built_of(seed),
+                                     .pyramid_down = built_of(down),
+                                     .cull_second = built_of(second)};
+    if (kernels.cull_first != nullptr && kernels.pyramid_seed != nullptr && kernels.pyramid_down != nullptr
+        && kernels.cull_second != nullptr)
+        _occlusion = cc::move(kernels);
+    else
+        CC_LOG_ERROR("the raster occlusion kernels did not build, so a raster frame culls by the view alone");
     co_return;
 }
 
@@ -343,21 +369,66 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
                            .pad = 0};
     }
 
-    // Culled on the GPU into `args`; without the kernel the templates are drawn as they stand.
-    auto drawn_args = sg::buffer<sg::draw_indexed_args>();
-    if (total > 0)
+    // A layer with no drawings still has a primary depth written; this frame alone reads it, which is nobody.
+    // Sampled too, since the depth pyramid of an occlusion-culled frame is built from it.
+    auto const primary_depth
+        = t.primary_depth.raw() != nullptr
+            ? t.primary_depth
+            : ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
+                                               .width = extent[0],
+                                               .height = extent[1],
+                                               .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
+    auto const depth = ctx.transient.create_texture_2d(
+        {.format = depth_format, .width = extent[0], .height = extent[1], .usage = sg::texture_usage::depth_stencil});
+
+    auto const item_buffer = total > 0
+                               ? ctx.transient.create_buffer_from_data(cmd, items, sg::buffer_usage::readonly_buffer)
+                               : sg::buffer<shaders::cull_item>();
+    auto const template_buffer = total > 0
+                                   ? ctx.transient.create_buffer_from_data(
+                                         cmd, templates,
+                                         sg::buffer_usage::readonly_buffer | sg::buffer_usage::indirect_command_buffer
+                                             | sg::buffer_usage::copy_src)
+                                   : sg::buffer<shaders::draw_args>();
+    auto const args_buffer = [&]
     {
-        auto const template_buffer = ctx.transient.create_buffer_from_data(
-            cmd, templates,
-            sg::buffer_usage::readonly_buffer | sg::buffer_usage::indirect_command_buffer | sg::buffer_usage::copy_src);
-        drawn_args = template_buffer.reinterpret_as<sg::draw_indexed_args>();
-        if (self->_cull != nullptr)
+        // Read-only too: the second pass reads what the first wrote.
+        return ctx.transient.create_buffer<shaders::draw_args>(
+            total, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::readonly_buffer
+                       | sg::buffer_usage::indirect_command_buffer | sg::buffer_usage::copy_src);
+    };
+    auto const shape = shaders::raster_cull_shape{.count = u32(total), .pad = {}}.to_block();
+
+    // Every draw of one bin set, from `args`, into the scope open on `pass`.
+    auto const draw_bins = [&](sg::rendering_scope& pass, sg::buffer<sg::draw_indexed_args> const& args)
+    {
+        if (total == 0)
+            return;
+        CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
+        pass.bind_index_buffer(d.index_pool.as_index_buffer());
+        for (auto p = isize(0); p < counts.size(); ++p)
         {
-            auto const item_buffer = ctx.transient.create_buffer_from_data(cmd, items, sg::buffer_usage::readonly_buffer);
-            auto const args = ctx.transient.create_buffer<shaders::draw_args>(
-                total, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::indirect_command_buffer
-                           | sg::buffer_usage::copy_src);
-            auto const cull_group = ctx.transient.create_binding_group(
+            if (counts[p] == 0)
+                continue;
+            pass.bind_pipeline(*pipelines[p]);
+            pass.bind_group(0, *drawn);
+            pass.bind_group(bindless_group, *d.bindless->group());
+            pass.bind_group(2, *tables);
+            // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
+            pass.draw_indexed_indirect(args, firsts[p], counts[p]);
+        }
+    };
+
+    // Two passes where the caller keeps a visibility record and the kernels built; otherwise one, culled by the view alone.
+    auto const occlusion = d.visibility != nullptr && total > 0 && self->_cull != nullptr && self->_occlusion.has_value();
+    auto drawn_args = sg::buffer<sg::draw_indexed_args>();
+    if (!occlusion)
+    {
+        drawn_args = template_buffer.reinterpret_as<sg::draw_indexed_args>();
+        if (total > 0 && self->_cull != nullptr)
+        {
+            auto const args = args_buffer();
+            auto const group = ctx.transient.create_binding_group(
                 cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull_io>(),
                 shaders::raster_cull_io{.frame = frame.as_readonly_buffer(),
                                         .instances = d.instance_table.as_readonly_buffer(),
@@ -365,63 +436,153 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
                                         .templates = template_buffer.as_readonly_buffer(),
                                         .args = args.as_readwrite_buffer()});
             cmd.compute.bind_pipeline(*self->_cull);
-            cmd.compute.bind_group(0, *cull_group);
-            cmd.compute.set_inline_constants(shaders::raster_cull_shape{.count = u32(total), .pad = {}}.to_block());
+            cmd.compute.bind_group(0, *group);
+            cmd.compute.set_inline_constants(shape);
             cmd.compute.dispatch_threads(int(total));
             drawn_args = args.reinterpret_as<sg::draw_indexed_args>();
         }
+
+        // Every pixel of every target is written, by a surface or by the environment behind them, so nothing is loaded.
+        // The depth alone is cleared, to the far plane the environment tests against.
+        auto pass = cmd.raster.render_to(raster::targets{
+            .color = t.color.as_render_target_view().discarded(),
+            .normal = t.normal.as_render_target_view().discarded(),
+            .depth = t.depth.as_render_target_view().discarded(),
+            .albedo = t.albedo.as_render_target_view().discarded(),
+            .specular_albedo = t.specular_albedo.as_render_target_view().discarded(),
+            .roughness = t.roughness.as_render_target_view().discarded(),
+            .motion = t.motion.as_render_target_view().discarded(),
+            .primary_depth = primary_depth.as_render_target_view().discarded(),
+            .depth_stencil = depth.as_depth_stencil_view().cleared(0.0f),
+        });
+        // Every table is declared once for the pass, after `pass` so it dies first.
+        // The first draw applies them, and a later one finds them current unless its pipeline touches them at new stages.
+        // The environment draw binds no table, so it leaves them dormant, and a pass with nothing else to draw ends them silently.
+        auto const declared = d.bindless->declare_raster_access(cmd);
+        draw_bins(pass, drawn_args);
+        pass.bind_pipeline(*self->_environment);
+        pass.bind_group(0, *drawn);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+    }
+    else
+    {
+        auto const& k = self->_occlusion.value();
+
+        // A record of another frame's draws says nothing of these: everything starts not visible, and the second pass draws it.
+        auto& history = *d.visibility;
+        if (history.raw() == nullptr || history.element_count() != total)
+        {
+            history = ctx.persistent.create_buffer<u32>(
+                total, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::readonly_buffer
+                           | sg::buffer_usage::copy_dst | sg::buffer_usage::copy_src);
+            cmd.upload.data_to_buffer(history, cc::vector<u32>::create_defaulted(total));
+        }
+
+        // First: what was visible last frame and is in view.
+        auto const first_args = args_buffer();
+        {
+            auto const group = ctx.transient.create_binding_group(
+                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_first_io>(),
+                shaders::raster_first_io{.frame = frame.as_readonly_buffer(),
+                                         .instances = d.instance_table.as_readonly_buffer(),
+                                         .items = item_buffer.as_readonly_buffer(),
+                                         .templates = template_buffer.as_readonly_buffer(),
+                                         .history = history.as_readonly_buffer(),
+                                         .args = first_args.as_readwrite_buffer()});
+            cmd.compute.bind_pipeline(*k.cull_first);
+            cmd.compute.bind_group(0, *group);
+            cmd.compute.set_inline_constants(shape);
+            cmd.compute.dispatch_threads(int(total));
+        }
+        {
+            // The primary depth is cleared to far, 1, since the pyramid reads it before the environment fills what nothing covered.
+            auto pass = cmd.raster.render_to(raster::targets{
+                .color = t.color.as_render_target_view().discarded(),
+                .normal = t.normal.as_render_target_view().discarded(),
+                .depth = t.depth.as_render_target_view().discarded(),
+                .albedo = t.albedo.as_render_target_view().discarded(),
+                .specular_albedo = t.specular_albedo.as_render_target_view().discarded(),
+                .roughness = t.roughness.as_render_target_view().discarded(),
+                .motion = t.motion.as_render_target_view().discarded(),
+                .primary_depth = primary_depth.as_render_target_view().cleared(tg::vec4f(1, 1, 1, 1)),
+                .depth_stencil = depth.as_depth_stencil_view().cleared(0.0f),
+            });
+            auto const declared = d.bindless->declare_raster_access(cmd);
+            draw_bins(pass, first_args.reinterpret_as<sg::draw_indexed_args>());
+        }
+
+        // The pyramid: the farthest primary depth under each texel, level by level.
+        auto levels = 1;
+        while ((extent[0] >> levels) > 0 || (extent[1] >> levels) > 0)
+            ++levels;
+        auto const pyramid
+            = ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
+                                               .width = extent[0],
+                                               .height = extent[1],
+                                               .mip_levels = levels,
+                                               .usage = sg::texture_usage::texture | sg::texture_usage::image});
+        auto const pyramid_layout = ctx.cached.acquire_binding_group_layout<shaders::pyramid_io>();
+        auto const level_group = [&](sg::raw_view const& source, int level)
+        {
+            return ctx.transient.create_binding_group(
+                cmd, pyramid_layout,
+                shaders::pyramid_io{.source = sg::as_texture_view(source).as_texture<sg::tv_2d>(),
+                                    .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = level})});
+        };
+        cmd.compute.bind_pipeline(*k.pyramid_seed);
+        cmd.compute.bind_group(0, *level_group(primary_depth.as_texture_view(), 0));
+        cmd.compute.dispatch_threads(extent[0], extent[1]);
+        for (auto level = 1; level < levels; ++level)
+        {
+            cmd.compute.bind_pipeline(*k.pyramid_down);
+            cmd.compute.bind_group(
+                0, *level_group(pyramid.as_texture_view({.mips = {.start = level - 1, .count = 1}}), level));
+            auto const width = extent[0] >> level;
+            auto const height = extent[1] >> level;
+            cmd.compute.dispatch_threads(width > 0 ? width : 1, height > 0 ? height : 1);
+        }
+
+        // Second: everything tested against the pyramid, drawing what is visible and was not drawn first, and recording what is visible.
+        auto const second_args = args_buffer();
+        {
+            auto const group = ctx.transient.create_binding_group(
+                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_second_io>(),
+                shaders::raster_second_io{.frame = frame.as_readonly_buffer(),
+                                          .instances = d.instance_table.as_readonly_buffer(),
+                                          .items = item_buffer.as_readonly_buffer(),
+                                          .templates = template_buffer.as_readonly_buffer(),
+                                          .first = first_args.as_readonly_buffer(),
+                                          .pyramid = pyramid.as_texture_view(),
+                                          .history = history.as_readwrite_buffer(),
+                                          .args = second_args.as_readwrite_buffer()});
+            cmd.compute.bind_pipeline(*k.cull_second);
+            cmd.compute.bind_group(0, *group);
+            cmd.compute.set_inline_constants(
+                shaders::raster_second_shape{.count = u32(total), .levels = u32(levels), .pad = {}}.to_block());
+            cmd.compute.dispatch_threads(int(total));
+        }
+        drawn_args = second_args.reinterpret_as<sg::draw_indexed_args>();
+
+        // The first pass's surfaces stay, and the environment fills what neither pass covered.
+        auto pass = cmd.raster.render_to(raster::targets{
+            .color = t.color.as_render_target_view().preserved(),
+            .normal = t.normal.as_render_target_view().preserved(),
+            .depth = t.depth.as_render_target_view().preserved(),
+            .albedo = t.albedo.as_render_target_view().preserved(),
+            .specular_albedo = t.specular_albedo.as_render_target_view().preserved(),
+            .roughness = t.roughness.as_render_target_view().preserved(),
+            .motion = t.motion.as_render_target_view().preserved(),
+            .primary_depth = primary_depth.as_render_target_view().preserved(),
+            .depth_stencil = depth.as_depth_stencil_view().preserved(),
+        });
+        auto const declared = d.bindless->declare_raster_access(cmd);
+        draw_bins(pass, drawn_args);
+        pass.bind_pipeline(*self->_environment);
+        pass.bind_group(0, *drawn);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
     }
     if (d.drawn_args != nullptr)
         *d.drawn_args = drawn_args;
-
-    // A layer with no drawings still has a primary depth written; this frame alone reads it, which is nobody.
-    auto const primary_depth = t.primary_depth.raw() != nullptr
-                                 ? t.primary_depth
-                                 : ctx.transient.create_texture_2d({.format = sg::pixel_format::r32_float,
-                                                                    .width = extent[0],
-                                                                    .height = extent[1],
-                                                                    .usage = sg::texture_usage::render_target});
-    auto const depth = ctx.transient.create_texture_2d(
-        {.format = depth_format, .width = extent[0], .height = extent[1], .usage = sg::texture_usage::depth_stencil});
-
-    // Every pixel of every target is written, by a surface or by the environment behind them, so nothing is loaded.
-    // The depth alone is cleared, to the far plane the environment tests against.
-    auto pass = cmd.raster.render_to(raster::targets{
-        .color = t.color.as_render_target_view().discarded(),
-        .normal = t.normal.as_render_target_view().discarded(),
-        .depth = t.depth.as_render_target_view().discarded(),
-        .albedo = t.albedo.as_render_target_view().discarded(),
-        .specular_albedo = t.specular_albedo.as_render_target_view().discarded(),
-        .roughness = t.roughness.as_render_target_view().discarded(),
-        .motion = t.motion.as_render_target_view().discarded(),
-        .primary_depth = primary_depth.as_render_target_view().discarded(),
-        .depth_stencil = depth.as_depth_stencil_view().cleared(0.0f),
-    });
-
-    // Every table is declared once for the pass, after `pass` so it dies first.
-    // The first draw applies them, and a later one finds them current unless its pipeline touches them at new stages.
-    // The environment draw binds no table, so it leaves them dormant, and a pass with nothing else to draw ends them silently.
-    auto const declared = d.bindless->declare_raster_access(cmd);
-    if (total > 0)
-    {
-        CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
-        pass.bind_index_buffer(d.index_pool.as_index_buffer());
-    }
-    for (auto p = isize(0); p < counts.size(); ++p)
-    {
-        if (counts[p] == 0)
-            continue;
-        pass.bind_pipeline(*pipelines[p]);
-        pass.bind_group(0, *drawn);
-        pass.bind_group(bindless_group, *d.bindless->group());
-        pass.bind_group(2, *tables);
-        // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
-        pass.draw_indexed_indirect(drawn_args, firsts[p], counts[p]);
-    }
-
-    pass.bind_pipeline(*self->_environment);
-    pass.bind_group(0, *drawn);
-    pass.draw({.vertex_range = {.offset = 0, .size = 3}});
 
     if (d.stand_ins != nullptr)
         *d.stand_ins = stand_in_report::of(bound, substituted, pending);

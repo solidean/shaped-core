@@ -984,7 +984,8 @@ struct raster_scene
                           .roughness = slot_of(temporal_id::roughness_guide(layer))->texture,
                           .motion = motion->texture,
                           .primary_depth = primary_depth != nullptr ? primary_depth->texture : sg::texture_2d()},
-              .stand_ins = &stand_ins});
+              .stand_ins = &stand_ins,
+              .visibility = &slot.raster_visibility});
     if (outcome == sg::routine_outcome::declined)
         return outcome;
 

@@ -59,21 +59,147 @@ fun outside_view(cam: scene.camera, near: float, c: float3, e: float3) -> bool:
     if beyond(u - f, 0.0, cam.position, c, e) => return true
     return beyond(-u - f, 0.0, cam.position, c, e)
 
+/// The world box an item's object-space box covers under `inst`: its center moved, and its half-extent the largest each world axis sees of it.
+fun world_center(inst: scene.instance, item: cull_item) -> float3:
+    return raster.to_world_point(inst, (item.box_min + item.box_max) * 0.5)
+
+fun world_half_extent(inst: scene.instance, item: cull_item) -> float3:
+    let e = (item.box_max - item.box_min) * 0.5
+    return float3(dot(abs(inst.to_world_x.xyz), e), dot(abs(inst.to_world_y.xyz), e), dot(abs(inst.to_world_z.xyz), e))
+
+/// Whether `item` reaches the view of the frame's camera; one with no box always does.
+fun in_view(f: raster.frame_constants, inst: scene.instance, item: cull_item) -> bool:
+    if item.has_box == 0u => return true
+    return not outside_view(scene.camera(..f.camera), f.near_plane, world_center(inst, item), world_half_extent(inst, item))
+
 @compute(64) fun cull(@thread_id id: int3){raster_cull_io, raster_cull_shape}:
     let i = id.x
     if (i as uint) >= raster_cull_shape.count => return
     let t = raster_cull_io.templates[i]
-    let item = raster_cull_io.items[i]
-
-    let mut instances = t.instance_count
-    if item.has_box != 0u:
-        let f = raster_cull_io.frame[0]
-        let inst = scene.instance(..raster_cull_io.instances[t.first_instance as int])
-        let center = (item.box_min + item.box_max) * 0.5
-        let half_extent = (item.box_max - item.box_min) * 0.5
-        // The box placed in the world: its center moved, and its extent the largest each world axis can see of it.
-        let c = raster.to_world_point(inst, center)
-        let e = float3(dot(abs(inst.to_world_x.xyz), half_extent), dot(abs(inst.to_world_y.xyz), half_extent), dot(abs(inst.to_world_z.xyz), half_extent))
-        if outside_view(scene.camera(..f.camera), f.near_plane, c, e) => instances = 0u
-
+    let inst = scene.instance(..raster_cull_io.instances[t.first_instance as int])
+    let visible = in_view(raster_cull_io.frame[0], inst, raster_cull_io.items[i])
+    let instances = if visible => t.instance_count else 0u
     raster_cull_io.args[i] = draw_args(t.index_count, instances, t.first_index, t.vertex_offset, t.first_instance)
+
+// ---- Two-phase occlusion culling --------------------------------------------------------------------------------------
+//
+// The first pass draws what was visible last frame and is in view; the depth it leaves becomes a pyramid of the farthest depth under each texel.
+// The second pass tests every item against that pyramid, draws what is visible now and was not drawn first, and records what is visible for the next frame.
+// A history that is wrong costs a draw and never a hole: whatever the first pass misses, the second catches.
+
+/// The first pass's inputs: the draws, and what each was last frame.
+binding raster_first_io:
+    frame: buffer[raster.frame_constants]
+    instances: buffer[tracer.instance_record]
+    items: buffer[cull_item]
+    templates: buffer[draw_args]
+    /// 1 where the draw was visible last frame, parallel to `templates`.
+    history: buffer[uint]
+    args: mut buffer[draw_args]
+
+@compute(64) fun cull_first(@thread_id id: int3){raster_first_io, raster_cull_shape}:
+    let i = id.x
+    if (i as uint) >= raster_cull_shape.count => return
+    let t = raster_first_io.templates[i]
+    let inst = scene.instance(..raster_first_io.instances[t.first_instance as int])
+    let drawn = raster_first_io.history[i] != 0u and in_view(raster_first_io.frame[0], inst, raster_first_io.items[i])
+    let instances = if drawn => t.instance_count else 0u
+    raster_first_io.args[i] = draw_args(t.index_count, instances, t.first_index, t.vertex_offset, t.first_instance)
+
+/// One level of the depth pyramid from the one below it, or level 0 from the first pass's primary depth.
+binding pyramid_io:
+    @unfilterable
+    source: texture_2d[float]
+    target: out image_2d[.r32_float]
+
+/// Level 0: the first pass's primary depth, `1 - near / depth` and 1 where nothing was drawn, as it stands.
+@compute(8, 8) fun pyramid_seed(@thread_id id: int3){pyramid_io}:
+    let size = pyramid_io.source.size()
+    if id.x >= size.x or id.y >= size.y => return
+    pyramid_io.target.store(int2(id.x, id.y), pyramid_io.source.load(int2(id.x, id.y)))
+
+/// Level N + 1: the farthest of the texels under each one.
+/// Where level N is odd along an axis the last texel covers three, or a column of it would be covered by none.
+@compute(8, 8) fun pyramid_down(@thread_id id: int3){pyramid_io}:
+    let below = pyramid_io.source.size()
+    let size = int2(max(below.x / 2, 1), max(below.y / 2, 1))
+    if id.x >= size.x or id.y >= size.y => return
+    let last_x = if id.x == size.x - 1 and (below.x & 1) != 0 => 2 else 1
+    let last_y = if id.y == size.y - 1 and (below.y & 1) != 0 => 2 else 1
+    let mut farthest = 0.0
+    for dy in 0 ..< last_y + 1:
+        for dx in 0 ..< last_x + 1:
+            let at = min(int2(id.x * 2 + dx, id.y * 2 + dy), below - int2(1, 1))
+            farthest = max(farthest, pyramid_io.source.load(at))
+    pyramid_io.target.store(int2(id.x, id.y), farthest)
+
+/// The second pass's inputs: the first pass's arguments, the pyramid over the depth they left, and the history it rewrites.
+binding raster_second_io:
+    frame: buffer[raster.frame_constants]
+    instances: buffer[tracer.instance_record]
+    items: buffer[cull_item]
+    templates: buffer[draw_args]
+    /// what the first pass drew, which the second does not draw again
+    first: buffer[draw_args]
+    @unfilterable
+    pyramid: texture_2d[float]
+    /// written 1 where the draw is visible this frame, for the next frame's first pass
+    history: mut buffer[uint]
+    args: mut buffer[draw_args]
+
+@inline binding raster_second_shape:
+    count: uint
+    /// how many levels `pyramid` holds
+    levels: uint
+    pad: uint2
+
+/// Whether the world box around `c` with half-extents `e` lies wholly behind the farthest depth the pyramid holds over it.
+/// A box reaching in front of the near plane is never behind anything.
+fun occluded(f: raster.frame_constants, c: float3, e: float3, levels: int){raster_second_io} -> bool:
+    let cam = scene.camera(..f.camera)
+    let forward = normalize(cam.forward)
+    let mut lo = float2(1e30, 1e30)
+    let mut hi = float2(-1e30, -1e30)
+    let mut nearest = 1e30
+    for k in 0 ..< 8:
+        let sx = if (k & 1) != 0 => 1.0 else -1.0
+        let sy = if (k & 2) != 0 => 1.0 else -1.0
+        let sz = if (k & 4) != 0 => 1.0 else -1.0
+        let offset = c + e * float3(sx, sy, sz) - cam.position
+        let depth = dot(offset, forward)
+        if depth <= f.near_plane => return false
+        let px = scene.camera_project(cam, offset, f.size)
+        lo = min(lo, px)
+        hi = max(hi, px)
+        nearest = min(nearest, depth)
+
+    lo = clamp(lo, float2(0.0, 0.0), f.size - float2(1.0, 1.0))
+    hi = clamp(hi, float2(0.0, 0.0), f.size - float2(1.0, 1.0))
+    // The level at which the box's footprint spans at most two texels along each axis, so four loads cover it.
+    let extent = max(max(hi.x - lo.x, hi.y - lo.y), 1.0)
+    let level = clamp(ceil(log2(extent)) as int, 0, levels - 1)
+    let last = raster_second_io.pyramid.size(level) - int2(1, 1)
+    let t0 = min(int2(lo.x as int, lo.y as int) >> level, last)
+    let t1 = min(int2(hi.x as int, hi.y as int) >> level, last)
+    let farthest = max(max(raster_second_io.pyramid.load(t0, level), raster_second_io.pyramid.load(int2(t1.x, t0.y), level)), max(raster_second_io.pyramid.load(int2(t0.x, t1.y), level), raster_second_io.pyramid.load(t1, level)))
+
+    // Both in the primary depth's form, larger farther.
+    let box_depth = 1.0 - f.near_plane / nearest
+    return box_depth > farthest
+
+@compute(64) fun cull_second(@thread_id id: int3){raster_second_io, raster_second_shape}:
+    let i = id.x
+    if (i as uint) >= raster_second_shape.count => return
+    let f = raster_second_io.frame[0]
+    let t = raster_second_io.templates[i]
+    let item = raster_second_io.items[i]
+    let inst = scene.instance(..raster_second_io.instances[t.first_instance as int])
+
+    let mut visible = in_view(f, inst, item)
+    if visible and item.has_box != 0u:
+        visible = not occluded(f, world_center(inst, item), world_half_extent(inst, item), raster_second_shape.levels as int)
+    raster_second_io.history[i] = if visible => 1u else 0u
+
+    let drawn_first = raster_second_io.first[i].instance_count != 0u
+    let instances = if visible and not drawn_first => t.instance_count else 0u
+    raster_second_io.args[i] = draw_args(t.index_count, instances, t.first_index, t.vertex_offset, t.first_instance)

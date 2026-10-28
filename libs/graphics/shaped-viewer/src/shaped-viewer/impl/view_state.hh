@@ -5,6 +5,7 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/string/string.hh>
 #include <shaped-graphics/bytes_future.hh>
+#include <shaped-graphics/resource/buffer.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
@@ -127,6 +128,9 @@ struct temporal_slot
 
     /// Whether this accumulation slot's raster layer has said that it skips the quadric batches it holds, which it says once.
     bool raster_skip_reported = false;
+
+    /// What each draw of this slot's raster layer was last frame, which its occlusion culling starts from; `raster_frame_desc::visibility`.
+    sg::buffer<u32> raster_visibility;
 
     /// Whether this accumulation slot's traced layer has said that the device cannot trace it, which it says once.
     bool untraceable_reported = false;
