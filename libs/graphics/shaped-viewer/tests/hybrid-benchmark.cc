@@ -72,6 +72,16 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
         SKIP("no ray tracing on this device");
     CC_LOG_INFO("adapter: {}", ctx.metrics.adapter().name);
 
+    // What this process holds on the GPU against what it may, at each step: the differences are what each step costs.
+    auto const memory = [&](cc::string_view when)
+    {
+        auto const usage = ctx.metrics.query_gpu_memory();
+        if (usage.has_value())
+            CC_LOG_INFO("gpu memory {}: {} MiB of a {} MiB budget", when, usage.value().current_usage_bytes >> 20,
+                        usage.value().budget_bytes >> 20);
+    };
+    memory("with the context alone");
+
     auto const loader = sv::asset_loader();
     auto const asset = loader.load(SV_TEST_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf");
     if (asset.has_error())
@@ -85,6 +95,7 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
     for (auto const& mesh : asset.value().meshes)
         items.push_back(resources.acquire_scene_item(mesh));
     resources.wait_for_pending_uploads();
+    memory("with Sponza uploaded");
 
     auto const support = sr::query_reconstruct_support(ctx);
     auto const dlss
@@ -175,6 +186,8 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
             sv_test::drive_ambient_work();
         }
 
+        memory(cc::format("once {} is warm", c.name));
+
         // Throughput first: frames back to back, as a viewer draws them, over the wall clock from the first submit until the GPU idles.
         // Their own timestamps would overstate them, since a member's work may run on past its frame and into the next one's stages.
         auto const wall_start = cc::current_time_steady_secs();
@@ -232,6 +245,7 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
                     stages.push_back({.name = fr.marks[i].stage, .seconds = dt});
             }
         }
+        memory(cc::format("after {}'s frames", c.name));
         auto const* const samples = store.peek_ptr(id)->temporal.get_ptr(sv::temporal_id::frame_samples(0));
         auto const input = samples != nullptr ? samples->scaled_denoise.extent() : tg::vec2i(0, 0);
         CC_LOG_INFO("sponza {}x{} moving: {} {} ms per frame alone on the GPU, {} ms back to back, drawn at {}x{}",

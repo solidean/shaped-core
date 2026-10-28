@@ -338,7 +338,9 @@ Back to back, hybrid deferred with svgf and FSR takes 18.8 ms a frame against 8.
 
 **dlss_rr itself costs about 4.2 ms**, measured alone after a short run, where the whole frame is 10.8 ms.
 After a long run its frames slow to about 35 ms, the hybrid's own stages too, which nothing in them explains.
-The GPU's memory stands at 7.7 of 8 GB in both setups, so dlss_rr's own allocations most likely push Sponza into paging; what fills it is not measured yet.
+It is not memory: the process holds 6.5 GB while Sponza uploads and about 3 GB once warm, and dlss_rr adds only ~90 MB of that.
+The lead is the driver's power state: sampled during the slow frames, the GPU sat in P5 with its memory clock at 810 MHz, against P2 and 11,001 MHz with svgf.
+Too few samples to settle it, since the frames idle the GPU between them.
 
 Measured warm, forward's raster pass, which is its lighting, took 48.5 ms against deferred's 19.5 ms of lighting in the same run, and dlss_rr 10.4 ms against svgf and FSR's 2.3 ms.
 Both want a cool measurement before they decide anything.
