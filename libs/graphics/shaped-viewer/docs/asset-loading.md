@@ -135,7 +135,7 @@ with `find_mesh(name)`, `meshes_with_material(name)` and `material(name)` as the
 
 Load options then carry only what must happen *during* the parse, because it saves work or cannot be undone afterwards:
 an `include_mesh` predicate, `import_materials`, `import_textures`, a `material_override` hook, `flatten_hierarchy`, the
-tangent-frame options below, `max_file_bytes` for the filesystem default, and `fbx_materials` for an FBX's material reading.
+tangent-frame options below, and `fbx_materials` for an FBX's material reading.
 
 **One mesh per (geometry, material) pair**, whatever the format.
 A glTF mesh with three primitives becomes three meshes; an OBJ's `usemtl` runs become one mesh per run, which
@@ -423,7 +423,9 @@ The importer joins the name onto the document's directory itself, so no uri pass
 The importer's checks confine what a name may SAY; they are not a sandbox, since a link inside the directory can still lead out of it.
 glTF reaches further: its uris are uris, so `../` resolves as written and an absolute one passes through `join_uri` untouched.
 A host that must confine an import to one directory does so in its resolver, which sees every uri before anything is opened.
-The filesystem default refuses what is not a regular file — a directory, a pipe, a device such as `/dev/zero` — and any file over `asset_loader_config::max_file_bytes`, 4 GiB unless set.
+The filesystem default refuses what is not a regular file — a directory, a device such as `/dev/zero` — and any file over 4 GiB.
+`sv::filesystem_resolver({.max_file_bytes = …})` is the same default with another ceiling, passed as a loader's `resolve`.
+On POSIX a named pipe blocks the open until a writer appears; a file-kind query in clean-core is what will refuse it.
 On Windows it refuses a device by name (`NUL`, `CON`, …) as well, since `NUL` opens and reads as an empty file.
 That holds for glTF's buffers and images as much as for FBX's textures.
 One that cannot be fetched or decoded leaves its material on its factors, and the failures arrive as one issue per kind rather than one per texture.

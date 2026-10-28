@@ -65,9 +65,15 @@ void set_resolve_uri(uri_resolver_provider provider)
     g_resolve_uri = cc::move(provider);
 }
 
-cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri, i64 max_bytes)
+cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri)
 {
-    return g_resolve_uri ? g_resolve_uri(uri) : impl::resolve_uri_from_filesystem(uri, max_bytes);
+    return g_resolve_uri ? g_resolve_uri(uri) : impl::resolve_uri_from_filesystem(uri);
+}
+
+uri_resolver_provider filesystem_resolver(filesystem_resolver_options options)
+{
+    return [max_bytes = options.max_file_bytes](cc::string_view uri)
+    { return impl::resolve_uri_from_filesystem(uri, max_bytes); };
 }
 
 cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::string_view uri, i64 max_bytes)
@@ -87,6 +93,7 @@ cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::st
 
     auto stream = adapter.value().stream();
 
+    // "Regular" inferred from the stream below stands in for a file-kind query; issue: feat-cc-file-kind-query
     // The size the source states, checked against the ceiling before a byte is read.
     auto const size = stream.size();
     if (size.has_error() || size.value() < 0)
@@ -112,6 +119,7 @@ cc::result<cc::pinned_data<byte const>> impl::resolve_uri_from_filesystem(cc::st
 
 bool impl::names_windows_device(cc::string_view path)
 {
+    // A path rule that belongs in clean-core; issue: feat-cc-file-kind-query
     if (path.size() >= 4 && is_separator(path[0]) && is_separator(path[1]) && path[2] == '.' && is_separator(path[3]))
         return true;
 

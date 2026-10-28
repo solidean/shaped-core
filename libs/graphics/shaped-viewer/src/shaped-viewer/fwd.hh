@@ -116,6 +116,7 @@ enum class frame_generation : u8;        // how tangent frames are obtained (ass
 enum class fbx_material_convention : u8; // how an FBX material's properties are read (asset_loader.hh)
 struct tangent_frame_options;
 struct asset_loader_config;
+struct filesystem_resolver_options;
 struct asset_material;
 struct asset_node;
 struct asset_light; // one light a file placed (asset/asset_data.hh)

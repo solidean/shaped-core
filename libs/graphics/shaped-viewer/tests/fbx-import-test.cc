@@ -1100,6 +1100,23 @@ TEST("sv::asset_loader - the filesystem default reads regular files under the ce
     CHECK(sv::impl::resolve_uri_from_filesystem("/dev/zero").has_error());
 }
 
+TEST("sv::asset_loader - sv::filesystem_resolver carries its own ceiling into a load")
+{
+    auto const path = cc::temp_file_path("sv-fbx-ceiling", ".obj");
+    {
+        auto file = REQUIRED_VALUE(cc::file_write_stream_adapter::create(path));
+        auto stream = file.stream();
+        REQUIRE(stream.write(cc::as_bytes(cc::string_view("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"))).has_value());
+        REQUIRE(stream.flush().has_value());
+    }
+
+    auto const loader = sv::asset_loader({.resolve = sv::filesystem_resolver({.max_file_bytes = 16})});
+    auto const over = loader.load(path);
+    REQUIRE(over.has_error());
+    CHECK(cc::format("{}", over.error()).contains("bytes"));
+    CHECK(cc::remove_file(path));
+}
+
 TEST("sv::asset_loader - on Windows the filesystem default refuses a device by its name")
 {
 #ifndef CC_OS_WINDOWS

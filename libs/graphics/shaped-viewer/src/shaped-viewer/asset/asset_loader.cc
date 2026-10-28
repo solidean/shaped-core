@@ -41,7 +41,7 @@ cc::result<asset_data> asset_loader::load(cc::string_view uri) const
     if (!format.has_value())
         return cc::error(cc::format("shaped-viewer: '{}' names no format asset_loader reads", uri));
 
-    auto bytes = _config.resolve ? _config.resolve(uri) : resolve_uri(uri, _config.max_file_bytes);
+    auto bytes = _config.resolve ? _config.resolve(uri) : resolve_uri(uri);
     if (bytes.has_error())
         return cc::error(cc::move(bytes).error());
 
@@ -73,7 +73,7 @@ cc::result<asset_data> asset_loader::_import(cc::pinned_data<byte const> bytes,
         auto resolve = [&](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
         {
             auto const joined = impl::join_uri(base_uri, uri);
-            return _config.resolve ? _config.resolve(joined) : resolve_uri(joined, _config.max_file_bytes);
+            return _config.resolve ? _config.resolve(joined) : resolve_uri(joined);
         };
 
         auto doc = babel::gltf::read(cc::move(bytes), {.resolve_uri = resolve});
@@ -108,7 +108,7 @@ cc::result<asset_data> asset_loader::_import(cc::pinned_data<byte const> bytes,
         // A texture's file name travels the seam the FBX itself did; the importer checks it and joins it onto
         // `base_uri`'s directory itself, since a file name an FBX carries is a path and never a uri.
         auto resolve = [&](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
-        { return _config.resolve ? _config.resolve(uri) : resolve_uri(uri, _config.max_file_bytes); };
+        { return _config.resolve ? _config.resolve(uri) : resolve_uri(uri); };
         return impl::import_fbx(doc.value(), _config, name, resolve, base_uri, definitions);
     }
     }
@@ -140,7 +140,7 @@ sv::asset asset_loader::load_async(cc::string_view uri) const
                 return ctx.resolve_to_error(cc::async_error::make_error(
                     cc::any_error(cc::format("shaped-viewer: '{}' names no format asset_loader reads", owned_uri))));
 
-            auto bytes = _config.resolve ? _config.resolve(owned_uri) : resolve_uri(owned_uri, _config.max_file_bytes);
+            auto bytes = _config.resolve ? _config.resolve(owned_uri) : resolve_uri(owned_uri);
             if (bytes.has_error())
                 return ctx.resolve_to_error(cc::async_error::make_error(cc::move(bytes).error()));
             if (dropped->load())
@@ -193,7 +193,7 @@ cc::result<asset_data> asset_loader::load(babel::stl::data const& doc, cc::strin
 cc::result<asset_data> asset_loader::load(babel::fbx::data const& doc, cc::string_view name, cc::string_view base_uri) const
 {
     auto resolve = [&](cc::string_view uri) -> cc::result<cc::pinned_data<byte const>>
-    { return _config.resolve ? _config.resolve(uri) : resolve_uri(uri, _config.max_file_bytes); };
+    { return _config.resolve ? _config.resolve(uri) : resolve_uri(uri); };
 
     auto definitions = cc::vector<impl::asset_material_definition>();
     return _finish(impl::import_fbx(doc, _config, name, resolve, base_uri, definitions), definitions);

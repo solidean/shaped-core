@@ -637,7 +637,7 @@ a.wait()                         // -> bool; drives the load on THIS thread, the
 a.is_ready() / a.has_error() / a.error()
 a.data() / a.meshes() / a.issues()   // an empty asset until it lands, so a frame loop needs no branch
 
-sv::asset_loader_config          // { material_library* materials; uri_resolver_provider resolve; i64 max_file_bytes = 4 GiB (regular files only);
+sv::asset_loader_config          // { material_library* materials; uri_resolver_provider resolve;
                                  //   unique_function<bool(string_view)> include_mesh; bool import_materials, import_textures;
                                  //   unique_function<material_id(string_view)> material_override; bool flatten_hierarchy;
                                  //   tangent_frame_options frames; fbx_material_convention fbx_materials = phong; }
@@ -657,7 +657,8 @@ sv::asset_node                   // { string name; i32 parent; affine_transform3
 sv::uri_resolver                 // function_ref<result<pinned_data<byte const>>(string_view)> — the borrowed, per-call form
 sv::uri_resolver_provider        // the owning form a hook and a config hold
 sv::set_resolve_uri(provider)    // process-wide; {} restores the filesystem default
-sv::resolve_uri(uri, max_bytes)  // -> the hook's answer, or impl::resolve_uri_from_filesystem; max_bytes (4 GiB) bounds only the latter
+sv::resolve_uri(uri)             // -> the hook's answer, or impl::resolve_uri_from_filesystem
+sv::filesystem_resolver(opts)    // -> uri_resolver_provider over the filesystem default; {.max_file_bytes = 4 GiB}, regular files only
 ```
 
 Gotchas:

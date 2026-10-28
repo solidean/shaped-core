@@ -39,13 +39,25 @@ using uri_resolver_provider = cc::unique_function<cc::result<cc::pinned_data<byt
 /// Passing `{}` restores the filesystem default.
 void set_resolve_uri(uri_resolver_provider provider);
 
-/// The largest file the filesystem default reads, unless a caller asks for another ceiling.
-inline constexpr i64 default_max_file_bytes = i64(4) << 30;
-
 /// The bytes behind `uri`: the caller's hook if they set one, otherwise the filesystem default.
-/// `max_bytes` bounds only the filesystem default; a hook applies its own policy.
-[[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri,
-                                                                  i64 max_bytes = default_max_file_bytes);
+[[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri(cc::string_view uri);
+} // namespace sv
+
+/// How the filesystem resolver reads.
+struct sv::filesystem_resolver_options
+{
+    /// The largest file read, for an asset and everything it references.
+    i64 max_file_bytes = i64(4) << 30;
+};
+
+namespace sv
+{
+/// The filesystem default as a value, for a caller who wants it with other options:
+///
+///     auto const loader = sv::asset_loader({.resolve = sv::filesystem_resolver({.max_file_bytes = 64 << 20})});
+///
+/// It reads regular files only, and refuses a device or a directory however a document names one.
+[[nodiscard]] uri_resolver_provider filesystem_resolver(filesystem_resolver_options options = {});
 
 namespace impl
 {
@@ -53,12 +65,14 @@ namespace impl
 /// The default when no hook is set, and what makes "load a file" work with no ceremony.
 ///
 /// **Only a regular file of at most `max_bytes` is read.**
-/// A uri comes from a file as often as from a caller, and a device or a pipe would otherwise be read until memory runs out.
+/// A uri comes from a file as often as from a caller, and a device would otherwise be read until memory runs out.
 /// With no metadata layer in clean-core, "regular" is what the stream shows: a seekable source whose stated size is exactly what reading yields.
-/// A directory fails to open, a pipe cannot seek, and a device such as /dev/zero states one size and yields more.
+/// A directory fails to open, and a device such as /dev/zero states one size and yields more.
+/// **On POSIX a named pipe blocks the open until a writer appears**, which only a file-kind query in clean-core can prevent.
 /// On Windows a device is refused by name as well, since `NUL` states a size of zero and yields exactly that.
-[[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri_from_filesystem(cc::string_view uri,
-                                                                                  i64 max_bytes = default_max_file_bytes);
+[[nodiscard]] cc::result<cc::pinned_data<byte const>> resolve_uri_from_filesystem(
+    cc::string_view uri,
+    i64 max_bytes = filesystem_resolver_options{}.max_file_bytes);
 
 /// Whether Windows would open `path` as a device: a `\\.\` path, or a component naming `CON`, `COM1`, `CONIN$` and the like before its first dot or colon.
 /// Judged the same on every platform and in any case, since a name authored anywhere may be opened on Windows.

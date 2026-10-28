@@ -112,11 +112,6 @@ struct sv::asset_loader_config
     /// how a uri becomes bytes; unset means the process-wide `sv::resolve_uri`
     uri_resolver_provider resolve;
 
-    /// The largest file the filesystem default reads, for the asset and everything it references.
-    /// It reads regular files only, and refuses a device, a pipe or a directory however a document names one.
-    /// A `resolve` hook, this config's or the process-wide one, applies its own policy instead.
-    i64 max_file_bytes = default_max_file_bytes;
-
     /// Called per candidate mesh, with the name it would carry.
     /// Returning false skips it before its payloads are read, since this runs during the parse.
     /// Unset means every mesh is imported.
