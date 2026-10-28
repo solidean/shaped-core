@@ -326,9 +326,12 @@ Hybrid deferred with svgf and FSR, cool, on the laptop RTX 5070 in October 2026:
 
 What the lighting's parts cost, each measured by removing it alone:
 - the secondary hit's light and environment samples, about 3.0 ms;
-- the cutout test in every ray, about 2.5 ms;
+- the cutout test in every ray, about 2.5 ms, on Sponza's one BLEND material alone;
 - the primary light sample, about 2.2 ms;
 - the secondary base color's texture read, 0.3 ms.
+
+**The cutout cost is the candidate decisions, not their texture reads**: forcing every instance opaque recovers all of it, and sampling the opacity at mip 4 none.
+Opacity micromaps are the answer, for the tracer and the hybrid alike — [feat-sg-opacity-micromaps](../../../shaped-graphics/docs/issues/feat-sg-opacity-micromaps.md).
 
 Measured warm, forward's raster pass, which is its lighting, took 48.5 ms against deferred's 19.5 ms of lighting in the same run, and dlss_rr 10.4 ms against svgf and FSR's 2.3 ms.
 Both want a cool measurement before they decide anything.
