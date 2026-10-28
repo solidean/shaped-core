@@ -56,27 +56,22 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
 }
 } // namespace
 
-ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by occlusion")
+namespace
 {
-    auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
-    if (created.has_error())
-        SKIP("no dx12 hardware device");
-    auto& ctx = *created.value();
-    if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the raster shaders");
-    CC_LOG_INFO("adapter: {}", ctx.metrics.adapter().name);
-
-    auto const loader = sv::asset_loader();
-    auto const asset = loader.load(SV_TEST_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf");
-    if (asset.has_error())
-        SKIP("Sponza is not fetched; uv run extern/sponza/fetch-sponza.py installs it");
-    auto const box = asset.value().bounds();
+/// Draws `asset` along the longer horizontal axis of its box, at `eye_height` above its floor, three ways, and logs each.
+/// `eye_height` is in the asset's own units, or where it is none 5% of the box's height, for an asset whose unit is unknown.
+cc::shared_async<cc::unit> measure(sg::context& ctx,
+                                   cc::string_view name,
+                                   sv::asset_data const& asset,
+                                   cc::optional<f64> eye_height)
+{
+    auto const box = asset.bounds();
     REQUIRE(box.has_value());
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto items = cc::vector<sv::scene_item>();
     auto transforms = cc::vector<tg::affine_transform3f>();
-    for (auto const& mesh : asset.value().meshes)
+    for (auto const& mesh : asset.meshes)
     {
         items.push_back(resources.acquire_scene_item(mesh));
         transforms.push_back(mesh.transform);
@@ -104,7 +99,7 @@ ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by oc
                          .base_vertex = u32(mesh_rec->geometry.base_vertex),
                          .bounds = mesh_rec->bounds});
     }
-    CC_LOG_INFO("sponza: {} draws over {} permutations", draws.size(), permutations.size());
+    CC_LOG_INFO("{}: {} draws over {} permutations", name, draws.size(), permutations.size());
 
     auto const targets = sv::raster_gbuffer{.color = target_of(ctx, sg::pixel_format::rgba32_float),
                                             .normal = target_of(ctx, sg::pixel_format::rgba16_float),
@@ -119,7 +114,7 @@ ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by oc
     auto const lo = box.value().min;
     auto const hi = box.value().max;
     auto const along_x = hi[0] - lo[0] >= hi[2] - lo[2];
-    auto const eye_y = f64(lo[1]) + 1.7;
+    auto const eye_y = f64(lo[1]) + eye_height.value_or(0.05 * f64(hi[1] - lo[1]));
     auto const camera_at = [&](int frame)
     {
         auto const t = 0.15 + 0.7 * f64(frame) / f64(k_frames);
@@ -215,9 +210,46 @@ ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by oc
 
     cc::string_view const names[contenders] = {"no culling", "view culling", "occlusion culling"};
     for (auto c = 0; c < contenders; ++c)
-        CC_LOG_INFO("sponza {}x{}: {} {} ms per frame", k_size[0], k_size[1], names[c],
+        CC_LOG_INFO("{} {}x{}: {} {} ms per frame", name, k_size[0], k_size[1], names[c],
                     1e3 * seconds_of(spans[c]) / f64(k_frames));
 
     co_await cc::async_settled(sv::background_work(ctx));
     co_await ctx.idle_completion();
+    co_return;
+}
+} // namespace
+
+ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by occlusion")
+{
+    auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (created.has_error())
+        SKIP("no dx12 hardware device");
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the raster shaders");
+    CC_LOG_INFO("adapter: {}", created.value()->metrics.adapter().name);
+
+    auto const loader = sv::asset_loader();
+    auto const asset = loader.load(SV_TEST_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf");
+    if (asset.has_error())
+        SKIP(cc::format("Sponza did not load ({}); uv run extern/sponza/fetch-sponza.py installs it",
+                        asset.error().to_string()));
+    co_await measure(*created.value(), "sponza", asset.value(), 1.7);
+}
+
+// Many small pieces in a street of buildings, which is where occlusion culling has the most to hide.
+ASYNC_BENCHMARK("sv - raster on Bistro, culled by nothing, by the view and by occlusion")
+{
+    auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
+    if (created.has_error())
+        SKIP("no dx12 hardware device");
+    if (!sv_test::shared_env().has_compiler)
+        SKIP("no SGL compiler that reaches DXIL to build the raster shaders");
+    CC_LOG_INFO("adapter: {}", created.value()->metrics.adapter().name);
+
+    auto const loader = sv::asset_loader();
+    auto const asset = loader.load(SV_TEST_BISTRO_DIR "/BistroExterior.fbx");
+    if (asset.has_error())
+        SKIP(cc::format("Bistro did not load ({}); uv run extern/bistro/fetch-bistro.py installs it",
+                        asset.error().to_string()));
+    co_await measure(*created.value(), "bistro exterior", asset.value(), {});
 }

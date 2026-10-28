@@ -348,7 +348,8 @@ if(SC_BUILD_TESTS)
         target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
 
         # Where the on-request Sponza fetch installs, which the raster benchmark draws when it is there.
-        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install")
+        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install"
+                                                          SV_TEST_BISTRO_DIR="${CMAKE_SOURCE_DIR}/extern/bistro/.install")
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.
