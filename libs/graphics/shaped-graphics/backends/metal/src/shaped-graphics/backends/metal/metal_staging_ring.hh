@@ -72,7 +72,7 @@ public:
 
     /// Allocate the backing buffer.
     /// Must be called once, before any reservation.
-    /// `kind` is the word the overflow warning names this ring by — "upload" or "download".
+    /// `kind` is the word the overflow warning names this ring by — "upload" or "readback", as every backend words it.
     [[nodiscard]] cc::result<cc::unit> create(MTL::Device* device,
                                               isize capacity_in_bytes,
                                               cc::string_view label,
