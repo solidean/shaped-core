@@ -68,22 +68,38 @@ struct bounce:
     metalness: float
 
 /// One bounce from `p`: a direction drawn from the closure `b`, traced inline to what it meets.
-/// Only a reflection continues: a refracted direction would have to follow the ray through the surface, which nothing here does yet.
+///
+/// A refraction into a solid crosses its interior first, as `crossing_of` follows it, and what it meets beyond is the bounce's.
+/// A thin wall's continues straight on from the far side, and a subsurface one ends.
+/// Past a crossing everything weighs 1 against `direct`, whose shadow rays a transmissive surface blocks, so no light sample reaches what lies behind it.
 fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> bounce:
     let mut result = bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0)
     let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
     let s = openpbr.bsdf_sample_direction(b, wo_local, u)
-    if s.pdf <= 0.0 or s.direction.z <= 0.0 or not s.valid => return result
-    let wi = openpbr.to_world(f, s.direction)
-    if dot(wi, n) <= 0.0 => return result
-    result.throughput = s.value * (s.direction.z / s.pdf)
+    if s.pdf <= 0.0 or s.direction.z == 0.0 or not s.valid => return result
+    let refracts = s.direction.z < 0.0
+    if refracts and s.medium == openpbr.medium_subsurface => return result
+    let sampled = openpbr.to_world(f, s.direction)
+    // the shading normal bent the direction to the other side of the face than it was drawn for
+    if (dot(sampled, n) < 0.0) != refracts => return result
+
+    let mut throughput = s.value * (abs(s.direction.z) / s.pdf)
+    let mut origin = if refracts => p - n * 1e-3 else p + n * 1e-3
+    let mut wi = sampled
+    let weight_pdf = if refracts => 1e30 else s.pdf
+    if refracts and s.medium == openpbr.medium_transmission:
+        let c = crossing_of(b, origin, sampled, rng)
+        if not c.through => return result
+        throughput *= c.weight
+        origin = c.at
+        wi = c.wi
+    result.throughput = throughput
     result.wi = wi
 
-    let origin = p + n * 1e-3
     let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(rng, tracer.cutout_ray_surface))
-    result.lights = lights_along(origin, wi, h.t, s.pdf)
+    result.lights = lights_along(origin, wi, h.t, weight_pdf)
     if h.kind == tracer.hit_none:
-        result.escaped = scene.background_radiance(tracer.background_sh(), wi) * pt.mis_weight(s.pdf, pt.env_pdf())
+        result.escaped = scene.background_radiance(tracer.background_sh(), wi) * pt.mis_weight(weight_pdf, pt.env_pdf())
         return result
 
     let inst = scene.instance(..tracer.traced.instances[h.instance as int])
@@ -99,11 +115,55 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
         result.albedo = tracer.instance_base_color(inst, ctx)
         result.roughness = tracer.instance_roughness(inst, ctx)
         result.metalness = tracer.instance_metalness(inst, ctx)
-        result.lights += emitter_light(inst, ctx, w1 - w0, w2 - w0, wi, h.t, s.pdf)
+        result.lights += emitter_light(inst, ctx, w1 - w0, w2 - w0, wi, h.t, weight_pdf)
     else:
         result.n = normalize(raster.to_world_vector(inst, h.normal))
     if dot(result.n, wi) > 0.0 => result.n = -result.n
     return result
+
+/// Where a ray refracted into a solid leaves it again: the far side it reaches, the direction it bends out in, and what the crossing costs.
+struct crossing:
+    /// false where it met nothing, or the far side reflects it totally; the path then ends, and that light is lost
+    through: bool
+    at: float3
+    wi: float3
+    /// the interior's absorption over the distance, times what the far interface transmits
+    /// and the square of `trans_eta`, which returns the radiance the closure compressed on the way in
+    weight: float3
+
+/// The crossing of the solid whose surface `b` describes, from `origin` just inside it along `wi`.
+///
+/// The first surface met is taken as the way out, and refracts through `b`'s own interface turned around.
+/// So an object nested inside another bends the ray as if it were the far wall.
+/// The far interface's reflection is a loss rather than a further path, which darkens thick glass slightly.
+/// The interior absorbs alone: a scattering one is extinction here.
+fun crossing_of(b: openpbr.bsdf, origin: float3, wi: float3, rng: uint){tracer.traced, tracer.bindless} -> crossing:
+    let mut result = crossing(false, origin, wi, float3(0.0))
+    // hashed, so the far side's cutouts draw apart from those of the trace beyond it
+    let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(pt.hash(rng), tracer.cutout_ray_surface))
+    if h.kind == tracer.hit_none => return result
+    let mut outward = face_normal(h)
+    if dot(outward, wi) < 0.0 => outward = -outward
+    // `trans_eta` is the inside over the outside, which is the ratio a ray leaving bends by
+    let bent = openpbr.refract_through(wi, -outward, b.trans_eta)
+    if dot(bent, bent) < 1e-6 => return result
+    let transmitted = 1.0 - openpbr.fresnel_dielectric(dot(wi, outward), 1.0 / b.trans_eta)
+    result.through = true
+    result.at = origin + wi * h.t + outward * 1e-3
+    result.wi = normalize(bent)
+    result.weight = exp(-b.medium_sigma_t * h.t) * (transmitted * b.trans_eta * b.trans_eta)
+    return result
+
+/// The world normal of the face `h` met, either way around.
+fun face_normal(h: tracer.hit_record){tracer.traced, tracer.bindless} -> float3:
+    let inst = scene.instance(..tracer.traced.instances[h.instance as int])
+    if h.kind != tracer.hit_triangle => return normalize(raster.to_world_vector(inst, h.normal))
+    let indices = inst.indices as int
+    let ctx = material.make_context(inst, tracer.bindless.buffers[nonuniform indices], h.primitive, h.barycentrics)
+    let w0 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
+    let w1 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
+    let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
+    return normalize(cross(w1 - w0, w2 - w0))
 
 /// The analytic lights a bounce from `origin` along `wi` reaches, drawn at `bsdf_pdf`: the rects it crosses before `hit_t`, and on an escape, a negative `hit_t`, the discs it points into.
 /// Each is weighed against `direct`'s light sample, which draws the same direction at the light's own density.

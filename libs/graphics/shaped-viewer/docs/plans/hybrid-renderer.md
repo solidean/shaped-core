@@ -363,7 +363,10 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
    - 3c, done: denoised through the traced layer's own flow, its G-buffer slots serving as the guides.
      A temporal member reads each frame alone and a spatial one the mean, with the crossfade between; no split signal and no upscaling yet.
 4. **The indirect ray** with the secondary material, ending in the environment past its hit.
-   Done, lights reached by the bounce and the secondary's roughness and metalness included, but for a refracted bounce, which ends.
+   Done, lights reached by the bounce and the secondary's roughness and metalness included.
+   A refracted bounce crosses a solid once, bending out at the first surface it meets inside, and continues from there; a thin wall's goes straight on.
+   What the far side reflects back inside is lost, as is a crossing that ends in total internal reflection: a glass sphere under a uniform sky reads 0.96 of it at its center, 0.88 over its disc.
+   The deferred kernel's glass is clear: the thin G-buffer keeps no medium and no thin wall.
 5. **The radiance cache**, ending the indirect ray in it, once counsel has confirmed its design.
 6. **Reconstruction**: `dlss_rr` on the scaled stream, the MetalFX member.
    Begun: a moving hybrid frame is drawn at the upscaler's input extent, jittered as a traced one is, and upscaled through the traced layer's own reconstruct path.

@@ -52,7 +52,7 @@ fun oct_decode(e: float2) -> float3:
 /// `surface`'s reduced closure, its turned normals and its depth as a deferred pixel writes them.
 ///
 /// The base takes the subsurface's color by its weight, so a subsurface material keeps its albedo.
-/// The transmission keeps its weight alone, which darkens the base as `bsdf_prepare` does, and no refraction follows.
+/// The transmission keeps its weight alone, so the glass a bounce refracts through is clear.
 /// Lost are anisotropy, the fuzz, the thin film, the coat's color and IOR, the diffuse roughness and the medium.
 fun thin_of(surface: openpbr.surface, shading_n: float3, n: float3, view_depth: float, motion: float2, near: float) -> thin_targets:
     let base = saturate(surface.base_weight * mix(surface.base_color, surface.subsurface_color, saturate(surface.subsurface_weight)))
