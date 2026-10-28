@@ -37,6 +37,17 @@ namespace
     return MTL::LoadActionLoad;
 }
 
+
+/// `rect` clamped to a target of `size`.
+/// Metal's validation refuses a scissor reaching past the target, where dx12 and vulkan clip it, and sg allows one.
+[[nodiscard]] MTL::ScissorRect scissor_within(tg::aabb2i const& rect, tg::vec2i size)
+{
+    auto const x0 = cc::clamp(rect.min[0], 0, size[0]);
+    auto const y0 = cc::clamp(rect.min[1], 0, size[1]);
+    auto const x1 = cc::clamp(rect.max[0], x0, size[0]);
+    auto const y1 = cc::clamp(rect.max[1], y0, size[1]);
+    return MTL::ScissorRect{NS::UInteger(x0), NS::UInteger(y0), NS::UInteger(x1 - x0), NS::UInteger(y1 - y0)};
+}
 } // namespace
 
 metal_command_list::metal_command_list(metal_context& ctx,
@@ -1302,12 +1313,10 @@ void metal_command_list::open_render_encoder(bool force_load)
                           : sg::viewport{.offset = tg::pos2f(0.0f, 0.0f), .size = tg::vec2f(float(width), float(height))};
         _scope_viewport = MTL::Viewport{vp.offset[0], vp.offset[1], vp.size[0], vp.size[1], vp.min_depth, vp.max_depth};
 
-        _scope_scissor
-            = info.scissor.has_value()
-                ? MTL::ScissorRect{NS::UInteger(info.scissor.value().min[0]), NS::UInteger(info.scissor.value().min[1]),
-                                   NS::UInteger(info.scissor.value().max[0] - info.scissor.value().min[0]),
-                                   NS::UInteger(info.scissor.value().max[1] - info.scissor.value().min[1])}
-                : MTL::ScissorRect{0, 0, NS::UInteger(width), NS::UInteger(height)};
+        _scope_size = tg::vec2i(width, height);
+        _scope_scissor = scissor_within(
+            info.scissor.has_value() ? info.scissor.value() : tg::aabb2i(tg::pos2i(0, 0), tg::pos2i(width, height)),
+            _scope_size);
     }
 
     _render_encoder->setViewport(_scope_viewport);
@@ -1454,8 +1463,7 @@ void metal_command_list::raster_set_viewport(viewport const& vp)
 void metal_command_list::raster_set_scissor(tg::aabb2i const& rect)
 {
     CC_ASSERT(in_rendering_scope(), "setting the scissor needs an open rendering scope");
-    _scope_scissor = MTL::ScissorRect{NS::UInteger(rect.min[0]), NS::UInteger(rect.min[1]),
-                                      NS::UInteger(rect.max[0] - rect.min[0]), NS::UInteger(rect.max[1] - rect.min[1])};
+    _scope_scissor = scissor_within(rect, _scope_size);
     if (_render_encoder != nullptr)
         _render_encoder->setScissorRect(_scope_scissor);
 }

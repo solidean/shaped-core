@@ -442,6 +442,9 @@ private:
     /// find it where it left it, and a new encoder starts at Metal's defaults rather than at the old one's state.
     MTL::Viewport _scope_viewport = {};
     MTL::ScissorRect _scope_scissor = {};
+
+    /// The open rendering scope's pixel extent, which every scissor is clamped to.
+    tg::vec2i _scope_size = {};
     cc::optional<u32> _scope_stencil_reference;
     cc::optional<tg::vec4f> _scope_blend_constants;
 

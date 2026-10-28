@@ -315,3 +315,35 @@ ASYNC_INVOCABLE_TEST("sg - a viewport maps clip space onto its pixels, and a sci
             CHECK(drawn(pixels[0], x, y) == expected).context(cc::format("pixel ({}, {})", x, y));
         }
 }
+
+ASYNC_INVOCABLE_TEST("sg - a scissor reaching past the target clips to it", (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // Metal's validation refuses a scissor past the target, which dx12 and vulkan clip; sg clips it everywhere.
+    // One rect over all of clip space into an 8 × 4 target, scissored to a box that starts above-left of it and ends past it below-right.
+    constexpr int width = 8;
+    constexpr int height = 4;
+    sg_test::rect const whole[] = {sg_test::rect_at(0, 0, width, height, width, height, 0.5f, white)};
+    auto const batch = sg_test::rect_batch(*ctx, whole);
+    auto const pipeline = co_await rect_pipeline(*ctx, [](sg::raster_pipeline_description&) {});
+
+    auto const pixels = co_await sg_test::draw_offscreen(
+        *ctx,
+        {.width = width,
+         .height = height,
+         .colors = {sg::pixel_format::rgba16_float},
+         .target_set = shaders::rects::rect_target::name},
+        [&](sg::rendering_scope& scope)
+        {
+            scope.bind_pipeline(*pipeline);
+            scope.set_scissor(tg::aabb2i(tg::pos2i(-3, -2), tg::pos2i(2 * width, 2 * height)));
+            batch.draw(scope, 0);
+        });
+
+    for (auto y = 0; y < height; ++y)
+        for (auto x = 0; x < width; ++x)
+            CHECK(drawn(pixels[0], x, y)).context(cc::format("pixel ({}, {})", x, y));
+}
