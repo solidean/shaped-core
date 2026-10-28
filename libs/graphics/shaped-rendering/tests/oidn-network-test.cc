@@ -580,6 +580,10 @@ ASYNC_INVOCABLE_TEST("sr - the OIDN network in tiles agrees with the same image 
 
     if (!sr::impl::oidn_weights_present())
         SKIP("the OIDN weights were not fetched (extern/oidn-weights/fetch-oidn-weights.py)");
+    // TEMPORARY(perf-sr-oidn-tiles-slow-on-pinned-warp): the pinned NuGet WARP runs this about 25x slower than Windows' own,
+    // past the watchdog on CI.
+    if (SG_HAS_PINNED_WARP && ctx.metrics.adapter().is_software)
+        SKIP("the pinned WARP runs this network about 25x slower; issue: perf-sr-oidn-tiles-slow-on-pinned-warp");
 
     REQUIRE(co_await sr::impl::oidn_prewarm_pipelines(ctx, sg::pixel_format::rgba32_float))
         .context("the network's pipelines did not build");
