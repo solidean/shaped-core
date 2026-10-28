@@ -94,7 +94,8 @@ cc::shared_async<raster_readback> draw_raster_items(sg::context& ctx,
                                                     sv::pt_light_table const& lights,
                                                     sv::background const& environment,
                                                     tg::vec2i size,
-                                                    sg::buffer<u32>* visibility)
+                                                    sg::buffer<u32>* visibility,
+                                                    bool depth_prepass = true)
 {
     REQUIRE(!items.empty());
     auto const* const permutation = resources.shaders.find(items[0].shader_key);
@@ -158,7 +159,8 @@ cc::shared_async<raster_readback> draw_raster_items(sg::context& ctx,
                    .bindless = &bindless,
                    .targets = targets,
                    .drawn_args = &drawn_args,
-                   .visibility = visibility});
+                   .visibility = visibility,
+                   .depth_prepass = depth_prepass});
 
         // Asserted only after the submit: a REQUIRE unwinding past an unsubmitted list asserts in its destructor.
         auto const ready = drawn == sg::routine_outcome::executed;
@@ -931,6 +933,89 @@ ASYNC_INVOCABLE_TEST("sv::raster_routine - a draw hidden behind another is culle
     CHECK(is_pair(past.visibility, 0u, 1u));
     CHECK(is_pair(past.instance_counts, 0u, 1u));
     CHECK(green_pixels(past) > 0);
+    co_await cc::async_settled(sv::background_work(ctx));
+}
+
+// The prepass decides which surface a pixel shades and nothing else, so with or without it every target is the same, bit for bit.
+// Both pass an equal depth, so a tie between coplanar surfaces goes to the later draw either way.
+ASYNC_INVOCABLE_TEST("sv - a raster depth prepass changes no pixel", (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!can_raster())
+        SKIP("no SGL compiler, so the raster shaders do not build");
+
+    // A small near square drawn after a large far one it partly hides, so without a prepass both shade the pixels they share.
+    auto const square = [](f32 half, f32 z, tg::vec3f color)
+    {
+        auto positions = cc::vector<tg::pos3f>();
+        for (auto const& p : {tg::pos3f(-half, -half, z), tg::pos3f(half, -half, z), tg::pos3f(half, half, z),
+                              tg::pos3f(-half, -half, z), tg::pos3f(half, half, z), tg::pos3f(-half, half, z)})
+            positions.push_back(p);
+        auto& lib = sv_test::shared_material_library();
+        auto const unlit = lib.acquire_type(sv::builtin_material::unlit).value();
+        auto mesh = sv::mesh{.name = "square",
+                             .geometry = sv::triangle_geometry::create_from_positions(positions),
+                             .material = lib.acquire(sv::material::create("square", unlit, {}))};
+        mesh.attributes.push_back(sv::mesh_attribute::create("color", sv::attribute_frequency::per_triangle,
+                                                             cc::vector<tg::vec3f>{color, color}));
+        return mesh;
+    };
+
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto items = cc::vector<sv::scene_item>();
+    items.push_back(resources.acquire_scene_item(square(3.0f, 10.0f, tg::vec3f(0, 1, 0))));
+    items.push_back(resources.acquire_scene_item(square(0.5f, 3.0f, tg::vec3f(1, 0, 0))));
+    resources.wait_for_pending_uploads();
+
+    constexpr auto size = tg::vec2i(32, 32);
+    auto cam = sv::camera::looking_at(tg::pos3d(0.3, 0.2, 0), tg::pos3d(0.3, 0.2, 1));
+    cam.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+
+    auto const same = [](raster_readback const& a, raster_readback const& b)
+    {
+        if (a.color.size() != b.color.size() || a.depth.size() != b.depth.size())
+            return false;
+        for (auto i = isize(0); i < a.color.size(); ++i)
+            if (a.color[i] != b.color[i] || a.depth[i] != b.depth[i] || a.primary_depth[i] != b.primary_depth[i])
+                return false;
+        return true;
+    };
+    auto const reds = [](raster_readback const& r)
+    {
+        auto n = 0;
+        for (auto const& p : r.color)
+            if (p[0] > 0.5f && p[1] < 0.5f)
+                ++n;
+        return n;
+    };
+
+    // Culled by the view alone.
+    auto const shaded
+        = co_await draw_raster_items(ctx, resources, items, cam, {}, sv::background{}, size, nullptr, false);
+    auto const prepassed
+        = co_await draw_raster_items(ctx, resources, items, cam, {}, sv::background{}, size, nullptr, true);
+    CHECK(reds(prepassed) > 0);
+    CHECK(same(shaded, prepassed));
+
+    // And by occlusion, each from a record of its own, on the frame after the first, whose first pass draws from it.
+    auto shaded_record = sg::buffer<u32>();
+    auto prepassed_record = sg::buffer<u32>();
+    for (auto frame = 0; frame < 2; ++frame)
+    {
+        auto const a
+            = co_await draw_raster_items(ctx, resources, items, cam, {}, sv::background{}, size, &shaded_record, false);
+        auto const b = co_await draw_raster_items(ctx, resources, items, cam, {}, sv::background{}, size,
+                                                  &prepassed_record, true);
+        CHECK(same(a, b));
+        CHECK(a.visibility.size() == b.visibility.size());
+        for (auto i = isize(0); i < a.visibility.size() && i < b.visibility.size(); ++i)
+            CHECK(a.visibility[i] == b.visibility[i]);
+        CHECK(same(prepassed, b));
+    }
     co_await cc::async_settled(sv::background_work(ctx));
 }
 

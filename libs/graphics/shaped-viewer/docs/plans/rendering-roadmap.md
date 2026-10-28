@@ -9,7 +9,7 @@ A library's own TODO keeps the detail of each item; this page keeps the order an
 - **A rasterization path for the PBR materials** — first slice landed as `render_mode::raster` ([raster.md](../raster.md)).
   The same OpenPBR materials are drawn rather than traced, through the generated material body the hit groups use, lit directly and unshadowed.
   Its primary-hit G-buffer lands in the guide slots every frame, which is what a later lighting pass reads.
-  Left in it: quadric batches, antialiasing, transparency, lights seen by the camera, and a depth prepass.
+  Left in it: quadric batches, antialiasing, transparency, and lights seen by the camera.
 
 ## The intended default
 

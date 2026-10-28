@@ -16,8 +16,8 @@ Settled by the user on 2026-10-27:
 2. **No ReSTIR, in any form, until NVIDIA answers on its patents** (US 11,922,556 B2 among them).
    The radiance cache comes first.
 3. **The radiance cache is an open design no patent covers**, built from published work ([The radiance cache](#the-radiance-cache)).
-4. **Primary visibility is one raster pass writing a thin G-buffer.**
-   No depth prepass, and no visibility buffer.
+4. **Primary visibility is rasterized after a depth prepass**, with no visibility buffer.
+   Changed on 2026-10-28 from no prepass: the prepass is what lets a pixel stage run once per visible pixel.
 5. **The lighting reads a reduced closure from the G-buffer**, not the whole of OpenPBR.
 6. **A secondary hit sees a simplified material**, read from data rather than generated code; judged by images once it draws.
 7. **Raster culls on the GPU**, and that is a requirement rather than an optimization.
@@ -27,6 +27,10 @@ Settled by the user on 2026-10-27:
 11. **webgpu is out of scope**, as it is for the wavefront.
 12. **The target is 60 fps on a laptop RTX 5070**, upscaled: rendering at most at 1080p, output up to 4K, with resolutions mixed where that pays ([Budget](#budget)).
 13. **One vertex format, not interleaved**: fixed streams of one layout each ([One vertex buffer, one index buffer](#one-vertex-buffer-one-index-buffer)).
+14. **The lighting is built twice, and measured against itself**, decided on 2026-10-28.
+    Forward runs it in the material's own pixel stage, tracing inline with the full closure, so nothing but the guides is stored.
+    Deferred runs it in a compute kernel over the thin G-buffer, with the reduced closure of decision 5.
+    [Forward or deferred](#forward-or-deferred) is the comparison.
 
 ## The frame
 
@@ -86,14 +90,14 @@ A fixed stream changes how a material resolves them, so it is its own step, take
 - **Two-phase occlusion culling** against a depth pyramid:
   phase one draws what was visible last frame, builds the pyramid from that depth, and tests everything else against it;
   phase two draws what passed, which is what was disoccluded.
-  Nothing is drawn twice, and no separate depth prepass exists.
+  Both passes draw depth alone, and the shading draws of both follow once the depth is complete.
 - **Survivors are binned by material permutation**, a counting sort as the wavefront's shade sort is.
   Each permutation then gets one indirect draw with a GPU-written count, so the CPU records one draw per permutation, never per instance.
 - **Cluster culling inside a mesh comes later**, with the LODs, since both want meshes split into clusters.
 
-**Overdraw is answered by culling and order, not a prepass** (decision 4).
-Within a bin, instances draw roughly front to back, so early depth rejects most of what is behind.
-If measurement on a dense scene shows the pixel stage's overdraw still dominates, the cheapest fallback is a depth-only phase one, kept as a measured option rather than the default.
+**Overdraw is answered by a depth prepass** (decision 4), built and measured in [raster.md](../raster.md#what-culling-and-the-prepass-measured).
+The opaque draws lay down depth through the shared vertex stage, and the shading draws test against it at `greater_equal` without writing.
+A cutout skips it and writes its own depth as it shades, since its depth depends on its material.
 
 ### LODs, later
 
@@ -146,7 +150,21 @@ Linear depth is reconstructed from the hardware depth.
 
 ## Lighting
 
-**One compute kernel, tracing inline**, at the upscaler's input extent.
+**Inline tracing, in one pass**: one compute kernel at the upscaler's input extent where it is deferred, the material's own pixel stage where it is forward.
+
+### Forward or deferred
+
+**Both bind the tracer's own `tracer.traced` as group 0**, which holds the TLAS, the lights, the emitters, the instance table and the decals.
+So both light through the tracer's light selection and its inline shadow ray, and only where the closure comes from differs.
+`raster.drawn` cannot hold the TLAS, since a raster layer must draw on a device without ray tracing, and sg allows three groups.
+
+- **Forward**: a hybrid vertex stage reads `traced` instead of `raster.drawn`, and the material's generated pixel stage lights its full closure, tracing as it goes.
+  The depth prepass is what makes it affordable: each pixel stage runs once, for the visible surface.
+  Its costs are a long pixel stage holding up the raster pipeline, divergent rays inside pixel waves, helper lanes on small triangles, and rays only ever at the raster's own resolution.
+- **Deferred**: the pixel stage writes the thin G-buffer, and one compute kernel lights it.
+  Its costs are the G-buffer's bandwidth and the reduced closure.
+
+The images differ by what the reduced closure loses, and the frame times by everything above; phase 3 measures both on Sponza.
 
 ### Why not the wavefront or a pipeline
 

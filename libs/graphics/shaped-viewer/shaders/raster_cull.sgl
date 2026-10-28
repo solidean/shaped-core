@@ -118,6 +118,17 @@ binding pyramid_io:
     if id.x >= size.x or id.y >= size.y => return
     pyramid_io.target.store(int2(id.x, id.y), pyramid_io.source.load(int2(id.x, id.y)))
 
+/// Level 0 from a depth prepass instead: the depth buffer itself, which holds `near / depth`, 0 where nothing was drawn.
+binding pyramid_depth_io:
+    source: texture_2d_depth
+    target: out image_2d[.r32_float]
+
+/// The same primary depth `pyramid_seed` copies, `1 - near / depth`, from the depth the prepass tested.
+@compute(8, 8) fun pyramid_seed_depth(@thread_id id: int3){pyramid_depth_io}:
+    let size = pyramid_depth_io.source.size()
+    if id.x >= size.x or id.y >= size.y => return
+    pyramid_depth_io.target.store(int2(id.x, id.y), 1.0 - pyramid_depth_io.source.load(int2(id.x, id.y)))
+
 /// Level N + 1: the farthest of the texels under each one.
 /// Where level N is odd along an axis the last texel covers three, or a column of it would be covered by none.
 @compute(8, 8) fun pyramid_down(@thread_id id: int3){pyramid_io}:

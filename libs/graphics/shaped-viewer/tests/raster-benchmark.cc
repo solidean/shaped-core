@@ -13,10 +13,11 @@
 
 using namespace cc::primitive_defines;
 
-// What the raster path's culling saves on Intel's Sponza: the same frames drawn with no culling, culled by the view, and culled by occlusion too.
+// What the raster path's culling and depth prepass save on Intel's Sponza: the same frames drawn with no culling, culled by the view, and culled by occlusion too.
+// The last two again with the opaque depth laid down first, so each pixel is shaded once.
 //
 // GPU time rather than wall time: each frame is bracketed by its own timestamps.
-// The three run interleaved frame by frame, since a laptop GPU's clocks drift under sustained load and a later run would come out slower.
+// The contenders run interleaved frame by frame, since a laptop GPU's clocks drift under sustained load and a later run would come out slower.
 // The camera walks along the nave, so the view culling has something out of view and the occlusion culling pillars and walls to hide behind.
 // A benchmark rather than a test: it asserts nothing, and libs/graphics/shaped-viewer/docs/raster.md records what it measured.
 
@@ -58,7 +59,7 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
 
 namespace
 {
-/// Draws `asset` along the longer horizontal axis of its box, at `eye_height` above its floor, three ways, and logs each.
+/// Draws `asset` along the longer horizontal axis of its box, at `eye_height` above its floor, every contender's way, and logs each.
 /// `eye_height` is in the asset's own units, or where it is none 5% of the box's height, for an asset whose unit is unknown.
 cc::shared_async<cc::unit> measure(sg::context& ctx,
                                    cc::string_view name,
@@ -127,13 +128,25 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
         return cam;
     };
 
-    constexpr auto contenders = 3;
-    sv::raster_culling const culling[contenders]
-        = {sv::raster_culling::none, sv::raster_culling::view, sv::raster_culling::occlusion};
-    auto visibility = sg::buffer<u32>();
+    struct contender
+    {
+        cc::string_view name;
+        sv::raster_culling culling = sv::raster_culling::none;
+        bool depth_prepass = false;
+    };
+    contender const contenders[] = {
+        {.name = "no culling", .culling = sv::raster_culling::none, .depth_prepass = false},
+        {.name = "view culling", .culling = sv::raster_culling::view, .depth_prepass = false},
+        {.name = "occlusion culling", .culling = sv::raster_culling::occlusion, .depth_prepass = false},
+        {.name = "view culling + prepass", .culling = sv::raster_culling::view, .depth_prepass = true},
+        {.name = "occlusion culling + prepass", .culling = sv::raster_culling::occlusion, .depth_prepass = true},
+    };
+    auto const count = cc::span<contender const>(contenders).size();
+    // One record per occlusion contender, as two layers would keep them.
+    auto visibility = cc::vector<sg::buffer<u32>>::create_defaulted(count);
 
     // One frame of `c`: true where it executed with every permutation's own shader bound.
-    auto const record = [&](sg::command_list& cmd, int c, int frame) -> bool
+    auto const record = [&](sg::command_list& cmd, isize c, int frame) -> bool
     {
         auto records = cc::vector<sv::shaders::tracer::instance_record>();
         for (auto i = isize(0); i < items.size(); ++i)
@@ -169,19 +182,22 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
                   .bindless = &bindless,
                   .targets = targets,
                   .stand_ins = &stand_ins,
-                  .visibility = &visibility,
-                  .culling = culling[c]});
+                  .visibility = &visibility[c],
+                  .culling = contenders[c].culling,
+                  .depth_prepass = contenders[c].depth_prepass});
         return outcome == sg::routine_outcome::executed && stand_ins.hash == 0;
     };
 
-    // Until every permutation compiled and every texture's follow-up work drained, so all three time the same work.
+    // Until every permutation compiled and every texture's follow-up work drained, so every contender times the same work.
     auto const start = cc::current_time_steady_secs();
     while (true)
     {
         (void)ctx.routines.tick();
         auto cmd = ctx.create_command_list();
         (void)resources.record_pending_work(*cmd);
-        auto const ready = record(*cmd, 2, 0);
+        auto ready = true;
+        for (auto c = isize(0); c < count; ++c)
+            ready = record(*cmd, c, 0) && ready;
         ctx.submit_command_list(cc::move(cmd));
         ctx.advance_epoch();
         co_await ctx.idle_completion();
@@ -192,10 +208,10 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
     }
 
     auto spans = cc::vector<cc::vector<cc::pair<sg::gpu_timestamp, sg::gpu_timestamp>>>();
-    for (auto c = 0; c < contenders; ++c)
+    for (auto c = isize(0); c < count; ++c)
         spans.push_back({});
     for (auto f = 0; f < k_frames; ++f)
-        for (auto c = 0; c < contenders; ++c)
+        for (auto c = isize(0); c < count; ++c)
         {
             auto cmd = ctx.create_command_list();
             auto const from = cmd->query.record_gpu_timestamp();
@@ -208,9 +224,8 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
         }
     co_await ctx.idle_completion();
 
-    cc::string_view const names[contenders] = {"no culling", "view culling", "occlusion culling"};
-    for (auto c = 0; c < contenders; ++c)
-        CC_LOG_INFO("{} {}x{}: {} {} ms per frame", name, k_size[0], k_size[1], names[c],
+    for (auto c = isize(0); c < count; ++c)
+        CC_LOG_INFO("{} {}x{}: {} {} ms per frame", name, k_size[0], k_size[1], contenders[c].name,
                     1e3 * seconds_of(spans[c]) / f64(k_frames));
 
     co_await cc::async_settled(sv::background_work(ctx));
@@ -219,7 +234,8 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
 }
 } // namespace
 
-ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by occlusion")
+ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by occlusion, with and without a depth "
+                "prepass")
 {
     auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (created.has_error())
@@ -237,7 +253,8 @@ ASYNC_BENCHMARK("sv - raster on Sponza, culled by nothing, by the view and by oc
 }
 
 // Many small pieces in a street of buildings, which is where occlusion culling has the most to hide.
-ASYNC_BENCHMARK("sv - raster on Bistro, culled by nothing, by the view and by occlusion")
+ASYNC_BENCHMARK("sv - raster on Bistro, culled by nothing, by the view and by occlusion, with and without a depth "
+                "prepass")
 {
     auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (created.has_error())

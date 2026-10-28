@@ -9,9 +9,9 @@ This document is what a raster frame draws, how it shares its materials with the
 ## What a frame is
 
 ```
-one indexed draw per triangle item ─▶ environment where nothing was drawn
-   (vertex: pull the vertex, project)              (depth test against the far plane)
-   (pixel: @primitive_id, barycentrics, the material, then raster.shade)
+cull ─▶ depth of every opaque draw ─▶ one indexed draw per triangle item ─▶ environment where nothing was drawn
+        (vertex stage alone)           (vertex: pull the vertex, project)     (depth test against the far plane)
+                                       (pixel: @primitive_id, barycentrics, the material, then raster.shade)
 ```
 
 - **The GPU culls first**: `raster_cull.sgl` tests each item's box, placed by its instance, against the camera's view.
@@ -21,6 +21,12 @@ one indexed draw per triangle item ─▶ environment where nothing was drawn
   A pyramid of the farthest primary depth under each texel is built from what it left, and the second pass tests every item against it.
   That pass draws what is visible and was not drawn first, then the environment, and records what is visible for the next frame.
   A wrong record costs a draw and never a hole, since whatever the first pass misses the second catches; the record restarts when the count of draws changes.
+- **The opaque draws lay down their depth first**, through a depth-only pipeline over the same vertex stage, as one indirect draw.
+  The shading draws then test against it at `greater_equal` without writing it, so each pixel is shaded once, by the surface that is visible there.
+  The same vertex stage computes the same depth in both pipelines, which is what lets the equal test through.
+  A cutout's depth depends on its material, so its bins draw after the opaque ones, skip the prepass and write their depth as they shade.
+  With occlusion culling, both passes lay down depth, the pyramid is built from it, and the shading draws of both passes follow in one scope.
+  `raster_frame_desc::depth_prepass` turns it off, which is for measuring what it saves.
 - **One indexed draw per scene item**, through the mesh manager's central index pool, at the mesh's first index and base vertex; no vertex buffer is bound.
   The vertex stage, `surface_vs` of [raster_pass.sgl](../shaders/raster_pass.sgl), pulls its vertex out of the central vertex pool.
   So one vertex stage serves every mesh, whatever attributes it carries.
@@ -28,7 +34,7 @@ one indexed draw per triangle item ─▶ environment where nothing was drawn
 - **The pixel stage is generated per material permutation**, `raster_source` beside the hit group and the wavefront's shade kernel.
   It takes its triangle from `@primitive_id`, which requires the device's `primitive_index`, and finds its barycentrics from the object-space point.
   Then it builds the hit's `material.shading_context`, evaluates the material, and hands the surface to `raster.shade`.
-- **The depth test is reversed.** A surface tests at `near / depth`, cleared to 0 at infinity and passing `greater`.
+- **The depth test is reversed.** A surface tests at `near / depth`, cleared to 0 at infinity; the prepass passes `greater`, a shading draw `greater_equal`.
   A float's spacing shrinks toward 0 as fast as that does, so the step it resolves stays about 6e-8 · depth wherever the surface is.
   The standard `1 - near / depth` would step by about 6e-8 · depth² / near instead: 6 units at 1000 with the default near plane of 0.01.
   It would also round to exactly 1 past about 3e7 · near, 3e5 units at the default, where the environment would draw over geometry.
@@ -161,7 +167,6 @@ The pipelines list the tracer's groups in the tracer's order:
 - group 0 is `raster.drawn`: the frame block, the instance table, the lights, the environment and the decals;
 - group 1 is the manager's bindless tables and the sampler palette, `tracer.bindless`, bound as the very group a trace binds;
 - group 2 is `slug.tables`, the decal atlas;
-- the inline constants are `raster.draw`, the one row of the instance table a draw is.
 
 The records in `raster.drawn` are the tracer's own types, so a layer switching between the two uploads the same bytes.
 
@@ -174,22 +179,25 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
 - **Coverage-preserving mips.** A cutout reads level 0, so a minified one keeps its coverage but aliases.
   The quality fix is mips generated to keep the fraction above the cutoff, with the cutout then sampled through them.
 - **Lights seen by the camera**: a rect light marked visible to the camera is not drawn.
-- **Overdraw**: there is no depth prepass, so an occluded surface is shaded before the one in front of it lands.
 - **Upscaling**: a raster layer never draws at a scaled extent.
 - **Light linking** is reserved in the records and read by neither path.
 - **A vulkan rendering scope splits once per fresh upload**: a draw's bindings are barriered at the draw, inside the scope.
   sg has no way to record a draw's accesses before its scope opens, and that is the extension that removes the split; sg's TODO tracks it.
 
-## What culling measured
+## What culling and the prepass measured
 
-`raster-benchmark.cc` (`uv run dev.py benchmark "raster on Sponza"`) draws the same frames culled by nothing, by the view, and by occlusion too, interleaved frame by frame, in GPU time.
+`raster-benchmark.cc` (`uv run dev.py benchmark "raster on Sponza"`) draws the same frames culled by nothing, by the view, and by occlusion too, without and with the depth prepass.
+The contenders run interleaved frame by frame, timed on the GPU.
 On Intel's Sponza, 405 draws over 4 permutations, at 1920x1080 on a laptop RTX 5070 in October 2026:
 
-| culling | GPU time per raster frame |
-|---|---|
-| none | 1.77 ms |
-| view | 1.47 ms |
-| view and occlusion | 1.59 ms |
+| culling | no prepass | prepass |
+|---|---|---|
+| none | 1.73 ms | |
+| view | 1.48 ms | 1.02 ms |
+| view and occlusion | 1.55 ms | 1.14 ms |
+
+**The prepass pays even for raster's own cheap pixel stage**, a third of the frame on Sponza, so it is on by default.
+A pixel stage that traces, the hybrid's, only raises what it saves.
 
 **On Sponza occlusion culling costs more than it saves.**
 Its fixed cost — the pyramid's levels, a second cull and a second rendering scope — is larger than the draws it removes from a scene of few large pieces.
@@ -200,6 +208,7 @@ Whether it pays on a scene of many small ones is what the benchmark's next scene
 - `raster-test.cc`: the empty Cornell box against the megakernel's direct light, block by block, and its G-buffer at known points.
   Beside it: cutouts thresholded and as coverage, a capture of a raster layer finishing on its first drawn frame, and vulkan against dx12 to rounding.
   Two planes a unit apart at 2000, which a standard float depth cannot tell apart, hold the reversed depth test.
+  A frame drawn with and without the depth prepass is the same bit for bit, culled by the view and by occlusion.
   A textured cutout minified until its mips fall under the cutoff holds the cut to level 0.
   A baked occlusion of one half halves what the environment lights.
 - `material-shader-generator-test.cc`: the raster spelling of a cutout material, cut through `raster.is_cut`.

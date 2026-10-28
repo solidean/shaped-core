@@ -28,6 +28,9 @@ constexpr auto depth_format = sg::pixel_format::depth32_float;
 /// The seed of a surface pipeline's key, which hashes the permutation's key and the bindless layout it was built against.
 constexpr u64 surface_key_seed = 0x5a5f3c;
 
+/// The seed of the depth-only pipeline's key, which hashes the bindless layout it was built against.
+constexpr u64 depth_key_seed = 0x5a5f3d;
+
 /// A group binds only at a pipeline built against its very layout object, so the manager's layout is part of the key.
 [[nodiscard]] cc::hash128 surface_key_of(sv::material_permutation const& p, sv::bound_resources const& bindless)
 {
@@ -48,6 +51,17 @@ constexpr u64 surface_key_seed = 0x5a5f3c;
             .roughness = {.format = sg::pixel_format::r16_float},
             .motion = {.format = sg::pixel_format::rg32_float},
             .primary_depth = {.format = sg::pixel_format::r32_float}};
+}
+
+/// The layout every surface pipeline and the depth-only one share, so the groups a frame binds fit each of them.
+/// Group 1 is the manager's own layout, since a group fits only the very layout it was created against.
+[[nodiscard]] sg::pipeline_layout_handle surface_layout_of(sg::context& ctx, sv::bound_resources const& bindless)
+{
+    auto groups = cc::small_vector<sg::binding_group_layout_handle, sg::max_binding_groups>();
+    groups.push_back(ctx.cached.acquire_binding_group_layout<raster::drawn>());
+    groups.push_back(bindless.layout());
+    groups.push_back(ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>());
+    return ctx.cached.acquire_pipeline_layout({.groups = cc::move(groups)});
 }
 
 /// The context's first shader format the library builds SGL into, as a compile of a package's asset would pick.
@@ -114,6 +128,7 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
 
     // A reload re-generates every material's pixel stage against modules that may have moved.
     _surfaces.clear();
+    _depth_only.clear();
     _environment = nullptr;
 
     auto const surface_vs = shaders::raster_pass.surface_vs->acquire(ctx);
@@ -166,10 +181,12 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     { return entry.acquire_pipeline(ctx); };
     auto const first = kernel(shaders::raster_cull.cull_first);
     auto const seed = kernel(shaders::raster_cull.pyramid_seed);
+    auto const seed_depth = kernel(shaders::raster_cull.pyramid_seed_depth);
     auto const down = kernel(shaders::raster_cull.pyramid_down);
     auto const second = kernel(shaders::raster_cull.cull_second);
     co_await cc::async_settled(first);
     co_await cc::async_settled(seed);
+    co_await cc::async_settled(seed_depth);
     co_await cc::async_settled(down);
     co_await cc::async_settled(second);
     auto const built_of = [](auto const& pending) -> sg::compute_pipeline_handle
@@ -179,10 +196,11 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     };
     auto kernels = occlusion_kernels{.cull_first = built_of(first),
                                      .pyramid_seed = built_of(seed),
+                                     .pyramid_seed_depth = built_of(seed_depth),
                                      .pyramid_down = built_of(down),
                                      .cull_second = built_of(second)};
-    if (kernels.cull_first != nullptr && kernels.pyramid_seed != nullptr && kernels.pyramid_down != nullptr
-        && kernels.cull_second != nullptr)
+    if (kernels.cull_first != nullptr && kernels.pyramid_seed != nullptr && kernels.pyramid_seed_depth != nullptr
+        && kernels.pyramid_down != nullptr && kernels.cull_second != nullptr)
         _occlusion = cc::move(kernels);
     else
         CC_LOG_ERROR("the raster occlusion kernels did not build, so a raster frame culls by the view alone");
@@ -191,11 +209,13 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
 
 sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx,
                                                                 material_permutation const* p,
-                                                                bound_resources const& bindless)
+                                                                bound_resources const& bindless,
+                                                                bool writes_depth)
 {
     auto& s = _surfaces.entry(surface_key_of(*p, bindless)).get_or_emplace(surface_pipeline{});
-    if (s.pipeline != nullptr)
-        return s.pipeline;
+    auto const variant = writes_depth ? 1 : 0;
+    if (s.pipeline[variant] != nullptr)
+        return s.pipeline[variant];
     if (s.failed)
         return nullptr;
 
@@ -216,7 +236,7 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
         return nullptr;
     }
 
-    if (!s.pending.is_valid())
+    if (!s.pending[variant].is_valid())
     {
         if (!s.shader->is_ready())
             return nullptr;
@@ -229,39 +249,70 @@ sg::raster_pipeline_handle raster_routine::_surface_pipeline_of(sg::context& ctx
             return nullptr;
         }
 
-        // Group 1 is the manager's own layout, since a group fits only the very layout it was created against.
-        auto groups = cc::small_vector<sg::binding_group_layout_handle, sg::max_binding_groups>();
-        groups.push_back(ctx.cached.acquire_binding_group_layout<raster::drawn>());
-        groups.push_back(bindless.layout());
-        groups.push_back(ctx.cached.acquire_binding_group_layout<sgl_modules::slug::tables>());
-        auto const layout = ctx.cached.acquire_pipeline_layout({.groups = cc::move(groups)});
-
         // Two-sided like the tracer, which shades a triangle seen from behind through its turned normal.
-        s.pending = ctx.cached.acquire_raster_pipeline({
-            .layout = layout,
+        // Both variants pass an equal depth, which is what lets a prepass's own depth through.
+        s.pending[variant] = ctx.cached.acquire_raster_pipeline({
+            .layout = surface_layout_of(ctx, bindless),
             .vertex_shader = _surface_vs,
             .fragment_shader = *compiled,
             .topology = sg::primitive_topology::triangle_list,
             .rasterization = {.cull = sg::cull_mode::none},
-            .depth_stencil = {.depth_test = true, .depth_write = true, .depth_compare = sg::compare_op::greater},
+            .depth_stencil
+            = {.depth_test = true, .depth_write = writes_depth, .depth_compare = sg::compare_op::greater_equal},
             .color_targets = target_states(),
             .depth_stencil_format = depth_format,
         });
-        (void)ctx.backlog.start(s.pending);
+        (void)ctx.backlog.start(s.pending[variant]);
         return nullptr;
     }
 
-    if (!s.pending->is_ready())
+    if (!s.pending[variant]->is_ready())
         return nullptr;
-    auto const* const built = s.pending->try_value();
+    auto const* const built = s.pending[variant]->try_value();
     if (built == nullptr)
     {
         CC_LOG_ERROR("the raster stage of {} did not build into a pipeline", p->label);
         s.failed = true;
         return nullptr;
     }
+    s.pipeline[variant] = *built;
+    return s.pipeline[variant];
+}
+
+raster_routine::depth_pipeline const& raster_routine::_depth_pipeline_of(sg::context& ctx, bound_resources const& bindless)
+{
+    auto& b = cc::byte_stream_builder::thread_local_scratch();
+    b.add_pod(bindless.layout().get());
+    auto& s = _depth_only.entry(cc::hash128::create(b.written_bytes(), depth_key_seed)).get_or_emplace(depth_pipeline{});
+    if (s.pipeline != nullptr || s.failed)
+        return s;
+
+    if (!s.pending.is_valid())
+    {
+        // The vertex stage the surfaces draw with, so the depth it lays down is the very depth their test meets.
+        s.pending = ctx.cached.acquire_raster_pipeline({
+            .layout = surface_layout_of(ctx, bindless),
+            .vertex_shader = _surface_vs,
+            .topology = sg::primitive_topology::triangle_list,
+            .rasterization = {.cull = sg::cull_mode::none},
+            .depth_stencil = {.depth_test = true, .depth_write = true, .depth_compare = sg::compare_op::greater},
+            .depth_stencil_format = depth_format,
+        });
+        (void)ctx.backlog.start(s.pending);
+        return s;
+    }
+
+    if (!s.pending->is_ready())
+        return s;
+    auto const* const built = s.pending->try_value();
+    if (built == nullptr)
+    {
+        CC_LOG_ERROR("the raster depth prepass did not build into a pipeline, so a raster frame shades its overdraw");
+        s.failed = true;
+        return s;
+    }
     s.pipeline = *built;
-    return s.pipeline;
+    return s;
 }
 
 sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_desc const& d)
@@ -282,11 +333,34 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
 
     auto const extent = tg::vec2i(t.color.width(), t.color.height());
 
-    // Started whether or not a substitution ends up needing it.
-    auto const fallback = d.fallback != nullptr ? self->_surface_pipeline_of(ctx, d.fallback, *d.bindless) : nullptr;
+    // Declined while the prepass builds, so a frame that asks for one has it; one that failed shades its overdraw instead.
+    auto depth_only = sg::raster_pipeline_handle();
+    if (d.depth_prepass)
+    {
+        auto const& entry = self->_depth_pipeline_of(ctx, *d.bindless);
+        if (entry.pipeline == nullptr && !entry.failed)
+            return sg::routine_outcome::declined;
+        depth_only = entry.pipeline;
+    }
+    auto const prepass = depth_only != nullptr;
 
-    auto pipelines = cc::vector<sg::raster_pipeline_handle>();
-    pipelines.reserve(d.permutations.size());
+    // Started whether or not a substitution ends up needing them.
+    auto const fallback_of = [&](bool writes_depth) -> sg::raster_pipeline_handle
+    { return d.fallback != nullptr ? self->_surface_pipeline_of(ctx, d.fallback, *d.bindless, writes_depth) : nullptr; };
+    auto const fallback_writing = fallback_of(true);
+    auto const fallback_tested = prepass ? fallback_of(false) : nullptr;
+
+    // One bin per permutation, its draws contiguous in the argument buffers in the order the frame lists them.
+    // The opaque bins come first, so a prepass draws all of them as one run.
+    struct bin
+    {
+        sg::raster_pipeline_handle pipeline;
+        bool cutout = false;
+        isize first = 0;
+        isize count = 0;
+    };
+    auto bins = cc::vector<bin>();
+    bins.reserve(d.permutations.size());
     auto bound = cc::vector<material_permutation const*>();
     bound.reserve(d.permutations.size());
     auto substituted = false;
@@ -295,18 +369,22 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     {
         CC_ASSERT(p != nullptr, "a raster frame names a permutation the shader cache does not hold");
         CC_ASSERT(p->kind == geometry_kind::triangles, "a raster frame draws triangle permutations alone");
-        auto pipeline = self->_surface_pipeline_of(ctx, p, *d.bindless);
+        // A cutout's depth depends on its material, so it skips the prepass and writes its depth as it shades.
+        // The fallback standing in for one keeps that place.
+        auto const cutout = p->opacity.kind != material_value_kind::none;
+        auto const writes_depth = cutout || !prepass;
+        auto pipeline = self->_surface_pipeline_of(ctx, p, *d.bindless, writes_depth);
         if (pipeline == nullptr)
         {
             // _surface_pipeline_of made the entry, so it is there to ask whether the compile settled.
             pending = pending || !self->_surfaces.get_ptr(surface_key_of(*p, *d.bindless))->failed;
-            pipeline = fallback;
+            pipeline = writes_depth ? fallback_writing : fallback_tested;
             p = d.fallback;
             substituted = true;
         }
         if (pipeline == nullptr)
             return sg::routine_outcome::declined;
-        pipelines.push_back(cc::move(pipeline));
+        bins.push_back({.pipeline = cc::move(pipeline), .cutout = cutout});
         bound.push_back(p);
     }
 
@@ -332,24 +410,31 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             .curves = (has_atlas ? d.decal_atlas->curve_texture() : self->_stand_ins.decal_curves).as_texture_view(),
             .bands = (has_atlas ? d.decal_atlas->band_texture() : self->_stand_ins.decal_bands).as_texture_view()});
 
-    // One bin per permutation, its draws contiguous in the argument buffers, in the order the frame lists them.
     static_assert(sizeof(shaders::draw_args) == sizeof(sg::draw_indexed_args));
-    auto counts = cc::vector<isize>::create_defaulted(pipelines.size());
     for (auto const& draw : d.draws)
     {
-        CC_ASSERT(isize(draw.permutation) < pipelines.size(), "a raster draw names a permutation the frame holds");
+        CC_ASSERT(isize(draw.permutation) < bins.size(), "a raster draw names a permutation the frame holds");
         if (draw.triangle_count != 0)
-            ++counts[draw.permutation];
+            ++bins[draw.permutation].count;
     }
-    auto firsts = cc::vector<isize>::create_defaulted(pipelines.size());
-    auto next = cc::vector<isize>::create_defaulted(pipelines.size());
     auto total = isize(0);
-    for (auto p = isize(0); p < counts.size(); ++p)
-    {
-        firsts[p] = total;
-        next[p] = total;
-        total += counts[p];
-    }
+    for (auto& b : bins)
+        if (!b.cutout)
+        {
+            b.first = total;
+            total += b.count;
+        }
+    auto const opaque_total = total;
+    for (auto& b : bins)
+        if (b.cutout)
+        {
+            b.first = total;
+            total += b.count;
+        }
+    auto next = cc::vector<isize>();
+    next.reserve(bins.size());
+    for (auto const& b : bins)
+        next.push_back(b.first);
     auto templates = cc::vector<shaders::draw_args>::create_defaulted(total);
     auto items = cc::vector<shaders::cull_item>::create_defaulted(total);
     for (auto const& draw : d.draws)
@@ -370,7 +455,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     }
 
     // A layer with no drawings still has a primary depth written; this frame alone reads it, which is nobody.
-    // Sampled too, since the depth pyramid of an occlusion-culled frame is built from it.
+    // Sampled too, since without a prepass the depth pyramid of an occlusion-culled frame is built from it.
     auto const primary_depth
         = t.primary_depth.raw() != nullptr
             ? t.primary_depth
@@ -378,8 +463,12 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
                                                .width = extent[0],
                                                .height = extent[1],
                                                .usage = sg::texture_usage::render_target | sg::texture_usage::texture});
-    auto const depth = ctx.transient.create_texture_2d(
-        {.format = depth_format, .width = extent[0], .height = extent[1], .usage = sg::texture_usage::depth_stencil});
+    // Sampled where a prepass's depth seeds the pyramid.
+    auto const depth
+        = ctx.transient.create_texture_2d({.format = depth_format,
+                                           .width = extent[0],
+                                           .height = extent[1],
+                                           .usage = sg::texture_usage::depth_stencil | sg::texture_usage::texture});
 
     auto const item_buffer = total > 0
                                ? ctx.transient.create_buffer_from_data(cmd, items, sg::buffer_usage::readonly_buffer)
@@ -399,27 +488,69 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     };
     auto const shape = shaders::raster_cull_shape{.count = u32(total), .pad = {}}.to_block();
 
-    // Every draw of one bin set, from `args`, into the scope open on `pass`.
+    auto const bind_groups = [&](sg::rendering_scope& pass)
+    {
+        pass.bind_group(0, *drawn);
+        pass.bind_group(bindless_group, *d.bindless->group());
+        pass.bind_group(2, *tables);
+    };
+
+    // Every draw of every bin, from `args`, into the scope open on `pass`.
     auto const draw_bins = [&](sg::rendering_scope& pass, sg::buffer<sg::draw_indexed_args> const& args)
     {
         if (total == 0)
             return;
         CC_ASSERT(d.index_pool.raw() != nullptr, "raster_routine: a frame with draws binds the index pool");
         pass.bind_index_buffer(d.index_pool.as_index_buffer());
-        for (auto p = isize(0); p < counts.size(); ++p)
+        for (auto const& b : bins)
         {
-            if (counts[p] == 0)
+            if (b.count == 0)
                 continue;
-            pass.bind_pipeline(*pipelines[p]);
-            pass.bind_group(0, *drawn);
-            pass.bind_group(bindless_group, *d.bindless->group());
-            pass.bind_group(2, *tables);
+            pass.bind_pipeline(*b.pipeline);
+            bind_groups(pass);
             // The base vertex reaches the vertex stage in `@vertex_index`, so it reads the vertex pool at the index as it stands.
-            pass.draw_indexed_indirect(args, firsts[p], counts[p]);
+            pass.draw_indexed_indirect(args, b.first, b.count);
         }
     };
 
-    // Two passes where the caller keeps a visibility record and the kernels built; otherwise one, culled by the view alone.
+    // The depth of every opaque draw in `args`, into `depth` as `target` opens it.
+    auto const draw_depth = [&](sg::buffer<sg::draw_indexed_args> const& args, sg::depth_stencil_target target)
+    {
+        auto pass = cmd.raster.render_to({.depth_stencil_target = cc::move(target)});
+        if (opaque_total == 0)
+            return;
+        // The vertex stage reads the vertex pool through the bindless tables.
+        auto const declared = d.bindless->declare_raster_access(cmd);
+        pass.bind_index_buffer(d.index_pool.as_index_buffer());
+        pass.bind_pipeline(*depth_only);
+        bind_groups(pass);
+        pass.draw_indexed_indirect(args, 0, opaque_total);
+    };
+
+    // Every target, the depth as `depth_target` opens it; every pixel is a surface's or the environment's, so nothing is loaded.
+    auto const shading_targets = [&](sg::depth_stencil_target depth_target)
+    {
+        return raster::targets{
+            .color = t.color.as_render_target_view().discarded(),
+            .normal = t.normal.as_render_target_view().discarded(),
+            .depth = t.depth.as_render_target_view().discarded(),
+            .albedo = t.albedo.as_render_target_view().discarded(),
+            .specular_albedo = t.specular_albedo.as_render_target_view().discarded(),
+            .roughness = t.roughness.as_render_target_view().discarded(),
+            .motion = t.motion.as_render_target_view().discarded(),
+            .primary_depth = primary_depth.as_render_target_view().discarded(),
+            .depth_stencil = cc::move(depth_target),
+        };
+    };
+
+    auto const draw_environment = [&](sg::rendering_scope& pass)
+    {
+        pass.bind_pipeline(*self->_environment);
+        pass.bind_group(0, *drawn);
+        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+    };
+
+    // Two culling passes where the caller keeps a visibility record and the kernels built; otherwise one, culled by the view alone.
     auto const occlusion = d.culling == raster_culling::occlusion && d.visibility != nullptr && total > 0
                         && self->_cull != nullptr && self->_occlusion.has_value();
     auto drawn_args = sg::buffer<sg::draw_indexed_args>();
@@ -443,27 +574,18 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             drawn_args = args.reinterpret_as<sg::draw_indexed_args>();
         }
 
-        // Every pixel of every target is written, by a surface or by the environment behind them, so nothing is loaded.
-        // The depth alone is cleared, to the far plane the environment tests against.
-        auto pass = cmd.raster.render_to(raster::targets{
-            .color = t.color.as_render_target_view().discarded(),
-            .normal = t.normal.as_render_target_view().discarded(),
-            .depth = t.depth.as_render_target_view().discarded(),
-            .albedo = t.albedo.as_render_target_view().discarded(),
-            .specular_albedo = t.specular_albedo.as_render_target_view().discarded(),
-            .roughness = t.roughness.as_render_target_view().discarded(),
-            .motion = t.motion.as_render_target_view().discarded(),
-            .primary_depth = primary_depth.as_render_target_view().discarded(),
-            .depth_stencil = depth.as_depth_stencil_view().cleared(0.0f),
-        });
+        if (prepass)
+            draw_depth(drawn_args, depth.as_depth_stencil_view().cleared(0.0f));
+
+        // Without a prepass the depth is cleared here, to the far plane the environment tests against.
+        auto pass = cmd.raster.render_to(shading_targets(prepass ? depth.as_depth_stencil_view().preserved()
+                                                                 : depth.as_depth_stencil_view().cleared(0.0f)));
         // Every table is declared once for the pass, after `pass` so it dies first.
         // The first draw applies them, and a later one finds them current unless its pipeline touches them at new stages.
         // The environment draw binds no table, so it leaves them dormant, and a pass with nothing else to draw ends them silently.
         auto const declared = d.bindless->declare_raster_access(cmd);
         draw_bins(pass, drawn_args);
-        pass.bind_pipeline(*self->_environment);
-        pass.bind_group(0, *drawn);
-        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+        draw_environment(pass);
     }
     else
     {
@@ -495,21 +617,17 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             cmd.compute.set_inline_constants(shape);
             cmd.compute.dispatch_threads(int(total));
         }
+        auto const first_drawn = first_args.reinterpret_as<sg::draw_indexed_args>();
+        if (prepass)
+            draw_depth(first_drawn, depth.as_depth_stencil_view().cleared(0.0f));
+        else
         {
             // The primary depth is cleared to far, 1, since the pyramid reads it before the environment fills what nothing covered.
-            auto pass = cmd.raster.render_to(raster::targets{
-                .color = t.color.as_render_target_view().discarded(),
-                .normal = t.normal.as_render_target_view().discarded(),
-                .depth = t.depth.as_render_target_view().discarded(),
-                .albedo = t.albedo.as_render_target_view().discarded(),
-                .specular_albedo = t.specular_albedo.as_render_target_view().discarded(),
-                .roughness = t.roughness.as_render_target_view().discarded(),
-                .motion = t.motion.as_render_target_view().discarded(),
-                .primary_depth = primary_depth.as_render_target_view().cleared(tg::vec4f(1, 1, 1, 1)),
-                .depth_stencil = depth.as_depth_stencil_view().cleared(0.0f),
-            });
+            auto targets = shading_targets(depth.as_depth_stencil_view().cleared(0.0f));
+            targets.primary_depth = primary_depth.as_render_target_view().cleared(tg::vec4f(1, 1, 1, 1));
+            auto pass = cmd.raster.render_to(targets);
             auto const declared = d.bindless->declare_raster_access(cmd);
-            draw_bins(pass, first_args.reinterpret_as<sg::draw_indexed_args>());
+            draw_bins(pass, first_drawn);
         }
 
         // The pyramid: the farthest primary depth under each texel, level by level.
@@ -530,8 +648,20 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
                 shaders::pyramid_io{.source = sg::as_texture_view(source).as_texture<sg::tv_2d>(),
                                     .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = level})});
         };
-        cmd.compute.bind_pipeline(*k.pyramid_seed);
-        cmd.compute.bind_group(0, *level_group(primary_depth.as_texture_view(), 0));
+        if (prepass)
+        {
+            auto const group = ctx.transient.create_binding_group(
+                cmd, ctx.cached.acquire_binding_group_layout<shaders::pyramid_depth_io>(),
+                shaders::pyramid_depth_io{.source = depth.as_texture_view(),
+                                          .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = 0})});
+            cmd.compute.bind_pipeline(*k.pyramid_seed_depth);
+            cmd.compute.bind_group(0, *group);
+        }
+        else
+        {
+            cmd.compute.bind_pipeline(*k.pyramid_seed);
+            cmd.compute.bind_group(0, *level_group(primary_depth.as_texture_view(), 0));
+        }
         cmd.compute.dispatch_threads(extent[0], extent[1]);
         for (auto level = 1; level < levels; ++level)
         {
@@ -564,23 +694,34 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         }
         drawn_args = second_args.reinterpret_as<sg::draw_indexed_args>();
 
-        // The first pass's surfaces stay, and the environment fills what neither pass covered.
-        auto pass = cmd.raster.render_to(raster::targets{
-            .color = t.color.as_render_target_view().preserved(),
-            .normal = t.normal.as_render_target_view().preserved(),
-            .depth = t.depth.as_render_target_view().preserved(),
-            .albedo = t.albedo.as_render_target_view().preserved(),
-            .specular_albedo = t.specular_albedo.as_render_target_view().preserved(),
-            .roughness = t.roughness.as_render_target_view().preserved(),
-            .motion = t.motion.as_render_target_view().preserved(),
-            .primary_depth = primary_depth.as_render_target_view().preserved(),
-            .depth_stencil = depth.as_depth_stencil_view().preserved(),
-        });
-        auto const declared = d.bindless->declare_raster_access(cmd);
-        draw_bins(pass, drawn_args);
-        pass.bind_pipeline(*self->_environment);
-        pass.bind_group(0, *drawn);
-        pass.draw({.vertex_range = {.offset = 0, .size = 3}});
+        if (prepass)
+        {
+            // Every surface is shaded once, both passes' draws against the depth they laid down together.
+            draw_depth(drawn_args, depth.as_depth_stencil_view().preserved());
+            auto pass = cmd.raster.render_to(shading_targets(depth.as_depth_stencil_view().preserved()));
+            auto const declared = d.bindless->declare_raster_access(cmd);
+            draw_bins(pass, first_drawn);
+            draw_bins(pass, drawn_args);
+            draw_environment(pass);
+        }
+        else
+        {
+            // The first pass's surfaces stay, and the environment fills what neither pass covered.
+            auto pass = cmd.raster.render_to(raster::targets{
+                .color = t.color.as_render_target_view().preserved(),
+                .normal = t.normal.as_render_target_view().preserved(),
+                .depth = t.depth.as_render_target_view().preserved(),
+                .albedo = t.albedo.as_render_target_view().preserved(),
+                .specular_albedo = t.specular_albedo.as_render_target_view().preserved(),
+                .roughness = t.roughness.as_render_target_view().preserved(),
+                .motion = t.motion.as_render_target_view().preserved(),
+                .primary_depth = primary_depth.as_render_target_view().preserved(),
+                .depth_stencil = depth.as_depth_stencil_view().preserved(),
+            });
+            auto const declared = d.bindless->declare_raster_access(cmd);
+            draw_bins(pass, drawn_args);
+            draw_environment(pass);
+        }
     }
     if (d.drawn_args != nullptr)
         *d.drawn_args = drawn_args;

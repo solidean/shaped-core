@@ -133,12 +133,21 @@ struct sv::raster_frame_desc
 
     /// At most how far the frame culls; occlusion also needs `visibility`.
     raster_culling culling = raster_culling::occlusion;
+
+    /// Whether the opaque draws lay down their depth first, so each pixel is shaded once, by the surface that is visible there.
+    /// Without it, an occluded surface drawn first is shaded and then overwritten; off is for measuring what the prepass saves.
+    bool depth_prepass = true;
 };
 
 /// The raster path: one indexed draw per scene item, through each material permutation's generated pixel stage, into a G-buffer.
 ///
 /// **The GPU decides what draws.** A cull dispatch tests each item's box against the camera's view and writes its draw's arguments, an instance count of 0 for one out of view.
 /// The CPU then records one indirect draw per permutation, whatever was culled.
+///
+/// **Depth comes first.** A depth-only pipeline draws every opaque draw before anything is shaded, and the shading draws then test against that depth without writing it.
+/// So a pixel stage runs once per visible pixel, which is what makes an expensive one, such as the hybrid's traced lighting, affordable.
+/// A cutout draw's depth depends on its material, so it skips the prepass and writes its depth as it shades, after the opaque ones.
+///
 /// A draw's first instance is its row of the instance table, which the vertex stage takes as `@first_instance`.
 /// Its pixel stage is the permutation's `raster_source`: the material body the tracer's hit group evaluates, then `raster.shade`.
 /// That lights the surface directly from every light, unshadowed, and from the environment's SH, and writes the G-buffer.
@@ -149,7 +158,7 @@ struct sv::raster_frame_desc
 class sv::raster_routine : public sg::render_routine<raster_routine>
 {
 public:
-    /// Records one frame into `cmd`, or declines while the vertex stage, the environment or every stand-in is still building.
+    /// Records one frame into `cmd`, or declines while the vertex stage, the environment, the prepass or every stand-in is still building.
     ///
     /// Must be called with no rendering scope open: it opens its own over `d.targets`.
     [[nodiscard]] static sg::routine_outcome execute(sg::command_list& cmd, raster_frame_desc const& d);
@@ -187,25 +196,42 @@ private:
     {
         sg::compute_pipeline_handle cull_first;
         sg::compute_pipeline_handle pyramid_seed;
+        sg::compute_pipeline_handle pyramid_seed_depth;
         sg::compute_pipeline_handle pyramid_down;
         sg::compute_pipeline_handle cull_second;
     };
     cc::optional<occlusion_kernels> _occlusion;
 
-    /// One permutation's pixel stage and the pipeline over it, compiled and built on first use, polled rather than waited on.
+    /// One permutation's pixel stage and the pipelines over it, compiled and built on first use, polled rather than waited on.
+    /// Two pipelines share the stage: index 0 tests against a prepass's depth without writing it, and 1 writes its own.
     struct surface_pipeline
     {
         cc::shared_async<sg::compiled_shader> shader;
+        sg::async_raster_pipeline pending[2];
+        sg::raster_pipeline_handle pipeline[2];
+        bool failed = false;
+    };
+
+    /// The pipeline of `p` that writes depth or only tests it, or null while it builds and after it failed; never waits.
+    [[nodiscard]] sg::raster_pipeline_handle _surface_pipeline_of(sg::context& ctx,
+                                                                  material_permutation const* p,
+                                                                  bound_resources const& bindless,
+                                                                  bool writes_depth);
+
+    /// Keyed on the permutation's key and the bindless layout the pipeline was built against; dropped by every reload.
+    cc::map<cc::hash128, surface_pipeline> _surfaces;
+
+    /// The depth-only pipeline, built on first use like a surface's.
+    struct depth_pipeline
+    {
         sg::async_raster_pipeline pending;
         sg::raster_pipeline_handle pipeline;
         bool failed = false;
     };
 
-    /// The pipeline of `p`, or null while it builds and after it failed; never waits.
-    [[nodiscard]] sg::raster_pipeline_handle _surface_pipeline_of(sg::context& ctx,
-                                                                  material_permutation const* p,
-                                                                  bound_resources const& bindless);
+    /// Keyed on the bindless layout the pipeline was built against; dropped by every reload.
+    cc::map<cc::hash128, depth_pipeline> _depth_only;
 
-    /// Keyed on the permutation's key and the bindless layout the pipeline was built against; dropped by every reload.
-    cc::map<cc::hash128, surface_pipeline> _surfaces;
+    /// The depth-only pipeline over the shared vertex stage, its build started on first use; never waits.
+    [[nodiscard]] depth_pipeline const& _depth_pipeline_of(sg::context& ctx, bound_resources const& bindless);
 };
