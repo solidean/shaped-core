@@ -36,5 +36,6 @@ Isolating it into a standalone `repro.cc` is what would let it be filed with Mic
 
 ## Closing it
 
-When the skip can go: either the system WARP on CI's image is fixed, or CI runs a fixed WARP ([feat-ci-nuget-warp](../../../../../docs/issues/feat-ci-nuget-warp.md)).
+CI runs on the pinned NuGet WARP now, and the skip applies only without it (`SG_HAS_PINNED_WARP`).
+It can go once the system WARP is fixed, which is what a developer who never fetched the pinned one runs.
 [bug-sv-warp-megakernel-quadric-flake](bug-sv-warp-megakernel-quadric-flake.md) is very likely the same fault and should be re-checked at the same time.

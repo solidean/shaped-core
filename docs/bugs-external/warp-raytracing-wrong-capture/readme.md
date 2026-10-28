@@ -60,11 +60,25 @@ With `d3d10warp.dll` from `Microsoft.Direct3D.WARP` 1.0.21 (`build/native/bin/x6
 
 ## What shaped-core does about it
 
-The test skips on any software adapter, `TEMPORARY(bug-sv-megakernel-emitter-capture-dark)` in `libs/graphics/shaped-viewer/tests/denoise-view-test.cc`.
-`sg::adapter_info::driver_version` is opaque by contract and reports the D3D runtime rather than the WARP DLL anyway, so the skip cannot be narrowed to the broken versions.
+CI's Windows Clang job runs every dx12 WARP test on WARP 1.0.21 from NuGet, the version that passes.
+`uv run extern/warp/fetch-warp.py` fetches it, on request because its terms are testing-only ([extern/warp/dependency.yml](../../../extern/warp/dependency.yml)).
+`sg_warp_test_binary` stages its `d3d10warp.dll` beside each WARP test binary.
+The same command gives a developer that WARP locally.
+
+Without it, the test skips on any software adapter, `TEMPORARY(bug-sv-megakernel-emitter-capture-dark)` in `libs/graphics/shaped-viewer/tests/denoise-view-test.cc`.
+`SG_HAS_PINNED_WARP` is what narrows the skip, since a test cannot tell the two WARPs apart from the adapter alone.
 [bug-sv-warp-megakernel-quadric-flake](../../../libs/graphics/shaped-viewer/docs/issues/bug-sv-warp-megakernel-quadric-flake.md) is very likely the same fault.
 It is two quadric tests whose images come out wrong on CI's WARP and never alone, skipped the same way.
-Running CI's WARP legs on the NuGet WARP instead is [feat-ci-nuget-warp](../../issues/feat-ci-nuget-warp.md).
+
+## The pinned WARP has a quirk of its own
+
+WARP 1.0.21 rejects a pipeline blob written through a copy of its DLL with another last-write time, even a byte-identical copy.
+The debug layer then reports "a cached PSO intended for a different driver version" on every such pipeline, and a test fails on that warning.
+Measured with the copies staged beside shaped-viewer-test and shaped-rendering-test: rejections with their write times apart, none with them equal, none with only the creation times apart.
+The system WARP never showed it.
+
+So sg's dx12 backend reports the loaded WARP's file version and write time as `driver_version`, which pipeline blobs are keyed on.
+The staging in `tools/cmake/RuntimeDlls.cmake` keeps a DLL's write time, so that every copy still shares one cache.
 
 ## Re-checking after an update
 

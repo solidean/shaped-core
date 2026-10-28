@@ -263,9 +263,9 @@ if(SC_BUILD_TESTS)
     # the SGL compiler, unoptimized, compiling each test's material permutations afresh.
     # TEMPORARY: a process-wide compile cache is what would bring it back; see libs/graphics/shaped-viewer/docs/plans/rendering-roadmap.md.
     if(WIN32)
-        sc_nexus_binary(shaped-viewer-test KINDS tests TIMEOUT 600)
+        sg_warp_test_binary(shaped-viewer-test TIMEOUT 600)
     else()
-        sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+        sg_warp_test_binary(shaped-viewer-test)
     endif()
 
     target_link_libraries(shaped-viewer-test

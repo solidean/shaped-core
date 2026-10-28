@@ -23,3 +23,8 @@ Decided already, and why this is CI-only:
 Open:
 - Whether the step belongs in the workflows, or in a `dev.py install warp` that CI calls; the latter keeps the pin in a `dependency.yml` with its hash.
 - Whether to keep one leg on the system WARP, since that is what users without the package run.
+
+Resolved:
+- The step runs `extern/warp/fetch-warp.py`, the way DLSS and OIDN are fetched, with the pin and its hash in `extern/warp/dependency.yml`.
+- No CI leg stays on the system WARP; a developer who never fetched the pinned one runs it, and the skip covers that case.
+- The pinned WARP rejects pipeline blobs written through a copy of itself with another write time, so sg keys WARP blobs on that time and the DLL staging keeps it.
