@@ -16,6 +16,7 @@
 #include <shaped-viewer/impl/gpu_marks.hh>
 #include <shaped-viewer/rendering/hybrid_routine.hh>
 #include <shaped-viewer/rendering/impl/emitters.hh>
+#include <shaped-viewer/rendering/impl/resolved_view.hh>
 #include <shaped-viewer/rendering/pathtrace_routine.hh>
 #include <shaped-viewer/rendering/raster_routine.hh>
 #include <shaped-viewer/rendering/view_renderer.hh>
@@ -61,60 +62,7 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
 }
 
 
-/// One view resolved to what the path tracer binds: a TLAS instance and an `shaders::tracer::instance_record` per item, over the set of
-/// permutations those items shade with.
-///
-/// Two index relations, which together are the shape of the trace:
-/// `instances[i]` and `records[i]` describe the same item, and `instances[i].hit_group_offset` indexes `hit_groups`.
-/// A view resolved for a raster frame names no BLAS: its instances carry the placement and the permutation alone.
-struct resolved_view
-{
-    cc::vector<sg::tlas_instance> instances;
-    cc::vector<shaders::tracer::instance_record> records;
-
-    /// the parameter block each item shades with, parallel to `records` — its CONTENT identity, for the trace hash
-    cc::vector<instance_id> parameter_blocks;
-    cc::vector<material_permutation const*> hit_groups;
-
-    /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
-    cc::vector<cc::hash128> permutations;
-
-    /// How many triangles `instances[i]`'s geometry holds — a placeholder's cube included — and 0 for a landed quadric batch.
-    /// What a raster frame draws per row; no trace reads it.
-    cc::vector<u32> triangle_counts;
-
-    /// The box of `instances[i]`'s geometry in its own space, which a raster frame culls the row by; none where nothing declared one.
-    cc::vector<cc::optional<tg::aabb3f>> bounds;
-
-    /// One per instance that lights the scene this frame, in item order: its light record, and what the sampler reads beyond it.
-    /// `emitters[k].instance` is the row of `records` it describes; `link_emitters` writes that row's light index once the table is grouped.
-    cc::vector<shaders::tracer::light_record> emitter_lights;
-    cc::vector<shaders::tracer::emitter_record> emitters;
-
-    /// How many traced instances are emitters shown to emit, whether or not their area CDF is built yet.
-    /// What turns the fallback light off: a layer lit by its emitters is lit, even on the frames before they can be sampled.
-    /// Shown means an estimate that is neither `unseen` nor resting on a factor not summarized yet, and a permutation that has not failed.
-    /// One still compiling counts, so the fallback does not switch on for every cold compile.
-    /// A raster frame counts none, as it draws no emitter's light, and neither does a manager whose CDF kernels failed.
-    isize emissive_items = 0;
-
-    /// Whether some emissive instance lit nothing this frame because its area CDF is not built yet, or its permutation is still compiling.
-    /// Such a frame is an image of a darker scene, so it restarts as a frame drawn through a stand-in does.
-    bool emitters_pending = false;
-
-    /// Whether any item here is a quadric batch at all.
-    ///
-    /// It decides whether the trace is handed the PROCEDURAL stand-in, and it has to be this broad.
-    /// Acquiring the stand-in starts its compile, and `pathtrace_routine::_variant_for` declines the WHOLE trace —
-    /// meshes included — while a quadric permutation is unready and no procedural stand-in is ready to take its place.
-    /// So deferring the acquire until some batch is actually caught uncompiled means the view blanks for exactly as
-    /// long as the stand-in then takes to build, which is the outage the stand-in exists to prevent.
-    /// Acquiring it as soon as a batch is placed gives it the whole life of the view to get ready in.
-    ///
-    /// What still holds, and is the reason this is not simply unconditional, is that a triangle-only scene never
-    /// acquires it and never compiles a hit group it could not select.
-    bool has_quadrics = false;
-};
+using impl::resolved_view;
 
 /// The hit-group index for `key` — a `scene_item::shader_key` — in `out`, appending it on first use, so the order is the
 /// scene's own.
@@ -1207,6 +1155,7 @@ plan_resources view_renderer::resolve(sg::command_list& cmd, render_plan const& 
     auto out = plan_resources{};
     out.targets.resize_to_defaulted(plan.targets.size());
     out.traces.resize_to_defaulted(plan.traces.size());
+    out.scenes.resize_to_defaulted(plan.traces.size());
 
     // Touch first, and touch everything: a view that is throttled this frame is still sampled by its parent, so
     // letting the idle reclaim pass over it would release a texture that is about to be read.
@@ -1304,7 +1253,7 @@ void view_renderer::acquire_trace(sg::command_list& cmd,
                                   viewer_definition const& def,
                                   render_plan const& plan,
                                   u32 trace_index,
-                                  plan_resources const& res,
+                                  plan_resources& res,
                                   gpu_resource_manager& resources)
 {
     auto const& tr = plan.traces[trace_index];
@@ -1313,15 +1262,15 @@ void view_renderer::acquire_trace(sg::command_list& cmd,
     CC_ASSERT(isize(tr.layer) < v.layers.size(), "a plan trace names a layer the view does not hold");
     if (res.traces[trace_index].raw() == nullptr)
         return; // trace() will not run it either
-    // The same walk trace() takes, for its acquires alone: residency only moves at the frame's settle pass, so both
-    // resolve the same items to the same indices — under the same mode, which decides what a walk acquires.
+    // The walk trace() takes, kept for it: residency only moves at the frame's settle pass, so it still holds when the
+    // trace records — under the same mode, which decides what a walk acquires.
     auto const& l = v.layers[tr.layer];
     auto const mode = planned_mode(l.settings.mode);
     auto const is_traced = mode != render_mode::raster;
     // trace() declines a layer this device cannot trace, and says so; a walk for it would build BLASes nothing can.
     if (is_traced && missing_trace_feature(cmd.context(), mode).has_value())
         return;
-    (void)resolve_scene(cmd, l, resources, mode);
+    res.scenes[trace_index] = resolve_scene(cmd, l, resources, mode);
 }
 
 sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
@@ -1358,7 +1307,9 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     if (is_traced && !can_trace(ctx, mode, rec, *slot))
         return sg::routine_outcome::declined;
 
-    auto resolved = resolve_scene(cmd, l, resources, mode);
+    auto resolved = res.scenes[trace_index].has_value() ? cc::move(res.scenes[trace_index].value())
+                                                        : resolve_scene(cmd, l, resources, mode);
+    res.scenes[trace_index] = cc::nullopt;
 
     // The aspect comes from the resolution the plan settled on, not the definition's own field: a layout-following
     // view's resolution is decided by the rect it landed in.

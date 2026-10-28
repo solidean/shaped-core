@@ -1,10 +1,12 @@
 #pragma once
 
+#include <clean-core/error/optional.hh>
 #include <shaped-graphics/fwd.hh>
 #include <shaped-graphics/resource/texture.hh>
 #include <shaped-graphics/routine/render_routine.hh>
 #include <shaped-rendering/fwd.hh> // sr::reconstruct_status
 #include <shaped-viewer/fwd.hh>
+#include <shaped-viewer/rendering/impl/resolved_view.hh>
 #include <shaped-viewer/rendering/layout_routine.hh> // plan_textures
 #include <shaped-viewer/stable_id.hh>
 #include <shaped-viewer/view/camera.hh>
@@ -17,6 +19,9 @@ struct sv::plan_resources
 {
     cc::vector<sg::texture_2d> targets;
     cc::vector<sg::texture_2d> traces;
+
+    /// Each trace's layer as `view_renderer::acquire_trace` resolved it, which `trace` takes rather than walking it again.
+    cc::vector<cc::optional<impl::resolved_view>> scenes;
 
     [[nodiscard]] plan_textures textures() const { return {.targets = targets, .traces = traces}; }
 };
@@ -70,7 +75,8 @@ public:
     /// Takes no guard: it reads nothing this routine initializes, only the store and the context's persistent allocator.
     [[nodiscard]] static plan_resources resolve(sg::command_list& cmd, render_plan const& plan, view_store& store);
 
-    /// Acquires every bindless index the trace at `trace_index` will read, without recording the trace.
+    /// Acquires every bindless index the trace at `trace_index` will read, without recording the trace, and keeps the
+    /// resolved layer in `res` for it.
     ///
     /// A frame runs it for each of its traces before the first one, so their resources all land in the tables before the
     /// first `freeze`, and the frame mints one snapshot rather than one per view that brought something new.
@@ -81,7 +87,7 @@ public:
                               viewer_definition const& def,
                               render_plan const& plan,
                               u32 trace_index,
-                              plan_resources const& res,
+                              plan_resources& res,
                               gpu_resource_manager& resources);
 
     /// Records the trace at `trace_index` into its own accumulation texture.

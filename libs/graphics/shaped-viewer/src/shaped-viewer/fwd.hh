@@ -256,6 +256,7 @@ struct plan_resources;
 namespace impl
 {
 struct layout_pipeline_key;
+struct resolved_view; // a layer resolved to what a trace binds (rendering/impl/resolved_view.hh)
 } // namespace impl
 
 // rendering
