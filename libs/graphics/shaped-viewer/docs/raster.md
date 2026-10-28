@@ -180,6 +180,21 @@ The records in `raster.drawn` are the tracer's own types, so a layer switching b
 - **A vulkan rendering scope splits once per fresh upload**: a draw's bindings are barriered at the draw, inside the scope.
   sg has no way to record a draw's accesses before its scope opens, and that is the extension that removes the split; sg's TODO tracks it.
 
+## What culling measured
+
+`raster-benchmark.cc` (`uv run dev.py benchmark "raster on Sponza"`) draws the same frames culled by nothing, by the view, and by occlusion too, interleaved frame by frame, in GPU time.
+On Intel's Sponza, 405 draws over 4 permutations, at 1920x1080 on a laptop RTX 5070 in October 2026:
+
+| culling | GPU time per raster frame |
+|---|---|
+| none | 1.77 ms |
+| view | 1.47 ms |
+| view and occlusion | 1.59 ms |
+
+**On Sponza occlusion culling costs more than it saves.**
+Its fixed cost — the pyramid's levels, a second cull and a second rendering scope — is larger than the draws it removes from a scene of few large pieces.
+Whether it pays on a scene of many small ones is what the benchmark's next scene decides.
+
 ## Tests
 
 - `raster-test.cc`: the empty Cornell box against the megakernel's direct light, block by block, and its G-buffer at known points.

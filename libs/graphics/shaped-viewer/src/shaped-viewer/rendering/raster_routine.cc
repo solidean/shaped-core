@@ -420,12 +420,13 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     };
 
     // Two passes where the caller keeps a visibility record and the kernels built; otherwise one, culled by the view alone.
-    auto const occlusion = d.visibility != nullptr && total > 0 && self->_cull != nullptr && self->_occlusion.has_value();
+    auto const occlusion = d.culling == raster_culling::occlusion && d.visibility != nullptr && total > 0
+                        && self->_cull != nullptr && self->_occlusion.has_value();
     auto drawn_args = sg::buffer<sg::draw_indexed_args>();
     if (!occlusion)
     {
         drawn_args = template_buffer.reinterpret_as<sg::draw_indexed_args>();
-        if (total > 0 && self->_cull != nullptr)
+        if (total > 0 && self->_cull != nullptr && d.culling != raster_culling::none)
         {
             auto const args = args_buffer();
             auto const group = ctx.transient.create_binding_group(

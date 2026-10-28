@@ -271,8 +271,9 @@ enum class wavefront_stage : u8; // what a wavefront frame's timestamps divide i
 struct wavefront_timing;         // one wavefront frame's stage timestamps (rendering/wavefront_routine.hh)
 class wavefront_routine;
 struct raster_gbuffer; // what a raster frame writes: the image and the primary hit's G-buffer (rendering/raster_routine.hh)
-struct raster_draw;       // one draw of a raster frame (rendering/raster_routine.hh)
-struct raster_frame_desc; // one raster frame (rendering/raster_routine.hh)
+struct raster_draw;             // one draw of a raster frame (rendering/raster_routine.hh)
+struct raster_frame_desc;       // one raster frame (rendering/raster_routine.hh)
+enum class raster_culling : u8; // how far a raster frame culls (rendering/raster_routine.hh)
 class raster_routine;
 class view_renderer;
 class viewer_renderer;

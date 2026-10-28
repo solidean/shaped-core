@@ -71,6 +71,15 @@ struct sv::raster_draw
     cc::optional<tg::aabb3f> bounds;
 };
 
+/// How far a raster frame culls: `occlusion` where it has a visibility record, else `view`; `none` draws every item.
+/// Fewer than `occlusion` is for measuring what culling saves.
+enum class sv::raster_culling : sv::u8
+{
+    none,
+    view,
+    occlusion,
+};
+
 /// Everything one raster frame binds and draws.
 struct sv::raster_frame_desc
 {
@@ -121,6 +130,9 @@ struct sv::raster_frame_desc
     /// The caller keeps it from frame to frame, one per layer, and the routine rewrites it each frame.
     /// It is recreated, everything not visible, whenever the frame holds another count of draws; a stale one costs draws and never hides one.
     sg::buffer<u32>* visibility = nullptr;
+
+    /// At most how far the frame culls; occlusion also needs `visibility`.
+    raster_culling culling = raster_culling::occlusion;
 };
 
 /// The raster path: one indexed draw per scene item, through each material permutation's generated pixel stage, into a G-buffer.
