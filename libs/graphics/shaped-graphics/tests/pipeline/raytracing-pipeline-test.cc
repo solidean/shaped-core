@@ -370,6 +370,100 @@ ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline's procedural group report
         }
 }
 
+// Both groups in one scene: the first test's non-opaque triangles below y = 4, and the boxes moved up by 4 above it.
+// A traversal then meets an any hit and an intersection in one dispatch, which neither test above asks of a backend.
+
+ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces non-opaque triangles and procedural boxes in one scene",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    auto const desc = co_await shaders::raytracing_pipeline::path.description(*ctx);
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
+    REQUIRE(pipeline != nullptr);
+
+    auto table_desc = path_t::table_description(pipeline);
+    auto const textured = path_t::add_row(table_desc, path_t::hit_groups_t::textured);
+    auto const spheres = path_t::add_row(table_desc, path_t::hit_groups_t::spheres);
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    float const boxes[] = {0, 0, 0, 2, 2, 2, 2, 0, 0, 4, 2, 2};
+    auto const triangle_input
+        = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const box_input = ctx->persistent.create_buffer_from_data(boxes, sg::buffer_usage::accel_structure_build_input);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = triangle_input.raw(), .vertex_count = 6, .is_opaque = false};
+    auto const triangle_blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                          sg::accel_build_flag::fast_trace, path_t::ray_count);
+    auto const aabbs = sg::blas_aabbs{.aabbs = box_input.raw(), .aabb_count = 2};
+    auto const box_blas = cmd->raytracing.build_blas(cc::span<sg::blas_aabbs const>(&aabbs, 1),
+                                                     sg::accel_build_flag::fast_trace, path_t::ray_count);
+    sg::tlas_instance const instances[] = {
+        {.blas = triangle_blas, .instance_id = 10, .hit_group_offset = table->offset_of(textured)},
+        {.blas = triangle_blas,
+         .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2},
+         .instance_id = 20,
+         .hit_group_offset = table->offset_of(textured)},
+        {.blas = box_blas,
+         .transform = {1, 0, 0, 0, 0, 1, 0, 4, 0, 0, 1, 0},
+         .instance_id = 30,
+         .hit_group_offset = table->offset_of(spheres)},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing_pipeline::traced>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::raytracing_pipeline::traced{.world = tlas->as_view(),
+                                                                                   .hits = hits.as_readwrite_buffer(),
+                                                                                   .ids = ids.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+    auto const hits_back = cmd->download.data_from_buffer(hits);
+    auto const ids_back = cmd->download.data_from_buffer(ids);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_hits = co_await hits_back.data();
+    auto const got_ids = co_await ids_back.data();
+    REQUIRE(got_hits.size() == grid * grid);
+    REQUIRE(got_ids.size() == grid * grid);
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+        {
+            auto const at = y * grid + x;
+            auto const where = cc::format("cell ({}, {})", x, y);
+            auto const px = float(x) + 0.25f;
+            auto const py = float(y) + 0.5f;
+            if (py < 4)
+            {
+                auto const want = expected_at(x, y);
+                CHECK(got_ids[at][0] == (want.is_hit ? 1 : 0)).context(where);
+                if (want.is_hit)
+                    CHECK(got_ids[at][1] == want.instance_id).context(where);
+                continue;
+            }
+            auto const primitive = px < 2 ? 0 : 1;
+            auto const dx = px - float(2 * primitive + 1);
+            auto const dy = py - 5;
+            auto const is_hit = px < 4 && dx * dx + dy * dy < 1;
+            CHECK(got_ids[at][0] == (is_hit ? 1 : 0)).context(where);
+            if (is_hit)
+                CHECK(got_ids[at][1] == 30).context(where);
+        }
+}
+
 // `open_path` leaves every hit group to the host, which compiles one at run time from SGL it wrote: `textured`, again.
 // It traces the triangle grid of the first test, so a cell sees what that test's cells see.
 
