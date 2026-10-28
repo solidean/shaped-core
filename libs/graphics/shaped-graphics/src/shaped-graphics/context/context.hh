@@ -696,8 +696,10 @@ protected:
 
     /// Allocates a GPU memory heap of `size_in_bytes` that placed resources sub-allocate into; size must be >= 0, and 0 is a valid empty heap.
     /// A heap is persistent — it outlives the resources placed in it — so it is reached through ctx.persistent.create_memory_heap.
-    /// ctx.transient builds on it too: a transient buffer is create_raw_buffer with a heap-placed allocation_info picked by its per-epoch bump allocator.
-    [[nodiscard]] virtual cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes) = 0;
+    /// ctx.transient builds on it too: a transient buffer or texture is created with a heap-placed allocation_info picked by its per-epoch bump allocator.
+    /// A backend that cannot place textures returns an error for a `textures` heap.
+    [[nodiscard]] virtual cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                                memory_heap_contents contents) = 0;
 
     // The bind-path creates carry an explicit lifetime_scope; buffers carry it inside allocation_info instead.
     // binding_group is a real per-scope descriptor allocation, so ctx.persistent / ctx.transient append the scope.

@@ -402,6 +402,8 @@ public:
                                                                         VkBufferUsageFlags extra_usage = 0);
     [[nodiscard]] cc::result<vulkan_texture_handle> create_vulkan_texture(sg::texture_description const& desc,
                                                                           sg::allocation_info const& alloc);
+    /// The VkImage a texture of `desc` is, created with no memory bound: what create_vulkan_texture binds, and what a heap asks requirements of.
+    [[nodiscard]] cc::result<VkImage> create_vk_image(sg::texture_description const& desc);
     sg::submission_token submit_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
     void drop_vulkan_command_list(std::unique_ptr<vulkan_command_list> cmd);
 
@@ -436,11 +438,13 @@ public:
 
     // Device-local memory a buffer can be placed into; textures are not placeable on either backend.
     // Returns an error rather than aborting, so the sg throwing façade turns a failure into a typed exception.
-    [[nodiscard]] cc::result<vulkan_memory_heap_handle> create_vulkan_memory_heap(isize size_in_bytes);
+    [[nodiscard]] cc::result<vulkan_memory_heap_handle> create_vulkan_memory_heap(isize size_in_bytes,
+                                                                                  sg::memory_heap_contents contents);
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                            sg::memory_heap_contents contents) override
     {
-        return cc::result<sg::memory_heap_handle>(create_vulkan_memory_heap(size_in_bytes));
+        return cc::result<sg::memory_heap_handle>(create_vulkan_memory_heap(size_in_bytes, contents));
     }
 
     [[nodiscard]] cc::result<vulkan_swapchain_handle> create_vulkan_swapchain(sg::swapchain_description const& desc);

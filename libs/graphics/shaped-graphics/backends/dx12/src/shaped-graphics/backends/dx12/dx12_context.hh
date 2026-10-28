@@ -256,7 +256,8 @@ public:
                                                                     sg::allocation_info const& alloc);
     [[nodiscard]] cc::result<dx12_texture_handle> create_dx12_texture(sg::texture_description const& desc,
                                                                       sg::allocation_info const& alloc);
-    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes);
+    [[nodiscard]] cc::result<dx12_memory_heap_handle> create_dx12_memory_heap(isize size_in_bytes,
+                                                                              sg::memory_heap_contents contents);
     [[nodiscard]] cc::result<dx12_swapchain_handle> create_dx12_swapchain(sg::swapchain_description const& desc);
     sg::submission_token submit_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
     void drop_dx12_command_list(std::unique_ptr<dx12_command_list> cmd);
@@ -337,10 +338,11 @@ public:
                                          "create_raw_texture");
     }
 
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                            sg::memory_heap_contents contents) override
     {
-        return note_device_loss_on_error(cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes)),
-                                         "create_memory_heap");
+        return note_device_loss_on_error(
+            cc::result<sg::memory_heap_handle>(create_dx12_memory_heap(size_in_bytes, contents)), "create_memory_heap");
     }
 
     [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const& desc) override

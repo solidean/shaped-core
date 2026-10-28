@@ -151,9 +151,11 @@ ctx.try_create_swapchain(swapchain_description = {})  // -> cc::result<swapchain
 ctx.persistent.create_raw_buffer(size, usage, alloc={})     // -> raw_buffer_handle  (throws sg::allocation_exception; size>=0, 0 = empty, no alloc)
                                                    //   resource creation lives on the lifetime scope (sg::context_persistent_scope)
                                                    //   alloc defaults to dedicated; pass a placed allocation_info (from a heap) to sub-allocate
-ctx.persistent.create_memory_heap(size)            // -> memory_heap_handle  (heap placed resources sub-allocate into)
+ctx.persistent.create_memory_heap(size, contents=buffers)  // -> memory_heap_handle  (heap of buffers OR textures placed resources sub-allocate into)
+heap->memory_requirements_for_texture(desc)        // -> memory_requirements  (.placeable false: create it dedicated); + acquire_allocation_for_texture(desc, offset)
 ctx.transient.create_raw_buffer(size, usage)       // -> raw_buffer_handle  per-epoch scratch (bump-reset heap); expires at advance_epoch (+ try_ twin)
-ctx.transient.set_budget(size)                     // void — shared transient heap budget (buffers + future textures); the next advance_epoch drops the heap, never waits; default 128 MiB
+ctx.transient.set_budget(size)                     // void — transient BUFFER heap budget; the next advance_epoch drops the heap, never waits; default 128 MiB
+ctx.transient.set_texture_budget(size)             // void — the same for the transient TEXTURE heap; default 256 MiB (a placed transient texture starts undefined)
 sg::context_transient_scope::default_budget_bytes  // isize — that 128 MiB default, e.g. for a test putting it back
 ctx.transient.create_binding_group(layout, views)  // -> binding_group_handle  transient (ring-allocated) group; expires with its epoch (+ try_ twin)
                                                    //   using any transient resource past its epoch is a hard error (asserts)

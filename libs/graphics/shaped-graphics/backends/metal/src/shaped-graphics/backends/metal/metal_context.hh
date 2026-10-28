@@ -326,7 +326,8 @@ private:
                                                                       allocation_info const& alloc) override;
     [[nodiscard]] cc::result<raw_texture_handle> try_create_raw_texture(texture_description const& desc,
                                                                         allocation_info const& alloc) override;
-    [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override;
+    [[nodiscard]] cc::result<memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                        memory_heap_contents contents) override;
 
     [[nodiscard]] cc::result<binding_group_layout_handle> try_create_binding_group_layout(
         cc::span<binding const> bindings,

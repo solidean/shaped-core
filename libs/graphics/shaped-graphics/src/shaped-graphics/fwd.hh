@@ -25,6 +25,7 @@ enum class command_list_slot : int; // a recorder's slot in the per-context pool
 // The vocabulary enums this header goes on to DEFINE rather than only declare, named here so each definition can be written qualified.
 enum class index_format : u8;
 enum class lifetime_scope;
+enum class memory_heap_contents;
 enum class epoch : u64;
 enum class submission_token : u64;
 
@@ -166,6 +167,16 @@ enum class sg::lifetime_scope
 {
     persistent,
     transient,
+};
+
+/// What a memory_heap places: buffers or textures, never both.
+/// One kind per heap is what every backend can give: D3D12 below resource heap tier 2 separates them, and Vulkan's
+/// buffer–image granularity would otherwise pad every boundary between the two.
+/// A backend that cannot place textures refuses a `textures` heap, and its callers keep textures dedicated.
+enum class sg::memory_heap_contents
+{
+    buffers,
+    textures,
 };
 
 namespace sg

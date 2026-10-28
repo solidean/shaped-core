@@ -227,9 +227,13 @@ public:
     {
         return cc::result<sg::raw_texture_handle>(create_webgpu_texture(desc, alloc));
     }
-    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes) override
+    [[nodiscard]] cc::result<sg::memory_heap_handle> try_create_memory_heap(isize size_in_bytes,
+                                                                            sg::memory_heap_contents contents) override
     {
         CC_ASSERT(size_in_bytes >= 0, "heap size must be non-negative");
+        // WebGPU has no memory to place a texture into, only textures it allocates itself.
+        if (contents == sg::memory_heap_contents::textures)
+            return cc::error("webgpu places no textures");
         return sg::memory_heap_handle(std::make_shared<webgpu_memory_heap>(size_in_bytes));
     }
     [[nodiscard]] cc::result<sg::swapchain_handle> try_create_swapchain(sg::swapchain_description const& desc) override
