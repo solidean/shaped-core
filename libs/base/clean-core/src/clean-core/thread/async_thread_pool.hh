@@ -8,6 +8,7 @@
 #include <clean-core/math/random.hh>
 #include <clean-core/memory/unique_ptr.hh>
 #include <clean-core/thread/async.hh>
+#include <clean-core/thread/async_ambient.hh>
 #include <clean-core/thread/async_node.hh>
 #include <clean-core/thread/atomic.hh>
 #include <clean-core/thread/impl/async_tls.hh>
@@ -99,6 +100,22 @@ public:
     /// Without threads the caller is not merely a participant but the only one, and runs the whole graph inline.
     void participate_until_ready(async_node_base& root) override;
 
+    /// worker_count() + 1 with threads, the driving thread being the other; 1 without.
+    [[nodiscard]] int parallelism() const override { return _thread_count + 1; }
+
+    /// One slot: every worker, and every participant scanning for work, joins the open job once.
+    /// Opening wakes all sleepers with one notify; a second opener gets false until the first closed.
+    /// Without threads there is nobody to join, and it answers false.
+    [[nodiscard]] bool try_open_broadcast(async_broadcast_job job) override;
+    void close_broadcast() override;
+
+    /// How long an idle thread keeps scanning for work, beyond its spin rounds, before it sleeps.
+    /// 0 by default: a sleep costs a wake of microseconds, while lingering burns a core for its whole length.
+    /// Worth it for a caller that runs parallel phases between short serial ones, such as a solver's inner loop.
+    /// May be changed at any time; idle threads read it as they go idle.
+    void set_idle_linger_us(f64 us);
+    [[nodiscard]] f64 idle_linger_us() const;
+
     // queries
 public:
     /// Worker THREADS, excluding the external slots that participating foreign threads borrow.
@@ -130,9 +147,20 @@ private:
         // External slots only (index >= _thread_count).
         // A foreign thread participating claims one for the duration of its drive; worker slots are never claimed.
         cc::atomic<bool> claimed = {false};
+
+        // The broadcast sequence this slot last joined, so a thread joins each job once; only its own thread touches it.
+        u64 last_broadcast = 0;
     };
 
     void worker_main(worker& w);
+
+    /// Runs the open broadcast job on this thread if it has not joined it yet; true if it did.
+    [[nodiscard]] bool try_join_broadcast(worker& w);
+
+    /// The idle scan before a sleep: the spin rounds, then scanning until the linger runs out, or `stop` holds.
+    /// True if it ran something, and the caller loops rather than sleeping.
+    template <class Stop>
+    [[nodiscard]] bool idle_scan(worker& w, Stop const& stop);
 
     /// `authoritative` = this scan decides whether the caller may sleep, so it must not skip the injection queue (see the poller-token note on the member below).
     /// Cold path; the spin path passes false.
@@ -182,6 +210,19 @@ private:
     // The wake state.
     // There is deliberately no counter of claimable tasks: a worker's scan of the deques already answers "is there work", authoritatively and without shared writes.
     // A counter would be a hot-path RMW serving a cold-path question — see the protocol block in the .cc.
+    // The broadcast slot, a seqlock with a join count.
+    // _bc_seq is odd while a job is open; a joiner announces itself in _bc_active, then re-reads the sequence.
+    // close_broadcast bumps the sequence, then waits for _bc_active to drain: a Dekker pairing, so either the joiner sees the close or the closer sees the joiner.
+    alignas(64) cc::atomic<u64> _bc_seq = {0};
+    cc::atomic<void (*)(void*)> _bc_run = {nullptr};
+    cc::atomic<void*> _bc_ctx = {nullptr};
+    cc::atomic<bool> _bc_held = {false};
+    async_ambient_handle _bc_ambient; // the opener's context, installed in every joiner as a node carries its own; written only while closed
+    alignas(64) cc::atomic<int> _bc_active = {0};
+
+    // Nanoseconds; read relaxed by each thread going idle.
+    cc::atomic<i64> _linger_ns = {0};
+
     alignas(64) cc::atomic<i64> _wake_epoch = {0}; // bumped only when a sleeper actually needs waking
     cc::atomic<i64> _home_epoch = {0}; // bumped when a parked participant's home receives work; workers ignore it
     cc::atomic<int> _sleepers = {0};   // workers blocked on (or committing to) _wait_cv
@@ -198,6 +239,7 @@ private:
     // LIFO, matching singlethreaded_scheduler and the workers' own deques: a freshly spawned child is the hottest thing in cache, and running it next is what makes the drive depth-first.
     cc::vector<async_node_ptr> _queue;
     int _thread_count = 0; // never anything else; kept so worker_count() reads the same either way
+    f64 _linger_us = 0;    // kept only to be read back: nobody idles here
 
 #endif
 };
@@ -219,6 +261,8 @@ struct cc::scoped_async_homes
         int compute_workers = -1;
         /// Workers of the io pool; 0 creates none.
         int io_workers = 0;
+        /// The compute pool's idle linger, see async_thread_pool::set_idle_linger_us.
+        f64 compute_linger_us = 0;
     };
 
     scoped_async_homes();

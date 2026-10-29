@@ -5,7 +5,10 @@
 #include <clean-core/thread/thread_bound_scheduler.hh>
 #include <clean-core/thread/thread_pump.hh>
 
+using namespace cc::primitive_defines;
+
 #if CC_HAS_THREADS
+#include <clean-core/common/time.hh>
 #include <clean-core/string/print.hh>
 #include <clean-core/thread/spin.hh>
 #include <clean-core/thread/thread.hh>
@@ -264,6 +267,116 @@ cc::async_node_ptr cc::async_thread_pool::try_get_work(worker& w, bool authorita
 // and the rest properly asleep -- which is a design change, not a constant.
 static constexpr int async_pool_spin_rounds = 64;
 
+// ============================================================================
+// The broadcast slot
+// ============================================================================
+//
+// One job every idle thread joins, for a fan-out over the whole pool: a parallel loop's helpers start without a node each.
+// Against helper nodes spawned as a tree it saves ~3 us per loop on a 31-worker pool that is awake; see "Parallel loops" in libs/base/clean-core/docs/benchmarks/async-benchmark.md.
+// It does not make waking a sleeping pool faster: one notify_all still releases the sleepers one after another.
+//
+// The slot is a seqlock with a join count.
+// A joiner reads an odd sequence, announces itself in _bc_active, and re-reads the sequence before it touches the job.
+// The closer bumps the sequence, then waits for _bc_active to drain.
+// Both pairs are seq_cst, so either the joiner sees the close and backs out, or the closer sees the joiner and waits for it.
+
+bool cc::async_thread_pool::try_open_broadcast(async_broadcast_job job)
+{
+    CC_ASSERT(job.run != nullptr, "a broadcast job needs something to run");
+    if (_bc_held.exchange(true, cc::memory_order_acquire))
+        return false;
+    _bc_run.store(job.run, cc::memory_order_relaxed);
+    _bc_ctx.store(job.ctx, cc::memory_order_relaxed);
+    _bc_ambient = async_ambient_handle(); // what the job logs or checks is attributed to whoever opened it
+    // odd: open; the RMW is also our half of the wake Dekker, ordering the open before the _sleepers read
+    _bc_seq.fetch_add(1, cc::memory_order_seq_cst);
+    if (_sleepers.load(cc::memory_order_relaxed) > 0)
+        wake_all();
+    return true;
+}
+
+void cc::async_thread_pool::close_broadcast()
+{
+    CC_ASSERT((_bc_seq.load(cc::memory_order_relaxed) & 1) == 1, "close_broadcast without an open broadcast");
+    _bc_seq.fetch_add(1, cc::memory_order_seq_cst);
+    // joiners still inside run are leaving: an opener closes only once its job has nothing left to hand out
+    while (_bc_active.load(cc::memory_order_seq_cst) > 0)
+        cc::spin_pause();
+    _bc_ambient.reset();
+    _bc_held.store(false, cc::memory_order_release);
+}
+
+bool cc::async_thread_pool::try_join_broadcast(worker& w)
+{
+    auto const seq = _bc_seq.load(cc::memory_order_acquire);
+    if ((seq & 1) == 0 || seq == w.last_broadcast)
+        return false;
+    w.last_broadcast = seq;
+    _bc_active.fetch_add(1, cc::memory_order_seq_cst);
+    if (_bc_seq.load(cc::memory_order_seq_cst) == seq)
+    {
+        auto const run = _bc_run.load(cc::memory_order_relaxed);
+        auto const ctx = _bc_ctx.load(cc::memory_order_relaxed);
+        // as a dequeued node runs: this pool bound, and the opener's context in place of whatever this thread had
+        async_worker_scope const scope(*this);
+        impl::async_ambient_root_scope const root;
+        async_ambient_install_scope const ambient(_bc_ambient);
+        run(ctx);
+    }
+    _bc_active.fetch_sub(1, cc::memory_order_release);
+    return true;
+}
+
+void cc::async_thread_pool::set_idle_linger_us(f64 us)
+{
+    _linger_ns.store(i64(us * 1e3), cc::memory_order_relaxed);
+}
+
+f64 cc::async_thread_pool::idle_linger_us() const
+{
+    return f64(_linger_ns.load(cc::memory_order_relaxed)) * 1e-3;
+}
+
+// The spin rounds are what async_pool_spin_rounds argues for: cheap, and enough for fork-join going briefly dry.
+// The linger after them is for a caller whose parallel phases are separated by serial ones longer than a spin, such as a solver's inner loop.
+// A sleeping 31-worker pool takes ~50 us to wake, so a linger longer than the serial gap turns that wake into a scan.
+// The clock is read only every few rounds, since a read costs more than scanning an empty pool.
+template <class Stop>
+bool cc::async_thread_pool::idle_scan(worker& w, Stop const& stop)
+{
+    for (int i = 0; i < async_pool_spin_rounds && !_stop.load(cc::memory_order_relaxed) && !stop(); ++i)
+    {
+        cc::spin_pause();
+        if (try_join_broadcast(w))
+            return true;
+        if (auto n = try_get_work(w))
+        {
+            impl::async_poll_work_item(*n);
+            return true;
+        }
+    }
+
+    auto const linger_ns = _linger_ns.load(cc::memory_order_relaxed);
+    if (linger_ns <= 0)
+        return false;
+    auto const until = cc::current_time_steady_secs() + f64(linger_ns) * 1e-9;
+    while (!_stop.load(cc::memory_order_relaxed) && !stop())
+    {
+        for (int i = 0; i < 8; ++i)
+            cc::spin_pause();
+        if (try_join_broadcast(w))
+            return true;
+        if (auto n = try_get_work(w))
+        {
+            impl::async_poll_work_item(*n);
+            return true;
+        }
+        if (cc::current_time_steady_secs() >= until)
+            return false;
+    }
+    return false;
+}
+
 void cc::async_thread_pool::worker_main(worker& w)
 {
     cc::set_current_thread_name("async-pool");
@@ -272,6 +385,8 @@ void cc::async_thread_pool::worker_main(worker& w)
 
     while (!_stop.load(cc::memory_order_acquire))
     {
+        if (try_join_broadcast(w))
+            continue;
         if (auto n = try_get_work(w))
         {
             impl::async_poll_work_item(*n);
@@ -280,18 +395,7 @@ void cc::async_thread_pool::worker_main(worker& w)
 
         // 1. nothing right now -- scan a bounded while before paying for a sleep.
         //    No shared writes here, just re-scans, so a worker that is about to be handed work costs nobody anything.
-        bool found = false;
-        for (int i = 0; i < async_pool_spin_rounds && !_stop.load(cc::memory_order_relaxed); ++i)
-        {
-            cc::spin_pause();
-            if (auto n = try_get_work(w))
-            {
-                impl::async_poll_work_item(*n);
-                found = true;
-                break;
-            }
-        }
-        if (found)
+        if (idle_scan(w, [] { return false; }))
             continue;
 
         // 2. still nothing: commit to sleeping.
@@ -305,6 +409,12 @@ void cc::async_thread_pool::worker_main(worker& w)
 
         // 3. the re-scan that closes the race: a producer that pushed before our registration became visible may have already read _sleepers == 0 and skipped notifying us.
         //    Seq_cst says at least one of us sees the other -- so if they missed us, we see their work here.
+        // The broadcast slot is work too: try_open_broadcast's RMW pairs with our registration exactly as a push does.
+        if (try_join_broadcast(w))
+        {
+            _sleepers.fetch_sub(1, cc::memory_order_relaxed);
+            continue;
+        }
         // authoritative: this scan is what decides we may sleep, so it must not let the poller token filter it
         if (auto n = try_get_work(w, /*authoritative*/ true))
         {
@@ -498,6 +608,8 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 
         while (latched ? !waiter.done.load(cc::memory_order_acquire) : !root.is_ready())
         {
+            if (try_join_broadcast(*slot))
+                continue;
             if (auto n = try_get_work(*slot))
             {
                 impl::async_poll_work_item(*n);
@@ -510,18 +622,7 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
 
             // Dry, so spin like a worker before giving up.
             // The rest of the graph is in flight on the pool and work may come back to us within nanoseconds, whereas parking costs microseconds.
-            bool found = false;
-            for (int i = 0; i < async_pool_spin_rounds && !root.is_ready(); ++i)
-            {
-                cc::spin_pause();
-                if (auto n = try_get_work(*slot))
-                {
-                    impl::async_poll_work_item(*n);
-                    found = true;
-                    break;
-                }
-            }
-            if (found || (!latched && root.is_ready()))
+            if (idle_scan(*slot, [&] { return root.is_ready(); }) || (!latched && root.is_ready()))
                 continue;
 
             if (!latched)
@@ -541,6 +642,11 @@ void cc::async_thread_pool::participate_until_ready(async_node_base& root)
             _sleepers.fetch_add(1, cc::memory_order_seq_cst);
             cc::atomic_thread_fence(cc::memory_order_seq_cst);
 
+            if (try_join_broadcast(*slot))
+            {
+                _sleepers.fetch_sub(1, cc::memory_order_relaxed);
+                continue;
+            }
             if (auto n = try_get_work(*slot, /*authoritative*/ true))
             {
                 _sleepers.fetch_sub(1, cc::memory_order_relaxed);
@@ -611,6 +717,28 @@ void cc::async_thread_pool::wake_home_participants()
 void cc::async_thread_pool::wake_home_participants()
 {
     // Nobody parks without threads.
+}
+
+bool cc::async_thread_pool::try_open_broadcast(async_broadcast_job job)
+{
+    // Nobody would join: the one thread there is, is the opener.
+    CC_UNUSED(job);
+    return false;
+}
+
+void cc::async_thread_pool::close_broadcast()
+{
+    CC_ASSERT(false, "close_broadcast without an open broadcast: a pool without threads never opens one");
+}
+
+void cc::async_thread_pool::set_idle_linger_us(f64 us)
+{
+    _linger_us = us;
+}
+
+f64 cc::async_thread_pool::idle_linger_us() const
+{
+    return _linger_us;
 }
 
 // ============================================================================
@@ -740,6 +868,7 @@ cc::scoped_async_homes::scoped_async_homes(config cfg)
     auto const compute_workers
         = cfg.compute_workers < 0 ? async_thread_pool::default_worker_count() : cfg.compute_workers;
     _compute = cc::make_unique<async_thread_pool>(compute_workers);
+    _compute->set_idle_linger_us(cfg.compute_linger_us);
     install_compute_async_scheduler(*_compute);
 
     if (cfg.io_workers > 0)

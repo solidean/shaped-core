@@ -937,6 +937,11 @@ auto s = cc::make_async_scheduled<int>([](cc::async_context<int>&){ ... });  // 
 auto c = cc::make_async_lazy([](int x, int y){ return x + y; }, a, s);      // depends on a,s; f gets plain ints
 auto d = cc::make_async_lazy([](int x){ return x + 2; }, a);   // single-dep transform (one-arg variadic form)
 auto m = cc::make_async_manual<int>();               // promise-style: external_pending until pushed
+
+#include <clean-core/thread/async_parallel_for.hh>   // body over [0, n) on every thread of the pool, as one async
+co_await cc::async_parallel_for(n, [&](isize i) { ... });                 // or (isize begin, isize end) per chunk
+co_await cc::async_parallel_for(n, body, {.grain = 1024});                // grain only matters for bodies of a few ns
+pool.set_idle_linger_us(50);   // idle threads scan 50 us before sleeping: for parallel phases between short serial ones
 auto p = cc::make_async_lazy_emplace<int, cc::async_error, PinnedFrame>(7); // builds the FRAME in place: immovable f
                                                      // ok. T explicit, no dep args (capture + require instead)
 // born already ready (no frame, no scheduling); _emplace builds in place (immovable T ok):

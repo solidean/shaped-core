@@ -574,6 +574,14 @@ The producer still passes through the wait mutex on the wake path — only `wait
 Workers **spin ~64 rounds before sleeping** — a condvar round-trip is ~1–10 µs against fork-join tasks that cost ~100 ns, so this is worth ~25% on a spawn tree rather than being a micro-optimization.
 Steal victims are **randomized** with bounded attempts: a linear scan points every idle worker at worker 0, which is both a contention hotspot and unfair.
 
+**Idle linger** extends that spin by time: `set_idle_linger_us`, 0 by default, keeps an idle thread scanning that long before it sleeps.
+It is for a caller whose parallel phases sit between serial ones longer than the spin but shorter than the linger, where a wake would otherwise cost tens of microseconds.
+`scoped_async_homes`' `compute_linger_us` sets it for the compute pool.
+
+**The broadcast slot** is one job every idle thread of the pool joins once, which is how a [parallel loop](#parallel-loops) starts on all of them without a node each.
+Opening it wakes every sleeper; a joiner runs it with the pool bound and the opener's ambient context installed, as a dequeued node would.
+It is a seqlock with a join count: closing bumps the sequence and waits for the joiners still inside to leave.
+
 ### Measured
 
 Scaling is pool-at-P vs pool-at-1-worker, so it is independent of leaf cost.
@@ -640,6 +648,45 @@ So it is pinned by a `static_assert` in `async<T, E>` and by the 64 B guards in 
 
 The **semantics and the public API are the contract**.
 The node layout is not, and can change under the hood as the system matures without breaking callers.
+
+## Parallel loops
+
+**`cc::async_parallel_for(n, body)` runs `body` over every index of `[0, n)` on the threads of the scheduler it runs on, and is one async.**
+Header [`async_parallel_for.hh`](../../src/clean-core/thread/async_parallel_for.hh).
+
+```cpp
+co_await cc::async_parallel_for(n, [&](isize i) { out[i] = f(in[i]); });             // per index
+co_await cc::async_parallel_for(n, [&](isize begin, isize end) { ... });             // per chunk
+co_await cc::async_parallel_for(n, body, {.grain = 1024});                           // bodies of a few ns
+```
+
+* **Cold, like every async**, so awaiting it is what runs it; `cc::async_blocking_get` is the bridge from synchronous code.
+* **The body is owned.** It is moved into the loop, so a loop held across a suspension cannot dangle; capture by reference what it works on.
+  It is destroyed on the thread that resumes the awaiter, before that resumes.
+* **Inline where a fan-out cannot pay**: on a scheduler without steal-capable peers (`singlethreaded_scheduler`, a thread home, a pool without threads), and for a range of one grain or less.
+  On a single-threaded scheduler the indices run in order.
+* **A throwing body fails the loop**, as `cc::async_all` fails on a failed member.
+  Nothing unclaimed runs after that; chunks already running finish first, so no body runs once the loop has settled.
+* **The grain** is how many indices a thread claims at a time; 0, the default, picks n / (64 · parallelism), at least 1.
+  A claim is a CAS on a line only the claiming thread writes, so a small grain stays cheap: only bodies of a few nanoseconds want a larger one, not bodies of a few hundred.
+* **Nesting works.** A body that blocks on an inner loop participates in it; an inner loop that finds the broadcast slot held starts its helpers as nodes.
+
+How it works, because the costs follow from it:
+
+* **One helper per thread, each owning an even slice of the range.** A helper pops a grain off its own slice's front.
+  Once that is empty, it steals the back half of another slice, or the whole of one at most a grain long.
+  Slices rather than one shared counter: at grain 1 over 5 ns bodies the counter ran 8× slower than serial, the slices 3.5× faster.
+* **Helpers start through the pool's broadcast slot**, `async_scheduler::try_open_broadcast`: one job every idle thread joins, with no node per thread.
+  Where there is no slot, or another loop holds it, they start as a tree, each helper scheduling two more as it begins.
+  The caller scheduling every helper itself put ~0.45 µs between consecutive helpers, so the last of 31 began 24 µs late.
+* **No helper outlives its loop.** Through the slot, a countdown of indices pushes a manual node the loop awaits, and closing the slot waits for the joiners still leaving.
+  As a tree, each helper awaits the two it started, and the loop's frame is the root.
+* The scheduler's `parallelism()` sizes the fan-out: a pool's workers plus the driving thread.
+
+**A sleeping pool is the cost this does not remove.**
+Waking 31 workers after a millisecond of serial work took ~50 µs on Windows, against a loop of ~20 µs; one `notify_all` still releases the sleepers one after another.
+For parallel phases between short serial ones, `async_thread_pool::set_idle_linger_us` keeps idle threads scanning that long before they sleep, at the price of the cores it burns.
+[benchmarks/async-benchmark](../benchmarks/async-benchmark.md#parallel-loops) has the numbers.
 
 ## Homes
 

@@ -10,6 +10,7 @@ The single-thread number comes first on purpose: if driving a node is expensive,
 | born-ready decomposition | [born-ready-benchmark.cc](../../tests/benchmarks/async/born-ready-benchmark.cc) | where a born-ready node's ~40 ns goes, as a cumulative ladder |
 | work-stealing pool | [pool-benchmark.cc](../../tests/benchmarks/async/pool-benchmark.cc) | scaling across five fork-join shapes, and the per-node scheduling cost |
 | grain & fork floor | [grain-benchmark.cc](../../tests/benchmarks/async/grain-benchmark.cc) | at what leaf size fork-join overhead stops dominating, and what the second thread costs |
+| parallel loops | [parallel-for-benchmark.cc](../../tests/benchmarks/async/parallel-for-benchmark.cc) | what `cc::async_parallel_for` costs per call, and what a sleeping pool adds |
 
 The first three also carry a `PGO_BENCHMARK`, recording representative points via `nx::pgo` for the perf gate.
 Every file's human-facing entry points are `BENCHMARK`s, run with `uv run dev.py benchmark <match>`.
@@ -173,6 +174,37 @@ Read the `w=1` line first — one worker plus the participating caller is the mi
 > Two comments in the benchmark disagreed about it by roughly 70× for the same configuration, so both figures were deleted rather than one being picked.
 > What is not in dispute: an inline node is ~50–100 ns, and the floor is microseconds — three to four orders of magnitude of pure handoff.
 > Treat the *shape*, flat-vs-fanning across worker count, as the result here, and re-measure on one run before quoting a number.
+
+## Parallel loops
+
+[parallel-for-benchmark.cc](../../tests/benchmarks/async/parallel-for-benchmark.cc) runs `cc::async_parallel_for` against a serial loop, interleaved per round.
+It also runs a node per chunk, four per thread joined by `async_all`, the shape the loop replaces.
+One timed run is a coroutine awaiting the loop repeatedly, as a solver's inner loop does; the body is a dependent hash chain.
+A second table puts a serial gap between calls, long enough for the pool to sleep, with and without idle linger.
+
+Measured on a Ryzen 9 9950X3D (16 cores, 32 threads), Windows, `release-clang`, 31 workers plus the driving thread, with ~28% background load:
+
+| loop | serial | node per chunk | `async_parallel_for` | at grain 1 |
+|---|---|---|---|---|
+| 128 × 300 ns | 38.6 µs | 69.2 µs | 7.4 µs | 7.1 µs |
+| 2000 × 300 ns | 608 µs | 91 µs | 28.7 µs | 28.0 µs |
+| 8000 × 300 ns, load ramping up | 2414 µs | 156 µs | 97 µs | 98 µs |
+| 65536 × 5 ns | 109 µs | 86 µs | 15.1 µs | 27.0 µs |
+| 1048576 × 2 ns | 1561 µs | 205 µs | 108 µs | 266 µs |
+
+| 2000 × 300 ns after a serial gap of | 0 | 100 µs | 1000 µs |
+|---|---|---|---|
+| ideal, gap + serial / 32 | 19 µs | 119 µs | 1019 µs |
+| no linger | 41 µs | 157 µs | 1074 µs |
+| 50 µs linger | 42 µs | 134 µs | 1072 µs |
+
+The design was chosen against prototypes of the alternatives, on the same machine:
+
+* **Recursive bisection** matched the helpers on large loops and lost on small ones: 11.7 against 8.4 µs on 128 × 300 ns.
+* **A shared claim counter** collapsed at small grains: 950 µs at grain 1 on 65536 × 5 ns, where the slices took 32 µs.
+* **Helpers spawned as a tree** rather than through the broadcast slot cost ~3 µs more per loop at 31 workers, 8.4 against 5.7 µs on 128 × 300 ns.
+* **Waking a sleeping pool** took ~50 µs whatever started the helpers: a tree reached its last helper after ~47 µs, and one `notify_all` released the sleepers ~1.6 µs apart.
+* **Linger past the gap** helped only gaps shorter than itself, and at 500 µs, 31 spinning workers on the loaded machine made the large loops noisy and up to 2× slower.
 
 ## Running them
 

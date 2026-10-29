@@ -2,6 +2,8 @@
 created: 2026-10-29
 refs:
   - file: libs/base/clean-core/src/clean-core/thread/async.hh
+closed: 2026-10-29
+resolution: fixed
 ---
 
 # clean-core: a parallel for over an index range, on the async scheduler

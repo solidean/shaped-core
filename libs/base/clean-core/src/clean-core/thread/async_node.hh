@@ -152,6 +152,14 @@ struct cc::async_home_options
     async_inline_deps inline_deps = async_inline_deps::home_default;
 };
 
+/// A job offered to every idle thread of a scheduler at once: each thread that joins runs `run(ctx)` once, concurrently with the others.
+/// It is how a fan-out over all of a pool's threads starts them without a node per thread — see async_scheduler::try_open_broadcast.
+struct cc::async_broadcast_job
+{
+    void (*run)(void* ctx) = nullptr;
+    void* ctx = nullptr;
+};
+
 /// Where runnable nodes go.
 /// The async machinery only ever asks a scheduler to make a node runnable — it never owns execution and never blocks.
 /// A worker binds a scheduler to its thread with async_worker_scope; nodes reach it via async_scheduler::current().
@@ -202,6 +210,22 @@ struct alignas(64) cc::async_scheduler
         CC_UNUSED(node);
         return false;
     }
+
+    /// How many threads may run this scheduler's work at once, a participating caller included: what a fan-out sizes itself to.
+    /// 1 for a scheduler that runs everything on one thread.
+    [[nodiscard]] virtual int parallelism() const { return 1; }
+
+    /// Offer `job` to every thread of this scheduler that is idle while it is open, the sleeping ones woken for it.
+    /// False when the scheduler has no such slot or another job holds it; the caller then fans out with nodes instead.
+    /// The opener must call close_broadcast, and `job.ctx` must live until that returns.
+    [[nodiscard]] virtual bool try_open_broadcast(async_broadcast_job job)
+    {
+        CC_UNUSED(job);
+        return false;
+    }
+
+    /// Close what try_open_broadcast opened: no thread joins after this, and it returns once every joiner has left `run`.
+    virtual void close_broadcast() {}
 
     /// How many live, unresolved nodes are homed here — a home must outlive every one of them.
     [[nodiscard]] isize homed_node_count() const { return _homed_nodes.load(cc::memory_order_acquire); }

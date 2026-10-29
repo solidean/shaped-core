@@ -467,6 +467,13 @@ rules:
       - tests/thread/async-mutex-test.cc
 
   - kind: allow-blocking-wait
+    value: [async_blocking_get, async_blocking_get_on]
+    reason: a pool's broadcast slot and linger are checked, and loops timed, on pools these files own; a body blocking on a nested loop is one of the cases
+    files:
+      - tests/thread/async-parallel-for-test.cc
+      - tests/benchmarks/async/parallel-for-benchmark.cc
+
+  - kind: allow-blocking-wait
     value: [async_blocking_get, try_async_blocking_get, async_blocking_get_on, try_async_blocking_get_on, try_async_blocking_get_for]
     reason: a thread-bound ambient scope is what is checked, and it cannot span a co_await
     files:
