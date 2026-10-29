@@ -14,16 +14,21 @@ Nothing is registered: creating the folder starts tracking there.
 
 ```text
 <scope>/docs/issues/
-  bug-test-pattern-unbuilt-binary.md      an open issue
-  epic-axis-aligned-predicates.md
-  closed/2026/10/feat-segment-predicates.md   closed in October 2026
+  .closed/2026/10/feat-segment-predicates.md   closed in October 2026
+  epic/epic-axis-aligned-predicates.md          an open issue, in a group folder
+  release/chore-release-notes.md
+  bug-test-pattern-unbuilt-binary.md            an open issue, ungrouped
 ```
 
 - **The file name is the id: `<type>-<slug>.md`**, the slug lowercase kebab-case.
 - **An id is unique in its repository, open and closed together, forever.**
   So `bug-<slug>` names one issue anywhere — in code, a commit message, a chat — with no path.
-- **Closed issues move to `closed/<yyyy>/<mm>/`** of the same folder, the month two digits so the folders sort.
-  The open folder stays short, and the month keeps a busy year's folder browsable.
+- **Closed issues move to `.closed/<yyyy>/<mm>/`** of the same folder, the month two digits so the folders sort.
+  The dot sorts it first, and the month keeps a busy year's folder browsable.
+- **Open issues may be grouped in subfolders**, lowercase kebab-case and nested if need be, by whatever groups them best.
+  A group is filing only: it changes no id, scope or behavior, and a folder that outgrows about 25 issues is the cue to group it.
+  **A group named after a type is the default for that type**: with `docs/issues/bug/` present, `issues new bug ...` files there.
+  A small scope stays flat.
 
 ## Types
 
@@ -113,8 +118,12 @@ A marker counts for its whole file, since it sits above the code it marks rather
 ### Open
 
 `issues new <type> <slug> [--in <dir>]` writes `<dir>/docs/issues/<type>-<slug>.md` and commits nothing.
+It files into the group named after the type if there is one; `--group <folder>` picks another, `--group .` none.
 `<dir>` is the owner, so a `docs/` folder is refused, since it would file into `docs/docs/issues/`; `--force` overrides that.
+`<dir>` may also be the issue folder itself or a group folder in it.
 By hand: create the file.
+
+`issues move <id> <group>` regroups an open issue, `.` for the issue folder itself, and relinks what pointed at it.
 
 ### Claimed — pushed at once
 
@@ -162,10 +171,11 @@ If the gate fails, nothing is pushed, and the close stays a local commit to keep
 Coupling the close to the push is what keeps a claim from outliving its work: the moment the fix is real is the moment the issue ends.
 
 `issues close <id> [--resolution fixed]` is the same close by hand, for a close that belongs inside a larger commit.
-It adds `closed` and `resolution`, ends the claim, moves the file to `closed/<yyyy>/<mm>/` with `git mv`, and commits nothing.
+It adds `closed` and `resolution`, ends the claim, moves the file to `.closed/<yyyy>/<mm>/` with `git mv`, and commits nothing.
 It rewrites the moved file's own relative links, and every markdown link in the repository that pointed at it.
+A path in plain text, such as a code comment naming the issue file, is not rewritten; name the id there instead.
 
-`issues reopen <id>` moves it back.
+`issues reopen <id>` moves it back, into the group named after its type if there is one.
 By hand: move the file and add, or remove, the two lines.
 
 ## Triage in the browser
@@ -213,12 +223,13 @@ Claiming a submodule's issue pushes to the submodule's remote.
 
 | Command | Does |
 |---|---|
-| `new <type> <slug>` | create an issue: `--in`, `-t`, `--body`, `--priority`, `--tag`, `--parent`, `--ref kind:value`, `--force` |
+| `new <type> <slug>` | create an issue: `--in`, `--group`, `-t`, `--body`, `--priority`, `--tag`, `--parent`, `--ref kind:value`, `--force` |
 | `list` | open issues, epics' children indented: `--type`, `--tag`, `--in`, `--repo`, `--claimed`, `--unclaimed`, `--mine`, `--stale`, `--closed`, `--all`, `-g` |
 | `show <id>` | the issue; an epic also counts its children |
 | `known <query>` | the issues a file, line, test, symbol or text belongs to; exit code 1 when none |
 | `claim <id>`, `release <id>` | one commit, pushed alone: `--as`, `--force` |
 | `close <id>`, `reopen <id>` | move it: `--resolution`, `--date` |
+| `move <id> <group>` | regroup an open issue |
 | `check` | validate every issue and every marker |
 | `serve` | the web page above: `--port`, `--no-open` |
 
