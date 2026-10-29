@@ -71,8 +71,11 @@ struct light_emission;
 class light;
 struct scene_light;
 struct background;
-struct dome;        // an analytic environment: a gradient and soft lobes (scene/background.hh)
-struct dome_lobe;   // one von Mises-Fisher lobe of a dome
+enum class studio_setup : u8; // the studio spec's floor or ceiling setup (scene/studio.hh)
+enum class studio_view : u8;  // one of the six views of its sheet
+struct studio_options;        // what scene_ref::studio sets up
+struct dome;                  // an analytic environment: a gradient and soft lobes (scene/background.hh)
+struct dome_lobe;             // one von Mises-Fisher lobe of a dome
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;
@@ -122,7 +125,8 @@ struct asset_loader_config;
 struct filesystem_resolver_options;
 struct asset_material;
 struct asset_node;
-struct asset_light; // one light a file placed (asset/asset_data.hh)
+struct asset_light;  // one light a file placed (asset/asset_data.hh)
+struct asset_camera; // one camera a file placed
 struct asset_data;
 class asset;
 class asset_loader;

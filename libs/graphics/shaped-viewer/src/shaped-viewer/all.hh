@@ -23,6 +23,7 @@
 #include <shaped-viewer/scene/mesh_texture.hh>
 #include <shaped-viewer/scene/resident_mesh.hh>
 #include <shaped-viewer/scene/scene_item.hh>
+#include <shaped-viewer/scene/studio.hh>
 #include <shaped-viewer/scene/triangle_geometry.hh>
 
 // drawings

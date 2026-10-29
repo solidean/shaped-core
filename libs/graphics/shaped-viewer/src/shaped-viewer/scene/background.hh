@@ -3,6 +3,7 @@
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/scene/light.hh>
 #include <typed-geometry/linalg/vec.hh>
+#include <typed-geometry/scalar/angle.hh>
 
 /// One soft lobe of a dome: `radiance * exp(concentration * (dot(d, direction) - 1))`, peaking at `radiance` along `direction`.
 /// That is a von Mises–Fisher lobe, so it has a closed-form integral and closed-form sampling, which is what lets the tracer draw from it exactly.
@@ -31,12 +32,33 @@ struct sv::dome
     dome_lobe lobes[max_lobes] = {};
     int lobe_count = 0;
 
+    /// Set, the lobes' directions are in the camera's leveled frame rather than the world's, and turn with the view every frame.
+    /// That frame is x the camera's right, y world up, and z toward the camera, both horizontal axes leveled to the horizon,
+    /// so an elevation stays an elevation however the camera pitches.
+    /// The gradient is always the world's.
+    bool follows_camera = false;
+
     /// The gradient alone along unit direction `d`.
     [[nodiscard]] tg::vec3f gradient(tg::vec3f d) const;
 
     /// The whole dome along unit direction `d`: the gradient plus every lobe.
     [[nodiscard]] tg::vec3f radiance(tg::vec3f d) const;
+
+    /// The irradiance on a surface facing unit direction `n`: the dome times the clamped cosine, over the sphere.
+    /// Computed by quadrature, for setting an exposure rather than for a frame.
+    [[nodiscard]] tg::vec3f irradiance(tg::vec3f n) const;
+
+    /// This dome as `cam` sees it: a following dome's lobes turned into the world, and `follows_camera` cleared.
+    /// A dome that does not follow is returned as it is; freezing a following one is `d = d.seen_from(cam)`.
+    [[nodiscard]] dome seen_from(sv::camera const& cam) const;
 };
+
+namespace sv
+{
+/// The unit direction `azimuth` from the camera toward its left and `elevation` above the horizon, in a following dome's frame.
+/// An azimuth of 0 is behind the camera, lighting the scene from the front; 180 degrees is behind the scene.
+[[nodiscard]] tg::vec3f camera_relative_direction(tg::angle_f azimuth, tg::angle_f elevation);
+} // namespace sv
 
 /// The view's background / environment: the radiance a primary ray sees when it misses all geometry.
 ///
@@ -61,6 +83,9 @@ struct sv::background
 
     /// The analytic `d`, with `sh` projected from it.
     [[nodiscard]] static background of_dome(sv::dome const& d);
+
+    /// This environment as `cam` sees it: a following dome turned to the camera, with its projection redone; anything else as it is.
+    [[nodiscard]] background seen_from(sv::camera const& cam) const;
 
     /// The same `radiance` in every direction — a flat ambient environment, band 0 alone.
     [[nodiscard]] static background uniform(tg::vec3f radiance);

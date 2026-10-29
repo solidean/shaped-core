@@ -1,6 +1,8 @@
 #include <clean-core/common/assert.hh>
 #include <clean-core/common/utility.hh> // cc::clamp, cc::max
 #include <shaped-viewer/scene/background.hh>
+#include <shaped-viewer/view/camera.hh>
+#include <typed-geometry/linalg/cross.hh>   // tg::cross, tg::dual
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
 #include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/constants.hh>
@@ -65,7 +67,46 @@ void sh_basis(tg::vec3f d, f32 (&y)[background::sh_coefficient_count])
 {
     return 2.0f * tg::pi<f32> * (1.0f - tg::exp(-2.0f * k)) / k;
 }
+
+/// A zonal function's Legendre moments `F_l`, the integral of `f(mu) P_l(mu)` over [-1, 1], for bands 0 to 3.
+/// A function zonal about unit `axis` projects to `sh_lm = 2 pi F_l Y_lm(axis)`, which is what `add_zonal` writes.
+struct legendre_moments
+{
+    f64 f[4] = {};
+};
+
+/// The moments of a vMF lobe of unit peak, `exp(k (mu - 1))`, in closed form.
+/// `I_n`, the integral of `mu^n exp(k (mu - 1))`, follows from integrating by parts: `I_n = (1 - (-1)^n e^(-2k)) / k - n / k I_(n-1)`.
+[[nodiscard]] legendre_moments vmf_moments(f64 k)
+{
+    auto const e = tg::exp(-2.0 * k);
+    auto const i0 = (1.0 - e) / k;
+    auto const i1 = (1.0 + e) / k - i0 / k;
+    auto const i2 = (1.0 - e) / k - 2.0 * i1 / k;
+    auto const i3 = (1.0 + e) / k - 3.0 * i2 / k;
+    return {.f = {i0, i1, 0.5 * (3.0 * i2 - i0), 0.5 * (5.0 * i3 - 3.0 * i1)}};
+}
+
+/// Adds `radiance` times the zonal function with moments `m` about unit `axis` to `sh`.
+void add_zonal(tg::vec3f (&sh)[background::sh_coefficient_count],
+               tg::vec3f axis,
+               legendre_moments const& m,
+               tg::vec3f radiance)
+{
+    f32 y[background::sh_coefficient_count] = {};
+    sh_basis(axis, y);
+    for (auto i = 0; i < background::sh_coefficient_count; ++i)
+    {
+        auto const band = i < 1 ? 0 : i < 4 ? 1 : i < 9 ? 2 : 3;
+        sh[i] += radiance * f32(2.0 * tg::pi<f64> * m.f[band] * f64(y[i]));
+    }
+}
 } // namespace
+
+tg::vec3f camera_relative_direction(tg::angle_f azimuth, tg::angle_f elevation)
+{
+    return tg::vec3f(-azimuth.sin() * elevation.cos(), elevation.sin(), azimuth.cos() * elevation.cos());
+}
 
 tg::vec3f dome::gradient(tg::vec3f d) const
 {
@@ -84,14 +125,12 @@ tg::vec3f dome::radiance(tg::vec3f d) const
     return out;
 }
 
-background background::of_dome(sv::dome const& d)
+tg::vec3f dome::irradiance(tg::vec3f n) const
 {
-    CC_ASSERT(d.lobe_count >= 0 && d.lobe_count <= dome::max_lobes, "a dome holds at most max_lobes lobes");
-    auto bg = background{.is_dome = true, .analytic = d};
-
-    // Projected by quadrature over equal-angle cells, each weighed by its solid angle: what a reader of SH alone sees of the dome.
-    constexpr int rows = 64;
-    constexpr int columns = 128;
+    // Equal-angle cells about +y, each weighed by its solid angle; the lobes are narrow enough to want the resolution.
+    constexpr int rows = 256;
+    constexpr int columns = 512;
+    auto out = tg::vec3f(0, 0, 0);
     for (auto r = 0; r < rows; ++r)
     {
         auto const theta = tg::angle_f::make_from_radians((f32(r) + 0.5f) / f32(rows) * tg::pi<f32>);
@@ -100,14 +139,74 @@ background background::of_dome(sv::dome const& d)
         {
             auto const phi = tg::angle_f::make_from_radians((f32(c) + 0.5f) / f32(columns) * 2.0f * tg::pi<f32>);
             auto const dir = tg::vec3f(theta.sin() * phi.cos(), theta.cos(), theta.sin() * phi.sin());
-            auto const radiance = d.radiance(dir);
-            f32 y[sh_coefficient_count] = {};
-            sh_basis(dir, y);
-            for (auto i = 0; i < sh_coefficient_count; ++i)
-                bg.sh[i] += radiance * (y[i] * weight);
+            auto const cosine = tg::dot(dir, n);
+            if (cosine > 0.0f)
+                out += radiance(dir) * (cosine * weight);
         }
     }
+    return out;
+}
+
+dome dome::seen_from(sv::camera const& cam) const
+{
+    if (!follows_camera)
+        return *this;
+
+    // Leveled to the horizon; a camera looking straight down or up has no horizontal backward, and takes -z, as the spec does.
+    auto const basis = cam.basis();
+    auto const up = tg::vec3f(0, 1, 0);
+    auto toward = tg::vec3f(-f32(basis.forward[0]), 0.0f, -f32(basis.forward[2]));
+    toward = tg::dot(toward, toward) < 1e-8f ? tg::vec3f(0, 0, -1) : tg::normalize(toward);
+    auto const right = tg::dual(tg::cross(toward, up));
+
+    auto out = *this;
+    out.follows_camera = false;
+    for (auto i = 0; i < lobe_count; ++i)
+    {
+        auto const l = tg::normalize(lobes[i].direction);
+        out.lobes[i].direction = right * l[0] + up * l[1] + toward * l[2];
+    }
+    return out;
+}
+
+background background::of_dome(sv::dome const& d)
+{
+    CC_ASSERT(d.lobe_count >= 0 && d.lobe_count <= dome::max_lobes, "a dome holds at most max_lobes lobes");
+    auto bg = background{.is_dome = true, .analytic = d};
+
+    // Every part is zonal, so each projects from its moments alone: the gradient about +y, by quadrature in its height,
+    // per channel since it is a color per height, and each lobe about its own axis in closed form.
+    // Cheap enough to redo every frame a following dome turns.
+    constexpr int steps = 1024;
+    for (auto ch = 0; ch < 3; ++ch)
+    {
+        auto moments = legendre_moments{};
+        for (auto i = 0; i < steps; ++i)
+        {
+            auto const mu = -1.0 + (f64(i) + 0.5) * (2.0 / f64(steps));
+            auto const value = f64(d.gradient(tg::vec3f(0, f32(mu), 0))[ch]) * (2.0 / f64(steps));
+            moments.f[0] += value;
+            moments.f[1] += value * mu;
+            moments.f[2] += value * 0.5 * (3.0 * mu * mu - 1.0);
+            moments.f[3] += value * 0.5 * (5.0 * mu * mu * mu - 3.0 * mu);
+        }
+        auto unit = tg::vec3f(0, 0, 0);
+        unit[ch] = 1.0f;
+        add_zonal(bg.sh, tg::vec3f(0, 1, 0), moments, unit);
+    }
+    for (auto i = 0; i < d.lobe_count; ++i)
+    {
+        auto const& l = d.lobes[i];
+        add_zonal(bg.sh, tg::normalize(l.direction), vmf_moments(f64(l.concentration)), l.radiance);
+    }
     return bg;
+}
+
+background background::seen_from(sv::camera const& cam) const
+{
+    if (!is_dome || !analytic.follows_camera)
+        return *this;
+    return of_dome(analytic.seen_from(cam));
 }
 
 background_gpu background_gpu::from(background const& bg)
