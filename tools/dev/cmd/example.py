@@ -21,6 +21,7 @@ from tools import dev
 from tools.dev import console
 from tools.dev.lib.pipeline.captures import IMAGE_MECHANISMS, SIDECAR_NAME, SidecarError, captures_for
 from tools.dev.lib.pipeline.eligibility import nexus_filter
+from tools.dev.lib.core.ui import is_ci
 from tools.dev.lib.pipeline.examples import (capture_directory, collect_examples, is_example_target,
                                              resolve_example, select_examples)
 
@@ -30,6 +31,9 @@ from . import args as a
 from .context import Context
 
 NAME = "example"
+
+# Asks for windows without the flag, for a terminal that hides its TTY from Python: Git Bash's mintty on Windows is the known one.
+WINDOW_ENV_VAR = "SC_EXAMPLE_WINDOW"
 
 
 def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -45,6 +49,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
     p.add_argument("--no-configure", action="store_true", help="Skip automatic configure step")
     p.add_argument("--timeout", type=float, default=0.0, metavar="SECS",
                    help="Kill the example after SECS (default: 0, no limit — an example may be interactive)")
+    p.add_argument("--window", action="store_true",
+                   help="Open the example's windows even without an interactive terminal. "
+                        "Without a TTY (a batch job, CI, an agent session) a run is refused unless it asks for windows "
+                        f"with this flag or {WINDOW_ENV_VAR}=1, or renders headless with --capture.")
     p.add_argument("--background", action="store_true",
                    help="Ask the example not to steal focus: its windows appear without being activated. "
                         "Sets SC_REQUEST_BACKGROUND=1, which sr::window_system reads (sr::background_request_env_var).")
@@ -81,6 +89,10 @@ def add_parser(sub: argparse._SubParsersAction) -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace, ctx: Context) -> None:
+    # Before the build, so a refused run costs nothing.
+    if _would_open_windows(args) and not _windows_allowed(args):
+        ctx.die(_WINDOW_REFUSAL.format(match=args.match, env=WINDOW_ENV_VAR))
+
     presets = ctx.resolve_build_presets(args)
     preset = presets[0]
     ctx.warn_known_issues(presets)
@@ -391,6 +403,46 @@ def _refresh(ctx: Context, preset, match: str) -> None:
         copied += 1
 
     print(console.dim(f"{copied} image(s) refreshed"), file=sys.stderr)
+
+
+_WINDOW_REFUSAL = (
+    "not running {match!r}: an example may open windows, and this is no interactive terminal "
+    "(stdout or stderr is not a TTY, or CI is set): a batch job, CI or an agent session, where a window lands on someone's desktop unasked.\n"
+    "  --window      open it anyway\n"
+    "  --capture     render it headless and write an image, if its .capture.json declares one\n"
+    "  {env}=1  for an interactive terminal that hides its TTY, such as Git Bash's mintty"
+)
+
+
+def _would_open_windows(args: argparse.Namespace) -> bool:
+    """Whether this invocation runs one example as is: not a listing, not a capture, not a sweep.
+
+    `SC_CAPTURE` in the environment is a capture too, headless by the protocol: a tool driving the example that way,
+    a consumer's video or figure renderer, opens no window either.
+    """
+    if _flag_set(os.environ.get("SC_CAPTURE", "")):
+        return False
+    return (args.match is not None and args.capture is None and args.update_captures is None
+            and args.refresh_captures is None)
+
+
+def _flag_set(value: str) -> bool:
+    """An environment flag as cc::is_environment_flag_set reads one: anything but empty, 0, false, no and off."""
+    v = value.strip().lower()
+    return v != "" and v not in ("0", "false", "no", "off")
+
+
+def _windows_allowed(args: argparse.Namespace) -> bool:
+    """Whether a window may open: asked for explicitly, or somebody is at a terminal to see it.
+
+    The discriminator is the one console colors and the progress region use: both streams a TTY and no CI.
+    A redirected stream is the agent and batch case, where nobody asked for a window on the desktop.
+    """
+    if args.window:
+        return True
+    if _flag_set(os.environ.get(WINDOW_ENV_VAR, "")):
+        return True
+    return sys.stdout.isatty() and sys.stderr.isatty() and not is_ci()
 
 
 def _working_directory(ctx: Context, example) -> Path:
