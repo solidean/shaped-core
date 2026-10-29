@@ -1,0 +1,389 @@
+The scenes installed here, and the license each carries.
+A CC-BY-3.0 scene credits its author, as its text below names them, wherever it is shown.
+
+== bathroom (CC0-1.0)
+
+This is the pbrt-v3 version of 'Contemporary Bathroom' by Mareck, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/75302
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== bathroom2 (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'Salle de bain' by nacimus, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/73937
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== bmw-m6 (CC0-1.0)
+
+--------------------------------------------------------------------------------
+Thank you for downloading "BMW M6 2006" by tyrant monkey
+Released under
+Creative Commons Zero (Public Domain)
+Downloaded from http://www.blendswap.com/blends/view/3557
+
+The following is important licensing information, please keep this file for
+archival and future reference when working with the file. It's important that
+you know, understand and follow any requirements stated in this file regarding
+the usage of the materials included.
+
+Some parts of this file are marked with [#], the corresponding numbered note is
+at the end of the file.
+
+--------------------------------------------------------------------------------
+################################################################################
+
+VERY IMPORTANT LICENSE INFORMATION:
+
+This blend has been released under
+Creative Commons Zero (Public Domain)
+
+This means that you can use it for any purpose you see fit, even commercially,
+as long as you respect these requirements:
+
+	--There are no requirements for CC-0 licensed blends.
+################################################################################
+--------------------------------------------------------------------------------
+
+ABOUT THE BLEND:
+
+Ready for Blender 0
+Published on: 2010-05-17 18:11:32
+
+--------------------------------------------------------------------------------
+
+HELP US MODERATE THIS BLEND:
+If you find anomalies in this blend or any of the contained files such as:
+
+	- Missing, unneeded or corrupted files.
+	- Inaccurate/mismatching preview image on the site.
+	- Illegal distribution of third party files.
+	- Ripping from a game or other 3D repository.
+	- Uncredited or incorrect use of other CC licensed works.
+	- Some other troubling issues[1].
+
+Please submit a report from  http://www.blendswap.com/blends/view/3557
+by pressing the red button with the flag, including links and details that serve
+as evidence and can help us to solve any conflicts or issues derived from the
+contents of this file.
+
+--------------------------------------------------------------------------------
+
+Thank you for using Blend Swap!
+
+Register to get tons of more blends! http://www.blendswap.com/register
+Share your own blends with the world from http://www.blendswap.com/blends/add
+
+Get answers to your questions and doubts: http://www.blendswap.com/page/faq
+If the site doesn't work for you try here: http://www.blendswap.com/page/issues
+For questions please contact us: http://www.blendswap.com/contact
+Check out our Terms Of Use: http://www.blendswap.com/tou
+Report website bugs: http://www.blendswap.com/bugs
+
+Consider getting an associate Membership to get some neat features and
+enhancements.
+
+--------------------------------------------------------------------------------
+
+NOTES:
+
+[1] Please make sure your problem is not derived from a setting in Blender (like
+hidden layers or objects) before submitting a report under the "Other" category.
+Issues arising from this type of problem will be ignored.
+
+--------------------------------------------------------------------------------
+######################    END OF BLEND SWAP LICENSE.txt    #####################
+
+== breakfast-room (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'The Breakfast Room' by Wig42, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/75431
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== classroom (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'Japanese Classroom' by NovaZeeke, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/75940
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== classroom2 (CC0-1.0)
+
+Classroom by Christophe Seux
+
+Source: https://www.blender.org/download/demo-files/
+Original Blender download: https://download.blender.org/demo/test/classroom.zip
+
+Blender lists this demo under CC0 (Creative Commons Zero 1.0 Universal).
+License: https://creativecommons.org/publicdomain/zero/1.0/
+Legal text: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+This glTF export is derived from the Blender demo. The original author's
+ReadMe is preserved alongside this file as ReadMe.txt.
+
+== coffee-maker (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'Coffee Maker' by cekuhnen, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/81696
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== cornell-box (CC0-1.0)
+
+This is the pbrt-v3 version of 'Cornell Box' by Benedikt Bitterli, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: https://benedikt-bitterli.me/resources
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== cornell-caustic (CC0-1.0)
+
+This is the pbrt-v3 version of 'Water Caustic' by Benedikt Bitterli, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: https://benedikt-bitterli.me/resources
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== dragon (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'Dragon' by Delatronic, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/80766
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== glass-of-water (CC0-1.0)
+
+This is the pbrt-v3 version of 'Glass of Water' by aXel, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/21697
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== house (CC0-1.0)
+
+This is the pbrt-v3 version of 'Victorian Style House' by MrChimp2313, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/74114
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== kitchen (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'Country Kitchen' by Jay-Artist, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/42851
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== lamp (CC0-1.0)
+
+This is the pbrt-v3 version of 'Little Lamp' by UP3D, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/57000
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== living-room (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'The Grey & White Room' by Wig42, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/75795
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== living-room-2 (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'The White Room' by Jay-Artist, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/41683
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== modern-hall (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'Modern Hall' by NewSee2l035, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: https://blendswap.com/blend/6304
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== pontiac-gto (CC0-1.0)
+
+This is the pbrt-v3 version of 'Pontiac GTO 67' by thecali, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/75850
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== spaceship (CC0-1.0)
+
+This is the pbrt-v3 version of '4060.b Spaceship' by thecali, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/75686
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== staircase (CC-BY-3.0)
+
+This is the pbrt-v3 version of 'The Wooden Staircase' by Wig42, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: http://www.blendswap.com/blends/view/77668
+
+This scene was released under a CC-BY license.
+It may be copied, modified and used commercially without permission, as long as:
+
+  * Appropriate credit is given to the original author
+  * A link to the license is provided
+  
+For more information about the license, please see
+https://creativecommons.org/licenses/by/3.0/
+
+== veach-ajar (CC0-1.0)
+
+This is the pbrt-v3 version of 'Veach, Ajar' by Benedikt Bitterli, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: https://benedikt-bitterli.me/resources
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== veach-bidir (CC0-1.0)
+
+This is the pbrt-v3 version of 'Veach, Bidir Room' by Benedikt Bitterli, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: https://benedikt-bitterli.me/resources
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
+
+== veach-mis (CC0-1.0)
+
+This is the pbrt-v3 version of 'Veach, MIS' by Benedikt Bitterli, downloaded from https://benedikt-bitterli.me/resources/
+
+The original file may be obtained here: https://benedikt-bitterli.me/resources
+
+This scene was released under a CC0 license and is in the public domain.
+It may be copied, modified and used commercially, without permission or
+attribution. However, crediting the artist is encouraged.
+
+For more information about the license, please see
+https://creativecommons.org/publicdomain/zero/1.0/
