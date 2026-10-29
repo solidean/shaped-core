@@ -317,6 +317,15 @@ fun instance_base_color(inst: scene.instance, ctx: material.shading_context){tra
     let c = emission_factor(inst.base_kind, inst.base_offset, inst.base_uv_offset, inst.base_frequency, inst.base_channels, inst.base_sampler, inst.base_transform, 3u, ctx)
     return saturate(c)
 
+/// How many refractions through smooth glass a path takes without spending a bounce; past them, each spends one again.
+/// A hollow vessel is four interfaces deep, which would otherwise leave nothing of `max_bounces` for what lies behind it.
+/// `wavefront_routine::free_refractions` is the same number, for the rounds a draining frame runs.
+const free_refraction_cap = 8u
+
+/// Whether a continuation drawn from `lobe` on a surface of `roughness` is a refraction through smooth glass, which `free_refraction_cap` lets spend no bounce.
+/// A total internal reflection is the transmission lobe's too, and is free alike.
+fun is_free_refraction(lobe: uint, roughness: float) -> bool => lobe == openpbr.bsdf_lobe_transmission and roughness < 0.1
+
 /// The smooth normal of `inst` where `ctx` sits, turned to `geometric`'s side: its tangent frame's +z in the world, or `geometric` where it has none per vertex or corner.
 fun instance_shading_normal(inst: scene.instance, ctx: material.shading_context, geometric: float3){traced, bindless} -> float3:
     if inst.frame_offset == scene.no_offset or inst.frame_frequency == material.frequency_per_triangle => return geometric

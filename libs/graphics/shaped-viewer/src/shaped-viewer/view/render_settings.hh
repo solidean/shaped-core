@@ -109,7 +109,8 @@ struct sv::render_settings
     /// so this trades how fast a moving camera settles against how smooth it stays while it moves.
     i32 samples_per_pixel = 4;
 
-    /// Path length: the primary hit plus this many diffuse bounces.
+    /// Path length: the primary hit plus this many bounces.
+    /// Up to eight refractions through smooth glass spend none, so a hollow glass vessel still leaves the path its bounces for what lies behind.
     i32 max_bounces = 5;
 
     /// Which path tracer traces this layer, or `raster` to draw it instead; switching restarts its image.

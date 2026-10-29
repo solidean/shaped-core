@@ -93,9 +93,11 @@ rays path_rays:
         // Scattering events do not count against `max_bounces`: Russian roulette ends a long walk, and `pt.scatter_cap` guards it.
         let mut scatters = 0
 
+        // `b` counts every surface the path continued from, and `free` those that were free refractions, which `max_bounces` does not count.
         let mut b = 0
-        while b < f.max_bounces:
-            let last_bounce = if b + 1 >= f.max_bounces => 1u else 0u
+        let mut free = 0
+        while b - free < f.max_bounces:
+            let last_bounce = if b - free + 1 >= f.max_bounces => 1u else 0u
             let mut p = tracer.surface_payload_for(rng, medium_sigma_t, medium_albedo, medium_g, channel, last_bounce)
             let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(dir.x, dir.y, dir.z), t_min = 1e-3, t_max = 1e4)
             trace(tracer.traced.world, r, path_rays.surface, mut p)
@@ -321,6 +323,7 @@ rays path_rays:
             medium_g = next_g
             channel = next_channel
             b += 1
+            if tracer.is_free_refraction(lobe, roughness) and free < (tracer.free_refraction_cap as int) => free += 1
 
         // One non-finite path would poison this pixel forever, since the mean is blended in place.
         // It counts as a sample of zero instead: the sum is still divided by `spp`, as the wavefront counts one.

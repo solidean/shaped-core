@@ -24,6 +24,12 @@ const path_flag_primary = 2u
 const path_flag_prev_nee_reachable = 4u
 /// the path belongs to the specular signal, decided by the lobe its first continuation was drawn from
 const path_flag_specular = 8u
+/// how many of `path_state::bounce` were free refractions, `is_free_refraction`, which `max_bounces` does not count
+const path_free_shift = 8u
+const path_free_mask = 0xf00u
+
+/// The bounces `st` has spent against `max_bounces`: every surface it continued from, less its free refractions.
+fun spent_bounces(st: path_state) -> uint => st.bounce - ((st.flags & path_free_mask) >> path_free_shift)
 
 /// `hit_record::kind`.
 const hit_none = 0u
@@ -559,7 +565,7 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         let local = openpbr.frame_from_quaternion(surface.geometry_tangent_frame, surface.geometry_handedness)
         authored = openpbr.frame(normalize(instance_to_world(inst, local.t)), normalize(instance_to_world(inst, local.b)), normalize(instance_to_world(inst, local.n)))
 
-    let last_bounce = if st.bounce + 1u >= (f.max_bounces as uint) => 1u else 0u
+    let last_bounce = if spent_bounces(st) + 1u >= (f.max_bounces as uint) => 1u else 0u
     let mut p = surface_payload_for(st.rng, md.sigma_t, md.albedo, md.g, md.channel, last_bounce)
     let mut light_s = no_light_sample()
     let mut env_s = no_light_sample()
@@ -622,15 +628,19 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
         else:
             st.flags = st.flags & ~path_flag_prev_nee_reachable
         st.bounce = b + 1u
+        let free = (st.flags & path_free_mask) >> path_free_shift
+        if is_free_refraction(p.lobe, p.roughness) and free < free_refraction_cap:
+            st.flags = (st.flags & ~path_free_mask) | ((free + 1u) << path_free_shift)
 
         // The offset follows the direction rather than the normal: a refracted continuation leaves on the far side.
         let side = if dot(p.direction, p.normal) < 0.0 => -1e-3 else 1e-3
         traced.path_rays[s] = path_ray(ray_origin + ray_dir * hit.t + p.normal * side, p.direction)
         traced.path_media[s] = path_medium(p.medium_sigma_t, p.medium_albedo, p.medium_g, p.channel)
 
-        if st.bounce >= (f.max_bounces as uint):
+        let spent = spent_bounces(st)
+        if spent >= (f.max_bounces as uint):
             continues = false
-        else if f.roulette_after > 0u and st.bounce > f.roulette_after:
+        else if f.roulette_after > 0u and spent > f.roulette_after:
             // Russian roulette ends a path that carries little, without taking its energy with it.
             let q = clamp(max(next_throughput.x, max(next_throughput.y, next_throughput.z)), 0.05, 1.0)
             let u_roulette = pt.rand(mut rng)

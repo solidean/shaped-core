@@ -55,7 +55,7 @@ sv::render_settings              // { int samples_per_pixel, max_bounces; render
                                  //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
 sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each fits its share with whole rounds, then with a partial fill
                                  //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
-sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + 1 + medium_roulette_after (16, pt.roulette_after)
+sv::wavefront_routine::drain_rounds(max_bounces) // -> i32: a moving frame's rounds, max_bounces + free_refractions (8) + 1 + medium_roulette_after (16, pt.roulette_after)
 sv::render_mode              // automatic (default) | megakernel | wavefront | raster — switching restarts the layer; the wavefront reads rounds_per_frame instead of samples_per_pixel
                                  //   automatic: the wavefront where the device has raytracing_pipeline and ray_query, raster with one warning where not;
                                  //   the viewer resolves it before planning, and a plan built by hand traces it with the wavefront
