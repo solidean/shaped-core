@@ -146,7 +146,7 @@ ASYNC_INVOCABLE_TEST("sv - the SGL path tracer helpers keep what each promises",
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
+        SKIP("no SGL compiler for this backend to build the probe shader");
 
     auto const& entry = sv_test::shaders::pt_support_probe::pt_support_measure;
     auto const compiled_shader = entry->acquire(ctx);

@@ -31,10 +31,7 @@ void set_acquire_context(context_provider provider);
 
 namespace impl
 {
-/// Creates the context viewers use when no provider was set, preferring a hardware device and falling back to WARP.
-///
-/// Today that is always dx12; which backend it reaches for is a per-target choice that will grow with the platforms sv
-/// supports, and is why this sits behind a hook rather than in the viewer.
+/// Creates the context viewers use when no provider was set: dx12 on Windows, hardware first and then WARP, and metal on Apple platforms.
 ///
 /// It creates unconditionally — `acquire_viewer_context` is what makes that happen only once.
 /// Fails, rather than asserting, when sv was built with no backend to fall back on.

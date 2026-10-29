@@ -225,7 +225,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - traces the megakernel's image of t
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const scene = make_scene(resources);
@@ -337,7 +337,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a carrying frame keeps every slot 
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const scene = make_scene(resources);
@@ -411,7 +411,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a still frame of one round keeps t
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const scene = make_scene(resources);
@@ -504,7 +504,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a partial fill starts its share of
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
     if (ctx.metrics.adapter().is_software)
         SKIP("statistical convergence is checked on hardware, not WARP");
 
@@ -735,7 +735,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a sample target stops every pixel 
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const scene = make_scene(resources);
@@ -769,7 +769,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a pixel's samples are the same wha
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const scene = make_scene(resources);
@@ -825,7 +825,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a primary depth first asked for on
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const scene = make_scene(resources);
@@ -909,7 +909,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - picking lights by power keeps the 
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
     if (ctx.metrics.adapter().is_software)
         SKIP("statistical convergence is checked on hardware, not WARP");
 
@@ -1033,7 +1033,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a dim light near what it lights ke
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
     if (ctx.metrics.adapter().is_software)
         SKIP("statistical convergence is checked on hardware, not WARP");
 
@@ -1137,7 +1137,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a lossless interior is invisible u
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     using binding = sv::material_attribute_binding;
     auto const environment = tg::vec3f(0.5f, 0.5f, 0.5f);
@@ -1251,7 +1251,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a cutout cuts where its opacity sa
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto positions = cc::vector<tg::pos3f>();
     for (auto const p : {tg::pos3f(-2, -2, 0), tg::pos3f(2, -2, 0), tg::pos3f(2, 2, 0), tg::pos3f(-2, -2, 0),
@@ -1314,7 +1314,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - a coverage cutout tosses a coin pe
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto positions = cc::vector<tg::pos3f>();
     for (auto const p : {tg::pos3f(-2, -2, 0), tg::pos3f(2, -2, 0), tg::pos3f(2, 2, 0), tg::pos3f(-2, -2, 0),
@@ -1377,7 +1377,7 @@ ASYNC_INVOCABLE_TEST("sv::wavefront_routine - an image past one row of groups is
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     constexpr auto size = tg::vec2i(4096, 1040);
     static_assert(isize(size[0]) * isize(size[1]) > isize(65535) * 64, "the image needs a second row of groups");

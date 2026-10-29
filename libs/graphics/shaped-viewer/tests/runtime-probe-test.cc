@@ -408,7 +408,7 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
+        SKIP("no SGL compiler for this backend to build the probe shader");
 
     auto const memory = make_memory();
     auto const cases = make_cases();

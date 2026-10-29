@@ -43,7 +43,7 @@ cc::result<cc::unit> metal_context::create_systems(isize upload_bytes, isize dow
     CC_RETURN_IF_ERROR(_queries.create(*this));
 
     CC_RETURN_IF_ERROR(_upload_ring.create(_device, upload_bytes, "sg inline upload ring", "upload"));
-    CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "download"));
+    CC_RETURN_IF_ERROR(_download_ring.create(_device, download_bytes, "sg inline download ring", "readback"));
     _upload_ring.count_overflow_into(&_stats);
     _download_ring.count_overflow_into(&_stats);
     _epochs.count_waits_into(&_stats);
@@ -99,7 +99,7 @@ void metal_context::set_inline_upload_budget(isize bytes)
 
 void metal_context::set_inline_download_budget(isize bytes)
 {
-    resize_ring(_download_ring, bytes, "sg inline download ring", "download");
+    resize_ring(_download_ring, bytes, "sg inline download ring", "readback");
 }
 
 void metal_context::report_feedback_error(sg::device_error_kind kind, cc::string_view message)

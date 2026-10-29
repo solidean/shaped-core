@@ -101,9 +101,10 @@ metal_staging_ring::reservation metal_staging_ring::reserve(isize size)
             return true;
         });
     if (warn)
-        CC_LOG_WARNING("an inline transfer of {} bytes did not fit the {}-byte {} ring, so it was staged in a one-off "
-                       "allocation — correct but slow. Raise the matching inline budget past the peak an epoch needs",
-                       size, _capacity, _kind);
+        CC_LOG_WARNING("an inline {} of {} bytes did not fit the {}-byte {} ring, so it was staged in a one-off "
+                       "allocation — correct but slow. Raise {} past the peak an epoch needs",
+                       _kind, size, _capacity, _kind,
+                       _kind == "upload" ? "ctx.upload.set_inline_budget" : "ctx.download.set_budget");
 
     // No room, so this transfer gets storage of its own rather than an error.
     // A single transfer larger than the whole ring lands here too, and is perfectly legitimate.

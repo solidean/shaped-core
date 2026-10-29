@@ -244,6 +244,11 @@ Each of these is a fact about Metal rather than a gap in the backend.
   So every pipeline build is taken under `pipeline_compilation_lock()`, process-wide rather than per context.
   The state being corrupted is the device's, and a Mac hands the same device to everyone who asks.
   `sg metal - pipelines build concurrently from several contexts` is the gate, and it is probabilistic: without the lock it takes the binary down within a run or two.
+- **A bounding-box intersection function linked after several triangle ones never runs.**
+  Its boxes are missed, and in sv's path tracer traversal hung until the command buffer timed out.
+  Where it sits in the table does not matter, only its place among the pipeline's linked functions: two triangle groups with any hits ahead of it are enough, on an M4 under macOS 26.
+  So a pipeline links every procedural group's intersection function first.
+  `sg - an SGL ray-tracing pipeline traces host groups of both kinds in one scene` is the gate.
 - **Off-frame transfer needs three queues, and each one is correctness rather than tuning.**
   A wait blocks everything committed after it on that queue.
   So an async transfer ordering behind an in-flight stream blocks the stream's own copies too when they share a queue, and the stream never finishes and the wait never clears.

@@ -20,7 +20,7 @@ What it is for, in order:
 - **A frame paced by its live paths**, with no dispatch bounded by the worst path in it.
 - **Material coherence**: each material's shading runs over only the paths that hit it.
 - **Paths that outlive a frame**, so a still view converges on a fixed per-frame budget.
-- **dx12, vulkan and metal.** It runs on dx12 and vulkan; metal is open, below.
+- **dx12, vulkan and metal.**
 
 **webgpu is out of scope.**
 Inline ray queries would reach it, but it has no bindless binding arrays, and sv's material model is built on them.
@@ -360,8 +360,6 @@ Parity is pinned twice: `wavefront-trace-test.cc` against the megakernel on the 
 `wavefront-trace-test.cc` holds media and glass to the furnace's analytic expectation instead, and cutouts to the fraction they keep.
 
 What is still open:
-
-- **metal.** The tracer has never run there, and running there is part of done.
 
 - **A draining frame is bounded rather than empty.**
   It runs `wavefront_routine::drain_rounds(max_bounces)`, `max_bounces + 17` rounds, enough for every surface bounce and for a medium walk up to where its roulette starts.

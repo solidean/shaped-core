@@ -9,9 +9,9 @@ The authoring surface sits at the root; everything else is one folder down — `
 > **Scope note:** early stage, in three layers.
 > A frame is authored through the fluent handles (`sv::interactive` → `frame` → `window_ref` → `view_ref` → `scene_ref`), flattened into a `render_plan`, and replayed by `viewer_renderer`.
 > A **view is the definition of one texture**, and a view's layer may itself be a whole layout tree — so views nest, at any depth.
-> Tracing needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracers run on dx12 and vulkan.
+> Tracing needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracers run on dx12, vulkan and metal.
 > A raster layer needs none, and `render_mode::automatic`, the default, rasterizes where the device cannot trace.
-> The default context and the examples are dx12's.
+> The default context and the examples are dx12's on Windows and metal's on Apple platforms.
 > The API is present everywhere; without a backend a routine just draws nothing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 

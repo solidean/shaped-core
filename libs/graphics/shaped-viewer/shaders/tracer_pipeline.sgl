@@ -11,6 +11,7 @@ require raytracing_pipeline
 use openpbr
 use pt
 use scene
+use slug
 use tracer
 
 /// The tracer's two rays, restated from module `tracer`, whose shading traces the shadow ray through its own.
@@ -19,7 +20,7 @@ rays path_rays:
     occlusion: tracer.shadow_payload
 
 /// One sample's path, walked until it escapes, runs out of bounces or is absorbed — what `path_trace` does per sample.
-@raygen fun path_trace(@launch_id id: int3, @launch_size size: int3){tracer.traced, tracer.bindless}:
+@raygen fun path_trace(@launch_id id: int3, @launch_size size: int3){tracer.traced, tracer.bindless, slug.tables}:
     let f = tracer.traced.frame[0]
     let px = uint2(id.x as uint, id.y as uint)
     let dim = uint2(size.x as uint, size.y as uint)
@@ -390,7 +391,7 @@ fun component_of(v: float3, i: uint) -> float:
 
 /// The surface ray's miss: the ray escaped to the SH environment, whose radiance rides back in `emission`.
 /// Every field is written so the caller reads them all unconditionally; `hit_t` below 0 signals the escape.
-@miss fun path_miss(p: mut tracer.surface_payload, r: ray){tracer.traced, tracer.bindless}:
+@miss fun path_miss(p: mut tracer.surface_payload, r: ray){tracer.traced, tracer.bindless, slug.tables}:
     p.direct_diffuse = float3(0.0)
     p.direct_specular = float3(0.0)
     p.emission = scene.background_radiance(tracer.background_sh(), normalize(float3(r.direction.x, r.direction.y, r.direction.z)))
@@ -407,7 +408,7 @@ fun component_of(v: float3, i: uint) -> float:
     p.light_pdf = -1.0
 
 /// The shadow ray's miss: reached only when nothing occluded the ray, so it marks it visible.
-@miss fun shadow_miss(p: mut tracer.shadow_payload){tracer.traced, tracer.bindless}:
+@miss fun shadow_miss(p: mut tracer.shadow_payload){tracer.traced, tracer.bindless, slug.tables}:
     p.visible = 1.0
 
 /// The tracer: the raygen above, a miss per ray type in the order `path_rays` names them, and the host's hit groups.

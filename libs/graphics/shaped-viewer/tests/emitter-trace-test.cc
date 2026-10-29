@@ -279,7 +279,7 @@ void check_channels_match(cc::span<tg::vec3f const> image,
 [[nodiscard]] cc::string_view skip_reason(sg::context& ctx)
 {
     if (!sv_test::shared_env().has_compiler)
-        return "no SGL compiler that reaches DXIL to build the path-tracing shaders";
+        return "no SGL compiler for this backend to build the path-tracing shaders";
     if (!can_trace(ctx, sv::render_mode::megakernel))
         return "device reports no ray tracing support";
     if (ctx.metrics.adapter().is_software)
@@ -566,7 +566,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter's area CDF is monotone, ends at one, and g
 {
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the kernels");
+        SKIP("no SGL compiler for this backend to build the kernels");
 
     constexpr auto triangle_count = 300;
     constexpr auto degenerate = 7;
@@ -653,7 +653,7 @@ ASYNC_INVOCABLE_TEST("sv - an emitter's exact world area under a non-uniform pla
 {
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the kernels");
+        SKIP("no SGL compiler for this backend to build the kernels");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto const cube

@@ -178,9 +178,25 @@ cc::result<sg::raytracing_pipeline_handle> metal_context::create_metal_raytracin
         hit_groups.push_back(entry);
     }
 
-    // The linked set every raygen pipeline is built against.
+    // The linked set every raygen pipeline is built against, a procedural group's intersection function first.
+    // **A bounding-box intersection function linked after several triangle ones is never run**: its boxes miss, or traversal hangs.
+    // Linked ahead of them, it runs from any slot of the table; `sg - an SGL ray-tracing pipeline traces host groups of both kinds in one scene` pins it.
+    auto const is_box_intersection = [&](MTL4::BinaryFunction const* f)
+    {
+        for (auto const& g : hit_groups)
+            if (g.is_procedural && g.intersection == f)
+                return true;
+        return false;
+    };
+    auto ordered = cc::vector<MTL4::BinaryFunction*>();
+    for (auto* const f : linked)
+        if (is_box_intersection(f))
+            ordered.push_back(f);
+    for (auto* const f : linked)
+        if (!is_box_intersection(f))
+            ordered.push_back(f);
     auto* const linked_array
-        = NS::Array::array(reinterpret_cast<NS::Object* const*>(linked.data()), NS::UInteger(linked.size()));
+        = NS::Array::array(reinterpret_cast<NS::Object* const*>(ordered.data()), NS::UInteger(ordered.size()));
 
     auto* const linking = MTL4::PipelineStageDynamicLinkingDescriptor::alloc()->init();
     linking->setBinaryLinkedFunctions(linked_array);
