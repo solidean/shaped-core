@@ -1089,6 +1089,7 @@ leaf.add_view("id") -> view_ref;  leaf.post_process(p);  leaf.fit(m);  leaf.samp
 // every leaf shows its view's display_name in a 22-logical-px strip above it unless title(false); the strip is cut from its rect
 scene.add_mesh(sv::mesh)    -> mesh_ref                   // geometry, attributes and textures upload here, keyed by the mesh's own hashes
 scene.add_mesh(sv::resident_mesh)         -> mesh_ref                   // already resources: nothing to look up
+scene.add_mesh(sv::mesh, sv::mesh_lifetime::frame) -> mesh_ref          // geometry uploaded inline for this frame alone: never streams, never a placeholder
 scene.add_light("id", sv::light) -> light_ref               // the id is hashed under the id stack, like a view's; one id twice in a layer ASSERTS
 scene.add_point_light / add_spot_light / add_rect_light / add_directional_light / add_sun_light("id", ...) -> light_ref
 scene.fallback_light(optional<light>)                        // traced when the layer has none; a sun by default, nullopt for none

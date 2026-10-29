@@ -72,6 +72,10 @@ struct resolved_view
 
     /// the parameter block each item shades with, parallel to `records` — its CONTENT identity, for the trace hash
     cc::vector<instance_id> parameter_blocks;
+
+    /// Per instance, the geometry's content key when it is a frame mesh, and zero when a manager holds it.
+    /// A frame mesh's BLAS and buffers are new every frame, so the trace hash reads this in their place.
+    cc::vector<cc::hash128> frame_contents;
     cc::vector<material_permutation const*> hit_groups;
 
     /// the shader key of `hit_groups[i]`, kept for the trace hash rather than for the pipeline
@@ -201,6 +205,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
             out.records.push_back(resources.describe_instance(cmd, item.quadrics, item.instance));
             place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
             out.parameter_blocks.push_back(item.instance);
+            out.frame_contents.push_back({});
             // A pending batch is the cube a raster frame draws too; a landed one has no triangles to draw.
             out.triangle_counts.push_back(pending ? u32(resources.meshes.placeholder_vertices().element_count() / 3) : 0);
 
@@ -212,6 +217,27 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
 
         if (item.kind != scene_item_kind::triangle_mesh)
             continue;
+
+        // A frame mesh is uploaded right here, so it is never pending and never a placeholder; it lights nothing (see `mesh_lifetime::frame`).
+        if (item.lifetime == mesh_lifetime::frame)
+        {
+            CC_ASSERT(resources.contains_instance(item.instance), "scene_item references an unknown instance_id");
+            auto const& m = resources.acquire_frame_mesh(cmd, item.frame_geometry, traced);
+            auto const shade_fallback = !resources.attributes_resident(item.instance);
+            auto const permutation = hit_group_of(out, shade_fallback ? fallback.key : item.shader_key, resources);
+            auto inst = sg::tlas_instance{.blas = traced ? m.blas : sg::blas_handle(),
+                                          .instance_id = u32(out.instances.size()),
+                                          .hit_group_offset = permutation * 2,
+                                          .opaque_override = !out.hit_groups[permutation]->opacity.can_cut_out()};
+            pack_transform(inst, item.transform);
+            out.instances.push_back(cc::move(inst));
+            out.records.push_back(resources.describe_instance(cmd, m, item.instance));
+            place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
+            out.parameter_blocks.push_back(item.instance);
+            out.frame_contents.push_back(item.frame_geometry.hash);
+            out.triangle_counts.push_back(u32(m.triangle_count));
+            continue;
+        }
 
         auto const* const mesh = resources.meshes.get_ptr(item.mesh);
         CC_ASSERT(mesh != nullptr, "scene_item references an unknown mesh_id");
@@ -261,6 +287,7 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         out.records.push_back(resources.describe_instance(cmd, item.mesh, item.instance));
         place_instance_record(out.records.back(), out.instances.back(), out.hit_groups[permutation]->opacity);
         out.parameter_blocks.push_back(item.instance);
+        out.frame_contents.push_back({});
         out.triangle_counts.push_back(triangle_count);
 
         // An instance lights the scene where its own permutation declares an emission that is not dark throughout.
@@ -507,10 +534,16 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     h = cc::combine_hash(h, cc::make_hash(resolution[0], resolution[1], shader_generation));
 
     // tlas_instance holds a handle and an optional, so its padding is not hashable — take the fields the build reads.
-    for (auto const& inst : r.instances)
+    // A frame mesh's BLAS is new every frame, so its geometry's content key stands in for it: an unchanged mesh keeps the image.
+    for (auto i = isize(0); i < r.instances.size(); ++i)
     {
+        auto const& inst = r.instances[i];
+        auto const content = r.frame_contents[i];
         h = cc::combine_hash(h, cc::make_hash_of_bytes(cc::span<float const>(inst.transform, 12).as_bytes()));
-        h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, inst.blas.get()));
+        if (content == cc::hash128())
+            h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, inst.blas.get()));
+        else
+            h = cc::combine_hash(h, cc::make_hash(inst.instance_id, inst.hit_group_offset, content.low, content.high));
     }
 
     // The instance table is the whole of what a hit reads, geometry and material parameters alike, so hashing the
@@ -520,10 +553,16 @@ shaders::tracer::frame_constants make_frame_constants(view_data const& v,
     // The index is epoch-scoped by contract even where the slot table happens to hand back the same one, so it says
     // nothing about the image and leaving it in would risk restarting the estimator for nothing.
     // The `instance_id` beside it is the content identity that field stood for, since one is minted per `parameter_key`.
-    for (auto const& rec : r.records)
+    // A frame mesh's buffers are new every frame as well, so their indices are taken out with it; its content key above covers them.
+    for (auto i = isize(0); i < r.records.size(); ++i)
     {
-        auto anonymized = rec;
+        auto anonymized = r.records[i];
         anonymized.param_buffer = 0;
+        if (r.frame_contents[i] != cc::hash128())
+        {
+            anonymized.vertices = 0;
+            anonymized.indices = 0;
+        }
         h = cc::combine_hash(
             h, cc::make_hash_of_bytes(cc::span<shaders::tracer::instance_record const>(&anonymized, 1).as_bytes()));
     }

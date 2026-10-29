@@ -76,6 +76,8 @@ struct render_settings;
 enum class render_mode : u8; // how a layer is drawn: automatic, one of two path tracers, or raster (render_settings.hh)
 struct scene_item;
 enum class scene_item_kind : u8; // which arm of a scene_item is live (scene_item.hh)
+enum class mesh_lifetime : u8; // whether a mesh's geometry is held by the managers or uploaded for one frame (scene_item.hh)
+struct frame_mesh;             // geometry uploaded for one epoch (gpu_resource_manager.hh)
 struct triangle_geometry;
 struct quadric3;             // a quadric surface, as the 10 entries of the symmetric 4x4 Q (scene/quadric.hh)
 struct quadric_primitive;    // one drawn quadric: a surface, a clipper, and the box both are expressed about

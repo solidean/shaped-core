@@ -172,6 +172,9 @@ public:
     /// and its declared default applies only where neither supplies one.
     mesh_ref add_mesh(sv::mesh const& mesh);
 
+    /// The same, with the geometry's lifetime chosen: `mesh_lifetime::frame` uploads it inline for this frame alone (see `sv::mesh_lifetime`).
+    mesh_ref add_mesh(sv::mesh const& mesh, mesh_lifetime lifetime);
+
     /// The same for a mesh already made of resources — nothing to look up, since its ids are minted.
     /// This is the path a compute-produced geometry takes, and the one to prefer when the same mesh is placed many times.
     mesh_ref add_mesh(sv::resident_mesh const& mesh);

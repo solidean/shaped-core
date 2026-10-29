@@ -239,6 +239,7 @@ void gpu_resource_manager::advance_to(sg::epoch e)
     drawings.begin_frame(e);
     for (auto& t : _tables)
         t.acquired.clear();
+    _frame_meshes.clear(); // their transient buffers died with the epoch left
     ++_record_stamp;
     _epoch = e;
 }
@@ -427,6 +428,38 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
             .link_mask = ~0u,
             .shade_group = 0,
             .emitter = 0xffffffffu}; // lights nothing until a trace's light table names it
+}
+
+shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::command_list& cmd,
+                                                                         frame_mesh const& mesh,
+                                                                         instance_id instance)
+{
+    CC_ASSERT(contains_instance(instance), "no such instance_id");
+    auto& r = _instances[isize(u32(instance))];
+
+    // A raw triangle list names the stand-in, since a record has to name some buffer there.
+    auto const& indices = mesh.is_indexed ? mesh.indices : meshes.index_stand_in();
+
+    // Attributes still streaming shade the real geometry through the fallback, which reads no parameter block, as describe_instance does for a resident mesh.
+    if (!attributes_resident(instance))
+        return {.param_buffer = u32(acquire_buffer(meshes.index_stand_in().raw()->as_raw_readonly())),
+                .param_offset = 0,
+                .vertices = u32(acquire_buffer(mesh.vertices.raw()->as_raw_readonly())),
+                .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
+                .is_indexed = mesh.is_indexed ? 1u : 0u,
+                .link_mask = ~0u,
+                .shade_group = 0,
+                .emitter = 0xffffffffu};
+
+    _upload_parameters(cmd, r);
+    return {.param_buffer = u32(acquire_buffer(r.parameters.as_readonly_buffer())),
+            .param_offset = 0,
+            .vertices = u32(acquire_buffer(mesh.vertices.raw()->as_raw_readonly())),
+            .indices = u32(acquire_buffer(indices.raw()->as_raw_readonly())),
+            .is_indexed = mesh.is_indexed ? 1u : 0u,
+            .link_mask = ~0u,
+            .shade_group = 0,
+            .emitter = 0xffffffffu};
 }
 
 bool gpu_resource_manager::attributes_resident(instance_id instance)
@@ -679,6 +712,88 @@ scene_item gpu_resource_manager::acquire_scene_item(sv::mesh const& mesh)
     slot.item = item;
     slot.item_material = resident.material;
     return item;
+}
+
+scene_item gpu_resource_manager::acquire_frame_scene_item(sv::mesh const& mesh)
+{
+    CC_ASSERT(!mesh.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
+
+    // Resolution reads the attributes and textures, never the geometry, so a resident_mesh without geometry is what it is resolved against.
+    auto bindings = cc::vector<mesh_attribute_binding>();
+    bindings.reserve(mesh.attributes.size());
+    for (auto const& a : mesh.attributes)
+    {
+        auto const uploads = a.frequency != attribute_frequency::per_instance;
+        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire(a) : attribute_id::invalid));
+    }
+    auto bound_textures = cc::vector<mesh_texture_binding>();
+    bound_textures.reserve(mesh.textures.size());
+    for (auto const& t : mesh.textures)
+        bound_textures.push_back({.name = t.name,
+                                  .source = {.texture = textures.acquire(t.source.texture),
+                                             .uv_attribute = t.source.uv_attribute,
+                                             .sampler = t.source.sampler,
+                                             .swizzle = t.source.swizzle,
+                                             .transform = t.source.transform}});
+    auto const resident = sv::resident_mesh{.name = mesh.name,
+                                            .attributes = cc::move(bindings),
+                                            .transform = mesh.transform,
+                                            .material = mesh.material,
+                                            .flags = mesh.flags,
+                                            .textures = cc::move(bound_textures),
+                                            .triangle_count = mesh.geometry.triangle_count(),
+                                            .vertex_count = mesh.geometry.vertex_count()};
+
+    auto const lib = acquire_material_library();
+    CC_ASSERT(lib.has_value(), "shaped-viewer: no material library to resolve a mesh's material through");
+    auto const material = mesh.material == material_id::invalid ? default_material(*lib.value()) : mesh.material;
+    auto const resolved = resolve_material(*lib.value(), material, resident);
+    auto const& permutation = shaders.acquire(resolved);
+
+    return {.instance = acquire_instance(resolved, permutation.layout),
+            .shader_key = permutation.key,
+            .lifetime = mesh_lifetime::frame,
+            .frame_geometry = mesh.geometry,
+            .transform = mesh.transform};
+}
+
+sv::frame_mesh const& gpu_resource_manager::acquire_frame_mesh(sg::command_list& cmd,
+                                                               triangle_geometry const& geometry,
+                                                               bool build_blas)
+{
+    auto* found = static_cast<frame_mesh*>(nullptr);
+    for (auto& m : _frame_meshes)
+        if (m.hash == geometry.hash)
+            found = &m;
+
+    if (found == nullptr)
+    {
+        // Build input only where the context builds acceleration structures, which a raster-only device refuses;
+        // readonly so a hit, or a raster vertex stage, reads the geometry back.
+        auto const builds = _ctx->supports(sg::feature::ray_query) || _ctx->supports(sg::feature::raytracing_pipeline);
+        auto usage = sg::buffer_usages(sg::buffer_usage::readonly_buffer);
+        if (builds)
+            usage = usage | sg::buffer_usage::accel_structure_build_input;
+
+        auto m = frame_mesh{.hash = geometry.hash,
+                            .vertices = _ctx->transient.create_buffer_from_data(cmd, geometry.positions.span(), usage),
+                            .is_indexed = geometry.is_indexed(),
+                            .triangle_count = geometry.triangle_count()};
+        if (m.is_indexed)
+            m.indices = _ctx->transient.create_buffer_from_data(cmd, geometry.indices.span(), usage);
+        _frame_meshes.push_back(cc::move(m));
+        found = &_frame_meshes.back();
+    }
+
+    if (build_blas && found->blas == nullptr)
+        found->blas = found->is_indexed
+                        ? cmd.raytracing.build_blas({{.vertices = found->vertices.raw(),
+                                                      .vertex_count = found->vertices.element_count(),
+                                                      .indices = found->indices.raw(),
+                                                      .index_count = found->indices.element_count()}})
+                        : cmd.raytracing.build_blas(
+                              {{.vertices = found->vertices.raw(), .vertex_count = found->vertices.element_count()}});
+    return *found;
 }
 
 scene_item gpu_resource_manager::acquire_scene_item(sv::resident_quadric_set const& set)

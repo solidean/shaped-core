@@ -203,6 +203,15 @@ mesh_ref scene_ref::add_mesh(sv::mesh const& mesh)
     return mesh_ref(_frame, _view, _layer, u32(items.size() - 1));
 }
 
+mesh_ref scene_ref::add_mesh(sv::mesh const& mesh, mesh_lifetime lifetime)
+{
+    if (lifetime == mesh_lifetime::resident)
+        return add_mesh(mesh);
+    auto& items = target().items;
+    items.push_back(_frame->resources().acquire_frame_scene_item(mesh));
+    return mesh_ref(_frame, _view, _layer, u32(items.size() - 1));
+}
+
 mesh_ref scene_ref::add_mesh(sv::resident_mesh const& mesh)
 {
     auto& items = target().items;

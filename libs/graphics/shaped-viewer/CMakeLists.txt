@@ -320,6 +320,7 @@ if(SC_BUILD_TESTS)
             tests/wavefront-view-test.cc
             tests/raster-test.cc
             tests/view-renderer-test.cc
+            tests/frame-mesh-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
             tests/drawing-render-test.cc
