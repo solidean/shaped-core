@@ -21,6 +21,19 @@
 
 namespace sv::impl
 {
+/// The automatic exposure of one traced layer: where it has adapted to, and the meter reading still on its way back.
+struct auto_exposure_state
+{
+    /// Whether a reading has landed; until one does, a layer shows at its compensation alone.
+    bool primed = false;
+
+    /// In stops, before the layer's compensation.
+    f32 exposure = 0.0f;
+
+    /// The partials of the meter last started, which a later frame polls; invalid once read.
+    sg::data_future<tg::vec2f> pending;
+};
+
 /// One temporal resource a view keeps across frames, and how far whatever writes it has run.
 ///
 /// `reset_hash` is the declaration's, carried over from the frame that allocated this: a mismatch against the frame
@@ -226,6 +239,9 @@ struct view_state
     /// Keyed rather than indexed because a temporal resource names itself: a traced layer's accumulator, and whatever
     /// else a view declares, have to survive a layer being inserted above them.
     cc::map<u64, temporal_slot> temporal;
+
+    /// The automatic exposure of each traced layer, indexed by layer, grown as layers ask for one.
+    cc::vector<auto_exposure_state> auto_exposure;
 
     /// The frame this view last re-recorded, which is what its refresh rate is measured against.
     /// The one piece of history with no texture to read it off, so the frame stamps it.

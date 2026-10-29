@@ -15,6 +15,7 @@ add_library(shaped-viewer
     src/shaped-viewer/shader_library.cc
     src/shaped-viewer/scene/light.cc
     src/shaped-viewer/scene/background.cc
+    src/shaped-viewer/scene/studio.cc
     src/shaped-viewer/scene/quadric.cc
     src/shaped-viewer/scene/quadric_set.cc
     src/shaped-viewer/drawing/annotation.cc
@@ -89,6 +90,7 @@ target_sources(shaped-viewer
     src/shaped-viewer/stable_id.hh
     src/shaped-viewer/scene/light.hh
     src/shaped-viewer/scene/background.hh
+    src/shaped-viewer/scene/studio.hh
     src/shaped-viewer/scene/triangle_geometry.hh
     src/shaped-viewer/scene/resident_mesh.hh
     src/shaped-viewer/scene/mesh.hh
@@ -331,6 +333,8 @@ if(SC_BUILD_TESTS)
             tests/wavefront-view-test.cc
             tests/raster-test.cc
             tests/hybrid-test.cc
+            tests/studio-test.cc
+            tests/auto-exposure-test.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc

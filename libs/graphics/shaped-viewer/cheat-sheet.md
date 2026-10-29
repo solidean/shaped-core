@@ -64,6 +64,7 @@ sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
                                  //   display: exposure (stops) and curve, applied where the parent composites the layer; never restarts; the default curve none passes radiance through unencoded
+                                 //   display.automatic: the viewer meters the layer's image and adapts toward middle gray, a fifth per reading; exposure is then the compensation
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose
@@ -82,7 +83,12 @@ sv::light_problem(l)             // -> string_view, empty when valid; what the s
 sv::light_unit                   // candela | lux | nit | lumen; ONE NIT IS ONE UNIT OF TRACER RADIANCE, the same as OpenPBR emission_luminance
 sv::scene_light                  // { light_id id; light light; } — one light as a layer holds it
 sv::light_record_of(light)       // -> shaders::tracer::light_record, 96 bytes, tagged by path; emission is point intensity / rect radiance / parallel irradiance / sun radiance; the cone is glTF's scale + offset
-sv::background                   // { vec3f sh[16]; } — order-3 RGB SH environment a missed ray sees (the flat and pt misses both reconstruct radiance from it)
+sv::background                   // { vec3f sh[16]; bool is_dome; dome analytic; } — order-3 RGB SH environment a missed ray sees, or an analytic dome every renderer evaluates and samples exactly
+sv::background::of_dome(d)       // -> background — the dome, its SH projected in closed form; seen_from(camera) turns a following dome to the camera
+sv::dome                         // { horizon, zenith, rise_start, backdrop_scale, lobes[4], lobe_count, follows_camera } — a gradient plus vMF lobes; a missed camera ray sees the gradient alone, times backdrop_scale
+sv::camera_relative_direction(azimuth, elevation) // -> vec3f in a following dome's frame: azimuth toward the camera's left, 0 behind the camera
+scene.studio({...})              // the studio spec on a layer: dome, no fallback light, neutral display at the derived exposure, the floor (scene/studio.hh)
+sv::studio_dome(setup, H) / sv::studio_exposure(dome) / sv::studio_floor(height, half_extent) / sv::studio_camera(bounds, view, aspect, front_azimuth)
 sv::background::uniform(radiance)              // -> background — the same radiance in every direction (band 0 alone)
 sv::background::gradient(zenith, nadir)        // -> background — vertical (+y) gradient, exact: zenith straight up, nadir straight down, their average on the horizon
 sv::background::lobe(direction, radiance)      // -> background — soft lobe peaking at exactly `radiance` along `direction` (normalized for you); a fill, NEVER a sun: no shadow, a smeared reflection
@@ -649,7 +655,8 @@ sv::tangent_frame_options        // { bool prefer_file = true; frame_generation 
 sv::frame_generation             // none (let the geometric fallback answer) | smooth | crease  — only `none` is implemented
 
 sv::asset_data                   // { string name; vector<mesh> meshes; vector<asset_material> materials;
-                                 //   vector<asset_node> nodes; vector<asset_light> lights; vector<string> issues; }
+                                 //   vector<asset_node> nodes; vector<asset_light> lights; vector<asset_camera> cameras; vector<string> issues; }
+sv::asset_camera                 // { string name; camera camera; } — always world-placed; fov and near from the file, the aspect left to the view; perspective only
 a.find_mesh(name) / a.meshes_with_material(name) / a.material(name)   // -> mesh const* / vector<mesh const*> / material_id
 a.override_material(name, id)    // -> isize, how many meshes moved; rewrites the SLOT's meshes
 a.bounds()                       // -> optional<aabb3f> in world space — what a camera frames
