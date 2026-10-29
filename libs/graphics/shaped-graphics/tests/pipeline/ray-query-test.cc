@@ -272,9 +272,10 @@ cc::shared_async<cc::unit> trace_micromapped(sg::context_handle ctx,
     auto const tlas = cmd->raytracing.build_tlas(instances);
 
     auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing::scene>();
-    auto const group = ctx->transient.create_binding_group(
-        *cmd, layout,
-        shaders::raytracing::scene{.world = tlas->as_view(), .hits = hits.as_readwrite_buffer(), .ids = ids.as_readwrite_buffer()});
+    auto const group = ctx->transient.create_binding_group(*cmd, layout,
+                                                           shaders::raytracing::scene{.world = tlas->as_view(),
+                                                                                      .hits = hits.as_readwrite_buffer(),
+                                                                                      .ids = ids.as_readwrite_buffer()});
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(grid, grid);
