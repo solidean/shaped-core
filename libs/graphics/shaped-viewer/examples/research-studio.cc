@@ -23,7 +23,7 @@ using namespace cc::primitive_defines;
 //   the panel picks the scene, one of the six sheet views, and the renderer
 //
 // A capture takes its scene from SV_STUDIO_SCENE (an index), its renderer from SV_STUDIO_MODE (0 deferred, 1 forward, 2 traced)
-// and its sheet view from SV_STUDIO_VIEW (0 front to 5 top, as the panel lists them).
+// its sheet view from SV_STUDIO_VIEW (0 front to 5 top, as the panel lists them), and SV_STUDIO_TEMPORAL_FOREVER=1 keeps the temporal denoiser on.
 //
 // Run it:
 //   uv run dev.py example shaped-viewer/research-studio
@@ -177,7 +177,8 @@ constexpr sr::denoise_method k_denoisers[]
 
 EXAMPLE("shaped-viewer/research-studio")
 {
-    auto const loader = sv::asset_loader();
+    // The research scenes leave the volume off solid glass, so a closed glass mesh is read as the solid it is.
+    auto const loader = sv::asset_loader({.closed_transmission_is_solid = true});
     cc::optional<sv::asset> assets[k_scene_count] = {};
     tg::aabb3f bounds[k_scene_count] = {};
     bool framed[k_scene_count] = {};
@@ -202,8 +203,9 @@ EXAMPLE("shaped-viewer/research-studio")
     auto mode = from_environment("SV_STUDIO_MODE", 0, 3); // 0 hybrid deferred, 1 hybrid forward, 2 path traced
     auto denoiser = 0;                                    // into k_denoisers
     auto temporal_frames = 16;                            // render_settings::temporal_denoise_frames
-    auto temporal_forever = false;                        // never hand over to the spatial member
-    auto fade_frames = 8;                                 // render_settings::temporal_denoise_fade_frames
+    auto temporal_forever
+        = from_environment("SV_STUDIO_TEMPORAL_FOREVER", 0, 2) == 1; // never hand over to the spatial member
+    auto fade_frames = 8;                                            // render_settings::temporal_denoise_fade_frames
     auto ceiling = false;
     auto exposure_offset = 0.0f;
     // Each a quadrature over the dome, so taken once rather than every frame.

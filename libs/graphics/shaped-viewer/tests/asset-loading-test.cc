@@ -585,6 +585,68 @@ TEST("sv::asset_loader - a glTF camera arrives in the world, looking down its no
     CHECK(mentioned);
 }
 
+TEST("sv::asset_loader - closed glass without a volume can be read as solid, and an open pane stays a thin wall")
+{
+    auto lib = make_library();
+
+    // A tetrahedron with its vertices split per face, as a mesh with per-face normals is, so only welding by position closes it.
+    auto positions = cc::vector<tg::pos3f>();
+    auto const corner = [](int i) { return tg::pos3f(i == 1 ? 1.0f : 0.0f, i == 2 ? 1.0f : 0.0f, i == 3 ? 1.0f : 0.0f); };
+    int const faces[4][3] = {{0, 2, 1}, {0, 1, 3}, {0, 3, 2}, {1, 2, 3}};
+    for (auto const& f : faces)
+        for (auto const c : f)
+            positions.push_back(corner(c));
+
+    // The importer reads glTF, so the two meshes are written as one: a tetrahedron, and a lone triangle of it.
+    auto bin = cc::vector<byte>::create_filled(positions.size() * sizeof(tg::pos3f), byte(0));
+    cc::memcpy(bin.data(), positions.data(), bin.size());
+    auto json = cc::string();
+    json += R"({"asset": {"version": "2.0"}, "buffers": [{"uri": "data:application/octet-stream;base64,)";
+    json += babel::base64::encode(bin);
+    json += cc::format(R"(", "byteLength": {}}}],
+        "bufferViews": [{{"buffer": 0, "byteOffset": 0, "byteLength": {}}}, {{"buffer": 0, "byteOffset": 0, "byteLength": 36}}],
+        "accessors": [{{"bufferView": 0, "componentType": 5126, "count": 12, "type": "VEC3", "min": [0, 0, 0], "max": [1, 1, 1]}},
+                      {{"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3", "min": [0, 0, 0], "max": [0, 1, 0]}}],
+        "materials": [{{"name": "glass", "extensions": {{"KHR_materials_transmission": {{"transmissionFactor": 1}}}}}}],
+        "meshes": [{{"name": "solid", "primitives": [{{"attributes": {{"POSITION": 0}}, "material": 0}}]}},
+                   {{"name": "pane", "primitives": [{{"attributes": {{"POSITION": 1}}, "material": 0}}]}}],
+        "nodes": [{{"mesh": 0}}, {{"mesh": 1}}], "scenes": [{{"nodes": [0, 1]}}], "scene": 0}})",
+                       bin.size(), bin.size());
+    auto const doc = babel::gltf::read(json);
+    REQUIRE(doc.has_value());
+
+    auto const thin_walled_of = [](sv::mesh const& m) -> cc::optional<f32>
+    {
+        for (auto const& a : m.attributes)
+            if (a.name == "thin_walled")
+            {
+                auto value = 0.0f;
+                cc::memcpy(&value, a.data.data(), sizeof(f32));
+                return value;
+            }
+        return {};
+    };
+
+    // By default the spec's reading stands: neither mesh overrides the material's thin wall.
+    {
+        auto const asset = sv::asset_loader({.materials = &lib}).load(doc.value(), "glass.glb");
+        REQUIRE(asset.has_value());
+        REQUIRE(asset.value().meshes.size() == 2);
+        CHECK(!thin_walled_of(asset.value().meshes[0]).has_value());
+        CHECK(!thin_walled_of(asset.value().meshes[1]).has_value());
+    }
+
+    // Opted in, the closed one is solid and the open one stays thin.
+    {
+        auto const asset
+            = sv::asset_loader({.materials = &lib, .closed_transmission_is_solid = true}).load(doc.value(), "glass.glb");
+        REQUIRE(asset.has_value());
+        REQUIRE(asset.value().meshes.size() == 2);
+        CHECK(thin_walled_of(asset.value().meshes[0]) == 0.0f);
+        CHECK(!thin_walled_of(asset.value().meshes[1]).has_value());
+    }
+}
+
 TEST("sv::asset_loader - a mesh with several primitives becomes several meshes")
 {
     auto lib = make_library();

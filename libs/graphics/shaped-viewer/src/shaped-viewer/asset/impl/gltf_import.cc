@@ -183,6 +183,41 @@ struct gltf_importer
             into.push_back({.name = cc::move(name), .source = cc::move(sample.value())});
     }
 
+    /// Whether the triangles `indices` draw over `positions` close a volume: every edge shared by exactly two of them.
+    /// Vertices are welded by exact position first, since a mesh split along its seams for normals or uvs is still closed.
+    [[nodiscard]] static bool is_closed(cc::span<tg::pos3f const> positions, cc::span<u32 const> indices)
+    {
+        auto welded = cc::map<u64, u32>();
+        auto canonical = cc::vector<u32>();
+        canonical.reserve(positions.size());
+        for (auto const& p : positions)
+        {
+            u32 bits[3] = {};
+            cc::memcpy(bits, &p, sizeof(bits));
+            auto const key = cc::make_hash(bits[0], bits[1], bits[2]);
+            auto e = welded.entry(key);
+            canonical.push_back(e.get_or_emplace(u32(canonical.size())));
+        }
+
+        auto edges = cc::map<u64, i32>();
+        for (auto t = isize(0); t + 2 < indices.size(); t += 3)
+            for (auto k = 0; k < 3; ++k)
+            {
+                auto const a = canonical[indices[t + k]];
+                auto const b = canonical[indices[t + (k + 1) % 3]];
+                if (a == b)
+                    continue;
+                auto const key = (u64(a < b ? a : b) << 32) | u64(a < b ? b : a);
+                edges[key] += 1;
+            }
+        if (edges.empty())
+            return false;
+        for (auto [key, count] : edges)
+            if (count != 2)
+                return false;
+        return true;
+    }
+
     /// The bindings and mesh textures one glTF material maps onto.
     void build_material(bg::material const& m, cc::string_view name)
     {
@@ -582,6 +617,14 @@ struct gltf_importer
 
             auto attributes = attributes_of(p, vertex_count, name);
             auto const slot = slot_of(p.material);
+
+            if (cfg.closed_transmission_is_solid)
+            {
+                auto const* const m = doc.find(p.material);
+                if (m != nullptr && m->transmission_factor > 0.0f && m->thickness_factor <= 0.0f
+                    && is_closed(positions, indices))
+                    attributes.push_back(mesh_attribute::create_value("thin_walled", 0.0f));
+            }
 
             auto textures = cc::vector<mesh_texture>();
             for (auto const& t : textures_of(slot))
