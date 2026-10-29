@@ -20,9 +20,9 @@
 
 using namespace cc::primitive_defines;
 
-// What a whole moving frame costs on Intel's Sponza, through the viewer: the hybrid, its denoiser and its upscaler, against the 16.6 ms of 60 fps.
+// What a whole moving frame costs on Intel's Sponza and NVIDIA's Bistro, through the viewer: the hybrid, its denoiser and its upscaler, against the 16.6 ms of 60 fps.
 //
-// Every frame moves the camera along the nave, so every frame is one a user orbiting sees: drawn at the upscaler's input extent and upscaled to the output.
+// Every frame moves the camera along the scene, so every frame is one a user orbiting sees: drawn at the upscaler's input extent and upscaled to the output.
 // Each contender runs alone, its view and history freed before the next: four views' histories and path state at once overflow a laptop GPU's memory.
 // GPU time, bracketed by timestamps around the viewer's whole frame, each frame alone on the GPU.
 // A benchmark rather than a test: it asserts nothing, and libs/graphics/shaped-viewer/docs/plans/hybrid-renderer.md records what it measured.
@@ -82,20 +82,28 @@ void write_trace(cc::rec::recording const& captured, cc::string_view name)
     def.views.push_back(cc::move(root));
     return def;
 }
-} // namespace
 
-ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and upscaled to 1920x1200")
+/// A dx12 hardware context that traces and builds the shaders, or none, with why, where this machine has no such context.
+[[nodiscard]] cc::result<sg::context_handle> tracing_context()
 {
     auto created = sg::create_dx12_context({.adapter = sg::backend::dx12::dx12_adapter::hardware});
     if (created.has_error())
-        SKIP("no dx12 hardware device");
+        return cc::error("no dx12 hardware device");
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
-    auto& ctx = *created.value();
-    if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
-        SKIP("no ray tracing on this device");
-    CC_LOG_INFO("adapter: {}", ctx.metrics.adapter().name);
+        return cc::error("no SGL compiler that reaches DXIL to build the shaders");
+    if (!created.value()->supports(sg::feature::ray_query) || !created.value()->supports(sg::feature::raytracing_pipeline))
+        return cc::error("no ray tracing on this device");
+    CC_LOG_INFO("adapter: {}", created.value()->metrics.adapter().name);
+    return cc::move(created.value());
+}
 
+/// Draws `asset` moving along the longer horizontal axis of its box, at `eye_height` above its floor, every contender's way, and logs each.
+/// `eye_height` is in the asset's own units, or where it is none 5% of the box's height, for an asset whose unit is unknown.
+cc::shared_async<cc::unit> measure(sg::context& ctx,
+                                   cc::string_view name,
+                                   sv::asset_data const& asset,
+                                   cc::optional<f64> eye_height)
+{
     // What this process holds on the GPU against what it may, at each step: the differences are what each step costs.
     auto const memory = [&](cc::string_view when)
     {
@@ -106,20 +114,15 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
     };
     memory("with the context alone");
 
-    auto const loader = sv::asset_loader();
-    auto const asset = loader.load(SV_TEST_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf");
-    if (asset.has_error())
-        SKIP(cc::format("Sponza did not load ({}); uv run extern/sponza/fetch-sponza.py installs it",
-                        asset.error().to_string()));
-    auto const box = asset.value().bounds();
+    auto const box = asset.bounds();
     REQUIRE(box.has_value());
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto items = cc::vector<sv::scene_item>();
-    for (auto const& mesh : asset.value().meshes)
+    for (auto const& mesh : asset.meshes)
         items.push_back(resources.acquire_scene_item(mesh));
     resources.wait_for_pending_uploads();
-    memory("with Sponza uploaded");
+    memory(cc::format("with {} uploaded", name));
 
     auto const support = sr::query_reconstruct_support(ctx);
     auto const dlss
@@ -153,12 +156,13 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
     auto const lo = box.value().min;
     auto const hi = box.value().max;
     auto const along_x = hi[0] - lo[0] >= hi[2] - lo[2];
+    auto const eye_y = f64(lo[1]) + eye_height.value_or(0.05 * f64(hi[1] - lo[1]));
     auto const camera_at = [&](int frame)
     {
         auto const t = 0.15 + 0.7 * f64(frame) / f64(k_frames);
-        auto const center = tg::pos3d(0.5 * (f64(lo[0]) + f64(hi[0])), f64(lo[1]) + 1.7, 0.5 * (f64(lo[2]) + f64(hi[2])));
-        auto const position = along_x ? tg::pos3d(f64(lo[0]) + t * f64(hi[0] - lo[0]), center[1], center[2])
-                                      : tg::pos3d(center[0], center[1], f64(lo[2]) + t * f64(hi[2] - lo[2]));
+        auto const center = tg::pos3d(0.5 * (f64(lo[0]) + f64(hi[0])), eye_y, 0.5 * (f64(lo[2]) + f64(hi[2])));
+        auto const position = along_x ? tg::pos3d(f64(lo[0]) + t * f64(hi[0] - lo[0]), eye_y, center[2])
+                                      : tg::pos3d(center[0], eye_y, f64(lo[2]) + t * f64(hi[2] - lo[2]));
         auto const ahead = along_x ? tg::vec3d(1, 0, 0) : tg::vec3d(0, 0, 1);
         auto cam = sv::camera::looking_at(position, position + ahead);
         cam.projection.vertical_fov = tg::angle_d::make_from_degree(60.0);
@@ -245,14 +249,14 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
         cc::rec::flush_blocking();
         cc::rec::unregister_listener(capture_handle);
         auto const captured = capture.take().spliced_samples();
-        CC_LOG_INFO("{} back to back, where the CPU's time went:\n{}", c.name,
+        CC_LOG_INFO("{} {} back to back, where the CPU's time went:\n{}", name, c.name,
                     cc::rec::hot_functions(captured).to_string(30));
-        write_trace(captured, c.name);
+        write_trace(captured, cc::format("{}-{}", name, c.name));
         co_await ctx.idle_completion();
         auto const wall = cc::current_time_steady_secs() - wall_start;
-        CC_LOG_INFO("{} back to back on the CPU: {} ms recording, {} ms submitting and {} ms waiting for the "
+        CC_LOG_INFO("{} {} back to back on the CPU: {} ms recording, {} ms submitting and {} ms waiting for the "
                     "GPU per frame; the GPU finished {} ms after the last submit",
-                    c.name, 1e3 * recording / f64(k_frames), 1e3 * handing_over / f64(k_frames),
+                    name, c.name, 1e3 * recording / f64(k_frames), 1e3 * handing_over / f64(k_frames),
                     1e3 * throttled / f64(k_frames), 1e3 * (wall_start + wall - cpu_done));
 
         // Each frame's stages, as the marks the viewer records along it divide it: each mark ends the stage it names.
@@ -301,8 +305,8 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
         memory(cc::format("after {}'s frames", c.name));
         auto const* const samples = store.peek_ptr(id)->temporal.get_ptr(sv::temporal_id::frame_samples(0));
         auto const input = samples != nullptr ? samples->scaled_denoise.extent() : tg::vec2i(0, 0);
-        CC_LOG_INFO("sponza {}x{} moving: {} {} ms per frame alone on the GPU, {} ms back to back, drawn at {}x{}",
-                    k_output[0], k_output[1], c.name, 1e3 * total / f64(k_frames), 1e3 * wall / f64(k_frames), input[0],
+        CC_LOG_INFO("{} {}x{} moving: {} {} ms per frame alone on the GPU, {} ms back to back, drawn at {}x{}",
+                    name, k_output[0], k_output[1], c.name, 1e3 * total / f64(k_frames), 1e3 * wall / f64(k_frames), input[0],
                     input[1]);
         for (auto const& st : stages)
             CC_LOG_INFO("    {}: {} ms", st.name, 1e3 * st.seconds / f64(k_frames));
@@ -311,4 +315,30 @@ ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and up
     co_await cc::async_settled(sv::background_work(ctx));
     co_await ctx.idle_completion();
     co_return;
+}
+} // namespace
+
+ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Sponza, denoised and upscaled to 1920x1200")
+{
+    auto ctx = tracing_context();
+    if (ctx.has_error())
+        SKIP(ctx.error().to_string());
+    auto const asset = sv::asset_loader().load(SV_TEST_SPONZA_DIR "/NewSponza_Main_glTF_003.gltf");
+    if (asset.has_error())
+        SKIP(cc::format("Sponza did not load ({}); uv run extern/sponza/fetch-sponza.py installs it",
+                        asset.error().to_string()));
+    co_await measure(*ctx.value(), "sponza", asset.value(), 1.7);
+}
+
+// A street of buildings, many small pieces, and alpha-tested foliage and signs: what an opacity micromap would decide.
+ASYNC_BENCHMARK("sv - the hybrid's whole moving frame on Bistro, denoised and upscaled to 1920x1200")
+{
+    auto ctx = tracing_context();
+    if (ctx.has_error())
+        SKIP(ctx.error().to_string());
+    auto const asset = sv::asset_loader().load(SV_TEST_BISTRO_DIR "/BistroExterior.fbx");
+    if (asset.has_error())
+        SKIP(cc::format("Bistro did not load ({}); uv run extern/bistro/fetch-bistro.py installs it",
+                        asset.error().to_string()));
+    co_await measure(*ctx.value(), "bistro exterior", asset.value(), {});
 }
