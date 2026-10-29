@@ -131,6 +131,9 @@ struct tls_data
     isize write_size = 0;
     isize write_done = 0;
 
+    /// Every byte of the write is encrypted; it completes once the records carrying them are with the OS.
+    bool write_encrypted = false;
+
     ~tls_data()
     {
         if (!contexts_live)
@@ -313,8 +316,8 @@ void drive_write(tls_data& d, pump_plan& plan)
         return;
     }
 
-    plan.finish_write = d.write_promise;
-    d.write_promise = {};
+    // Not finished yet: a send means the OS holds the bytes, and so far they are only records in `outbound`.
+    d.write_encrypted = true;
 }
 
 void drive_read(tls_data& d, pump_plan& plan)
@@ -359,7 +362,7 @@ void drive_read(tls_data& d, pump_plan& plan)
     if (d.phase == tls_phase::established)
     {
         // Writing first: a write that produces records is what a peer is usually waiting for before it answers.
-        if (d.write_promise.is_valid())
+        if (d.write_promise.is_valid() && !d.write_encrypted)
             drive_write(d, plan);
         if (d.read_promise.is_valid())
             drive_read(d, plan);
@@ -372,6 +375,14 @@ void drive_read(tls_data& d, pump_plan& plan)
         d.outbound = {};
         d.socket_writing = true;
         plan.start_send = true;
+    }
+
+    // Only one socket send is in flight at a time, so once none is and nothing waits, every record produced so far,
+    // the write's included, has been handed to the OS.
+    if (d.write_promise.is_valid() && d.write_encrypted && d.outbound.empty() && !d.socket_writing)
+    {
+        plan.finish_write = d.write_promise;
+        d.write_promise = {};
     }
 
     // And it is fed only when it asked to be, which is what keeps a finished connection from holding a read open.
@@ -565,6 +576,7 @@ public:
                 data.write_buffer = bytes.data();
                 data.write_size = bytes.size();
                 data.write_done = 0;
+                data.write_encrypted = false;
                 return {};
             });
 
