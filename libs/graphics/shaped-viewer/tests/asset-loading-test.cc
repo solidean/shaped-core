@@ -490,6 +490,101 @@ TEST("sv::asset_loader - a glTF normal map and occlusion strength are sample tra
     CHECK(asset.value().issues.empty());
 }
 
+TEST("sv::asset_loader - glTF glass and emission strength cross into OpenPBR")
+{
+    auto lib = make_library();
+
+    auto const json = triangle_gltf(R"({"attributes": {"POSITION": 1}, "indices": 0, "material": 0},
+                                       {"attributes": {"POSITION": 1}, "indices": 0, "material": 1})",
+                                    R"("materials": [
+                                        {"name": "glass", "extensions": {
+                                            "KHR_materials_transmission": {"transmissionFactor": 1},
+                                            "KHR_materials_ior": {"ior": 1.33},
+                                            "KHR_materials_volume": {"attenuationDistance": 2, "attenuationColor": [0.5, 0.75, 1]}}},
+                                        {"name": "lamp", "emissiveFactor": [1, 0.5, 0],
+                                         "extensions": {"KHR_materials_emissive_strength": {"emissiveStrength": 40},
+                                                        "KHR_materials_specular": {"specularFactor": 0},
+                                                        "KHR_materials_clearcoat": {"clearcoatFactor": 1, "clearcoatRoughnessFactor": 0.25}}}],
+                                    "extensionsRequired": ["KHR_materials_specular", "KHR_materials_clearcoat"],)");
+    auto const doc = babel::gltf::read(json);
+    REQUIRE(doc.has_value());
+    auto const asset = sv::asset_loader({.materials = &lib}).load(doc.value(), "glass.glb");
+    REQUIRE(asset.has_value());
+
+    auto const constant_of = [&](sv::material const& m, cc::string_view name) -> cc::span<byte const>
+    {
+        auto const* const b = m.find(name);
+        return b == nullptr ? cc::span<byte const>() : cc::span<byte const>(b->constant);
+    };
+    auto const f32_of = [&](sv::material const& m, cc::string_view name)
+    {
+        auto value = -1.0f;
+        auto const bytes = constant_of(m, name);
+        if (bytes.size() == isize(sizeof(f32)))
+            cc::memcpy(&value, bytes.data(), sizeof(f32));
+        return value;
+    };
+
+    // Transmission and ior one to one; the volume's attenuation is the color at its distance.
+    // No thicknessFactor is glTF's thin wall.
+    auto const& glass = lib.get(asset.value().material("glass"));
+    CHECK(f32_of(glass, "transmission_weight") == 1.0f);
+    CHECK(f32_of(glass, "thin_walled") == 1.0f);
+    CHECK(f32_of(glass, "specular_ior") == 1.33f);
+    CHECK(f32_of(glass, "transmission_depth") == 2.0f);
+    auto color = tg::vec3f(0, 0, 0);
+    REQUIRE(constant_of(glass, "transmission_color").size() == isize(sizeof(tg::vec3f)));
+    cc::memcpy(&color, constant_of(glass, "transmission_color").data(), sizeof(tg::vec3f));
+    CHECK(color == tg::vec3f(0.5f, 0.75f, 1));
+
+    // The strength is the luminance the factor is emitted at, in nits.
+    auto const& lamp = lib.get(asset.value().material("lamp"));
+    CHECK(f32_of(lamp, "emission_luminance") == 40.0f);
+    // A material without glass binds none, so it keeps OpenPBR's opaque defaults.
+    CHECK(lamp.find("transmission_weight") == nullptr);
+    CHECK(lamp.find("specular_ior") == nullptr);
+
+    // Specular and clearcoat, which a file may require now that they are read.
+    CHECK(f32_of(lamp, "specular_weight") == 0.0f);
+    CHECK(f32_of(lamp, "coat_weight") == 1.0f);
+    CHECK(f32_of(lamp, "coat_roughness") == 0.25f);
+    CHECK(f32_of(lamp, "coat_ior") == 1.5f);
+    CHECK(glass.find("coat_weight") == nullptr);
+    CHECK(lamp.find("thin_walled") == nullptr);
+}
+
+TEST("sv::asset_loader - a glTF camera arrives in the world, looking down its node's -Z")
+{
+    auto lib = make_library();
+
+    // The camera's node sits under a parent moved 1 up, so the world placement composes both.
+    auto json = triangle_gltf(
+        R"({"attributes": {"POSITION": 1}, "indices": 0})",
+        R"("cameras": [{"name": "main", "type": "perspective", "perspective": {"yfov": 0.5, "znear": 0.25}},
+                                             {"type": "orthographic", "orthographic": {"xmag": 1, "ymag": 1, "znear": 0.1, "zfar": 10}}],)");
+    REQUIRE(json.replace_first(
+        R"("nodes": [{"mesh": 0, "name": "root", "translation": [1, 2, 3]}],)",
+        R"("nodes": [{"mesh": 0, "name": "root", "children": [1, 3]}, {"translation": [0, 1, 0], "children": [2]},
+                                            {"name": "eye", "camera": 0, "translation": [0, 0, 5]}, {"camera": 1}],)"));
+    auto const doc = babel::gltf::read(json);
+    REQUIRE(doc.has_value());
+    auto const asset = sv::asset_loader({.materials = &lib, .flatten_hierarchy = false}).load(doc.value(), "cam.glb");
+    REQUIRE(asset.has_value());
+
+    // The orthographic one is skipped, and says so.
+    REQUIRE(asset.value().cameras.size() == 1);
+    auto const& c = asset.value().cameras[0];
+    CHECK(c.name == "main");
+    CHECK((c.camera.position - tg::pos3d(0, 1, 5)).length() < 1e-6);
+    CHECK((c.camera.basis().forward - tg::vec3d(0, 0, -1)).length() < 1e-6);
+    CHECK(tg::abs(c.camera.projection.vertical_fov.radians() - 0.5) < 1e-6);
+    CHECK(c.camera.projection.near_plane == 0.25);
+    auto mentioned = false;
+    for (auto const& issue : asset.value().issues)
+        mentioned = mentioned || issue.contains("not perspective");
+    CHECK(mentioned);
+}
+
 TEST("sv::asset_loader - a mesh with several primitives becomes several meshes")
 {
     auto lib = make_library();

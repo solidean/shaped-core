@@ -20,8 +20,8 @@
 //
 // The mapping targets OPENPBR rather than pbr, because that is what makes the extensions worth having: transmission,
 // ior, clearcoat and sheen land on `transmission_*`, `coat_*` and `fuzz_*` natively where pbr would discard them.
-// babel does not interpret the KHR_materials_* extensions yet, so what actually crosses today is the core
-// metallic-roughness set plus emission — and an issue names what was left behind.
+// What crosses today is the core metallic-roughness set, emission with its strength, glass (transmission, ior and volume's attenuation), specular and clearcoat.
+// The other KHR_materials_* extensions do not yet, and an issue names them.
 //
 // Textures ride on the MESH rather than on the material, as `mesh_texture`.
 // That is what lets the importer stay CPU-side: a mesh texture travels as pixels, while a material binding would need
@@ -200,12 +200,40 @@ struct gltf_importer
         //
         // glTF gives `emissiveFactor` no physical unit, so the mapping is the format's own: factor times
         // KHR_materials_emissive_strength, read one-to-one as nits — the unit sv's area lights and OpenPBR share.
-        // The strength defaults to 1 and babel does not interpret the extension yet, so 1 is what it is until it does;
-        // reading it is the same babel extension KHR_lights_punctual needs.
         if (m.emissive_factor != tg::vec3f::zero)
         {
             bindings.push_back(binding::of("emission_color", m.emissive_factor));
-            bindings.push_back(binding::of("emission_luminance", 1.0f));
+            bindings.push_back(binding::of("emission_luminance", m.emissive_strength));
+        }
+
+        // Glass: KHR_materials_transmission and _ior are OpenPBR's transmission and specular IOR one to one.
+        // KHR_materials_volume's attenuation is the color at a distance, which is exactly `transmission_color` at `transmission_depth`.
+        // Without a volume's thickness the extension means a thin wall, a single sheet with no interior to cross.
+        // Left solid, a pane would be read as the surface of a body, and a path refracted into it would look for a far side that is not there.
+        if (m.transmission_factor > 0.0f)
+            bindings.push_back(binding::of("transmission_weight", m.transmission_factor));
+        if (m.transmission_factor > 0.0f && m.thickness_factor <= 0.0f)
+            bindings.push_back(binding::of("thin_walled", 1.0f));
+        if (m.ior != 1.5f)
+            bindings.push_back(binding::of("specular_ior", m.ior));
+        if (m.transmission_factor > 0.0f && m.attenuation_distance.has_value())
+        {
+            bindings.push_back(binding::of("transmission_color", m.attenuation_color));
+            bindings.push_back(binding::of("transmission_depth", m.attenuation_distance.value()));
+        }
+
+        // KHR_materials_specular scales and tints the dielectric reflection, as OpenPBR's specular weight and color do.
+        if (m.specular_factor != 1.0f)
+            bindings.push_back(binding::of("specular_weight", m.specular_factor));
+        if (m.specular_color_factor != tg::vec3f(1, 1, 1))
+            bindings.push_back(binding::of("specular_color", m.specular_color_factor));
+
+        // KHR_materials_clearcoat is OpenPBR's coat, at the extension's fixed IOR of 1.5.
+        if (m.clearcoat_factor > 0.0f)
+        {
+            bindings.push_back(binding::of("coat_weight", m.clearcoat_factor));
+            bindings.push_back(binding::of("coat_roughness", m.clearcoat_roughness_factor));
+            bindings.push_back(binding::of("coat_ior", 1.5f));
         }
 
         // OPAQUE binds nothing, leaving opacity at 1: baseColorFactor's alpha is not a transparency there.
@@ -582,6 +610,39 @@ struct gltf_importer
     /// a negative z scale flips it — both kept as they come out, which is what three.js does too.
     /// What the extension permits and sv cannot mean — a negative intensity or color, a cone out of order — is clamped
     /// and noted, and a light of a type sv does not know is skipped and noted.
+    /// The camera `index` names, as its node at `world` places it: looking down the node's -Z with +Y up.
+    /// sv's camera is perspective alone, so an orthographic one is skipped and noted.
+    void emit_camera(bg::camera_index index, tg::affine_transform3f const& world)
+    {
+        auto const* const found = doc.find(index);
+        if (found == nullptr)
+            return;
+        auto const& c = *found;
+        if (c.type != bg::camera_type::perspective)
+        {
+            note(cc::format("gltf: camera {} is not perspective, which sv's camera is, so it was not imported",
+                            int(index)));
+            return;
+        }
+        auto const eye = world.transform(tg::pos3f::zero);
+        auto const forward = world.transform(tg::vec3f(0, 0, -1));
+        auto const up = world.transform(tg::vec3f(0, 1, 0));
+        if (forward.length() <= 1e-12f || up.length() <= 1e-12f)
+        {
+            note(cc::format("gltf: camera {} is placed by a node that collapses its axes, so it was not imported",
+                            int(index)));
+            return;
+        }
+        auto const from = tg::pos3d(eye[0], eye[1], eye[2]);
+        auto const to = from + tg::vec3d(forward[0], forward[1], forward[2]);
+        auto cam = camera::looking_at(from, to, tg::vec3d(up[0], up[1], up[2]));
+        if (c.yfov > 0.0f)
+            cam.projection.vertical_fov = tg::angle_d::make_from_radians(f64(c.yfov));
+        if (c.znear > 0.0f)
+            cam.projection.near_plane = f64(c.znear);
+        out.cameras.push_back({.name = c.name, .camera = cam});
+    }
+
     void emit_light(bg::light_index index, tg::affine_transform3f const& placement)
     {
         auto const* const found = doc.find(index);
@@ -690,6 +751,9 @@ struct gltf_importer
 
         if (n->light != bg::light_index::invalid)
             emit_light(n->light, cfg.flatten_hierarchy ? world : local);
+
+        if (n->camera != bg::camera_index::invalid)
+            emit_camera(n->camera, world);
 
         // Counted before the children run, since their meshes and lights belong to them and not to this node.
         out.nodes[slot].mesh_count = i32(out.meshes.size()) - out.nodes[slot].first_mesh;
