@@ -40,6 +40,22 @@ Anything `dev.py` does not recognize is forwarded to the example, so `dev.py exa
 There is deliberately **no `--all`**: executing the whole corpus would open every window it has, and nobody wants that.
 The capture sweep below is the one exception, and it is allowed because it cannot do that: it runs only what a sidecar declares capturable, and every such example runs headless.
 
+### `--window`, and why a run without a terminal is refused
+
+`dev.py example <match>` opens whatever windows the example opens, on the desktop of whoever runs it.
+At a terminal someone ran it to see that window; in a batch job, CI or an agent session nobody asked for one, and it lands on someone's screen anyway.
+So without an interactive terminal a run is refused before anything builds, unless it asks for windows explicitly:
+
+```bash
+uv run dev.py example <match> --window    # open it anyway
+uv run dev.py example <match> --capture   # render headless instead, if the example declares a capture
+```
+
+Interactive means stdout and stderr are both TTYs and no CI variable is set, the test console colors and the progress region use.
+`SC_EXAMPLE_WINDOW=1` stands in for `--window`, for an interactive terminal that hides its TTY from Python, such as Git Bash's mintty on Windows.
+Listing the examples, a capture and the capture sweep open no window and are never refused.
+An example that only prints is refused the same way, since dev.py cannot tell it from one that opens a window before it runs.
+
 ### `--background`, for a run that should not take over the screen
 
 `dev.py example <match> --background` asks a graphical example to appear without stealing the foreground.
