@@ -983,8 +983,12 @@ void viewer::finish_frame(frame& f)
 
     // A capture asks every traced view for its samples and no more, so a traced layer stops where the image is taken.
     // Also while work is owed: what the views hold then is thrown away once it drains, so tracing on past the target buys nothing.
+    // Nor does it denoise an image it will not take: only the one at the target.
     if (im.capture != nullptr && !im.capture->is_done())
+    {
         def.sample_target = im.capture->request().accumulate;
+        def.denoise_at_target_only = true;
+    }
 
     // A canvas places its drawings in logical pixels, and the window's display scale is how many back-buffer pixels one of those covers.
     if (im.window != nullptr)
