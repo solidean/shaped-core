@@ -11,6 +11,7 @@ add_library(shaped-rendering
     src/shaped-rendering/window.cc
     src/shaped-rendering/blit_routine.cc
     src/shaped-rendering/box_filter_mipmap_routine.cc
+    src/shaped-rendering/display.cc
     src/shaped-rendering/reconstruct.cc
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
@@ -54,6 +55,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/input.hh
     src/shaped-rendering/blit_routine.hh
     src/shaped-rendering/box_filter_mipmap_routine.hh
+    src/shaped-rendering/display.hh
     src/shaped-rendering/reconstruct.hh
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
@@ -338,6 +340,7 @@ if(SC_BUILD_TESTS)
         tests/shader-package-test.cc
         tests/slug-font-test.cc
         tests/slug-module-test.cc
+        tests/display-module-test.cc
         tests/slug-path-test.cc
         tests/text-layout-test.cc
         tests/slug-shape-test.cc

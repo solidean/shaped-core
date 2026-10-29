@@ -440,6 +440,16 @@ sr::bc_compress_routine::prewarm(ctx, family);                   // keyed by the
 // an sRGB source is encoded as the bytes it stores; BC4 and BC5 have no sRGB form, so their source must be linear
 ```
 
+## Display transform
+
+Linear radiance to display values: an exposure, then a curve, then the sRGB encode — SGL module `display` (`shaders/modules/display.sgl`), `use display` from any pixel shader.
+
+```cpp
+sr::display_transform{.exposure = 0.0f, .curve = sr::display_curve::neutral} // exposure in stops; exposure_scale() -> 2^exposure, what the module takes
+sr::display_curve // none (radiance as is, unclamped, unencoded) | srgb (clamp + exact encode) | neutral (identity to 0.6, then the peak rolls off, hue kept; then encode)
+// 18% gray reads 118 of 255 under srgb and neutral alike; the module's `transform_premultiplied` keeps alpha
+```
+
 ## Reconstruction
 
 One front that denoises, then upscales; the design is [docs/reconstruction.md](docs/reconstruction.md).

@@ -1,0 +1,86 @@
+// Display: the transform from scene-referred linear radiance to the encoded values a unorm8 target shows.
+//
+// An exposure scales the radiance, a curve maps it into [0, 1], and the exact sRGB encode makes it display values.
+// The curve is applied to the peak channel and the other two scaled with it, so a hue never shifts as it brightens.
+// `curve` is one of the `curve_*` constants, which `sr::display_curve` mirrors.
+module display
+
+const curve_none = 0u
+const curve_srgb = 1u
+const curve_neutral = 2u
+
+/// Where the neutral curve stops being the identity.
+const neutral_knee = 0.6
+
+/// The exact sRGB transfer function of one linear channel in [0, 1]: the linear toe, then the 2.4 power segment.
+fun srgb_encode(linear: float) -> float:
+    if linear <= 0.0031308 => return linear * 12.92
+    return 1.055 * pow(linear, 1.0 / 2.4) - 0.055
+
+fun srgb_encode(linear: float3) -> float3:
+    return float3(srgb_encode(linear.x), srgb_encode(linear.y), srgb_encode(linear.z))
+
+/// The neutral roll-off of one value: the identity up to the knee, then an exponential approaching 1 with slope 1 at the knee.
+fun neutral_peak(peak: float) -> float:
+    if peak <= neutral_knee => return peak
+    let headroom = 1.0 - neutral_knee
+    return neutral_knee + headroom * (1.0 - exp(-(peak - neutral_knee) / headroom))
+
+/// The neutral curve: the peak channel rolls off and the other two keep their ratio to it, then all three clamp to [0, 1].
+fun neutral(linear: float3) -> float3:
+    let peak = max(linear.x, max(linear.y, linear.z))
+    if peak <= neutral_knee => return saturate(linear)
+    return saturate(linear * (neutral_peak(peak) / peak))
+
+/// `linear` exposed by `exposure_scale` and mapped by `curve`; `curve_none` returns the exposed radiance unencoded.
+fun transform(linear: float3, exposure_scale: float, curve: uint) -> float3:
+    let exposed = max(linear * exposure_scale, float3(0.0, 0.0, 0.0))
+    if curve == curve_srgb => return srgb_encode(saturate(exposed))
+    if curve == curve_neutral => return srgb_encode(neutral(exposed))
+    return exposed
+
+/// The same for a premultiplied color: the transform applies to the color the alpha covers, and the alpha stays.
+fun transform_premultiplied(c: float4, exposure_scale: float, curve: uint) -> float4:
+    if c.w <= 0.0 => return c
+    let t = transform(c.xyz / c.w, exposure_scale, curve)
+    return float4(t.x * c.w, t.y * c.w, t.z * c.w, c.w)
+
+// ---- tests: run when this file is compiled on its own, as sr's display-module test does ----
+
+// An 18% gray card encodes to sRGB 118 of 255, and the knee to 203.
+test:
+    nearly_equal(srgb_encode(0.18) * 255.0, 117.7, within = 0.1)
+test:
+    nearly_equal(srgb_encode(0.6) * 255.0, 203.4, within = 0.1)
+// Both segments meet at the toe's end.
+test:
+    nearly_equal(srgb_encode(0.0031308), 1.055 * pow(0.0031308, 1.0 / 2.4) - 0.055, within = 0.00001)
+
+// Below the knee the neutral curve is the identity, so the gray card reads the same under `srgb` and `neutral`.
+test neutral_peak(0.18) == 0.18
+test neutral_peak(0.6) == 0.6
+// Past it the slope starts at 1, and the curve approaches 1 without reaching it: twice the knee's headroom past it reads 0.988.
+test:
+    let e = 0.001
+    nearly_equal((neutral_peak(neutral_knee + e) - neutral_knee) / e, 1.0, within = 0.002)
+test:
+    nearly_equal(neutral_peak(2.0), 0.6 + 0.4 * (1.0 - exp(-3.5)), within = 0.00001) and neutral_peak(2.0) < 1.0
+
+// The hue survives the roll-off: the channels keep their ratios.
+test:
+    let c = neutral(float3(2.0, 1.0, 0.5))
+    nearly_equal(c.y / c.x, 0.5, within = 0.0001) and nearly_equal(c.z / c.x, 0.25, within = 0.0001)
+
+// `curve_none` is the exposed radiance, unclamped and unencoded.
+test:
+    let c = transform(float3(0.5, 1.0, 4.0), 2.0, curve_none)
+    c.x == 1.0 and c.y == 2.0 and c.z == 8.0
+// An exposure of one stop doubles before the curve.
+test:
+    let c = transform(float3(0.09, 0.09, 0.09), 2.0, curve_neutral)
+    nearly_equal(c.x * 255.0, 117.7, within = 0.1)
+
+// A premultiplied half-covered gray transforms the gray it covers.
+test:
+    let c = transform_premultiplied(float4(0.09, 0.09, 0.09, 0.5), 1.0, curve_srgb)
+    nearly_equal(c.x, srgb_encode(0.18) * 0.5, within = 0.0001) and c.w == 0.5

@@ -51,7 +51,7 @@ sv::camera::look_rotation(eye, target, up=+y)  // -> quat_d aiming from eye at t
 cam.basis()                      // -> camera_basis { vec3d right, up, forward } — the world axes a screen-space drag is expressed in
 sv::perspective_projection       // { angle_d vertical_fov; f64 aspect_ratio; f64 near_plane; } — the only projection kind for now
 sv::camera_record_of(cam)        // -> shaders::tracer::camera_record (the GPU basis: forward/right_scaled/up_scaled); aspect from projection.aspect_ratio
-sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; } — per-layer integration controls (no light/sky: those are on the view)
+sv::render_settings              // { int samples_per_pixel, max_bounces; render_mode mode; int rounds_per_frame; f32 motion_hold_ms; sr::reconstruct_settings reconstruct; sr::display_transform display; } — per-layer integration controls (no light/sky: those are on the view)
                                  //   samples_per_pixel is the megakernel's alone; the wavefront's still frame runs rounds_per_frame (8), a moving one drains
 sv::viewer_config::frame_budget_ms // (16) the GPU ms a frame's still wavefront layers share, split evenly; each fits its share with whole rounds, then with a partial fill
                                  //   0 runs rounds_per_frame at full fill; a headless viewer forces 0; a plan built by hand takes viewer_definition::wavefront_budget_ms (0)
@@ -63,6 +63,7 @@ sv::resolve_render_mode(ctx, m)  // -> render_mode: m itself unless automatic
                                  //   raster: the same materials drawn, lit directly and unshadowed, final every frame, never denoised (docs/raster.md)
                                  //   reconstruct defaults to denoiser none; NOTHING in it restarts accumulation (see "Denoising" below)
                                  //   sv owns reconstruct.fresh_samples and reconstruct.upscaler (none), and overwrites whatever a caller set: each half of the hand-off runs with its own value
+                                 //   display: exposure (stops) and curve, applied where the parent composites the layer; never restarts; the default curve none passes radiance through unencoded
 sv::scene_item                   // { scene_item_kind kind; mesh_id mesh; instance_id instance; hash128 permutation; tg::affine_transform3f transform; } — triangle_mesh only for now
                                  //   mint one with resources.acquire_scene_item(mesh); the three ids have to come from ONE material resolution
                                  //   build the placement with tg's factories (make_rotation(quat), make_translation(vec), make_from_linear_mat(mat3)) and tg::compose

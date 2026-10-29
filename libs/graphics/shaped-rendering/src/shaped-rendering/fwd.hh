@@ -28,6 +28,10 @@ enum class mipmap_variant : u8;         // which entry point a texture shape mip
 struct mipmap_key;                      // a shape and the format it writes: the routine's parameter
 struct mipmap_program;                  // one mipmap key's group layout + compute pipeline
 
+// The display transform (see display.hh): exposure and curve, as SGL module `display` applies them.
+enum class display_curve : u8; // none, the clamped sRGB encode, or the neutral roll-off before it
+struct display_transform;      // an exposure in stops and a curve
+
 // Reconstruction (see reconstruct.hh): one front routine over denoise and upscale members.
 enum class denoise_method : u8;      // which member runs, or automatic
 enum class upscale_method : u8;      // which upscaler runs behind it, or automatic

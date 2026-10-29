@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shaped-graphics/fwd.hh>
+#include <shaped-rendering/display.hh>
 #include <shaped-rendering/reconstruct.hh>
 #include <shaped-viewer/fwd.hh>
 
@@ -85,7 +86,7 @@ enum class sv::hybrid_lighting : sv::u8
 ///
 /// How the layer is drawn, traced or rasterized, and the controls of each; a field says which mode reads it.
 /// Lighting and the environment live elsewhere on the layer (its lights and its background).
-/// This is the home for the post-process sequence, exposure, ... as they land.
+/// This is the home for the post-process sequence, the display transform, ... as they land.
 struct sv::render_settings
 {
     /// Primary rays integrated per pixel, all in the one path-trace dispatch: the megakernel's alone, which no other mode reads or restarts on.
@@ -157,4 +158,11 @@ struct sv::render_settings
     /// Both members run on each frame of the fade, so its length is what it costs.
     /// 0 turns the fade off and hands over in one frame.
     u32 temporal_denoise_fade_frames = 8;
+
+    /// The exposure and curve the layer's image is shown through, applied where its parent composites it.
+    ///
+    /// **Never restarts accumulation**: the mean stays radiance, and only its display changes.
+    /// The default curve `none` shows the radiance as it is, so a unorm8 target clips and does not encode it.
+    /// Drawings and annotations are drawn after it and see none of it.
+    sr::display_transform display = {};
 };
