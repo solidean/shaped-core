@@ -127,6 +127,17 @@
             {}
         ]
     },
+    // The scene and the renderer come from SV_STUDIO_SCENE and SV_STUDIO_MODE; unset is the BMW through the deferred hybrid.
+    "shaped-viewer/research-studio": {
+        "mechanism": "sv",
+        "size": "1280x720",
+        "format": "jpg",
+        "accumulate": 64,
+        "timeout": 600,
+        "captures": [
+            {}
+        ]
+    },
     "shaped-viewer/hybrid-sponza": {
         "mechanism": "sv",
         "size": "1440x600",
