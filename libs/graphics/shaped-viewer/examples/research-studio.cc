@@ -202,11 +202,6 @@ EXAMPLE("shaped-viewer/research-studio")
 {
     // The research scenes leave the volume off solid glass, so a closed glass mesh is read as the solid it is.
     auto const loader = sv::asset_loader({.closed_transmission_is_solid = true});
-
-    // What this machine can run, asked once of the context every viewer here draws on.
-    auto support = sr::reconstruct_support{};
-    if (auto const ctx = sv::acquire_viewer_context(); ctx.has_value() && ctx.value() != nullptr)
-        support = sr::query_reconstruct_support(*ctx.value());
     cc::optional<sv::asset> assets[k_scene_count] = {};
     tg::aabb3f bounds[k_scene_count] = {};
     bool framed[k_scene_count] = {};
@@ -272,6 +267,11 @@ EXAMPLE("shaped-viewer/research-studio")
             ImGui::RadioButton("path traced", &mode, 2);
             if (ImGui::BeginCombo("denoiser", sr::to_string(k_denoisers[denoiser]).data()))
             {
+                // Asked while the list is open rather than once up front: sr's shaders answer only once a viewer has
+                // added them to its library, so before the first frame every member built from them reads as missing.
+                auto support = sr::reconstruct_support{};
+                if (auto const ctx = sv::acquire_viewer_context(); ctx.has_value() && ctx.value() != nullptr)
+                    support = sr::query_reconstruct_support(*ctx.value());
                 for (auto i = 0; i < int(sizeof(k_denoisers) / sizeof(k_denoisers[0])); ++i)
                 {
                     auto const m = k_denoisers[i];
