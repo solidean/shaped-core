@@ -157,6 +157,9 @@ public:
         case sg::feature::first_instance:
             // WGSL has no 16-bit integers, no coherence qualifier, no atomic texel and no first-instance builtin, on any device.
             return false;
+        case sg::feature::opacity_micromap:
+            // The ray-query polyfill traverses its own boxes and knows no micromap.
+            return false;
         case sg::feature::unaligned_block_compression:
             // Lifted by `texture-compression-unaligned`, which the emdawnwebgpu this builds against does not offer.
             return false;

@@ -7,7 +7,8 @@
 #include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
 #include <shaped-graphics/fwd.hh>
-#include <shaped-graphics/resource/views.hh> // tlas_view (tlas::as_view)
+#include <shaped-graphics/raytracing/micromap.hh> // blas_triangles::micromap
+#include <shaped-graphics/resource/views.hh>      // tlas_view (tlas::as_view)
 
 #include <atomic>
 
@@ -65,6 +66,18 @@ struct sg::blas_triangles
     /// Geometry is opaque, so no any-hit runs: DX12 GEOMETRY_FLAG_OPAQUE / Vk GEOMETRY_OPAQUE.
     /// Defaulted on as the common fast case; clear it for alpha-tested geometry.
     bool is_opaque = true;
+
+    /// Optional opacity micromap, which must be null where the context lacks `sg::feature::opacity_micromap`.
+    /// `micromap_indices` then holds one index per triangle: a map of `micromap`, or a `micromap_special_index`.
+    /// An unsigned `micromap_index_type` reads its bits as signed, so `0xFFFFFFFF` is `fully_transparent`.
+    micromap_handle micromap = nullptr;
+    raw_buffer_handle micromap_indices = nullptr;
+    isize micromap_indices_offset_in_bytes = 0;
+    index_format micromap_index_type = index_format::uint32;
+
+    /// How many triangles name a map of each level and format.
+    /// Empty means `micromap`'s own usage, which is right where every map is named by exactly one triangle.
+    cc::vector<micromap_usage> micromap_usage_counts = {};
 };
 
 /// One procedural geometry in a BLAS: a list of axis-aligned bounding boxes an intersection shader refines.
@@ -145,6 +158,9 @@ void set_build_record(blas const& blas, blas_geometry geometry, int hit_record_s
 /// Records every instance of `tlas`, which only a build under `context::portability_checks` does.
 void set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records);
 
+/// Records the micromaps a BLAS was built from, which it then holds.
+void set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
+
 /// What `set_instance_records` recorded, which is empty where it never ran.
 [[nodiscard]] cc::span<tlas_instance_record const> instance_records_of(tlas const& tlas);
 } // namespace sg::impl
@@ -214,9 +230,11 @@ protected:
 
 private:
     friend void impl::set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
+    friend void impl::set_micromaps(blas const& blas, cc::vector<micromap_handle> micromaps);
 
     blas_geometry _geometry = blas_geometry::triangles;
     int _hit_record_stride = 1;
+    cc::vector<micromap_handle> _micromaps; // the ownership edge: keeps every micromap a geometry named alive
 };
 
 /// A top-level acceleration structure: an opaque index over a set of instances, each placing a blas with a transform.

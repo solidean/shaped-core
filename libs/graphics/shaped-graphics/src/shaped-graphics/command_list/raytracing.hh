@@ -24,6 +24,7 @@ public:
     /// Non-indexed geometries need `vertex_count % 3 == 0`, indexed ones `index_count % 3 == 0`, and `fast_trace` / `fast_build` are mutually exclusive.
     /// Throws sg::allocation_exception if the result buffer cannot be allocated.
     /// Requires is_supported().
+    /// A geometry may name an opacity micromap only where the context has `sg::feature::opacity_micromap`, and the BLAS then holds it.
     ///
     /// `hit_record_stride` is the number of shader-table records one geometry of this BLAS takes: the ray count of the pipelines that trace it, and must be >= 1.
     /// Metal bakes it into the structure, setting geometry g's intersection-function-table offset to `g * hit_record_stride`.
@@ -31,6 +32,11 @@ public:
     [[nodiscard]] blas_handle build_blas(cc::span<blas_triangles const> geometries,
                                          accel_build_flags flags = accel_build_flag::fast_trace,
                                          int hit_record_stride = 1);
+
+    /// Build an opacity micromap, which a later `build_blas` names in a `blas_triangles`.
+    /// Requires `sg::feature::opacity_micromap`; `triangles.usage` must name at least one map, and its levels the device's maximum at most.
+    /// Throws sg::allocation_exception if the result buffer cannot be allocated.
+    [[nodiscard]] micromap_handle build_micromap(micromap_triangles const& triangles);
 
     /// Build a procedural (AABB) BLAS.
     /// Same contract as the triangle overload; a BLAS is triangles or AABBs, never both.

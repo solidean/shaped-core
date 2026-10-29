@@ -1,6 +1,7 @@
 #pragma once
 
 #include <clean-core/common/assert.hh>
+#include <clean-core/error/optional.hh>
 #include <clean-core/function/unique_function.hh>
 #include <clean-core/thread/mutex.hh>
 #include <shaped-graphics/backends/vulkan/fwd.hh>
@@ -189,6 +190,19 @@ public:
     // Set once by create_vulkan_context, before the context is handed out; never changes afterwards.
     void set_raytracing_supported(bool supported) { _raytracing_supported = supported; }
 
+    /// Whether VK_EXT_opacity_micromap is enabled, with its entry points loaded: sg::feature::opacity_micromap.
+    [[nodiscard]] bool is_opacity_micromap_supported() const { return _opacity_micromap.has_value(); }
+
+    /// The deepest subdivision level the device takes in a 4-state and in a 2-state map; only where micromaps are supported.
+    [[nodiscard]] VkPhysicalDeviceOpacityMicromapPropertiesEXT const& opacity_micromap_properties() const
+    {
+        return _opacity_micromap.value();
+    }
+
+    /// The VkBufferUsageFlags a buffer of `usage` is created with, here and by every requirements probe alike.
+    /// Where micromaps are enabled, an acceleration-structure usage carries its micromap twin too, so one buffer serves either build.
+    [[nodiscard]] VkBufferUsageFlags vk_buffer_usage(sg::buffer_usages usage) const;
+
     /// Serializes every queue operation on this device.
     ///
     /// **Vulkan queues are externally synchronized; D3D12's are free-threaded.**
@@ -293,6 +307,8 @@ public:
         case sg::feature::image_atomics:
         case sg::feature::first_instance:
             return true;
+        case sg::feature::opacity_micromap:
+            return is_opacity_micromap_supported();
         }
         return false;
     }
@@ -790,6 +806,9 @@ public:
 
     // Set once at creation from the device's extension set; see is_raytracing_supported.
     bool _raytracing_supported = false;
+
+    // Set once at creation where VK_EXT_opacity_micromap is enabled; see is_opacity_micromap_supported.
+    cc::optional<VkPhysicalDeviceOpacityMicromapPropertiesEXT> _opacity_micromap;
 
     // See is_swapchain_supported / is_headless_present_supported.
     bool _swapchain_supported = false;

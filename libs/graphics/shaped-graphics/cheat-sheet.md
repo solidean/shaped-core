@@ -106,6 +106,7 @@ ctx.supports(sg::feature::ray_query)               // bool — THE capability qu
                                                    //   | device_coherence (globallycoherent / coherent(device); false on webgpu)
                                                    //   | image_atomics (atomics on r32 integer images; false on webgpu)
                                                    //   | first_instance (SGL's @first_instance, draw-uniform; false on webgpu, which has no builtin)
+                                                   //   | opacity_micromap (a blas_triangles may name a micromap; vulkan with VK_EXT_opacity_micromap; host-only, no `require`)
                                                    //   vulkan's geometry, tessellation, sample-rate and wireframe answers are the device features creation enabled
                                                    //   binding_arrays false (webgpu) = no count > 1 bindings, no staging_binding_group, no bindless_array
                                                    //   the per-scope bools (cmd.raytracing.is_supported(), cmd.query.is_supported(),
@@ -845,6 +846,16 @@ sg::index_size_in_bytes(format)          // -> 2 | 4
 sg::index_buffer_offset_alignment        // 4 — portable floor an index fetch must start on
 sg::is_aligned_index_fetch(fmt, off, i)  // -> bool; the rule over (view offset + first index)
 sg::instance_cull_mode  // back(default) | front | none
+// opacity micromaps — sg::feature::opacity_micromap only (raytracing/micromap.hh):
+sg::micromap_handle     // std::shared_ptr<sg::micromap const> — persistent; a blas built from it holds it
+sg::micromap_triangles  { states buffer+offset (2 bits a micro-triangle, lowest first); descriptors buffer+offset;
+                          vector<micromap_usage> usage }  // both buffers accel_structure_build_input, 256-byte aligned at the offset
+sg::micromap_descriptor { u32 states_offset_in_bytes; u16 subdivision_level; micromap_format format }  // 8 bytes, both APIs' record
+sg::micromap_usage      { u32 count; u32 subdivision_level; micromap_format format }  // CPU-side counts both APIs size the build from
+sg::micromap_format     // two_state = 1 | four_state = 2
+sg::micromap_state      // transparent 0 | opaque 1 | unknown_transparent 2 | unknown_opaque 3
+sg::micromap_special_index  // fully_transparent -1 | fully_opaque -2 | fully_unknown_transparent -3 | fully_unknown_opaque -4
+// blas_triangles gains: micromap, micromap_indices (+offset, micromap_index_type), micromap_usage_counts (empty = the micromap's own)
 
 // recording (on a command_list, via the cmd.raytracing scope). Sizes+allocates the persistent result from a
 // prebuild query, records the build with transient scratch, returns a persistent handle. Throws sg::allocation_exception.
@@ -854,6 +865,7 @@ cmd.raytracing.build_blas(span<blas_aabbs const>,     flags=fast_trace, int hit_
 //   hit_record_stride = shader-table records per geometry = the ray count of the pipelines that trace it;
 //   metal bakes it (geometry g's offset = g*stride), dx12/vulkan take the multiplier per TraceRay and ignore it
 cmd.raytracing.build_tlas(span<tlas_instance const>,  flags=fast_trace)  // -> tlas_handle  (each blas must be built first)
+cmd.raytracing.build_micromap(micromap_triangles)  // -> micromap_handle; ASSERTS without sg::feature::opacity_micromap, as does a blas naming one
 // blas/tlas: size_in_bytes(); build_scratch_size_in_bytes()/update_scratch_size_in_bytes();
 //   geometry_count()/instance_count(); build_flags(); allows_update(); is_expired()/is_valid()/expire()/add_finalizer().
 // blas.geometry()           // -> sg::blas_geometry — triangles | aabbs

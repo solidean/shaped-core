@@ -677,6 +677,22 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         for (auto const* name : k_raytracing_extensions)
             device_extensions.push_back(name);
 
+    // Opacity micromaps are optional above ray tracing, and enabled wherever the device grants them.
+    char const* const micromap_names[] = {VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME};
+    auto micromap_supported = false;
+    if (raytracing_supported && device_extensions_available(best_device, micromap_names))
+    {
+        auto micromap_query = VkPhysicalDeviceOpacityMicromapFeaturesEXT{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT,
+        };
+        auto features
+            = VkPhysicalDeviceFeatures2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &micromap_query};
+        vkGetPhysicalDeviceFeatures2(best_device, &features);
+        micromap_supported = micromap_query.micromap == VK_TRUE;
+    }
+    if (micromap_supported)
+        device_extensions.push_back(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME);
+
     auto const shader_features = query_optional_shader_features(best_device);
     if (shader_features.has_compute_derivatives)
         device_extensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
@@ -844,10 +860,15 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .maintenance5 = VK_TRUE,
     };
 
+    auto micromap_features = VkPhysicalDeviceOpacityMicromapFeaturesEXT{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT,
+        .pNext = maintenance5_supported ? static_cast<void*>(&maintenance5_features) : static_cast<void*>(&core_features),
+        .micromap = VK_TRUE,
+    };
+
     auto const device_info = VkDeviceCreateInfo{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-        .pNext = maintenance5_supported ? static_cast<void const*>(&maintenance5_features)
-                                        : static_cast<void const*>(&core_features),
+        .pNext = micromap_supported ? static_cast<void const*>(&micromap_features) : micromap_features.pNext,
         .queueCreateInfoCount = u32(queue_infos.size()),
         .pQueueCreateInfos = queue_infos.data(),
         .enabledExtensionCount = u32(device_extensions.size()),
@@ -927,6 +948,16 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         raytracing_supported = ctx->_raytracing_functions.load(device);
     }
     ctx->set_raytracing_supported(raytracing_supported);
+    if (raytracing_supported && micromap_supported && ctx->_raytracing_functions.load_micromaps(device))
+    {
+        auto micromap_props = VkPhysicalDeviceOpacityMicromapPropertiesEXT{
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_PROPERTIES_EXT,
+        };
+        auto props = VkPhysicalDeviceProperties2{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                                 .pNext = &micromap_props};
+        vkGetPhysicalDeviceProperties2(best_device, &props);
+        ctx->_opacity_micromap = micromap_props;
+    }
     ctx->_shader_f16 = shader_features.has_f16();
     ctx->_shader_int16 = shader_features.has_int16();
     ctx->_subgroups = shader_features.subgroups;

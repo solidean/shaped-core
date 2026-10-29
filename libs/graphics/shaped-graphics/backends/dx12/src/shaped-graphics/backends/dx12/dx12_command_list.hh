@@ -281,6 +281,7 @@ protected:
     [[nodiscard]] sg::blas_handle raytracing_build_blas_triangles(cc::span<sg::blas_triangles const> geometries,
                                                                   sg::accel_build_flags flags,
                                                                   int hit_record_stride) override;
+    [[nodiscard]] sg::micromap_handle raytracing_build_micromap(sg::micromap_triangles const& triangles) override;
     [[nodiscard]] sg::blas_handle raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
                                                               sg::accel_build_flags flags,
                                                               int hit_record_stride) override;

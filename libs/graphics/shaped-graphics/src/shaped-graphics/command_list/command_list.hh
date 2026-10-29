@@ -215,6 +215,8 @@ protected:
     [[nodiscard]] virtual blas_handle raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
                                                                       accel_build_flags flags,
                                                                       int hit_record_stride) = 0;
+    // Reached only where the context reports sg::feature::opacity_micromap; the scope checks that first.
+    [[nodiscard]] virtual micromap_handle raytracing_build_micromap(micromap_triangles const& triangles) = 0;
     [[nodiscard]] virtual blas_handle raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
                                                                   accel_build_flags flags,
                                                                   int hit_record_stride) = 0;

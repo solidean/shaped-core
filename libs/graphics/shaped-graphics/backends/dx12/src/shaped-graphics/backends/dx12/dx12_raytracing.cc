@@ -168,6 +168,12 @@ sg::blas_handle dx12_command_list::raytracing_build_blas_triangles(cc::span<sg::
     return build_blas_common(descs, inputs, flags, int(geometries.size()));
 }
 
+sg::micromap_handle dx12_command_list::raytracing_build_micromap(sg::micromap_triangles const& /*triangles*/)
+{
+    // issue: feat-sg-opacity-micromaps
+    CC_UNREACHABLE("dx12 reports no sg::feature::opacity_micromap until it runs the Agility SDK's DXR 1.2");
+}
+
 sg::blas_handle dx12_command_list::raytracing_build_blas_aabbs(cc::span<sg::blas_aabbs const> geometries,
                                                                sg::accel_build_flags flags,
                                                                int /*hit_record_stride*/)

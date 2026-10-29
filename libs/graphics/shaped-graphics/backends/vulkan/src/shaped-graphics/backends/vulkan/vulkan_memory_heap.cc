@@ -113,7 +113,7 @@ sg::memory_requirements vulkan_memory_heap::query_buffer_requirements(isize size
     auto const info = VkBufferCreateInfo{
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
         .size = VkDeviceSize(size_in_bytes),
-        .usage = to_vk_buffer_usage(usage),
+        .usage = _ctx.vk_buffer_usage(usage),
         .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
     };
     VkBuffer probe = VK_NULL_HANDLE;

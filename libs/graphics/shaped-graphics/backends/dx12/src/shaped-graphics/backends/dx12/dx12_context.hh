@@ -226,6 +226,8 @@ public:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;
+        case sg::feature::opacity_micromap: // DXR 1.2, which only the Agility SDK carries — issue: feat-sg-opacity-micromaps
+            return false;
         case sg::feature::unaligned_block_compression:
             return _unaligned_block_textures;
         case sg::feature::shader_f16:

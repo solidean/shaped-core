@@ -195,6 +195,7 @@ private:
     [[nodiscard]] blas_handle raytracing_build_blas_triangles(cc::span<blas_triangles const> geometries,
                                                               accel_build_flags flags,
                                                               int hit_record_stride) override;
+    [[nodiscard]] micromap_handle raytracing_build_micromap(micromap_triangles const& triangles) override;
     [[nodiscard]] blas_handle raytracing_build_blas_aabbs(cc::span<blas_aabbs const> geometries,
                                                           accel_build_flags flags,
                                                           int hit_record_stride) override;

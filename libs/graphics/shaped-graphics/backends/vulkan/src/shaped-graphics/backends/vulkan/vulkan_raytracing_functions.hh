@@ -24,8 +24,17 @@ struct sg::backend::vulkan::vulkan_raytracing_functions
     PFN_vkGetRayTracingShaderGroupHandlesKHR get_shader_group_handles = nullptr;
     PFN_vkCmdTraceRaysKHR cmd_trace_rays = nullptr;
 
+    // VK_EXT_opacity_micromap, loaded apart since a device may trace without it
+    PFN_vkCreateMicromapEXT create_micromap = nullptr;
+    PFN_vkDestroyMicromapEXT destroy_micromap = nullptr;
+    PFN_vkGetMicromapBuildSizesEXT get_micromap_build_sizes = nullptr;
+    PFN_vkCmdBuildMicromapsEXT cmd_build_micromaps = nullptr;
+
     /// Fetches every entry point; returns false when any is missing.
     [[nodiscard]] bool load(VkDevice device);
+
+    /// Fetches the micromap entry points; returns false when any is missing.
+    [[nodiscard]] bool load_micromaps(VkDevice device);
 
     [[nodiscard]] bool is_loaded() const { return cmd_build_acceleration_structures != nullptr; }
 };

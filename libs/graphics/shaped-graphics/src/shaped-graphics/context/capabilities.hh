@@ -127,6 +127,11 @@ enum class sg::feature
     /// D3D12 has it from shader model 6.8, Vulkan from `shaderDrawParameters`, which creation requires, and Metal always.
     /// WGSL has no builtin for it.
     first_instance,
+
+    /// A triangle geometry may carry an opacity micromap (`cmd.raytracing.build_micromap`), which traversal decides most candidates by.
+    /// Vulkan grants it with `VK_EXT_opacity_micromap`, D3D12 from DXR 1.2 in the Agility SDK; metal and WebGPU have no equivalent.
+    /// The host's alone: a shader traces the same way either way, so no `require` names it.
+    opacity_micromap,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -161,8 +166,9 @@ inline constexpr feature k_all_features[] = {
     feature::device_coherence,
     feature::image_atomics,
     feature::first_instance,
+    feature::opacity_micromap,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::first_instance) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::opacity_micromap) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -216,6 +222,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "image_atomics";
     case feature::first_instance:
         return "first_instance";
+    case feature::opacity_micromap:
+        return "opacity_micromap";
     }
     return "";
 }

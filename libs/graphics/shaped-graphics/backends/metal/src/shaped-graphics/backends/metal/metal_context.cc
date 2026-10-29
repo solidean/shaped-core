@@ -155,6 +155,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::first_instance:
         // `[[base_instance]]` is on every Apple GPU this backend's Metal 4 floor admits.
         return true;
+    case sg::feature::opacity_micromap:
+        // Metal 4 has no opacity micromaps.
+        return false;
     case sg::feature::depth32_float_stencil8:
         // `MTLPixelFormatDepth32Float_Stencil8` is on every Apple GPU.
         return true;
