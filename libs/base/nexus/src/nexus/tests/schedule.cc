@@ -427,6 +427,10 @@ bool nx::test_schedule_config::is_eligible(test_declaration const& decl, bool na
     if (tc.bucket != selected_bucket && !(allow_cross_bucket_naming && named_exactly))
         return false;
 
+    // A manual test of another bucket, a manual benchmark say, runs within its bucket's sweep only when named exactly.
+    if (tc.manual && tc.bucket != nx::config::test_bucket::manual && !named_exactly)
+        return false;
+
     if (!tc.enabled && !run_disabled_tests && !named_exactly)
         return false;
 

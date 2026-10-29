@@ -62,6 +62,7 @@ struct nx::config::cfg
 {
     bool enabled = true;
     test_bucket bucket = test_bucket::normal;
+    bool manual = false;        // runs only when named exactly, also within its bucket's sweep; see `manual` below
     bool thorough_only = false; // skipped unless the run is --thorough; orthogonal to `bucket` and `enabled`
     bool default_entry = false; // the app or command a run with nothing selected runs; at most one per binary
     int seed = 0;
@@ -207,9 +208,18 @@ constexpr auto rerun_on(char const* glob)
 // A manual test never runs as part of an automatic sweep, not by default and not under a "run disabled too" bulk request either.
 // It runs when a filter names it exactly, or when the runner is put in manual mode via --manual.
 // Intended for tests that open windows, or are otherwise incompatible with unattended execution.
+//
+// On a test of another bucket, a benchmark or an example, it keeps that bucket and narrows it instead:
+// the test is listed with its bucket and runs in its bucket's mode, but only when a filter names it exactly, never on a substring or a full sweep.
+// So the order it is given in does not matter, and a manual benchmark is still a benchmark to the tools that run benchmarks.
 constexpr struct
 {
-    void apply(cfg& result) const { result.bucket = test_bucket::manual; }
+    void apply(cfg& result) const
+    {
+        result.manual = true;
+        if (result.bucket == test_bucket::normal)
+            result.bucket = test_bucket::manual;
+    }
 } manual;
 
 // A PGO benchmark records performance metrics via nx::pgo, and is swept only via --pgo-benchmarks.
