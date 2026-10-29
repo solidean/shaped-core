@@ -104,7 +104,7 @@ public:
     [[nodiscard]] int parallelism() const override { return _thread_count + 1; }
 
     /// One slot: every worker, and every participant scanning for work, joins the open job once.
-    /// Opening wakes all sleepers with one notify; a second opener gets false until the first closed.
+    /// Opening wakes as many sleepers as the job's max_joiners asks for; a second opener gets false until the first closed.
     /// Without threads there is nobody to join, and it answers false.
     [[nodiscard]] bool try_open_broadcast(async_broadcast_job job) override;
     void close_broadcast() override;

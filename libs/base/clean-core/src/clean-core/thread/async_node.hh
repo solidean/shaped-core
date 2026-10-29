@@ -158,6 +158,9 @@ struct cc::async_broadcast_job
 {
     void (*run)(void* ctx) = nullptr;
     void* ctx = nullptr;
+    /// How many joiners the job can use; opening wakes at most that many sleepers, 0 meaning all.
+    /// Threads already awake may still join beyond it, so `run` must cope with a joiner that finds nothing to do.
+    int max_joiners = 0;
 };
 
 /// Where runnable nodes go.

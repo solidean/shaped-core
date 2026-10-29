@@ -290,8 +290,26 @@ bool cc::async_thread_pool::try_open_broadcast(async_broadcast_job job)
     _bc_ambient = async_ambient_handle(); // what the job logs or checks is attributed to whoever opened it
     // odd: open; the RMW is also our half of the wake Dekker, ordering the open before the _sleepers read
     _bc_seq.fetch_add(1, cc::memory_order_seq_cst);
-    if (_sleepers.load(cc::memory_order_relaxed) > 0)
-        wake_all();
+
+    // Wake only as many as the job can use: a loop of 5 helpers that woke all 31 workers ran a solver's step 27% slower,
+    // its serial part too, with the surplus threads spinning beside it before they went back to sleep.
+    auto const sleepers = _sleepers.load(cc::memory_order_relaxed);
+    if (sleepers > 0)
+    {
+        if (job.max_joiners <= 0 || job.max_joiners >= sleepers)
+        {
+            wake_all();
+        }
+        else
+        {
+            {
+                std::lock_guard<std::mutex> const lk(_wait_m);
+                _wake_epoch.fetch_add(1, cc::memory_order_relaxed);
+            }
+            for (int i = 0; i < job.max_joiners; ++i)
+                _wait_cv.notify_one();
+        }
+    }
     return true;
 }
 

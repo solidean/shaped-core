@@ -271,7 +271,7 @@ cc::shared_async<cc::unit> cc::impl::async_parallel_for_ranges(isize n,
                                             cc::memory_order_relaxed);
 
                 j->done = make_async_manual<cc::unit>(); // before the slot opens: a joiner may finish the loop at once
-                if (sched->try_open_broadcast({.run = &join_broadcast, .ctx = j.get()}))
+                if (sched->try_open_broadcast({.run = &join_broadcast, .ctx = j.get(), .max_joiners = j->helpers - 1}))
                 {
                     j->broadcast = sched;
                 }

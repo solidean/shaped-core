@@ -579,7 +579,8 @@ It is for a caller whose parallel phases sit between serial ones longer than the
 `scoped_async_homes`' `compute_linger_us` sets it for the compute pool.
 
 **The broadcast slot** is one job every idle thread of the pool joins once, which is how a [parallel loop](#parallel-loops) starts on all of them without a node each.
-Opening it wakes every sleeper; a joiner runs it with the pool bound and the opener's ambient context installed, as a dequeued node would.
+Opening it wakes as many sleepers as the job can use, all of them for a loop as wide as the pool.
+A joiner runs it with the pool bound and the opener's ambient context installed, as a dequeued node would.
 It is a seqlock with a join count: closing bumps the sequence and waits for the joiners still inside to leave.
 
 ### Measured
