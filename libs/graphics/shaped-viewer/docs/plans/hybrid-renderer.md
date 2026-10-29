@@ -245,36 +245,85 @@ Others to stay clear of, all NVIDIA's:
 - [US 11,756,254 B2](https://patents.google.com/patent/US11756254B2/en): light importance caching by spatial hashing, which light selection must not grow into.
 
 **Counsel confirms the design below before phase 5 starts**, and the question to NVIDIA about ReSTIR is worth widening to US 10,614,613.
+No cache code is written before that answer.
 This section is an engineer's reading of the claims, not a legal opinion.
 
 ### The design: a directly addressed clipmap
+
+Settled in a design review on 2026-10-29, as the design counsel is asked about.
 
 **A camera-centered clipmap of dense 3D grids**, each level twice the cell size of the one inside it.
 A cell's address is its integer coordinate, wrapped toroidally inside its level's grid, so nothing is hashed and nothing collides.
 As the camera moves, a level scrolls: the slab of cells that wrapped around is cleared and refills.
 
-- **A cell holds irradiance in six directions**, an ambient cube, so the normal is a lookup direction rather than a key.
-- **A lookup** takes the finest level that holds the point, interpolates trilinearly between cells, and weights out a cell behind the surface by its center's side of the normal.
-- **Starting size**: six levels of 64³ cells, six half-float RGB directions each, about 75 MB; measured, then tuned.
+**The cache answers indirect light only.**
+The secondary hit keeps its own light and environment samples with their shadow rays, so lamp light and shadows seen through a bounce stay sharp.
+The cache adds `base_color / π` times the irradiance it holds there, and holds only light that bounced at least once more before arriving.
+So the light that changes fastest and leaks worst, a lamp's direct light, is never cached.
+Caching everything would save two of the pixel's five rays; it stays a later option for distant hits, once the cache's bias is measured.
+
+**A cell is an ambient cube**: six RGB irradiances, for a surface facing each axis direction, at half precision.
+The two sides of an axis-aligned thin wall face opposite ways, so they land in opposite faces and do not mix.
+The representation stays behind one SGL function pair, `deposit` and `irradiance`, so first-order spherical harmonics can be measured against it.
 
 **It is fed by the frame's own rays, which is what makes it multi-bounce.**
-The light gathered at each indirect hit — its next-event estimate plus the cache's own answer there — is added to that hit's cell.
-So each frame's secondary light becomes the next frame's cached light, one bounce further each time.
+- **The pixel's own bounce feeds the cell at the pixel's surface**, at no extra ray.
+  What the secondary hit sends back — its direct light plus the cache's answer there — is light arriving at the pixel's surface from another surface.
+  It is added weighted by the cosine over the pdf of the direction drawn.
+  The sky and lamps the bounce itself reached are direct light, and are left out.
+- **One pixel in N traces one more bounce from its secondary hit**, with its direct light, to feed the cells off screen; N starts at 16, about 190k rays and 0.25 ms on Sponza.
+- **Cells do not trace rays of their own.**
+  That would spend rays on cells nothing reads, and choosing one point per cell by an atomic max is US 12,394,144 B2.
 
-- **The adds are integer atomics in fixed point**, since SGL has no float atomics, into a per-cell sum and count.
-  A resolve pass then blends them into the stored irradiance and clears them.
-- **A cell nothing reached fades by age**, so a light switched off does not linger.
-- **Where the frame's rays leave cells empty**, a sparse set of extra paths from a strided subset of pixels runs a few bounces deeper to fill them; tuned by measurement.
+So each frame's bounced light becomes the next frame's cached light, one bounce further each time.
 
-**Leaking is its known weakness**: a cell straddling a thin wall averages both sides.
+**The adds are 32-bit integer atomics in fixed point**, since SGL has no float atomics, into a per-cell sum and count.
+- **Every sample is clamped, and a cell takes at most K samples a frame**: the count's atomic add returns the count before, and a sample arriving past K adds nothing.
+  A wall can put a hundred thousand samples into one coarse cell, so without the cap a bright scene would wrap the sum silently.
+  With it, overflow is impossible by construction, and the fixed-point scale follows from K and the clamp.
+- **No sort and no grouped updates**: applying concurrent updates grouped per cache entry by one thread each is close to US 11,609,899 B2.
+
+**A resolve pass blends each cell's frame into its history** and clears the sums: `stored = mix(stored, frame_mean, max(1 / frames_fed, 1 / N))`, N starting at 32.
+That is about half a second of lag at 60 fps.
+A cell nothing reached ages and fades to zero, so a light switched off does not linger.
+Forgetting faster where a frame disagrees with the history by more than its noise is the additive refinement, should switching lights show a lag worth a second moment per value.
+
+**A lookup is one jittered read.**
+The point moves by a random offset of up to half a cell along the surface, and slightly off it along the normal, and the one cell it lands in is read: three faces of one cube.
+The jitter averages over frames and neighbors, and the denoiser removes the rest; a trilinear blend would be 24 scattered reads at the frame's least coherent point.
+**The level matches the bounce's footprint**: the one whose cell is about the width of the ray cone where the bounce landed, so a long or rough bounce reads a coarse, well-fed cell.
+Any level can be read at any point, so a feed sample adds to every level containing it, and the cap turns most coarse adds away early.
+
+**A metal or glossy secondary hit multiplies the cached irradiance by its whole reflectance**, diffuse and specular together.
+The energy stays roughly right; a polished secondary shows a blur where a reflection would be, seen through one bounce.
+A mirror chain past a smooth secondary is the answer if an image shows that matters.
+
+**Starting size: six levels of 64³.**
+The stored cubes are 36 bytes a cell, 54 MiB; the frame's sums, six faces of RGB as `uint` plus the count, 76 bytes a cell, 114 MiB; 168 MiB together.
+With a 10 cm finest cell it reaches ±3.2 m at that detail and ±102 m at 3.2 m.
+Sponza's transient upload peak is what to lower if memory is short, not the cache; sums kept only for the cells a frame feeds are the lever after that.
+
+**Leaking is its known weakness**: a cell straddling a thin wall averages both sides, and the cube separates only axis-aligned ones.
 It shows less here than in a probe-only renderer, because the cache is read only past the first indirect hit, so contact and near-field light is always traced.
 
-### Alternatives kept
+**Two tests prove it.**
+- **A closed glowing sphere**: the camera inside a closed matte sphere of albedo ρ emitting `Le` everywhere sees `Le / (1 − ρ)` in every direction, `5 Le` at ρ = 0.8.
+  Without the cache the hybrid stops at `Le (1 + ρ + ρ²)`, 2.44 `Le`, so the test pins the bounce sum exactly, and the frames it takes measure the lag.
+- **Sponza against the converged wavefront**, within a bound, for leaks and blur.
+
+Two more pin its edge cases: a cell fed far more than K bright samples in a frame reads back within bound, and switching the only light off reaches near zero within the frames the resolve promises.
+
+### Alternatives closed
 
 - **A DDGI-style probe grid**: NVIDIA's application on it was abandoned, so the method is open, but its RTXGI implementation is not; it would be written from the paper.
-  Diffuse alone, and it needs per-probe visibility to keep from leaking.
-- **Irradiance caching after Ward (1988) and Křivánek (2005)**: sparse world-space records with error-bounded interpolation, long out of patent, and harder to make fast on a GPU.
-- **A surface cache in Lumen's style**: no patent found, and by far the most engineering.
+  Diffuse alone, its probes trace their own rays every frame whatever the camera sees, and a probe inside a wall has to be moved or switched off.
+  It stays the fallback if leaks measure badly, since it keeps the clipmap's feed and lookup interface.
+- **Irradiance caching after Ward (1988) and Křivánek (2005)**: sparse records placed where an error bound asks for one, long out of patent.
+  Placing a record needs a search over the existing ones, and on a GPU that search is usually a hash grid, which is the patented thing again.
+- **A surface cache in Lumen's style**: light stored in texture cards covering each mesh, so nothing leaks, and memory follows surface area rather than empty space.
+  It needs a card-placement pass per mesh when the mesh is first placed, which is hard on CAD geometry with thin parts and thousands of small meshes.
+  It also needs a card atlas, and a lookup through the hit instance's cards.
+  By far the most engineering, for a leak the ambient cube and the first traced bounce already ease.
 
 ## Denoising and upscaling
 
@@ -383,6 +432,7 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
    What the far side reflects back inside is lost, as is a crossing that ends in total internal reflection: a glass sphere under a uniform sky reads 0.96 of it at its center, 0.88 over its disc.
    The deferred kernel's glass is clear: the thin G-buffer keeps no medium and no thin wall.
 5. **The radiance cache**, ending the indirect ray in it, once counsel has confirmed its design.
+   The design is settled and waits on counsel; the glowing-sphere test comes first, since it tells a bug in the feed from a weakness of the design.
 6. **Reconstruction**: `dlss_rr` on the scaled stream, the MetalFX member.
    Begun: a moving hybrid frame is drawn at the upscaler's input extent, jittered as a traced one is, and upscaled through the traced layer's own reconstruct path.
    `raster.frame_constants::jitter` moves the image in clip space so a pixel's center lands where its jittered ray would.
