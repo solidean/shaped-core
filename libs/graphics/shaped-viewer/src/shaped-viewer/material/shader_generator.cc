@@ -890,7 +890,8 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
                                               .roughness = factor_of(r.type->roughness_attribute),
                                               .metalness = factor_of(r.type->metalness_attribute),
                                               .transmission = factor_of(r.type->transmission_attribute),
-                                              .thin_walled = factor_of(r.type->thin_walled_attribute)};
+                                              .thin_walled = factor_of(r.type->thin_walled_attribute),
+                                              .tangent_frame = factor_of(r.type->tangent_frame_attribute)};
     return {.source = cc::move(source),
             .shade_source = cc::move(shade_source),
             .raster_source = cc::move(raster_source),

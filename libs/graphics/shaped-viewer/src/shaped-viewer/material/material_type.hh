@@ -24,6 +24,7 @@ struct sv::material_type_description
     cc::string metalness_attribute = {};
     cc::string transmission_attribute = {};
     cc::string thin_walled_attribute = {};
+    cc::string tangent_frame_attribute = {};
 };
 
 /// A family of materials: what a shader needs per pixel, and the code that turns it into a shaded surface.
@@ -101,6 +102,10 @@ struct sv::material_type
     /// An instance with both, the weight above 0 and the switch on, is a pane the hybrid's rays pass through.
     cc::string transmission_attribute;
     cc::string thin_walled_attribute;
+
+    /// Which declared rotation attribute is this type's tangent frame, or empty for none.
+    /// The hybrid reads its +z as the smooth normal where a bounce meets the surface, so glass refracts and a secondary is lit without facets.
+    cc::string tangent_frame_attribute;
 
     cc::hash128 hash;
 

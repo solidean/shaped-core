@@ -84,7 +84,7 @@ const value_texture = 3u
 /// What `instance.opacity_offset` and `opacity_uv_offset` name when they are not a parameter-block offset.
 const no_offset = 0xffffffffu
 
-/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 200 bytes.
+/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 208 bytes.
 /// `gpu_resource_manager::describe_instance` fills the first seven fields, and `view_renderer` the opacity and the placement.
 ///
 /// Keep the two in lockstep: this is a byte layout, not a description of one.
@@ -140,6 +140,10 @@ struct instance:
     metal_channels: uint
     metal_sampler: uint
     metal_transform: uint
+    /// Where the tangent frame's attribute descriptor sits in the parameter block, or `no_offset` where nothing supplied one per vertex or corner, and its frequency.
+    /// A bounce reads its +z as the smooth normal, `tracer.instance_shading_normal`.
+    frame_offset: uint
+    frame_frequency: uint
 
     /// The rows of the object-to-world transform the instance is placed by, which a hit stored for later shading needs.
     to_world_x: float4

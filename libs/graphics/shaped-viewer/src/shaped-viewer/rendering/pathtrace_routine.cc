@@ -213,6 +213,9 @@ void place_instance_record(shaders::tracer::instance_record& record,
                           | (secondary.metalness.channels[2] << 16);
     record.metal_sampler = secondary.metalness.sampler;
     record.metal_transform = secondary.metalness.transform;
+    auto const per_element = secondary.tangent_frame.kind == material_value_kind::attribute;
+    record.frame_offset = per_element ? secondary.tangent_frame.offset : material_opacity::no_offset;
+    record.frame_frequency = secondary.tangent_frame.frequency;
 
     // A caller's offset counts two records per permutation, so it names the permutation the instance shades with.
     // An odd one would shade the instance through its neighbor's material, reading its parameter block in another layout.

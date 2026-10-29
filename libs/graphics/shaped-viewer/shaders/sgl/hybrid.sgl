@@ -152,7 +152,8 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
         let w0 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
         let w1 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
         let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
-        result.n = normalize(cross(w1 - w0, w2 - w0))
+        let geometric = normalize(cross(w1 - w0, w2 - w0))
+        result.n = tracer.instance_shading_normal(inst, ctx, if dot(geometric, wi) > 0.0 => -geometric else geometric)
         result.albedo = tracer.instance_base_color(inst, ctx)
         result.roughness = tracer.instance_roughness(inst, ctx)
         result.metalness = tracer.instance_metalness(inst, ctx)
@@ -195,7 +196,7 @@ fun crossing_of(b: openpbr.bsdf, origin: float3, wi: float3, rng: uint){tracer.t
     result.weight = exp(-b.medium_sigma_t * h.t) * (transmitted * b.trans_eta * b.trans_eta)
     return result
 
-/// The world normal of the face `h` met, either way around.
+/// The world normal of the face `h` met, either way around: its smooth normal where its material carries one, so a crossing bends without facets.
 fun face_normal(h: tracer.hit_record){tracer.traced, tracer.bindless} -> float3:
     let inst = scene.instance(..tracer.traced.instances[h.instance as int])
     if h.kind != tracer.hit_triangle => return normalize(raster.to_world_vector(inst, h.normal))
@@ -204,7 +205,8 @@ fun face_normal(h: tracer.hit_record){tracer.traced, tracer.bindless} -> float3:
     let w0 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.x))
     let w1 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.y))
     let w2 = raster.to_world_point(inst, tracer.instance_position(inst, ctx.corner.z))
-    return normalize(cross(w1 - w0, w2 - w0))
+    let geometric = normalize(cross(w1 - w0, w2 - w0))
+    return tracer.instance_shading_normal(inst, ctx, geometric)
 
 /// The analytic lights a bounce from `origin` along `wi` reaches, drawn at `bsdf_pdf`: the rects it crosses before `hit_t`, and on an escape, a negative `hit_t`, the discs it points into.
 /// Each is weighed against `direct`'s light sample, which draws the same direction at the light's own density.

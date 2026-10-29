@@ -317,6 +317,18 @@ fun instance_base_color(inst: scene.instance, ctx: material.shading_context){tra
     let c = emission_factor(inst.base_kind, inst.base_offset, inst.base_uv_offset, inst.base_frequency, inst.base_channels, inst.base_sampler, inst.base_transform, 3u, ctx)
     return saturate(c)
 
+/// The smooth normal of `inst` where `ctx` sits, turned to `geometric`'s side: its tangent frame's +z in the world, or `geometric` where it has none per vertex or corner.
+fun instance_shading_normal(inst: scene.instance, ctx: material.shading_context, geometric: float3){traced, bindless} -> float3:
+    if inst.frame_offset == scene.no_offset or inst.frame_frequency == material.frequency_per_triangle => return geometric
+    let block = ctx.param_buffer as int
+    let desc = material.load_attribute_desc(bindless.buffers[nonuniform block], ctx.param_offset + inst.frame_offset)
+    let desc_buffer = desc.buffer as int
+    let corners = if inst.frame_frequency == material.frequency_per_corner => material.corner_elements(ctx) else ctx.corner
+    let q = material.interpolate_rotation(bindless.buffers[nonuniform desc_buffer], desc, corners, ctx.barycentrics)
+    let n = normalize(instance_normal_to_world(inst, openpbr.quat_rotate(q, float3(0.0, 0.0, 1.0))))
+    if dot(n, geometric) < 0.0 => return -n
+    return n
+
 /// The specular roughness of `inst` where `ctx` sits, read as `instance_base_color` reads its color; -1 for a type that declares none, whose secondary hit stays matte.
 fun instance_roughness(inst: scene.instance, ctx: material.shading_context){traced, bindless} -> float:
     if inst.rough_kind == scene.value_none => return -1.0

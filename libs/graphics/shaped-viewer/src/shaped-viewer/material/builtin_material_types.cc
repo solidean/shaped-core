@@ -214,7 +214,8 @@ surface.emission_color = color
                                   .roughness_attribute = "specular_roughness",
                                   .metalness_attribute = "base_metalness",
                                   .transmission_attribute = "transmission_weight",
-                                  .thin_walled_attribute = "thin_walled"});
+                                  .thin_walled_attribute = "thin_walled",
+                                  .tangent_frame_attribute = "tangent_frame"});
 }
 
 [[nodiscard]] material_type make_pbr()
@@ -240,7 +241,8 @@ surface.emission_color = color
                                   .emission_color_attribute = "emissive",
                                   .base_color_attribute = "base_color",
                                   .roughness_attribute = "roughness",
-                                  .metalness_attribute = "metallic"});
+                                  .metalness_attribute = "metallic",
+                                  .tangent_frame_attribute = "tangent_frame"});
 }
 
 [[nodiscard]] material_type make_unlit()

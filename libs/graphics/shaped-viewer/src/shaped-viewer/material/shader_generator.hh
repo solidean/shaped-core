@@ -137,6 +137,9 @@ struct sv::material_secondary
     /// The type's transmission weight and thin-wall switch, which the host reads to let the hybrid's rays pass a pane.
     material_emission_factor transmission;
     material_emission_factor thin_walled;
+
+    /// The type's tangent frame, whose +z a bounce reads as the smooth normal; only an attribute, interpolated per vertex or corner, is read.
+    material_emission_factor tangent_frame;
 };
 
 /// A material permutation as an SGL hit group, plus the parameter layout it reads.
