@@ -1623,6 +1623,18 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         // Changed settings count as nothing having denoised it, since the denoised slot's declaration covers them and `resolve` restarts it.
         if (!traces && ds.denoised->accum_frame > 0)
             return sg::routine_outcome::executed;
+
+        // Short of the target under `denoise_at_target_only`, a spatial member is skipped and the raw mean presented.
+        // The denoised slot is marked as holding nothing, so the frame at the target denoises, and no stale image from an earlier mean shows.
+        // That is the frame reaching it for a megakernel, whose samples count as it traces, and the first frame tracing nothing for a wavefront,
+        // whose samples land a frame or more later; convergence reads that same count, so a capture never settles before the denoise.
+        if (def.denoise_at_target_only && traces && slot->samples < target && !schedule.runs_temporal())
+        {
+            ds.denoised->accum_frame = 0;
+            res.traces[trace_index] = slot->texture;
+            return sg::routine_outcome::executed;
+        }
+
         if (_denoise(cmd, schedule, *slot, ds, cameras, sample_counts, res.traces[trace_index])
             == sr::reconstruct_status::pending)
             return sg::routine_outcome::declined;

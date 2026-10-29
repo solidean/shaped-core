@@ -31,6 +31,11 @@ struct sv::viewer_definition
     /// Never part of a trace's hash: raising it carries on from the samples the image holds.
     u32 sample_target = 0;
 
+    /// Whether a traced layer's spatial denoiser runs only on the image at `sample_target`, every frame before it presenting the raw mean.
+    /// A capture sets it with the target: nothing sees the frames in between, and a spatial member such as OIDN costs several frames' traces.
+    /// A temporal member runs on regardless, since its history is built frame by frame.
+    bool denoise_at_target_only = false;
+
     [[nodiscard]] view_data& operator[](view_index i) { return views[u32(i)]; }
     [[nodiscard]] view_data const& operator[](view_index i) const { return views[u32(i)]; }
 };
