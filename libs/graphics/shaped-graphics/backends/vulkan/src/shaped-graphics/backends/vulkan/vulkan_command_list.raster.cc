@@ -371,9 +371,14 @@ void vulkan_command_list::raster_set_viewport(sg::viewport const& vp)
 
 void vulkan_command_list::raster_set_scissor(tg::aabb2i const& rect)
 {
+    // Vulkan's validation refuses a negative offset, though it clips an extent past the target, and sg allows both.
+    auto const x0 = cc::max(rect.min[0], 0);
+    auto const y0 = cc::max(rect.min[1], 0);
+    auto const x1 = cc::max(rect.max[0], x0);
+    auto const y1 = cc::max(rect.max[1], y0);
     auto const r = VkRect2D{
-        .offset = {rect.min[0], rect.min[1]},
-        .extent = {u32(rect.max[0] - rect.min[0]), u32(rect.max[1] - rect.min[1])},
+        .offset = {x0, y0},
+        .extent = {u32(x1 - x0), u32(y1 - y0)},
     };
     vkCmdSetScissor(_buffer, 0, 1, &r);
 }
