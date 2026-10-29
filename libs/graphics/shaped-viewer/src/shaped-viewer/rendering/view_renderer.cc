@@ -1932,9 +1932,23 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     // 0 while the temporal member owns the frame, 1 once the spatial one does, and the fade in between — so the two
     // members are never both idle.
     // A layer with no crossfade slot has nowhere to run both at once, so it hands over in one frame whatever it asked for.
-    auto const fade_frames = ds.crossfade != nullptr ? settings.temporal_denoise_fade_frames : 0;
+    // OIDN hands over in one frame too, since a crossfade would run it on every frame of the fade.
+    auto const oidn = settings.still_denoise == still_denoise::oidn;
+    auto const fade_frames = ds.crossfade != nullptr && !oidn ? settings.temporal_denoise_fade_frames : 0;
     if (may_run_temporally)
         schedule.blend = crossfade_weight(accum_frame, settings.temporal_denoise_frames, fade_frames);
+
+    if (oidn)
+    {
+        schedule.spatial_settings.denoiser = sr::denoise_method::oidn;
+        schedule.spatial_on_doubling = true;
+    }
+    // The temporal member never hands over; past where it would have, it is fed the mean, which carries on converging.
+    if (settings.still_denoise == still_denoise::temporal_on_mean && may_run_temporally)
+    {
+        schedule.temporal_on_mean = accum_frame > settings.temporal_denoise_frames;
+        schedule.blend = 0.0f;
+    }
     return schedule;
 }
 
@@ -1978,13 +1992,16 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
         temporal_guides.motion = ds.motion->texture;
 
         // A split-signal member reads the two lobes as its colour pair; everything else reads their sum, which is
-        // what `frame` already holds.
-        auto const split = ds.frame_diffuse != nullptr && ds.frame_specular != nullptr && ds.hit_distance != nullptr;
+        // what `frame` already holds — or, fed the mean, what the accumulator holds, which has no lobes apart.
+        auto const split = !schedule.temporal_on_mean && ds.frame_diffuse != nullptr && ds.frame_specular != nullptr
+                        && ds.hit_distance != nullptr;
         if (split)
             temporal_guides.hit_distance = ds.hit_distance->texture;
 
         auto const inputs = sr::reconstruct_inputs{
-            .color = split ? ds.frame_diffuse->texture : ds.frame->texture,
+            .color = schedule.temporal_on_mean ? accumulator.texture
+                   : split                     ? ds.frame_diffuse->texture
+                                               : ds.frame->texture,
             .specular = split ? ds.frame_specular->texture : sg::texture_2d(),
             .guides = temporal_guides,
             .output = denoised.texture,
@@ -2009,8 +2026,20 @@ sr::reconstruct_status view_renderer::_denoise(sg::command_list& cmd,
             .sample_count = accumulator.samples,
             .sample_counts = sample_counts,
         };
-        auto const spatial_outcome
-            = sr::reconstruct_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
+
+        // On doubling, the denoised slot's `samples` holds the mean's count as of the run that wrote it.
+        // It runs again once the mean has twice that, or has restarted below it, or when the slot holds no image at all.
+        auto const ran_at = denoised.samples;
+        auto const due = !schedule.spatial_on_doubling || denoised.accum_frame == 0 || ran_at == 0
+                      || accumulator.samples < ran_at || accumulator.samples >= 2 * ran_at;
+        auto spatial_outcome = sr::reconstruct_outcome{.status = sr::reconstruct_status::denoised,
+                                                       .denoiser = schedule.spatial_settings.denoiser};
+        if (due)
+        {
+            spatial_outcome = sr::reconstruct_routine::execute(cmd, inputs, denoised.denoise, schedule.spatial_settings);
+            if (schedule.spatial_on_doubling && spatial_outcome.is_denoised())
+                denoised.samples = cc::max(accumulator.samples, 1u);
+        }
 
         // Mid-fade the frame is only as good as its worse half: a spatial member that declined leaves the crossfade
         // slot holding an older image, and mixing that in would be a visible jump backwards.

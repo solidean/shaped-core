@@ -82,6 +82,20 @@ enum class sv::hybrid_lighting : sv::u8
     deferred,
 };
 
+/// What denoises a still image once the temporal member has handed over, `render_settings::temporal_denoise_frames` after the image last changed.
+enum class sv::still_denoise : sv::u8
+{
+    /// The spatial member `reconstruct` resolves to, on the mean, every frame, crossfaded in over the hand-off.
+    spatial,
+
+    /// OIDN on the mean, run again each time the mean's samples double, its last result shown in between.
+    /// Reference quality at roughly 0.2 s a megapixel, so each run is a hitch the doubling keeps rare.
+    oidn,
+
+    /// The temporal member keeps running, fed the mean rather than each frame's own samples.
+    temporal_on_mean,
+};
+
 /// View-wide render settings — everything that applies to a whole view rather than a single scene item.
 ///
 /// How the layer is drawn, traced or rasterized, and the controls of each; a field says which mode reads it.
@@ -158,6 +172,9 @@ struct sv::render_settings
     /// Both members run on each frame of the fade, so its length is what it costs.
     /// 0 turns the fade off and hands over in one frame.
     u32 temporal_denoise_fade_frames = 8;
+
+    /// What denoises a still image once the temporal member hands over; never restarts accumulation.
+    sv::still_denoise still_denoise = sv::still_denoise::spatial;
 
     /// The exposure and curve the layer's image is shown through, applied where its parent composites it.
     ///

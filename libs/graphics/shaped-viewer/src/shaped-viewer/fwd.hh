@@ -288,7 +288,8 @@ enum class raster_shading : u8; // which pixel stage a raster frame's shading dr
 struct raster_thin_targets;     // the hybrid's thin G-buffer (rendering/raster_routine.hh)
 class raster_routine;
 enum class hybrid_lighting : u8; // where a hybrid frame lights its primary hits (view/render_settings.hh)
-struct hybrid_frame_desc;        // one hybrid frame (rendering/hybrid_routine.hh)
+enum class still_denoise : u8; // what denoises a still image once the temporal member hands over (view/render_settings.hh)
+struct hybrid_frame_desc;      // one hybrid frame (rendering/hybrid_routine.hh)
 class hybrid_routine;
 class view_renderer;
 class viewer_renderer;

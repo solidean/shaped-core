@@ -165,6 +165,12 @@ private:
         /// `crossfade_weight` at the mean's frame count after this frame's trace.
         f32 blend = 1.0f;
 
+        /// The temporal member runs on the mean rather than this frame's samples: `still_denoise::temporal_on_mean` past the hand-off.
+        bool temporal_on_mean = false;
+
+        /// The spatial member runs only when the mean's samples have doubled since its last run: `still_denoise::oidn`.
+        bool spatial_on_doubling = false;
+
         [[nodiscard]] bool runs_temporal() const { return blend < 1.0f; }
         [[nodiscard]] bool runs_spatial() const { return blend > 0.0f; }
     };
