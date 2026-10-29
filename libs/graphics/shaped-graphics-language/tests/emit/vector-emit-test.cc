@@ -284,8 +284,10 @@ TEST("sgl emit - is_nan and is_inf are a test of the bits on every target")
     for (auto const t : {target::hlsl_dx12, target::hlsl_vulkan})
     {
         auto const hlsl = text_of(source, t);
-        CHECK(hlsl.contains("((asuint(p.position.x) & uint(0x7fffffffu)) > uint(0x7f800000u))")).dump("hlsl", hlsl);
-        CHECK(hlsl.contains("((asuint(v) & uint3(0x7fffffffu)) == uint3(0x7f800000u))")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(p.position.x) & 0x7fffffffu) > 0x7f800000u)")).dump("hlsl", hlsl);
+        CHECK(hlsl.contains("((asuint(v) & 0x7fffffffu) == 0x7f800000u)")).dump("hlsl", hlsl);
+        // HLSL's vector constructors take one value per element, so a one-value splat would not compile.
+        CHECK(!hlsl.contains("uint3(0x")).dump("hlsl", hlsl);
         CHECK(!hlsl.contains("isnan(")).dump("hlsl", hlsl);
         CHECK(!hlsl.contains("isinf(")).dump("hlsl", hlsl);
     }
