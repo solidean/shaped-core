@@ -31,6 +31,7 @@ struct mipmap_program;                  // one mipmap key's group layout + compu
 // The display transform (see display.hh): exposure and curve, as SGL module `display` applies them.
 enum class display_curve : u8; // none, the clamped sRGB encode, or the neutral roll-off before it
 struct display_transform;      // an exposure in stops and a curve
+class exposure_meter_routine;  // an image's mean log luminance, for an automatic exposure (exposure_meter_routine.hh)
 
 // Reconstruction (see reconstruct.hh): one front routine over denoise and upscale members.
 enum class denoise_method : u8;      // which member runs, or automatic

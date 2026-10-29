@@ -16,6 +16,7 @@ add_library(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.cc
     src/shaped-rendering/svgf_denoise_routine.cc
     src/shaped-rendering/mix_routine.cc
+    src/shaped-rendering/exposure_meter_routine.cc
     src/shaped-rendering/dlss_rr_routine.cc
     src/shaped-rendering/nrd_denoise_routine.cc
     src/shaped-rendering/oidn_denoise_routine.cc
@@ -60,6 +61,7 @@ target_sources(shaped-rendering
     src/shaped-rendering/atrous_denoise_routine.hh
     src/shaped-rendering/svgf_denoise_routine.hh
     src/shaped-rendering/mix_routine.hh
+    src/shaped-rendering/exposure_meter_routine.hh
     src/shaped-rendering/dlss_rr_routine.hh
     src/shaped-rendering/nrd_denoise_routine.hh
     src/shaped-rendering/oidn_denoise_routine.hh
@@ -291,6 +293,7 @@ sc_add_shader_package(
         nn_io.sgl:*
         slug_quads.sgl:*
         mix.sgl:*
+        exposure_meter.sgl:*
         atrous_denoise.sgl:*
         svgf.sgl:*
         fsr_prepare_depth.sgl:*
@@ -448,6 +451,7 @@ if(SC_BUILD_TESTS)
             tests/fsr-clear-test.cc
             tests/fsr-test.cc
             tests/mix-test.cc
+            tests/exposure-meter-test.cc
             tests/nrd-test.cc
             tests/svgf-reference-test.cc
             tests/oidn-test.cc

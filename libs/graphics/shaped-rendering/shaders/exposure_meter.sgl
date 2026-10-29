@@ -1,0 +1,31 @@
+// An image's brightness, for an automatic exposure: log2 luminance over a 64x64 grid of its pixels, as 256 partial sums.
+// Paired with sr::exposure_meter_routine, which a caller reads the partials back through and finishes the mean on the host.
+//
+// One group of 256 threads, each summing its 16 grid points: no group memory and no atomics, so it is one portable dispatch, and the host adds 256 numbers.
+// A grid rather than every pixel, since a mean over 4096 evenly spread samples is as good a meter and costs the same at any size.
+
+binding meter_io:
+    @unfilterable
+    source: texture_2d[float4]
+    // per thread: the sum of log2 luminance over its points, and how many it summed
+    partials: mut buffer[float2]
+
+const grid = 64
+const per_thread = 16
+
+// The luminance a black pixel is metered at, so a few of them darken the mean rather than send it to minus infinity.
+const darkest = 0.0001
+
+@compute(256, 1, 1) fun main_cs(@thread_id id: int3){meter_io}:
+    let size = meter_io.source.size()
+    let mut sum = 0.0
+    for k in 0 ..< per_thread:
+        let cell = id.x * per_thread + k
+        let gx = cell % grid
+        let gy = cell / grid
+        let x = (((gx as float) + 0.5) / (grid as float) * (size.x as float)) as int
+        let y = (((gy as float) + 0.5) / (grid as float) * (size.y as float)) as int
+        let c = meter_io.source.load(int2(x, y))
+        let luminance = 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z
+        sum += log2(max(luminance, darkest))
+    meter_io.partials[id.x] = float2(sum, per_thread as float)

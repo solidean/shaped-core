@@ -24,6 +24,17 @@ struct sr::display_transform
 
     display_curve curve = display_curve::none;
 
+    /// Set, the exposure is metered from the image and adapts toward middle gray, and `exposure` is the compensation added to it.
+    /// Whoever draws the image meters it, with `sr::exposure_meter_routine`; the transform itself holds no state.
+    bool automatic = false;
+
     /// `2^exposure`, the factor module `display`'s `transform` takes.
     [[nodiscard]] f32 exposure_scale() const;
 };
+
+namespace sr
+{
+/// The exposure in stops that shows an image of mean luminance `average` as middle gray, 0.18: what an automatic exposure adapts toward.
+/// `average` must be above 0.
+[[nodiscard]] f32 exposure_for_average(f32 average);
+} // namespace sr

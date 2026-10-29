@@ -448,6 +448,10 @@ Linear radiance to display values: an exposure, then a curve, then the sRGB enco
 sr::display_transform{.exposure = 0.0f, .curve = sr::display_curve::neutral} // exposure in stops; exposure_scale() -> 2^exposure, what the module takes
 sr::display_curve // none (radiance as is, unclamped, unencoded) | srgb (clamp + exact encode) | neutral (identity to 0.6, then the peak rolls off, hue kept; then encode)
 // 18% gray reads 118 of 255 under srgb and neutral alike; the module's `transform_premultiplied` keeps alpha
+// .automatic = true: the exposure is metered from the image and `exposure` is its compensation; whoever draws the image meters it
+sr::exposure_for_average(average_luminance)   // -> f32 stops that show that mean as middle gray, 0.18
+sr::exposure_meter_routine::execute(cmd, image) // -> optional<buffer<vec2f>>: 256 partial sums of log2 luminance over a 64x64 grid; none while compiling
+sr::exposure_meter_routine::average_luminance(partials) // -> optional<f32>, 2^(mean log2); read the partials back with cmd.download.data_from_buffer
 ```
 
 ## Reconstruction
