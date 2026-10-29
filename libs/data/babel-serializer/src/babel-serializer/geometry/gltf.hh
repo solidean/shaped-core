@@ -106,6 +106,10 @@ enum class babel::gltf::light_index : int
 {
     invalid = -1
 };
+enum class babel::gltf::camera_index : int
+{
+    invalid = -1
+};
 
 // value enums
 // -------------------------------------------------------------------------------------------------
@@ -191,6 +195,14 @@ enum class babel::gltf::wrap_mode : babel::u16
     repeat = 10497,
     clamp_to_edge = 33071,
     mirrored_repeat = 33648,
+};
+
+/// A camera's `type`; `unknown` is one the spec does not define, kept so node indices stay the file's own.
+enum class babel::gltf::camera_type : babel::u8
+{
+    unknown,
+    perspective,
+    orthographic,
 };
 
 /// A KHR_lights_punctual light's `type`.
@@ -448,6 +460,9 @@ struct babel::gltf::node
     /// KHR_lights_punctual: the light this node places, pointing down the node's -Z.
     light_index light = light_index::invalid;
 
+    /// The camera this node places, looking down the node's -Z with +Y up.
+    camera_index camera = camera_index::invalid;
+
     cc::string name;
 };
 
@@ -468,8 +483,9 @@ struct babel::gltf::texture_ref
     i32 texcoord = 0; // the n in TEXCOORD_n
 };
 
-/// One `materials` entry, core metallic-roughness only.
-/// The KHR_materials_* extensions are not interpreted; their raw JSON is skipped.
+/// One `materials` entry: core metallic-roughness, plus the factors of the emission, glass, specular and clearcoat extensions.
+/// Each extension's field holds its own default where the material does not use it, so an absent extension needs no flag.
+/// Their textures are not read yet, and recorded as issues; the other KHR_materials_* extensions (sheen, iridescence, ...) are not read at all.
 struct babel::gltf::material
 {
     i32 json_node = -1; // its object in data::json, which data::json_of reads
@@ -489,6 +505,29 @@ struct babel::gltf::material
     alpha_mode alpha = alpha_mode::opaque;
     f32 alpha_cutoff = 0.5f;
     bool double_sided = false;
+
+    /// KHR_materials_emissive_strength: what `emissive_factor` is multiplied by.
+    f32 emissive_strength = 1;
+
+    /// KHR_materials_transmission: the share of light the surface lets through, refracted, rather than scattering it diffusely.
+    f32 transmission_factor = 0;
+
+    /// KHR_materials_ior: the interior's index of refraction.
+    f32 ior = 1.5f;
+
+    /// KHR_materials_volume: how thick the interior is, in the mesh's own units; 0 is a thin wall with no interior.
+    f32 thickness_factor = 0;
+    /// The distance light crosses inside before it is tinted to `attenuation_color`; none is the spec's infinity, no absorption.
+    cc::optional<f32> attenuation_distance;
+    tg::vec3f attenuation_color = tg::vec3f(1, 1, 1);
+
+    /// KHR_materials_specular: the strength and the color of the dielectric reflection.
+    f32 specular_factor = 1;
+    tg::vec3f specular_color_factor = tg::vec3f(1, 1, 1);
+
+    /// KHR_materials_clearcoat: a clear layer over the base, of index of refraction 1.5.
+    f32 clearcoat_factor = 0;
+    f32 clearcoat_roughness_factor = 0;
 
     cc::string name;
 };
@@ -547,6 +586,30 @@ struct babel::gltf::light
     /// spot only: half-angles from the -Z axis in radians, which the extension requires to satisfy 0 <= inner < outer <= pi / 2
     f32 inner_cone_angle = 0;
     f32 outer_cone_angle = 0.78539816f; // pi / 4, the extension's default
+
+    cc::string name;
+};
+
+/// One `cameras` entry, as the file wrote it, the spec's defaults filled in.
+///
+/// A camera has no transform of its own: the node that names it places it, looking down that node's -Z with +Y up.
+/// Lengths are in the scene's units, angles in radians.
+struct babel::gltf::camera
+{
+    i32 json_node = -1; // its object in data::json, which data::json_of reads
+    camera_type type = camera_type::unknown;
+
+    /// perspective: the vertical field of view, and the width over the height where the file states one
+    f32 yfov = 0;
+    cc::optional<f32> aspect_ratio;
+
+    /// orthographic: half the view's width and height
+    f32 xmag = 0;
+    f32 ymag = 0;
+
+    /// The near plane; the far plane, which a perspective camera may leave out for an infinite one.
+    f32 znear = 0;
+    cc::optional<f32> zfar;
 
     cc::string name;
 };
@@ -678,7 +741,7 @@ struct babel::gltf::data
     cc::vector<issue> issues;
 
     /// `extensionsUsed` / `extensionsRequired`, recorded verbatim.
-    /// KHR_lights_punctual and EXT_meshopt_compression are the extensions this reader interprets.
+    /// KHR_lights_punctual, EXT_meshopt_compression and the KHR_materials_* extensions `material` carries are the ones this reader interprets.
     /// Any other required one never reaches a caller unless it is one of `read_options::extensions`: read fails
     /// on it, because the spec says a client that cannot support a required extension must refuse the file.
     cc::vector<cc::string> extensions_used;
@@ -725,6 +788,9 @@ struct babel::gltf::data
     /// KHR_lights_punctual's lights, from the document's own `extensions`; a node places one by `node::light`.
     cc::vector<light> lights;
 
+    /// The `cameras` array; a node places one by `node::camera`.
+    cc::vector<camera> cameras;
+
     // import issues
 public:
     [[nodiscard]] bool has_issues() const { return !issues.empty(); }
@@ -751,6 +817,7 @@ public:
     [[nodiscard]] image const* find(image_index i) const { return impl_find(images, i); }
     [[nodiscard]] sampler const* find(sampler_index i) const { return impl_find(samplers, i); }
     [[nodiscard]] light const* find(light_index i) const { return impl_find(lights, i); }
+    [[nodiscard]] camera const* find(camera_index i) const { return impl_find(cameras, i); }
 
     // flattened runs
 public:
