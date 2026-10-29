@@ -398,6 +398,11 @@ if(NOT DEFINED SC_SOURCE_SITES)
     set(SC_SOURCE_SITES FULL)
 endif()
 
+# SC_ASYNC_AMBIENT_TRACE is the root CMakeLists' option, defaulted the same way; async_ambient.hh turns it into CC_ASYNC_AMBIENT_TRACE.
+if(NOT DEFINED SC_ASYNC_AMBIENT_TRACE)
+    set(SC_ASYNC_AMBIENT_TRACE OFF)
+endif()
+
 # Define build configuration macros. These are the inputs macros.hh derives from; it owns the outputs
 # (CC_ASSERT_ENABLED, CC_HAS_THREADS). PUBLIC because they must agree across the whole build: consumers
 # branch on them, and CC_SINGLE_THREADED additionally changes struct layout (node_allocation's slab header),
@@ -412,6 +417,7 @@ target_compile_definitions(clean-core
     $<$<BOOL:${SC_FRAME_POINTERS}>:CC_FRAME_POINTERS>
     $<$<STREQUAL:${SC_SOURCE_SITES},OPAQUE>:CC_SOURCE_SITES_OPAQUE>
     $<$<STREQUAL:${SC_SOURCE_SITES},OFF>:CC_SOURCE_SITES_OFF>
+    $<$<BOOL:${SC_ASYNC_AMBIENT_TRACE}>:CC_ASYNC_AMBIENT_TRACE_REQUESTED>
 )
 
 # Detect and link the correct library for std::stacktrace support.

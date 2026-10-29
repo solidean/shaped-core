@@ -229,11 +229,11 @@ struct expr_lowering
         auto copy = out.e.at(place);
         auto pinned = [&](flat_expr_id index)
         {
-            // `nonuniform i` pins `i`, and marks the pinned local, since a mark is read only where it indexes (CHK-300)
+            // `nonuniform i` or `uniform i` pins `i`, and marks the pinned local, since a mark is read only where it indexes (CHK-300)
             auto const mark = out.e.at(index);
             auto const* const call = mark.node.try_as<flat_call>();
             auto const* const record = call != nullptr ? out.m.builtin_function(call->intrinsic) : nullptr;
-            auto const is_marked = record != nullptr && record->is_nonuniform_mark;
+            auto const is_marked = record != nullptr && record->mark != builtins::index_mark::none;
             auto const pin = out.let("index", is_marked ? out.e.at(call->arguments)[0] : index);
             out.e.locals[index_of(pin.local)].kind = local_kind::temporary;
             pre.insert_at(at++, pin.stmt);

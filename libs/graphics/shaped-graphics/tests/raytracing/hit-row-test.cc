@@ -7,7 +7,7 @@
 #include <shaped-graphics/raytracing/raytracing_shader_table.hh>
 
 
-// Hit rows and the hit-record check dispatch_rays runs under context::portability_checks, on CPU stand-ins.
+// Hit rows and the hit-record check dispatch_rays runs under context::hit_record_checks, on CPU stand-ins.
 // Neither needs a device: a row is description arithmetic, and the check reads only what sg recorded beside the native objects.
 // raytracing-test.cc builds the real structures on every backend and checks that the recording happens.
 
@@ -135,7 +135,7 @@ TEST("sg - the hit-record check is silent when every reached record fits its BLA
     auto const tlas = make_tlas(instances);
 
     auto const mismatches = sg::impl::find_hit_record_mismatches(table, *tlas);
-    CHECK(mismatches.empty()).context(mismatches.empty() ? cc::string() : mismatches[0]);
+    CHECK(mismatches.empty()).context(mismatches.empty() ? cc::string() : mismatches[0].message);
 }
 
 TEST("sg - the hit-record check names a record of the wrong kind")
@@ -150,7 +150,8 @@ TEST("sg - the hit-record check names a record of the wrong kind")
         sg::impl::tlas_instance_record const instance = {.blas = make_blas(sg::blas_geometry::triangles, 1, 2)};
         auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
         REQUIRE(mismatches.size() == 1);
-        CHECK(mismatches[0].contains("hit record 1")).context(mismatches[0]);
+        CHECK(mismatches[0].message.contains("hit record 1")).context(mismatches[0].message);
+        CHECK(!mismatches[0].past_table_end);
     }
 
     SECTION("an AABB BLAS reaching a triangle group")
@@ -158,7 +159,7 @@ TEST("sg - the hit-record check names a record of the wrong kind")
         sg::impl::tlas_instance_record const instance = {.blas = make_blas(sg::blas_geometry::aabbs, 1, 2)};
         auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
         REQUIRE(mismatches.size() == 1);
-        CHECK(mismatches[0].contains("hit record 0")).context(mismatches[0]);
+        CHECK(mismatches[0].message.contains("hit record 0")).context(mismatches[0].message);
     }
 
     SECTION("an instance whose mask is 0 is never hit, so it is not checked")
@@ -179,8 +180,10 @@ TEST("sg - the hit-record check names a record past the table")
     sg::impl::tlas_instance_record const instance = {.blas = make_blas(sg::blas_geometry::triangles, 2, 2)};
     auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
     REQUIRE(mismatches.size() == 2);
-    CHECK(mismatches[0].contains("hit record 2")).context(mismatches[0]);
-    CHECK(mismatches[1].contains("hit record 3")).context(mismatches[1]);
+    CHECK(mismatches[0].message.contains("hit record 2")).context(mismatches[0].message);
+    CHECK(mismatches[1].message.contains("hit record 3")).context(mismatches[1].message);
+    CHECK(mismatches[0].past_table_end);
+    CHECK(mismatches[1].past_table_end);
 }
 
 TEST("sg - the hit-record check names a BLAS built for another ray count")
@@ -195,7 +198,42 @@ TEST("sg - the hit-record check names a BLAS built for another ray count")
     sg::impl::tlas_instance_record const instance = {.blas = make_blas(sg::blas_geometry::triangles, 2, 1)};
     auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
     REQUIRE(mismatches.size() == 1);
-    CHECK(mismatches[0].contains("hit_record_stride 1")).context(mismatches[0]);
+    CHECK(mismatches[0].message.contains("hit_record_stride 1")).context(mismatches[0].message);
+    CHECK(!mismatches[0].past_table_end).context("both readings stay within the two rows");
+}
+
+TEST("sg - the hit-record check names a default-stride BLAS under one row of two ray types")
+{
+    // What an application first wrote: one row for every instance, two ray types, and BLASes of several geometries
+    // built without a stride.
+    // On metal geometry g's records start at g * 1, so geometry 1's ray type 1 reaches record 2 of 2.
+    // That calls past the intersection function table, which can fault the GPU.
+    auto desc = sg::raytracing_shader_table_description{.pipeline = make_pipeline(), .ray_count = 2};
+    sg::hit_shader_handle const row[2] = {k_triangle, k_other_triangle};
+    auto const only_row = desc.add_hit_row(row);
+    auto const table = cpu_table(desc);
+
+    SECTION("the default stride is named, since it is what to fix first")
+    {
+        sg::impl::tlas_instance_record const instance
+            = {.blas = make_blas(sg::blas_geometry::triangles, 3, 1), .hit_group_offset = table.offset_of(only_row)};
+        auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
+        REQUIRE(mismatches.size() == 1);
+        CHECK(mismatches[0].message.contains("BLAS of 3 geometries built with hit_record_stride 1"))
+            .context(mismatches[0].message);
+        CHECK(mismatches[0].message.contains("build the BLAS with 2")).context(mismatches[0].message);
+        CHECK(mismatches[0].past_table_end).context("so dispatch_rays skips it rather than faulting on metal");
+    }
+
+    SECTION("with the stride right, the one row is still too short for the second geometry")
+    {
+        sg::impl::tlas_instance_record const instance
+            = {.blas = make_blas(sg::blas_geometry::triangles, 2, 2), .hit_group_offset = table.offset_of(only_row)};
+        auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
+        REQUIRE(mismatches.size() == 2);
+        CHECK(mismatches[0].message.contains("hit record 2 for geometry 1 and ray type 0")).context(mismatches[0].message);
+        CHECK(mismatches[1].message.contains("hit record 3 for geometry 1 and ray type 1")).context(mismatches[1].message);
+    }
 }
 
 TEST("sg - the hit-record check asks a stride only of a BLAS whose geometries it separates")
@@ -209,7 +247,7 @@ TEST("sg - the hit-record check asks a stride only of a BLAS whose geometries it
 
         sg::impl::tlas_instance_record const instance = {.blas = make_blas(sg::blas_geometry::triangles, 1, 1)};
         auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
-        CHECK(mismatches.empty()).context(mismatches.empty() ? cc::string() : mismatches[0]);
+        CHECK(mismatches.empty()).context(mismatches.empty() ? cc::string() : mismatches[0].message);
     }
 
     SECTION("a table of one ray type still separates two geometries, by 1 on dx12 and by the stride on metal")
@@ -223,7 +261,7 @@ TEST("sg - the hit-record check asks a stride only of a BLAS whose geometries it
         sg::impl::tlas_instance_record const instance = {.blas = make_blas(sg::blas_geometry::triangles, 2, 2)};
         auto const mismatches = sg::impl::find_hit_record_mismatches(table, *make_tlas(instance));
         REQUIRE(mismatches.size() == 1);
-        CHECK(mismatches[0].contains("hit_record_stride 2")).context(mismatches[0]);
+        CHECK(mismatches[0].message.contains("hit_record_stride 2")).context(mismatches[0].message);
     }
 }
 

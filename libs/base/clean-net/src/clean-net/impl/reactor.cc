@@ -173,6 +173,7 @@ cc::optional<cc::optional<error>> reactor::drive(entry& e)
     case io_op_kind::accept:
     case io_op_kind::receive:
     case io_op_kind::send:
+    case io_op_kind::readable:
         return drive_socket(e);
     }
     return {};

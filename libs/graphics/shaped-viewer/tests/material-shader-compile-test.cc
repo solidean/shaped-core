@@ -2,8 +2,8 @@
 
 // The SGL reaches DXIL through DXC, whose reflection reads a container beside the bytecode through the Windows SDK's
 // d3d12shader.h — a header the Linux DXC release does not ship.
-// So these need Windows as well as a DXC build, unlike the rest of the viewer suite.
-#if SLIB_HAS_DXC && defined(CC_OS_WINDOWS)
+// So these need Windows as well as a DXC build, or Apple's Metal edge, unlike the rest of the viewer suite.
+#if (SLIB_HAS_DXC && defined(CC_OS_WINDOWS)) || SLIB_HAS_METAL
 
 #include "viewer_test_env.hh"
 
@@ -55,7 +55,7 @@ namespace
 void check_entry_compiles(cc::string_view source, sg::shader_stage stage, cc::string_view entry)
 {
     auto const& lib = *sv_test::shared_env().lib;
-    auto const shader = lib.compile_source(source, stage, entry, sg::shader_format::dxil,
+    auto const shader = lib.compile_source(source, stage, entry, sv_test::shared_env().format,
                                            {.language = slib::shader_language::sgl, .label = "<generated material>"});
     REQUIRE(shader != nullptr);
     (void)cc::try_async_blocking_get(shader);
@@ -89,7 +89,7 @@ void check_compiles(sv::resolved_material const& r, sv::geometry_kind kind = sv:
 TEST("sv - every builtin material type compiles as a hit group, on triangles and on quadrics")
 {
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
+        SKIP("no SGL compiler for this backend to build the generated hit groups");
 
     auto materials = sv::material_library::create();
     sv::register_builtin_material_types(materials);
@@ -108,7 +108,7 @@ TEST("sv - every builtin material type compiles as a hit group, on triangles and
 TEST("sv - a hit group compiles at every attribute frequency, sampled, swizzled and cut out")
 {
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
+        SKIP("no SGL compiler for this backend to build the generated hit groups");
 
     auto materials = sv::material_library::create();
     sv::register_builtin_material_types(materials);
@@ -164,7 +164,7 @@ TEST("sv - a hit group compiles at every attribute frequency, sampled, swizzled 
 TEST("sv - a hit group compiles at every attribute frequency of the pbr type")
 {
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the generated hit groups");
+        SKIP("no SGL compiler for this backend to build the generated hit groups");
 
     auto materials = sv::material_library::create();
     sv::register_builtin_material_types(materials);

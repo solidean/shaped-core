@@ -46,7 +46,7 @@ struct sv::viewer_config
     /// Must be >= 2.
     int buffer_count = 3;
 
-    /// Budgets for the viewer's own `gpu_resource_manager` — per-manager LRU limits and the bindless table sizes.
+    /// Budgets for the viewer's own `gpu_resource_manager` — per-manager LRU limits.
     /// The defaults suit a viewer-sized working set; a caller whose content says otherwise sets them here rather
     /// than reaching past the viewer.
     gpu_resource_manager_config resources = {};

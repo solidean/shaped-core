@@ -1,0 +1,47 @@
+// `mat3` is a 3x3 float matrix of function bodies, made of its columns and multiplied as `mat4` is (CHK-397)
+
+fun scale(x: float, y: float, z: float) => mat3(float3(x, 0.0, 0.0), float3(0.0, y, 0.0), float3(0.0, 0.0, z))
+
+// a quarter turn about z, which takes x to y
+fun turn() => mat3(float3(0.0, 1.0, 0.0), float3(-1.0, 0.0, 0.0), float3(0.0, 0.0, 1.0))
+
+// the columns stand in order, so the first one is what x becomes
+test:
+    let m = mat3(float3(1.0, 2.0, 3.0), float3(4.0, 5.0, 6.0), float3(7.0, 8.0, 9.0))
+    m * float3(1.0, 0.0, 0.0) == float3(1.0, 2.0, 3.0)
+    m * float3(0.0, 0.0, 1.0) == float3(7.0, 8.0, 9.0)
+    m * float3(1.0, 1.0, 1.0) == float3(12.0, 15.0, 18.0)
+
+// a product applies its right side first
+test:
+    let v = float3(1.0, 0.0, 0.0)
+    turn() * v == float3(0.0, 1.0, 0.0)
+    (scale(2.0, 3.0, 4.0) * turn()) * v == float3(0.0, 3.0, 0.0)
+    (turn() * scale(2.0, 3.0, 4.0)) * v == float3(0.0, 2.0, 0.0)
+    (turn() * turn()) * v == turn() * (turn() * v)
+
+// a direction keeps its type, as `mat4 * vec3` does
+test (turn() * vec3(1.0, 0.0, 0.0)).y == 1.0
+
+// a mat3 is a value like any other in a body: a local, a parameter, a field and a result
+struct frame:
+    basis: mat3
+    origin: float3
+
+fun to_world(f: frame, p: float3) => f.basis * p + f.origin
+
+test:
+    let mut f = frame(turn(), float3(0.0, 0.0, 1.0))
+    to_world(f, float3(1.0, 0.0, 0.0)) == float3(0.0, 1.0, 1.0)
+    f.basis = scale(2.0, 2.0, 2.0)
+    to_world(f, float3(1.0, 0.0, 0.0)) == float3(2.0, 0.0, 1.0)
+
+// no GPU memory holds one yet, so a shader builds it from what memory holds
+binding scene:
+    axes: buffer[float3]
+    points: mut buffer[float3]
+
+@compute(64) fun rotate(@thread_id id: int3){scene}:
+    let basis = mat3(scene.axes[0], scene.axes[1], scene.axes[2])
+    let f = frame(basis * turn(), float3(0.0))
+    scene.points[id.x] = to_world(f, scene.points[id.x])

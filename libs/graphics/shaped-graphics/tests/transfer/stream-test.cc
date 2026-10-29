@@ -516,6 +516,43 @@ ASYNC_INVOCABLE_TEST("sg stream - a chunked source fills a texture region", (sg:
     CHECK(bytes[src.size() - 1] == src[src.size() - 1]);
 }
 
+// One stream per mip level, all into one texture and all in flight at once: each lands in its own level.
+ASYNC_INVOCABLE_TEST("sg stream - every mip of a texture streams as its own transfer", (sg::context_handle const& handle))
+{
+    REQUIRE(handle != nullptr);
+    auto& c = *handle;
+
+    sg::texture_description desc;
+    desc.format = sg::pixel_format::rgba8_unorm;
+    desc.dimension = sg::texture_dimension::d2;
+    desc.width = 8;
+    desc.height = 8;
+    desc.mip_levels = 4;
+    desc.usage = sg::texture_usage::copy_src | sg::texture_usage::copy_dst;
+    auto tex = c.persistent.create_raw_texture(desc);
+    REQUIRE(tex != nullptr);
+
+    auto levels = cc::vector<cc::vector<byte>>();
+    auto streams = cc::vector<sg::stream_upload_handle>();
+    for (auto mip = 0; mip < 4; ++mip)
+    {
+        auto const side = 8 >> mip;
+        levels.push_back(pattern(side * side * 4, 11 * (mip + 1)));
+        streams.push_back(c.stream.bytes_to_texture(tex, cc::make_pinned_data(levels.back()), {.mip_level = mip}));
+    }
+    for (auto& s : streams)
+        REQUIRE((co_await cc::async_as_result(s.completion())).has_value());
+
+    for (auto mip = 0; mip < 4; ++mip)
+    {
+        auto const back = c.download.bytes_from_texture(tex, {.mip_level = mip});
+        auto const bytes = co_await back.bytes();
+        REQUIRE(bytes.size() == levels[mip].size());
+        CHECK(bytes[0] == levels[mip][0]);
+        CHECK(bytes[bytes.size() - 1] == levels[mip][levels[mip].size() - 1]);
+    }
+}
+
 // A streamed texture's rows are rows of BLOCKS, and its extent is slice-major.
 //
 // Both of those are invisible on an uncompressed 2D texture, where a block is one texel and there is one slice — so

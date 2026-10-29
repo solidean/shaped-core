@@ -67,6 +67,8 @@ add_library(shaped-viewer
     src/shaped-viewer/asset/impl/gltf_import.cc
     src/shaped-viewer/asset/impl/obj_import.cc
     src/shaped-viewer/asset/impl/stl_import.cc
+    src/shaped-viewer/asset/impl/fbx_import.cc
+    src/shaped-viewer/asset/impl/asset_shared.cc
     src/shaped-viewer/asset/impl/asset_materials.cc
 )
 
@@ -153,7 +155,7 @@ target_include_directories(shaped-viewer
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-# babel-serializer is what reads the asset formats sv imports (glTF, OBJ) and decodes their images.
+# babel-serializer is what reads the asset formats sv imports (glTF, OBJ, STL, FBX) and decodes their images.
 # PUBLIC because `asset_loader` takes an already-parsed `babel::gltf::data` / `babel::obj::data`, so a caller who reads a
 # document for their own reasons can hand it straight over rather than re-reading it.
 # A legal direction — data/ sits below graphics/ — and the first time sv links anything below shaped-rendering.
@@ -161,12 +163,14 @@ target_link_libraries(shaped-viewer PUBLIC shaped-rendering babel-serializer)
 
 # sv brings its own context up when a caller sets no sv::acquire_context, so it needs one backend to fall back on.
 # PRIVATE: the fallback is an implementation detail, and a consumer that wants a different backend overrides the hook
-# rather than inheriting this one. Which backend the default reaches for is a per-target choice that will grow.
+# rather than inheriting this one.
+# dx12 on Windows and metal on Apple platforms; anywhere else a caller supplies the context.
 if(WIN32 AND TARGET shaped-graphics-dx12)
     target_link_libraries(shaped-viewer PRIVATE shaped-graphics-dx12)
-    target_compile_definitions(shaped-viewer PRIVATE SV_HAS_DEFAULT_BACKEND=1)
-else()
-    target_compile_definitions(shaped-viewer PRIVATE SV_HAS_DEFAULT_BACKEND=0)
+    target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_DX12=1)
+elseif(APPLE AND TARGET shaped-graphics-metal)
+    target_link_libraries(shaped-viewer PRIVATE shaped-graphics-metal)
+    target_compile_definitions(shaped-viewer PRIVATE SV_DEFAULT_BACKEND_METAL=1)
 endif()
 
 sc_target_pch(shaped-viewer SG)
@@ -239,8 +243,7 @@ if(SC_BUILD_TOOLS AND WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-d
 endif()
 
 # Test executable.
-# The vocabulary test needs no device and runs everywhere; the GPU tests drive a dx12 WARP/hardware context
-# and compile the ray-tracing shaders through DXC, so they need the dx12 backend and a compiler.
+# The vocabulary test needs no device and runs everywhere; the GPU tests need dx12 with DXC, or metal.
 if(SC_BUILD_TESTS)
     add_executable(shaped-viewer-test
         tests/main.cc
@@ -269,14 +272,16 @@ if(SC_BUILD_TESTS)
         tests/emitter-test.cc
         tests/value-summary-test.cc
         tests/asset-loading-test.cc
+        tests/fbx-import-test.cc
     )
     # Over three times sg's WARP allowance: an unoptimized build runs the suite for five to six minutes, nearly all of it
     # the SGL compiler, unoptimized, compiling each test's material permutations afresh.
     # TEMPORARY: a process-wide compile cache is what would bring it back; see libs/graphics/shaped-viewer/docs/plans/rendering-roadmap.md.
-    if(WIN32)
-        sc_nexus_binary(shaped-viewer-test KINDS tests TIMEOUT 600)
+    # metal runs the whole GPU suite on one device, which takes over a minute as well.
+    if(WIN32 OR APPLE)
+        sg_warp_test_binary(shaped-viewer-test TIMEOUT 600)
     else()
-        sc_nexus_binary(shaped-viewer-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+        sg_warp_test_binary(shaped-viewer-test)
     endif()
 
     target_link_libraries(shaped-viewer-test
@@ -286,14 +291,30 @@ if(SC_BUILD_TESTS)
         babel-serializer # the capture test decodes the image back, which is how it catches a truncated write
     )
 
+    # geometry/fbx_fixtures.hh, the FBX scenes babel's own tests read, which the importer's tests import.
+    target_include_directories(shaped-viewer-test PRIVATE "${BABEL_TEST_DIR}")
+
+    # Where a fetched Bistro lands (extern/bistro/fetch-bistro.py), for the import test that reads the real scene when present.
+    cmake_path(SET _sv_test_bistro_dir NORMALIZE "${CMAKE_CURRENT_SOURCE_DIR}/../../../extern/bistro/.install")
+    target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_BISTRO_DIR="${_sv_test_bistro_dir}")
+
     sc_target_pch(shaped-viewer-test SG NEXUS) # 0.53
 
-    # The GPU tests need a dx12 device and DXC to compile the shaders, so they compile only where both exist.
-    # dx12-entry.cc brings up one context per adapter and invokes them all against it.
-    # The ray-tracing ones SKIP at runtime when the device reports no ray tracing.
+    # The GPU tests run once per backend this build has: an entry driver per backend invokes every
+    # `INVOCABLE_TEST(..., (sg::context_handle const&))` in the binary against one context of it.
+    # dx12 needs DXC to compile the shaders; metal compiles SGL through slib's own compiler edge, so it needs nothing more.
+    # The ray-tracing tests SKIP at runtime when the device reports no ray tracing.
+    set(_sv_test_dx12 OFF)
     if(WIN32 AND SC_HAS_DXC_COMPILER AND TARGET shaped-graphics-dx12)
+        set(_sv_test_dx12 ON)
+    endif()
+    set(_sv_test_metal OFF)
+    if(APPLE AND TARGET shaped-graphics-metal)
+        set(_sv_test_metal ON)
+    endif()
+
+    if(_sv_test_dx12 OR _sv_test_metal)
         target_sources(shaped-viewer-test PRIVATE
-            tests/dx12-entry.cc
             tests/headless-viewer-test.cc
             tests/denoise-view-test.cc
             tests/pathtraced-view-test.cc
@@ -310,10 +331,6 @@ if(SC_BUILD_TESTS)
             tests/wavefront-view-test.cc
             tests/raster-test.cc
             tests/hybrid-test.cc
-            tests/raster-without-raytracing-test.cc
-            tests/wavefront-benchmark.cc
-            tests/raster-benchmark.cc
-            tests/hybrid-benchmark.cc
             tests/view-renderer-test.cc
             tests/view-accumulation-test.cc
             tests/viewer-renderer-test.cc
@@ -323,18 +340,9 @@ if(SC_BUILD_TESTS)
             tests/quadric-manager-test.cc
             tests/quadric-trace-test.cc
             tests/decal-trace-test.cc
-            tests/viewer-window-manual-test.cc
-            tests/pathtraced-window-manual-test.cc
             tests/immediate-viewer-window-manual-test.cc
             tests/interactive-showcase-manual-test.cc
         )
-        target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-dx12)
-
-        # The cross-backend trace test brings up a vulkan context of its own, which sv's other GPU tests do not run on.
-        if(TARGET shaped-graphics-vulkan)
-            target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-vulkan)
-            target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_VULKAN=1)
-        endif()
 
         # The probes: compute shaders over the tracer's modules in shaders/sgl, so a test can measure what the closure returns,
         # where the camera projects, where a ray meets a quadric and what the path tracer's helpers promise.
@@ -354,10 +362,29 @@ if(SC_BUILD_TESTS)
                 pt_support_probe.sgl:*
         )
         target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_PROBE_SHADERS=1)
+    endif()
 
-        # Where the on-request Sponza fetch installs, which the raster benchmark draws when it is there.
-        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install"
-                                                          SV_TEST_BISTRO_DIR="${CMAKE_SOURCE_DIR}/extern/bistro/.install")
+    if(_sv_test_dx12)
+        target_sources(shaped-viewer-test PRIVATE
+            tests/dx12-entry.cc
+            tests/raster-without-raytracing-test.cc
+            tests/wavefront-benchmark.cc
+            tests/raster-benchmark.cc
+            tests/hybrid-benchmark.cc
+            tests/viewer-window-manual-test.cc
+            tests/pathtraced-window-manual-test.cc
+        )
+        target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-dx12)
+        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_DX12=1)
+
+        # The cross-backend trace test brings up a vulkan context of its own, which sv's other GPU tests do not run on.
+        if(TARGET shaped-graphics-vulkan)
+            target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-vulkan)
+            target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_VULKAN=1)
+        endif()
+
+        # Where the on-request Sponza fetch installs, which the raster and hybrid benchmarks draw when it is there.
+        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_SPONZA_DIR="${CMAKE_SOURCE_DIR}/extern/sponza/.install")
 
         # Stage the runtime DLLs (DXC's dxcompiler/dxil, the dx12 backend, SDL3 for the window) next to the
         # binary so it starts. $<TARGET_RUNTIME_DLLS> reaches them through the link chain; empty off Windows.
@@ -368,6 +395,13 @@ if(SC_BUILD_TESTS)
         if(SC_DLSS_RUNTIME)
             sc_stage_runtime_dlls(shaped-viewer-test DLLS "${SC_DLSS_RUNTIME}" TAG dlss)
         endif()
+    endif()
+
+    if(_sv_test_metal)
+        target_sources(shaped-viewer-test PRIVATE tests/metal-entry.cc)
+        target_link_libraries(shaped-viewer-test PRIVATE shaped-graphics-metal)
+        # main() arms Metal's validation layer, which is read from the environment before the framework initializes.
+        target_compile_definitions(shaped-viewer-test PRIVATE SV_TEST_HAS_METAL=1)
     endif()
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

@@ -27,8 +27,8 @@ bool oidn_denoise_routine::is_available(sg::context const& ctx)
 
     // On a backend no compiler of the library serves, the member is unsupported however many weights were fetched.
     for (auto const& asset :
-         {sgl_shaders::nn_conv.main_cs.asset, sgl_shaders::nn_io.input_cs.asset, sgl_shaders::nn_io.output_cs.asset,
-          sgl_shaders::nn_pool.main_cs.asset, sgl_shaders::nn_upsample.main_cs.asset})
+         {sgl_shaders::nn_conv::main_cs.asset, sgl_shaders::nn_io::input_cs.asset, sgl_shaders::nn_io::output_cs.asset,
+          sgl_shaders::nn_pool::main_cs.asset, sgl_shaders::nn_upsample::main_cs.asset})
         if (asset == nullptr || !asset->can_acquire(ctx))
             return false;
     return true;

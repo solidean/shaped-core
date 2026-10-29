@@ -266,9 +266,9 @@ reconstruct_support query_reconstruct_support(sg::context const& ctx)
     // The ones still unimplemented stay false, which is what makes `automatic` skip them and a named request report
     // `unsupported` rather than silently running something else.
     return {
-        .atrous = buildable(sgl_shaders::atrous_denoise.main_cs.asset),
-        .svgf = buildable(sgl_shaders::svgf.temporal_cs.asset) && buildable(sgl_shaders::svgf.variance_cs.asset)
-             && buildable(sgl_shaders::svgf.atrous_cs.asset),
+        .atrous = buildable(sgl_shaders::atrous_denoise::main_cs.asset),
+        .svgf = buildable(sgl_shaders::svgf::temporal_cs.asset) && buildable(sgl_shaders::svgf::variance_cs.asset)
+             && buildable(sgl_shaders::svgf::atrous_cs.asset),
         .oidn = oidn_denoise_routine::is_available(ctx),
         .dlss_rr = dlss_rr_routine::is_available(ctx),
         .nrd = nrd_denoise_routine::is_available(ctx),

@@ -203,7 +203,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a cutout cuts where its opacity sa
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     using binding = sv::material_attribute_binding;
     auto const unlit = sv::builtin_material::unlit;

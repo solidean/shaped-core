@@ -74,6 +74,21 @@ enum class sv::asset_format : sv::u8
     obj,
     /// STL, either container — `read` decides by size, not by the leading `solid`
     stl,
+    /// Autodesk FBX, either encoding
+    fbx,
+};
+
+/// How an FBX material's properties are read, since FBX's Phong and Lambert properties mean whatever the exporting pipeline made them mean and the file never says which.
+enum class sv::fbx_material_convention : sv::u8
+{
+    /// FBX's own semantics: DiffuseColor is the base color, ShininessExponent the specular exponent, the surface a dielectric.
+    /// A specular color map has no OpenPBR parameter to land on and is reported rather than bound.
+    phong,
+
+    /// NVIDIA's ORCA scenes (Amazon Lumberyard Bistro among them) as Falcor reads them, as a metal-rough material.
+    /// Its SpecularColor map packs occlusion in red, roughness in green and metalness in blue, and its normal maps are DirectX-convention.
+    /// Nothing in the file distinguishes this from Phong, which is why it is asked for rather than detected.
+    orca_metal_rough,
 };
 
 /// What a loader does to every file it reads.
@@ -82,7 +97,7 @@ enum class sv::asset_format : sv::u8
 /// Everything else — picking meshes out, renaming, replacing a material after the fact — is ordinary code over
 /// `asset_data`, which is why there is so little here.
 ///
-/// The two hooks own their callables, since a loader outlives the expression that built it.
+/// Its hooks own their callables, since a loader outlives the expression that built it.
 ///
 /// **Every hook here is called from a WORKER**, and from several at once when several `load_async` loads are in
 /// flight — they are the only caller-supplied code an import runs, and the import is what moved off the main thread.
@@ -122,6 +137,9 @@ struct sv::asset_loader_config
     bool flatten_hierarchy = true;
 
     sv::tangent_frame_options frames = {};
+
+    /// how an FBX file's materials are read; the other formats ignore it
+    sv::fbx_material_convention fbx_materials = fbx_material_convention::phong;
 };
 
 namespace sv::impl
@@ -180,6 +198,12 @@ public:
     [[nodiscard]] cc::result<asset_data> load(babel::gltf::data const& doc, cc::string_view name = {}) const;
     [[nodiscard]] cc::result<asset_data> load(babel::obj::data const& doc, cc::string_view name = {}) const;
     [[nodiscard]] cc::result<asset_data> load(babel::stl::data const& doc, cc::string_view name = {}) const;
+
+    /// An FBX document, ideally read with `read_options::triangulate`.
+    /// Its texture file names are joined against `base_uri`, and resolved as written when that is empty.
+    [[nodiscard]] cc::result<asset_data> load(babel::fbx::data const& doc,
+                                              cc::string_view name = {},
+                                              cc::string_view base_uri = {}) const;
 
     /// Loads `uri` off the calling thread, handing back a handle that fills in.
     ///

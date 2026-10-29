@@ -26,7 +26,7 @@ MANIFEST_NAME = "dependency.yml"
 
 # `source` says how we obtain the upstream; `track` says how "what is current" is defined.
 # They are separate because stb, ImPlot and ImGuizmo are ordinary git clones whose newest version is a branch head, not a tag.
-SOURCES = {"git", "github-release", "github-files", "url"}
+SOURCES = {"git", "github-release", "github-files", "url", "nuget"}
 TRACKS = {"tags", "default-branch", "github-releases", "sqlite", "none"}
 DIGEST_ALGOS = {"git-commit", "sha256", "sha3-256"}
 # The keys `unavailable_on` may name a host by.
@@ -62,6 +62,8 @@ class Upstream:
     version: str = ""
     year: str = ""
     asset: str = ""
+    # For `source: url`: the archive's address, where it is not built from `year` and `asset` the way sqlite's is.
+    download: str = ""
     # For `track: tags`, a regex selecting which tags are versions at all — upstreams tag far more than releases.
     # Empty means the default "looks like a version number" pattern.
     tag_pattern: str = ""
@@ -89,7 +91,10 @@ class Upstream:
         if self.source == "github-release":
             return f"{self.repo}/releases/download/{self.tag}/{self.asset}"
         if self.source == "url":
-            return f"https://sqlite.org/{self.year}/{self.asset}"
+            return self.download or f"https://sqlite.org/{self.year}/{self.asset}"
+        if self.source == "nuget":
+            # `repo` is the package id; nuget.org serves a pinned version at this address, whatever is newest.
+            return f"https://www.nuget.org/api/v2/package/{self.repo}/{self.version}"
         raise ValueError(f"{self.name}: source {self.source!r} has no archive URL")
 
     @property
@@ -309,6 +314,7 @@ def _build(path: Path, directory: Path, entry: object) -> Upstream:
         version=str(entry.get("version", "")),
         year=str(entry.get("year", "")),
         asset=per_os("asset", required=False),
+        download=str(entry.get("download", "")),
         tag_pattern=entry.get("tag_pattern", ""),
         unavailable_on=unavailable,
         license_files=list(entry.get("license_files", [])),

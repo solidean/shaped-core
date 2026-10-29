@@ -128,6 +128,12 @@ enum class sg::feature
     /// WGSL has no builtin for it.
     first_instance,
 
+    /// A pixel shader may tell a helper invocation from a real one, which SGL's strong compare-exchange needs there (EMIT-163).
+    /// D3D12 has HLSL's `IsHelperLane()` from SM 6.6, Vulkan has the core `HelperInvocation` built-in, Metal has `simd_is_helper_thread()`.
+    /// D3D12's and Vulkan's compare-exchange is strong already, so their strong form needs no loop and asks no test.
+    /// WGSL has no such test.
+    helper_lane_query,
+
     /// A triangle geometry may carry an opacity micromap (`cmd.raytracing.build_micromap`), which traversal decides most candidates by.
     /// Vulkan grants it with `VK_EXT_opacity_micromap`, D3D12 from DXR 1.2 in the Agility SDK; metal and WebGPU have no equivalent.
     /// The host's alone: a shader traces the same way either way, so no `require` names it.
@@ -166,6 +172,7 @@ inline constexpr feature k_all_features[] = {
     feature::device_coherence,
     feature::image_atomics,
     feature::first_instance,
+    feature::helper_lane_query,
     feature::opacity_micromap,
 };
 static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::opacity_micromap) + 1,
@@ -222,6 +229,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "image_atomics";
     case feature::first_instance:
         return "first_instance";
+    case feature::helper_lane_query:
+        return "helper_lane_query";
     case feature::opacity_micromap:
         return "opacity_micromap";
     }

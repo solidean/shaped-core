@@ -30,11 +30,13 @@ class slib::shader_asset
 public:
     /// `library` is weak on purpose — see the note on the members.
     /// `options` names the options of its SGL source the entry point reaches, which are all an acquire keys on.
+    /// `file_namespace` is `shader_definition::file_namespace`, empty for a source that is not SGL.
     shader_asset(std::weak_ptr<shader_library> library,
                  cc::string virtual_path,
                  sg::shader_stage stage,
                  cc::string entry_point,
-                 cc::vector<cc::string> options = {});
+                 cc::vector<cc::string> options = {},
+                 cc::string file_namespace = {});
 
     /// The compiled shader in a format `ctx` accepts, preferring the context's own order.
     /// The result carries an async error if no registered compiler connects this package's language to any format the context takes.
@@ -135,6 +137,7 @@ private:
     sg::shader_stage _stage;
     cc::string _entry_point;
     cc::vector<cc::string> _options;
+    cc::string _file_namespace;
 
     // The watcher stages compiles from its own thread while a consumer acquires.
     // Mutable so acquire() stays const: promoting a staged compile is not a change a caller can observe as one.

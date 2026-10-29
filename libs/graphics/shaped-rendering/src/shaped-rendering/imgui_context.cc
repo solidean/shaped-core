@@ -67,9 +67,8 @@ window& window_of(ImGuiViewport* viewport)
     return *static_cast<window*>(viewport->PlatformHandle);
 }
 
-// imgui's viewport geometry is in its own logical units, while sr::window is in pixels.
-// The two coincide while DisplayFramebufferScale is 1, which is every path here today — begin_frame(window&) does no DPI scaling of its own.
-// A backend that starts scaling has to convert in both directions right here.
+// imgui works in logical units, the desktop coordinates sr::window places and sizes windows in, so positions and sizes pass through unchanged.
+// Only the pixels cross over: each viewport's FramebufferScale is its window's pixel_density, and process_event divides input positions by it.
 
 /// Republishes the desktop's monitors into imgui.
 /// Refreshed every frame rather than once: monitors come and go while an application runs, and imgui uses the list to keep a viewport window on-screen.
@@ -187,8 +186,15 @@ void install_viewport_callbacks()
 
     platform_io.Platform_GetWindowSize = [](ImGuiViewport* viewport) -> ImVec2
     {
-        auto const& win = window_of(viewport);
-        return ImVec2(float(win.width()), float(win.height()));
+        auto const size = window_of(viewport).logical_size();
+        return ImVec2(float(size[0]), float(size[1]));
+    };
+
+    // Which is also what imgui rasterizes a viewport's fonts at, so text on a Retina viewport comes out crisp.
+    platform_io.Platform_GetWindowFramebufferScale = [](ImGuiViewport* viewport) -> ImVec2
+    {
+        auto const density = window_of(viewport).pixel_density();
+        return ImVec2(density, density);
     };
 
     platform_io.Platform_SetWindowFocus = [](ImGuiViewport* viewport) { window_of(viewport).focus(); };
@@ -404,17 +410,22 @@ void imgui_context::process_event(input_event const& event)
     CC_ASSERT(_ctx != nullptr, "imgui context is not valid");
     auto& io = ImGui::GetIO();
 
-    // Mouse positions arrive relative to the window the event went to, but once viewports are on imgui wants them in desktop space:
+    // Mouse positions arrive in pixels relative to the window the event went to, and imgui wants logical units.
+    // Once viewports are on it also wants them in desktop space:
     // it hit-tests the position against every viewport's rectangle to decide which one the pointer is over, and a window-relative coordinate would name the wrong one.
-    // With viewports off there is a single viewport at the origin and the two spaces coincide, so this is the identity.
-    //
+    // With viewports off there is a single viewport at the origin and the two spaces coincide.
+    // An event naming no window is taken as already in imgui's units.
     auto const to_imgui_space = [&](tg::pos2f cursor_pos)
     {
-        if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0 || event.window == nullptr)
+        if (event.window == nullptr)
             return cursor_pos;
 
+        auto const logical = tg::pos2f(cursor_pos[0] / event.pixel_density, cursor_pos[1] / event.pixel_density);
+        if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0)
+            return logical;
+
         auto const origin = event.window->position();
-        return cursor_pos + tg::vec2f(float(origin[0]), float(origin[1]));
+        return logical + tg::vec2f(float(origin[0]), float(origin[1]));
     };
 
     event.payload.visit(
@@ -513,8 +524,9 @@ void imgui_context::begin_frame(window& win, float delta_time)
 
     // A minimized window is 0x0, which begin_frame(frame_info) rejects.
     // Substitute a 1x1 display so imgui still gets a well-formed frame — the caller skips rendering it anyway.
-    auto const size = win.is_minimized() ? tg::vec2i(1, 1) : tg::vec2i(win.width(), win.height());
-    begin_frame({.display_size = size, .delta_time = delta_time});
+    auto const size = win.is_minimized() ? tg::vec2i(1, 1) : win.logical_size();
+    auto const density = win.pixel_density();
+    begin_frame({.display_size = size, .delta_time = delta_time, .framebuffer_scale = tg::vec2f(density, density)});
 }
 
 void imgui_context::begin_frame(frame_info const& info)

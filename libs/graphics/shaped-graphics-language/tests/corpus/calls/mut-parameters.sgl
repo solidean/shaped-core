@@ -46,12 +46,18 @@ test:
     bump_twice(mut c)
     c.hits == 2
 
-// the mark and the parameter go together, in both directions
+// the mark and the parameter go together, in both directions, and the error names the parameter the mark is off at
 @expect(error = "no-matching-overload")
 test:
     let mut c = counter(0, 0.0)
     bump(c, 1.0)
     true
+
+@expect(error = "no-matching-overload")
+test:
+    let mut v = 1.0
+    twice(v)
+    v == 2.0
 
 @expect(error = "no-matching-overload")
 test:

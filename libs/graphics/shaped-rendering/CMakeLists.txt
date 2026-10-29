@@ -344,7 +344,7 @@ if(SC_BUILD_TESTS)
         tests/tza-test.cc
         tests/oidn-tiling-test.cc
     )
-    sc_nexus_binary(shaped-rendering-test KINDS tests ${SG_WARP_TEST_BINARY_ARGS})
+    sg_warp_test_binary(shaped-rendering-test)
 
     target_link_libraries(shaped-rendering-test
         PRIVATE

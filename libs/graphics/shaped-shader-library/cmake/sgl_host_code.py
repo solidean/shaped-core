@@ -151,6 +151,49 @@ def dx12_semantic(member: dict) -> str:
 # declares for wherever that header was generated.
 MODULES_NAMESPACE = "sgl_modules"
 
+# The namespaces generated code qualifies through, which a file's namespace would hide inside the package's.
+RESERVED_FILE_NAMESPACES = ("cc", "sg", "slib", "std", "tg", MODULES_NAMESPACE)
+
+
+def identifier_of(path: str) -> str:
+    """The path as one C++ identifier, directory included.
+
+    post-process/manga_render.sgl becomes post_process_manga_render, since '/' and '-' both map to '_'.
+    """
+    stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    directory = path.rsplit("/", 1)[0] if "/" in path else ""
+    ident = stem.replace("-", "_")
+    if directory:
+        ident = directory.replace("-", "_").replace("/", "_") + "_" + ident
+    return ident
+
+
+def file_namespace(namespace: str, entries: SglEntries, path: str) -> str:
+    """Where a file's generated types, entry points and pipelines stand: a namespace of its own in the package's.
+
+    So two files of one package may each declare a name.
+    A module's stand in the module's namespace, whichever of its files declares them.
+    """
+    return namespace if entries.module else f"{namespace}::{identifier_of(path)}"
+
+
+def anchored(qualified: str) -> str:
+    """`qualified` reached from the global namespace.
+
+    Every reference into a package or file namespace takes this, since a file's namespace named like the package's root
+    (sr.sgl in `sr::sgl_shaders`) hides that root from code generated inside it.
+    """
+    return qualified if qualified.startswith("::") else f"::{qualified}"
+
+
+def options_type_of(namespace: str, entries: SglEntries, path: str) -> str:
+    """The qualified name of a file's options struct, or empty where the file has no options.
+
+    Qualified, since a wrapper's own `options` alias would otherwise change what the name means inside it.
+    """
+    struct = entries.option_structs.get(path, "")
+    return anchored(f"{file_namespace(namespace, entries, path)}::{struct}") if struct else ""
+
 
 def cpp_name(sgl_name: str, namespace: str = "") -> str:
     """The C++ spelling of a generated type SGL names `sgl_name`.
@@ -180,12 +223,12 @@ def modules_used(entries: SglEntries) -> list[str]:
     return sorted(set(modules) - ({entries.module} if entries.module else set()))
 
 
-def memory_structs_of(entries: SglEntries) -> dict[str, tuple[str, int]]:
-    """Every struct the package places in GPU memory, by name: its C++ spelling, and its size.
+def memory_structs_of(entries: SglEntries, path: str) -> dict[str, tuple[str, int]]:
+    """Every struct file `path` places in GPU memory, by name: its C++ spelling, and its size.
 
-    The package's own are named as SGL names them; another module's through that module's namespace.
+    The file's own are named as SGL names them, within its namespace; another module's through that module's namespace.
     """
-    out = {s["name"]: (s["name"], s["size"]) for _, s in entries.memory_structs}
+    out = {s["name"]: (s["name"], s["size"]) for f, s in entries.memory_structs if f.path == path}
     for name, (module, size) in entries.foreign_structs.items():
         out.setdefault(name, (cpp_name(f"{module}.{name}"), size))
     return out
@@ -211,17 +254,49 @@ def host_type(package: str, memory: dict[str, tuple[str, int]], where: str, sgl_
     return known[0]
 
 
-def check_names(package: str, entries: SglEntries, taken: dict[str, str]) -> None:
-    """Every generated type lives in the package's namespace, so two files declaring one name is a build error here.
+def generated_names(entries: SglEntries, path: str) -> dict[str, str]:
+    """The names the generator itself writes into file `path`'s namespace, each with what writes it."""
+    out = {}
+    if path in entries.option_structs:
+        out[entries.option_structs[path]] = "its options struct"
+    wrapped = entry_wrappers(entries)
+    for p, _, name in entries.entry_points:
+        if p != path:
+            continue
+        out[name] = f"entry point `{name}`"
+        if (p, name) in wrapped:
+            out[wrapped[(p, name)]] = f"the type of entry point `{name}`"
+            out[f"{wrapped[(p, name)]}_reached_options"] = f"the options entry point `{name}` reaches"
+    for file, p in entries.pipelines + entries.raytracing_pipelines:
+        if file.path != path:
+            continue
+        name = pipeline_type(p["name"])
+        out[p["name"]] = f"pipeline `{p['name']}`"
+        out[name] = f"the type of pipeline `{p['name']}`"
+        out[f"{name}_open"] = f"the open parts of pipeline `{p['name']}`"
+        out[f"{name}_reached_options"] = f"the options pipeline `{p['name']}` reaches"
+    return out
 
-    `taken` maps a C++ name already emitted to what emitted it, the per-file asset structs among them.
+
+def check_names(package: str, entries: SglEntries) -> None:
+    """Every file's generated names stand in its own namespace, so a name clashes only with another of the same file.
+
+    A module's files share the module's namespace, so there two files declaring one name is a build error here.
     """
+    paths = [f.path for f, _ in entries.bindings + entries.vertex_inputs + entries.render_targets + entries.memory_structs]
+    paths += [p for p, _, _ in entries.entry_points] + list(entries.option_structs)
+    taken_in: dict[str, dict[str, str]] = {}
+    for path in dict.fromkeys(paths):
+        space = "" if entries.module else path
+        taken = taken_in.setdefault(space, {})
+        for name, what in generated_names(entries, path).items():
+            taken.setdefault(name, f"{what} of '{path}'")
     declared = [(file, b["name"], f"`binding {b['name']}`") for file, b in entries.bindings]
     declared += [(file, v["name"], f"`@vertex struct {v['name']}`") for file, v in entries.vertex_inputs]
     declared += [(file, t["name"], f"`@pixel struct {t['name']}`") for file, t in entries.render_targets]
     declared += [(file, s["name"], f"`struct {s['name']}`") for file, s in entries.memory_structs]
-    declared += [(SglFile(path=path), name, "options") for path, name in entries.option_structs.items()]
     for file, name, what in declared:
+        taken = taken_in["" if entries.module else file.path]
         if name in taken:
             raise HostCodeError(
                 f"shader package '{package}': '{file.path}' declares {what}, and the generated C++ name "
@@ -536,7 +611,8 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
     statics = [m for m in resources if m["kind"] == "sampler" and "static_sampler" in m]
     dynamic = [m for m in resources if m["kind"] == "sampler" and "static_sampler" not in m]
     out = [f"\n// `binding {name}` of {file.path}: the table the shader's resources were numbered from.\n"]
-    out.append(f"namespace\n{{\nsg::binding const k_sgl_bindings_{name}[] = {{\n")
+    # within the file's namespace, since another file may declare a binding of the same name
+    out.append(f"namespace {namespace}\n{{\nnamespace\n{{\nsg::binding const k_sgl_bindings_{name}[] = {{\n")
     if has_block(binding):
         # A constants block is read in rows of 16 bytes, so that is what the shader reflects its size as.
         size = (binding["block_size"] + 15) // 16 * 16
@@ -552,6 +628,7 @@ def emit_group_impl(package: str, memory: dict[str, int], namespace: str, file: 
             out.append(f'    {{.name = "{member["host_name"]}", .sampler = {sampler_initializer(member["static_sampler"])}}},\n')
         out.append("};\n")
     out.append("} // namespace\n")
+    out.append(f"}} // namespace {namespace}\n")
 
     out.append(f"\ncc::span<sg::binding const> {qualified}::declared_bindings()\n{{\n")
     out.append(f"    return k_sgl_bindings_{name};\n}}\n")
@@ -722,7 +799,7 @@ def emit_inline_impl(package: str, memory: dict[str, int], namespace: str, file:
 
 
 def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
-    memory = memory_structs_of(entries)
+    """The types of every file, each in its file's namespace."""
     out = []
     # A module's types are its header's, and naming one needs that header: the package listing `module:m` writes it.
     for module in modules_used(entries):
@@ -731,58 +808,67 @@ def emit_header(package: str, namespace: str, entries: SglEntries) -> str:
     # Ahead of every wrapper and group, which take them; outside each, since a nested struct with member initializers
     # cannot be a default argument within its enclosing type.
     for path, struct_name in entries.option_structs.items():
-        out.append(f"\nnamespace {namespace}\n{{\n")
+        space = file_namespace(namespace, entries, path)
+        out.append(f"\nnamespace {space}\n{{\n")
         out.append(options_struct(package, path, struct_name, entries.file_options.get(path, [])))
-        out.append(f"}} // namespace {namespace}\n")
+        out.append(f"}} // namespace {space}\n")
+
+    def at(file: SglFile) -> tuple[dict[str, tuple[str, int]], str]:
+        return memory_structs_of(entries, file.path), file_namespace(namespace, entries, file.path)
+
     # Ahead of the bindings, whose fields and views name them.
     for file, struct in entries.memory_structs:
-        out.append(emit_memory_struct(package, memory, namespace, file, struct))
+        out.append(emit_memory_struct(package, *at(file), file, struct))
     for file, binding in entries.bindings:
         if binding["inline"]:
-            out.append(emit_inline(package, memory, namespace, file, binding))
+            out.append(emit_inline(package, *at(file), file, binding))
         else:
-            out.append(emit_group(package, memory, namespace, file, binding, entries.option_structs.get(file.path, "")))
+            out.append(emit_group(package, *at(file), file, binding, options_type_of(namespace, entries, file.path)))
     for file, struct in entries.vertex_inputs:
-        out.append(emit_vertex_input(package, namespace, file, struct))
+        out.append(emit_vertex_input(package, file_namespace(namespace, entries, file.path), file, struct))
     for file, struct in entries.render_targets:
+        space = file_namespace(namespace, entries, file.path)
         # a module's target set is named after its module, which the runtime names a module's shader by too
-        identity = f"{MODULES_NAMESPACE}::{entries.module}" if entries.module else namespace
-        out.append(emit_render_target(package, namespace, file, struct, identity))
+        identity = f"{MODULES_NAMESPACE}::{entries.module}" if entries.module else space
+        out.append(emit_render_target(package, space, file, struct, identity))
     return "".join(out)
 
 
 def emit_source(package: str, namespace: str, entries: SglEntries) -> str:
-    memory = memory_structs_of(entries)
     out = []
-    for _, struct in entries.memory_structs:
-        out.append(emit_memory_struct_impl(namespace, struct))
+
+    def at(file: SglFile) -> tuple[dict[str, tuple[str, int]], str]:
+        return memory_structs_of(entries, file.path), file_namespace(namespace, entries, file.path)
+
+    for file, struct in entries.memory_structs:
+        out.append(emit_memory_struct_impl(file_namespace(namespace, entries, file.path), struct))
     for file, binding in entries.bindings:
         if binding["inline"]:
-            out.append(emit_inline_impl(package, memory, namespace, file, binding))
+            out.append(emit_inline_impl(package, *at(file), file, binding))
         else:
-            out.append(emit_group_impl(package, memory, namespace, file, binding))
+            out.append(emit_group_impl(package, *at(file), file, binding))
     for file, struct in entries.vertex_inputs:
-        out.append(emit_vertex_input_impl(package, namespace, file, struct))
+        out.append(emit_vertex_input_impl(package, file_namespace(namespace, entries, file.path), file, struct))
     for file, struct in entries.render_targets:
-        out.append(emit_render_target_impl(namespace, struct))
+        out.append(emit_render_target_impl(file_namespace(namespace, entries, file.path), struct))
     return "".join(out)
 
 
 # ---- the entry points --------------------------------------------------------------------------------------------------
 
 
-def entry_wrappers(entries: SglEntries, stems: dict[str, str]) -> dict[tuple[str, str], str]:
-    """The wrapper type each described entry point gets, by (path, entry point).
+def entry_wrappers(entries: SglEntries) -> dict[tuple[str, str], str]:
+    """The wrapper type each described entry point gets, by (path, entry point), named within its file's namespace.
 
     One is written only where every binding the entry point lists has a generated type, since its layout is spelled
     with them; any other entry point stays a plain handle.
     """
-    generated = {b["name"] for _, b in entries.bindings}
+    generated = {(f.path, b["name"]) for f, b in entries.bindings}
     out = {}
     for (path, name), described in entries.described_entry_points.items():
         # a module's binding is generated by the package exporting it, which its header says (or fails to)
-        if all(b in generated or "." in b for b in described["bindings"]):
-            out[(path, name)] = f"{stems[path]}_{name}_t"
+        if all((path, b) in generated or "." in b for b in described["bindings"]):
+            out[(path, name)] = f"{name}_t"
     return out
 
 
@@ -816,21 +902,23 @@ def per_values_layout(listed: list[str], by_name: dict[str, dict], per_values: d
     return "".join(out)
 
 
-def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str], package: str = "") -> str:
-    """One struct per wrapped entry point: its asset, the pipeline layout its binding list states, and its options.
+def emit_entry_wrappers(namespace: str, entries: SglEntries, package: str = "") -> str:
+    """One struct per wrapped entry point, in its file's namespace: its asset, the layout its binding list states, and its options.
 
     Every wrapper of a file takes the file's one options struct, and states the options it reaches by name.
     """
-    wrappers = entry_wrappers(entries, stems)
-    by_name = {b["name"]: b for _, b in entries.bindings}
-    file_of_binding = {b["name"]: f.path for f, b in entries.bindings}
+    wrappers = entry_wrappers(entries)
     out = []
     for (path, name), type_name in wrappers.items():
+        space = file_namespace(namespace, entries, path)
+        # a bare name is a binding of the entry point's own file, which SGL reaches no other way
+        by_name = {b["name"]: b for f, b in entries.bindings if f.path == path}
         described = entries.described_entry_points[(path, name)]
         listed = described["bindings"]
         types = ", ".join(cpp_name(b) for b in listed)
         options = described.get("options", [])
-        options_type = entries.option_structs.get(path, "")
+        options_type = options_type_of(namespace, entries, path)
+        out.append(f"namespace {space}\n{{\n")
         out.append(reached_options(package, f"`{name}` of {path}", type_name, options,
                                    entries.file_options.get(path, [])))
         out.append(f"/// `{name}` of {path}: a {described['stage']} entry point listing {{{', '.join(listed)}}}.\n")
@@ -859,11 +947,6 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str], package: str
         # A group whose formats name options this entry point reaches has a layout per set of values.
         per_values = {b: [o for o in format_options(by_name[b]) if o in options] if b in by_name else [] for b in listed}
         is_per_values = any(per_values.values())
-        for b, named in per_values.items():
-            if named and file_of_binding[b] != path:
-                raise HostCodeError(
-                    f"shader package '{package}': `{name}` of {path} lists `binding {b}` of {file_of_binding[b]}, whose "
-                    f"formats follow options of that file, which this one's options struct does not hold")
         if options_type:
             if is_per_values:
                 out.append("    /// Its groups' image formats are those `values` names.\n")
@@ -895,7 +978,42 @@ def emit_entry_wrappers(entries: SglEntries, stems: dict[str, str], package: str
             out.append("    /// The compute pipeline of this entry point over that layout, which is all a compute pipeline needs.\n")
             out.append("    [[nodiscard]] sg::async_compute_pipeline acquire_pipeline(sg::context& ctx) const\n    {\n")
             out.append("        return slib::acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx));\n    }\n")
-        out.append("};\n\n")
+        out.append("};\n")
+        out.append(f"}} // namespace {space}\n\n")
+    return "".join(out)
+
+
+def file_symbols(entries: SglEntries) -> dict[str, list[tuple[str, str]]]:
+    """Each file's entry points and pipelines as (C++ type, name), in declaration order, by path."""
+    wrappers = entry_wrappers(entries)
+    out: dict[str, list[tuple[str, str]]] = {}
+    for path, _, name in entries.entry_points:
+        out.setdefault(path, []).append((wrappers.get((path, name), "slib::shader_asset_handle"), name))
+    for file, p in entries.pipelines + entries.raytracing_pipelines:
+        out.setdefault(file.path, []).append((pipeline_type(p["name"]), p["name"]))
+    return out
+
+
+def emit_file_symbols(namespace: str, entries: SglEntries) -> str:
+    """Each file's entry points and pipelines, as variables in its namespace beside its types."""
+    out = []
+    for path, symbols in file_symbols(entries).items():
+        space = file_namespace(namespace, entries, path)
+        out.append(f"namespace {space}\n{{\n")
+        out.append(f"/// The entry points and pipelines of {path}; null until the package is added to a library.\n")
+        out.extend(f"extern {cpp} {name};\n" for cpp, name in symbols)
+        out.append(f"}} // namespace {space}\n\n")
+    return "".join(out)
+
+
+def emit_file_symbols_impl(namespace: str, entries: SglEntries) -> str:
+    out = []
+    for path, symbols in file_symbols(entries).items():
+        space = file_namespace(namespace, entries, path)
+        for cpp, name in symbols:
+            # an unwrapped entry point is slib's handle, every other type the file's own
+            qualified = cpp if cpp.startswith("slib::") else f"{space}::{cpp}"
+            out.append(f"{qualified} {space}::{name};\n")
     return "".join(out)
 
 
@@ -972,7 +1090,7 @@ def emit_vertex_input(package: str, namespace: str, file: SglFile, struct: dict)
         out.append("    /// One buffer per stream, in slot order; only a buffer of that stream's element fits its field.\n")
         out.append("    struct buffers\n    {\n")
         for stream, _, _ in streams:
-            out.append(f"        sg::buffer<{namespace}::{name}::{stream}> {stream};\n")
+            out.append(f"        sg::buffer<{anchored(f'{namespace}::{name}::{stream}')}> {stream};\n")
         out.append("\n")
         out.append("        /// What `bind_vertex_buffers` takes, in slot order.\n")
         out.append(f"        [[nodiscard]] cc::fixed_array<sg::vertex_buffer_view, {len(streams)}> views() const;\n")
@@ -993,7 +1111,7 @@ def emit_vertex_input_impl(package: str, namespace: str, file: SglFile, struct: 
     slot_of = {stream: slot for slot, (stream, _, _) in enumerate(streams)}
 
     def owner(stream: str) -> str:
-        return qualified if single else f"{qualified}::{stream}"
+        return anchored(qualified if single else f"{qualified}::{stream}")
 
     out = [f"\nsg::vertex_input_layout {qualified}::layout()\n{{\n"]
     out.append("    return {.slots = {")
@@ -1075,8 +1193,9 @@ def emit_render_target_impl(namespace: str, struct: dict) -> str:
 # ---- a pipeline -------------------------------------------------------------------------------------------------------
 
 
-def pipeline_type(stem: str, name: str) -> str:
-    return f"{stem}_{name}_t"
+def pipeline_type(name: str) -> str:
+    """The type of a pipeline, within its file's namespace."""
+    return f"{name}_t"
 
 
 def open_fields(pipeline: dict) -> list[tuple[str, str, str]]:
@@ -1107,21 +1226,22 @@ def pipeline_includes(entries: SglEntries) -> list[str]:
     return out
 
 
-def emit_pipelines(entries: SglEntries, stems: dict[str, str], package: str = "") -> str:
-    """One type per `pipeline` declaration: an `sg::raster_pipeline_source`, so `ctx.cached` acquires it."""
+def emit_pipelines(namespace: str, entries: SglEntries, package: str = "") -> str:
+    """One type per `pipeline` declaration, in its file's namespace: an `sg::raster_pipeline_source`, so `ctx.cached` acquires it."""
     out = []
     for file, p in entries.pipelines:
-        stem = stems[file.path]
-        type_name = pipeline_type(stem, p["name"])
+        space = file_namespace(namespace, entries, file.path)
+        type_name = pipeline_type(p["name"])
         fields = open_fields(p)
         options = p.get("options", [])
-        options_type = entries.option_structs.get(file.path, "")
+        options_type = options_type_of(namespace, entries, file.path)
+        out.append(f"namespace {space}\n{{\n")
         out.append(reached_options(package, f"`pipeline {p['name']}` of {file.path}", type_name, options, file.options))
         named = [p[s] for s in PIPELINE_STAGES if p[s]]
         stages = ", ".join(named[:-1]) + " and " + named[-1] if len(named) > 1 else named[0]
         writes = f", writing `{p['target_set']}`" if p["target_set"] else ", writing depth alone"
         out.append(f"/// `pipeline {p['name']}` of {file.path}: {stages}{writes}. Generated; do not edit.\n")
-        out.append(f"/// Acquired as `ctx.cached.acquire_raster_pipeline({stem}.{p['name']}, …)`.\n")
+        out.append(f"/// Acquired as `ctx.cached.acquire_raster_pipeline({space}::{p['name']}, …)`.\n")
         # Outside the pipeline's type: a nested struct with member initializers cannot be a default argument within it.
         out.append(f"/// What `pipeline {p['name']}` leaves to the host with `.host`, stated when it is acquired; every field must be.\n")
         out.append(f"struct {type_name}_open\n{{\n")
@@ -1144,7 +1264,8 @@ def emit_pipelines(entries: SglEntries, stems: dict[str, str], package: str = ""
                    "sg::context& ctx, open const& parts = {}, sg::raster_pipeline_customize customize = {}) const;\n")
         out.append("    /// What slib describes it from: the stages, the layout, the settings as code, and the frozen part.\n")
         out.append("    [[nodiscard]] static slib::pipeline_definition const& definition();\n")
-        out.append("};\n\n")
+        out.append("};\n")
+        out.append(f"}} // namespace {space}\n\n")
     return "".join(out)
 
 
@@ -1180,9 +1301,9 @@ def open_call(path: str, index: int, targets: list[str]) -> str:
     return f"f::color_targets_format(d, {target}, sg::pixel_format(open[{index}].value));"
 
 
-def refuse_option_layouts(package: str, where: str, groups: list[str], entries: SglEntries) -> None:
+def refuse_option_layouts(package: str, where: str, path: str, groups: list[str], entries: SglEntries) -> None:
     """A pipeline's layout is acquired from the context alone, so a group whose formats name options cannot be in it yet."""
-    by_name = {b["name"]: b for _, b in entries.bindings}
+    by_name = {b["name"]: b for f, b in entries.bindings if f.path == path}
     optioned = [g for g in groups if g in by_name and format_options(by_name[g])]
     if optioned:
         raise HostCodeError(
@@ -1190,16 +1311,16 @@ def refuse_option_layouts(package: str, where: str, groups: list[str], entries: 
             f"pipeline's layout takes no option values yet; acquire its entry points one by one")
 
 
-def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems: dict[str, str],
-                        wrappers: dict[tuple[str, str], str]) -> str:
+def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries) -> str:
     out = []
-    generated = {b["name"] for _, b in entries.bindings}
-    vertex_inputs = {v["name"] for _, v in entries.vertex_inputs}
+    wrappers = entry_wrappers(entries)
     for file, p in entries.pipelines:
-        stem = stems[file.path]
-        type_name = pipeline_type(stem, p["name"])
-        qualified = f"{namespace}::{type_name}"
-        key = f"{stem}_{p['name']}"
+        # a bare name is a declaration of the pipeline's own file
+        generated = {b["name"] for f, b in entries.bindings if f.path == file.path}
+        vertex_inputs = {v["name"] for f, v in entries.vertex_inputs if f.path == file.path}
+        space = file_namespace(namespace, entries, file.path)
+        qualified = f"{space}::{pipeline_type(p['name'])}"
+        key = f"{identifier_of(file.path)}_{p['name']}"
         groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
         missing = [g for g in groups if g not in generated and "." not in g]
         # empty for a vertex stage that draws from no vertex buffer
@@ -1209,10 +1330,10 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
             raise HostCodeError(
                 f"shader package '{package}': `pipeline {p['name']}` of '{file.path}' is built from generated types, and "
                 f"{', '.join(missing)} has none; declare the file as '{file.path}:*'")
-        refuse_option_layouts(package, f"`pipeline {p['name']}` of '{file.path}'", groups, entries)
+        refuse_option_layouts(package, f"`pipeline {p['name']}` of '{file.path}'", file.path, groups, entries)
 
         def handle(entry: str) -> str:
-            return f"&{namespace}::{stem}.{entry}" + (".asset" if (file.path, entry) in wrappers else "")
+            return f"&{anchored(f'{space}::{entry}')}" + (".asset" if (file.path, entry) in wrappers else "")
 
         out.append("\nnamespace\n{\n")
         if p["targets"]:
@@ -1220,7 +1341,7 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
             out.append(f"constexpr cc::string_view k_{key}_targets[] = {{{names}}};\n")
         frozen = ",\n".join(f'    "{line}"' for line in p["frozen"])
         out.append(f"constexpr cc::string_view k_{key}_frozen[] = {{\n{frozen},\n}};\n")
-        group_types = ", ".join(cpp_name(g, namespace) for g in groups)
+        group_types = ", ".join(cpp_name(g, anchored(space)) for g in groups)
         samplers = p.get("samplers", [])
         if samplers:
             where = f"shader package '{package}': `pipeline {p['name']}` of '{file.path}'"
@@ -1253,9 +1374,9 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
                 out.append(f"        .{s} = {handle(p[s])},\n")
         out.append(f"        .acquire_layout = &{key}_layout,\n")
         if p["vertex_input"]:
-            out.append(f"        .vertex_input = &{cpp_name(p['vertex_input'], namespace)}::layout,\n")
+            out.append(f"        .vertex_input = &{cpp_name(p['vertex_input'], anchored(space))}::layout,\n")
         if p["target_set"]:
-            out.append(f"        .target_set = {cpp_name(p['target_set'], namespace)}::name,\n")
+            out.append(f"        .target_set = {cpp_name(p['target_set'], anchored(space))}::name,\n")
         if p["targets"]:
             out.append(f"        .targets = k_{key}_targets,\n")
         out.append(f"        .apply = &{key}_apply,\n")
@@ -1279,14 +1400,16 @@ def emit_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems
 # ---- a ray-tracing pipeline --------------------------------------------------------------------------------------------
 
 
-def emit_raytracing_pipelines(entries: SglEntries, stems: dict[str, str], package: str = "") -> str:
-    """One type per `@raytracing pipeline`: its description, its table, and its listed hit groups by position."""
+def emit_raytracing_pipelines(namespace: str, entries: SglEntries, package: str = "") -> str:
+    """One type per `@raytracing pipeline`, in its file's namespace: its description, its table, and its listed hit groups by position."""
     out = []
     for file, p in entries.raytracing_pipelines:
-        type_name = pipeline_type(stems[file.path], p["name"])
+        space = file_namespace(namespace, entries, file.path)
+        type_name = pipeline_type(p["name"])
         rays = file.ray_set(p["rays"])["rays"]
         options = p.get("options", [])
-        options_type = entries.option_structs.get(file.path, "")
+        options_type = options_type_of(namespace, entries, file.path)
+        out.append(f"namespace {space}\n{{\n")
         out.append(reached_options(package, f"`@raytracing pipeline {p['name']}` of {file.path}", type_name, options,
                                    file.options))
         out.append(f"/// `@raytracing pipeline {p['name']}` of {file.path}, over the ray set `{p['rays']}`. Generated; do not edit.\n")
@@ -1322,26 +1445,26 @@ def emit_raytracing_pipelines(entries: SglEntries, stems: dict[str, str], packag
         out.append("    [[nodiscard]] static sg::hit_row add_row(sg::raytracing_shader_table_description& table, hit_group group);\n")
         out.append("    /// What slib describes it from.\n")
         out.append("    [[nodiscard]] static slib::raytracing_pipeline_definition const& definition();\n")
-        out.append("};\n\n")
+        out.append("};\n")
+        out.append(f"}} // namespace {space}\n\n")
     return "".join(out)
 
 
-def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEntries, stems: dict[str, str],
-                                   wrappers: dict[tuple[str, str], str]) -> str:
+def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEntries) -> str:
     out = []
-    generated = {b["name"] for _, b in entries.bindings}
+    wrappers = entry_wrappers(entries)
     for file, p in entries.raytracing_pipelines:
-        stem = stems[file.path]
-        type_name = pipeline_type(stem, p["name"])
-        qualified = f"{namespace}::{type_name}"
-        key = f"{stem}_{p['name']}"
+        generated = {b["name"] for f, b in entries.bindings if f.path == file.path}
+        space = file_namespace(namespace, entries, file.path)
+        qualified = f"{space}::{pipeline_type(p['name'])}"
+        key = f"{identifier_of(file.path)}_{p['name']}"
         where = f"shader package '{package}': `@raytracing pipeline {p['name']}` of '{file.path}'"
         groups = p["layout"] + ([p["inline"]] if p["inline"] else [])
         missing = [g for g in groups if g not in generated and "." not in g]
         if missing:
             raise HostCodeError(f"{where} is built from generated types, and {', '.join(missing)} has none; "
                                 f"declare the file as '{file.path}:*'")
-        refuse_option_layouts(package, f"`@raytracing pipeline {p['name']}` of '{file.path}'", groups, entries)
+        refuse_option_layouts(package, f"`@raytracing pipeline {p['name']}` of '{file.path}'", file.path, groups, entries)
         if any(not m for m in p["misses"]):
             # issue: feat-slib-raytracing-ray-type-without-miss
             raise HostCodeError(f"{where} leaves a ray type without a miss, which slib cannot table yet")
@@ -1349,7 +1472,7 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
         def handle(entry: str) -> str:
             if not entry:
                 return "nullptr"
-            return f"&{namespace}::{stem}.{entry}" + (".asset" if (file.path, entry) in wrappers else "")
+            return f"&{anchored(f'{space}::{entry}')}" + (".asset" if (file.path, entry) in wrappers else "")
 
         out.append("\nnamespace\n{\n")
         ray_set = file.ray_set(p["rays"])
@@ -1385,7 +1508,7 @@ def emit_raytracing_pipelines_impl(package: str, namespace: str, entries: SglEnt
                            f".closest_hits = k_{key}_{group_name}_closest, .any_hits = k_{key}_{group_name}_any"
                            f"{traversals}}},\n")
             out.append("};\n")
-        group_types = ", ".join(cpp_name(g, namespace) for g in groups)
+        group_types = ", ".join(cpp_name(g, anchored(space)) for g in groups)
         # the file samplers any of its shaders reaches, which the layout carries as a raster pipeline's does
         samplers = p.get("samplers", [])
         if samplers:

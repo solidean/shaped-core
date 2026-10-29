@@ -177,8 +177,8 @@ def test_claim_refuses_a_parent_only_this_checkout_has(base: Path):
 def test_check_finds_what_is_wrong(base: Path):
     a, _ = setup(base)
     write(a / "docs/issues/oops.md", "# T\n")
-    write(a / "docs/issues/closed/2026/3/bug-old.md", issue_text("Old", "closed: 2026-03-01", "resolution: fixed"))
-    write(a / "docs/issues/closed/2026/04/bug-older.md", issue_text("Older", "closed: 2026-03-01", "resolution: fixed"))
+    write(a / "docs/issues/.closed/2026/3/bug-old.md", issue_text("Old", "closed: 2026-03-01", "resolution: fixed"))
+    write(a / "docs/issues/.closed/2026/04/bug-older.md", issue_text("Older", "closed: 2026-03-01", "resolution: fixed"))
     write(a / "docs/issues/feat-child.md", issue_text("Child", "parent: feat-shiny", "blocked-by: [bug-ghost]"))
     write(a / "lib/docs/issues/bug-crash.md", issue_text("Twin"))
     write(a / "docs/issues/bug-notitle.md", "---\nclaimed-by: X\n---\n\nno title\n")
@@ -188,8 +188,8 @@ def test_check_finds_what_is_wrong(base: Path):
     write(a / "src/use.cc", "// issue: bug-ghost\nx(); // TEMPORARY(bug-older)\n// issue: other:bug-unknown-repo\n")
     code, out, _ = cli(a, "check")
     assert code == 1
-    for expected in ("oops.md:1: the file name must be", "closed/2026/3/bug-old.md:1: a closed issue lives in",
-                     "bug-older.md:3: closed 2026-03-01 belongs in closed/2026/03/", "feat-child.md:3: parent feat-shiny is not an epic",
+    for expected in ("oops.md:1: the file name must be", ".closed/2026/3/bug-old.md:1: a closed issue lives in",
+                     "bug-older.md:3: closed 2026-03-01 belongs in .closed/2026/03/", "feat-child.md:3: parent feat-shiny is not an epic",
                      "feat-child.md:4: blocked-by bug-ghost does not exist", "id bug-crash is used 2 times",
                      "bug-notitle.md:5: the first line after the frontmatter must be the title",
                      "bug-notitle.md:2: claimed-by and claimed-at go together",
@@ -364,18 +364,50 @@ def test_close_moves_and_relinks(base: Path):
     write(a / "docs/issues/epic-big.md", issue_text("Big"))
     code, _, err = cli(a, "close", "feat-shiny", "--date", "2026-03-05", "--resolution", "obsolete")
     assert code == 0, err
-    moved = a / "docs/issues/closed/2026/03/feat-shiny.md"
+    moved = a / "docs/issues/.closed/2026/03/feat-shiny.md"
     text = moved.read_text(encoding="utf-8")
     assert "closed: 2026-03-05\nresolution: obsolete" in text and "[notes](../../../../notes.md)" in text, text
     assert "claimed-by" not in text and "claimed-at" not in text, "closing ends the claim: " + text
     notes = (a / "docs/notes.md").read_text(encoding="utf-8")
-    assert "(issues/bug-crash.md#repro)" in notes and "(issues/closed/2026/03/feat-shiny.md)" in notes, notes
+    assert "(issues/bug-crash.md#repro)" in notes and "(issues/.closed/2026/03/feat-shiny.md)" in notes, notes
     assert cli(a, "check")[0] == 0
     code, out, _ = cli(a, "show", "epic-big")
     assert "children: 1 of 1 closed" in out, out
     assert cli(a, "reopen", "feat-shiny")[0] == 0
     assert (a / "docs/issues/feat-shiny.md").is_file() and "closed:" not in (a / "docs/issues/feat-shiny.md").read_text()
     assert cli(a, "check")[0] == 0
+
+
+def test_groups_file_by_type_and_move(base: Path):
+    a, _ = setup(base)
+    (a / "docs/issues/bug").mkdir()
+    code, out, _ = cli(a, "new", "bug", "grouped")
+    assert code == 0 and out.strip() == "docs/issues/bug/bug-grouped.md", "a folder named after the type is the default"
+    code, out, _ = cli(a, "new", "feat", "ungrouped")
+    assert code == 0 and out.strip() == "docs/issues/feat-ungrouped.md", "no such folder, so the issue folder itself"
+    code, out, _ = cli(a, "new", "bug", "elsewhere", "--group", "api/v2")
+    assert code == 0 and out.strip() == "docs/issues/api/v2/bug-elsewhere.md", out
+    code, out, _ = cli(a, "new", "bug", "spelled-in", "--in", "docs/issues/api")
+    assert code == 0 and out.strip() == "docs/issues/api/bug-spelled-in.md", "--in may name a group folder"
+    assert cli(a, "new", "bug", "dotted", "--group", ".hidden")[0] == 2
+    assert cli(a, "new", "bug", "legacy", "--group", "closed")[0] == 2
+
+    write(a / "docs/notes.md", "See [shiny](issues/feat-shiny.md).\n")
+    assert cli(a, "move", "feat-shiny", "api")[0] == 0
+    assert "(issues/api/feat-shiny.md)" in (a / "docs/notes.md").read_text(encoding="utf-8")
+    assert cli(a, "check")[0] == 0, cli(a, "check")[1]
+
+    # A reopened issue goes to its type's folder, not back to where it was grouped.
+    assert cli(a, "close", "bug-elsewhere", "--date", "2026-03-05")[0] == 0
+    assert (a / "docs/issues/.closed/2026/03/bug-elsewhere.md").is_file()
+    assert cli(a, "reopen", "bug-elsewhere")[0] == 0
+    assert (a / "docs/issues/bug/bug-elsewhere.md").is_file()
+
+    write(a / "docs/issues/Odd_Group/bug-odd.md", issue_text("Odd"))
+    write(a / "docs/issues/closed/2026/03/bug-legacy.md", issue_text("Legacy", "closed: 2026-03-01", "resolution: fixed"))
+    code, out, _ = cli(a, "check")
+    assert code == 1 and "a group folder below docs/issues/ is lowercase kebab-case" in out, out
+    assert "bug-legacy.md:1: closed issues live in docs/issues/.closed/ now" in out and "an open issue has no" not in out, out
 
 
 def test_known_matches_refs_and_markers(base: Path):

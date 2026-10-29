@@ -29,7 +29,7 @@ cc::shared_async<cc::unit> hybrid_routine::init(sg::routine_init_scope scope)
     _light_thin = nullptr;
     if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
         co_return;
-    auto const light_thin = shaders::hybrid_pass.light_thin.acquire_pipeline(ctx);
+    auto const light_thin = shaders::hybrid_pass::light_thin.acquire_pipeline(ctx);
     co_await cc::async_settled(light_thin);
     auto const* const built = light_thin->try_value();
     if (built != nullptr)
@@ -144,8 +144,8 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
         return outcome;
 
     auto const thin_io
-        = ctx.transient.create_binding_group(cmd, ctx.cached.acquire_binding_group_layout<shaders::thin_io>(),
-                                             shaders::thin_io{.emission = thin.emission.as_texture_view(),
+        = ctx.transient.create_binding_group(cmd, ctx.cached.acquire_binding_group_layout<shaders::hybrid_pass::thin_io>(),
+                                             shaders::hybrid_pass::thin_io{.emission = thin.emission.as_texture_view(),
                                                               .normals = thin.normals.as_texture_view(),
                                                               .base = thin.base.as_texture_view(),
                                                               .specular = thin.specular.as_texture_view(),

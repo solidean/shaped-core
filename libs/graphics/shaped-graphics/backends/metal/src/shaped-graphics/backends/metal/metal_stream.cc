@@ -121,7 +121,8 @@ private:
     };
 
     [[nodiscard]] metal_stream_job* find_job(u64 sequence);
-    void reap_finished();
+    /// Settles every finished job and returns how many it removed.
+    [[nodiscard]] isize reap_finished();
     [[nodiscard]] bool run_cycle();
 
     /// Arms a shared-event notification that wakes this actor when the submission timeline reaches `value`.
@@ -192,11 +193,16 @@ bool metal_stream_system::actor_impl::on_process()
 
     deliver_completed_batches();
     auto const staged = run_cycle();
-    reap_finished();
+    auto const reaped = reap_finished();
 
     // Another cycle only if this one moved something: a cycle that staged nothing has nothing new to find, and the
     // next wake is what a stalled source or an in-flight commit owes us.
     if (staged)
+        return true;
+
+    // **A reaped job is progress too**, since it may have been the head its family waited behind.
+    // The cycle that finds a source exhausted stages nothing for it, and nothing else wakes the job behind it.
+    if (reaped > 0 && !_jobs.empty())
         return true;
 
     // **Except for a job held back on a direct-queue submission, which has to arm its own wake.**
@@ -573,8 +579,9 @@ bool metal_stream_system::actor_impl::run_cycle()
     return true;
 }
 
-void metal_stream_system::actor_impl::reap_finished()
+isize metal_stream_system::actor_impl::reap_finished()
 {
+    auto reaped = isize(0);
     for (auto i = _jobs.size(); i > 0; --i)
     {
         auto& job = _jobs[i - 1];
@@ -588,7 +595,9 @@ void metal_stream_system::actor_impl::reap_finished()
 
         settle(*_ctx, job, !job.failed && !cancelled);
         _jobs.remove_at(i - 1);
+        ++reaped;
     }
+    return reaped;
 }
 
 void metal_stream_system::actor_impl::on_thread_shutdown()

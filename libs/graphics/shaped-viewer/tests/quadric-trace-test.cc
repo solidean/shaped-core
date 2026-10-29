@@ -79,7 +79,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric sphere is traced through a procedural BLAS"
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
+        SKIP("no SGL compiler for this backend to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -263,7 +263,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric material reading a per-primitive attribute 
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
+        SKIP("no SGL compiler for this backend to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -315,7 +315,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch is placed through the resource manage
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
+        SKIP("no SGL compiler for this backend to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -424,7 +424,7 @@ ASYNC_INVOCABLE_TEST("sv - the traced silhouette agrees with the CPU reference",
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
+        SKIP("no SGL compiler for this backend to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -717,7 +717,7 @@ ASYNC_INVOCABLE_TEST("sv - a quadric batch still draws while its own permutation
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the quadric shaders");
+        SKIP("no SGL compiler for this backend to build the quadric shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 

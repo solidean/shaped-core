@@ -109,7 +109,7 @@ src/shaped-graphics/
                                                 metal = a compute pipeline per raygen
     raytracing_shader_table.hh/.cc [in progress] shader-table description + abstract table, hit rows and ray_count; real on dx12, vulkan and metal;
                                                 its records still sit in a plain buffer
-    impl/hit_record_check.hh/.cc  [done]        what dispatch_rays checks under the portability checks: each record an instance reaches
+    impl/hit_record_check.hh/.cc  [done]        what dispatch_rays checks under the hit-record checks: each record an instance reaches
 
   resource/
     pixel_format.hh               [done]        restrictive texel-format enum + helpers (depth/compressed/block-size)

@@ -101,6 +101,7 @@ struct watch
         return {.read = false, .write = true};
     case io_op_kind::accept:
     case io_op_kind::receive:
+    case io_op_kind::readable:
         return {.read = true, .write = false};
     case io_op_kind::timer:
     case io_op_kind::manual:
@@ -260,6 +261,13 @@ cc::optional<cc::optional<error>> reactor::drive_socket(entry& e)
         }
         return cc::optional<error>();
     }
+
+    case io_op_kind::readable:
+        // Readiness is the whole result: the bytes are left for the caller's own batched read.
+        // A socket error is folded into readability on POSIX, and the read then reports it.
+        if (!e.readable)
+            return {};
+        return cc::optional<error>();
 
     case io_op_kind::timer:
     case io_op_kind::manual:

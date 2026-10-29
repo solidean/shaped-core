@@ -17,7 +17,7 @@ namespace slib::impl
                                      sg::shader_stage stage,
                                      cc::string_view entry_point,
                                      cc::span<shader_option const> options,
-                                     cc::string_view host_namespace,
+                                     cc::string_view file_namespace,
                                      cc::string_view source,
                                      cc::span<module_source const> modules);
 

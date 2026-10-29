@@ -9,9 +9,9 @@ The authoring surface sits at the root; everything else is one folder down — `
 > **Scope note:** early stage, in three layers.
 > A frame is authored through the fluent handles (`sv::interactive` → `frame` → `window_ref` → `view_ref` → `scene_ref`), flattened into a `render_plan`, and replayed by `viewer_renderer`.
 > A **view is the definition of one texture**, and a view's layer may itself be a whole layout tree — so views nest, at any depth.
-> Tracing needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracers run on dx12 and vulkan.
+> Tracing needs a backend with ray-tracing pipelines: every shader is SGL, and the path tracers run on dx12, vulkan and metal.
 > A raster layer needs none, and `render_mode::automatic`, the default, rasterizes where the device cannot trace.
-> The default context and the examples are dx12's.
+> The default context and the examples are dx12's on Windows and metal's on Apple platforms.
 > The API is present everywhere; without a backend a routine just draws nothing.
 > Format conventions live in [docs/guides/cheat-sheets.md](../../../docs/guides/cheat-sheets.md).
 
@@ -25,7 +25,7 @@ Every `CC_LOG_*` and `CC_RECORD_*` site in this library is attributed to it; see
 ## Per-frame description — what to render
 
 ```cpp
-sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 content_scale; u32 sample_target; def[i] -> view_data& } — a whole frame, as two flat pools
+sv::viewer_definition            // { vector<view_data> views; layout_tree nodes; view_index root_view; f32 display_scale; u32 sample_target; def[i] -> view_data& } — a whole frame, as two flat pools
 sv::view_data                    // { view_id id; vec2i resolution; bool resolution_follows_layout; camera; vector<layer> layers; refresh_policy refresh; vector<temporal_input>; }
                                  //   the definition of ONE TEXTURE. Deliberately no position: the leaf referencing it decides where it goes,
                                  //   which is what makes "relayout must not restart a converged image" a property of the type
@@ -629,8 +629,9 @@ loader.load(pinned, fmt, name, base_uri)   // the same from bytes in hand; base_
 // glTF's normalTexture (with its scale) and occlusionTexture (with its strength) both import as sample transforms
 loader.load(babel::gltf::data)   // an ALREADY-PARSED document — no re-read for a caller who parsed it themselves
 loader.load(babel::obj::data) / loader.load(babel::stl::data)
+loader.load(babel::fbx::data, name, base_uri)   // read it with {.triangulate = true}; base_uri is what texture file names join against
 loader.load_async(uri)           // -> sv::asset; fetch + parse + import off this thread, the LOADER must outlive it
-sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl
+sv::asset_format_of_uri(uri)     // -> optional<asset_format>; gltf | obj | stl | fbx
 
 sv::asset                        // a load in flight; move-only; dropping it mid-load WAITS for the worker to leave the loader
 a.poll()                         // -> bool; collects a landed load and mints its materials — never blocks, call it per frame
@@ -641,7 +642,8 @@ a.data() / a.meshes() / a.issues()   // an empty asset until it lands, so a fram
 sv::asset_loader_config          // { material_library* materials; uri_resolver_provider resolve;
                                  //   unique_function<bool(string_view)> include_mesh; bool import_materials, import_textures;
                                  //   unique_function<material_id(string_view)> material_override; bool flatten_hierarchy;
-                                 //   tangent_frame_options frames; }
+                                 //   tangent_frame_options frames; fbx_material_convention fbx_materials = phong; }
+sv::fbx_material_convention      // phong (FBX's own reading) | orca_metal_rough (NVIDIA ORCA / Falcor: SpecularColor packs occlusion, roughness, metalness)
 sv::tangent_frame_options        // { bool prefer_file = true; frame_generation generate = none; angle_f crease_angle; float weld_epsilon; }
 sv::frame_generation             // none (let the geometric fallback answer) | smooth | crease  — only `none` is implemented
 
@@ -658,6 +660,7 @@ sv::uri_resolver                 // function_ref<result<pinned_data<byte const>>
 sv::uri_resolver_provider        // the owning form a hook and a config hold
 sv::set_resolve_uri(provider)    // process-wide; {} restores the filesystem default
 sv::resolve_uri(uri)             // -> the hook's answer, or impl::resolve_uri_from_filesystem
+sv::filesystem_resolver(opts)    // -> uri_resolver_provider over the filesystem default; {.max_file_bytes = 4 GiB}, regular files only
 ```
 
 Gotchas:
@@ -676,7 +679,7 @@ Gotchas:
 - **`import_materials = false` imports no textures either**: a map with no material to bind into is noise, and the fallback `pbr` material declares different attribute names.
 - **A successful load with a non-empty `issues` is the normal case.** Check it before concluding you got everything the file described.
 - **glTF today maps the core metallic-roughness set plus emission.** babel does not interpret the `KHR_materials_*` extensions yet, so transmission, ior, clearcoat and sheen do not cross.
-- **glTF lights cross as `asset_data::lights`** — `{ id, light, optional range }`, world-placed like the meshes: `for (auto const& l : a.lights) scene.add_light(l.id, l.light);`
+- **glTF and FBX lights cross as `asset_data::lights`** — `{ id, light, optional range }`, world-placed like the meshes: `for (auto const& l : a.lights) scene.add_light(l.id, l.light);`
   `id` is the file's name, `name##i` when shared, or `light##i` when empty (bumped past any name already taken); `range` is kept but not honoured, and says so in `issues`.
   Ids are unique within one asset only: placing it twice in a layer asserts on the duplicate unless each placement sits under its own `f.scoped_id(...)`.
   Unflattened, a light sits at its node's local transform and `asset_node::first_light` / `light_count` say which node placed it.
@@ -688,9 +691,23 @@ Gotchas:
 - **`.mtl` is not read**, so an OBJ import carries geometry plus material names only — each name mints an unbound `openpbr` material so the slot exists to be overridden.
 - **An STL is one mesh of raw triangles**, with no material and no attributes.
   Its per-facet normals are dropped on purpose: the hit shader derives the geometric frame from the triangle, so a per-triangle normal could only ever match it.
+- **An FBX import lands in sv's convention** — meters, +Y up, right-handed — whatever axes and unit the file declared, through one transform at the root of every placement.
+- **FBX materials hang off the NODE**, so meshes split per (node, material slot): `"lamp.0"`, `"lamp.1"`, each instance free to draw a slot with its own material.
+  The geometry of one FBX mesh is built once per slot and shared by every instance, which content hashing makes one upload.
+- **Which material reading an FBX gets is asked for, never detected** (`fbx_materials`): nothing in a file says that its SpecularColor map is ORCA's packed one.
+  An ORCA packed specular map that does not decode leaves metalness 0 and roughness 0.5 rather than the SpecularColor constant.
+- **FBX textures are fetched beside the document**: by their relative name (backslashes made portable), then by their bare file name.
+  A texture name is a raw file path, never a uri: one holding `:`, opening with `//`, climbing with `..` or naming a Windows device is never asked for as written.
+  Its bare file name still is when that is safe, and `%` is escaped.
+- **A hidden FBX node (`Visibility` 0) places nothing, and nor does anything under it**: it is helper or proxy geometry.
+- **An FBX base color whose alpha drops below 1 anywhere becomes a cutout at 0.5.**
+- **An FBX material with a normal map gets tangents generated along its uv layout**, when the file carries normals and `prefer_file` is on.
+- **FBX light intensities have no unit.** They are taken one-to-one as candela or lux, and a caller rescales.
+  A decay other than quadratic is an issue.
 - **`generate` beyond `none` is not implemented.**
-  What lands is `prefer_file`: glTF NORMAL + TANGENT become a `tangent_frame` + `tangent_handedness`.
+  What lands is `prefer_file`: glTF NORMAL + TANGENT, and FBX's normals and tangents, become a `tangent_frame` + `tangent_handedness`.
   A normal with no tangent gets an arbitrary perpendicular one, which is fine for everything but anisotropy and normal mapping.
+  The exception is an FBX mesh under a normal-mapped material, which gets uv-aligned tangents generated.
 
 ## Camera control — orbit and first-person
 
@@ -704,7 +721,7 @@ c.update(dt) -> bool             // advance that glide (config.focus_seconds, ea
 c.is_focusing()                  // whether update would still move the camera
 c.camera() / c.is_dragging()     // the resulting camera / whether a drag is in progress
 sv::primary_hit_position(record, pixel, resolution, depth, near) // -> optional<pos3d>: a texel of the trace's primary depth back to world; none = escaped
-sv::camera_controller_config     // { f64 orbit_degrees_per_pixel, pan_units_per_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
+sv::camera_controller_config     // { f64 orbit_degrees_per_logical_pixel, pan_units_per_logical_pixel, zoom_per_wheel_tick, min_distance, max_distance; angle_d max_elevation; }
 ```
 
 Left drag orbits, middle drag pans the target (scaled by distance, so one drag covers the same screen fraction at every zoom), the wheel scales the distance geometrically.
@@ -730,7 +747,7 @@ c.handle(sr::input_event) -> bool  // apply one event ALREADY routed to this vie
 c.update(dt) -> bool             // integrate the held keys over dt seconds; true if the camera moved. Call EVERY frame, event or not
 c.camera() / c.is_looking() / c.is_moving()
 c.release_input()                // drop every held key + the look — for a view that lost focus and will never see the key-up
-sv::fps_camera_controller_config // { f64 look_degrees_per_pixel, move_units_per_second, fast_multiplier, slow_multiplier, speed_per_wheel_tick,
+sv::fps_camera_controller_config // { f64 look_degrees_per_logical_pixel, move_units_per_second, fast_multiplier, slow_multiplier, speed_per_wheel_tick,
                                  //   min/max_move_units_per_second; angle_d max_pitch; bool look_requires_button; }
 ```
 

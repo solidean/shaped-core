@@ -968,7 +968,23 @@ CC_FORCE_INLINE void cc::async_node_base::teardown_payload_as(async_node_state c
         unresolved().~async_unresolved(); // deps + conts
         if (home != nullptr)
             home->_homed_nodes.fetch_sub(1, cc::memory_order_relaxed);
+
+        // Last, and released: a weak holder that reads it sees everything the teardown dropped (async_teardown_unfinished).
+        // Only this branch writes it, so a node that resolved pays nothing; the ops bits free_storage reads stay as they are.
+        auto const w = _state_and_ops.load(cc::memory_order_relaxed);
+        _state_and_ops.store((w & ~state_mask) | (u64(async_node_state::torn_down) << state_shift),
+                             cc::memory_order_release);
     }
+}
+
+bool cc::impl::async_teardown_unfinished(async_node_weak const& node)
+{
+    auto const* const n = node.get();
+    if (n == nullptr)
+        return false;
+    // A weak ref keeps the control word alive through teardown, which is what makes this read sound.
+    auto const s = n->load_state(cc::memory_order_acquire);
+    return !async_node_base::is_ready_state(s) && s != async_node_state::torn_down;
 }
 
 CC_COLD_FUNC bool cc::async_node_base::teardown_payload_or_defer(async_node_state const s)

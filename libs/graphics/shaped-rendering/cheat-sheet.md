@@ -33,7 +33,7 @@ auto const wsys = sr::window_system::create({.headless = false});  // -> cc::uni
 auto const win  = wsys->create_window({.title = "viewer", .width = 1280, .height = 720,
                                        .is_resizable = true, .is_visible = true,
                                        .has_decoration = true, .is_always_on_top = false,
-                                       .has_taskbar_icon = true, .is_focusable = true});  // -> cc::unique_ptr<window>
+                                       .has_taskbar_icon = true, .is_focusable = true});  // -> cc::unique_ptr<window>; size in LOGICAL units
 
 wsys->poll_events();              // drains the OS queue; refreshes every live window. Once per frame.
 wsys->windows();                  // -> cc::span<window* const>, creation order, non-owning
@@ -41,9 +41,12 @@ wsys->is_quit_requested();        // latched OS-level quit; clear_quit_request()
 wsys->is_headless();
 
 win->native_window();             // -> sg::native_window, platform-tagged; feeds sg::swapchain_description::window
-win->width();  win->height();     // -> int, pixels, as of the last poll_events
-win->position();                  // -> tg::pos2i, desktop coords, may be negative on a multi-monitor desktop
-win->set_position(tg::pos2i(x, y));  win->set_size(tg::vec2i(w, h));  // write-through: the getter reads it back at once
+win->width();  win->height();     // -> int, PIXELS (the swapchain's size), as of the last poll_events
+win->logical_size();              // -> tg::vec2i, logical units (points on macOS) — what create_window and set_size take
+win->pixel_density();             // -> float, pixels per logical unit: 2 on Retina, 1 on Windows/X11/headless
+win->display_scale();             // -> float, pixel_density × the display's content_scale: what a UI scales its sizes by
+win->position();                  // -> tg::pos2i, desktop coords (logical units), may be negative on a multi-monitor desktop
+win->set_position(tg::pos2i(x, y));  win->set_size(tg::vec2i(w, h));  // logical units; write-through: the getter reads it back at once
 win->is_focused();                // -> bool, as of the last poll_events;  win->focus() asks for it
 win->send_to_back();              // the opposite of focus(): behind everything, focus untouched. Windows-only, best-effort
 wsys->is_background();            // -> bool; is this system keeping its windows out of the way
@@ -60,7 +63,13 @@ wsys->set_cursor_visible(false);  wsys->is_cursor_visible();
 wsys->clipboard_text();           // -> cc::string, empty if the clipboard holds no text
 wsys->set_clipboard_text(sv);
 wsys->has_clipboard_text();
+
+wsys->displays();                 // -> vector<display_info>: position/size/work_position/work_size (desktop coords), pixel_density, content_scale
 ```
+
+- **Two units.** Pixels: `width()`/`height()` and every mouse position and delta.
+  Logical units: window sizes you ask for, `logical_size()`, and all desktop coordinates.
+  `pixel_density()` converts; on a Retina Mac a 1280x720 window has a 2560x1440 back buffer.
 
 - **Cursor and clipboard are process-global**, hence on the system rather than a window: one cursor shows at a
   time, whichever window the pointer is over.
@@ -84,6 +93,8 @@ wsys->has_clipboard_text();
 for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest first, all windows
 {
     e.window;                          // -> sr::window*, null if none was focused
+    e.pixel_density;                   // -> float, what the event's positions were converted at; divide by THIS for logical units
+                                       //    (window->pixel_density() may have changed mid-poll on a display move); 1 if no window
     e.payload;                         // -> cc::variant<key_event, text_event, mouse_move/button/wheel_event, file_drop_event>
 
     e.payload.visit(                   // THE way to consume an event; every handler must return the same type
@@ -96,7 +107,8 @@ for (auto const& e : wsys->events())   // -> cc::span<input_event const>, oldest
         },
         [&](sr::mouse_move_event const& m)
         {
-            m.delta;                              // tg::vec2f — what drives a camera; m.cursor_pos is window-relative
+            m.delta;  m.cursor_pos;               // tg::vec2f / pos2f, PIXELS; cursor_pos is window-relative
+            m.logical_delta();                    // delta / m.pixel_density — what drives a camera, the same on every display
             m.is_held(sr::mouse_button::right);   // buttons held during the motion: END A DRAG ON IT TOO,
                                                   // a release outside an uncaptured window never arrives
         },
@@ -144,7 +156,7 @@ auto imgui = sr::imgui_context::create({.ini_file = "app.ini"});  // let imgui p
 
 wsys->poll_events();
 imgui.process_events(*wsys);                 // feed input; MUST precede begin_frame (NewFrame commits it)
-imgui.begin_frame(*win, dt);                 // size from the window + hands it imgui's text-input intent
+imgui.begin_frame(*win, dt);                 // logical size + pixel_density as framebuffer scale, + imgui's text-input intent
 // or, without a window:
 imgui.begin_frame({.display_size = tg::vec2i(w, h), .delta_time = dt, .framebuffer_scale = {1, 1}});
 ImGui::ShowDemoWindow();                     // any imgui calls

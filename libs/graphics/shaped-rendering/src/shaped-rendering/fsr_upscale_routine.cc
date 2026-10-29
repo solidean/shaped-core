@@ -66,8 +66,8 @@ bool fsr_upscale_routine::is_available(sg::context const& ctx)
         return false;
     if (!impl::fsr_passes_available(ctx))
         return false;
-    for (auto const& asset : {sgl_shaders::fsr_prepare_depth.main_cs.asset, sgl_shaders::fsr_clear_float.main_cs.asset,
-                              sgl_shaders::fsr_clear_uint.main_cs.asset})
+    for (auto const& asset : {sgl_shaders::fsr_prepare_depth::main_cs.asset,
+                              sgl_shaders::fsr_clear_float::main_cs.asset, sgl_shaders::fsr_clear_uint::main_cs.asset})
         if (asset == nullptr || !asset->can_acquire(ctx))
             return false;
     return true;
@@ -91,7 +91,7 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
     auto const fsr = impl::fsr_build_passes(ctx);
 
     // The depth conversion is SGL, and states its own layout.
-    auto const prepare_depth = sgl_shaders::fsr_prepare_depth.main_cs.acquire_pipeline(ctx);
+    auto const prepare_depth = sgl_shaders::fsr_prepare_depth::main_cs.acquire_pipeline(ctx);
 
     // FSR's clear job writes images of every channel count, so each format it clears is a compile of its own.
     auto clears = cc::vector<programs::clear_pass>();
@@ -101,17 +101,17 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
         clears.push_back({.format = cleared.format});
         if (cleared.is_uint)
         {
-            auto const values = sgl_shaders::fsr_clear_uint_options{.target_format = cleared.format};
-            clears.back().program.layout
-                = ctx.cached.acquire_binding_group_layout(sgl_shaders::fsr_clear_uint_target::declared_bindings(values));
-            pipelines.push_back(sgl_shaders::fsr_clear_uint.main_cs.acquire_pipeline(ctx, values));
+            auto const values = sgl_shaders::fsr_clear_uint::options{.target_format = cleared.format};
+            clears.back().program.layout = ctx.cached.acquire_binding_group_layout(
+                sgl_shaders::fsr_clear_uint::fsr_clear_uint_target::declared_bindings(values));
+            pipelines.push_back(sgl_shaders::fsr_clear_uint::main_cs.acquire_pipeline(ctx, values));
         }
         else
         {
-            auto const values = sgl_shaders::fsr_clear_float_options{.target_format = cleared.format};
-            clears.back().program.layout
-                = ctx.cached.acquire_binding_group_layout(sgl_shaders::fsr_clear_float_target::declared_bindings(values));
-            pipelines.push_back(sgl_shaders::fsr_clear_float.main_cs.acquire_pipeline(ctx, values));
+            auto const values = sgl_shaders::fsr_clear_float::options{.target_format = cleared.format};
+            clears.back().program.layout = ctx.cached.acquire_binding_group_layout(
+                sgl_shaders::fsr_clear_float::fsr_clear_float_target::declared_bindings(values));
+            pipelines.push_back(sgl_shaders::fsr_clear_float::main_cs.acquire_pipeline(ctx, values));
         }
     }
 
@@ -124,8 +124,9 @@ cc::shared_async<cc::unit> fsr_upscale_routine::init(sg::routine_init_scope scop
         fail_init();
         co_return;
     }
-    built->prepare_depth = {.layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::fsr_prepare_depth_io>(),
-                            .pipeline = *depth_pipeline};
+    built->prepare_depth
+        = {.layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::fsr_prepare_depth::fsr_prepare_depth_io>(),
+           .pipeline = *depth_pipeline};
 
     for (auto i = isize(0); i < pipelines.size(); ++i)
     {

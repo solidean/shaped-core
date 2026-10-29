@@ -134,3 +134,38 @@ binding pictured:
     miss.surface = pictured_sky
     miss.occlusion = open_sky
     hit_groups = (textured)
+
+// ---- the same rays counted: each launch, closest hit and miss runs once per ray, so an atomic counts it exactly
+
+binding tallies:
+    counts: mut buffer[atomic[uint]]
+
+// counts[0] the launches, [1] the closest hits, [2] the misses, and [3] the columns whose slot from 4 on was claimed
+@raygen fun counted_primary(@launch_id id: int3){traced, tallies}:
+    tallies.counts[0].add(1u)
+    let mut p = radiance(0.0, 0.0, 0.0, 0, 0, 0, 0)
+    let r = ray(
+        origin = pos3((id.x as float) + 0.25, (id.y as float) + 0.5, -1.0)
+        direction = vec3(0.0, 0.0, 1.0)
+    )
+    trace(traced.world, r, path_rays.surface, mut p)
+    if tallies.counts[4 + id.x].compare_exchange_strong(0u, (id.y as uint) + 1u) == 0u => tallies.counts[3].add(1u)
+
+@closest_hit fun counted_shade(h: triangle_hit, p: mut radiance){traced, tallies}:
+    p.is_hit = 1
+    tallies.counts[1].add(1u)
+
+@miss fun counted_sky(p: mut radiance){traced, tallies}:
+    p.is_hit = 0
+    tallies.counts[2].add(1u)
+
+hit_group counted for path_rays:
+    surface = (closest_hit = counted_shade, any_hit = cutout)
+    occlusion = (any_hit = shadow_cutout)
+
+@raytracing pipeline counted_path:
+    rays = path_rays
+    raygen = counted_primary
+    miss.surface = counted_sky
+    miss.occlusion = open_sky
+    hit_groups = (counted)

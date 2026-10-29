@@ -43,7 +43,7 @@ TEST("sgl check - a pixel-only builtin is refused in any other stage, after inli
     CHECK(
         reports_for(compute("", cc::format("{}    tex.dst.store(int2(0, 0), c)\n", sample))).contains("stage-not-allowed"));
     CHECK(reports_for(compute("", cc::format("{}    tex.dst.store(int2(0, 0), c)\n", sample)))
-              .contains("cs is a compute entry point, and sample is @stages without it"));
+              .contains("a compute entry point reaches this, and sample is @stages without it"));
 
     // Reached through a function that says nothing about stages, it is still the entry point that decides.
     constexpr auto shade = "fun shade(){tex} -> float4 => tex.src.sample(float2(0.5, 0.5), tex.smp)\n\n";
@@ -84,7 +84,7 @@ TEST("sgl check - @stages is judged wherever the stage comes from")
                            "\n";
     CHECK(reports_for(with_entry(shade, "@vertex fun vs(v: vin) -> pixel_input:",
                                  "    return {position = hpos4(shade(v.x), 0.0, 0.0, 1.0)}\n"))
-              .contains("vs is a vertex entry point, and shade is @stages without it"));
+              .contains("a vertex entry point reaches this, and shade is @stages without it"));
 
     // Two functions in between say nothing, and the call is reported where it stands.
     constexpr auto deep = "@stages(.pixel) fun lit(c: float4) -> float4 => c * 0.5\n"
@@ -93,6 +93,6 @@ TEST("sgl check - @stages is judged wherever the stage comes from")
                           "\n";
     auto const reports
         = reports_for(compute(deep, "    tex.dst.store(int2(0, 0), outer(float4(1.0, 1.0, 1.0, 1.0)))\n"));
-    CHECK(reports.contains("user:[lit(c)] cs is a compute entry point, and lit is @stages without it"));
+    CHECK(reports.contains("user:[lit(c)] a compute entry point reaches this, and lit is @stages without it"));
     CHECK(reports_for(pixel(deep, "    return {color = outer(float4(1.0, 1.0, 1.0, 1.0))}\n")) == "");
 }

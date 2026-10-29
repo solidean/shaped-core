@@ -25,7 +25,7 @@ The switch is whole-build, set by the `frozen-*` presets, because it changes wha
 ## The bundle key
 
 A bundle files each shader under a hash of everything that decides it, taken in `shader_library::_compile_text` before any compiler runs.
-That covers the language, format, stage, entry point, options and host namespace, plus the source text.
+That covers the language, format, stage, entry point, options and the namespace of an SGL file's generated types, plus the source text.
 It also holds `sgl::compiler_fingerprint()` and slib's own source fingerprint, so an edit to SGL or slib misses.
 It holds nothing of DXC or `ssc::dxc`, so a bundle is only as current as the recording it came from — which is why a recording never serves from one.
 

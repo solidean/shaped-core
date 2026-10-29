@@ -180,6 +180,30 @@ A handle closed under the reactor can be reissued to the next socket the process
 Windows retransmits the SYN of a refused connect, so probing a closed loopback port takes about 2 s without it.
 Those same retransmissions are what let a connect burst past the backlog succeed once the server accepts, and with the option on it fails at once instead.
 
+## Datagrams
+
+```cpp
+#include <clean-net/transport/datagram.hh>
+
+auto sock = cnet::datagram_socket::create(io, endpoint(addr, 0));   // try_create(io | transport, where, options)
+sock->local();                                          // endpoint, port included
+
+cc::vector<cnet::datagram> records;                     // each record's .buffer is the room; set once, reused unchanged
+sock->receive_batch(records);                           // cc::result<isize, error> — filled prefix, 0 when nothing waits
+records[i].bytes(); records[i].peer; records[i].received_at_ns; records[i].truncated;
+
+sock->send_batch(packets);                              // span<outgoing_datagram const{.peer, .bytes}> -> count handed on
+sock->on_arrival([](cnet::datagram_socket& s) { ... }); // level-triggered, on the reactor thread; {} clears it
+```
+
+`cnet::datagram_options` — `v6_only`, `reuse_address`, `receive_buffer_bytes`, `send_buffer_bytes`, `dont_fragment`, `traffic_class` (best effort).
+
+Three things worth knowing.
+**Loss is data, never an error**: an error means the socket is unusable or a datagram was refused outright.
+**A partial send returns its count**, and the next call, starting at the packet that stopped it, reports why.
+**The arrival callback is told, not handed**: it calls `receive_batch` itself, and is called again at once if it leaves datagrams unread.
+[docs/datagrams.md](docs/datagrams.md) is the design.
+
 ## Names
 
 ```cpp
@@ -403,7 +427,7 @@ auto const child = token.create_child();   // cancelled by its parent, and cance
 ## Standing something else in for the network
 
 ```cpp
-#include <clean-net/transport/backend.hh>       // the seam: connection_backend, listener_backend, transport
+#include <clean-net/transport/backend.hh>       // the seam: connection_backend, listener_backend, datagram_backend, transport
 #include <clean-net/transport/virtual_transport.hh>
 #include <clean-net/transport/simulated_transport.hh>
 
@@ -412,10 +436,12 @@ auto link = cnet::simulated_transport(io, net, {.latency_ms = 50, .reset_after_b
 
 cnet::stream_listener::try_create(link, where);            // the transport overloads of the same factories
 cnet::tcp_connect(link, where);                         // ...so the code under test never changes
+cnet::datagram_socket::try_create(link, where);         // datagrams too
 ```
 
 `cnet::link_conditions` — `latency_ms`, `jitter_ms`, `loss_probability`, `bandwidth_bytes_per_sec`, `reset_after_bytes`, `seed`.
 `duplicate_probability` and `reorder_probability` are datagram-only and ignored on a stream.
+**A datagram is impaired where it is received**, so in an all-simulated test each one crosses exactly one impairment.
 
 Three things worth knowing.
 **Every condition is off by default**, so a simulated link nobody configured is indistinguishable from the one underneath — without that, a passing test proves nothing.

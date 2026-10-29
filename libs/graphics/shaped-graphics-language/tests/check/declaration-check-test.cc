@@ -524,7 +524,7 @@ TEST("sgl check - only a pixel entry point may reach discard")
                       + "struct vout:\n    @position p: hpos4\n"
                         "@vertex fun vs(@vertex_index i: int) -> vout:\n"
                         "    return { p = hpos4(cut(0.25), 0.0, 0.0, 1.0) }\n")
-          == "stage-not-allowed user:[discard] vs is a vertex entry point, and only a pixel stage discards\n");
+          == "stage-not-allowed user:[discard] a vertex entry point reaches this, and only a pixel stage discards\n");
     CHECK(reports_for(cc::string(helper)
                       + "struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n"
                         "@pixel fun ps(v: vout) -> target:\n    return { c = float4(cut(v.p.x), 0.0, 0.0, 1.0) }\n")

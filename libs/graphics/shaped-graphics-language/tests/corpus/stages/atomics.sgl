@@ -28,3 +28,110 @@ test:
     counters.slots[2].bit_or(1) == 8
     counters.slots[2].bit_xor(3) == 9
     counters.slots[2].load() == 10
+
+// a strong compare-exchange stores only where the value is the expected one, and gives the value before either way
+fun claim_slot(key: uint){counters} -> uint:
+    let mut i = key & 3u
+    for _ in 0 ..< 4:
+        let before = counters.slots[i].compare_exchange_strong(0u, key)
+        if before == 0u or before == key => return i
+        i = (i + 1u) & 3u
+    return 4u
+
+test:
+    for i in 0 ..< 4 => counters.slots[i].store(0)
+    claim_slot(5u) == 1
+    claim_slot(9u) == 2
+    claim_slot(5u) == 1
+    claim_slot(2u) == 3
+    claim_slot(4u) == 0
+    claim_slot(7u) == 4
+    counters.slots[1].load() == 5
+    counters.slots[2].load() == 9
+    counters.slots[3].load() == 2
+
+// a run is one invocation, so a strong compare-exchange that meets the expected value always stores
+test:
+    counters.lowest.store(-1)
+    counters.lowest.compare_exchange_strong(3, 8) == -1
+    counters.lowest.load() == -1
+    counters.lowest.compare_exchange_strong(-1, 8) == -1
+    counters.lowest.load() == 8
+
+// a weak one says whether it stored, and a test fails it spuriously the first time it meets `expected` (EVAL-100)
+test:
+    counters.lowest.store(4)
+    let missed = counters.lowest.compare_exchange_weak(3, 9)
+    missed.old == 4
+    not missed.exchanged
+    let first = counters.lowest.compare_exchange_weak(4, 9)
+    first.old == 4
+    not first.exchanged
+    counters.lowest.load() == 4
+
+// so a weak compare-exchange stands in a loop that retries while it read `expected` and did not store
+fun claim_slot_weak(key: uint){counters} -> uint:
+    let mut i = key & 3u
+    for _ in 0 ..< 4:
+        let mut r = counters.slots[i].compare_exchange_weak(0u, key)
+        while r.old == 0u and not r.exchanged:
+            r = counters.slots[i].compare_exchange_weak(0u, key)
+        if r.exchanged or r.old == key => return i
+        i = (i + 1u) & 3u
+    return 4u
+
+test:
+    for i in 0 ..< 4 => counters.slots[i].store(0)
+    claim_slot_weak(5u) == 1
+    claim_slot_weak(9u) == 2
+    claim_slot_weak(5u) == 1
+    claim_slot_weak(2u) == 3
+    claim_slot_weak(4u) == 0
+    claim_slot_weak(7u) == 4
+    counters.slots[1].load() == 5
+    counters.slots[0].load() == 4
+
+// without the retry, the first claim fails although its slot was empty, as it may on a GPU
+fun claim_once(key: uint){counters} -> bool => counters.slots[key & 3u].compare_exchange_weak(0u, key).exchanged
+
+test:
+    for i in 0 ..< 4 => counters.slots[i].store(0)
+    not claim_once(5u)
+    counters.slots[1].load() == 0
+    claim_once(5u)
+    counters.slots[1].load() == 5
+
+// a traversal runs its decisions as often as it decides, so an any hit or an intersection writes no memory through a
+// binding, and an atomic there is refused (CHK-404)
+require raytracing_pipeline
+
+binding traced:
+    counts: mut buffer[atomic[uint]]
+    plain: mut buffer[uint]
+
+struct radiance:
+    color: float
+
+struct sphere_attributes:
+    t: float
+
+@expect(error = "stage-not-allowed")
+@any_hit fun counting_hit(c: triangle_candidate, p: mut radiance){traced} -> hit_decision:
+    traced.counts[0].add(1u)
+    return hit_decision.accept
+
+@expect(error = "stage-not-allowed")
+@intersection fun counting_box(b: procedural_box){traced} -> report[sphere_attributes]:
+    traced.counts[1].add(1u)
+    return report.none()
+
+// a plain store counts as badly, and races besides
+@expect(error = "stage-not-allowed")
+@any_hit fun storing_hit(c: triangle_candidate, p: mut radiance){traced} -> hit_decision:
+    traced.plain[0] = traced.plain[0] + 1u
+    return hit_decision.accept
+
+// the stages that run once per ray take every atomic
+@miss fun counting_miss(p: mut radiance){traced}:
+    traced.counts[2].add(1u)
+    p.color = 0.0

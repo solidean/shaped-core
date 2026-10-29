@@ -983,19 +983,16 @@ void viewer::finish_frame(frame& f)
 
     // A capture asks every traced view for its samples and no more, so a traced layer stops where the image is taken.
     // Also while work is owed: what the views hold then is thrown away once it drains, so tracing on past the target buys nothing.
+    // Nor does it denoise an image it will not take: only the one at the target.
     if (im.capture != nullptr && !im.capture->is_done())
+    {
         def.sample_target = im.capture->request().accumulate;
+        def.denoise_at_target_only = true;
+    }
 
-    // A canvas places its drawings in logical pixels, so it takes the content scale of the display the window is on —
-    // the one whose rectangle holds the window's top-left corner, which is also where a new window opens.
-    if (im.window != nullptr && im.window_system != nullptr)
-        for (auto const& d : im.window_system->displays())
-        {
-            auto const p = im.window->position();
-            if (p[0] >= d.position[0] && p[1] >= d.position[1] && p[0] < d.position[0] + d.size[0]
-                && p[1] < d.position[1] + d.size[1] && d.content_scale > 0.0f)
-                def.content_scale = d.content_scale;
-        }
+    // A canvas places its drawings in logical pixels, and the window's display scale is how many back-buffer pixels one of those covers.
+    if (im.window != nullptr)
+        def.display_scale = im.window->display_scale();
 
     im.last_frame_views.clear();
     for (auto& v : def.views)

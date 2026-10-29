@@ -404,8 +404,7 @@ void sgl::builtins::register_vector_math(registry& r)
                      "/// `a` where `t` is 0 and `b` where it is 1.");
         if (type != element)
             add_function(r, "mix", {"a", type, "b", type, "t", type}, type, mix_componentwise, {.hlsl = "lerp"},
-                         "/// `mix` with a weight per component: `a` where a component of `t` is 0 and `b` where it is "
-                         "1.");
+                         "/// `mix` of each component by its own `t` (CHK-398).");
     }
 
     r.add_comment("// float3 and float4 are plain numbers, so all of their arithmetic is componentwise");

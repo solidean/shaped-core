@@ -143,6 +143,7 @@ INVOCABLE_TEST("sg - coherence, image atomics and 16-bit integers follow the API
     auto const is_webgpu = ctx->backend() == sg::backend_kind::webgpu;
     CHECK(ctx->supports(sg::feature::device_coherence) == !is_webgpu);
     CHECK(ctx->supports(sg::feature::image_atomics) == !is_webgpu);
+    CHECK(ctx->supports(sg::feature::helper_lane_query) == !is_webgpu);
     if (is_webgpu)
         CHECK(!ctx->supports(sg::feature::shader_int16));
 }

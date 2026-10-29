@@ -28,7 +28,7 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames under its id", (sg::
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -252,7 +252,7 @@ ASYNC_INVOCABLE_TEST("sv - a view accumulates across frames down the plan path",
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -392,7 +392,7 @@ ASYNC_INVOCABLE_TEST("sv - a material that does not compile still accumulates do
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto& lib = *sv::acquire_material_library().value();
     auto signature = cc::vector<sv::material_signature_entry>();
@@ -495,7 +495,7 @@ ASYNC_INVOCABLE_TEST("sv - a camera cut waits for a traced frame and drops the t
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -635,7 +635,7 @@ ASYNC_INVOCABLE_TEST("sv - a moving camera traces at the upscaler's extent and a
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
     if (!sr::query_reconstruct_support(ctx).fsr)
         SKIP("no upscaler on this device");
 
@@ -790,7 +790,7 @@ ASYNC_INVOCABLE_TEST("sv - a layer at its target restarts for new guides and den
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -943,7 +943,7 @@ ASYNC_INVOCABLE_TEST("sv - a wavefront layer carries its paths across still fram
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
     if (!ctx.supports(sg::feature::ray_query))
         SKIP("the wavefront tracer needs inline ray queries");
 

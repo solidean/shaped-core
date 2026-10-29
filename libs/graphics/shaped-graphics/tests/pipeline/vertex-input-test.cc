@@ -21,7 +21,7 @@ ASYNC_INVOCABLE_TEST("sg - every vertex_attribute_format decodes the value its b
 
     // vertex_input.sgl compares each member against these values and sets one bit per member that matched.
     // The two packed formats share their bytes, 51, 102, 153 and 255, which unorm reads as 0.2, 0.4, 0.6 and 1.0.
-    auto const vertex = shaders::formatted{
+    auto const vertex = shaders::vertex_input::formatted{
         .f1 = 1.5f,
         .f2 = tg::vec2f(2.5f, -3.0f),
         .f3 = tg::vec3f(4.0f, 5.5f, -6.25f),
@@ -37,15 +37,15 @@ ASYNC_INVOCABLE_TEST("sg - every vertex_attribute_format decodes the value its b
         .n4 = 0xFF996633u,
         .b4 = 0xFF996633u,
     };
-    shaders::formatted const vertices[] = {vertex};
+    shaders::vertex_input::formatted const vertices[] = {vertex};
     auto const buffer = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::vertex_input.formats);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::vertex_input::formats);
 
     auto const pixels = co_await sg_test::draw_offscreen(*ctx,
                                                          {.width = 1,
                                                           .height = 1,
                                                           .colors = {sg::pixel_format::rgba32_float},
-                                                          .target_set = shaders::format_target::name,
+                                                          .target_set = shaders::vertex_input::format_target::name,
                                                           .clear_color = tg::vec4f(-1, 0, 0, 0)},
                                                          [&](sg::rendering_scope& scope)
                                                          {

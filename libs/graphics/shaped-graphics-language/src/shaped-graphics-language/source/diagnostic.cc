@@ -246,6 +246,12 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "non-uniform-index";
     case diagnostic_kind::needless_nonuniform:
         return "needless-nonuniform";
+    case diagnostic_kind::unproven_index:
+        return "unproven-index";
+    case diagnostic_kind::mixed_index:
+        return "mixed-index";
+    case diagnostic_kind::uniform_index_varies:
+        return "uniform-index-varies";
     case diagnostic_kind::non_uniform_per_draw:
         return "non-uniform-per-draw";
     }
@@ -484,6 +490,12 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "an index into a binding array that may differ between invocations, without `nonuniform`";
     case diagnostic_kind::needless_nonuniform:
         return "a `nonuniform` mark on an index that is the same in every invocation";
+    case diagnostic_kind::unproven_index:
+        return "an index into a binding array that is neither proven uniform nor marked `uniform` or `nonuniform`";
+    case diagnostic_kind::mixed_index:
+        return "an index into a binding array that some calls give a uniform value and others one that may differ";
+    case diagnostic_kind::uniform_index_varies:
+        return "a `uniform` mark on an index that differs between invocations";
     case diagnostic_kind::non_uniform_per_draw:
         return "a `@per_draw` value a vertex stage writes that may differ within a draw";
     case diagnostic_kind::nesting_too_deep:
@@ -618,6 +630,9 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::invalid_constant_argument:
     case diagnostic_kind::non_uniform_control_flow:
     case diagnostic_kind::non_uniform_index:
+    case diagnostic_kind::unproven_index:
+    case diagnostic_kind::mixed_index:
+    case diagnostic_kind::uniform_index_varies:
     case diagnostic_kind::non_uniform_per_draw:
     case diagnostic_kind::invalid_option:
         return severity::normal_error;

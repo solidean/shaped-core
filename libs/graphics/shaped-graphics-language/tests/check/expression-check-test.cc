@@ -154,8 +154,10 @@ TEST("sgl check - a struct's constructor takes its fields in order, and a splat 
           == "no-matching-overload user:[float4(..c)] float4(float, float, float), and the constructor is "
              "float4(float, "
              "float, float, float)\n");
-    CHECK(body_reports("let a = float(k)\nreturn k\n")
-          == "no-matching-overload user:[float(k)] float is opaque and has no constructor\n");
+    // CHK-396: a scalar converts by its name as `as` converts, and `bool32` has no constructor at all
+    CHECK(body_reports("let a = float(k)\nreturn k\n") == "");
+    CHECK(body_reports("let a = bool32(k)\nreturn k\n")
+          == "no-matching-overload user:[bool32(k)] bool32 is opaque and has no constructor\n");
     CHECK(body_reports("let a = vec3(..k, k, k)\nreturn k\n")
           == "type-mismatch user:[..k] float has no fields a splat could spread\n");
     CHECK(body_reports("return dot(..v, v)\n") == "unsupported-yet user:[..v] a splat outside a constructor call\n");
@@ -328,6 +330,59 @@ TEST("sgl check - `as` converts between float, int and uint of one width, and no
           == "no-matching-overload user:[k as vec3] float as vec3: no conversion\n");
     CHECK(body_reports("let t = c as int2\nreturn k\n")
           == "no-matching-overload user:[c as int2] float3 as int2: no conversion\n");
+}
+
+TEST("sgl check - a numeric type's name converts as `as` does, and converts nothing `as` does not")
+{
+    // CHK-396: `T(x)` is `x as T`, and `x` itself where it is a `T`
+    CHECK(body_reports("let i = int(k)\nlet u = uint(i)\nreturn float(u) + float(k)\n") == "");
+    CHECK(body_reports("let w = int3(c)\nreturn float3(w).x\n") == "");
+    CHECK(body_reports("let t = vec3(k)\nreturn k\n") == "");
+    CHECK(body_reports("let b = float(true)\nreturn k\n") == "no-matching-overload user:[float(true)] float(bool)\n");
+    CHECK(body_reports("let t = int2(c)\nreturn k\n").contains("no-matching-overload user:[int2(c)] int2(float3)"));
+}
+
+TEST("sgl check - a call one `mut` mark away from a candidate says which parameter wants it")
+{
+    constexpr auto twice = "fun twice(x: mut float):\n    x = x * 2.0\n\n";
+    // CHK-316: the parameter is mut, and the argument is unmarked
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    twice(v)\n    return v\n", twice))
+          == "no-matching-overload user:[twice(v)] twice(float): x is a mut parameter, so its argument is a place "
+             "marked `mut`, as in `mut v`\n");
+    CHECK(reports_for("fun f() -> float:\n    let mut v = 1.0\n    return sqrt(mut v)\n")
+              .contains("sqrt(float): x is no mut parameter, so its argument takes no `mut`"));
+    // a mark that would not make the call match is not the reason, and is not named
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut n = 1\n    twice(n)\n    return 1.0\n", twice))
+          == "no-matching-overload user:[twice(n)] twice(int)\n");
+
+    // a mark is no fix for what is no place, so the detail says why it is none
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    twice(v + 1.0)\n    return v\n", twice))
+              .contains("x is a mut parameter, so its argument is a place marked `mut`, and `v + 1.0` is none: only a "
+                        "local, or a member of one, is a place"));
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let k = 1.0\n    twice(k)\n    return k\n", twice))
+              .contains("and `k` is none: k is immutable; `let mut` declares a local an assignment may name"));
+    // every mark that is off is named, in the one call that has them all
+    CHECK(reports_for("fun both(x: mut float, y: mut float):\n    x = y\n\n"
+                      "fun f() -> float:\n    let mut a = 1.0\n    let mut b = 2.0\n    both(a, b)\n    return a\n")
+              .contains("x and y are mut parameters, so their arguments are places marked `mut`, as in "
+                        "`both(mut a, mut b)`"));
+    // a dot call has no place for the mark, so the fix is the free call
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    v.twice()\n    return v\n", twice))
+              .contains("x is a mut parameter, so its argument is a place marked `mut`, as in `twice(mut v)`"));
+}
+
+TEST("sgl check - a select written with its condition last says the condition comes first")
+{
+    // CHK-365: WGSL's `select(f, t, cond)` is a habit a port brings along
+    CHECK(body_reports("let b = k > 0.0\nreturn select(1.0, 2.0, b)\n")
+          == "no-matching-overload user:[select(1.0, 2.0, b)] select(1.0, 2.0, bool): its condition comes first, as "
+             "in select(bool, float, float)\n");
+    CHECK(body_reports("let b = c > c\nreturn select(c, c, b).x\n")
+              .contains("its condition comes first, as in select(bool3, float3, float3)"));
+    CHECK(body_reports("let b = k > 0.0\nreturn select(b, 1.0, 2.0)\n") == "");
+    // the candidate the arguments convert to most directly, not merely the first that takes them
+    CHECK(body_reports("let b = k > 0.0\nreturn select(1, 2, b) as float\n")
+              .contains("its condition comes first, as in select(bool, int, int)"));
 }
 
 TEST("sgl check - the side tables name what an editor asks for")

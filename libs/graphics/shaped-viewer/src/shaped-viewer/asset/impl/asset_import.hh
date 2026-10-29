@@ -5,8 +5,12 @@
 #include <clean-core/error/result.hh>
 #include <clean-core/string/string_view.hh>
 #include <shaped-viewer/asset/asset_data.hh>
+#include <shaped-viewer/asset/uri_resolver.hh>
 #include <shaped-viewer/fwd.hh>
 #include <shaped-viewer/material/material_attribute.hh>
+#include <typed-geometry/linalg/pos.hh>
+#include <typed-geometry/linalg/quat.hh>
+#include <typed-geometry/linalg/vec.hh>
 
 /// The per-format importers behind `sv::asset_loader`.
 ///
@@ -80,6 +84,50 @@ void acquire_asset_materials(asset_data& out,
                                                 asset_loader_config const& cfg,
                                                 cc::string_view asset_name,
                                                 cc::vector<asset_material_definition>& definitions);
+
+/// FBX into `asset_data`, one mesh per (node, material slot) — FBX connects materials to the node placing a mesh, so two instances of one geometry may draw with different materials.
+///
+/// `doc` should have been read with `read_options::triangulate`; a polygon that was not is fanned, with an issue.
+/// Every position comes out in sv's convention: meters, +Y up, right-handed, whatever axes and unit the file declared.
+/// `resolve` is what a texture's file name is fetched through, once the importer has checked it and joined it onto `base_uri`'s directory;
+/// a texture it cannot fetch or decode is an issue, and its material keeps its factors.
+[[nodiscard]] cc::result<asset_data> import_fbx(babel::fbx::data const& doc,
+                                                asset_loader_config const& cfg,
+                                                cc::string_view asset_name,
+                                                uri_resolver resolve,
+                                                cc::string_view base_uri,
+                                                cc::vector<asset_material_definition>& definitions);
+
+/// One decoded image expanded to tightly packed rgba8.
+///
+/// Every decode lands on rgba8 whatever the file held, because that is the one shape `texture_data` and the bindless table agree on today.
+/// A 16-bit PNG keeps its high byte and an f32 image is clamped, both of which lose precision the importer has nowhere to put — block compression and wider formats are a `derived` recipe, not this.
+[[nodiscard]] cc::result<cc::vector<byte>> to_rgba8(babel::image::image const& img);
+
+/// Makes every light id unique within the asset: a name that is empty or shared becomes `name##i`, or `light##i` for an empty one.
+/// `i` is its index in `lights`, which keeps what a human reads while giving each its own identity.
+///
+/// Which names are shared is settled before any is renamed, since renaming the first of two would otherwise leave the second looking unique.
+/// A generated id can still meet a name the file already uses — `a##1` beside two `a`s — so a taken one bumps its suffix until it is new.
+void disambiguate_light_ids(cc::vector<asset_light>& lights);
+
+/// Tangent frames aligned with a uv set, for a mesh that carries normals and uvs but no tangents.
+///
+/// Per triangle, the tangent is the direction of increasing u and the bitangent that of increasing v.
+/// Both are accumulated per vertex, weighted by the triangle's size, then made perpendicular to the vertex normal.
+/// `handedness` is -1 where the bitangent opposes `cross(normal, tangent)`, which is a mirrored uv island.
+/// `uvs` must be in the convention whose +v is "up" in a normal map's tangent space — OpenGL's, V up the image.
+/// So a caller holding top-row-first uvs passes them unflipped from the file, before its own flip.
+/// A vertex no triangle gives a usable tangent falls back to an arbitrary one perpendicular to its normal.
+struct uv_tangent_frames
+{
+    cc::vector<tg::quat_f> frames;
+    cc::vector<f32> handedness;
+};
+[[nodiscard]] uv_tangent_frames tangent_frames_from_uvs(cc::span<tg::pos3f const> positions,
+                                                        cc::span<tg::vec3f const> normals,
+                                                        cc::span<tg::vec2f const> uvs,
+                                                        cc::span<u32 const> indices);
 
 /// Whether `n` can be normalized into a frame at all.
 ///

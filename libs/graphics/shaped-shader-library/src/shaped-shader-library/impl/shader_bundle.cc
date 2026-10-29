@@ -202,7 +202,7 @@ cc::hash128 slib::impl::bundle_key(shader_language language,
                                    sg::shader_stage stage,
                                    cc::string_view entry_point,
                                    cc::span<shader_option const> options,
-                                   cc::string_view host_namespace,
+                                   cc::string_view file_namespace,
                                    cc::string_view source,
                                    cc::span<module_source const> modules)
 {
@@ -222,7 +222,7 @@ cc::hash128 slib::impl::bundle_key(shader_language language,
         b.add_string(o.name);
         b.add_string(o.value);
     }
-    b.add_string(host_namespace);
+    b.add_string(file_namespace);
     add_text(b, source);
 
     // By path, since the disk and the embedded copy may list a directory in different orders.

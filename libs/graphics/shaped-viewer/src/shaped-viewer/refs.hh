@@ -351,7 +351,7 @@ private:
 /// A 2D layer of a view — where drawings are instanced in the view's logical pixels, y down.
 ///
 /// Nothing occludes what a canvas draws, and later instances draw over earlier ones.
-/// A logical pixel is the window's content scale in texture pixels, so a drawing keeps its physical size on any display.
+/// A logical pixel is the window's display scale in texture pixels, so a drawing keeps its physical size on any display.
 class sv::canvas_ref
 {
 public:

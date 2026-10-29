@@ -79,20 +79,20 @@ cc::shared_async<cc::unit> svgf_denoise_routine::init(sg::routine_init_scope sco
     // The passes between write the scratch images, and the last the caller's output.
     auto const atrous_pass = [&](sg::pixel_format target)
     {
-        auto const values = sgl_shaders::svgf_options{.target_format = target};
-        return pass{.group_layout
-                    = ctx.cached.acquire_binding_group_layout(sgl_shaders::svgf_atrous_images::declared_bindings(values),
-                                                              sgl_shaders::svgf_atrous_images::declared_samplers()),
-                    .pipeline = sgl_shaders::svgf.atrous_cs.acquire_pipeline(ctx, values)};
+        auto const values = sgl_shaders::svgf::options{.target_format = target};
+        return pass{.group_layout = ctx.cached.acquire_binding_group_layout(
+                        sgl_shaders::svgf::svgf_atrous_images::declared_bindings(values),
+                        sgl_shaders::svgf::svgf_atrous_images::declared_samplers()),
+                    .pipeline = sgl_shaders::svgf::atrous_cs.acquire_pipeline(ctx, values)};
     };
 
     // All four compile at once; settling them one after another costs no concurrency.
     auto const temporal
-        = pass{.group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::svgf_temporal_images>(),
-               .pipeline = sgl_shaders::svgf.temporal_cs.acquire_pipeline(ctx)};
+        = pass{.group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::svgf::svgf_temporal_images>(),
+               .pipeline = sgl_shaders::svgf::temporal_cs.acquire_pipeline(ctx)};
     auto const variance
-        = pass{.group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::svgf_variance_images>(),
-               .pipeline = sgl_shaders::svgf.variance_cs.acquire_pipeline(ctx)};
+        = pass{.group_layout = ctx.cached.acquire_binding_group_layout<sgl_shaders::svgf::svgf_variance_images>(),
+               .pipeline = sgl_shaders::svgf::variance_cs.acquire_pipeline(ctx)};
     auto const atrous = atrous_pass(k_history_format);
     auto const atrous_output = params() == k_history_format ? atrous : atrous_pass(params());
 
@@ -165,7 +165,7 @@ reconstruct_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
     {
         auto const group = ctx.transient.create_binding_group(
             cmd, self->_temporal.group_layout,
-            sgl_shaders::svgf_temporal_images{
+            sgl_shaders::svgf::svgf_temporal_images{
                 .color = in.color.as_texture_view(),
                 .albedo = albedo,
                 .specular_albedo = specular_albedo,
@@ -181,7 +181,7 @@ reconstruct_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
             });
         cmd.compute.bind_pipeline(**self->_temporal.pipeline->try_value());
         cmd.compute.bind_group(0, *group);
-        cmd.compute.set_inline_constants(sgl_shaders::svgf_temporal_constants{
+        cmd.compute.set_inline_constants(sgl_shaders::svgf::svgf_temporal_constants{
             .flags = albedo_flag | (reset ? k_reset : 0u),
             .color_alpha_min = options.color_alpha_min,
             .moments_alpha_min = options.moments_alpha_min,
@@ -197,7 +197,7 @@ reconstruct_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
     {
         auto const group
             = ctx.transient.create_binding_group(cmd, self->_variance.group_layout,
-                                                 sgl_shaders::svgf_variance_images{
+                                                 sgl_shaders::svgf::svgf_variance_images{
                                                      .history = s[k_color + cur].as_texture_view(),
                                                      .moments = s[k_moments + cur].as_texture_view(),
                                                      .normal_depth = s[k_normal_depth + cur].as_texture_view(),
@@ -205,7 +205,7 @@ reconstruct_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
                                                  });
         cmd.compute.bind_pipeline(**self->_variance.pipeline->try_value());
         cmd.compute.bind_group(0, *group);
-        cmd.compute.set_inline_constants(sgl_shaders::svgf_variance_constants{
+        cmd.compute.set_inline_constants(sgl_shaders::svgf::svgf_variance_constants{
             .normal_power = options.normal_power,
             .depth_sigma = options.depth_sigma,
             .spatial_below = options.spatial_variance_below,
@@ -224,7 +224,7 @@ reconstruct_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
         auto const& pass = i == last ? self->_atrous_output : self->_atrous;
         auto const group
             = ctx.transient.create_binding_group(cmd, pass.group_layout,
-                                                 sgl_shaders::svgf_atrous_images{
+                                                 sgl_shaders::svgf::svgf_atrous_images{
                                                      .source = source.as_texture_view(),
                                                      .normal_depth = s[k_normal_depth + cur].as_texture_view(),
                                                      .albedo = albedo,
@@ -234,7 +234,7 @@ reconstruct_outcome svgf_denoise_routine::execute(sg::command_list& cmd,
                                                  });
         cmd.compute.bind_pipeline(**pass.pipeline->try_value());
         cmd.compute.bind_group(0, *group);
-        cmd.compute.set_inline_constants(sgl_shaders::svgf_atrous_constants{
+        cmd.compute.set_inline_constants(sgl_shaders::svgf::svgf_atrous_constants{
             .step = 1 << i,
             .flags = albedo_flag | (i == last ? k_remodulate_out : 0u),
             .luminance_sigma = options.luminance_sigma,

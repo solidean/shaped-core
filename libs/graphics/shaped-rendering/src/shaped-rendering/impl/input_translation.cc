@@ -159,4 +159,19 @@ float wheel_amount(float raw, SDL_MouseWheelDirection direction)
 {
     return direction == SDL_MOUSEWHEEL_FLIPPED ? -raw : raw;
 }
+
+float pixel_density_from_sdl(float density)
+{
+    return density > 0.0f ? density : 1.0f;
+}
+
+tg::pos2f pixels_from_logical(float x, float y, float density)
+{
+    return tg::pos2f(x * density, y * density);
+}
+
+tg::vec2f pixels_from_logical_delta(float dx, float dy, float density)
+{
+    return tg::vec2f(dx * density, dy * density);
+}
 } // namespace sr::impl

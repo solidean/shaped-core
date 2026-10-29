@@ -144,7 +144,7 @@ struct sg::tlas_instance
 
 namespace sg::impl
 {
-/// What the hit-record check of `context::portability_checks` needs of one tlas instance.
+/// What the hit-record check of `context::hit_record_checks` needs of one tlas instance.
 struct tlas_instance_record
 {
     blas_handle blas;
@@ -155,7 +155,7 @@ struct tlas_instance_record
 /// Records what the build took, as the structure comes back from its backend and before anyone else holds it.
 void set_build_record(blas const& blas, blas_geometry geometry, int hit_record_stride);
 
-/// Records every instance of `tlas`, which only a build under `context::portability_checks` does.
+/// Records every instance of `tlas`, which only a build under `context::hit_record_checks` does.
 void set_instance_records(tlas const& tlas, cc::vector<tlas_instance_record> records);
 
 /// Records the micromaps a BLAS was built from, which it then holds.

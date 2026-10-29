@@ -117,13 +117,14 @@ struct sphere_mesh
             auto const c = index_of(r + 1, s + 1);
             auto const d = index_of(r, s + 1);
 
+            // a-c-b and a-d-c: going down a ring and around in +phi, so the corners turn counterclockwise seen from outside.
             out.indices.push_back(a);
-            out.indices.push_back(b);
             out.indices.push_back(c);
+            out.indices.push_back(b);
 
             out.indices.push_back(a);
-            out.indices.push_back(c);
             out.indices.push_back(d);
+            out.indices.push_back(c);
         }
     }
     return out;

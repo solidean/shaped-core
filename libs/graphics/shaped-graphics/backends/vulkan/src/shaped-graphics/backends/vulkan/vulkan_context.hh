@@ -89,7 +89,8 @@ struct sg::backend::vulkan::vulkan_config
 
     /// Capacity of the descriptor heap, in bytes, and the share of it reserved for transient binding groups.
     /// Sized in bytes rather than in descriptors because a descriptor's size is a device property.
-    isize descriptor_heap_bytes = 4 * 1024 * 1024;
+    /// A bindless group takes its whole table per snapshot, so this must hold several of the largest one.
+    isize descriptor_heap_bytes = isize(16) * 1024 * 1024;
     float descriptor_transient_fraction = 0.25f;
 };
 
@@ -306,6 +307,8 @@ public:
         case sg::feature::device_coherence:
         case sg::feature::image_atomics:
         case sg::feature::first_instance:
+        // `HelperInvocation` is a core built-in; `OpAtomicCompareExchange` is strong, so no loop asks it
+        case sg::feature::helper_lane_query:
             return true;
         case sg::feature::opacity_micromap:
             return is_opacity_micromap_supported();

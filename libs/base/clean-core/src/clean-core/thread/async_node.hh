@@ -688,7 +688,8 @@ enum class cc::async_node_state : cc::u8
     external_pending, // 4  awaiting external completion (a manual/promise node, no compute frame)
     ready_value,      // 5  terminal: completed with a value
     ready_error,      // 6  terminal: completed on the failure channel
-    // 7 states -> fits 3 bits (see async_node_base's packed control word).
+    torn_down,        // 7  terminal: dropped before it resolved, and its payload gone; only a weak ref sees it
+    // 8 states -> fits 3 bits (see async_node_base's packed control word).
     // is-error is encoded in the state itself (ready_value vs ready_error), not as a separate flag.
 };
 
@@ -777,6 +778,11 @@ inline constexpr isize async_home_word_bytes = 8;
 /// Run the teardown a scheduler took over through async_scheduler::try_defer_teardown, then drop the weak count that kept the node's storage alive.
 /// Call on the thread the teardown was deferred to.
 void async_run_deferred_teardown(async_node_base* node);
+
+/// Whether `node`, which no strong handle reaches any more, still has a teardown to finish: it was dropped before it resolved.
+/// Its frame's captures and its context go only as that teardown ends, which may be deferred to its home or to an outer teardown.
+/// A backlog asks this of an entry it can no longer lock, so that settled() does not return while such a teardown is still running.
+[[nodiscard]] bool async_teardown_unfinished(async_node_weak const& node);
 
 /// Creates and binds the main thread's home; called once, by cc::mark_current_thread_as_main.
 void async_bind_main_thread_home();
@@ -1233,6 +1239,7 @@ private:
     friend void impl::async_frame_resolve_current_exception(async_node_base*); // reaches finish_error_emplace
     friend struct impl::async_node_traits; // reaches the intrusive counts / ops / teardown_payload
     friend void impl::async_run_deferred_teardown(async_node_base*);
+    friend bool impl::async_teardown_unfinished(async_node_weak const&); // reads the state a teardown ends on
 
     /// Intrusive refcount (async_node_traits): strong owners in the high half, weak in the low half — continuation cells plus the strong owners' collective one.
     /// Born 1/1 by init_control.

@@ -133,7 +133,8 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
                          | check::feature::multisampled_array_textures | check::feature::raytracing_pipeline
                          | check::feature::geometry_shader | check::feature::tessellation_shader
                          | check::feature::shader_int16 | check::feature::device_coherence
-                         | check::feature::image_atomics | check::feature::first_instance;
+                         | check::feature::image_atomics | check::feature::first_instance
+                         | check::feature::helper_lane_query;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,

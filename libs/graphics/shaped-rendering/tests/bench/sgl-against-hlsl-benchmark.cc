@@ -207,11 +207,11 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
     // ---- à-trous, one pass at step 2 with every guide -----------------------------------------------------------------
     {
         auto const flags = (1u << 0) | (1u << 1) | (1u << 2); // albedo, normal, depth
-        auto const sgl_values = sr::sgl_shaders::atrous_denoise_options{.target_format = sg::pixel_format::rgba32_float};
-        auto const sgl_layout
-            = ctx.cached.acquire_binding_group_layout(sr::sgl_shaders::atrous_images::declared_bindings(sgl_values),
-                                                      sr::sgl_shaders::atrous_images::declared_samplers());
-        auto const sgl_pipeline = sr::sgl_shaders::atrous_denoise.main_cs.acquire_pipeline(ctx, sgl_values);
+        auto const sgl_values = sr::sgl_shaders::atrous_denoise::options{.target_format = sg::pixel_format::rgba32_float};
+        auto const sgl_layout = ctx.cached.acquire_binding_group_layout(
+            sr::sgl_shaders::atrous_denoise::atrous_images::declared_bindings(sgl_values),
+            sr::sgl_shaders::atrous_denoise::atrous_images::declared_samplers());
+        auto const sgl_pipeline = sr::sgl_shaders::atrous_denoise::main_cs.acquire_pipeline(ctx, sgl_values);
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::atrous_bindings>{
             .shader = sr_bench::hlsl::atrous_denoise.compute.main_cs->acquire(ctx)};
 
@@ -240,46 +240,47 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
                                                                        .depth_sigma = 1.0f});
                                   cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
                               }});
-        contenders.push_back({.name = "sgl",
-                              .is_ready =
-                                  [&]
-                              {
-                                  (void)ctx.backlog.start(sgl_pipeline);
-                                  return sgl_pipeline->is_ready() && sgl_pipeline->try_value() != nullptr;
-                              },
-                              .record =
-                                  [&](sg::command_list& cmd)
-                              {
-                                  auto const group = ctx.transient.create_binding_group(
-                                      cmd, sgl_layout,
-                                      sr::sgl_shaders::atrous_images{.source = color.as_texture_view(),
-                                                                     .albedo = albedo.as_texture_view(),
-                                                                     .specular_albedo = albedo.as_texture_view(),
-                                                                     .normal = normal.as_texture_view(),
-                                                                     .depth = depth.as_texture_view(),
-                                                                     .sample_counts = color.as_texture_view(),
-                                                                     .target = target.as_any_image_view()});
-                                  cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
-                                  cmd.compute.bind_group(0, *group);
-                                  cmd.compute.set_inline_constants(
-                                      sr::sgl_shaders::atrous_constants{.step = 2,
-                                                                        .flags = flags,
-                                                                        .luminance_scale = 0.5f,
-                                                                        .normal_power = 128.0f,
-                                                                        .depth_sigma = 1.0f}
-                                          .to_block());
-                                  cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
-                              }});
+        contenders.push_back(
+            {.name = "sgl",
+             .is_ready =
+                 [&]
+             {
+                 (void)ctx.backlog.start(sgl_pipeline);
+                 return sgl_pipeline->is_ready() && sgl_pipeline->try_value() != nullptr;
+             },
+             .record =
+                 [&](sg::command_list& cmd)
+             {
+                 auto const group = ctx.transient.create_binding_group(
+                     cmd, sgl_layout,
+                     sr::sgl_shaders::atrous_denoise::atrous_images{.source = color.as_texture_view(),
+                                                                    .albedo = albedo.as_texture_view(),
+                                                                    .specular_albedo = albedo.as_texture_view(),
+                                                                    .normal = normal.as_texture_view(),
+                                                                    .depth = depth.as_texture_view(),
+                                                                    .sample_counts = color.as_texture_view(),
+                                                                    .target = target.as_any_image_view()});
+                 cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
+                 cmd.compute.bind_group(0, *group);
+                 cmd.compute.set_inline_constants(
+                     sr::sgl_shaders::atrous_denoise::atrous_constants{.step = 2,
+                                                                       .flags = flags,
+                                                                       .luminance_scale = 0.5f,
+                                                                       .normal_power = 128.0f,
+                                                                       .depth_sigma = 1.0f}
+                         .to_block());
+                 cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
+             }});
         co_await measure(ctx, "à-trous", contenders);
     }
 
     // ---- SVGF's filter, one pass at step 2 ---------------------------------------------------------------------------
     {
-        auto const sgl_values = sr::sgl_shaders::svgf_options{.target_format = sg::pixel_format::rgba32_float};
-        auto const sgl_layout
-            = ctx.cached.acquire_binding_group_layout(sr::sgl_shaders::svgf_atrous_images::declared_bindings(sgl_values),
-                                                      sr::sgl_shaders::svgf_atrous_images::declared_samplers());
-        auto const sgl_pipeline = sr::sgl_shaders::svgf.atrous_cs.acquire_pipeline(ctx, sgl_values);
+        auto const sgl_values = sr::sgl_shaders::svgf::options{.target_format = sg::pixel_format::rgba32_float};
+        auto const sgl_layout = ctx.cached.acquire_binding_group_layout(
+            sr::sgl_shaders::svgf::svgf_atrous_images::declared_bindings(sgl_values),
+            sr::sgl_shaders::svgf::svgf_atrous_images::declared_samplers());
+        auto const sgl_pipeline = sr::sgl_shaders::svgf::atrous_cs.acquire_pipeline(ctx, sgl_values);
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::svgf_atrous_bindings>{
             .shader = sr_bench::hlsl::svgf_atrous.compute.main_cs->acquire(ctx)};
 
@@ -320,19 +321,19 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
              {
                  auto const group = ctx.transient.create_binding_group(
                      cmd, sgl_layout,
-                     sr::sgl_shaders::svgf_atrous_images{.source = color.as_texture_view(),
-                                                         .normal_depth = normal_depth.as_texture_view(),
-                                                         .albedo = albedo.as_texture_view(),
-                                                         .specular_albedo = albedo.as_texture_view(),
-                                                         .color = color.as_texture_view(),
-                                                         .target = target.as_any_image_view()});
+                     sr::sgl_shaders::svgf::svgf_atrous_images{.source = color.as_texture_view(),
+                                                               .normal_depth = normal_depth.as_texture_view(),
+                                                               .albedo = albedo.as_texture_view(),
+                                                               .specular_albedo = albedo.as_texture_view(),
+                                                               .color = color.as_texture_view(),
+                                                               .target = target.as_any_image_view()});
                  cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
                  cmd.compute.bind_group(0, *group);
-                 cmd.compute.set_inline_constants(sr::sgl_shaders::svgf_atrous_constants{.step = 2,
-                                                                                         .flags = 0u,
-                                                                                         .luminance_sigma = 4.0f,
-                                                                                         .normal_power = 128.0f,
-                                                                                         .depth_sigma = 1.0f}
+                 cmd.compute.set_inline_constants(sr::sgl_shaders::svgf::svgf_atrous_constants{.step = 2,
+                                                                                               .flags = 0u,
+                                                                                               .luminance_sigma = 4.0f,
+                                                                                               .normal_power = 128.0f,
+                                                                                               .depth_sigma = 1.0f}
                                                       .to_block());
                  cmd.compute.dispatch_threads(k_extent[0], k_extent[1], 1);
              }});
@@ -373,8 +374,8 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
         auto const source4 = source.try_reinterpret_as<tg::vec4f>();
         REQUIRE(source4.has_value());
 
-        auto const sgl_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv_buffers>();
-        auto const sgl_pipeline = sr::sgl_shaders::nn_conv.main_cs.acquire_pipeline(ctx);
+        auto const sgl_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv::nn_conv_buffers>();
+        auto const sgl_pipeline = sr::sgl_shaders::nn_conv::main_cs.acquire_pipeline(ctx);
         auto hlsl = hlsl_pipeline<sr_bench::hlsl::nn_conv_bindings>{
             .shader = sr_bench::hlsl::nn_conv.compute.main_cs->acquire(ctx)};
         auto const dispatch = [&](sg::command_list& cmd)
@@ -404,35 +405,36 @@ ASYNC_BENCHMARK("sr - SGL against the HLSL it was ported from, GPU time per disp
                                                                         .in_channels_a = u32(channels)});
                                   dispatch(cmd);
                               }});
-        contenders.push_back({.name = "sgl",
-                              .is_ready =
-                                  [&]
-                              {
-                                  (void)ctx.backlog.start(sgl_pipeline);
-                                  return sgl_pipeline->is_ready() && sgl_pipeline->try_value() != nullptr;
-                              },
-                              .record =
-                                  [&](sg::command_list& cmd)
-                              {
-                                  auto const group = ctx.transient.create_binding_group(
-                                      cmd, sgl_layout,
-                                      sr::sgl_shaders::nn_conv_buffers{.source_a = source4.value().as_readonly_buffer(),
-                                                                       .source_b = source4.value().as_readonly_buffer(),
-                                                                       .weights = weight_buffer.as_readonly_buffer(),
-                                                                       .target = conv_target.as_readwrite_buffer()});
-                                  cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
-                                  cmd.compute.bind_group(0, *group);
-                                  cmd.compute.set_inline_constants(
-                                      sr::sgl_shaders::nn_conv_constants{.width = u32(width),
-                                                                         .height = u32(height),
-                                                                         .in_channels = u32(channels),
-                                                                         .out_channels = u32(channels),
-                                                                         .weight_offset = 0u,
-                                                                         .bias_offset = bias_offset,
-                                                                         .in_channels_a = u32(channels)}
-                                          .to_block());
-                                  dispatch(cmd);
-                              }});
+        contenders.push_back(
+            {.name = "sgl",
+             .is_ready =
+                 [&]
+             {
+                 (void)ctx.backlog.start(sgl_pipeline);
+                 return sgl_pipeline->is_ready() && sgl_pipeline->try_value() != nullptr;
+             },
+             .record =
+                 [&](sg::command_list& cmd)
+             {
+                 auto const group = ctx.transient.create_binding_group(
+                     cmd, sgl_layout,
+                     sr::sgl_shaders::nn_conv::nn_conv_buffers{.source_a = source4.value().as_readonly_buffer(),
+                                                               .source_b = source4.value().as_readonly_buffer(),
+                                                               .weights = weight_buffer.as_readonly_buffer(),
+                                                               .target = conv_target.as_readwrite_buffer()});
+                 cmd.compute.bind_pipeline(**sgl_pipeline->try_value());
+                 cmd.compute.bind_group(0, *group);
+                 cmd.compute.set_inline_constants(
+                     sr::sgl_shaders::nn_conv::nn_conv_constants{.width = u32(width),
+                                                                 .height = u32(height),
+                                                                 .in_channels = u32(channels),
+                                                                 .out_channels = u32(channels),
+                                                                 .weight_offset = 0u,
+                                                                 .bias_offset = bias_offset,
+                                                                 .in_channels_a = u32(channels)}
+                         .to_block());
+                 dispatch(cmd);
+             }});
         co_await measure(ctx, "convolution", contenders);
     }
 

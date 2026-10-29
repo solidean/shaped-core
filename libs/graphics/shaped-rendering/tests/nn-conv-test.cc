@@ -104,13 +104,13 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    auto const shader = sr::sgl_shaders::nn_conv.main_cs->acquire(ctx);
+    auto const shader = sr::sgl_shaders::nn_conv::main_cs->acquire(ctx);
     co_await cc::async_settled(shader);
     if (shader->has_error())
         FAIL(cc::format("nn_conv did not compile:\n{}", shader->try_error()->underlying().to_string()));
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv_buffers>();
-    auto const built = co_await sr::sgl_shaders::nn_conv.main_cs.acquire_pipeline(ctx);
+    auto const group_layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_conv::nn_conv_buffers>();
+    auto const built = co_await sr::sgl_shaders::nn_conv::main_cs.acquire_pipeline(ctx);
     REQUIRE(built != nullptr);
 
     // The third case has more output channels than one 64-thread group, so the second group is checked too.
@@ -173,12 +173,12 @@ ASYNC_INVOCABLE_TEST("sr - the network's convolution matches a reference impleme
 
         auto const group = ctx.transient.create_binding_group(
             *cmd, group_layout,
-            sr::sgl_shaders::nn_conv_buffers{.source_a = a4.value().as_readonly_buffer(),
-                                             .source_b = b4.value().as_readonly_buffer(),
-                                             .weights = weight_buffer.as_readonly_buffer(),
-                                             .target = target_buffer.as_readwrite_buffer()});
+            sr::sgl_shaders::nn_conv::nn_conv_buffers{.source_a = a4.value().as_readonly_buffer(),
+                                                      .source_b = b4.value().as_readonly_buffer(),
+                                                      .weights = weight_buffer.as_readonly_buffer(),
+                                                      .target = target_buffer.as_readwrite_buffer()});
 
-        auto const constants = sr::sgl_shaders::nn_conv_constants{
+        auto const constants = sr::sgl_shaders::nn_conv::nn_conv_constants{
             .width = u32(c.width),
             .height = u32(k_height),
             .in_channels = u32(in),

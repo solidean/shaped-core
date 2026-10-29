@@ -66,8 +66,8 @@ EXAMPLE("shaped-viewer/decals")
     auto const floor
         = sv::mesh{.name = "floor",
                    .geometry = sv::triangle_geometry::create_from_positions(
-                       cc::vector<tg::pos3f>{tg::pos3f(-6, 0, -6), tg::pos3f(6, 0, -6), tg::pos3f(6, 0, 6),
-                                             tg::pos3f(-6, 0, -6), tg::pos3f(6, 0, 6), tg::pos3f(-6, 0, 6)}),
+                       cc::vector<tg::pos3f>{tg::pos3f(-6, 0, -6), tg::pos3f(6, 0, 6), tg::pos3f(6, 0, -6),
+                                             tg::pos3f(-6, 0, -6), tg::pos3f(-6, 0, 6), tg::pos3f(6, 0, 6)}),
                    .attributes = {sv::mesh_attribute::create_value("base_color", tg::vec3f(0.5f, 0.5f, 0.48f))}};
 
     // The face the camera sees is the plane z = -0.5.

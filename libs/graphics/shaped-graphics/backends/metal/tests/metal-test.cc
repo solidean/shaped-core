@@ -72,6 +72,34 @@ ASYNC_TEST("sg metal - epochs advance and retire")
     CHECK(ctx->in_flight_epoch_count() == 0);
 }
 
+// A target lower than the armed one wakes the completion waiter from the host, and the waiter must park again after.
+// A waiter that spins instead calls park in a loop while the GPU works, so the check is a bound on the park count.
+ASYNC_TEST("sg metal - the completion waiter parks again after a host wake")
+{
+    auto const ctx = test::make_context();
+    if (ctx == nullptr)
+        SKIP("no metal 4 device on this host");
+
+    // Neither target can settle before both are armed, since the lower one is the open epoch.
+    auto const open = ctx->current_epoch();
+    auto const later = ctx->epoch_completion(sg::epoch(u64(open) + 1));
+    auto const sooner = ctx->epoch_completion(open);
+    auto const parks_before = ctx->completion_park_count();
+
+    // GPU round trips, each a host wake and a GPU signal: a few parks apiece, where a spin runs to thousands.
+    constexpr int k_round_trips = 8;
+    for (auto i = 0; i < k_round_trips; ++i)
+        co_await ctx->submission_completion(ctx->submit_command_list(ctx->create_command_list()));
+
+    ctx->advance_epoch();
+    co_await sooner;
+    ctx->advance_epoch();
+    co_await later;
+
+    auto const parks = ctx->completion_park_count() - parks_before;
+    CHECK(parks <= 16 * k_round_trips).context(cc::format("the waiter parked {} times", parks));
+}
+
 ASYNC_TEST("sg metal - a command list can be opened and submitted empty")
 {
     auto const ctx = test::make_context();

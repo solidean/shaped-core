@@ -65,7 +65,7 @@ struct slib::preprocessed_source
     cc::string entry_point;
     /// The whole shader but its bytecode and compiler, where the source language states it, which only SGL does.
     /// The library then takes nothing from the compile but those two, and the compiler's reflection only confirms the rest.
-    /// `target_set` is the bare name of the target struct, which the library qualifies with the package's namespace.
+    /// `target_set` is the bare name of the target struct, which the library qualifies with the namespace of the file's generated types.
     /// nullopt for every other compiler, whose shader is what the compile reflects.
     cc::optional<sg::compiled_shader> stated;
     /// Every binding the text declares, used or not, which is what a compiler reflecting the text may report.

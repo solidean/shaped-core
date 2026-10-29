@@ -8,6 +8,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 
 | Dependency | Version | License | Used by | Text |
 |---|---|---|---|---|
+| [Amazon Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro) | v5.2 | `CC-BY-4.0` | shaped-viewer — the bistro example; and tests that skip without it (babel's FBX reader and DDS / TGA decode, sv's FBX importer) | [amazon-lumberyard-bistro.txt](amazon-lumberyard-bistro.txt) |
 | [BLAKE3](https://github.com/BLAKE3-team/BLAKE3) | 1.8.6 | `CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception` | clean-core — cc::blake3 / cc::hash256 (the cryptographic hash) | [blake3-cc0.txt](blake3-cc0.txt), [blake3-a2.txt](blake3-a2.txt), [blake3-a2llvm.txt](blake3-a2llvm.txt) |
 | [DLSS](https://github.com/NVIDIA/DLSS) | v310.9.1 | `LicenseRef-NVIDIA-RTX-SDK` | shaped-rendering — sr::dlss_rr_routine (the DLSS Ray Reconstruction denoise member) | [dlss.txt](dlss.txt) |
 | [DXC](https://github.com/microsoft/DirectXShaderCompiler) | v1.9.2602.24 | `LicenseRef-Microsoft-DXC-Binary` | shaped-shader-compiler-dxc — HLSL to sg::compiled_shader | [dxc.txt](dxc.txt), [dxc-llvm.txt](dxc-llvm.txt), [dxc-mit.txt](dxc-mit.txt) |
@@ -31,6 +32,7 @@ Our own license is in [shaped-core.txt](shaped-core.txt), so this directory is a
 | [SQLite](https://sqlite.org) | 3.53.3 | `blessing` | babel-serializer — the babel::sqlite engine wrapper | [sqlite.txt](sqlite.txt) |
 | [stb](https://github.com/nothings/stb) | 31c1ad374564 | `MIT OR Unlicense` | babel-serializer — the JPEG codec behind babel::jpg | [stb.txt](stb.txt) |
 | [ufbx](https://github.com/ufbx/ufbx) | v0.23.1 | `MIT OR Unlicense` | babel-serializer — the FBX reader behind babel::fbx | [ufbx.txt](ufbx.txt) |
+| [WARP](https://www.nuget.org/packages/Microsoft.Direct3D.WARP) | 1.0.21 | `LicenseRef-Microsoft-WARP-Testing` | the dx12 test binaries' WARP driver, staged beside them by sg_warp_test_binary | [warp.txt](warp.txt) |
 | [xxHash](https://github.com/Cyan4973/xxHash) | v0.8.3 | `BSD-2-Clause` | clean-core — cc::hash128 (the XXH3 128-bit hash) | [xxhash.txt](xxhash.txt) |
 | [zlib](https://zlib.net) | v1.3.1 | `Zlib` | clean-core — cc::compress / cc::decompress, the Deflate algorithm | [zlib.txt](zlib.txt) |
 | [Zstandard](https://github.com/facebook/zstd) | v1.5.7 | `BSD-3-Clause` | clean-core — cc::compress / cc::decompress, the Zstandard algorithm | [zstandard.txt](zstandard.txt) |

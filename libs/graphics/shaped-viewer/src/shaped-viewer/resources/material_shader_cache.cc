@@ -103,7 +103,7 @@ material_permutation const& material_shader_cache::acquire(resolved_material con
         hit_group = failed_hit_group(cc::format("no shader library to compile material '{}' through: {}", r.type->name,
                                                 lib.error().to_string()));
     else
-        hit_group = slib::compile_hit_group(_context, lib.value(), &sv::shaders::tracer_pipeline_path_t::definition(),
+        hit_group = slib::compile_hit_group(_context, lib.value(), &sv::shaders::tracer_pipeline::path_t::definition(),
                                             generated.source, "sv_material", label);
 
     auto entry = _by_key.entry(key);

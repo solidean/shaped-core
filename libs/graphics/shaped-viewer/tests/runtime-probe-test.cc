@@ -44,7 +44,7 @@ struct runtime_probe_case
     u32 pad[2] = {};
 };
 
-static_assert(sizeof(sv_test::shaders::runtime_probe_case) == sizeof(runtime_probe_case),
+static_assert(sizeof(sv_test::shaders::runtime_probe::runtime_probe_case) == sizeof(runtime_probe_case),
               "runtime_probe_case must match runtime_probe_case in tests/shaders/runtime_probe.sgl");
 
 /// How many float4s one case writes, in the order the probe writes them.
@@ -241,7 +241,7 @@ cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
                                                   runtime_probe_memory const& memory,
                                                   cc::span<runtime_probe_case const> cases)
 {
-    auto const& entry = sv_test::shaders::runtime_probe.runtime_measure;
+    auto const& entry = sv_test::shaders::runtime_probe::runtime_measure;
     auto const compiled_shader = entry->acquire(ctx);
     co_await cc::async_settled(compiled_shader);
     if (compiled_shader->has_error())
@@ -251,7 +251,8 @@ cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
     auto const* const compiled = compiled_shader->try_value();
     REQUIRE(compiled != nullptr); // without it every check below is vacuous
 
-    auto const group_layout = ctx.cached.acquire_binding_group_layout<sv_test::shaders::runtime_probe_io>();
+    auto const group_layout
+        = ctx.cached.acquire_binding_group_layout<sv_test::shaders::runtime_probe::runtime_probe_io>();
     auto pipeline = ctx.cached.acquire_compute_pipeline({.shader = *compiled, .layout = entry.acquire_layout(ctx)});
     auto const built = co_await pipeline;
     REQUIRE(built != nullptr);
@@ -279,8 +280,9 @@ cc::shared_async<cc::vector<tg::vec4f>> run_probe(sg::context& ctx,
     // SGL reads no buffer's length, so the probe is told the count.
     auto const group = ctx.transient.create_binding_group(
         *cmd, group_layout,
-        sv_test::shaders::runtime_probe_io{
-            .cases = case_buffer.reinterpret_as<sv_test::shaders::runtime_probe_case>().as_readonly_buffer(),
+        sv_test::shaders::runtime_probe::runtime_probe_io{
+            .cases
+            = case_buffer.reinterpret_as<sv_test::shaders::runtime_probe::runtime_probe_case>().as_readonly_buffer(),
             .quadrics = quadric_buffer.as_readonly_buffer(),
             .attributes = attribute_buffer.as_readonly_buffer(),
             .indices = index_buffer.as_readonly_buffer(),
@@ -413,7 +415,7 @@ ASYNC_INVOCABLE_TEST("sv - the quadric and material runtimes compute what their 
 #endif
     auto& ctx = *ctx_h;
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the probe shader");
+        SKIP("no SGL compiler for this backend to build the probe shader");
 
     auto const memory = make_memory();
     auto const cases = make_cases();

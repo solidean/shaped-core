@@ -186,6 +186,7 @@ if(SC_BUILD_TESTS)
         tests/sgl_emit_cache-test.cc
         tests/sgl_options-test.cc
         tests/sgl_layout-test.cc
+        tests/sgl_file_namespaces-test.cc
         tests/sgl_modules-test.cc
         tests/metal_compiler-test.cc
         tests/pipeline-test.cc
@@ -295,6 +296,9 @@ if(SC_BUILD_TESTS)
             scaled.sgl:*
             tapped.sgl:*
             host_layout.sgl:*
+            twin_a.sgl:*
+            twin_b.sgl:*
+            slib_test.sgl:*
     )
 
     # Browser test runner (Emscripten only); a no-op on native toolchains.

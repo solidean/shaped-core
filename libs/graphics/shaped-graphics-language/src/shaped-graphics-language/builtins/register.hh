@@ -11,15 +11,15 @@ namespace sgl::builtins
 /// Every topic below, in the order the generated file shows them; `r` is not finalized.
 void register_builtins(registry& r);
 
-/// `float`, `int`, `uint` and `bool` with their vectors, and `mat4`; first, since every signature names them.
+/// `float`, `int`, `uint` and `bool` with their vectors, `mat4` and `mat3`; first, since every signature names them.
 void register_types(registry& r);
 /// Arithmetic, comparisons and the scalar functions of `float`, `int`, `uint` and `bool`.
 void register_scalar_math(registry& r);
 /// The componentwise families of the vectors, and what `pos3` and `vec3` mean together.
 void register_vector_math(registry& r);
-/// `mat4` times a matrix, a position, a direction and a plain four-vector, and its determinant.
+/// `mat4` times a matrix, a position, a direction and a plain four-vector, and its determinant; `mat3` of its columns, times a vector.
 void register_transforms(registry& r);
-/// `x as T` between `float`, `int` and `uint` of one width, as operator functions of `as`.
+/// `x as T` between `float`, `int` and `uint` of one width, as operator functions of `as`, and `T(x)` beside it.
 void register_conversions(registry& r);
 /// The texture and image methods, for every shape.
 void register_textures(registry& r);

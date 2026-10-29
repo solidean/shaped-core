@@ -138,7 +138,7 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront traces the megakernel's quadrics and de
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
     if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
         SKIP("the wavefront tracer needs inline ray queries");
 

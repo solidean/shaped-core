@@ -1460,6 +1460,8 @@ CC_HAS_THREAD_SANITIZER                             // 0/1 (common/macros.hh) â€
                                                     // instrumentation genuinely CHANGES: a stack walk sees frames
                                                     // that are not the source's, and a thread TSan started has no
                                                     // unwindable top. Not a way to skip a test that is merely slow.
+CC_HAS_ADDRESS_SANITIZER                            // 0/1 (common/macros.hh) â€” ASan's allocator ABORTS on a request it
+                                                    // cannot grant, so an allocation failure never reaches its handler
 
 #include <clean-core/platform/leak_annotations.hh> // tell LeakSanitizer a leak is deliberate; no-op without it
 cc::leak_intentionally(p);                          // this object is never freed on purpose (state WHY at the site)

@@ -40,6 +40,7 @@ from binding_grammar import (BindingError, DeclaredSampler, Group, InlineConstan
                              StructMember, VALUE_TYPES, VERTEX_FORMATS, VertexInput, parse_binding_groups)
 from sgl_description import MODULE as SGL_MODULE, SGL_STAGES, DescriptionError, SglEntries, resolve as resolve_sgl  # noqa: E402
 import sgl_host_code  # noqa: E402
+from sgl_host_code import identifier_of  # noqa: E402
 
 # How each sg::sampler field is spelled in C++, and the order sg::sampler declares them in -- a designated
 # initializer has to follow the declaration order, so the order here is fixed.
@@ -202,19 +203,6 @@ def module_files(manifest: Manifest) -> list[tuple[str, Path]]:
     return out
 
 
-def identifier_of(path: str) -> str:
-    """The path as one C++ identifier, directory included.
-
-    post-process/manga_render.hlsl becomes post_process_manga_render, since '/' and '-' both map to '_'.
-    """
-    stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-    directory = path.rsplit("/", 1)[0] if "/" in path else ""
-    ident = stem.replace("-", "_")
-    if directory:
-        ident = directory.replace("-", "_").replace("/", "_") + "_" + ident
-    return ident
-
-
 @dataclass
 class Entries:
     """Everything a package's manifest declares, grouped by what it generates."""
@@ -248,9 +236,8 @@ def parse_sgl_entries(manifest: Manifest, sgl_tool: Path | None) -> Entries:
                                   all_module_dirs(manifest))
     except DescriptionError as e:
         raise GeneratorError(str(e)) from e
-    # One options struct per file that has options, named after the file as its entry points' object is.
-    entries.sgl.option_structs = {path: f"{identifier_of(path)}_options"
-                                  for path, options in entries.sgl.file_options.items() if options}
+    # One options struct per file that has options, in the file's namespace.
+    entries.sgl.option_structs = {path: "options" for path, options in entries.sgl.file_options.items() if options}
     for name, unit in entries.sgl.modules.items():
         unit.option_structs = {path: f"{name}_options" for path, options in unit.file_options.items() if options}
 
@@ -696,8 +683,7 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
     if vertex_inputs or payloads or constants:
         out.append("\n#include <cstddef> // offsetof\n")
     sgl_includes = sgl_host_code.includes(entries.sgl)
-    stems = {f.path: f.stem for f in files}
-    wrappers = sgl_host_code.entry_wrappers(entries.sgl, stems)
+    wrappers = sgl_host_code.entry_wrappers(entries.sgl)
     if wrappers:
         sgl_includes += ["<shaped-graphics/context/context.hh>", "<cstddef> // std::nullptr_t",
                          "<clean-core/string/string.hh>", "<clean-core/thread/async.hh>"]
@@ -717,29 +703,24 @@ def emit_header(manifest: Manifest, entries: Entries) -> str:
         # Nothing here names a context or a layout: those are the scope templates' business.
         out.append("#include <shaped-graphics/binding/binding_group.hh>\n")
         out.append("#include <shaped-graphics/resource/views.hh>\n")
-    out.append(f"\nnamespace {manifest.namespace}\n{{\n")
-    out.append(sgl_host_code.emit_entry_wrappers(entries.sgl, stems, manifest.name))
-    out.append(sgl_host_code.emit_pipelines(entries.sgl, stems, manifest.name))
-    out.append(sgl_host_code.emit_raytracing_pipelines(entries.sgl, stems, manifest.name))
+    # An SGL file's entry points and pipelines stand in its namespace, beside its types.
+    out.append("\n")
+    out.append(sgl_host_code.emit_entry_wrappers(manifest.namespace, entries.sgl, manifest.name))
+    out.append(sgl_host_code.emit_pipelines(manifest.namespace, entries.sgl, manifest.name))
+    out.append(sgl_host_code.emit_raytracing_pipelines(manifest.namespace, entries.sgl, manifest.name))
+    out.append(sgl_host_code.emit_file_symbols(manifest.namespace, entries.sgl))
+    out.append(f"namespace {manifest.namespace}\n{{\n")
 
-    for file in files:
+    # Any other language's file is one object, holding its entry points under their stage.
+    hlsl_or_wgsl_files = files if manifest.language != "sgl" else []
+    for file in hlsl_or_wgsl_files:
         out.append(f"/// {file.path}\n")
         out.append(f"struct {file.stem}_t\n{{\n")
-        if manifest.language == "sgl":
-            # An SGL entry point carries its stage, so it needs no struct of its stage around it.
-            for entry_points in file.stages.values():
-                for entry_point in entry_points:
-                    field_type = wrappers.get((file.path, entry_point), "slib::shader_asset_handle")
-                    out.append(f"    {field_type} {entry_point};\n")
-            for described, p in entries.sgl.pipelines + entries.sgl.raytracing_pipelines:
-                if described.path == file.path:
-                    out.append(f"    {sgl_host_code.pipeline_type(file.stem, p['name'])} {p['name']};\n")
-        else:
-            for stage, entry_points in file.stages.items():
-                out.append("    struct\n    {\n")
-                for entry_point in entry_points:
-                    out.append(f"        slib::shader_asset_handle {entry_point};\n")
-                out.append(f"    }} {stage};\n")
+        for stage, entry_points in file.stages.items():
+            out.append("    struct\n    {\n")
+            for entry_point in entry_points:
+                out.append(f"        slib::shader_asset_handle {entry_point};\n")
+            out.append(f"    }} {stage};\n")
         out.append("};\n")
         out.append(f"extern {file.stem}_t {file.stem};\n\n")
 
@@ -901,15 +882,18 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
         out.append("#include <shaped-shader-library/binding/binding_groups.hh> // slib::inline_constants_space\n")
     if sgl.vertex_inputs or sgl.memory_structs or any(b["inline"] for _, b in sgl.bindings):
         out.append("#include <cstddef> // offsetof\n")
-    if sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files}) or sgl.pipelines or sgl.raytracing_pipelines:
+    if sgl_host_code.entry_wrappers(sgl) or sgl.pipelines or sgl.raytracing_pipelines:
         out.append("#include <clean-core/thread/async_coroutine.hh>\n")
         out.append("#include <shaped-shader-library/shader_asset.hh> // slib::acquire_compute_pipeline\n")
     if sgl.pipelines:
         out.append("#include <shaped-shader-library/impl/pipeline_fields.hh> // a pipeline's settings, as field writes\n")
     out.append("\n")
 
-    for file in files:
-        out.append(f"{manifest.namespace}::{file.stem}_t {manifest.namespace}::{file.stem};\n")
+    if manifest.language == "sgl":
+        out.append(sgl_host_code.emit_file_symbols_impl(manifest.namespace, sgl))
+    else:
+        for file in files:
+            out.append(f"{manifest.namespace}::{file.stem}_t {manifest.namespace}::{file.stem};\n")
     out.append("\nnamespace\n{\n")
 
     entries = []
@@ -945,12 +929,14 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
                 out.append(f'     .entry_point = "{point}",\n')
                 if (file.path, point) in option_tables:
                     out.append(f"     .options = {option_tables[(file.path, point)]},\n")
+                if manifest.language == "sgl":
+                    out.append(f'     .file_namespace = "{manifest.namespace}::{file.stem}",\n')
                 # A wrapped SGL entry point holds its handle as `asset`.
-                wrapped = (file.path, point) in sgl_host_code.entry_wrappers(sgl, {f.path: f.stem for f in files})
+                wrapped = (file.path, point) in sgl_host_code.entry_wrappers(sgl)
                 member = f"{point}.asset" if wrapped else point
-                # An SGL file's entry points stand directly in its struct; an HLSL file's under their stage.
-                owner = file.stem if manifest.language == "sgl" else f"{file.stem}.{stage}"
-                out.append(f"     .asset = &{manifest.namespace}::{owner}.{member}}},\n")
+                # An SGL file's entry points stand in its namespace; an HLSL file's in its object, under their stage.
+                owner = f"{file.stem}::" if manifest.language == "sgl" else f"{file.stem}.{stage}."
+                out.append(f"     .asset = &{manifest.namespace}::{owner}{member}}},\n")
     out.append("};\n")
 
     paths = [path for path, _ in embedded]
@@ -974,7 +960,6 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     out.append(f"slib::shader_package const& {manifest.namespace}::package()\n{{\n")
     out.append("    static slib::shader_package const pkg = {\n")
     out.append(f'        .name = "{manifest.name}",\n')
-    out.append(f'        .host_namespace = "{manifest.namespace}",\n')
     out.append(f"        .language = slib::shader_language::{manifest.language},\n")
     out.append(f'        .source_dir = "{manifest.source_dir.as_posix()}",\n')
     out.append("        .embedded_files = k_embedded_files,\n")
@@ -988,14 +973,8 @@ def emit_source(manifest: Manifest, files: list[ShaderFile], bindings: list[Bind
     for entry in bindings:
         out.append(emit_binding_group_impl(manifest, entry, paths))
     out.append(sgl_host_code.emit_source(manifest.name, manifest.namespace, sgl))
-    if sgl.pipelines:
-        stems = {f.path: f.stem for f in files}
-        out.append(sgl_host_code.emit_pipelines_impl(manifest.name, manifest.namespace, sgl, stems,
-                                                    sgl_host_code.entry_wrappers(sgl, stems)))
-    if sgl.raytracing_pipelines:
-        stems = {f.path: f.stem for f in files}
-        out.append(sgl_host_code.emit_raytracing_pipelines_impl(manifest.name, manifest.namespace, sgl, stems,
-                                                               sgl_host_code.entry_wrappers(sgl, stems)))
+    out.append(sgl_host_code.emit_pipelines_impl(manifest.name, manifest.namespace, sgl))
+    out.append(sgl_host_code.emit_raytracing_pipelines_impl(manifest.name, manifest.namespace, sgl))
 
     if bindings:
         out.append(f"\ncc::string {manifest.namespace}::self_check()\n{{\n")
@@ -1153,6 +1132,24 @@ def emit_binding_group_impl(manifest: Manifest, entry: BindingEntry, embedded: l
     return "".join(out)
 
 
+def check_sgl_namespaces(manifest: Manifest, entries: Entries) -> None:
+    """Each SGL file is a namespace in the package's, beside each exported module's and `package()`, and none may clash."""
+    taken = {"package": "the package's `package()`"}
+    taken |= {name: f"the namespace of module:{name}" for name in entries.sgl.modules}
+    for path in dict.fromkeys(entries.paths):
+        stem = identifier_of(path)
+        if stem in sgl_host_code.RESERVED_FILE_NAMESPACES:
+            raise GeneratorError(
+                f"shader package '{manifest.name}': '{path}' generates the namespace '{stem}', which would hide the "
+                f"'{stem}' its generated code names; rename the file")
+        what = f"the namespace of '{path}'"
+        if taken.get(stem, what) != what:
+            raise GeneratorError(
+                f"shader package '{manifest.name}': '{path}' generates the namespace '{stem}', and the generated C++ "
+                f"name '{stem}' is already {taken[stem]}; rename the file")
+        taken[stem] = what
+
+
 def write_if_different(path: Path, content: str) -> None:
     """Copy-if-different: an unchanged package must not retrigger the compile that consumes these."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1180,23 +1177,15 @@ def main() -> int:
         embedded = [(path, manifest.source_dir / path) for path in include_closure(manifest, entries.paths)]
         # every module file too, which a shader's `use` reaches only once it is compiled
         embedded += [(path, file) for path, file in module_files(manifest) if path not in {p for p, _ in embedded}]
-        # The asset structs are names in the same namespace as every generated type.
-        taken = {f.stem: f"the entry points of '{f.path}'" for f in entries.files}
-        taken |= {f"{f.stem}_t": f"the entry points of '{f.path}'" for f in entries.files}
-        # an exported module is a namespace beside them, which a file's object or a type of its name would clash with
-        for name in entries.sgl.modules:
-            if name in taken:
-                raise GeneratorError(
-                    f"shader package '{manifest.name}': module:{name} generates the namespace '{name}', and the "
-                    f"generated C++ name '{name}' is already {taken[name]}; rename the file or the module")
-            taken[name] = f"the namespace of module:{name}"
-        sgl_host_code.check_names(manifest.name, entries.sgl, taken)
+        if manifest.language == "sgl":
+            check_sgl_namespaces(manifest, entries)
+            sgl_host_code.check_names(manifest.name, entries.sgl)
         header = emit_header(manifest, entries)
         source = emit_source(manifest, entries.files, entries.bindings, embedded, entries.sgl)
         # each exported module in a namespace, a header and a source of its own, so its names are checked apart
         modules = {}
         for name, unit in entries.sgl.modules.items():
-            sgl_host_code.check_names(manifest.name, unit, {})
+            sgl_host_code.check_names(manifest.name, unit)
             modules[name] = (emit_module_header(manifest, unit), emit_module_source(manifest, unit))
     except (GeneratorError, sgl_host_code.HostCodeError) as e:
         print(str(e), file=sys.stderr)

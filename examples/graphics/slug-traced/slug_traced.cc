@@ -280,7 +280,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
     lib.add_package(shaders::package());
     sr::add_shader_packages(lib);
 
-    auto const building = shaders::slug_traced.trace_view.acquire_pipeline(*ctx);
+    auto const building = shaders::slug_traced::trace_view.acquire_pipeline(*ctx);
     co_await cc::async_settled(building);
     auto const* const pipeline = building->try_value();
     if (pipeline == nullptr)
@@ -409,7 +409,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
 
     auto const tables_layout = ctx->cached.acquire_binding_group_layout<sgl_modules::slug::tables>();
     auto const shapes_layout = ctx->cached.acquire_binding_group_layout<sgl_modules::slug::shapes>();
-    auto const scene_layout = ctx->cached.acquire_binding_group_layout<shaders::scene>();
+    auto const scene_layout = ctx->cached.acquire_binding_group_layout<shaders::slug_traced::scene>();
 
     auto camera = orbit_camera();
     auto dragging = false;
@@ -434,7 +434,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
                 if (e.is_mouse_button() && e.as_mouse_button().button == sr::mouse_button::left)
                     dragging = e.as_mouse_button().is_down;
                 else if (e.is_mouse_move() && dragging)
-                    camera.orbit(e.as_mouse_move().delta);
+                    camera.orbit(e.as_mouse_move().logical_delta());
                 else if (e.is_mouse_wheel())
                     camera.zoom(e.as_mouse_wheel().delta[1]);
             }
@@ -479,7 +479,7 @@ ASYNC_EXAMPLE("graphics/slug-traced")
                                                                 sgl_modules::slug::shapes{.instances = records.as_readonly_buffer()});
         auto const scene = ctx->transient.create_binding_group(
             *cmd, scene_layout,
-            shaders::scene{.world = tlas->as_view(),
+            shaders::slug_traced::scene{.world = tlas->as_view(),
                            .cube_positions = cube_positions.as_readonly_buffer(),
                            .cube_em = cube_em.as_readonly_buffer(),
                            .first_shapes = first_shapes.as_readonly_buffer(),

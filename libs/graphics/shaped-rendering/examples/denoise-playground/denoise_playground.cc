@@ -191,14 +191,14 @@ struct camera
 };
 
 /// Fills the tracer's constants block, which the shader package generates from noisy_scene.sgl.
-[[nodiscard]] shaders::scene_constants scene_constants_for(camera const& cam,
-                                                           tg::mat4f const& prev_view_projection,
-                                                           tg::vec2i extent,
-                                                           controls const& c,
-                                                           u32 frame,
-                                                           u32 accum_frame,
-                                                           tg::vec2f jitter,
-                                                           bool upscaling)
+[[nodiscard]] shaders::noisy_scene::scene_constants scene_constants_for(camera const& cam,
+                                                                        tg::mat4f const& prev_view_projection,
+                                                                        tg::vec2i extent,
+                                                                        controls const& c,
+                                                                        u32 frame,
+                                                                        u32 accum_frame,
+                                                                        tg::vec2f jitter,
+                                                                        bool upscaling)
 {
     auto const e = cam.eye();
     auto const f = cam.forward();
@@ -206,7 +206,7 @@ struct camera
     auto const u = cam.up();
     auto const aspect = extent[1] > 0 ? float(extent[0]) / float(extent[1]) : 1.0f;
 
-    auto out = shaders::scene_constants{};
+    auto out = shaders::noisy_scene::scene_constants{};
 
     // One shader float4 per matrix ROW, so nothing here depends on how a float4x4 would be packed into a constant
     // buffer.
@@ -437,15 +437,15 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
     // The tracer is a plain compute pipeline rather than a render routine, so there is no readiness to poll and
     // nothing worth drawing without it: build it up front and fail loudly.
     // An SGL entry point states its own layout, so the pipeline is the shader's and nothing else.
-    auto const scene_layout = ctx.cached.acquire_binding_group_layout<shaders::scene_images>();
-    auto const scene_shader = shaders::noisy_scene.main_cs->acquire(ctx);
+    auto const scene_layout = ctx.cached.acquire_binding_group_layout<shaders::noisy_scene::scene_images>();
+    auto const scene_shader = shaders::noisy_scene::main_cs->acquire(ctx);
     co_await cc::async_settled(scene_shader);
     if (auto const* const why = scene_shader->try_error(); why != nullptr)
     {
         FAIL(cc::format("noisy_scene.sgl did not compile: {}", why->underlying().to_string()));
         co_return;
     }
-    auto const scene_pipeline_async = shaders::noisy_scene.main_cs.acquire_pipeline(ctx);
+    auto const scene_pipeline_async = shaders::noisy_scene::main_cs.acquire_pipeline(ctx);
     co_await cc::async_settled(scene_pipeline_async);
     auto const* const scene_pipeline = scene_pipeline_async->try_value();
     if (scene_pipeline == nullptr)
@@ -454,15 +454,15 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         co_return;
     }
 
-    auto const compose_layout = ctx.cached.acquire_binding_group_layout<shaders::compose_images>();
-    auto const compose_shader = shaders::compose.main_cs->acquire(ctx);
+    auto const compose_layout = ctx.cached.acquire_binding_group_layout<shaders::compose::compose_images>();
+    auto const compose_shader = shaders::compose::main_cs->acquire(ctx);
     co_await cc::async_settled(compose_shader);
     if (auto const* const why = compose_shader->try_error(); why != nullptr)
     {
         FAIL(cc::format("compose.sgl did not compile: {}", why->underlying().to_string()));
         co_return;
     }
-    auto const compose_pipeline_async = shaders::compose.main_cs.acquire_pipeline(ctx);
+    auto const compose_pipeline_async = shaders::compose::main_cs.acquire_pipeline(ctx);
     co_await cc::async_settled(compose_pipeline_async);
     auto const* const compose_pipeline = compose_pipeline_async->try_value();
     if (compose_pipeline == nullptr)
@@ -556,7 +556,7 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         {
             auto const group = ctx.transient.create_binding_group(
                 *cmd, scene_layout,
-                shaders::scene_images{
+                shaders::noisy_scene::scene_images{
                     .color = images.color.as_image_view<k_scene_format>(),
                     .albedo = images.albedo.as_image_view<k_scene_format>(),
                     .normal = images.normal.as_image_view<k_scene_format>(),
@@ -616,14 +616,14 @@ ASYNC_EXAMPLE("shaped-rendering/denoise-playground")
         {
             auto const group
                 = ctx.transient.create_binding_group(*cmd, compose_layout,
-                                                     shaders::compose_images{
+                                                     shaders::compose::compose_images{
                                                          .raw = images.color.as_texture_view(),
                                                          .denoised = shown.as_texture_view(),
                                                          .target = images.composed.as_image_view<k_scene_format>(),
                                                      });
             cmd->compute.bind_pipeline(**compose_pipeline);
             cmd->compute.bind_group(0, *group);
-            cmd->compute.set_inline_constants(shaders::compose_constants{
+            cmd->compute.set_inline_constants(shaders::compose::compose_constants{
                 .split = ui.split,
                 .exposure = ui.exposure,
                 .show_split = ui.show_split ? 1 : 0,

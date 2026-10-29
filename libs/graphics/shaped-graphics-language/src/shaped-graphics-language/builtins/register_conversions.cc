@@ -170,6 +170,33 @@ cc::string type_name(numeric const& n, i32 width)
 {
     return width == 1 ? cc::string(n.name) : cc::format("{}{}", n.name, width);
 }
+
+/// `x as T` as each target writes it: a conversion to `T`, `float3(x)` in HLSL and MSL and `vec3f(x)` in WGSL.
+spelling conversion_to(numeric const& to, i32 width)
+{
+    auto const hlsl = width == 1 ? cc::string(to.hlsl) : cc::format("{}{}", to.hlsl, width);
+    auto const wgsl = width == 1                    ? cc::string(to.wgsl_scalar)
+                    : to.wgsl_vector_suffix.empty() ? cc::format("vec{}<{}>", width, to.wgsl_scalar)
+                                                    : cc::format("vec{}{}", width, to.wgsl_vector_suffix);
+    return {.hlsl = hlsl, .wgsl = wgsl, .msl = type_name(to, width)};
+}
+
+/// WGSL folds a constant exactly, and no uint holds a negative int (CHK-312).
+undefined_check unrepresentable_of(numeric const& from, numeric const& to)
+{
+    return from.kind == value_kind::scalar_int && to.kind == value_kind::scalar_uint ? impl::negative_as_uint : nullptr;
+}
+
+/// `T(x)` of a `T` is `x`, as `x as T` is (CHK-196).
+void same(leaves in, result& out)
+{
+    out.push_back_range(in);
+}
+
+written write_same(call_context const& c)
+{
+    return c.arguments[0];
+}
 } // namespace
 
 void sgl::builtins::register_conversions(registry& r)
@@ -184,19 +211,40 @@ void sgl::builtins::register_conversions(registry& r)
                     continue;
                 auto const source = type_name(from, width);
                 auto const target = type_name(to, width);
-                auto const hlsl = width == 1 ? cc::string(to.hlsl) : cc::format("{}{}", to.hlsl, width);
-                auto const wgsl = width == 1                    ? cc::string(to.wgsl_scalar)
-                                : to.wgsl_vector_suffix.empty() ? cc::format("vec{}<{}>", width, to.wgsl_scalar)
-                                                                : cc::format("vec{}{}", width, to.wgsl_vector_suffix);
                 r.add(function_record{
                     .signature = cc::format("@pure @operator(\"as\") fun convert_{}_to_{}(x: {}) -> {}", source, target,
                                             source, target),
                     .evaluate = converter_to(to.kind),
-                    // WGSL folds a constant exactly, and no uint holds a negative int (CHK-312)
-                    .unrepresentable_when_constant
-                    = from.kind == value_kind::scalar_int && to.kind == value_kind::scalar_uint ? impl::negative_as_uint
-                                                                                                : nullptr,
-                    .write = {.hlsl = hlsl, .wgsl = wgsl, .msl = target},
+                    .unrepresentable_when_constant = unrepresentable_of(from, to),
+                    .write = conversion_to(to, width),
+                });
+            }
+
+    r.add_comment("// `T(x)` is `x as T` for every conversion above, and `x` where it is a `T` already (CHK-396)");
+    for (auto width = 1; width <= 4; ++width)
+        for (auto const& to : k_numerics)
+            for (auto const& from : k_numerics)
+            {
+                if (from.name != to.name && !converts(from, to))
+                    continue;
+                auto const target = type_name(to, width);
+                auto const signature = cc::format("@pure fun {}(x: {}) -> {}", target, type_name(from, width), target);
+                if (from.name == to.name)
+                {
+                    r.add(function_record{
+                        .signature = signature,
+                        .evaluate = same,
+                        .write = {.kind = spelling_kind::custom, .custom = write_same},
+                        .takes_literal_at_default = true,
+                    });
+                    continue;
+                }
+                r.add(function_record{
+                    .signature = signature,
+                    .evaluate = converter_to(to.kind),
+                    .unrepresentable_when_constant = unrepresentable_of(from, to),
+                    .write = conversion_to(to, width),
+                    .takes_literal_at_default = true,
                 });
             }
 

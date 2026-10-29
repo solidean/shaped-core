@@ -37,6 +37,10 @@ These rules bind every GPU test in the repo — sg's two tiers, and the librarie
   WARP means every adapter of Microsoft's vendor id, whatever DXGI's software flag says, since the Windows ARM image enumerates one without it.
   So a test that creates a context of its own SKIPs when creation fails, never `REQUIRE`s it.
   WARP runs on the Windows Clang job alone, and the binaries that bring it up declare a 180 s timeout (`SG_WARP_TEST_BINARY_ARGS`).
+  That job runs them on a pinned WARP from NuGet rather than Windows' own, which traces some scenes wrong.
+  [warp-raytracing-wrong-capture](../../../../docs/bugs-external/warp-raytracing-wrong-capture/readme.md) has the evidence.
+  `uv run extern/warp/fetch-warp.py` fetches it on request, since its terms are testing-only, and `sg_warp_test_binary` stages it beside each such binary.
+  `SG_HAS_PINNED_WARP` tells a test which of the two WARPs it runs on.
   `SC_SG_COLD=all` adds the other half of a CI runner, a first build of every shader and pipeline: the persistent tiers are neither read nor written.
   `pipelines` or `shaders` turns off one of the two, and the driver's own cache is out of its reach.
 - **A test passes on any adapter.**

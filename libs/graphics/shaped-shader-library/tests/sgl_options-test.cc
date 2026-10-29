@@ -29,7 +29,7 @@ cc::string text_of(sg::async_compiled_shader const& shader)
     return cc::string(cc::string_view(reinterpret_cast<char const*>(bytes.data()), bytes.size()));
 }
 
-using scale_options = slib_test::sgl_shaders::scaled_options;
+using scale_options = slib_test::sgl_shaders::scaled::options;
 } // namespace
 
 TEST("slib sgl options - the generated struct holds a file's options at the source's defaults, which each wrapper "
@@ -50,10 +50,10 @@ TEST("slib sgl options - the generated struct holds a file's options at the sour
     CHECK(slib::option_of("format", sg::pixel_format::rgba16_float).value == ".rgba16_float");
 
     // the wrapper names the file's struct, and states the options it reaches, which are all its compiles key on
-    auto const taken = slib_test::sgl_shaders::scaled_scale_t::options{.tile = 32};
+    auto const taken = slib_test::sgl_shaders::scaled::scale_t::options{.tile = 32};
     scale_options const* const same = &taken;
     CHECK(same->tile == 32);
-    auto const reached = slib_test::sgl_shaders::scaled_scale_t::reached_options;
+    auto const reached = slib_test::sgl_shaders::scaled::scale_t::reached_options;
     REQUIRE(reached.size() == 3);
     CHECK(reached[0] == "factor");
     CHECK(reached[1] == "negate");
@@ -66,7 +66,7 @@ TEST("slib sgl options - one entry point under two sets of values is two shaders
     slib::shader_library lib;
     lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
     lib.add_package(slib_test::sgl_shaders::package());
-    auto const& asset = slib_test::sgl_shaders::scaled.scale.asset;
+    auto const& asset = slib_test::sgl_shaders::scaled::scale.asset;
     REQUIRE(asset != nullptr);
     CHECK(asset->options().size() == 3);
 
@@ -94,7 +94,7 @@ TEST("slib sgl options - a value the source refuses is the shader's error", excl
     lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
     lib.add_package(slib_test::sgl_shaders::package());
     slib::shader_option const wrong[] = {{.name = "tile", .value = "wide"}};
-    auto const shader = slib_test::sgl_shaders::scaled.scale.asset->acquire(sg::shader_format::wgsl, wrong);
+    auto const shader = slib_test::sgl_shaders::scaled::scale.asset->acquire(sg::shader_format::wgsl, wrong);
     REQUIRE(shader != nullptr);
     REQUIRE(shader->has_error());
     CHECK(shader->try_error()->underlying().to_string().contains("invalid-option"));
@@ -180,7 +180,7 @@ TEST("slib sgl options - an entry point listed on its own knows its options, and
     lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
     lib.add_package(slib_test::sgl_shaders::package());
     // `listed.sgl:compute:spread` alone: no `*`, and no generated type for its binding, so a plain handle
-    auto const& asset = slib_test::sgl_shaders::listed.spread;
+    auto const& asset = slib_test::sgl_shaders::listed::spread;
     REQUIRE(asset != nullptr);
     REQUIRE(asset->options().size() == 1);
     CHECK(asset->options()[0] == "tile");
@@ -196,7 +196,7 @@ TEST("slib sgl options - an entry point listed on its own knows its options, and
 TEST("slib sgl options - a module's option is a member named after its module, set apart from the program's own",
      exclusive("slib-shader-library"))
 {
-    using tapped_options = slib_test::sgl_shaders::tapped_options;
+    using tapped_options = slib_test::sgl_shaders::tapped::options;
     auto const defaults = tapped_options{};
     CHECK(defaults.taps == 2);
     CHECK(defaults.weights.taps == 4);
@@ -205,7 +205,7 @@ TEST("slib sgl options - a module's option is a member named after its module, s
     CHECK(values[0].name == "taps");
     CHECK(values[1].name == "weights.taps");
     CHECK(values[1].value == "8");
-    auto const reached = slib_test::sgl_shaders::tapped_tap_t::reached_options;
+    auto const reached = slib_test::sgl_shaders::tapped::tap_t::reached_options;
     REQUIRE(reached.size() == 2);
     CHECK(reached[0] == "weights.taps");
     CHECK(reached[1] == "taps");
@@ -213,7 +213,7 @@ TEST("slib sgl options - a module's option is a member named after its module, s
     slib::shader_library lib;
     lib.add_compiler(slib::create_sgl_compiler(slib::create_wgsl_compiler()));
     lib.add_package(slib_test::sgl_shaders::package());
-    auto const& asset = slib_test::sgl_shaders::tapped.tap.asset;
+    auto const& asset = slib_test::sgl_shaders::tapped::tap.asset;
     REQUIRE(asset != nullptr);
     auto const plain = text_of(asset->acquire(sg::shader_format::wgsl, tapped_options{}.values()));
     auto const by_module
@@ -232,6 +232,6 @@ TEST("slib sgl options - a name given twice is logged as an error, and the first
     lib.add_package(slib_test::sgl_shaders::package());
     nx::expect_error("given the option tile twice", nx::exactly(1));
     slib::shader_option const twice[] = {{.name = "tile", .value = "32"}, {.name = "tile", .value = "16"}};
-    auto const shader = slib_test::sgl_shaders::scaled.scale.asset->acquire(sg::shader_format::wgsl, twice);
+    auto const shader = slib_test::sgl_shaders::scaled::scale.asset->acquire(sg::shader_format::wgsl, twice);
     CHECK(text_of(shader).contains("@workgroup_size(32, 1, 1)"));
 }

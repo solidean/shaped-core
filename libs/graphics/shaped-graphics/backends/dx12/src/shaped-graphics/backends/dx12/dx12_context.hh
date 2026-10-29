@@ -138,7 +138,8 @@ struct sg::backend::dx12::dx12_config
     isize async_download_window_bytes = isize(16) * 1024 * 1024;
 
     /// Total descriptors in the shader-visible CBV/SRV/UAV heap binding_groups allocate their tables from.
-    int descriptor_heap_capacity = 1 << 16;
+    /// A bindless group takes its whole table per snapshot, so this must hold several of the largest one; D3D12 allows 1,000,000.
+    int descriptor_heap_capacity = 1 << 18;
 
     /// Share (0..1) of the descriptor heap reserved for the per-epoch-reclaimed transient ring; the rest is the persistent bump region.
     float descriptor_transient_fraction = 0.25f;
@@ -223,6 +224,8 @@ public:
         case sg::feature::image_atomics:          // typed UAV atomics on r32 integer formats are required
         case sg::feature::texture_compression_bc: // BC1-BC7 are required at feature level 11_0
         case sg::feature::first_instance:         // SV_StartInstanceLocation, of the shader model 6.8 SGL emits
+        // `IsHelperLane()` needs SM 6.6 and SGL compiles at SM 6.8; `InterlockedCompareExchange` is strong, so no loop asks it
+        case sg::feature::helper_lane_query:
             return true;
         case sg::feature::extended_image_formats:
             return _extended_image_formats;

@@ -115,11 +115,52 @@ adapter_pin read_adapter_pin()
     return adapter_pin::none;
 }
 
+/// The identity of the WARP this process loaded: its file version and its last-write time, or empty when none is loaded yet.
+///
+/// A d3d10warp.dll beside the executable replaces the system one, which DXGI does not see: it reports the same adapter
+/// either way, so this is what tells the two apart.
+/// The write time is in it because WARP 1.0.21 rejects a pipeline blob written through a copy of itself with another
+/// write time, byte-identical or not, and the creation time does not matter; measured with copies staged beside two binaries.
+cc::string loaded_warp_identity()
+{
+    auto const module = GetModuleHandleW(L"d3d10warp.dll");
+    if (module == nullptr)
+        return {};
+
+    wchar_t path[MAX_PATH] = {};
+    if (GetModuleFileNameW(module, path, MAX_PATH) == 0)
+        return {};
+
+    DWORD ignored = 0;
+    auto const size = GetFileVersionInfoSizeW(path, &ignored);
+    if (size == 0)
+        return {};
+    auto data = cc::vector<byte>::create_defaulted(isize(size));
+    if (!GetFileVersionInfoW(path, 0, size, data.data()))
+        return {};
+
+    VS_FIXEDFILEINFO* fixed = nullptr;
+    UINT fixed_size = 0;
+    if (!VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&fixed), &fixed_size) || fixed == nullptr)
+        return {};
+
+    WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &attributes))
+        return {};
+    auto const written
+        = (u64(attributes.ftLastWriteTime.dwHighDateTime) << 32) | attributes.ftLastWriteTime.dwLowDateTime;
+
+    return cc::format("{}.{}.{}.{} written {}", u16(fixed->dwFileVersionMS >> 16), u16(fixed->dwFileVersionMS & 0xFFFF),
+                      u16(fixed->dwFileVersionLS >> 16), u16(fixed->dwFileVersionLS & 0xFFFF), written);
+}
+
 /// What DXGI says about the adapter that was picked.
 ///
 /// The driver version comes from CheckInterfaceSupport, which is the only place d3d12 exposes one at all.
 /// It fails on WARP and on some drivers, and the empty string it then leaves correctly reads as "unknown" rather than
 /// as a version anyone should compare.
+/// On WARP, once a device exists, the loaded module's identity replaces it: pipeline blobs are keyed on it, and
+/// one WARP rejects the blobs another wrote, which the debug layer reports on every pipeline.
 sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
 {
     auto info = sg::adapter_info();
@@ -147,6 +188,9 @@ sg::adapter_info describe_adapter(IDXGIAdapter1* adapter)
     if (SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &umd)))
         info.driver_version = cc::format("{}.{}.{}.{}", u16(umd.HighPart >> 16), u16(umd.HighPart & 0xFFFF),
                                          u16(umd.LowPart >> 16), u16(umd.LowPart & 0xFFFF));
+    if (info.is_software)
+        if (auto warp = loaded_warp_identity(); !warp.empty())
+            info.driver_version = cc::move(warp);
 
     return info;
 }

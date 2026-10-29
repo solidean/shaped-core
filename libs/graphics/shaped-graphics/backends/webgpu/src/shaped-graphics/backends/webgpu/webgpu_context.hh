@@ -155,7 +155,9 @@ public:
         case sg::feature::device_coherence:
         case sg::feature::image_atomics:
         case sg::feature::first_instance:
-            // WGSL has no 16-bit integers, no coherence qualifier, no atomic texel and no first-instance builtin, on any device.
+        case sg::feature::helper_lane_query:
+            // WGSL has no 16-bit integers, no coherence qualifier, no atomic texel, no first-instance builtin and no test
+            // for a helper invocation, on any device.
             return false;
         case sg::feature::opacity_micromap:
             // The ray-query polyfill traverses its own boxes and knows no micromap.

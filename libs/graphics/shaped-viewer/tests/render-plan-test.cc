@@ -898,7 +898,7 @@ TEST("sv - a scene layer with no geometry plans no trace")
 TEST("sv - a titled leaf's strip is a band and a 2D text job, and its hit region keeps the strip")
 {
     auto def = sv::viewer_definition{};
-    def.content_scale = 2.0f;
+    def.display_scale = 2.0f;
     auto const scene = add_traced_view(def, "scene");
     def.root_view = add_layout_view(def, "root");
     auto proto = sv::layout_leaf{};
@@ -908,7 +908,7 @@ TEST("sv - a titled leaf's strip is a band and a 2D text job, and its hit region
     auto const plan = sv::build_render_plan(def, tg::vec2i(200, 100), 0, {});
     REQUIRE(plan.validate());
 
-    // the strip is 22 logical pixels, so 44 texels at a content scale of 2
+    // the strip is 22 logical pixels, so 44 texels at a display scale of 2
     REQUIRE(plan.hit_regions.size() == 1);
     CHECK(plan.hit_regions[0].window_rect == rect_of(0, 44, 200, 100));
     CHECK(plan.hit_regions[0].leaf_rect == rect_of(0, 0, 200, 100));

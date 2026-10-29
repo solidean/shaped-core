@@ -26,7 +26,11 @@ TEST("sgl builtins - the registry generates a prelude that parses, and reads eve
     auto const ast = sgl::ast::build(file);
     CHECK(file.diagnostics.empty());
     CHECK(ast.diagnostics.empty());
-    CHECK(isize(ast.declarations.count) == r.types.size() + r.functions.size());
+    auto plain = isize(0);
+    for (auto const& item : r.items)
+        plain += item.kind == builtins::registry_item::kind_t::declaration ? 1 : 0;
+    CHECK(plain >= 1);
+    CHECK(isize(ast.declarations.count) == r.types.size() + r.functions.size() + plain);
     CHECK(r.prelude_text().starts_with("// GENERATED FILE - DO NOT EDIT.\n"));
 
     // Deterministic: registration is one function calling the topics in a fixed order.

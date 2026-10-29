@@ -51,7 +51,7 @@ gpu_resource_manager                     [in progress]  where resource managemen
 bindless tables                          [in progress]  module tracer's `binding bindless` is the one declaration (shaders/sgl/tracer_bindings.sgl): one table per view dimension, raw byte buffers.
                                                         The manager's staging group is laid out from its reflection, so the trace's group 1 is the very layout its pipeline was compiled against and sg resolves its footprint by name
 pathtrace_routine                        [in progress]  the GI trace view_renderer drives: shaders/tracer_pipeline.sgl over module tracer, TLAS + dispatch_rays into an image target, one hit group per material permutation
-wavefront tracer                         [in progress]  one compute dispatch per stage over the live paths, the default integrator; the megakernel stays beside it. Runs on dx12 and vulkan, metal is open. docs/wavefront.md is the design
+wavefront tracer                         [in progress]  one compute dispatch per stage over the live paths, the default integrator; the megakernel stays beside it. Runs on dx12, vulkan and metal. docs/wavefront.md is the design
 raster path                              [in progress]  render_mode::raster: one draw per triangle item through each permutation's generated pixel stage, lit directly and unshadowed, final every frame.
                                                         Writes the primary hit's G-buffer into the guide slots, the seam the hybrid mode grows from; quadrics are not drawn yet. docs/raster.md is the design
 sv_shaders package                       [in progress]  one SGL package: the tracer pipeline with module tracer exported, the raster path's raster_pass.sgl with module raster exported, plus layout.sgl (border / view / wipe) and depth_fill.sgl, via slib
@@ -110,10 +110,10 @@ fallback hit group                       [done]         a permutation that has n
 async loading (sv::asset)                [done]         asset_loader::load_async fetches, parses and imports off the calling thread, handing back an sv::asset that poll() collects.
                                                         The import touches no material library, which is what lets it move: it produces material DEFINITIONS, and minting them is the small step poll runs where the library is owned.
                                                         is_ready is whole-asset rather than structure-first: the mesh list arriving before the payloads needs a mesh that is a key and a box before it is bytes, which is the general resource system's job rather than sv's
-asset loading (asset_loader)             [done]         glTF 2.0, OBJ and STL load into a CPU-side sv::asset_data that add_mesh takes directly — one mesh per (geometry, material), hierarchy flattened, material names namespaced by the asset.
+asset loading (asset_loader)             [done]         glTF 2.0, OBJ, STL and FBX load into a CPU-side sv::asset_data that add_mesh takes directly — one mesh per (geometry, material), hierarchy flattened, material names namespaced by the asset.
                                                         The loader holds no device and opens no file: every uri goes through sv::resolve_uri, a settable process-wide hook over cc::file_read_stream_adapter.
                                                         Textures ride on the mesh as pixels rather than on the material as ids, which is what keeps the whole importer CPU-side.
-                                                        Still open: PLY, .mtl, the KHR_materials_* extensions (babel does not read them), and generated tangent frames.
+                                                        Still open: PLY, .mtl, the KHR_materials_* extensions (babel does not read them), and frame_generation::smooth / crease; uv-aligned tangents are generated for FBX alone.
                                                         The recipe and caching model in [asset-loading.md](asset-loading.md) is deliberately deferred — from_memory plus a key covers everything until assets get big enough that holding their payloads resident is the problem
 quadric primitives                       [done]         a second scene_item_kind: analytic quadrics traced by a custom intersection shader over a procedural (AABB) BLAS, for drawing a mesh's vertices and edges at scale.
                                                         One record is a surface quadric and a clipping quadric about a per-primitive origin, batched one BLAS and one TLAS instance per sv::quadric_set.
@@ -155,10 +155,10 @@ A shader reload is folded into that same hash as a reload generation, since `sg:
 ## Platform / backend status
 
 Every sv shader is SGL — the tracer, the generated material hit groups and raster pixel stages, the raster path and the compositing passes — so one source compiles for every backend.
-The raster path runs on dx12 and vulkan, held to each other to rounding by `raster-test.cc`.
-The path tracer runs on **dx12** (hardware or WARP) and on **vulkan**; `cross-backend-trace-test.cc` holds the vulkan image to the dx12 one to rounding, material spelling by material spelling.
-The viewer's default context (`sv::set_acquire_context` unset), the examples and the rest of the GPU tests are dx12's.
-Metal and webgpu are untried: metal has the ray-tracing pipeline sg needs, webgpu has ray queries alone.
+The raster path runs on dx12, vulkan and metal; `raster-test.cc` holds vulkan's image to dx12's to rounding.
+The path tracer runs on **dx12** (hardware or WARP), **vulkan** and **metal**; `cross-backend-trace-test.cc` holds the vulkan image to the dx12 one to rounding, material spelling by material spelling.
+The viewer's default context (`sv::set_acquire_context` unset) is dx12's on Windows and metal's on Apple platforms, and so are the examples and the GPU tests.
+webgpu is untried: it has ray queries alone.
 The whole sv API compiles everywhere: without a backend a routine simply acquires no shader and draws nothing.
 
 ## First library-extension seams (per the "living libraries" rule)

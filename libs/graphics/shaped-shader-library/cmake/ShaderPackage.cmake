@@ -61,6 +61,10 @@
 # The third field is the SGL name exactly as the shader spells it, and one the file does not declare is a build error.
 # `*` generates nothing for what the file `use`s: an imported module is described by its own package entry.
 #
+# Each SGL file generates into a namespace of its own, named as the file folds into an identifier:
+# cube.sgl's types, entry points and pipelines are <NAMESPACE>::cube::target, <NAMESPACE>::cube::main_vs and so on.
+# So two files of one package may each declare a name.
+#
 # An SGL package's SOURCE_DIR is a module directory, and MODULE_DIRS names more, relative to the calling CMakeLists:
 # a file's `use view` finds module `view` among the `.sgl` files directly in any of them.
 # A module another package exports is reached by naming that package's directory here too.

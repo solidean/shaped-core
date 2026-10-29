@@ -38,7 +38,7 @@ ASYNC_INVOCABLE_TEST("sv - denoising a layer never restarts its accumulation", (
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto const size = tg::vec2i(96, 64); // small: WARP traces every pixel in software
     auto v_r = sv::viewer::try_create(ctx, "sv-test/denoise", {.width = size[0], .height = size[1], .headless = true});
@@ -243,6 +243,12 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's
                      (sg::context_handle const& ctx_h))
 {
     auto& ctx = *ctx_h;
+    // TEMPORARY(bug-sv-megakernel-emitter-capture-dark): Windows' own WARP traces the first wavefront capture wrong about one run in eight.
+    // Every input the trace reads matches a passing run, and the pinned WARP extern/warp/fetch-warp.py fetches passes, so only the system one skips.
+    // docs/bugs-external/warp-raytracing-wrong-capture has the evidence.
+    if (!SG_HAS_PINNED_WARP && ctx.metrics.adapter().is_software)
+        SKIP("Windows' WARP traces this scene wrong about one run in eight; issue: "
+             "bug-sv-megakernel-emitter-capture-dark");
 
     {
         auto probe = ctx.create_command_list();
@@ -253,7 +259,7 @@ ASYNC_INVOCABLE_TEST("sv - the wavefront tracer traces and denoises the viewer's
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
     if (!ctx.supports(sg::feature::ray_query) || !ctx.supports(sg::feature::raytracing_pipeline))
         SKIP("the wavefront tracer needs inline ray queries");
 
@@ -310,7 +316,7 @@ ASYNC_INVOCABLE_TEST("sv - a denoised capture is smoother than the raw one", (sg
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto const raw_path = cc::format("{}/sv-denoise-raw.png", cc::temp_directory_path());
     auto const spatial_path = cc::format("{}/sv-denoise-atrous.png", cc::temp_directory_path());
@@ -351,7 +357,7 @@ ASYNC_INVOCABLE_TEST("sv - the viewer drives the split-signal denoiser", (sg::co
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
     if (!sr::query_reconstruct_support(ctx).nrd)
         SKIP("NRD was not fetched into this build (extern/nrd/fetch-nrd.py)");
 
@@ -392,7 +398,7 @@ ASYNC_INVOCABLE_TEST("sv - a named temporal member still denoises past the hand-
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto const raw_path = cc::format("{}/sv-handoff-raw.png", cc::temp_directory_path());
 
@@ -494,7 +500,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture settles mid-crossfade", (sg::context_handle
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     // A window of 2, so the hand-off is reached in a handful of frames rather than the 16 the default would take, and
     // a fade far longer than this capture can run — so no frame of it is past the fade.

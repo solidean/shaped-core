@@ -311,10 +311,10 @@ TESSELLATED = {
 @test
 def a_pipeline_names_every_stage_in_pipeline_definitions_field_order():
     entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)], pipelines=[(FILE, TESSELLATED)])
-    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {FILE.path: "shadow"}, {})
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries)
     # a designated initializer follows the declaration, which is not the order a vertex passes the stages
-    fields = [".vertex = &ns::shadow.vs,", ".pixel = &ns::shadow.ps,", ".geometry = &ns::shadow.gs,",
-              ".tessellation_control = &ns::shadow.tc,", ".tessellation_evaluation = &ns::shadow.te,"]
+    fields = [".vertex = &::ns::shadow::vs,", ".pixel = &::ns::shadow::ps,", ".geometry = &::ns::shadow::gs,",
+              ".tessellation_control = &::ns::shadow::tc,", ".tessellation_evaluation = &::ns::shadow::te,"]
     positions = []
     for f in fields:
         expect_in(f, source, "a stage of the pipeline")
@@ -322,7 +322,7 @@ def a_pipeline_names_every_stage_in_pipeline_definitions_field_order():
     expect_equal(positions, sorted(positions), "the stages in pipeline_definition's field order")
     expect_in('    "stages = vs, tc, te, gs, ps",\n', source, "the stages frozen, in the order a vertex passes them")
     expect_not_in(".vertex_input", source, "a vertex stage that draws from no vertex buffer")
-    header = sgl_host_code.emit_pipelines(entries, {FILE.path: "shadow"})
+    header = sgl_host_code.emit_pipelines("ns", entries)
     expect_in("vs, tc, te, gs and ps, writing depth alone", header, "the stages the doc comment names")
 
 
@@ -340,7 +340,7 @@ def an_entry_points_layout_holds_the_file_samplers_its_code_reaches():
     entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)],
                                          described_entry_points={(FILE.path, "cs"): entry},
                                          file_samplers={FILE.path: [EDGE]})
-    header = sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"})
+    header = sgl_host_code.emit_entry_wrappers("ns", entries)
     expect_in(EDGE_ROW, header, "the sampler's binding, at its index in slib's space")
     expect_in(".sampler = {.min_filter = sg::sampler_filter::nearest, "
               ".address_u = sg::sampler_address_mode::clamp_edge}}", header, "the sampler's settings")
@@ -354,13 +354,13 @@ def a_pipelines_layout_holds_the_file_samplers_any_stage_reaches():
     file = SglFile(path="shadow.sgl", samplers=[EDGE])
     pipeline = {**TESSELLATED, "samplers": ["edge"]}
     entries = sgl_description.SglEntries(bindings=[(file, GROUP)], pipelines=[(file, pipeline)])
-    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {file.path: "shadow"}, {})
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries)
     expect_in("sg::bound_sampler const k_shadow_tessellated_samplers[] = {\n    " + EDGE_ROW, source, "the table")
-    expect_in("acquire_pipeline_layout<ns::shadow>(k_shadow_tessellated_samplers);", source, "the layout takes it")
+    expect_in("acquire_pipeline_layout<::ns::shadow::shadow>(k_shadow_tessellated_samplers);", source, "the layout takes it")
     # a pipeline that reaches none passes none
     plain = sgl_host_code.emit_pipelines_impl("pkg", "ns", sgl_description.SglEntries(
-        bindings=[(file, GROUP)], pipelines=[(file, TESSELLATED)]), {file.path: "shadow"}, {})
-    expect_in("acquire_pipeline_layout<ns::shadow>();", plain, "no sampler")
+        bindings=[(file, GROUP)], pipelines=[(file, TESSELLATED)]))
+    expect_in("acquire_pipeline_layout<::ns::shadow::shadow>();", plain, "no sampler")
 
 
 # ---- options --------------------------------------------------------------------------------------------------------
@@ -397,12 +397,12 @@ def an_entry_point_takes_its_files_options_and_states_the_ones_it_reaches():
     entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)],
                                          described_entry_points={(FILE.path, "cs"): entry},
                                          file_options={FILE.path: OPTIONS},
-                                         option_structs={FILE.path: "shadow_options"})
-    header = sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"}, "pkg")
-    expect_in('inline constexpr cc::string_view shadow_cs_t_reached_options[] = {"tile", "output_format"};', header,
+                                         option_structs={FILE.path: "options"})
+    header = sgl_host_code.emit_entry_wrappers("ns", entries, "pkg")
+    expect_in('inline constexpr cc::string_view cs_t_reached_options[] = {"tile", "output_format"};', header,
               "the names it reaches, in the order reached")
-    expect_in("    using options = shadow_options;", header, "the wrapper names its file's struct")
-    expect_in("static constexpr cc::span<cc::string_view const> reached_options = shadow_cs_t_reached_options;", header,
+    expect_in("    using options = ::ns::shadow::options;", header, "the wrapper names its file's struct, qualified")
+    expect_in("static constexpr cc::span<cc::string_view const> reached_options = cs_t_reached_options;", header,
               "the wrapper names its table")
     expect_in("acquire_compute_pipeline(&ctx, asset, acquire_layout(ctx, values), values.values());", header,
               "the compute pipeline takes them")
@@ -411,9 +411,9 @@ def an_entry_point_takes_its_files_options_and_states_the_ones_it_reaches():
     # one reaching none takes the struct too, so a host hands one value to every wrapper of the file
     other = {"name": "plain", "stage": "compute", "bindings": ["shadow"], "options": []}
     entries.described_entry_points[(FILE.path, "plain")] = other
-    header = sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"}, "pkg")
-    expect_in("struct shadow_plain_t\n{\n    /// The options of shadow.sgl, which every wrapper of the file takes.\n"
-              "    using options = shadow_options;\n", header, "a wrapper reaching no option")
+    header = sgl_host_code.emit_entry_wrappers("ns", entries, "pkg")
+    expect_in("struct plain_t\n{\n    /// The options of shadow.sgl, which every wrapper of the file takes.\n"
+              "    using options = ::ns::shadow::options;\n", header, "a wrapper reaching no option")
     expect_in("static constexpr cc::span<cc::string_view const> reached_options = {};", header, "an empty table")
 
 
@@ -424,9 +424,9 @@ def a_reached_name_the_file_does_not_declare_or_cannot_type_is_refused():
         entries = sgl_description.SglEntries(
             bindings=[(FILE, GROUP)], described_entry_points={(FILE.path, "cs"): entry},
             file_options={FILE.path: OPTIONS + [{"name": "mode", "type": "blur_mode", "value": ".box"}]},
-            option_structs={FILE.path: "shadow_options"})
+            option_structs={FILE.path: "options"})
         try:
-            sgl_host_code.emit_entry_wrappers(entries, {FILE.path: "shadow"}, "pkg")
+            sgl_host_code.emit_entry_wrappers("ns", entries, "pkg")
             raise AssertionError(f"a wrapper reaching '{reached}' generated")
         except sgl_host_code.HostCodeError as e:
             expect_in(wanted, str(e), f"the refusal of '{reached}'")
@@ -437,11 +437,11 @@ def a_pipelines_options_ride_in_its_open_parts():
     file = SglFile(path="shadow.sgl", options=OPTIONS)
     pipeline = {**TESSELLATED, "options": ["sharpen"]}
     entries = sgl_description.SglEntries(bindings=[(file, GROUP)], pipelines=[(file, pipeline)],
-                                         option_structs={file.path: "shadow_options"})
-    header = sgl_host_code.emit_pipelines(entries, {file.path: "shadow"}, "pkg")
-    expect_in("    shadow_options options;\n};", header, "the file's struct, a member of the open parts")
-    expect_in("reached_options = shadow_tessellated_t_reached_options;", header, "the names its stages reach")
-    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {file.path: "shadow"}, {})
+                                         option_structs={file.path: "options"})
+    header = sgl_host_code.emit_pipelines("ns", entries, "pkg")
+    expect_in("    ::ns::shadow::options options;\n};", header, "the file's struct, a member of the open parts")
+    expect_in("reached_options = tessellated_t_reached_options;", header, "the names its stages reach")
+    source = sgl_host_code.emit_pipelines_impl("pkg", "ns", entries)
     expect_in("cc::move(customize), false, parts.options.values());", source, "the description takes them")
 
 
@@ -492,8 +492,8 @@ def an_entry_point_reaching_a_groups_format_option_builds_its_layout_from_the_va
     entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED), (shadow_here, GROUP)],
                                          described_entry_points={(FORMATTED_FILE.path, "cs"): entry},
                                          file_options={FORMATTED_FILE.path: OPTIONS},
-                                         option_structs={FORMATTED_FILE.path: "upscale_options"})
-    header = sgl_host_code.emit_entry_wrappers(entries, {FORMATTED_FILE.path: "upscale"}, "pkg")
+                                         option_structs={FORMATTED_FILE.path: "options"})
+    header = sgl_host_code.emit_entry_wrappers("ns", entries, "pkg")
     expect_in("acquire_layout(sg::context& ctx, options const& values = {}) const", header, "the layout takes values")
     expect_in("        desc.groups.push_back(\n"
               "            ctx.cached.acquire_binding_group_layout(upscaled::declared_bindings(values), "
@@ -513,8 +513,8 @@ def another_modules_binding_in_a_layout_per_value_asks_its_type_whether_it_is_in
     entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED)],
                                          described_entry_points={(FORMATTED_FILE.path, "cs"): entry},
                                          file_options={FORMATTED_FILE.path: OPTIONS},
-                                         option_structs={FORMATTED_FILE.path: "upscale_options"})
-    header = sgl_host_code.emit_entry_wrappers(entries, {FORMATTED_FILE.path: "upscale"}, "pkg")
+                                         option_structs={FORMATTED_FILE.path: "options"})
+    header = sgl_host_code.emit_entry_wrappers("ns", entries, "pkg")
     expect_in("        if constexpr (sg::declared_inline_constants<::sgl_modules::common::lights>)\n"
               "            desc.inline_constants = ::sgl_modules::common::lights::inline_binding();\n"
               "        else\n"
@@ -536,7 +536,7 @@ def a_binding_array_sized_by_an_option_and_a_pipeline_over_an_optioned_group_are
     entries = sgl_description.SglEntries(bindings=[(FORMATTED_FILE, FORMATTED)],
                                          pipelines=[(FORMATTED_FILE, pipeline)])
     try:
-        sgl_host_code.emit_pipelines_impl("pkg", "ns", entries, {FORMATTED_FILE.path: "upscale"}, {})
+        sgl_host_code.emit_pipelines_impl("pkg", "ns", entries)
         raise AssertionError("a pipeline over a group with an option format generated a layout")
     except sgl_host_code.HostCodeError as e:
         expect_in("upscaled", str(e), "the refusal names the group")
@@ -556,12 +556,67 @@ def an_inline_block_naming_an_option_is_refused_in_words_of_its_own():
 
 @test
 def an_options_struct_is_a_generated_name_like_any_other():
-    entries = sgl_description.SglEntries(option_structs={"shadow.sgl": "shadow_options"})
+    entries = sgl_description.SglEntries(option_structs={FILE.path: "options"},
+                                         bindings=[(FILE, {**GROUP, "name": "options"})])
     try:
-        sgl_host_code.check_names("pkg", entries, {"shadow_options": "`binding shadow_options` of 'other.sgl'"})
-        raise AssertionError("an options struct took a name already generated")
+        sgl_host_code.check_names("pkg", entries)
+        raise AssertionError("a binding took the name of its file's options struct")
     except sgl_host_code.HostCodeError as e:
-        expect_in("shadow_options", str(e), "the clash names the struct")
+        expect_in("'options' is already its options struct of 'shadow.sgl'", str(e), "the clash names the struct")
+
+
+# ---- a file's namespace ---------------------------------------------------------------------------------------------
+
+
+@test
+def each_files_generated_names_stand_in_a_namespace_of_its_own():
+    other = SglFile(path="post-process/shadow_blur.sgl")
+    twin = {**GROUP, "name": "shadow_twin"}
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP), (other, GROUP), (other, twin)])
+    sgl_host_code.check_names("pkg", entries)
+    expect_equal(sgl_host_code.file_namespace("ns", entries, other.path), "ns::post_process_shadow_blur",
+                 "a path folded into one identifier, directory included")
+    header = sgl_host_code.emit_header("pkg", "ns", entries)
+    expect_in("namespace ns::shadow\n{", header, "the first file's namespace")
+    expect_in("namespace ns::post_process_shadow_blur\n{", header, "the second file's namespace")
+    source = sgl_host_code.emit_source("pkg", "ns", entries)
+    expect_in("cc::span<sg::binding const> ns::shadow::shadow::declared_bindings()", source, "the first file's group")
+    expect_in("cc::span<sg::binding const> ns::post_process_shadow_blur::shadow::declared_bindings()", source,
+              "the second file's group of the same name")
+    expect_in("namespace ns::post_process_shadow_blur\n{\nnamespace\n{\nsg::binding const k_sgl_bindings_shadow[]", source,
+              "each file's table in its own namespace")
+
+
+@test
+def a_modules_files_share_its_namespace_so_one_name_twice_clashes():
+    first, second = SglFile(path="module:view"), SglFile(path="module:view")
+    entries = sgl_description.SglEntries(module="view", bindings=[(first, GROUP), (second, GROUP)])
+    expect_equal(sgl_host_code.file_namespace("ns::view", entries, first.path), "ns::view", "the module's namespace")
+    try:
+        sgl_host_code.check_names("pkg", entries)
+        raise AssertionError("a module declared one name twice")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("'shadow'", str(e), "the clash names the binding")
+
+
+@test
+def an_entry_point_and_a_pipeline_stand_in_their_files_namespace():
+    entry = {"name": "cs", "stage": "compute", "bindings": ["shadow"]}
+    entries = sgl_description.SglEntries(bindings=[(FILE, GROUP)], entry_points=[(FILE.path, "compute", "cs")],
+                                         described_entry_points={(FILE.path, "cs"): entry},
+                                         pipelines=[(FILE, TESSELLATED)])
+    header = sgl_host_code.emit_file_symbols("ns", entries)
+    expect_in("namespace ns::shadow\n{\n", header, "the file's namespace")
+    expect_in("extern cs_t cs;\nextern tessellated_t tessellated;\n", header, "an entry point and a pipeline")
+    source = sgl_host_code.emit_file_symbols_impl("ns", entries)
+    expect_in("ns::shadow::cs_t ns::shadow::cs;\n", source, "the entry point's definition")
+    try:
+        sgl_host_code.check_names("pkg", sgl_description.SglEntries(
+            bindings=[(FILE, GROUP), (FILE, {**GROUP, "name": "cs_t"})], entry_points=entries.entry_points,
+            described_entry_points=entries.described_entry_points))
+        raise AssertionError("a binding took the name of its file's entry point type")
+    except sgl_host_code.HostCodeError as e:
+        expect_in("'cs_t'", str(e), "the clash names the type")
 
 
 # ---- the runner -----------------------------------------------------------------------------------------------------

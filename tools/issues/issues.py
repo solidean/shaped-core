@@ -34,10 +34,14 @@ RESOLUTIONS = ("fixed", "wontfix", "duplicate", "obsolete")
 REF_KINDS = ("file", "test", "symbol", "issue")
 CONFIG_FILE = ".issues.toml"
 CONFIG_KEYS = {"name", "branch", "remote", "exclude", "submodules"}
+# The dot sorts it first in a file browser, ahead of the open issues' group folders.
+CLOSED_DIR = ".closed"
 
 _SLUG = r"[a-z0-9]+(?:-[a-z0-9]+)*"
 _ID = rf"(?:{'|'.join(TYPES)})-{_SLUG}"
 ID_RE = re.compile(rf"^{_ID}$")
+# A group folder of open issues, nested or not: `api`, `release/2026-2`.
+GROUP_RE = re.compile(rf"^{_SLUG}(?:/{_SLUG})*$")
 # An id, optionally qualified by the repository it lives in: `shaped-core:<id>`.
 QID_RE = re.compile(rf"^(?:([A-Za-z0-9_.-]+):)?({_ID})$")
 # How code points at an issue: an `issue: <id>` comment, or `TEMPORARY(<id>)` on a workaround.
@@ -232,6 +236,8 @@ class Issue:
     path: Path
     id: str
     scope: str
+    # The folder below docs/issues/ an open issue is filed in, "" for docs/issues/ itself and for every closed issue.
+    group: str
     closed: bool
     text: str
     meta: dict
@@ -277,13 +283,17 @@ def _load_issue(repo: Repo, path: Path, text: str | None = None) -> Issue:
     at = max(i for i in range(len(parts) - 1) if parts[i:i + 2] == ["docs", "issues"])
     scope, rest = "/".join(parts[:at]), parts[at + 2:]
     errors: list[tuple[int, str]] = []
-    closed = False
-    if len(rest) == 4 and rest[0] == "closed":
-        closed = True
-        if not (re.fullmatch(r"\d{4}", rest[1]) and re.fullmatch(r"0[1-9]|1[0-2]", rest[2])):
-            errors.append((1, f"a closed issue lives in docs/issues/closed/<yyyy>/<mm>/, mm two digits; not {'/'.join(rest[:3])}/"))
-    elif len(rest) != 1:
-        errors.append((1, "an issue lives in docs/issues/ or docs/issues/closed/<yyyy>/<mm>/"))
+    closed, group = False, "/".join(rest[:-1])
+    if rest[0] == CLOSED_DIR:
+        closed, group = True, ""
+        if not (len(rest) == 4 and re.fullmatch(r"\d{4}", rest[1]) and re.fullmatch(r"0[1-9]|1[0-2]", rest[2])):
+            errors.append((1, f"a closed issue lives in docs/issues/{CLOSED_DIR}/<yyyy>/<mm>/, mm two digits; not {'/'.join(rest[:-1])}/"))
+    elif rest[0] == "closed" and len(rest) > 1:
+        # The folder's name before it became a dot folder; read as closed, so the one finding is the rename.
+        closed, group = True, ""
+        errors.append((1, f"closed issues live in docs/issues/{CLOSED_DIR}/ now: `git mv` the closed/ folder to {CLOSED_DIR}/"))
+    elif group and not GROUP_RE.match(group):
+        errors.append((1, f"a group folder below docs/issues/ is lowercase kebab-case, and only {CLOSED_DIR}/ starts with a dot; not {group}/"))
     stem = path.stem
     if not ID_RE.match(stem):
         errors.append((1, f"the file name must be <type>-<slug>.md, type one of {', '.join(TYPES)}, slug lowercase kebab-case"))
@@ -303,7 +313,7 @@ def _load_issue(repo: Repo, path: Path, text: str | None = None) -> Issue:
             break
     if title is None:
         errors.append((title_line, "the first line after the frontmatter must be the title, `# <title>`"))
-    return Issue(repo, path, stem, scope, closed, text, meta, key_lines, title, title_line, errors)
+    return Issue(repo, path, stem, scope, group, closed, text, meta, key_lines, title, title_line, errors)
 
 
 class Workspace:
@@ -399,13 +409,33 @@ def _now_stamp() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
 
 
+def _default_group(issues_dir: Path, issue_id: str) -> str:
+    """Where an issue goes when nobody says: the group folder named after its type, if the folder has one."""
+    kind = issue_id.split("-", 1)[0]
+    return kind if (issues_dir / kind).is_dir() else ""
+
+
+def _check_group(group: str) -> str:
+    group = group.strip("/")
+    if group in ("", "."):
+        return ""
+    if not GROUP_RE.match(group) or group.split("/")[0] == "closed":
+        raise IssueError(f"{group!r} is no group: lowercase kebab-case folders below docs/issues/, and not closed/")
+    return group
+
+
 def cmd_new(ws: Workspace, args: argparse.Namespace) -> int:
     issue_id = args.name if args.slug is None else f"{args.name}-{args.slug}"
     if not ID_RE.match(issue_id):
         raise IssueError(f"{issue_id!r} is no issue id: <type>-<slug>, type one of {', '.join(TYPES)}, slug lowercase kebab-case")
     owner = (ws.cwd / (args.in_ or ".")).resolve()
-    if owner.name == "issues" and owner.parent.name == "docs":
-        owner = owner.parent.parent
+    group = args.group
+    # `--in` may name the issue folder itself, or a group folder in it.
+    at = next((i for i in range(len(owner.parts) - 2, -1, -1) if owner.parts[i:i + 2] == ("docs", "issues")), None)
+    if at is not None:
+        if group is None and len(owner.parts) > at + 2:
+            group = "/".join(owner.parts[at + 2:])
+        owner = Path(*owner.parts[:at])
     if owner.name == "docs" and not args.force:
         raise IssueError(f"--in names the directory owning the issue, so {ws.show_path(owner)} would file it in "
                          f"{ws.show_path(owner / 'docs' / 'issues')}; pass the owner itself, or --force if a docs/ folder really owns it")
@@ -432,7 +462,9 @@ def cmd_new(ws: Workspace, args: argparse.Namespace) -> int:
             fm.append(f"  - {kind}: {_scalar(value)}")
     title = args.title or issue_id.split("-", 1)[1].replace("-", " ").capitalize()
     body = args.body or "What is wrong or wanted, and what is already known."
-    path = owner / "docs" / "issues" / f"{issue_id}.md"
+    issues_dir = owner / "docs" / "issues"
+    group = _check_group(group) if group is not None else _default_group(issues_dir, issue_id)
+    path = issues_dir / group / f"{issue_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(["---", *fm, "---", "", f"# {title}", "", body, ""]), encoding="utf-8", newline="\n")
     print(ws.show_path(path))
@@ -728,7 +760,7 @@ def _publish(ws: Workspace, issue: Issue, verb: str, mutate) -> None:
             return {rel: mutate(issue.text, base)}
         if untracked:
             raise IssueError(f"{remote}/{branch} already has an issue {issue.id}, at {path}")
-        if "/closed/" in f"/{path}":
+        if f"/docs/issues/{CLOSED_DIR}/" in f"/{path}":
             raise IssueError(f"{issue.id} is closed on {remote}/{branch}")
         return {path: mutate(_git(repo.root, "show", f"{base}:{path}").stdout.replace("\r\n", "\n"), base)}
 
@@ -859,7 +891,7 @@ def cmd_close(ws: Workspace, args: argparse.Namespace) -> int:
     if not _DATE_RE.match(date):
         raise IssueError("--date is yyyy-mm-dd")
     year, month = date[:4], date[5:7]
-    new_path = issue.repo.root / issue.scope / "docs" / "issues" / "closed" / year / month / f"{issue.id}.md"
+    new_path = issue.repo.root / issue.scope / "docs" / "issues" / CLOSED_DIR / year / month / f"{issue.id}.md"
     # The claim ends with the work: a closed issue still carrying one is the leftover the guide tells people to clear.
     _move(ws, issue, new_path, {"closed": date, "resolution": args.resolution, "claimed-by": None, "claimed-at": None})
     print(f"closed {issue.qid} as {args.resolution}: {ws.show_path(new_path)}")
@@ -871,9 +903,23 @@ def cmd_reopen(ws: Workspace, args: argparse.Namespace) -> int:
     issue = ws.resolve(args.id)
     if not issue.closed:
         raise IssueError(f"{issue.qid} is open")
-    new_path = issue.repo.root / issue.scope / "docs" / "issues" / f"{issue.id}.md"
+    issues_dir = issue.repo.root / issue.scope / "docs" / "issues"
+    new_path = issues_dir / _default_group(issues_dir, issue.id) / f"{issue.id}.md"
     _move(ws, issue, new_path, {"closed": None, "resolution": None})
     print(f"reopened {issue.qid}: {ws.show_path(new_path)}")
+    return 0
+
+
+def cmd_move(ws: Workspace, args: argparse.Namespace) -> int:
+    issue = ws.resolve(args.id)
+    if issue.closed:
+        raise IssueError(f"{issue.qid} is closed; a closed issue is filed by its month")
+    group = _check_group(args.group)
+    new_path = issue.repo.root / issue.scope / "docs" / "issues" / group / f"{issue.id}.md"
+    if new_path == issue.path:
+        raise IssueError(f"{issue.qid} is in {group or 'docs/issues'}/ already")
+    _move(ws, issue, new_path, {})
+    print(f"moved {issue.qid}: {ws.show_path(new_path)}")
     return 0
 
 
@@ -949,11 +995,11 @@ def _check_issue(ws: Workspace, issue: Issue, at: str | None = None) -> list[tup
         date = issue.get("closed") or ""
         folder = issue.path.parent.parent.name + "-" + issue.path.parent.name
         if _DATE_RE.match(date) and date[:7] != folder:
-            problems.append((line("closed"), f"closed {date} belongs in closed/{date[:4]}/{date[5:7]}/"))
+            problems.append((line("closed"), f"closed {date} belongs in {CLOSED_DIR}/{date[:4]}/{date[5:7]}/"))
     else:
         for key in ("closed", "resolution"):
             if key in meta:
-                problems.append((line(key), f"an open issue has no `{key}:`; closing moves it to docs/issues/closed/<yyyy>/<mm>/"))
+                problems.append((line(key), f"an open issue has no `{key}:`; closing moves it to docs/issues/{CLOSED_DIR}/<yyyy>/<mm>/"))
 
     parent_id = issue.get("parent")
     if parent_id:
@@ -1038,6 +1084,8 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
     q.add_argument("name", help=f"the type ({', '.join(TYPES)}), or the whole id <type>-<slug>")
     q.add_argument("slug", nargs="?", help="the slug, when the first argument is only the type")
     q.add_argument("--in", dest="in_", metavar="DIR", help="the directory owning the issue: DIR/docs/issues/ (default: here)")
+    q.add_argument("--group", metavar="FOLDER",
+                   help="the folder below docs/issues/ to file it in, '.' for none (default: the one named after its type, if any)")
     q.add_argument("--force", action="store_true", help="file it even when DIR is itself a docs/ folder")
     q.add_argument("-t", "--title")
     q.add_argument("--body", help="the description under the title")
@@ -1075,13 +1123,17 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
         q.add_argument("--as", dest="as_name", metavar="NAME", help="who claims (default: git user.name)")
         q.add_argument("--force", action="store_true", help="take over or release someone else's claim")
 
-    q = sub.add_parser("close", help="move an issue to docs/issues/closed/<yyyy>/<mm>/ (commits nothing)")
+    q = sub.add_parser("close", help=f"move an issue to docs/issues/{CLOSED_DIR}/<yyyy>/<mm>/ (commits nothing)")
     q.add_argument("id")
     q.add_argument("--resolution", choices=RESOLUTIONS, default="fixed")
     q.add_argument("--date", help="yyyy-mm-dd (default: today)")
 
-    q = sub.add_parser("reopen", help="move a closed issue back (commits nothing)")
+    q = sub.add_parser("reopen", help="move a closed issue back, into its type's group folder if there is one (commits nothing)")
     q.add_argument("id")
+
+    q = sub.add_parser("move", help="move an open issue to another group folder, relinking what points at it (commits nothing)")
+    q.add_argument("id")
+    q.add_argument("group", help="the folder below docs/issues/, '.' for docs/issues/ itself")
 
     sub.add_parser("check", help="validate every issue, and every marker in the code")
 
@@ -1104,7 +1156,8 @@ def cmd_serve(ws: Workspace, args: argparse.Namespace) -> int:
 
 
 COMMANDS = {"new": cmd_new, "list": cmd_list, "show": cmd_show, "known": cmd_known, "claim": cmd_claim,
-            "release": cmd_release, "close": cmd_close, "reopen": cmd_reopen, "check": cmd_check, "serve": cmd_serve}
+            "release": cmd_release, "close": cmd_close, "reopen": cmd_reopen, "move": cmd_move, "check": cmd_check,
+            "serve": cmd_serve}
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -201,6 +201,70 @@ TEST("sgl driver - a warning does not fail the compile, and comes back with the 
     CHECK(e == "warned.sgl:11:25: error: unknown-name: missing\n");
 }
 
+TEST("sgl driver - what is judged of one entry point's inlined body is no error of another one's compile")
+{
+    // CHK-402: the vertex stage never reaches the pixel stage's helper, so its compile says nothing of the helper
+    constexpr auto source
+        = cc::string_view("require binding_arrays\n"
+                          "\n"
+                          "binding textures:\n"
+                          "    maps: texture_2d[float4][16]\n"
+                          "    s: sampler\n"
+                          "\n"
+                          "binding draw:\n"
+                          "    slot: int\n"
+                          "\n"
+                          "@vertex struct vertex_in:\n"
+                          "    position: float3\n"
+                          "\n"
+                          "struct varyings:\n"
+                          "    @position position: hpos4\n"
+                          "    uv: float2\n"
+                          "    @interpolate(.flat) picked: int\n"
+                          "\n"
+                          "@pixel struct target:\n"
+                          "    color: float4\n"
+                          "\n"
+                          "@vertex fun main_vs(v: vertex_in) -> varyings:\n"
+                          "    return {position = hpos4(v.position.x, v.position.y, v.position.z, "
+                          "1.0), uv = float2(0.0, 0.0), picked = 0}\n"
+                          "\n"
+                          "fun sample_map(map: int, uv: float2){textures} -> float4 => "
+                          "textures.maps[map].sample(uv, textures.s)\n"
+                          "\n"
+                          "@pixel fun main_ps(v: varyings){textures, draw} -> target:\n"
+                          "    return {color = sample_map(draw.slot, v.uv) + sample_map(v.picked, v.uv)}\n");
+    auto const vs = sgl::compile_to_text(
+        {.source = source, .source_name = "split.sgl", .entry_point = "main_vs", .target = target::msl});
+    REQUIRE(vs.has_value()).context(vs.has_error() ? vs.error() : cc::string());
+    CHECK(vs.value().warnings.empty());
+    auto const ps
+        = error_of({.source = source, .source_name = "split.sgl", .entry_point = "main_ps", .target = target::msl});
+    CHECK(ps.starts_with("split.sgl:24:75: error: mixed-index: "));
+
+    // compiling every entry point at once fails the one the error is judged of alone
+    auto const all = sgl::compile_all_to_text({.source = source, .source_name = "split.sgl", .targets = {target::msl}});
+    REQUIRE(all.has_value());
+    REQUIRE(all.value().size() == 2);
+    CHECK(all.value()[0].text.has_value());
+    REQUIRE(all.value()[1].text.has_error());
+    CHECK(all.value()[1].text.error() == ps);
+
+    // a needless mark is a warning of the entry points that reach it, and of no other
+    auto needless = cc::string(source);
+    needless.replace_all("textures.maps[map]", "textures.maps[nonuniform map]");
+    needless.replace_all("sample_map(v.picked, v.uv)", "sample_map(draw.slot + 1, v.uv)");
+    auto const quiet = sgl::compile_to_text(
+        {.source = needless, .source_name = "split.sgl", .entry_point = "main_vs", .target = target::msl});
+    REQUIRE(quiet.has_value());
+    CHECK(quiet.value().warnings.empty());
+    auto const warned = sgl::compile_to_text(
+        {.source = needless, .source_name = "split.sgl", .entry_point = "main_ps", .target = target::msl});
+    REQUIRE(warned.has_value());
+    REQUIRE(warned.value().warnings.size() == 1);
+    CHECK(warned.value().warnings[0].contains("warning: needless-nonuniform: "));
+}
+
 // `main_thread` for the stack: this is the one test that deliberately builds a tree AT the limit, and the check pass
 // recurses over the AST before any flat-tree guard applies.
 // A worker thread has 512 KiB where the main thread has 8 MiB, and an unoptimized sanitizer build spends enough per

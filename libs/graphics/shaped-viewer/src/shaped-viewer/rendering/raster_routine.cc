@@ -183,10 +183,10 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     _environment_thin = nullptr;
     _hybrid_vs = {};
 
-    auto const surface_vs = shaders::raster_pass.surface_vs->acquire(ctx);
-    auto const environment_vs = shaders::raster_pass.environment_vs->acquire(ctx);
-    auto const environment_ps = shaders::raster_pass.environment_ps->acquire(ctx);
-    auto const environment_thin_ps = shaders::raster_pass.environment_thin_ps->acquire(ctx);
+    auto const surface_vs = shaders::raster_pass::surface_vs->acquire(ctx);
+    auto const environment_vs = shaders::raster_pass::environment_vs->acquire(ctx);
+    auto const environment_ps = shaders::raster_pass::environment_ps->acquire(ctx);
+    auto const environment_thin_ps = shaders::raster_pass::environment_thin_ps->acquire(ctx);
     co_await cc::async_settled(surface_vs);
     co_await cc::async_settled(environment_vs);
     co_await cc::async_settled(environment_ps);
@@ -208,7 +208,7 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     auto const environment_of = [&](sg::compiled_shader const& ps, raster_shading shading)
     {
         return ctx.cached.acquire_raster_pipeline({
-            .layout = shaders::raster_pass.environment_ps.acquire_layout(ctx),
+            .layout = shaders::raster_pass::environment_ps.acquire_layout(ctx),
             .vertex_shader = *compiled_environment_vs,
             .fragment_shader = ps,
             .topology = sg::primitive_topology::triangle_list, // no vertex input: the vertex index
@@ -235,7 +235,7 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     // The forward hybrid's vertex stage exists only where the device traces, and a raster frame never waits on it.
     if (ctx.supports(sg::feature::ray_query) && ctx.supports(sg::feature::raytracing_pipeline))
     {
-        auto const hybrid_vs = shaders::hybrid_pass.hybrid_vs->acquire(ctx);
+        auto const hybrid_vs = shaders::hybrid_pass::hybrid_vs->acquire(ctx);
         co_await cc::async_settled(hybrid_vs);
         auto const* const compiled_hybrid_vs = hybrid_vs->try_value();
         if (compiled_hybrid_vs != nullptr)
@@ -245,7 +245,7 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     }
 
     // Culling is what makes a frame cheaper, never what makes it right, so a kernel that does not build draws everything.
-    auto const cull = shaders::raster_cull.cull.acquire_pipeline(ctx);
+    auto const cull = shaders::raster_cull::cull.acquire_pipeline(ctx);
     co_await cc::async_settled(cull);
     auto const* const cull_built = cull->try_value();
     _cull = cull_built != nullptr ? *cull_built : nullptr;
@@ -255,11 +255,11 @@ cc::shared_async<cc::unit> raster_routine::init(sg::routine_init_scope scope)
     _occlusion = {};
     auto const kernel = [&](auto const& entry) -> cc::shared_async<sg::compute_pipeline_handle>
     { return entry.acquire_pipeline(ctx); };
-    auto const first = kernel(shaders::raster_cull.cull_first);
-    auto const seed = kernel(shaders::raster_cull.pyramid_seed);
-    auto const seed_depth = kernel(shaders::raster_cull.pyramid_seed_depth);
-    auto const down = kernel(shaders::raster_cull.pyramid_down);
-    auto const second = kernel(shaders::raster_cull.cull_second);
+    auto const first = kernel(shaders::raster_cull::cull_first);
+    auto const seed = kernel(shaders::raster_cull::pyramid_seed);
+    auto const seed_depth = kernel(shaders::raster_cull::pyramid_seed_depth);
+    auto const down = kernel(shaders::raster_cull::pyramid_down);
+    auto const second = kernel(shaders::raster_cull::cull_second);
     co_await cc::async_settled(first);
     co_await cc::async_settled(seed);
     co_await cc::async_settled(seed_depth);
@@ -506,7 +506,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             .curves = (has_atlas ? d.decal_atlas->curve_texture() : self->_stand_ins.decal_curves).as_texture_view(),
             .bands = (has_atlas ? d.decal_atlas->band_texture() : self->_stand_ins.decal_bands).as_texture_view()});
 
-    static_assert(sizeof(shaders::draw_args) == sizeof(sg::draw_indexed_args));
+    static_assert(sizeof(shaders::raster_cull::draw_args) == sizeof(sg::draw_indexed_args));
     for (auto const& draw : d.draws)
     {
         CC_ASSERT(isize(draw.permutation) < bins.size(), "a raster draw names a permutation the frame holds");
@@ -531,8 +531,8 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
     next.reserve(bins.size());
     for (auto const& b : bins)
         next.push_back(b.first);
-    auto templates = cc::vector<shaders::draw_args>::create_defaulted(total);
-    auto items = cc::vector<shaders::cull_item>::create_defaulted(total);
+    auto templates = cc::vector<shaders::raster_cull::draw_args>::create_defaulted(total);
+    auto items = cc::vector<shaders::raster_cull::cull_item>::create_defaulted(total);
     for (auto const& draw : d.draws)
     {
         if (draw.triangle_count == 0)
@@ -568,21 +568,21 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
 
     auto const item_buffer = total > 0
                                ? ctx.transient.create_buffer_from_data(cmd, items, sg::buffer_usage::readonly_buffer)
-                               : sg::buffer<shaders::cull_item>();
+                               : sg::buffer<shaders::raster_cull::cull_item>();
     auto const template_buffer = total > 0
                                    ? ctx.transient.create_buffer_from_data(
                                          cmd, templates,
                                          sg::buffer_usage::readonly_buffer | sg::buffer_usage::indirect_command_buffer
                                              | sg::buffer_usage::copy_src)
-                                   : sg::buffer<shaders::draw_args>();
+                                   : sg::buffer<shaders::raster_cull::draw_args>();
     auto const args_buffer = [&]
     {
         // Read-only too: the second pass reads what the first wrote.
-        return ctx.transient.create_buffer<shaders::draw_args>(
+        return ctx.transient.create_buffer<shaders::raster_cull::draw_args>(
             total, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::readonly_buffer
                        | sg::buffer_usage::indirect_command_buffer | sg::buffer_usage::copy_src);
     };
-    auto const shape = shaders::raster_cull_shape{.count = u32(total), .pad = {}}.to_block();
+    auto const shape = shaders::raster_cull::raster_cull_shape{.count = u32(total), .pad = {}}.to_block();
 
     // Group 0 is the frame's scene: `tracer.traced` for a forward hybrid frame, which also takes the image's size inline.
     auto const pass_block
@@ -680,8 +680,8 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         {
             auto const args = args_buffer();
             auto const group = ctx.transient.create_binding_group(
-                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull_io>(),
-                shaders::raster_cull_io{.frame = frame.as_readonly_buffer(),
+                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull::raster_cull_io>(),
+                shaders::raster_cull::raster_cull_io{.frame = frame.as_readonly_buffer(),
                                         .instances = d.instance_table.as_readonly_buffer(),
                                         .items = item_buffer.as_readonly_buffer(),
                                         .templates = template_buffer.as_readonly_buffer(),
@@ -725,8 +725,8 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         auto const first_args = args_buffer();
         {
             auto const group = ctx.transient.create_binding_group(
-                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_first_io>(),
-                shaders::raster_first_io{.frame = frame.as_readonly_buffer(),
+                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull::raster_first_io>(),
+                shaders::raster_cull::raster_first_io{.frame = frame.as_readonly_buffer(),
                                          .instances = d.instance_table.as_readonly_buffer(),
                                          .items = item_buffer.as_readonly_buffer(),
                                          .templates = template_buffer.as_readonly_buffer(),
@@ -757,19 +757,19 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
                                                .height = extent[1],
                                                .mip_levels = levels,
                                                .usage = sg::texture_usage::texture | sg::texture_usage::image});
-        auto const pyramid_layout = ctx.cached.acquire_binding_group_layout<shaders::pyramid_io>();
+        auto const pyramid_layout = ctx.cached.acquire_binding_group_layout<shaders::raster_cull::pyramid_io>();
         auto const level_group = [&](sg::raw_view const& source, int level)
         {
             return ctx.transient.create_binding_group(
                 cmd, pyramid_layout,
-                shaders::pyramid_io{.source = sg::as_texture_view(source).as_texture<sg::tv_2d>(),
+                shaders::raster_cull::pyramid_io{.source = sg::as_texture_view(source).as_texture<sg::tv_2d>(),
                                     .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = level})});
         };
         if (prepass)
         {
             auto const group = ctx.transient.create_binding_group(
-                cmd, ctx.cached.acquire_binding_group_layout<shaders::pyramid_depth_io>(),
-                shaders::pyramid_depth_io{.source = depth.as_texture_view(),
+                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull::pyramid_depth_io>(),
+                shaders::raster_cull::pyramid_depth_io{.source = depth.as_texture_view(),
                                           .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = 0})});
             cmd.compute.bind_pipeline(*k.pyramid_seed_depth);
             cmd.compute.bind_group(0, *group);
@@ -794,8 +794,8 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         auto const second_args = args_buffer();
         {
             auto const group = ctx.transient.create_binding_group(
-                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_second_io>(),
-                shaders::raster_second_io{.frame = frame.as_readonly_buffer(),
+                cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull::raster_second_io>(),
+                shaders::raster_cull::raster_second_io{.frame = frame.as_readonly_buffer(),
                                           .instances = d.instance_table.as_readonly_buffer(),
                                           .items = item_buffer.as_readonly_buffer(),
                                           .templates = template_buffer.as_readonly_buffer(),
@@ -806,7 +806,7 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             cmd.compute.bind_pipeline(*k.cull_second);
             cmd.compute.bind_group(0, *group);
             cmd.compute.set_inline_constants(
-                shaders::raster_second_shape{.count = u32(total), .levels = u32(levels), .pad = {}}.to_block());
+                shaders::raster_cull::raster_second_shape{.count = u32(total), .levels = u32(levels), .pad = {}}.to_block());
             cmd.compute.dispatch_threads(int(total));
         }
         drawn_args = second_args.reinterpret_as<sg::draw_indexed_args>();

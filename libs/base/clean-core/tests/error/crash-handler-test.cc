@@ -37,6 +37,9 @@ bool contains(cc::span<byte const> bytes, cc::string_view text)
 
 TEST("crash handler - a report kept in a file holds what stderr got, and on Windows a minidump beside it", exclusive())
 {
+    if constexpr (CC_CRASH_HANDLER_SANITIZED != 0)
+        SKIP("a sanitized build compiles the report machinery out, so the runtime's own handlers stay in place");
+
     cc::install_crash_handler();
     cc::set_crash_report_files({.directory = cc::temp_directory_path(), .name = "cc-crash-report-test"});
     // what the test runner had, restored however the test ends

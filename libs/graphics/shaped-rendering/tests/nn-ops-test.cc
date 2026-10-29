@@ -25,7 +25,7 @@ using namespace cc::primitive_defines;
 namespace
 {
 /// The options every pipeline here is built with: an output the tests read back as floats.
-constexpr auto k_values = sr::sgl_shaders::nn_io_options{.target_format = sg::pixel_format::rgba32_float};
+constexpr auto k_values = sr::sgl_shaders::nn_io::options{.target_format = sg::pixel_format::rgba32_float};
 
 /// Builds one entry point of nn_io.sgl, failing with the compiler's own text rather than a null handle.
 template <class Entry>
@@ -85,21 +85,21 @@ template <class Entry>
     auto const packed = ctx.transient.create_buffer<f32>(
         width * 12, sg::buffer_usage::readonly_buffer | sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
 
-    auto const layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_input_images>();
+    auto const layout = ctx.cached.acquire_binding_group_layout<sr::sgl_shaders::nn_io::nn_input_images>();
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *ctx.transient.create_binding_group(
                                    *cmd, layout,
-                                   sr::sgl_shaders::nn_input_images{.color = color_texture.as_texture_view(),
-                                                                    .albedo = albedo_texture.as_texture_view(),
-                                                                    .normal = normal_texture.as_texture_view(),
-                                                                    .target = packed.as_readwrite_buffer()}));
-    cmd->compute.set_inline_constants(sr::sgl_shaders::nn_input_constants{.width = u32(width),
-                                                                          .height = 1,
-                                                                          .source_width = u32(width),
-                                                                          .source_height = 1,
-                                                                          .source_offset_x = 0,
-                                                                          .source_offset_y = 0,
-                                                                          .input_scale = 1.0f}
+                                   sr::sgl_shaders::nn_io::nn_input_images{.color = color_texture.as_texture_view(),
+                                                                           .albedo = albedo_texture.as_texture_view(),
+                                                                           .normal = normal_texture.as_texture_view(),
+                                                                           .target = packed.as_readwrite_buffer()}));
+    cmd->compute.set_inline_constants(sr::sgl_shaders::nn_io::nn_input_constants{.width = u32(width),
+                                                                                 .height = 1,
+                                                                                 .source_width = u32(width),
+                                                                                 .source_height = 1,
+                                                                                 .source_offset_x = 0,
+                                                                                 .source_offset_y = 0,
+                                                                                 .input_scale = 1.0f}
                                           .to_block());
     cmd->compute.dispatch_threads(width, 1, 1);
 
@@ -125,15 +125,15 @@ ASYNC_INVOCABLE_TEST("sr - every network operation compiles", (sg::context_handl
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    auto const conv = sr::sgl_shaders::nn_conv.main_cs->acquire(ctx);
+    auto const conv = sr::sgl_shaders::nn_conv::main_cs->acquire(ctx);
     co_await cc::async_settled(conv);
     if (conv->has_error())
         FAIL(cc::format("nn_conv did not compile:\n{}", conv->try_error()->underlying().to_string()));
-    auto const conv_pipeline = co_await sr::sgl_shaders::nn_conv.main_cs.acquire_pipeline(ctx);
+    auto const conv_pipeline = co_await sr::sgl_shaders::nn_conv::main_cs.acquire_pipeline(ctx);
     CHECK(conv_pipeline != nullptr);
 
-    auto const input_pipeline = co_await build(ctx, sr::sgl_shaders::nn_io.input_cs, "nn_io input_cs");
-    auto const output_pipeline = co_await build(ctx, sr::sgl_shaders::nn_io.output_cs, "nn_io output_cs");
+    auto const input_pipeline = co_await build(ctx, sr::sgl_shaders::nn_io::input_cs, "nn_io input_cs");
+    auto const output_pipeline = co_await build(ctx, sr::sgl_shaders::nn_io::output_cs, "nn_io output_cs");
     CHECK(input_pipeline != nullptr);
     CHECK(output_pipeline != nullptr);
 }
@@ -150,7 +150,7 @@ ASYNC_INVOCABLE_TEST("sr - the network's input encodes as OIDN's curve does, and
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    auto const pipeline = co_await build(ctx, sr::sgl_shaders::nn_io.input_cs, "nn_io input_cs");
+    auto const pipeline = co_await build(ctx, sr::sgl_shaders::nn_io::input_cs, "nn_io input_cs");
 
     auto const nan = cc::bit_cast<f32>(0x7fc00000u);
     auto const inf = cc::bit_cast<f32>(0x7f800000u);
@@ -221,8 +221,8 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
 
     (void)sr_test::shader_fixtures(); // sr's one library, alive for the whole binary
 
-    auto const input_pipeline = co_await build(ctx, sr::sgl_shaders::nn_io.input_cs, "nn_io input_cs");
-    auto const output_pipeline = co_await build(ctx, sr::sgl_shaders::nn_io.output_cs, "nn_io output_cs");
+    auto const input_pipeline = co_await build(ctx, sr::sgl_shaders::nn_io::input_cs, "nn_io input_cs");
+    auto const output_pipeline = co_await build(ctx, sr::sgl_shaders::nn_io::output_cs, "nn_io output_cs");
 
     // One texel per value, spanning nine orders of magnitude and sitting either side of both knees.
     auto const values = cc::vector<f32>{0.0f, 1e-7f, 1e-6f, 1e-4f, 1e-3f,  0.01f,   0.03f, 0.05f, 0.2f,
@@ -263,25 +263,25 @@ ASYNC_INVOCABLE_TEST("sr - the network's transfer curve round-trips across the H
                                             .usage = sg::texture_usage::texture | sg::texture_usage::copy_dst});
     cmd->upload.bytes_to_texture(color.raw(), cc::span<tg::vec4f const>(pixels).as_bytes());
     auto const output_layout
-        = ctx.cached.acquire_binding_group_layout(sr::sgl_shaders::nn_output_images::declared_bindings(k_values),
-                                                  sr::sgl_shaders::nn_output_images::declared_samplers());
+        = ctx.cached.acquire_binding_group_layout(sr::sgl_shaders::nn_io::nn_output_images::declared_bindings(k_values),
+                                                  sr::sgl_shaders::nn_io::nn_output_images::declared_samplers());
     cmd->compute.bind_pipeline(*output_pipeline);
-    cmd->compute.bind_group(
-        0, *ctx.transient.create_binding_group(*cmd, output_layout,
-                                               sr::sgl_shaders::nn_output_images{.source = three.as_readonly_buffer(),
-                                                                                 .color = color.as_texture_view(),
-                                                                                 .target = result.as_any_image_view()}));
-    cmd->compute.set_inline_constants(sr::sgl_shaders::nn_output_constants{.width = u32(width),
-                                                                           .height = 1,
-                                                                           .target_width = u32(width),
-                                                                           .target_height = 1,
-                                                                           .write_width = u32(width),
-                                                                           .write_height = 1,
-                                                                           .target_offset_x = 0,
-                                                                           .target_offset_y = 0,
-                                                                           .read_offset_x = 0,
-                                                                           .read_offset_y = 0,
-                                                                           .input_scale = 1.0f}
+    cmd->compute.bind_group(0, *ctx.transient.create_binding_group(
+                                   *cmd, output_layout,
+                                   sr::sgl_shaders::nn_io::nn_output_images{.source = three.as_readonly_buffer(),
+                                                                            .color = color.as_texture_view(),
+                                                                            .target = result.as_any_image_view()}));
+    cmd->compute.set_inline_constants(sr::sgl_shaders::nn_io::nn_output_constants{.width = u32(width),
+                                                                                  .height = 1,
+                                                                                  .target_width = u32(width),
+                                                                                  .target_height = 1,
+                                                                                  .write_width = u32(width),
+                                                                                  .write_height = 1,
+                                                                                  .target_offset_x = 0,
+                                                                                  .target_offset_y = 0,
+                                                                                  .read_offset_x = 0,
+                                                                                  .read_offset_y = 0,
+                                                                                  .input_scale = 1.0f}
                                           .to_block());
     cmd->compute.dispatch_threads(width, 1, 1);
 

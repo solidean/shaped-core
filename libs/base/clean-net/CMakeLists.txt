@@ -23,6 +23,7 @@ add_library(clean-net
     src/clean-net/tls/impl/mbedtls_threading.cc
     src/clean-net/tls/tls_mbedtls.cc
     src/clean-net/transport/tcp.cc
+    src/clean-net/transport/datagram.cc
     src/clean-net/transport/connect.cc
     src/clean-net/http/http_target.cc
     src/clean-net/http/message.cc
@@ -62,6 +63,7 @@ target_sources(clean-net
     src/clean-net/io/io_system.hh
     src/clean-net/transport/backend.hh
     src/clean-net/transport/stream.hh
+    src/clean-net/transport/datagram.hh
     src/clean-net/transport/connect.hh
     src/clean-net/tls/tls.hh
     src/clean-net/http/http_target.hh
@@ -140,6 +142,7 @@ if(SC_BUILD_TESTS)
         tests/reactor-test.cc
         tests/io-system-test.cc
         tests/tcp-test.cc
+        tests/datagram-test.cc
         tests/connect-test.cc
         tests/tls-test.cc
         tests/http-target-test.cc

@@ -201,6 +201,9 @@ public:
     [[nodiscard]] cc::result<cc::unique_ptr<stream_listener>, error> listen(endpoint const& where,
                                                                             tcp_listen_options const& options) override;
 
+    [[nodiscard]] cc::result<cc::unique_ptr<datagram_socket>, error> bind_datagram(endpoint const& where,
+                                                                                   datagram_options const& options) override;
+
 private:
     io_system& _io;
 };

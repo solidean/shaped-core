@@ -49,7 +49,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the accumulated target is the mean
     }
 
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::gpu_resource_manager::create(ctx);

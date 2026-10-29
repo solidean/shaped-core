@@ -154,7 +154,7 @@ ASYNC_INVOCABLE_TEST("sg - builds record what the dispatch_rays hit-record check
     float const aabb[6] = {0, 0, 0, 1, 1, 1};
     auto const boxes = ctx->persistent.create_buffer_from_data(aabb, sg::buffer_usage::accel_structure_build_input).raw();
 
-    auto const was_on = ctx->portability_checks();
+    auto const was_on = ctx->hit_record_checks();
     auto cmd = ctx->create_command_list();
 
     // The kind and the stride are recorded whatever the checks say, since the BLAS itself carries them.
@@ -176,11 +176,11 @@ ASYNC_INVOCABLE_TEST("sg - builds record what the dispatch_rays hit-record check
     };
 
     // A TLAS keeps its instances for the check only while the checks are on.
-    ctx->set_portability_checks(true);
+    ctx->set_hit_record_checks(true);
     auto const checked = cmd->raytracing.build_tlas(instances);
-    ctx->set_portability_checks(false);
+    ctx->set_hit_record_checks(false);
     auto const unchecked = cmd->raytracing.build_tlas(instances);
-    ctx->set_portability_checks(was_on);
+    ctx->set_hit_record_checks(was_on);
     ctx->submit_command_list(cc::move(cmd));
 
     auto const records = sg::impl::instance_records_of(*checked);
@@ -205,8 +205,8 @@ ASYNC_INVOCABLE_TEST("sg - a staging group's snapshot carries the tlases it bind
         SKIP("this backend has no staging binding groups");
 
     auto const verts = make_triangle_vertices(ctx);
-    auto const was_on = ctx->portability_checks();
-    ctx->set_portability_checks(true);
+    auto const was_on = ctx->hit_record_checks();
+    ctx->set_hit_record_checks(true);
 
     auto cmd = ctx->create_command_list();
     auto const tri = sg::blas_triangles{.vertices = verts, .vertex_count = 3};
@@ -219,7 +219,7 @@ ASYNC_INVOCABLE_TEST("sg - a staging group's snapshot carries the tlases it bind
         = {.name = "Scene", .space = 0, .index = 0, .count = 1, .type = sg::binding_type::acceleration_structure};
     auto const layout = ctx->uncached.create_binding_group_layout(cc::span<sg::binding const>(&b, 1));
     auto const staging = ctx->persistent.create_staging_binding_group(layout);
-    ctx->set_portability_checks(was_on);
+    ctx->set_hit_record_checks(was_on);
 
     staging->set_binding("Scene", tlas->as_view());
     auto const bound = staging->snapshot();

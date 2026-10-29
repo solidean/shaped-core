@@ -29,7 +29,7 @@ ASYNC_INVOCABLE_TEST("sv - path-traced Cornell box (headless)", (sg::context_han
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     // Build the Cornell box through the managers: the BLAS build, the material resolution and the permutation compile
     // all happen here, exactly as `scene_ref::add_mesh` drives them.
@@ -156,7 +156,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - a material that does not compile c
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     // A material type whose fragment does not compile, which is the case the fallback exists for: before it, one of these
     // anywhere in a scene made the whole trace a no-op.
@@ -280,7 +280,7 @@ ASYNC_INVOCABLE_TEST("sv - a path-traced textured material samples through the p
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -382,7 +382,7 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - the split signals sum to the frame
             SKIP("device reports no ray tracing support");
     }
     if (!sv_test::shared_env().has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     auto const box = sv_test::make_cornell_box();
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -711,7 +711,7 @@ cc::shared_async<cc::vector<cc::vector<tg::vec4f>>> trace_under(sg::context* ctx
     if (!supported)
         return cc::string_view("device reports no ray tracing support");
     if (!sv_test::shared_env().has_compiler)
-        return cc::string_view("no SGL compiler that reaches DXIL to build the path-tracing shaders");
+        return cc::string_view("no SGL compiler for this backend to build the path-tracing shaders");
     return {};
 }
 } // namespace

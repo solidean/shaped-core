@@ -222,6 +222,11 @@ fun graded(a: float) -> float:
   A run is one invocation, so a barrier waits for nobody and what it stored is all the memory holds.
 * **EVAL-93** An atomic's update names its place first, then evaluates its other arguments, then reads, updates and writes the atomic in one step, giving the value it read.
   A run is one invocation, so no other update ever falls between.
+  A strong compare-exchange stores `desired` exactly where the value it read is `expected`.
+* **EVAL-100** A weak compare-exchange that reads `expected` fails spuriously every other time, the first time first: it stores nothing, and gives `exchanged` false.
+  Each call of the source counts on its own, wherever it was inlined, and one that reads anything else fails as a strong one does ([why](why/evaluation.md#eval-100)).
+  `run_limits::fails_weak_exchanges` false makes every one strong, for a driver that wants none.
+  A texel's, whose image a run holds no texels of, reads zero, and stores where zero is `expected`.
 * **EVAL-94** The bindings of a run are what its driver binds by name, a binding by its name and a member by its own.
   A value is its scalars in field order, 4 bytes each and never padded, and a buffer its elements one after another, each laid out so.
   A member the driver leaves out is zero, a buffer it leaves out is empty, and an acceleration member it leaves out is the empty TLAS.

@@ -53,7 +53,7 @@ sg_test::offscreen stage_target()
     return {.width = size,
             .height = size,
             .colors = {sg::pixel_format::rgba32_float},
-            .target_set = shaders::stage_target::name,
+            .target_set = shaders::stages::stage_target::name,
             .clear_color = tg::vec4f(-1, -1, -1, -1)};
 }
 
@@ -78,7 +78,7 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, rep
     auto const p0 = tg::vec2f(-1, -1);
     auto const p1 = tg::vec2f(1, -1);
     auto const p2 = tg::vec2f(-1, 1);
-    shaders::stage_corner const corners[] = {{.position = p0}, {.position = p1}, {.position = p2}};
+    shaders::stages::stage_corner const corners[] = {{.position = p0}, {.position = p1}, {.position = p2}};
     auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
 
     auto const draw_with = [&](auto const& declared) -> cc::shared_async<sg_test::offscreen_pixels>
@@ -95,9 +95,9 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated triangle patch covers its triangle, rep
 
     // Culling back faces with counter-clockwise fronts, the patch whose control stage says counter-clockwise is drawn whole and the clockwise one culled.
     // So the winding a control stage names is the patch's, as the evaluation below weighs its corners (CHK-304).
-    auto const ccw = co_await draw_with(shaders::stages.tessellated_ccw);
-    auto const cw = co_await draw_with(shaders::stages.tessellated_cw);
-    auto const culled = co_await draw_with(shaders::stages.tessellated_culled);
+    auto const ccw = co_await draw_with(shaders::stages::tessellated_ccw);
+    auto const cw = co_await draw_with(shaders::stages::tessellated_cw);
+    auto const culled = co_await draw_with(shaders::stages::tessellated_culled);
 
     for (auto y = 0; y < size; ++y)
         for (auto x = 0; x < size; ++x)
@@ -134,10 +134,10 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated quad patch covers its quad, reports its
 
     // The patch is the middle half of the target, its corners counter-clockwise from the bottom left.
     // The evaluation stage blends them by `uv`, along the bottom edge and then upwards.
-    shaders::stage_corner const corners[] = {{.position = tg::vec2f(-0.5f, -0.5f)},
-                                             {.position = tg::vec2f(0.5f, -0.5f)},
-                                             {.position = tg::vec2f(0.5f, 0.5f)},
-                                             {.position = tg::vec2f(-0.5f, 0.5f)}};
+    shaders::stages::stage_corner const corners[] = {{.position = tg::vec2f(-0.5f, -0.5f)},
+                                                     {.position = tg::vec2f(0.5f, -0.5f)},
+                                                     {.position = tg::vec2f(0.5f, 0.5f)},
+                                                     {.position = tg::vec2f(-0.5f, 0.5f)}};
     auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
     auto const draw_with = [&](auto const& declared) -> cc::shared_async<sg_test::offscreen_pixels>
     {
@@ -150,8 +150,8 @@ ASYNC_INVOCABLE_TEST("sg - a tessellated quad patch covers its quad, reports its
                                                        scope.draw({.vertex_range = {.offset = 0, .size = 4}});
                                                    });
     };
-    auto const ccw = co_await draw_with(shaders::stages.quad_ccw);
-    auto const cw = co_await draw_with(shaders::stages.quad_cw);
+    auto const ccw = co_await draw_with(shaders::stages::quad_ccw);
+    auto const cw = co_await draw_with(shaders::stages::quad_cw);
 
     for (auto y = 0; y < size; ++y)
         for (auto x = 0; x < size; ++x)
@@ -187,9 +187,9 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage's ended strips draw each copy and no
     auto const b = tg::vec2f(0, -1);
     auto const c = tg::vec2f(-1, 1);
     auto const shift = tg::vec2f(1, 0);
-    shaders::stage_corner const corners[] = {{.position = a}, {.position = b}, {.position = c}};
+    shaders::stages::stage_corner const corners[] = {{.position = a}, {.position = b}, {.position = c}};
     auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages.doubled);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::doubled);
 
     auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
                                                          [&](sg::rendering_scope& scope)
@@ -230,10 +230,10 @@ ASYNC_INVOCABLE_TEST("sg - a geometry stage reads each triangle's primitive id a
     auto const br = tg::vec2f(1, -1);
     auto const tr = tg::vec2f(1, 1);
     auto const tl = tg::vec2f(-1, 1);
-    shaders::stage_corner const corners[]
+    shaders::stages::stage_corner const corners[]
         = {{.position = bl}, {.position = br}, {.position = tr}, {.position = bl}, {.position = tr}, {.position = tl}};
     auto const buffer = ctx->persistent.create_buffer_from_data(corners, sg::buffer_usage::vertex_buffer);
-    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages.primitive_ids);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::stages::primitive_ids);
 
     auto const pixels = co_await sg_test::draw_offscreen(*ctx, stage_target(),
                                                          [&](sg::rendering_scope& scope)
@@ -264,7 +264,7 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline with a geometry stage the device lacks is 
     if (ctx->supports(sg::feature::geometry_shader))
         SKIP("this device has a geometry stage, so nothing is refused");
 
-    auto const built = ctx->cached.acquire_raster_pipeline(shaders::stages.doubled);
+    auto const built = ctx->cached.acquire_raster_pipeline(shaders::stages::doubled);
     co_await cc::async_settled(built);
     REQUIRE(built->has_error());
     CHECK(built->try_error()->underlying().to_string().contains("geometry_shader"));
@@ -279,7 +279,7 @@ ASYNC_INVOCABLE_TEST("sg - a pipeline with tessellation stages the device lacks 
     if (ctx->supports(sg::feature::tessellation_shader))
         SKIP("this device has tessellation stages, so nothing is refused");
 
-    auto const built = ctx->cached.acquire_raster_pipeline(shaders::stages.tessellated_ccw);
+    auto const built = ctx->cached.acquire_raster_pipeline(shaders::stages::tessellated_ccw);
     co_await cc::async_settled(built);
     REQUIRE(built->has_error());
     CHECK(built->try_error()->underlying().to_string().contains("tessellation_shader"));
@@ -295,7 +295,7 @@ ASYNC_INVOCABLE_TEST("sg - a wireframe pipeline on a device without wireframe fi
         SKIP("this device has wireframe fill, so nothing is refused");
 
     auto const built
-        = ctx->cached.acquire_raster_pipeline(shaders::rects.floating, {}, [](sg::raster_pipeline_description& d)
+        = ctx->cached.acquire_raster_pipeline(shaders::rects::floating, {}, [](sg::raster_pipeline_description& d)
                                               { d.rasterization.fill = sg::fill_mode::wireframe; });
     co_await cc::async_settled(built);
     REQUIRE(built->has_error());

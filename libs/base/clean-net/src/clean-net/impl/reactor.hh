@@ -46,6 +46,10 @@ enum class io_op_kind : u8
     /// loop is the reactor's to run.
     send,
 
+    /// Nothing moves: completes once the socket has something to read, and leaves it there.
+    /// How a datagram socket waits, since its reads are the caller's own batched calls rather than the reactor's.
+    readable,
+
     /// Nothing at all, until the clock passes `deadline_ns`.
     /// The one operation whose deadline is a SUCCESS rather than a failure, which is what makes it a delay: a retry
     /// backoff, a happy-eyeballs head start, the latency a simulated link adds.

@@ -3,6 +3,8 @@ created: 2026-10-17
 refs:
   - file: libs/graphics/shaped-rendering/src/shaped-rendering/impl/window_sdl.cc
   - symbol: sr::window
+closed: 2026-10-20
+resolution: fixed
 ---
 
 # HiDPI windows

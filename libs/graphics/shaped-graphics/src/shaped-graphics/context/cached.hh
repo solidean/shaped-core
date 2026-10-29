@@ -15,7 +15,7 @@ namespace sg
 using raster_pipeline_customize = cc::unique_function<void(raster_pipeline_description&)>;
 
 /// Something that describes a raster pipeline for a context, given the parts it leaves to the caller as `S::open`.
-/// A generated SGL `pipeline` is one, which is what lets `ctx.cached.acquire_raster_pipeline(shaders::cube.pipeline, {.color = f})` build it.
+/// A generated SGL `pipeline` is one, which is what lets `ctx.cached.acquire_raster_pipeline(shaders::cube::pipeline, {.color = f})` build it.
 /// sg knows nothing else about it: the description is what is acquired, so the cache key is the description's.
 template <class S>
 concept raster_pipeline_source = requires(S const& source, context& ctx, typename S::open const& parts) {

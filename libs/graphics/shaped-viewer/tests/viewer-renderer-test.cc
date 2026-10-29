@@ -5,8 +5,13 @@
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
 #include <shaped-graphics/all.hh>
+#if SV_TEST_HAS_DX12
 #include <shaped-graphics/backends/dx12/dx12_context.hh> // sg::create_dx12_context
-#include <shaped-rendering/blit_routine.hh>              // the stand-in overlay pass
+#endif
+#if SV_TEST_HAS_METAL
+#include <shaped-graphics/backends/metal/metal_context.hh> // sg::create_metal_context
+#endif
+#include <shaped-rendering/blit_routine.hh> // the stand-in overlay pass
 #include <shaped-viewer/all.hh>
 
 using namespace cc::primitive_defines;
@@ -63,7 +68,7 @@ ASYNC_INVOCABLE_TEST("sv - viewer renderer places every view in its own rect (he
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(32);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -143,7 +148,7 @@ ASYNC_INVOCABLE_TEST("sv - viewer renderer with no views still runs the clear (h
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the blit shader");
+        SKIP("no SGL compiler for this backend to build the blit shader");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
 
@@ -185,7 +190,7 @@ ASYNC_INVOCABLE_TEST("sv - many views bringing new meshes in one frame share one
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto resources = sv::gpu_resource_manager::create(ctx);
     auto constexpr view_count = 8;
@@ -245,7 +250,7 @@ ASYNC_INVOCABLE_TEST("sv - an overlay pass draws over the rendered frame (headle
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(16);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -328,7 +333,7 @@ ASYNC_INVOCABLE_TEST("sv - viewer renderer composites a nested layout (headless)
 
     auto const& env = sv_test::shared_env();
     if (!env.has_compiler)
-        SKIP("no SGL compiler that reaches DXIL to build the shaders");
+        SKIP("no SGL compiler for this backend to build the shaders");
 
     auto const cloud = sv_test::make_triangle_cloud(16);
     auto resources = sv::gpu_resource_manager::create(ctx);
@@ -441,17 +446,21 @@ TEST("sv - the rendering context is created once and shared")
         [&builds]
         {
             ++builds;
+#if SV_TEST_HAS_DX12
             // The debug layer, because this is usually the binary's FIRST device and the layer is process-wide:
             // a later context asking for it would be refused, the whole suite running unvalidated behind it.
             return sg::create_dx12_context(
                 {.activate_global_debug_layer = true, .adapter = sg::backend::dx12::dx12_adapter::hardware_or_warp});
+#else
+            return sg::create_metal_context();
+#endif
         });
 
     auto const first = sv::acquire_viewer_context();
     if (first.has_error())
     {
         sv::set_acquire_context({});
-        SKIP("no Direct3D 12 device (hardware or WARP)");
+        SKIP("no device to share");
     }
 
     auto const second = sv::acquire_viewer_context();
