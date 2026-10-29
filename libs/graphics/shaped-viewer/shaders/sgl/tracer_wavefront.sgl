@@ -256,9 +256,11 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
 // ---- extend: the round's segments, traced ---------------------------------------------------------------------------
 
 /// What a trace masks the instances with: every one against `ray_mask_all`.
-/// An instance the hybrid's rays may skip carries every bit but `ray_mask_hybrid`'s, which `view_renderer` gives one that keeps coverage, and a thin transmissive pane.
+/// The hybrid's bounces trace against `ray_mask_hybrid` and its shadow rays against `ray_mask_hybrid_shadow`.
+/// `view_renderer` clears both bits on an instance that keeps coverage and on a thin pane, and the shadow bit alone on solid glass.
 const ray_mask_all = 255
 const ray_mask_hybrid = 1
+const ray_mask_hybrid_shadow = 2
 
 /// The nearest hit the segment from `origin` along `direction` meets, traced inline, the cutouts it crosses drawing from `seed`.
 /// It meets only the instances whose mask shares a bit with `mask`.

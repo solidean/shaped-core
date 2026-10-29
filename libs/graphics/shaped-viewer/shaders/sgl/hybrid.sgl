@@ -40,11 +40,11 @@ fun direct(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: fl
     if wo_local.z <= 0.0 => return float3(0.0)
     let mut sum = float3(0.0)
     let l = tracer.sample_light(b, f, wo_local, p, n, not continues, mut rng)
-    if tracer.reaches(l, tracer.cutout_seed(rng, tracer.cutout_ray_light), tracer.ray_mask_hybrid):
+    if tracer.reaches(l, tracer.cutout_seed(rng, tracer.cutout_ray_light), tracer.ray_mask_hybrid_shadow):
         sum += l.diffuse + l.specular
     if not continues => return sum
     let e = tracer.sample_environment(b, f, wo_local, p, n, false, mut rng)
-    if tracer.reaches(e, tracer.cutout_seed(rng, tracer.cutout_ray_environment), tracer.ray_mask_hybrid):
+    if tracer.reaches(e, tracer.cutout_seed(rng, tracer.cutout_ray_environment), tracer.ray_mask_hybrid_shadow):
         sum += e.diffuse + e.specular
     return sum
 
@@ -76,14 +76,14 @@ fun secondary_environment(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local
     if pdf <= 0.0 => return float3(0.0)
     let scale = scene.environment_radiance(env, wi) * (wi_local.z / pdf)
     let e = tracer.light_sample(f_diffuse * scale, f_specular * scale, p + n * 1e-3, wi, 1e4, 1u)
-    if not tracer.reaches(e, seed, tracer.ray_mask_hybrid) => return float3(0.0)
+    if not tracer.reaches(e, seed, tracer.ray_mask_hybrid_shadow) => return float3(0.0)
     return e.diffuse + e.specular
 
 /// `tracer.sample_environment`'s own draw at a surface no bounce leaves, and its shadow ray.
 fun probe_environment(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: uint){tracer.traced, tracer.bindless} -> float3:
     let mut r = rng
     let e = tracer.sample_environment(b, f, wo_local, p, n, true, mut r)
-    if not tracer.reaches(e, tracer.cutout_seed(r, tracer.cutout_ray_environment), tracer.ray_mask_hybrid) => return float3(0.0)
+    if not tracer.reaches(e, tracer.cutout_seed(r, tracer.cutout_ray_environment), tracer.ray_mask_hybrid_shadow) => return float3(0.0)
     return e.diffuse + e.specular
 
 /// Where one bounce from a primary hit went: what it carries there, and either the environment it escaped into or the surface it met.
@@ -273,6 +273,12 @@ fun vertex_of(vertex: int, instance: uint){tracer.traced, tracer.bindless, pass}
     let inst = scene.instance(..tracer.traced.instances[instance as int])
     return raster.vertex_from(inst, instance, vertex, scene.camera(..f.camera), f.near_plane, raster.jitter_shift(jitter_of(f), pass.size))
 
+/// `c`, or black where any channel is not a finite number.
+/// One such sample spreads through the accumulated mean into every later frame, and a denoiser smears it across a block, so it is dropped here, where both lightings write.
+fun finite(c: float3) -> float3:
+    if any(is_nan(c)) or any(is_inf(c)) => return float3(0.0)
+    return c
+
 /// `raster.pixel_context`, reading the instance table of `tracer.traced`.
 fun pixel_context(p: raster.varyings, primitive: uint){tracer.traced, tracer.bindless} -> material.shading_context:
     return raster.context_from(scene.instance(..tracer.traced.instances[p.instance as int]), p, primitive)
@@ -309,7 +315,7 @@ fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr
     let bounced = bounce_from(b, shading, face.n, wo_local, p.world, mut rng)
     let s2 = secondary_of(bounced)
     let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, false, mut rng) + secondary_environment(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, mut rng)
-    let color = b.emission + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit)
+    let color = finite(b.emission + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit))
 
     let prev = scene.camera(..f.previous_camera)
     let motion = pixel + jitter_of(f) - scene.camera_project(prev, p.world - prev.position, pass.size)

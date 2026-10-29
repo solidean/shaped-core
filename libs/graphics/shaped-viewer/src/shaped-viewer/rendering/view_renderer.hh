@@ -170,10 +170,12 @@ private:
     };
 
     /// The schedule for a layer whose mean will hold `accum_frame` frames once this frame's trace lands.
+    /// `display_scale` is what the layer's display multiplies its image by, which a denoiser judging noise on screen is told.
     [[nodiscard]] static denoise_schedule _schedule_denoise(sg::context const& ctx,
                                                             render_settings const& settings,
                                                             denoise_slots const& ds,
-                                                            u32 accum_frame);
+                                                            u32 accum_frame,
+                                                            f32 display_scale);
 
     /// Denoises a traced layer into its denoised slot — temporally while its mean is young, spatially after, and both
     /// at once across the hand-off — and points `presented` at what its parent should sample.

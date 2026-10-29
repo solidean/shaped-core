@@ -64,8 +64,11 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
 
 using impl::resolved_view;
 
-/// The mask of an instance the hybrid's rays skip: every bit but module `tracer`'s `ray_mask_hybrid`, so every other trace still meets it.
-constexpr u8 instance_mask_hybrid_skips = 0xFE;
+/// The mask of an instance every hybrid ray skips: every bit but module `tracer`'s `ray_mask_hybrid` and `ray_mask_hybrid_shadow`, so every other trace still meets it.
+constexpr u8 instance_mask_hybrid_skips = 0xFC;
+
+/// The mask of an instance the hybrid's shadow rays pass while its bounces still meet it: every bit but `ray_mask_hybrid_shadow`.
+constexpr u8 instance_mask_hybrid_shadow_skips = 0xFD;
 
 /// The constant `f` names in `r`, or `fallback` where it is not one.
 [[nodiscard]] f32 constant_in(material_emission_factor const& f, instance_record const& r, f32 fallback)
@@ -82,10 +85,16 @@ constexpr u8 instance_mask_hybrid_skips = 0xFE;
     return fallback;
 }
 
+/// Whether an instance of `secondary` transmits at all.
+[[nodiscard]] bool is_transmissive(material_secondary const& secondary, instance_record const& r)
+{
+    return constant_in(secondary.transmission, r, 0.0f) > 0.0f;
+}
+
 /// Whether an instance of `secondary` is a pane: transmissive, and a thin wall with no interior to cross.
 [[nodiscard]] bool is_pane(material_secondary const& secondary, instance_record const& r)
 {
-    return constant_in(secondary.transmission, r, 0.0f) > 0.0f && constant_in(secondary.thin_walled, r, 0.0f) != 0.0f;
+    return is_transmissive(secondary, r) && constant_in(secondary.thin_walled, r, 0.0f) != 0.0f;
 }
 
 /// Whether an instance of `opacity` keeps its opacity as coverage rather than thresholding it: one that cuts out at all, with no cutoff or a cutoff of 0.
@@ -295,8 +304,14 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // A pane is drawn where the hybrid rasterizes it, and every one of its rays passes it, unrefracted and untinted.
         // Its single bounce is spent getting through the first pane, so a second one met would be lit as an opaque
         // surface of its base color; and what lies behind a pane has no other way to the light.
-        if (is_pane(out.hit_groups[permutation]->secondary, resources.get_instance(item.instance)))
+        // Solid glass is met by the bounce, which refracts through it, and passed by the shadow rays alone: a light inside a
+        // bulb, or a room behind a windscreen modelled as a closed slab, is otherwise reached by nothing but rare bounces.
+        auto const& instance = resources.get_instance(item.instance);
+        auto const& secondary = out.hit_groups[permutation]->secondary;
+        if (is_pane(secondary, instance))
             out.instances.back().mask = instance_mask_hybrid_skips;
+        else if (is_transmissive(secondary, instance))
+            out.instances.back().mask &= instance_mask_hybrid_shadow_skips;
 
         if (!estimate.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
             continue;
@@ -1529,9 +1544,15 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Decided before the frame block is uploaded, so the tracer writes this frame's own samples and motion only on the
     // frames the temporal member reads them.
     // On the mean's count as `_denoise` sees it, after this frame's increment below, which only a frame that traces makes.
-    auto const schedule
-        = has_guides ? _schedule_denoise(ctx, l.settings, ds, samples ? next_frame_count(*slot) : slot->accum_frame)
-                     : denoise_schedule{};
+    // What the display multiplies this layer's image by, its automatic exposure included once a reading has landed.
+    auto display_exposure = l.settings.display.exposure;
+    if (l.settings.display.automatic && isize(tr.layer) < rec.auto_exposure.size() && rec.auto_exposure[tr.layer].primed)
+        display_exposure += rec.auto_exposure[tr.layer].exposure;
+    auto const display_scale = sr::display_transform{.exposure = display_exposure}.exposure_scale();
+    auto const schedule = has_guides
+                            ? _schedule_denoise(ctx, l.settings, ds,
+                                                samples ? next_frame_count(*slot) : slot->accum_frame, display_scale)
+                            : denoise_schedule{};
     auto const writes_temporal = has_temporal && schedule.runs_temporal();
 
     // All three or none: a member filtering the lobes apart needs both halves AND the distances, and two of the three
@@ -1871,7 +1892,8 @@ f32 view_renderer::crossfade_weight(u32 accum_frame, u32 temporal_frames, u32 fa
 view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context const& ctx,
                                                                  render_settings const& settings,
                                                                  denoise_slots const& ds,
-                                                                 u32 accum_frame)
+                                                                 u32 accum_frame,
+                                                                 f32 display_scale)
 {
     // Temporal while the mean is young, on this frame's own samples: a young mean is barely less noisy than one frame,
     // and a temporal member's history is what makes up the difference.
@@ -1879,10 +1901,13 @@ view_renderer::denoise_schedule view_renderer::_schedule_denoise(sg::context con
     // unbiased.
     // `fresh_samples` says which of the two a call carries, and it lives in the settings so that resolving a method and
     // running it cannot disagree — so each member takes its own settings value rather than a flag per call.
-    auto const with_fresh_samples = [&settings](bool fresh)
+    auto const with_fresh_samples = [&settings, display_scale](bool fresh)
     {
         auto copy = settings.reconstruct;
         copy.fresh_samples = fresh;
+        // A member judging noise by how bright a pixel ends up on screen is told the display's scale, or it denoises an
+        // image many stops brighter or darker than the one shown.
+        copy.exposure = settings.reconstruct.exposure * display_scale;
         // These two run at the view's own size, without a jitter, so an upscaler would run 1:1 on an image it cannot
         // reconstruct from; only a frame traced at the input extent upscales, and `trace` asks for that itself.
         copy.upscaler = sr::upscale_method::none;

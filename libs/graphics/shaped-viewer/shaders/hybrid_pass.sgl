@@ -75,7 +75,7 @@ binding thin_io:
     let s2 = hybrid.secondary_of(bounced)
     let bounce_lit = hybrid.direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, false, mut rng)
         + hybrid.secondary_environment(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, mut rng)
-    let color = float3(emission.x, emission.y, emission.z) + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit)
+    let color = hybrid.finite(float3(emission.x, emission.y, emission.z) + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit))
 
     tracer.traced.output.store(px, float4(..color, 1.0))
     tracer.traced.guide_normal.store(px, float4(..n, 0.0))
