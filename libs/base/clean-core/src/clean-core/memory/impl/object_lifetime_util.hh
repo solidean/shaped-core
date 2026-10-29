@@ -19,6 +19,7 @@
 // Where a function copies or moves a RANGE, a trivially copyable T takes a memcpy — memmove where the ranges may overlap — instead of a per-element loop.
 // The default_ and fill_ functions always loop, since there is no source range to copy from.
 // On a throw the cursor delimits the objects handled so far, so the caller can still destroy exactly them.
+// A loop that cannot throw advances a local copy and stores the cursor once at the end, so the compiler can vectorize it.
 // The two move_ functions promise nothing beyond that, since a throwing move constructor has already lost the source.
 //
 namespace cc::impl
@@ -48,12 +49,22 @@ constexpr void default_create_objects_to(T*& dest_end, isize count)
     static_assert(sizeof(T) > 0, "T must be a complete type (did you forget to include a header?)");
     static_assert(std::is_default_constructible_v<T>, "T must be default constructible");
 
-    // Always construct with T() to ensure proper initialization
-    // (for trivial types like int, this ensures zero-initialization)
-    for (isize i = 0; i < count; ++i)
+    if constexpr (std::is_nothrow_default_constructible_v<T>)
     {
-        new (cc::placement_new, dest_end) T();
-        ++dest_end;
+        // a local cursor: a store of T could alias the caller's cursor, which would reload it per element and block vectorizing
+        auto p = dest_end;
+        auto const end = p + count;
+        for (; p != end; ++p)
+            new (cc::placement_new, p) T();
+        dest_end = end;
+    }
+    else
+    {
+        for (isize i = 0; i < count; ++i)
+        {
+            new (cc::placement_new, dest_end) T();
+            ++dest_end;
+        }
     }
 }
 
@@ -64,10 +75,22 @@ constexpr void fill_create_objects_to(T*& dest_end, isize count, T const& value)
     static_assert(sizeof(T) > 0, "T must be a complete type (did you forget to include a header?)");
     static_assert(std::is_copy_constructible_v<T>, "T must be copy constructible");
 
-    for (isize i = 0; i < count; ++i)
+    if constexpr (std::is_nothrow_copy_constructible_v<T>)
     {
-        new (cc::placement_new, dest_end) T(value);
-        ++dest_end;
+        // a local cursor, as in default_create_objects_to
+        auto p = dest_end;
+        auto const end = p + count;
+        for (; p != end; ++p)
+            new (cc::placement_new, p) T(value);
+        dest_end = end;
+    }
+    else
+    {
+        for (isize i = 0; i < count; ++i)
+        {
+            new (cc::placement_new, dest_end) T(value);
+            ++dest_end;
+        }
     }
 }
 

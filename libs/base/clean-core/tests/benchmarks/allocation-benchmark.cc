@@ -9,6 +9,7 @@
 
 
 #include <clean-core/container/span.hh>
+#include <clean-core/container/vector.hh>
 #include <clean-core/math/random.hh>
 #include <clean-core/memory/allocation.hh>
 #include <clean-core/memory/node_allocation.hh>
@@ -378,6 +379,38 @@ void run_comparison(nx::bench::run_config const& cfg)
     (comparison_row<Sizes>(cfg), ...);
 }
 
+// Elements per second for a constructing container create, against a raw memset into an uninitialized one.
+// The fill is what is measured: every create allocates the same bytes, and 1 Mi elements keeps the allocation itself small.
+template <class T>
+void fill_rows(char const* type_name, T value)
+{
+    constexpr isize count = 1 << 20;
+    auto const cfg = nx::bench::run_config{.min_time_secs = 0.1, .max_samples = 512};
+
+    nx::bench::run(cc::format("vector<{}> uninitialized + memset", type_name), cfg,
+                   [&](nx::bench::iteration& it)
+                   {
+                       auto v = cc::vector<T>::create_uninitialized(count);
+                       cc::memset(v.data(), 0, count * sizeof(T));
+                       nx::bench::sink(v.data());
+                       it.items(count);
+                   });
+    nx::bench::run(cc::format("vector<{}>::create_defaulted", type_name), cfg,
+                   [&](nx::bench::iteration& it)
+                   {
+                       auto v = cc::vector<T>::create_defaulted(count);
+                       nx::bench::sink(v.data());
+                       it.items(count);
+                   });
+    nx::bench::run(cc::format("vector<{}>::create_filled", type_name), cfg,
+                   [&](nx::bench::iteration& it)
+                   {
+                       auto v = cc::vector<T>::create_filled(count, value);
+                       nx::bench::sink(v.data());
+                       it.items(count);
+                   });
+}
+
 // The representative sizes the PGO benchmark sweeps: one small block (64 B) and one page-sized (4 KiB).
 constexpr isize guide_sizes[] = {64, 4096};
 isize const full_sizes[] = {16, 32, 64, 128, 256, 512, 1024, 4096, 16384, 65536};
@@ -402,6 +435,13 @@ BENCHMARK("bench-alloc - handle and node comparison")
 {
     // Small node classes (<= 256 B), then a few larger blocks that expose the node large-path cliff.
     run_comparison<8, 16, 32, 64, 128, 256, 512, 1024, 4096>(sweep_config);
+}
+
+// Filling a fresh vector: the default and fill creates against a memset, for a 4-byte and a 1-byte element.
+BENCHMARK("bench-alloc - vector fill creates")
+{
+    fill_rows<i32>("i32", -1);
+    fill_rows<u8>("u8", 7);
 }
 
 // Steady-state small-batch: alloc 10 nodes, free 10 in a fixed permuted order, node vs mimalloc.
