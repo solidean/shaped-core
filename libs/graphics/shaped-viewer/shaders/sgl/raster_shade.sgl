@@ -121,10 +121,18 @@ fun context_from(inst: scene.instance, p: varyings, primitive: uint){tracer.bind
 ///
 /// Where the type's cutoff is above 0 that is glTF's MASK, and the pixel is cut exactly where a hit is.
 /// A cutoff of 0 is coverage, which a tracer draws stochastically and converges to a partial surface.
-/// One raster frame cannot, so coverage below one half is cut and the rest kept.
+/// A frame that accumulates draws it the same way, from its `coverage_seed`; one that does not, a seed of 0, cuts coverage below one half.
 fun is_cut(p: varyings, ctx: material.shading_context){drawn, tracer.bindless} -> bool:
     let inst = scene.instance(..drawn.instances[p.instance as int])
-    return tracer.instance_opacity(inst, ctx) < 0.5
+    let opacity = tracer.instance_opacity(inst, ctx)
+    let f = drawn.frame[0]
+    if f.coverage_seed == 0u => return opacity < 0.5
+    return coverage_cut(opacity, uint2(p.position.x as uint, p.position.y as uint), f.size.x as uint, f.coverage_seed)
+
+/// Whether coverage `opacity` loses pixel `px` this frame: an opacity of 1 never does, 0 always, and anything between in that share of frames.
+fun coverage_cut(opacity: float, px: uint2, width: uint, seed: uint) -> bool:
+    let mut rng = pt.hash(px.x + px.y * width + seed * 9781u + 0x2545f491u)
+    return opacity <= pt.rand(mut rng)
 
 /// Paints every decal reaching `p` into `surface`'s base, as `tracer.apply_decals` paints a hit.
 fun apply_decals(surface: mut openpbr.surface, p: float3, n: float3, footprint: float){drawn, slug.tables}:

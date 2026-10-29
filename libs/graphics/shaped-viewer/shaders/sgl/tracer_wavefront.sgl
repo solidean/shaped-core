@@ -256,7 +256,7 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
 // ---- extend: the round's segments, traced ---------------------------------------------------------------------------
 
 /// What a trace masks the instances with: every one against `ray_mask_all`.
-/// An instance the hybrid's rays may skip carries every bit but `ray_mask_hybrid`'s, which `view_renderer` gives one that keeps coverage.
+/// An instance the hybrid's rays may skip carries every bit but `ray_mask_hybrid`'s, which `view_renderer` gives one that keeps coverage, and a thin transmissive pane.
 const ray_mask_all = 255
 const ray_mask_hybrid = 1
 

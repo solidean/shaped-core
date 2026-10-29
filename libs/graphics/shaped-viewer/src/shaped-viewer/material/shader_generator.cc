@@ -726,7 +726,7 @@ constexpr auto raster_spelling = body_spelling{.explicit_level = false, .mark = 
 ///
 /// The draw is indexed, so a pixel learns its triangle from `@primitive_id`, which is why it requires `primitive_index`.
 /// The cutout reads the instance's opacity record through `tracer.instance_opacity`, the reader a hit's any-hit cuts through.
-/// So a pixel cuts what a hit does wherever the type's cutoff is above 0; coverage, a cutoff of 0, is cut below one half (`raster.is_cut`).
+/// So a pixel cuts what a hit does wherever the type's cutoff is above 0; coverage, a cutoff of 0, as `raster.is_cut` says.
 /// The type's declared occlusion reaches `raster.shade` the same way, and 1 where it declares none.
 [[nodiscard]] cc::string generate_raster_pixel(resolved_material const& r,
                                                material_parameter_layout const& layout,
@@ -888,7 +888,9 @@ generated_material_shader generate_material_shader(resolved_material const& r, m
     { return attribute.empty() ? material_emission_factor{} : emission_factor_of(r, layout, attribute); };
     auto const secondary = material_secondary{.base_color = factor_of(r.type->base_color_attribute),
                                               .roughness = factor_of(r.type->roughness_attribute),
-                                              .metalness = factor_of(r.type->metalness_attribute)};
+                                              .metalness = factor_of(r.type->metalness_attribute),
+                                              .transmission = factor_of(r.type->transmission_attribute),
+                                              .thin_walled = factor_of(r.type->thin_walled_attribute)};
     return {.source = cc::move(source),
             .shade_source = cc::move(shade_source),
             .raster_source = cc::move(raster_source),

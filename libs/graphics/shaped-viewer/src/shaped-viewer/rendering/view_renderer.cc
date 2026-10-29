@@ -67,6 +67,27 @@ using impl::resolved_view;
 /// The mask of an instance the hybrid's rays skip: every bit but module `tracer`'s `ray_mask_hybrid`, so every other trace still meets it.
 constexpr u8 instance_mask_hybrid_skips = 0xFE;
 
+/// The constant `f` names in `r`, or `fallback` where it is not one.
+[[nodiscard]] f32 constant_in(material_emission_factor const& f, instance_record const& r, f32 fallback)
+{
+    if (!f.is_constant())
+        return fallback;
+    for (auto const& slot : r.slots)
+        if (slot.kind == material_slot_kind::constant && u32(slot.offset) == f.offset && slot.constant.size() >= 4)
+        {
+            auto value = 0.0f;
+            cc::memcpy(&value, slot.constant.data(), 4);
+            return value;
+        }
+    return fallback;
+}
+
+/// Whether an instance of `secondary` is a pane: transmissive, and a thin wall with no interior to cross.
+[[nodiscard]] bool is_pane(material_secondary const& secondary, instance_record const& r)
+{
+    return constant_in(secondary.transmission, r, 0.0f) > 0.0f && constant_in(secondary.thin_walled, r, 0.0f) != 0.0f;
+}
+
 /// Whether an instance of `opacity` keeps its opacity as coverage rather than thresholding it: one that cuts out at all, with no cutoff or a cutoff of 0.
 /// `r` is the instance's parameter block, where the cutoff is a constant.
 [[nodiscard]] bool keeps_coverage(material_opacity const& opacity, instance_record const& r)
@@ -269,6 +290,12 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         // One that lights the scene stays, since the bounce weighs the lights it meets against the light sample.
         if (!estimate.has_value()
             && keeps_coverage(out.hit_groups[permutation]->opacity, resources.get_instance(item.instance)))
+            out.instances.back().mask = instance_mask_hybrid_skips;
+
+        // A pane is drawn where the hybrid rasterizes it, and every one of its rays passes it, unrefracted and untinted.
+        // Its single bounce is spent getting through the first pane, so a second one met would be lit as an opaque
+        // surface of its base color; and what lies behind a pane has no other way to the light.
+        if (is_pane(out.hit_groups[permutation]->secondary, resources.get_instance(item.instance)))
             out.instances.back().mask = instance_mask_hybrid_skips;
 
         if (!estimate.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
@@ -1350,7 +1377,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Only the megakernel reads it, so no other mode restarts on it.
     if (mode != render_mode::megakernel)
         fc.samples_per_pixel = 0;
-    auto const bg = background_gpu::from(l.background);
+    // A following dome turns with the camera, so the trace sees it turned and the camera-free hash below sees it unturned:
+    // a temporal history survives a move, as it does for a dome that stays.
+    auto const bg = background_gpu::from(l.background.seen_from(v.camera));
+    auto const bg_unturned = background_gpu::from(l.background);
     // The integrator is folded in too: both converge to the same image, but a mean must not hold samples of both.
     // So is what the last frame stood in for a permutation not compiled, which only the routine decides.
     auto const hash
@@ -1361,7 +1391,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // Taken here, before anything per-frame is written into `fc`, since every one of those changes on every frame.
     auto scene_fc = fc;
     scene_fc.camera = {};
-    auto const scene_hash = trace_hash(scene_fc, bg, lights, decals, resolved, tr.resolution, self->_shader_generation);
+    auto const scene_hash
+        = trace_hash(scene_fc, bg_unturned, lights, decals, resolved, tr.resolution, self->_shader_generation);
 
     // A cut teleports the camera, so nothing from the last frame reprojects: the temporal history describes another
     // part of the scene, and the motion guide would reproject into a camera nothing connects it to.
@@ -2031,7 +2062,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
     fc.decal_count = u32(decals.decals.size());
     if (mode != render_mode::megakernel)
         fc.samples_per_pixel = 0;
-    auto const bg = background_gpu::from(scene->background);
+    auto const bg = background_gpu::from(scene->background.seen_from(v.camera));
     auto const hash
         = cc::combine_hash(trace_hash(fc, bg, lights, decals, resolved, v.resolution, shader_generation),
                            cc::make_hash(u32(mode), u32(scene->settings.hybrid_lighting), slot.stand_in_hash));

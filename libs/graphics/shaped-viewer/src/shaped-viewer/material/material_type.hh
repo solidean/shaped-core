@@ -22,6 +22,8 @@ struct sv::material_type_description
     cc::string base_color_attribute = {};
     cc::string roughness_attribute = {};
     cc::string metalness_attribute = {};
+    cc::string transmission_attribute = {};
+    cc::string thin_walled_attribute = {};
 };
 
 /// A family of materials: what a shader needs per pixel, and the code that turns it into a shaded surface.
@@ -94,6 +96,11 @@ struct sv::material_type
     /// A secondary hit reads them beside the base color; one without a roughness stays matte, and one without a metalness is a dielectric.
     cc::string roughness_attribute;
     cc::string metalness_attribute;
+
+    /// Which declared float attributes are this type's transmission weight and its thin-wall switch, or empty for none.
+    /// An instance with both, the weight above 0 and the switch on, is a pane the hybrid's rays pass through.
+    cc::string transmission_attribute;
+    cc::string thin_walled_attribute;
 
     cc::hash128 hash;
 

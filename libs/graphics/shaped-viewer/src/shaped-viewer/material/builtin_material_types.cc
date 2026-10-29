@@ -212,7 +212,9 @@ surface.emission_color = color
                                   .emission_scale_attribute = "emission_luminance",
                                   .base_color_attribute = "base_color",
                                   .roughness_attribute = "specular_roughness",
-                                  .metalness_attribute = "base_metalness"});
+                                  .metalness_attribute = "base_metalness",
+                                  .transmission_attribute = "transmission_weight",
+                                  .thin_walled_attribute = "thin_walled"});
 }
 
 [[nodiscard]] material_type make_pbr()
