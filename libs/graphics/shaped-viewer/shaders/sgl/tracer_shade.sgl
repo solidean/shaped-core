@@ -369,16 +369,21 @@ fun instance_point_to_world(inst: scene.instance, p: float3) -> float3:
 
 /// `estimate_environment` without its visibility test.
 fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: float3, n_geom: float3, last_bounce: bool, rng: mut uint){traced} -> light_sample:
-    // cos(theta) = u1 uniform in [0, 1] gives a uniform solid-angle pick about the normal.
+    let env = background_lanes()
     let u1 = pt.rand(mut rng)
     let u2 = pt.rand(mut rng)
-    let r = sqrt(max(0.0, 1.0 - u1 * u1))
-    let phi = 2.0 * pt.pi * u2
-
-    let wi_local = float3(r * cos(phi), r * sin(phi), u1)
-    let wi = openpbr.to_world(f, wi_local)
-    // On the face's own side only, as a light's sample is.
-    if dot(wi, n_geom) <= 0.0 => return no_light_sample()
+    // A probe draws as it always has, uniformly over the shading frame's upper half from two numbers, so its scenes keep their random stream.
+    let mut drawn = scene.environment_direction(float3(0.0), 1.0 / (2.0 * pt.pi))
+    if scene.environment_is_dome(env):
+        drawn = scene.sample_environment_direction(env, float3(0.0, 1.0, 0.0), float3(u1, u2, pt.rand(mut rng)))
+    else:
+        let r = sqrt(max(0.0, 1.0 - u1 * u1))
+        let phi = 2.0 * pt.pi * u2
+        drawn.wi = openpbr.to_world(f, float3(r * cos(phi), r * sin(phi), u1))
+    let wi = drawn.wi
+    let wi_local = openpbr.to_local(f, wi)
+    // On the face's own side and the shading frame's upper half only, as a light's sample is.
+    if dot(wi, n_geom) <= 0.0 or wi_local.z <= 0.0 => return no_light_sample()
 
     let mut f_diffuse = float3(0.0)
     let mut f_specular = float3(0.0)
@@ -386,9 +391,9 @@ fun sample_environment(b: openpbr.bsdf, f: openpbr.frame, wo_local: float3, p: f
     if all(f_diffuse + f_specular <= float3(0.0)) => return no_light_sample()
 
     // No bounce ray follows the last hit, so there is nothing to balance against there.
-    let w = if last_bounce => 1.0 else pt.mis_weight(pt.env_pdf(), openpbr.bsdf_pdf(b, wo_local, wi_local))
+    let w = if last_bounce => 1.0 else pt.mis_weight(drawn.pdf, openpbr.bsdf_pdf(b, wo_local, wi_local))
 
-    let scale = scene.background_radiance(background_sh(), wi) * (wi_local.z / pt.env_pdf()) * w
+    let scale = scene.environment_radiance(env, wi) * (wi_local.z / drawn.pdf) * w
     return light_sample(f_diffuse * scale, f_specular * scale, p + n_geom * 1e-3, wi, 1e4, 1u)
 
 // ---- Decals ---------------------------------------------------------------------------------------------------------

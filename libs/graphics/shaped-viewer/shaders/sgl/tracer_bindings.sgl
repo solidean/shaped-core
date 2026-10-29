@@ -318,7 +318,7 @@ binding traced:
     /// The per-item table, indexed by a hit's instance id.
     instances: buffer[instance_record]
 
-    /// The environment's 16 SH coefficients, `sv::background_gpu` byte for byte.
+    /// The environment, `sv::background_gpu` byte for byte: its 16 SH lanes, then a dome's.
     background: buffer[float4]
 
     /// The primary hit's facing normal, linear view depth and diffuse albedo, as running means, written while `frame.write_guides` is set.
@@ -572,3 +572,10 @@ fun background_sh(){traced} -> float4[16]:
     for k in 0 ..< 16:
         sh[k] = traced.background[k]
     return sh
+
+/// The whole environment, copied out of its buffer into the array `scene.environment_*` take.
+fun background_lanes(){traced} -> float4[28]:
+    let mut env = float4[28].filled(float4(0.0))
+    for k in 0 ..< 28:
+        env[k] = traced.background[k]
+    return env

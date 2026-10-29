@@ -4,9 +4,44 @@
 #include <shaped-viewer/scene/light.hh>
 #include <typed-geometry/linalg/vec.hh>
 
+/// One soft lobe of a dome: `radiance * exp(concentration * (dot(d, direction) - 1))`, peaking at `radiance` along `direction`.
+/// That is a von Mises–Fisher lobe, so it has a closed-form integral and closed-form sampling, which is what lets the tracer draw from it exactly.
+/// The studio spec's softness of 0.12 is a concentration of 1 / 0.12.
+struct sv::dome_lobe
+{
+    /// From the scene toward the lobe; it must not be zero, and is normalized where it is read.
+    tg::vec3f direction = tg::vec3f(0, 1, 0);
+    tg::vec3f radiance = tg::vec3f(0, 0, 0);
+    f32 concentration = 1.0f / 0.12f;
+};
+
+/// An analytic environment: a vertical gradient with up to four soft lobes on it, evaluated and sampled exactly.
+///
+/// The gradient is `horizon` at and below the elevation whose sine is `rise_start`, and rises by a smoothstep to `zenith` straight up.
+/// A camera ray that misses sees the gradient alone, times `backdrop_scale`, so no lobe ever shows in the backdrop; every other ray sees the whole dome.
+struct sv::dome
+{
+    static constexpr int max_lobes = 4;
+
+    tg::vec3f horizon = tg::vec3f(0, 0, 0);
+    tg::vec3f zenith = tg::vec3f(0, 0, 0);
+    f32 rise_start = 0.0f;
+    f32 backdrop_scale = 1.0f;
+
+    dome_lobe lobes[max_lobes] = {};
+    int lobe_count = 0;
+
+    /// The gradient alone along unit direction `d`.
+    [[nodiscard]] tg::vec3f gradient(tg::vec3f d) const;
+
+    /// The whole dome along unit direction `d`: the gradient plus every lobe.
+    [[nodiscard]] tg::vec3f radiance(tg::vec3f d) const;
+};
+
 /// The view's background / environment: the radiance a primary ray sees when it misses all geometry.
 ///
-/// For now it is an order-3 RGB spherical-harmonics probe — 16 coefficients, each an RGB radiance, in the standard real-SH basis with index 0 the constant (DC) term.
+/// It is an order-3 RGB spherical-harmonics probe — 16 coefficients, each an RGB radiance, in the standard real-SH basis with index 0 the constant (DC) term.
+/// Or it is an analytic `dome`, which every renderer evaluates and samples exactly; `sh` then holds the dome's projection, for what reads SH alone.
 /// Order 3 captures a sky gradient plus some soft directional structure, which is all a background needs.
 /// A sun is not one of those: it is a light (`sv::light::sun`), and `sv::daylight()` hands the two back as a pair.
 /// A miss shader reconstructs the radiance along a ray direction from these coefficients.
@@ -19,6 +54,13 @@ struct sv::background
     static constexpr int sh_coefficient_count = 16; // order 3: (3 + 1)^2 real-SH coefficients
 
     tg::vec3f sh[sh_coefficient_count] = {};
+
+    /// Set for an analytic dome, which then defines the environment; `sh` is its projection.
+    bool is_dome = false;
+    sv::dome analytic = {};
+
+    /// The analytic `d`, with `sh` projected from it.
+    [[nodiscard]] static background of_dome(sv::dome const& d);
 
     /// The same `radiance` in every direction — a flat ambient environment, band 0 alone.
     [[nodiscard]] static background uniform(tg::vec3f radiance);
@@ -43,6 +85,7 @@ struct sv::background
 
     /// This environment layered with `other` — the radiance the two reconstruct, added.
     /// Environments superpose because SH is linear, which is what lets a sky and a sun be authored separately.
+    /// Neither may be a dome.
     [[nodiscard]] background combined_with(background const& other) const;
 
     /// This environment at `factor` times the radiance — an exposure knob on a preset.
@@ -66,25 +109,30 @@ namespace sv
 [[nodiscard]] sky_and_sun daylight();
 } // namespace sv
 
-/// GPU-side SH probe, the `float4[16]` the tracer reads as `traced.background`.
-/// Each coefficient sits in its own 16-byte lane (`.xyz` = RGB radiance, `.w` unused).
-/// Evaluated by the miss shaders through `scene.background_radiance`.
+/// The environment as the GPU reads it, `traced.background` and `drawn.background`: 28 `float4` lanes, which module `scene` takes as `float4[28]`.
+///
+/// The 16 SH lanes come first (`.xyz` = RGB radiance), so a reader of the probe alone reads them as it always has.
+/// The dome follows: a header (kind, lobe count, the rise's start, the backdrop scale), the horizon and the zenith, then per lobe its
+/// direction and concentration, and its peak radiance and the probability of sampling it; the last lane holds the gradient's probability.
+/// `scene.environment_*` (shaders/sgl/scene_items.sgl) evaluates and samples it.
 struct sv::background_gpu
 {
-    tg::vec4f sh[background::sh_coefficient_count] = {};
+    static constexpr int lane_count = 28;
 
-    /// Packs a scene-side SH background into its GPU lane layout (each coefficient widened to a vec4, `.w` = 0).
-    [[nodiscard]] static background_gpu from(background const& bg)
-    {
-        auto out = background_gpu{};
-        for (auto i = 0; i < background::sh_coefficient_count; ++i)
-            out.sh[i] = tg::vec4f(bg.sh[i][0], bg.sh[i][1], bg.sh[i][2], 0.0f);
-        return out;
-    }
+    tg::vec4f sh[background::sh_coefficient_count] = {};
+    tg::vec4f header = {}; ///< x: 1 for a dome, 0 for a probe; y: lobe count; z: the rise's start; w: the backdrop scale
+    tg::vec4f horizon = {};
+    tg::vec4f zenith = {};
+    tg::vec4f lobe_direction[dome::max_lobes] = {}; ///< xyz: unit direction; w: concentration
+    tg::vec4f lobe_radiance[dome::max_lobes] = {};  ///< xyz: peak radiance; w: probability a sample picks this lobe
+    tg::vec4f gradient = {}; ///< x: probability a sample picks the gradient, drawn uniformly over the sphere
+
+    /// Packs `bg` into its lanes, with each part of a dome given its share of the samples by its power.
+    [[nodiscard]] static background_gpu from(background const& bg);
 };
 
 namespace sv
 {
-static_assert(sizeof(background_gpu) == sizeof(tg::vec4f) * background::sh_coefficient_count,
+static_assert(sizeof(background_gpu) == sizeof(tg::vec4f) * background_gpu::lane_count,
               "background_gpu must be a tight array of vec4 lanes, as traced.background reads it");
 } // namespace sv

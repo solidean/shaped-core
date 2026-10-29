@@ -41,7 +41,7 @@ binding drawn:
     /// Every light of the layer, `light_count` of them.
     lights: buffer[tracer.light_record]
 
-    /// The environment's 16 SH coefficients, `sv::background_gpu` byte for byte.
+    /// The environment, `sv::background_gpu` byte for byte: its 16 SH lanes, then a dome's.
     background: buffer[float4]
 
     /// The decals every pixel is painted with, `decal_count` of them, and the shapes they cover in the atlas bound as `slug.tables`.

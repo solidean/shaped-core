@@ -435,9 +435,11 @@ fun segment_settle(index: uint){traced, wavefront_step} -> uint3:
 
     if hit_t < 0.0 and not (ended or escaped_inside):
         // Escaped to the SH environment: the primary ray sees it at full weight, a bounce ray as the BSDF strategy of the hit's own estimate.
-        let emission = scene.background_radiance(background_sh(), normalize(dir))
+        // A ray that left the camera sees the backdrop, which a dome draws apart from what it lights with.
+        let env = background_lanes()
+        let emission = if b == 0u => scene.environment_backdrop(env, normalize(dir)) else scene.environment_radiance(env, normalize(dir))
         // The environment's sample reaches only the shading frame's upper hemisphere on the face's own side, and a medium scatter takes none.
-        let w = if b == 0u or not prev_nee_reachable => 1.0 else pt.mis_weight(st.prev_pdf, pt.env_pdf())
+        let w = if b == 0u or not prev_nee_reachable => 1.0 else pt.mis_weight(st.prev_pdf, scene.environment_pdf(env, normalize(dir)))
         let c = throughput * emission * w
         light.radiance += c
         lit = true

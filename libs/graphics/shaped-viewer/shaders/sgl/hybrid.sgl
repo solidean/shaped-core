@@ -99,7 +99,8 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
     let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(rng, tracer.cutout_ray_surface), tracer.ray_mask_hybrid)
     result.lights = lights_along(origin, wi, h.t, weight_pdf)
     if h.kind == tracer.hit_none:
-        result.escaped = scene.background_radiance(tracer.background_sh(), wi) * pt.mis_weight(weight_pdf, pt.env_pdf())
+        let env = tracer.background_lanes()
+        result.escaped = scene.environment_radiance(env, wi) * pt.mis_weight(weight_pdf, scene.environment_pdf(env, wi))
         return result
 
     let inst = scene.instance(..tracer.traced.instances[h.instance as int])

@@ -71,6 +71,8 @@ struct light_emission;
 class light;
 struct scene_light;
 struct background;
+struct dome;        // an analytic environment: a gradient and soft lobes (scene/background.hh)
+struct dome_lobe;   // one von Mises-Fisher lobe of a dome
 struct sky_and_sun; // a sky and the sun that lights it, as sv::daylight() hands them back (scene/background.hh)
 struct background_gpu;
 struct render_settings;

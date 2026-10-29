@@ -275,8 +275,11 @@ rays path_rays:
                 // Escaped to the SH environment, whose radiance the miss wrote back in `emission`.
                 // The primary ray sees the sky at full weight; a bounce ray is the BSDF strategy of the hit's own environment estimate.
                 // The environment's sample reaches only the shading frame's upper hemisphere on the face's own side, and a medium scatter takes none.
-                let w = if b == 0 or not prev_nee_reachable => 1.0 else pt.mis_weight(prev_pdf, pt.env_pdf())
-                let c = throughput * emission * w
+                // A ray that left the camera sees the backdrop, which a dome draws apart from what it lights with.
+                let env = tracer.background_lanes()
+                let seen = if b == 0 => scene.environment_backdrop(env, dir) else emission
+                let w = if b == 0 or not prev_nee_reachable => 1.0 else pt.mis_weight(prev_pdf, scene.environment_pdf(env, dir))
+                let c = throughput * seen * w
                 radiance += c
 
                 // The sky seen by the PRIMARY ray belongs to neither lobe, so it goes to the diffuse signal.
@@ -394,7 +397,7 @@ fun component_of(v: float3, i: uint) -> float:
 @miss fun path_miss(p: mut tracer.surface_payload, r: ray){tracer.traced, tracer.bindless, slug.tables}:
     p.direct_diffuse = float3(0.0)
     p.direct_specular = float3(0.0)
-    p.emission = scene.background_radiance(tracer.background_sh(), normalize(float3(r.direction.x, r.direction.y, r.direction.z)))
+    p.emission = scene.environment_radiance(tracer.background_lanes(), normalize(float3(r.direction.x, r.direction.y, r.direction.z)))
     p.throughput = float3(0.0)
     p.direction = float3(0.0)
     p.normal = float3(0.0)

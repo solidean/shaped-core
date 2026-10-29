@@ -1,6 +1,10 @@
+#include <clean-core/common/assert.hh>
+#include <clean-core/common/utility.hh> // cc::clamp, cc::max
 #include <shaped-viewer/scene/background.hh>
 #include <typed-geometry/linalg/vec_ops.hh> // tg::normalize
+#include <typed-geometry/scalar/angle.hh>
 #include <typed-geometry/scalar/constants.hh>
+#include <typed-geometry/scalar/scalar.hh> // tg::exp
 
 namespace sv
 {
@@ -25,7 +29,123 @@ constexpr f32 zh_cos2 = 0.7853982f; // pi / 4
 // The truncated lobe overshoots: it reconstructs 17/16 along its own axis, where the clamped cosine is 1.
 // Dividing it out is what makes `lobe`'s peak the radiance the caller asked for.
 constexpr f32 zh_cos_peak = 16.0f / 17.0f;
+
+/// The 16 real-SH basis values along unit direction `d`, as `scene.background_radiance` evaluates them.
+void sh_basis(tg::vec3f d, f32 (&y)[background::sh_coefficient_count])
+{
+    auto const x = d[0];
+    auto const yy = d[1];
+    auto const z = d[2];
+    y[0] = 0.282095f;
+    y[1] = 0.488603f * yy;
+    y[2] = 0.488603f * z;
+    y[3] = 0.488603f * x;
+    y[4] = 1.092548f * x * yy;
+    y[5] = 1.092548f * yy * z;
+    y[6] = 0.315392f * (3.0f * z * z - 1.0f);
+    y[7] = 1.092548f * x * z;
+    y[8] = 0.546274f * (x * x - yy * yy);
+    y[9] = 0.590044f * yy * (3.0f * x * x - yy * yy);
+    y[10] = 2.890611f * x * yy * z;
+    y[11] = 0.457046f * yy * (5.0f * z * z - 1.0f);
+    y[12] = 0.373176f * z * (5.0f * z * z - 3.0f);
+    y[13] = 0.457046f * x * (5.0f * z * z - 1.0f);
+    y[14] = 1.445306f * z * (x * x - yy * yy);
+    y[15] = 0.590044f * x * (x * x - 3.0f * yy * yy);
+}
+
+/// BT.709 luminance, the weight a sample's share of the dome is chosen by.
+[[nodiscard]] f32 luminance(tg::vec3f c)
+{
+    return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+}
+
+/// The integral of a lobe of unit peak, `exp(k (cos t - 1))`, over the sphere.
+[[nodiscard]] f32 vmf_integral(f32 k)
+{
+    return 2.0f * tg::pi<f32> * (1.0f - tg::exp(-2.0f * k)) / k;
+}
 } // namespace
+
+tg::vec3f dome::gradient(tg::vec3f d) const
+{
+    auto const t = cc::clamp((d[1] - rise_start) / cc::max(1.0f - rise_start, 1e-6f), 0.0f, 1.0f);
+    return horizon + (zenith - horizon) * (t * t * (3.0f - 2.0f * t));
+}
+
+tg::vec3f dome::radiance(tg::vec3f d) const
+{
+    auto out = gradient(d);
+    for (auto i = 0; i < lobe_count; ++i)
+    {
+        auto const& l = lobes[i];
+        out += l.radiance * tg::exp(l.concentration * (tg::dot(d, tg::normalize(l.direction)) - 1.0f));
+    }
+    return out;
+}
+
+background background::of_dome(sv::dome const& d)
+{
+    CC_ASSERT(d.lobe_count >= 0 && d.lobe_count <= dome::max_lobes, "a dome holds at most max_lobes lobes");
+    auto bg = background{.is_dome = true, .analytic = d};
+
+    // Projected by quadrature over equal-angle cells, each weighed by its solid angle: what a reader of SH alone sees of the dome.
+    constexpr int rows = 64;
+    constexpr int columns = 128;
+    for (auto r = 0; r < rows; ++r)
+    {
+        auto const theta = tg::angle_f::make_from_radians((f32(r) + 0.5f) / f32(rows) * tg::pi<f32>);
+        auto const weight = theta.sin() * (tg::pi<f32> / f32(rows)) * (2.0f * tg::pi<f32> / f32(columns));
+        for (auto c = 0; c < columns; ++c)
+        {
+            auto const phi = tg::angle_f::make_from_radians((f32(c) + 0.5f) / f32(columns) * 2.0f * tg::pi<f32>);
+            auto const dir = tg::vec3f(theta.sin() * phi.cos(), theta.cos(), theta.sin() * phi.sin());
+            auto const radiance = d.radiance(dir);
+            f32 y[sh_coefficient_count] = {};
+            sh_basis(dir, y);
+            for (auto i = 0; i < sh_coefficient_count; ++i)
+                bg.sh[i] += radiance * (y[i] * weight);
+        }
+    }
+    return bg;
+}
+
+background_gpu background_gpu::from(background const& bg)
+{
+    auto out = background_gpu{};
+    for (auto i = 0; i < background::sh_coefficient_count; ++i)
+        out.sh[i] = tg::vec4f(bg.sh[i][0], bg.sh[i][1], bg.sh[i][2], 0.0f);
+    if (!bg.is_dome)
+        return out;
+
+    auto const& d = bg.analytic;
+    out.header = tg::vec4f(1.0f, f32(d.lobe_count), d.rise_start, d.backdrop_scale);
+    out.horizon = tg::vec4f(d.horizon[0], d.horizon[1], d.horizon[2], 0.0f);
+    out.zenith = tg::vec4f(d.zenith[0], d.zenith[1], d.zenith[2], 0.0f);
+
+    // Each part's share of the samples follows its power: a lobe's peak times its integral, the gradient's mean times the sphere.
+    // The gradient keeps at least a fifth, so the dome between the lobes is never starved of samples.
+    f32 power[dome::max_lobes] = {};
+    auto lobes_total = 0.0f;
+    for (auto i = 0; i < d.lobe_count; ++i)
+    {
+        power[i] = luminance(d.lobes[i].radiance) * vmf_integral(d.lobes[i].concentration);
+        lobes_total += power[i];
+    }
+    auto const gradient_power = luminance(d.horizon + d.zenith) * 0.5f * 4.0f * tg::pi<f32>;
+    auto const total = lobes_total + gradient_power;
+    auto const gradient_share = total > 0.0f ? cc::max(gradient_power / total, lobes_total > 0.0f ? 0.2f : 1.0f) : 1.0f;
+    auto const lobe_scale = lobes_total > 0.0f ? (1.0f - gradient_share) / lobes_total : 0.0f;
+    for (auto i = 0; i < d.lobe_count; ++i)
+    {
+        auto const& l = d.lobes[i];
+        auto const dir = tg::normalize(l.direction);
+        out.lobe_direction[i] = tg::vec4f(dir[0], dir[1], dir[2], l.concentration);
+        out.lobe_radiance[i] = tg::vec4f(l.radiance[0], l.radiance[1], l.radiance[2], power[i] * lobe_scale);
+    }
+    out.gradient = tg::vec4f(gradient_share, 0.0f, 0.0f, 0.0f);
+    return out;
+}
 
 background background::uniform(tg::vec3f radiance)
 {
@@ -77,6 +197,8 @@ background background::studio()
 
 background background::combined_with(background const& other) const
 {
+    CC_ASSERT(!is_dome && !other.is_dome, "a dome composes with nothing: it is the environment, and its SH only its "
+                                          "projection");
     auto out = background{};
     for (auto i = 0; i < sh_coefficient_count; ++i)
         out.sh[i] = sh[i] + other.sh[i];
@@ -85,9 +207,13 @@ background background::combined_with(background const& other) const
 
 background background::scaled(f32 factor) const
 {
-    auto out = background{};
+    auto out = *this;
     for (auto i = 0; i < sh_coefficient_count; ++i)
         out.sh[i] = sh[i] * factor;
+    out.analytic.horizon = analytic.horizon * factor;
+    out.analytic.zenith = analytic.zenith * factor;
+    for (auto i = 0; i < analytic.lobe_count; ++i)
+        out.analytic.lobes[i].radiance = analytic.lobes[i].radiance * factor;
     return out;
 }
 

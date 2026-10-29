@@ -21,6 +21,13 @@ fun background_sh(){drawn} -> float4[16]:
         sh[k] = drawn.background[k]
     return sh
 
+/// The whole environment, copied out of its buffer into the array `scene.environment_*` take.
+fun background_lanes(){drawn} -> float4[28]:
+    let mut env = float4[28].filled(float4(0.0))
+    for k in 0 ..< 28:
+        env[k] = drawn.background[k]
+    return env
+
 /// An object-space point of `inst` in the world.
 fun to_world_point(inst: scene.instance, p: float3) -> float3:
     let q = float4(p.x, p.y, p.z, 1.0)
@@ -275,7 +282,7 @@ fun environment(pixel: float2){drawn} -> targets:
     let dir = normalize(scene.camera_ray_offset(cam, at, f.size))
     let prev = scene.camera(..f.previous_camera)
     return {
-        color = float4(..scene.background_radiance(background_sh(), dir), 1.0)
+        color = float4(..scene.environment_backdrop(background_lanes(), dir), 1.0)
         normal = float4(0.0)
         depth = 0.0
         albedo = float4(0.0)
