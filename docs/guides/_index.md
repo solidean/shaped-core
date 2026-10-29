@@ -34,7 +34,8 @@ Task-oriented how-tos for working in shaped-core.
   colocated per-library sheets live (start with clean-core and nexus).
 - [postmortem.md](postmortem.md) — the end-of-session friction review behind the `/postmortem`
   skill: where momentum was lost, not a bug report.
-- [issue-tracking.md](issue-tracking.md) — in-repo issue tracking: one markdown file per issue in any `docs/issues/` folder, claimed by a pushed commit, grouped in subfolders at will, closed into `.closed/<yyyy>/<mm>/`.
+- [issue-tracking.md](issue-tracking.md) — in-repo issue tracking: one markdown file per issue in any `docs/issues/` folder, claimed by a pushed commit, closed into `.closed/<yyyy>/<mm>/`.
+  Open issues may be grouped in subfolders, a type's folder being that type's default.
   `dev.py issues` is the CLI over it, and every operation also works by hand.
 - [reviewing-prs.md](reviewing-prs.md) — what we look for when reviewing a PR, ranked by what it costs to get wrong, and the tradeoffs that have no absolute answer.
   The living half of the `reviewing-a-pr` skill, written from actual reviews.
