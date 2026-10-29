@@ -428,6 +428,113 @@ ASYNC_INVOCABLE_TEST("sv - a hybrid layer accumulates to a capture's target, for
 
 namespace
 {
+/// A 1 x 1 quad level at height 0.3, under the Cornell box's rect light, wound both ways so a ray from either side meets it.
+[[nodiscard]] sv::mesh veil_of(sv::material_id material)
+{
+    auto const a = tg::pos3f(-0.5f, 0.3f, -0.5f);
+    auto const b = tg::pos3f(0.5f, 0.3f, -0.5f);
+    auto const c = tg::pos3f(0.5f, 0.3f, 0.5f);
+    auto const d = tg::pos3f(-0.5f, 0.3f, 0.5f);
+    auto const positions = cc::vector<tg::pos3f>{a, b, c, a, c, d, a, c, b, a, d, c};
+    return sv::mesh{.name = "veil",
+                    .geometry = sv::triangle_geometry::create_from_positions(positions),
+                    .material = material};
+}
+
+/// The mean of the hybrid's captured floor below the light, the box lit by its rect light alone, with `veil` placed where one is given.
+cc::shared_async<f32> captured_floor(sg::context& ctx, cc::optional<sv::mesh> veil)
+{
+    constexpr auto size = tg::vec2i(96, 64);
+    auto const path = cc::format("{}/sv-hybrid-veil.png", cc::temp_directory_path());
+    auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
+    auto const out = cc::scoped_environment_variable(sr::capture_output_env_var, path);
+    auto const which = cc::scoped_environment_variable(sr::capture_name_env_var, "front");
+    auto const dim = cc::scoped_environment_variable(sr::capture_size_env_var, cc::format("{}x{}", size[0], size[1]));
+    // Few frames: the shadow it checks for is the difference between 160 and 6 of 255.
+    auto const acc = cc::scoped_environment_variable(sr::capture_accumulate_env_var, "16");
+    auto const lim = cc::scoped_environment_variable(sr::capture_timeout_env_var, "40");
+
+    auto const box = shadowed_cornell_box();
+    auto camera = sv::camera{.position = tg::pos3d(0, 0, -3.4)};
+    camera.projection.vertical_fov = tg::angle_d::make_from_degree(45.0);
+    auto const start = cc::current_time_steady_secs();
+    for (auto f : sv::interactive(ctx, "sv-test/hybrid-veil"))
+    {
+        auto view = f.window().view();
+        view.camera(camera);
+        f.register_capture("front", [](sv::capture_context const&) {});
+        auto scene = view.add_scene();
+        scene.add_mesh(box);
+        if (veil.has_value())
+            scene.add_mesh(veil.value());
+        scene.add_rect_light("key", tg::pos3f(0, 0.99f, 0), tg::vec3f(0.35f, 0, 0), tg::vec3f(0, 0, 0.35f)).nits(40);
+        scene.settings({.mode = sv::render_mode::hybrid, .hybrid_lighting = sv::hybrid_lighting::deferred});
+        REQUIRE(cc::current_time_steady_secs() - start < 35.0);
+    }
+    co_await cc::async_settled(sv::background_work(ctx));
+
+    auto reread = cc::file_read_stream_adapter::open(path);
+    REQUIRE(reread.has_value());
+    cc::read_stream in = reread.value();
+    auto const decoded = babel::image::read(in);
+    REQUIRE(decoded.has_value());
+    auto const& img = decoded.value();
+    REQUIRE(img.width == size[0]);
+
+    // The floor at the box's center, below the veil and seen past its edge: a block of pixels around (48, 54).
+    auto sum = 0.0f;
+    auto count = 0;
+    for (auto y = 52; y <= 56; ++y)
+        for (auto x = 44; x <= 52; ++x)
+            for (auto ch = 0; ch < 3; ++ch)
+            {
+                sum += f32(img.pixels[(y * img.width + x) * img.channels + ch]);
+                ++count;
+            }
+    cc::remove_file(path);
+    co_return sum / f32(count);
+}
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sv::hybrid - a decal that keeps coverage casts no shadow in the hybrid, and a thresholded cutout "
+                     "does",
+                     (sg::context_handle const& ctx_h))
+{
+#if defined(CC_ARCH_ARM64) && defined(_WIN32)
+    SKIP("known broken on Windows on ARM — the inline readback path fastfails; "
+         "issue: bug-sv-woa-inline-readback-fastfail");
+#endif
+    auto& ctx = *ctx_h;
+    if (!sv_test::can_run(ctx) || !ctx.supports(sg::feature::ray_query))
+        SKIP("no inline ray tracing or no SGL compiler, so the hybrid does not build");
+
+    using binding = sv::material_attribute_binding;
+    auto& lib = sv_test::shared_material_library();
+    auto const openpbr = lib.acquire_type(sv::builtin_material::openpbr).value();
+    // glTF's BLEND, as the importer binds it: an opacity and no cutoff, so it stays a coverage fraction.
+    auto blend = cc::vector<binding>();
+    blend.push_back(binding::of("opacity", 0.5f));
+    // glTF's MASK: the same value stepped against a cutoff, fully opaque here.
+    auto mask = cc::vector<binding>();
+    mask.push_back(binding::of("opacity", 1.0f));
+    mask.push_back(binding::of("alpha_cutoff", 0.5f));
+    auto const blend_material = lib.acquire(sv::material::create("veil blend", openpbr, cc::move(blend)));
+    auto const mask_material = lib.acquire(sv::material::create("veil mask", openpbr, cc::move(mask)));
+
+    auto const open = co_await captured_floor(ctx, {});
+    auto const covered = co_await captured_floor(ctx, veil_of(blend_material));
+    auto const masked = co_await captured_floor(ctx, veil_of(mask_material));
+    CC_LOG_INFO("the floor below the light: {} open, {} under a coverage veil, {} under a thresholded one", open,
+                covered, masked);
+
+    // The hybrid's rays skip the coverage veil, so the floor is lit as with none; the thresholded one shadows it.
+    CHECK(open > 40.0f);
+    CHECK(tg::abs(covered - open) < 0.1f * open);
+    CHECK(masked < 0.7f * open);
+}
+
+namespace
+{
 /// A hybrid layer denoised by `method` below native: moving frames scaled into the denoised slot, then still ones at full size.
 cc::shared_async<cc::unit> moving_then_still(sg::context& ctx, sr::denoise_method method)
 {

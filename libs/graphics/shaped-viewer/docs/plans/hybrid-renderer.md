@@ -382,7 +382,12 @@ What the lighting's parts cost, each measured by removing it alone:
 - the secondary base color's texture read, 0.3 ms.
 
 **The cutout cost is the candidate decisions, not their texture reads**: forcing every instance opaque recovers all of it, and sampling the opacity at mip 4 none.
-Opacity micromaps are the answer, for the tracer and the hybrid alike — [feat-sg-opacity-micromaps](../../../shaped-graphics/docs/issues/feat-sg-opacity-micromaps.md).
+**That material is a dirt decal whose opacity is a soft mask**: 79% of its texels lie strictly between 0 and 1, and it keeps coverage rather than thresholding.
+An exact opacity micromap would leave those micro-triangles unknown, so it would recover little of the cost.
+**The hybrid's rays skip an instance that keeps coverage and lights nothing**, through the TLAS instance mask, while every other trace still meets it.
+Such a material is a decal over a surface, whose shadow and bounce barely move; a thresholded cutout, foliage above all, stays traced.
+On Sponza that halved the deferred lighting pass, 6.7 to 3.4 ms, and took a dlss_rr frame alone on the GPU from 11.5 to 8.1 ms.
+Opacity micromaps remain the answer for thresholded cutouts, whose texels are mostly exactly 0 or 1 — [feat-sg-opacity-micromaps](../../../shaped-graphics/docs/issues/feat-sg-opacity-micromaps.md).
 
 **Two numbers per contender, since back to back and alone disagree**: throughput over the wall clock, and a breakdown with each frame alone on the GPU.
 Back to back, it holds at most 2 frames in flight, as a windowed viewer's swapchain does.

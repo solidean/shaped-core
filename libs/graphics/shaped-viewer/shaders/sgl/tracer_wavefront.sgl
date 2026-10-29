@@ -255,10 +255,16 @@ fun wavefront_begin(slot: uint){traced, wavefront_step}:
 
 // ---- extend: the round's segments, traced ---------------------------------------------------------------------------
 
+/// What a trace masks the instances with: every one against `ray_mask_all`.
+/// An instance the hybrid's rays may skip carries every bit but `ray_mask_hybrid`'s, which `view_renderer` gives one that keeps coverage.
+const ray_mask_all = 255
+const ray_mask_hybrid = 1
+
 /// The nearest hit the segment from `origin` along `direction` meets, traced inline, the cutouts it crosses drawing from `seed`.
-fun trace_hit(origin: float3, direction: float3, seed: uint){traced, bindless} -> hit_record:
+/// It meets only the instances whose mask shares a bit with `mask`.
+fun trace_hit(origin: float3, direction: float3, seed: uint, mask: int){traced, bindless} -> hit_record:
     let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 1e-3, t_max = 1e4)
-    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept)
+    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, mask = mask)
     if h.kind == hit_kind.triangle:
         return hit_record(h.instance_id as uint, h.primitive_index as uint, hit_triangle, h.t, float2(h.barycentrics.y, h.barycentrics.z), float3(0.0))
     if h.kind == hit_kind.procedural:
@@ -272,7 +278,7 @@ fun wavefront_extend(index: uint){traced, bindless, wavefront_step}:
     let s = slot as int
     let r = traced.path_rays[s]
     // The path's own stream where the segment leaves, so a cutout's draw belongs to the sample and the bounce, never to the frame.
-    traced.hits[s] = trace_hit(r.origin, r.direction, cutout_seed(traced.path_states[s].rng, cutout_ray_surface))
+    traced.hits[s] = trace_hit(r.origin, r.direction, cutout_seed(traced.path_states[s].rng, cutout_ray_surface), ray_mask_all)
 
 // ---- segment: what the hit's material does not decide ---------------------------------------------------------------
 
@@ -642,15 +648,15 @@ fun shade_stored(slot: uint, inst: scene.instance, n_obj: float3, surface: openp
 
 /// Whether anything blocks the segment from `origin` along `direction` for `distance`, traced inline here and now.
 /// The inline counterpart of `occluded`, which traces through the pipeline's shadow miss; `seed` is what the cutouts it crosses draw from.
-fun blocked(origin: float3, direction: float3, distance: float, seed: uint){traced, bindless} -> bool:
+fun blocked(origin: float3, direction: float3, distance: float, seed: uint, mask: int){traced, bindless} -> bool:
     let r = ray(origin = pos3(origin.x, origin.y, origin.z), direction = vec3(direction.x, direction.y, direction.z), t_min = 1e-3, t_max = distance)
-    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search)
+    let h = traced.world.trace(r, any_hit = c => cutout(c, seed, candidate_opacity(c)), intersection = intersect_quadric, procedural_any_hit = c => hit_decision.accept, flags = ray_flags.accept_first_hit_and_end_search, mask = mask)
     return h.kind != hit_kind.none
 
 /// Whether `s` arrives, its shadow ray traced inline where it has one: `visible` for a caller with no pipeline.
-fun reaches(s: light_sample, seed: uint){traced, bindless} -> bool:
+fun reaches(s: light_sample, seed: uint, mask: int){traced, bindless} -> bool:
     if s.tested == 0u => return true
-    return not blocked(s.origin, s.direction, s.distance, seed)
+    return not blocked(s.origin, s.direction, s.distance, seed, mask)
 
 /// Tests the shadow rays of the slot at `index` of `queue_shadow` and adds what arrives to its path.
 /// One thread per slot rather than per ray, so the slot's radiance has one writer.
@@ -661,7 +667,7 @@ fun wavefront_connect(index: uint){traced, bindless, wavefront_step}:
     for j in 0 ..< 2:
         let sr = traced.shadow_rays[((2u * slot) as int) + j]
         if sr.tested == 0u => continue
-        if not blocked(sr.origin, sr.direction, sr.distance, sr.seed):
+        if not blocked(sr.origin, sr.direction, sr.distance, sr.seed, ray_mask_all):
             light.radiance += sr.radiance
             light.specular += sr.specular
     traced.path_lights[slot as int] = light

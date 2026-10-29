@@ -39,10 +39,10 @@ fun direct(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: fl
     if wo_local.z <= 0.0 => return float3(0.0)
     let mut sum = float3(0.0)
     let l = tracer.sample_light(b, f, wo_local, p, n, not continues, mut rng)
-    if tracer.reaches(l, tracer.cutout_seed(rng, tracer.cutout_ray_light)):
+    if tracer.reaches(l, tracer.cutout_seed(rng, tracer.cutout_ray_light), tracer.ray_mask_hybrid):
         sum += l.diffuse + l.specular
     let e = tracer.sample_environment(b, f, wo_local, p, n, not continues, mut rng)
-    if tracer.reaches(e, tracer.cutout_seed(rng, tracer.cutout_ray_environment)):
+    if tracer.reaches(e, tracer.cutout_seed(rng, tracer.cutout_ray_environment), tracer.ray_mask_hybrid):
         sum += e.diffuse + e.specular
     return sum
 
@@ -96,7 +96,7 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
     result.throughput = throughput
     result.wi = wi
 
-    let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(rng, tracer.cutout_ray_surface))
+    let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(rng, tracer.cutout_ray_surface), tracer.ray_mask_hybrid)
     result.lights = lights_along(origin, wi, h.t, weight_pdf)
     if h.kind == tracer.hit_none:
         result.escaped = scene.background_radiance(tracer.background_sh(), wi) * pt.mis_weight(weight_pdf, pt.env_pdf())
@@ -140,7 +140,7 @@ struct crossing:
 fun crossing_of(b: openpbr.bsdf, origin: float3, wi: float3, rng: uint){tracer.traced, tracer.bindless} -> crossing:
     let mut result = crossing(false, origin, wi, float3(0.0))
     // hashed, so the far side's cutouts draw apart from those of the trace beyond it
-    let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(pt.hash(rng), tracer.cutout_ray_surface))
+    let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(pt.hash(rng), tracer.cutout_ray_surface), tracer.ray_mask_hybrid)
     if h.kind == tracer.hit_none => return result
     let mut outward = face_normal(h)
     if dot(outward, wi) < 0.0 => outward = -outward

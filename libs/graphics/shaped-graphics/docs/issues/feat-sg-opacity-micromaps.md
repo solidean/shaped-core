@@ -50,5 +50,13 @@ NVIDIA's Opacity Micro-Map SDK was the alternative; its GPU path would have to b
 Until then the shader decides every candidate, as today.
 One BLAS per mesh and cutout material where two instances differ; blob-cache only once a measurement shows the bake is worth skipping.
 
-**Done means** the hybrid's lighting pass on Sponza loses most of its 2.5 ms of cutout decisions, measured on an uncapped GPU.
+**Done means** a thresholded cutout's candidate stops are gone from the hybrid's lighting pass, measured on a scene whose foliage is alpha-tested.
+
+## Status
+
+The sg API and the vulkan backend are in; the shaped-rendering baker, sv's integration and dx12 are not.
+**Sponza no longer motivates the rest.**
+Its 2.5 ms came from a dirt decal whose opacity is a soft mask, 79% of it strictly between 0 and 1, where an exact micromap decides little.
+sv's hybrid now skips such coverage instances through the instance mask instead, which removed the cost.
+What remains is thresholded foliage, Bistro's for one, measured before the baker is built.
 

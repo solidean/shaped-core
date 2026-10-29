@@ -64,6 +64,27 @@ void pack_transform(sg::tlas_instance& inst, tg::affine_transform3f const& t)
 
 using impl::resolved_view;
 
+/// The mask of an instance the hybrid's rays skip: every bit but module `tracer`'s `ray_mask_hybrid`, so every other trace still meets it.
+constexpr u8 instance_mask_hybrid_skips = 0xFE;
+
+/// Whether an instance of `opacity` keeps its opacity as coverage rather than thresholding it: one that cuts out at all, with no cutoff or a cutoff of 0.
+/// `r` is the instance's parameter block, where the cutoff is a constant.
+[[nodiscard]] bool keeps_coverage(material_opacity const& opacity, instance_record const& r)
+{
+    if (!opacity.can_cut_out())
+        return false;
+    if (opacity.cutoff == material_opacity::no_offset)
+        return true;
+    for (auto const& slot : r.slots)
+        if (slot.kind == material_slot_kind::constant && u32(slot.offset) == opacity.cutoff && slot.constant.size() >= 4)
+        {
+            auto cutoff = 0.0f;
+            cc::memcpy(&cutoff, slot.constant.data(), 4);
+            return cutoff <= 0.0f;
+        }
+    return true;
+}
+
 /// The hit-group index for `key` — a `scene_item::shader_key` — in `out`, appending it on first use, so the order is the
 /// scene's own.
 [[nodiscard]] u32 hit_group_of(resolved_view& out, cc::hash128 key, gpu_resource_manager& resources)
@@ -242,6 +263,14 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         auto const& emission = out.hit_groups[permutation]->emission;
         auto const estimate = impl::emitter_estimate_of(emission, resources.get_instance(item.instance),
                                                         {.texture = texture_summary, .attribute = attribute_summary});
+
+        // The hybrid's rays skip an instance that keeps coverage and lights nothing: such a material is a decal over a
+        // surface, mostly fractional, so every crossing asks the cutout decision for a shadow and a bounce that barely move.
+        // One that lights the scene stays, since the bounce weighs the lights it meets against the light sample.
+        if (!estimate.has_value()
+            && keeps_coverage(out.hit_groups[permutation]->opacity, resources.get_instance(item.instance)))
+            out.instances.back().mask = instance_mask_hybrid_skips;
+
         if (!estimate.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
             continue;
         auto const state = permutation_state_in(cmd, mode, out.hit_groups[permutation]);
