@@ -458,6 +458,9 @@ private:
     /// geometry reads it.
     void _upload_parameters(sg::command_list& cmd, instance_record& r);
 
+    /// The bindless index a descriptor or texture slot names this epoch, acquired: a texture still arriving names its placeholder.
+    [[nodiscard]] u32 _slot_index(instance_slot const& slot);
+
     /// Whether every id `set` names still resolves, and whether all of it has landed — the quadric counterparts of the
     /// mesh forms, and the same reason they exist: a cached slot is verified rather than believed.
     [[nodiscard]] bool _is_live(sv::resident_quadric_set const& set);

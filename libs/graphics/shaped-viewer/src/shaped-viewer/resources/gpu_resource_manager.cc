@@ -259,6 +259,33 @@ void append_pod(cc::vector<byte>& out, T const& value)
 }
 } // namespace
 
+u32 gpu_resource_manager::_slot_index(instance_slot const& slot)
+{
+    if (slot.kind == material_slot_kind::attribute_descriptor)
+        return u32(acquire_buffer(attributes.get(slot.attribute).data.as_readonly_buffer()));
+
+    CC_ASSERT(slot.kind == material_slot_kind::texture_index, "only a descriptor or a texture slot names an index");
+    auto const& record = textures.get(slot.texture);
+
+    // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
+    // Losing would be no new code, but it flips the permutation when the texture lands — so every affected
+    // mesh would recompile and restart its accumulation mid-load, which is the opposite of what a placeholder
+    // is for.
+    // Pointing the slot elsewhere keeps the permutation stable across the whole load.
+    //
+    // `failed` substitutes too, and deliberately not with the same texel: its texture was created and never
+    // written, so sampling it reads whatever that allocation happened to hold.
+    // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
+    // own factor, `failed` is "never" and wants to be seen.
+    // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
+    auto const& texture
+        = record.state == residency::pending
+            ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
+            : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
+                                                 : record.texture);
+    return u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view()));
+}
+
 cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record const& r)
 {
     // Zero-filled rather than uninitialized: a layout may leave alignment padding between slots, and a block whose padding
@@ -284,37 +311,15 @@ cc::vector<byte> gpu_resource_manager::build_instance_parameters(instance_record
 
         case material_slot_kind::attribute_descriptor:
         {
-            auto const& record = attributes.get(slot.attribute);
-
             // Tightly packed from offset 0 within its own buffer, so the stride is just the element size.
-            u32 const desc[attribute_desc_size / sizeof(u32)]
-                = {u32(acquire_buffer(record.data.as_readonly_buffer())), 0u, slot.element_stride};
+            u32 const desc[attribute_desc_size / sizeof(u32)] = {_slot_index(slot), 0u, slot.element_stride};
             write(slot.offset, cc::span<u32 const>(desc).as_bytes());
             break;
         }
 
         case material_slot_kind::texture_index:
         {
-            auto const& record = textures.get(slot.texture);
-
-            // Substituted at the SLOT rather than by letting the sample lose to a coarser rank.
-            // Losing would be no new code, but it flips the permutation when the texture lands — so every affected
-            // mesh would recompile and restart its accumulation mid-load, which is the opposite of what a placeholder
-            // is for.
-            // Pointing the slot elsewhere keeps the permutation stable across the whole load.
-            //
-            // `failed` substitutes too, and deliberately not with the same texel: its texture was created and never
-            // written, so sampling it reads whatever that allocation happened to hold.
-            // Magenta, because the two states are not the same news — `pending` is "not yet" and wants the material's
-            // own factor, `failed` is "never" and wants to be seen.
-            // `base_resident` is left alone: it is sampleable by definition, just at fewer mips than it will have.
-            auto const& texture
-                = record.state == residency::pending
-                    ? _placeholder_texture(slot.placeholder_texel, record.texture.format())
-                    : (record.state == residency::failed ? _placeholder_texture(k_failed_texel, record.texture.format())
-                                                         : record.texture);
-
-            auto const index = u32(acquire_texture(bindless_table::textures_2d, texture.as_texture_view()));
+            auto const index = _slot_index(slot);
             write(slot.offset, cc::span<u32 const>(&index, 1).as_bytes());
             break;
         }
@@ -329,6 +334,29 @@ void gpu_resource_manager::_upload_parameters(sg::command_list& cmd, instance_re
     if (r.built_in == _record_stamp)
         return;
     r.built_in = _record_stamp;
+
+    // Once a block is uploaded, only its indices can move from one epoch to the next: its constants are the record's own.
+    // So a later epoch re-acquires each index, as the access declaration needs, and patches and uploads only those that moved.
+    if (!r.uploaded.empty())
+    {
+        auto moved = false;
+        for (auto const& slot : r.slots)
+        {
+            if (slot.kind != material_slot_kind::attribute_descriptor && slot.kind != material_slot_kind::texture_index)
+                continue;
+            auto const index = _slot_index(slot);
+            CC_ASSERT(slot.offset + 4 <= r.uploaded.size(), "an index slot does not fit the block its layout sized");
+            auto stored = u32(0);
+            cc::memcpy(&stored, r.uploaded.data() + slot.offset, 4);
+            if (stored == index)
+                continue;
+            cc::memcpy(r.uploaded.data() + slot.offset, &index, 4);
+            moved = true;
+        }
+        if (moved)
+            cmd.upload.data_to_buffer(r.parameters, r.uploaded);
+        return;
+    }
 
     auto bytes = build_instance_parameters(r);
 
@@ -435,10 +463,14 @@ shaders::tracer::instance_record gpu_resource_manager::describe_instance(sg::com
 bool gpu_resource_manager::attributes_resident(instance_id instance)
 {
     CC_ASSERT(contains_instance(instance), "no such instance_id");
-    for (auto const& slot : _instances[isize(u32(instance))].slots)
+    auto& r = _instances[isize(u32(instance))];
+    if (r.resident_in == _record_stamp)
+        return true;
+    for (auto const& slot : r.slots)
         if (slot.kind == material_slot_kind::attribute_descriptor
             && attributes.get(slot.attribute).state != residency::complete)
             return false;
+    r.resident_in = _record_stamp;
     return true;
 }
 

@@ -91,7 +91,8 @@ void write_trace(cc::rec::recording const& captured, cc::string_view name)
         return cc::error("no dx12 hardware device");
     if (!sv_test::shared_env().has_compiler)
         return cc::error("no SGL compiler that reaches DXIL to build the shaders");
-    if (!created.value()->supports(sg::feature::ray_query) || !created.value()->supports(sg::feature::raytracing_pipeline))
+    if (!created.value()->supports(sg::feature::ray_query)
+        || !created.value()->supports(sg::feature::raytracing_pipeline))
         return cc::error("no ray tracing on this device");
     CC_LOG_INFO("adapter: {}", created.value()->metrics.adapter().name);
     return cc::move(created.value());
@@ -305,8 +306,8 @@ cc::shared_async<cc::unit> measure(sg::context& ctx,
         memory(cc::format("after {}'s frames", c.name));
         auto const* const samples = store.peek_ptr(id)->temporal.get_ptr(sv::temporal_id::frame_samples(0));
         auto const input = samples != nullptr ? samples->scaled_denoise.extent() : tg::vec2i(0, 0);
-        CC_LOG_INFO("{} {}x{} moving: {} {} ms per frame alone on the GPU, {} ms back to back, drawn at {}x{}",
-                    name, k_output[0], k_output[1], c.name, 1e3 * total / f64(k_frames), 1e3 * wall / f64(k_frames), input[0],
+        CC_LOG_INFO("{} {}x{} moving: {} {} ms per frame alone on the GPU, {} ms back to back, drawn at {}x{}", name,
+                    k_output[0], k_output[1], c.name, 1e3 * total / f64(k_frames), 1e3 * wall / f64(k_frames), input[0],
                     input[1]);
         for (auto const& st : stages)
             CC_LOG_INFO("    {}: {} ms", st.name, 1e3 * st.seconds / f64(k_frames));

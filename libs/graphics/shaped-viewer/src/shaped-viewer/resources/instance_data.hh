@@ -70,4 +70,8 @@ struct sv::instance_record
     /// Within an epoch a rebuild acquires the same indices again, so the items sharing this record, and every later recording
     /// of the epoch, reuse that build — even one a texture landing in between would have changed, which waits for the next epoch.
     u64 built_in = 0;
+
+    /// The manager's epoch stamp in which every attribute the block names was last seen resident.
+    /// Residency only ever drops at an epoch's start, when eviction runs, so a check that passed holds for the rest of the epoch.
+    u64 resident_in = 0;
 };

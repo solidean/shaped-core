@@ -440,12 +440,12 @@ sg::buffer<f32> const* mesh_manager::acquire_emitter_cdf(sg::command_list& cmd, 
     auto const group = _ctx.transient.create_binding_group(
         cmd, _ctx.cached.acquire_binding_group_layout<shaders::emitter_cdf::emitter_cdf_io>(),
         shaders::emitter_cdf::emitter_cdf_io{.vertices = _vertex_pool.reinterpret_as<byte>().as_readonly_buffer(),
-                                .indices = _index_pool.reinterpret_as<byte>().as_readonly_buffer(),
-                                .cdf = cdf.as_readwrite_buffer()});
+                                             .indices = _index_pool.reinterpret_as<byte>().as_readonly_buffer(),
+                                             .cdf = cdf.as_readwrite_buffer()});
     auto const shape = shaders::emitter_cdf::emitter_cdf_shape{.triangle_count = triangles,
-                                                  .block_count = blocks,
-                                                  .base_vertex = u32(g.base_vertex),
-                                                  .first_index = u32(g.first_index)}
+                                                               .block_count = blocks,
+                                                               .base_vertex = u32(g.base_vertex),
+                                                               .first_index = u32(g.first_index)}
                            .to_block();
 
     // Two dispatches over one buffer, the second reading what the first wrote: the blocks, then the mesh over them.
@@ -501,20 +501,20 @@ cc::optional<f32> mesh_manager::acquire_world_area(sg::command_list& cmd, mesh_i
     auto const group = _ctx.transient.create_binding_group(
         cmd, _ctx.cached.acquire_binding_group_layout<shaders::emitter_cdf::emitter_cdf_io>(),
         shaders::emitter_cdf::emitter_cdf_io{.vertices = _vertex_pool.reinterpret_as<byte>().as_readonly_buffer(),
-                                .indices = _index_pool.reinterpret_as<byte>().as_readonly_buffer(),
-                                .cdf = sums.as_readwrite_buffer()});
+                                             .indices = _index_pool.reinterpret_as<byte>().as_readonly_buffer(),
+                                             .cdf = sums.as_readwrite_buffer()});
     auto const column = [&](tg::vec3f axis)
     {
         auto const c = linear * axis;
         return tg::vec4f(c[0], c[1], c[2], 0.0f);
     };
     auto const shape = shaders::emitter_cdf::emitter_cdf_shape{.column_x = column(tg::vec3f(1, 0, 0)),
-                                                  .column_y = column(tg::vec3f(0, 1, 0)),
-                                                  .column_z = column(tg::vec3f(0, 0, 1)),
-                                                  .triangle_count = triangles,
-                                                  .block_count = blocks,
-                                                  .base_vertex = u32(g.base_vertex),
-                                                  .first_index = u32(g.first_index)}
+                                                               .column_y = column(tg::vec3f(0, 1, 0)),
+                                                               .column_z = column(tg::vec3f(0, 0, 1)),
+                                                               .triangle_count = triangles,
+                                                               .block_count = blocks,
+                                                               .base_vertex = u32(g.base_vertex),
+                                                               .first_index = u32(g.first_index)}
                            .to_block();
 
     // The blocks, then the instance over them, as the CDF's build runs.

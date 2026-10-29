@@ -143,15 +143,15 @@ sg::routine_outcome hybrid_routine::execute(sg::command_list& cmd, hybrid_frame_
     if (outcome != sg::routine_outcome::executed || !deferred)
         return outcome;
 
-    auto const thin_io
-        = ctx.transient.create_binding_group(cmd, ctx.cached.acquire_binding_group_layout<shaders::hybrid_pass::thin_io>(),
-                                             shaders::hybrid_pass::thin_io{.emission = thin.emission.as_texture_view(),
-                                                              .normals = thin.normals.as_texture_view(),
-                                                              .base = thin.base.as_texture_view(),
-                                                              .specular = thin.specular.as_texture_view(),
-                                                              .extra = thin.extra.as_texture_view(),
-                                                              .depth = t.depth.as_texture_view(),
-                                                              .primary_depth = t.primary_depth.as_texture_view()});
+    auto const thin_io = ctx.transient.create_binding_group(
+        cmd, ctx.cached.acquire_binding_group_layout<shaders::hybrid_pass::thin_io>(),
+        shaders::hybrid_pass::thin_io{.emission = thin.emission.as_texture_view(),
+                                      .normals = thin.normals.as_texture_view(),
+                                      .base = thin.base.as_texture_view(),
+                                      .specular = thin.specular.as_texture_view(),
+                                      .extra = thin.extra.as_texture_view(),
+                                      .depth = t.depth.as_texture_view(),
+                                      .primary_depth = t.primary_depth.as_texture_view()});
     auto const declared = d.bindless->declare_compute_access(cmd);
     cmd.compute.bind_pipeline(*self->_light_thin);
     cmd.compute.bind_group(0, *traced);

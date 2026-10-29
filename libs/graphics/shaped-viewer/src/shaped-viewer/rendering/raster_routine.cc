@@ -682,10 +682,10 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             auto const group = ctx.transient.create_binding_group(
                 cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull::raster_cull_io>(),
                 shaders::raster_cull::raster_cull_io{.frame = frame.as_readonly_buffer(),
-                                        .instances = d.instance_table.as_readonly_buffer(),
-                                        .items = item_buffer.as_readonly_buffer(),
-                                        .templates = template_buffer.as_readonly_buffer(),
-                                        .args = args.as_readwrite_buffer()});
+                                                     .instances = d.instance_table.as_readonly_buffer(),
+                                                     .items = item_buffer.as_readonly_buffer(),
+                                                     .templates = template_buffer.as_readonly_buffer(),
+                                                     .args = args.as_readwrite_buffer()});
             cmd.compute.bind_pipeline(*self->_cull);
             cmd.compute.bind_group(0, *group);
             cmd.compute.set_inline_constants(shape);
@@ -727,11 +727,11 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             auto const group = ctx.transient.create_binding_group(
                 cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull::raster_first_io>(),
                 shaders::raster_cull::raster_first_io{.frame = frame.as_readonly_buffer(),
-                                         .instances = d.instance_table.as_readonly_buffer(),
-                                         .items = item_buffer.as_readonly_buffer(),
-                                         .templates = template_buffer.as_readonly_buffer(),
-                                         .history = history.as_readonly_buffer(),
-                                         .args = first_args.as_readwrite_buffer()});
+                                                      .instances = d.instance_table.as_readonly_buffer(),
+                                                      .items = item_buffer.as_readonly_buffer(),
+                                                      .templates = template_buffer.as_readonly_buffer(),
+                                                      .history = history.as_readonly_buffer(),
+                                                      .args = first_args.as_readwrite_buffer()});
             cmd.compute.bind_pipeline(*k.cull_first);
             cmd.compute.bind_group(0, *group);
             cmd.compute.set_inline_constants(shape);
@@ -762,15 +762,17 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
         {
             return ctx.transient.create_binding_group(
                 cmd, pyramid_layout,
-                shaders::raster_cull::pyramid_io{.source = sg::as_texture_view(source).as_texture<sg::tv_2d>(),
-                                    .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = level})});
+                shaders::raster_cull::pyramid_io{
+                    .source = sg::as_texture_view(source).as_texture<sg::tv_2d>(),
+                    .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = level})});
         };
         if (prepass)
         {
             auto const group = ctx.transient.create_binding_group(
                 cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull::pyramid_depth_io>(),
-                shaders::raster_cull::pyramid_depth_io{.source = depth.as_texture_view(),
-                                          .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = 0})});
+                shaders::raster_cull::pyramid_depth_io{
+                    .source = depth.as_texture_view(),
+                    .target = pyramid.as_image_view<sg::pixel_format::r32_float>({.mip = 0})});
             cmd.compute.bind_pipeline(*k.pyramid_seed_depth);
             cmd.compute.bind_group(0, *group);
         }
@@ -796,17 +798,19 @@ sg::routine_outcome raster_routine::execute(sg::command_list& cmd, raster_frame_
             auto const group = ctx.transient.create_binding_group(
                 cmd, ctx.cached.acquire_binding_group_layout<shaders::raster_cull::raster_second_io>(),
                 shaders::raster_cull::raster_second_io{.frame = frame.as_readonly_buffer(),
-                                          .instances = d.instance_table.as_readonly_buffer(),
-                                          .items = item_buffer.as_readonly_buffer(),
-                                          .templates = template_buffer.as_readonly_buffer(),
-                                          .first = first_args.as_readonly_buffer(),
-                                          .pyramid = pyramid.as_texture_view(),
-                                          .history = history.as_readwrite_buffer(),
-                                          .args = second_args.as_readwrite_buffer()});
+                                                       .instances = d.instance_table.as_readonly_buffer(),
+                                                       .items = item_buffer.as_readonly_buffer(),
+                                                       .templates = template_buffer.as_readonly_buffer(),
+                                                       .first = first_args.as_readonly_buffer(),
+                                                       .pyramid = pyramid.as_texture_view(),
+                                                       .history = history.as_readwrite_buffer(),
+                                                       .args = second_args.as_readwrite_buffer()});
             cmd.compute.bind_pipeline(*k.cull_second);
             cmd.compute.bind_group(0, *group);
-            cmd.compute.set_inline_constants(
-                shaders::raster_cull::raster_second_shape{.count = u32(total), .levels = u32(levels), .pad = {}}.to_block());
+            cmd.compute.set_inline_constants(shaders::raster_cull::raster_second_shape{
+                .count = u32(total),
+                .levels = u32(levels),
+                .pad = {}}.to_block());
             cmd.compute.dispatch_threads(int(total));
         }
         drawn_args = second_args.reinterpret_as<sg::draw_indexed_args>();
