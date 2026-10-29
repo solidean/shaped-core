@@ -4,6 +4,8 @@ refs:
   - test: "sv::pathtrace_routine - every material spelling traces a lit, finite image"
   - file: libs/graphics/shaped-graphics/backends/metal/src/shaped-graphics/backends/metal/metal_raytracing_shader_table.cc
   - issue: feat-sv-path-tracer-on-metal
+closed: 2026-10-29
+resolution: fixed
 ---
 
 # On metal, the megakernel hangs the GPU on a scene of cutout triangles and quadrics
@@ -27,3 +29,9 @@ What sv adds over that test, any of which is the next thing to bisect:
 - the procedural group's closest hit traces shadow rays of its own.
 
 Shader validation (`MTL_SHADER_VALIDATION=1`) reports nothing before the timeout.
+
+## Resolved
+
+The cause was link order, not anything sv adds: on metal a bounding-box intersection function linked after several triangle ones never runs.
+sg's metal pipeline now links every procedural group's intersection function first, and `sg - an SGL ray-tracing pipeline traces host groups of both kinds in one scene` pins it.
+The quadric group sat last in this scene's table, so it was linked last; the same functions linked first trace from any slot.

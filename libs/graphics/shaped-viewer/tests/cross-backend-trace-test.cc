@@ -567,9 +567,6 @@ ASYNC_INVOCABLE_TEST("sv::pathtrace_routine - every material spelling traces a l
     auto resources = sv::gpu_resource_manager::create(*ctx_h);
     for (auto const c : cases_to_trace())
     {
-        if (c == trace_case::cutout && ctx_h->backend() == sg::backend_kind::metal)
-            SKIP("on metal the megakernel hangs on cutout triangles beside quadrics; "
-                 "issue: bug-sv-metal-megakernel-cutout-quadric-hang");
         auto const image = co_await image_of(ctx_h.get(), &resources, c);
         auto const mean = checked_mean(image, name_of(c));
         CHECK(mean > 0.05f).context(cc::format("{}: the scene is lit, or nothing traced; mean {}", name_of(c), mean));

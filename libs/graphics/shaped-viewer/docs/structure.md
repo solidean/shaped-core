@@ -158,7 +158,6 @@ Every sv shader is SGL — the tracer, the generated material hit groups and ras
 The raster path runs on dx12, vulkan and metal; `raster-test.cc` holds vulkan's image to dx12's to rounding.
 The path tracer runs on **dx12** (hardware or WARP), **vulkan** and **metal**; `cross-backend-trace-test.cc` holds the vulkan image to the dx12 one to rounding, material spelling by material spelling.
 The viewer's default context (`sv::set_acquire_context` unset) is dx12's on Windows and metal's on Apple platforms, and so are the examples and the GPU tests.
-On metal the megakernel hangs on a scene of cutout triangles beside quadrics, which the wavefront, the default, traces; issue: bug-sv-metal-megakernel-cutout-quadric-hang.
 webgpu is untried: it has ray queries alone.
 The whole sv API compiles everywhere: without a backend a routine simply acquires no shader and draws nothing.
 

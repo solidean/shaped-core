@@ -745,3 +745,150 @@ TEST("sg - a generated pipeline's hit group index is its own type")
     CHECK(path_t::hit_groups_t::spheres.index == 1);
     CHECK(open_t::first_host_hit_group.index == 0);
 }
+
+// sv's shape of a pipeline: every group the host's, a plain one, two cutouts and a procedural one last, so its intersection is linked after theirs.
+// The scene is the mixed one above: the cutout triangles below y = 4, and the boxes moved up by 4 above it.
+
+namespace
+{
+constexpr auto k_runtime_spheres = R"(
+struct sphere_attributes:
+    normal: vec3
+
+@intersection fun sphere(b: procedural_box) -> report[sphere_attributes]:
+    let centre = float3(2.0 * (b.primitive_index as float) + 1.0, 1.0, 1.0)
+    let o = float3(b.object_ray.origin.x, b.object_ray.origin.y, b.object_ray.origin.z)
+    let d = float3(b.object_ray.direction.x, b.object_ray.direction.y, b.object_ray.direction.z)
+    let oc = o - centre
+    let a = dot(d, d)
+    let half_b = dot(oc, d)
+    let disc = half_b * half_b - a * (dot(oc, oc) - 1.0)
+    if disc < 0.0 => return report.none()
+    let t = (-half_b - sqrt(disc)) / a
+    let p = o + d * t - centre
+    return report(t = t, attributes = sphere_attributes(vec3(p.x, p.y, p.z)))
+
+@closest_hit fun shade_sphere(h: procedural_hit[sphere_attributes], p: mut radiance):
+    p.t = h.t
+    p.instance_id = h.instance_id
+    p.primitive = h.primitive_index
+    p.is_hit = 1
+
+hit_group plain for path_rays:
+    surface = (closest_hit = shade)
+
+hit_group spheres for path_rays:
+    geometry = .procedural
+    intersection = sphere
+    surface = (closest_hit = shade_sphere)
+    occlusion = ()
+)";
+} // namespace
+
+ASYNC_INVOCABLE_TEST("sg - an SGL ray-tracing pipeline traces host groups of both kinds in one scene",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::raytracing_pipeline))
+        SKIP("this device has no ray-tracing pipelines");
+
+    using open_t = shaders::raytracing_open::open_path_t;
+    auto const source = cc::string(k_runtime_group) + k_runtime_spheres;
+    auto all = cc::vector<sg::hit_shader>();
+    for (auto const* const name : {"plain", "material", "material", "spheres"})
+    {
+        auto const shaders = co_await slib::compile_hit_group(ctx.get(), &sg_test::shader_fixtures(),
+                                                              &open_t::definition(), source, name, "both-kinds.sgl");
+        REQUIRE(shaders.size() == open_t::ray_count);
+        for (auto const& h : shaders)
+            all.push_back(h);
+    }
+    auto const desc = co_await shaders::raytracing_open::open_path.description(*ctx, {.hit_groups = all});
+    auto const pipeline = co_await ctx->cached.acquire_raytracing_pipeline(desc);
+    REQUIRE(pipeline != nullptr);
+
+    auto table_desc = open_t::table_description(pipeline);
+    auto const first = open_t::first_host_hit_group.index;
+    (void)open_t::add_row(table_desc, {first});
+    auto const cutout = open_t::add_row(table_desc, {first + 1});
+    auto const cutout_again = open_t::add_row(table_desc, {first + 2});
+    auto const spheres = open_t::add_row(table_desc, {first + 3});
+    auto const table = ctx->uncached.create_raytracing_shader_table(table_desc);
+    REQUIRE(table != nullptr);
+
+    float const vertices[] = {0, 0, 0, 4, 0, 0, 0, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4, 0};
+    float const boxes[] = {0, 0, 0, 2, 2, 2, 2, 0, 0, 4, 2, 2};
+    auto const triangle_input
+        = ctx->persistent.create_buffer_from_data(vertices, sg::buffer_usage::accel_structure_build_input);
+    auto const box_input = ctx->persistent.create_buffer_from_data(boxes, sg::buffer_usage::accel_structure_build_input);
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const hits
+        = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4f>::create_defaulted(grid * grid), usage);
+    auto const ids = ctx->persistent.create_buffer_from_data(cc::vector<tg::vec4i>::create_defaulted(grid * grid), usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const triangles = sg::blas_triangles{.vertices = triangle_input.raw(), .vertex_count = 6, .is_opaque = false};
+    auto const triangle_blas = cmd->raytracing.build_blas(cc::span<sg::blas_triangles const>(&triangles, 1),
+                                                          sg::accel_build_flag::fast_trace, open_t::ray_count);
+    auto const aabbs = sg::blas_aabbs{.aabbs = box_input.raw(), .aabb_count = 2};
+    auto const box_blas = cmd->raytracing.build_blas(cc::span<sg::blas_aabbs const>(&aabbs, 1),
+                                                     sg::accel_build_flag::fast_trace, open_t::ray_count);
+    sg::tlas_instance const instances[] = {
+        {.blas = triangle_blas, .instance_id = 10, .hit_group_offset = table->offset_of(cutout)},
+        {.blas = triangle_blas,
+         .transform = {1, 0, 0, 4, 0, 1, 0, 0, 0, 0, 1, 2},
+         .instance_id = 20,
+         .hit_group_offset = table->offset_of(cutout_again)},
+        {.blas = box_blas,
+         .transform = {1, 0, 0, 0, 0, 1, 0, 4, 0, 0, 1, 0},
+         .instance_id = 30,
+         .hit_group_offset = table->offset_of(spheres)},
+    };
+    auto const tlas = cmd->raytracing.build_tlas(instances);
+
+    auto const layout = ctx->cached.acquire_binding_group_layout<shaders::raytracing_open::traced_open>();
+    auto const group
+        = ctx->transient.create_binding_group(*cmd, layout,
+                                              shaders::raytracing_open::traced_open{.world = tlas->as_view(),
+                                                                                    .hits = hits.as_readwrite_buffer(),
+                                                                                    .ids = ids.as_readwrite_buffer()});
+    cmd->raytracing.bind_pipeline(*pipeline);
+    cmd->raytracing.bind_group(0, *group);
+    cmd->raytracing.dispatch_rays(*table, sg::raygen_index(0), grid, grid);
+    auto const ids_back = cmd->download.data_from_buffer(ids);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_ids = co_await ids_back.data();
+    REQUIRE(got_ids.size() == grid * grid);
+    for (auto y = 0; y < grid; ++y)
+        for (auto x = 0; x < grid; ++x)
+        {
+            auto const at = y * grid + x;
+            auto const where = cc::format("cell ({}, {})", x, y);
+            auto const px = float(x) + 0.25f;
+            auto const py = float(y) + 0.5f;
+            if (py < 4)
+            {
+                auto const want = expected_at(x, y);
+                CHECK(got_ids[at][0] == (want.is_hit ? 1 : 0)).context(where);
+                if (want.is_hit)
+                {
+                    CHECK(got_ids[at][1] == want.instance_id).context(where);
+                    CHECK(got_ids[at][3] == (want.is_lit ? 1 : 0)).context(where);
+                }
+                continue;
+            }
+            auto const primitive = px < 2 ? 0 : 1;
+            auto const dx = px - float(2 * primitive + 1);
+            auto const dy = py - 5;
+            auto const is_hit = px < 4 && dx * dx + dy * dy < 1;
+            CHECK(got_ids[at][0] == (is_hit ? 1 : 0)).context(where);
+            if (is_hit)
+            {
+                CHECK(got_ids[at][1] == 30).context(where);
+                CHECK(got_ids[at][2] == primitive).context(where);
+            }
+        }
+}
