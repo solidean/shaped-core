@@ -36,3 +36,44 @@ fun first_over(limit: int) -> int:
     return -1
 
 test first_over(7) == 8
+
+// `..=` takes its last value too, and evaluates both bounds once (EVAL-101)
+fun sum_to(a: int, b: int) -> int:
+    let mut total = 0
+    for i in a ..= b:
+        total += i
+    return total
+
+test sum_to(1, 4) == 10 and sum_to(3, 3) == 3 and sum_to(4, 1) == 0
+
+// a continue reaches the next value, as in a `..<` loop
+test:
+    let mut odd = 0
+    for i in 0 ..= 5:
+        if i % 2 == 0 => continue
+        odd += 1
+    odd == 3
+
+// a range ending at the largest int runs whole: no `last + 1` wraps it away
+test sum_to(2147483646, 2147483647) == -3
+
+// a constant range is the `..<` one past it, which @unroll writes out
+test:
+    let mut s = 0
+    @unroll
+    for d in -1 ..= 1:
+        s += d * d
+    s == 2
+
+// a `let mut` without a value is read only once every path to the read assigned it (CHK-55)
+fun first_square_above(n: int) -> int:
+    let mut found: int
+    let mut i = 0
+    loop:
+        if i * i > n:
+            found = i
+            break
+        i += 1
+    return found
+
+test first_square_above(10) == 4

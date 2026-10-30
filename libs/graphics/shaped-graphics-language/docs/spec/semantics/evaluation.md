@@ -181,6 +181,9 @@ fun graded(a: float) -> float:
   Its second read of the place goes through the index EVAL-14 evaluated, and evaluates nothing again.
 * **EVAL-55** An `if` / `else if` / `else` chain is an `if` whose `else` holds the rest of the chain.
 * **EVAL-56** `while`, `for … in first ..< end` and `loop:` are the loops of the same names; `break` is `leave $loop` and `continue` is `continue $loop`, of the innermost loop.
+* **EVAL-101** `for … in first ..= last` runs over `first` to `last`, `last` included, each bound evaluated once, `first` before `last`.
+  It takes no `int` past `last`, so a range ending at the largest `int` runs whole, where `first ..< last + 1` would wrap and run none.
+  With `last` a constant below the largest `int` it is that `..<` range, `@unroll` included (CHK-389).
 * **EVAL-57** A `loop:` that is a value is `block $loop_value { loop $loop { … } }`, and its `break value` is `leave $loop_value value`.
 * **EVAL-58** `a < b <= c` is `a < b and b <= c` with `b` evaluated once: each inner operand is bound to a local where it first stands, and read from it after that.
 * **EVAL-59** So a chain stops at its first comparison that is false, and evaluates no operand behind it.

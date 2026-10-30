@@ -274,7 +274,9 @@ TEST("sgl check - let introduces an immutable local, in order")
     CHECK(body_reports("let k = 1.0\nreturn k\n") == "");
     CHECK(body_reports("let x : vec3 = k\nreturn k\n") == "type-mismatch user:[k] expected vec3, got float\n");
     CHECK(body_reports("let mut a = k\nreturn a\n") == "");
-    CHECK(body_reports("let a : float\nreturn k\n") == "unsupported-yet user:[let a : float] a let without a value\n");
+    CHECK(body_reports("let a : float\nreturn k\n")
+          == "unsupported-yet user:[let a : float] a let without a value that is no `let mut`, which nothing could "
+             "assign\n");
     CHECK(body_reports("let (a, b) = k\nreturn k\n") == "unsupported-yet user:[(a, b)] a pattern in let\n");
 }
 
@@ -314,8 +316,8 @@ TEST("sgl check - statements and expressions the tracer does not carry")
 {
     CHECK(body_reports("for i in v:\n    return k\nreturn k\n")
           == "unsupported-yet user:[v] a for over anything but an int range\n");
-    CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n")
-          == "unsupported-yet user:[0 ..= 3] a for over a range that is not `..<`\n");
+    // EVAL-101: `..=` is a range a for runs over, its last value included
+    CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n") == "");
     CHECK(body_reports("assert k > 0.0, \"positive\"\nreturn k\n")
               .contains("unsupported-yet user:[\"positive\"] an assert message"));
     // a call may be written for its effect, so its value may be dropped; any other expression has none to be written for
@@ -599,4 +601,32 @@ TEST("sgl check - a constant count or divisor is judged alone, whatever stands b
               .contains("constant-without-value"));
     // a float divided by a constant zero at run time is an infinity every target gives alike
     CHECK(reports_for(cc::format("{}    res.floats[0] = (id.x as float) / 0.0\n", head)) == "");
+}
+
+TEST("sgl check - a let mut without a value is read only after every path assigned it")
+{
+    // CHK-55: an if with an else assigns on both paths, and a loop: on the path through its break
+    CHECK(reports_for("fun pick(c: bool, a: float) -> float:\n    let mut v: float\n    if c:\n        let s = a * "
+                      "2.0\n"
+                      "        v = s\n    else:\n        v = -a\n    return v\n"
+                      "binding o:\n    out_v: mut buffer[float]\n"
+                      "@compute(1) fun main(@thread_id id: int3){o}:\n    o.out_v[0] = pick(id.x > 0, 1.0)\n")
+          == "");
+    // an if without an else, and a for whose body may never run, leave a path that assigns nothing
+    auto const half = reports_for("binding o:\n    out_v: mut buffer[float]\n"
+                                  "@compute(1) fun main(@thread_id id: int3){o}:\n    let mut x: float\n"
+                                  "    if id.x > 0:\n        x = 1.0\n    o.out_v[0] = x\n");
+    CHECK(half.contains("read-before-assignment user:[x] x is read here, and a path to here assigns it nothing"));
+    auto const looped = reports_for("binding o:\n    out_v: mut buffer[float]\n"
+                                    "@compute(1) fun main(@thread_id id: int3){o}:\n    let mut x: float\n"
+                                    "    for i in 0 ..< id.x:\n        x = 1.0\n    o.out_v[0] = x\n");
+    CHECK(looped.contains("read-before-assignment"));
+    // a member assigned is part of it, which needs the rest assigned first
+    CHECK(reports_for("binding o:\n    out_v: mut buffer[float2]\n"
+                      "@compute(1) fun main(@thread_id id: int3){o}:\n    let mut p: float2\n    p.x = 1.0\n"
+                      "    o.out_v[0] = p\n")
+              .contains("read-before-assignment"));
+    // without mut nothing could assign it, and without a type nothing says what it holds
+    CHECK(body_reports("let v: float\nreturn k\n").contains("a let without a value that is no `let mut`"));
+    CHECK(body_reports("let mut v\nreturn k\n").contains("a let without a value or a written type"));
 }

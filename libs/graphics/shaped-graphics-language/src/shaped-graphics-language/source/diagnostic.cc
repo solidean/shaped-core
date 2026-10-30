@@ -182,6 +182,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "recursive-call";
     case diagnostic_kind::not_assignable:
         return "not-assignable";
+    case diagnostic_kind::read_before_assignment:
+        return "read-before-assignment";
     case diagnostic_kind::unreachable_code:
         return "unreachable-code";
     case diagnostic_kind::non_exhaustive_case:
@@ -438,6 +440,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a function that calls itself, directly or through others";
     case diagnostic_kind::not_assignable:
         return "an assignment to something that is not a mutable local or a member of one";
+    case diagnostic_kind::read_before_assignment:
+        return "a read of a local declared without a value, on a path where nothing assigned it";
     case diagnostic_kind::unreachable_code:
         return "a statement after a jump, which never runs";
     case diagnostic_kind::non_exhaustive_case:
@@ -603,6 +607,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::missing_return:
     case diagnostic_kind::recursive_call:
     case diagnostic_kind::not_assignable:
+    case diagnostic_kind::read_before_assignment:
     case diagnostic_kind::non_exhaustive_case:
     case diagnostic_kind::duplicate_case_pattern:
     case diagnostic_kind::missing_value_in_arm:

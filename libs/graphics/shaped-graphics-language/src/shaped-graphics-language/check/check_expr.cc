@@ -922,7 +922,12 @@ type_id checker::check_member(function_scope& scope, ast::expr_id id, ast::membe
 
     // CHK-249: `a.foo` is the field where there is one, and a call of `foo` with `a` otherwise
     auto const& type = out.at(object);
-    auto const index = find_member(type.members);
+    auto index = find_member(type.members);
+    // CHK-409: one letter of the second alphabet is its field, as a field's own letter is
+    if (index < 0 && name.size() == 1 && type.has_swizzles)
+        for (auto i = isize(0); i < type.swizzle_alias.size(); ++i)
+            if (type.swizzle_alias[i] == name[0])
+                index = decltype(index)(i);
     if (index >= 0)
     {
         set_target(file, id, {.kind = target_kind::field, .symbol = type.symbol, .index = i32(index)});
@@ -953,18 +958,27 @@ swizzle checker::swizzle_of(type_id object, cc::string_view name) const
     if (object == error_type || !out.at(object).has_swizzles || name.size() < 2 || name.size() > 4)
         return {};
     auto const fields = out.at(out.at(object).members);
-    auto result = swizzle{.count = i8(name.size())};
-    for (auto i = isize(0); i < name.size(); ++i)
+    // CHK-409: the letters of one swizzle are all the fields' own, or all of the second alphabet
+    auto const& alias = out.at(object).swizzle_alias;
+    for (auto const is_alias : {false, true})
     {
-        auto found = isize(-1);
-        for (auto f = isize(0); f < fields.size(); ++f)
-            if (fields[f].name.size() == 1 && fields[f].name[0] == name[i])
-                found = f;
-        if (found < 0)
-            return {};
-        result.fields[i] = i8(found);
+        if (is_alias && alias.empty())
+            break;
+        auto result = swizzle{.count = i8(name.size())};
+        auto is_found = true;
+        for (auto i = isize(0); is_found && i < name.size(); ++i)
+        {
+            auto found = isize(-1);
+            for (auto f = isize(0); f < fields.size(); ++f)
+                if (is_alias ? alias[f] == name[i] : fields[f].name.size() == 1 && fields[f].name[0] == name[i])
+                    found = f;
+            is_found = found >= 0;
+            result.fields[i] = i8(found);
+        }
+        if (is_found)
+            return result;
     }
-    return result;
+    return {};
 }
 
 type_id checker::lane_type_of(type_id object) const
@@ -988,14 +1002,21 @@ cc::string checker::why_no_swizzle(type_id object, cc::string_view name) const
     auto letters = cc::string();
     for (auto const& f : out.at(out.at(object).members))
         letters += f.name;
-    for (auto const c : name)
+    auto const& alias = out.at(object).swizzle_alias;
+    auto const is_in = [](cc::string_view set, char c)
     {
-        auto is_field = false;
-        for (auto i = isize(0); i < letters.size(); ++i)
-            is_field = is_field || letters[i] == c;
-        if (!is_field)
-            return cc::format(": its swizzle letters are {}, and {} is none", letters, c);
-    }
+        for (auto const x : set)
+            if (x == c)
+                return true;
+        return false;
+    };
+    auto const spelled = alias.empty() ? letters : cc::format("{} or {}", letters, alias);
+    for (auto const c : name)
+        if (!is_in(letters, c) && !is_in(alias, c))
+            return cc::format(": its swizzle letters are {}, and {} is none", spelled, c);
+    // CHK-409: every letter names a field, so the two alphabets are mixed
+    if (name.size() <= 4)
+        return cc::format(": a swizzle takes its letters from {} alone, and {} mixes them", spelled, name);
     return cc::format(": a swizzle reads at most four fields, and {} is its fifth letter", name[4]);
 }
 

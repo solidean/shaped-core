@@ -179,6 +179,11 @@ use view
   It is a value of the plain vector of the element type and the letter count: `float3` from a `vec3`, a `pos3` and a program's `rgb` alike ([why](why/checking.md#chk-385)).
   One letter is the field itself, by CHK-64.
   A letter that names no field, or a fifth letter, is `unknown-member`, and the detail names the letter.
+* **CHK-409** `@swizzle(letters)` gives the struct a second alphabet, one letter per field in order, none of them a field's own ([why](why/checking.md#chk-409)).
+  A swizzle takes its letters from one alphabet alone, so `c.rgb` and `c.xyz` read, and `c.xg` is `unknown-member`.
+  One letter of the second alphabet is its field, as CHK-64 has a field's own.
+  The prelude's plain vectors carry `rgba`: `float4` is `@swizzle(rgba)` and `float2` `@swizzle(rg)`, while `vec3`, `pos3` and `hpos4` carry none, so a position has no red.
+  Every swizzle of either alphabet is a member by CHK-386.
 * **CHK-386** Every swizzle of a `@swizzle` struct is a member of its type scope, as a field is (CHK-233) ([why](why/checking.md#chk-386)).
   So `v.xy` is the swizzle before any function is consulted (CHK-249).
   A function named `xy` visible at the use changes nothing, and `v.xy(…)` is still a call of it.
@@ -547,7 +552,12 @@ fun shade(k: float) -> float:
   Its one argument is `false` or `true`, on any declaration it stands on, and anything else is `invalid-attribute-arguments`.
 * **CHK-266** Every type of `builtins.sgl` is `@shadowable(false)`, and the types of `core.sgl` are not.
   A program's own `int` would be a second type that reads like the first, while a literal stays of the prelude's, so `level: int = 0` would read `expected int, got int`.
-* **CHK-55** A pattern in a `let` and a `let` without a value are `unsupported-yet`; `let mut` is CHK-111.
+* **CHK-55** A pattern in a `let` is `unsupported-yet`; `let mut` is CHK-111.
+  A `let mut` with a written type may stand without a value, `let mut v: float`, and holds nothing until it is assigned.
+  Every read of it must come after an assignment of it whole on every path to the read, or it is the normal error `read-before-assignment`.
+  A `while` or a `for` may run its body no time, so what only the body assigns counts nowhere after it; after a `loop:` it counts on the paths through each `break`.
+  It is judged on the tree an entry point or a test inlines, so a branch on a constant counts only as the branch it takes (CHK-356).
+  A `let` without a value that is no `let mut`, or has no written type, is `unsupported-yet`.
 * **CHK-56** `return value` needs `value` to be of the function's return type, or it is `type-mismatch`.
 * **CHK-57** An arrow body `=> value` is `return value`.
 * **CHK-58** A block body that returns a value does so on every path, by CHK-123 to CHK-125.
@@ -1507,6 +1517,7 @@ A diagnostic of this pass has a kind, a file, a byte span in that file, and a de
 | `binding-not-listed` | CHK-45, CHK-131, CHK-228 |
 | `type-mismatch` | CHK-52, CHK-56, CHK-77, CHK-112 to CHK-118, CHK-121, CHK-167, CHK-210, CHK-214, CHK-219, CHK-236, CHK-243, CHK-275, CHK-276, CHK-279, CHK-281, CHK-287, CHK-329, CHK-344, CHK-362, CHK-375, CHK-392 |
 | `not-assignable` | CHK-112, CHK-236, CHK-316, CHK-352, CHK-367 |
+| `read-before-assignment` | CHK-55 |
 | `missing-return` | CHK-125, CHK-236 |
 | `unreachable-code` | CHK-126, CHK-162 |
 | `no-effect` | CHK-225 |

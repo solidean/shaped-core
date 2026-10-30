@@ -452,7 +452,7 @@ void checker::judge_attributes(i32 file,
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "preferred_subgroup_size"
                  && name != "stream" && name != "stages" && name != "shadowable" && name != "expect"
                  && name != "interpolate" && name != "format" && name != "depth" && name != "sampler"
-                 && name != "geometry" && name != "tessellation_control" && name != "layout")
+                 && name != "geometry" && name != "tessellation_control" && name != "layout" && name != "swizzle")
             report(diagnostic_kind::invalid_attribute_arguments, file, span_of(file, a.list),
                    cc::format("@{} takes no arguments", name));
     }
@@ -653,22 +653,35 @@ cc::string_view checker::member_kind_of(symbol_id owner, cc::string_view name) c
             return "case";
     }
     // CHK-386: every swizzle is a member as a field is, and a function of its name would never be reached
-    if (s != nullptr && find_attribute(o.file, ast.at(o.declaration).attributes, "swizzle") != nullptr
-        && name.size() >= 2 && name.size() <= 4)
+    auto const* const swizzled
+        = s != nullptr ? find_attribute(o.file, ast.at(o.declaration).attributes, "swizzle") : nullptr;
+    if (swizzled != nullptr && name.size() >= 1 && name.size() <= 4)
     {
-        auto is_swizzle = true;
-        for (auto const letter : name)
+        auto letters = cc::string();
+        for (auto const member : ast.at(members))
+            if (auto const* const f = ast.at(member).node.try_as<ast::field_decl>();
+                f != nullptr && ast::is_valid(f->field) && text_of(o.file, ast.at(f->field).name).size() == 1)
+                letters += text_of(o.file, ast.at(f->field).name);
+        // CHK-409: the second alphabet's letters are members too, one alone included
+        auto alias = cc::string_view();
+        if (auto const arguments = ast.at(swizzled->arguments);
+            arguments.size() == 1 && ast::is_valid(arguments[0].value))
+            alias = text_of(o.file, span_of(o.file, arguments[0].value));
+        for (auto const set : {cc::string_view(letters), alias})
         {
-            auto is_field = false;
-            for (auto const member : ast.at(members))
-                if (auto const* const f = ast.at(member).node.try_as<ast::field_decl>();
-                    f != nullptr && ast::is_valid(f->field) && text_of(o.file, ast.at(f->field).name).size() == 1
-                    && text_of(o.file, ast.at(f->field).name)[0] == letter)
-                    is_field = true;
-            is_swizzle = is_swizzle && is_field;
+            if (set.empty() || (set.data() == letters.data() && name.size() < 2))
+                continue;
+            auto is_swizzle = true;
+            for (auto const letter : name)
+            {
+                auto is_letter = false;
+                for (auto const c : set)
+                    is_letter = is_letter || c == letter;
+                is_swizzle = is_swizzle && is_letter;
+            }
+            if (is_swizzle)
+                return "swizzle";
         }
-        if (is_swizzle)
-            return "swizzle";
     }
     auto const* const scope = type_scopes.get_ptr(i32(index_of(owner)));
     auto const* const found = scope != nullptr ? scope->get_ptr(name) : nullptr;

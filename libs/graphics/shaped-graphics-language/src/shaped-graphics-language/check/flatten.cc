@@ -3178,6 +3178,78 @@ struct flattener
         add_stmt(from, flat_for{.label = label, .index = index, .first = first, .end = end, .body = body});
     }
 
+    /// `for i in a ..= b`: the `for` over `a ..< b + 1` where `b` is a constant below the largest int, and otherwise a
+    /// loop that tests after its body, so `b + 1` is never computed and a range up to the largest int runs whole.
+    /// A `continue` leaves the body's block and reaches the test, as it reaches the next index of a `for`.
+    void flatten_inclusive_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id last)
+    {
+        if (!is_valid(first) || !is_valid(last))
+        {
+            mark_failed();
+            return;
+        }
+        auto const int_type = entry.at(first).type;
+        auto const is_unrolled = c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr;
+        if (auto const high = constant_int(last); high.has_value() && high.value() < 2147483647)
+        {
+            auto const end = add_expr(int_type, loop.iterable, flat_int_literal{.value = high.value() + 1});
+            if (is_unrolled)
+                return flatten_unrolled_for(from, id, loop, first, end);
+            return flatten_looped_for(from, id, loop, first, end);
+        }
+        type_id const ints[] = {int_type, int_type};
+        auto const at_most = c.find_operator(file(), "<=", ints);
+        auto const equals = c.find_operator(file(), "==", ints);
+        auto const plus = c.find_operator(file(), "+", ints);
+        if (!is_valid(at_most) || !is_valid(equals) || !is_valid(plus))
+        {
+            mark_failed();
+            return;
+        }
+        auto const where = loop.iterable;
+        // both bounds once, first before last, as a `for` evaluates them
+        auto const low = add_local(local_kind::temporary, "first", int_type);
+        add_stmt(from, flat_let{.local = low, .value = first});
+        auto const high = add_local(local_kind::temporary, "last", int_type);
+        add_stmt(from, flat_let{.local = high, .value = last});
+
+        auto const outer = cc::move(block);
+        block = {};
+        auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
+        auto const index
+            = add_local(local_kind::var, n != nullptr ? c.text_of(file(), n->where) : cc::string_view("i"), int_type);
+        add_stmt(from, flat_var{.local = index, .value = local_ref(low, where)});
+        current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
+
+        auto const label = add_label("for");
+        auto const iteration = add_label("iteration");
+        auto const is_test_loop = is_test && frames.size() == 1;
+        if (is_test_loop)
+            test_loops.push_back(index);
+        current()->loops.push_back({.loop = label, .continue_block = iteration});
+        auto const body = flatten_body(loop.body);
+        current()->loops.remove_back();
+        if (is_test_loop)
+            test_loops.remove_back();
+
+        auto const around = cc::move(block);
+        block = {};
+        add_stmt(from, flat_block{.label = iteration, .body = body});
+        flat_expr_id const reached[] = {local_ref(index, where), local_ref(high, where)};
+        flat_stmt_id const leave[] = {make_stmt(from, flat_leave{.target = label})};
+        add_stmt(from, flat_if{.condition = builtin_call(where, equals, reached), .then_body = add_list(leave)});
+        flat_expr_id const next[] = {local_ref(index, where), add_expr(int_type, where, flat_int_literal{.value = 1})};
+        add_stmt(from, flat_assign{.place = local_ref(index, where), .value = builtin_call(where, plus, next)});
+        auto const steps = add_list(block);
+        block = cc::move(around);
+        add_stmt(from, flat_loop{.label = label, .body = steps});
+
+        auto const runs = add_list(block);
+        block = cc::move(outer);
+        flat_expr_id const ordered[] = {local_ref(low, where), local_ref(high, where)};
+        add_stmt(from, flat_if{.condition = builtin_call(where, at_most, ordered), .then_body = runs});
+    }
+
     void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
     {
         auto const* const r = ast::is_valid(loop.iterable) ? ast().at(loop.iterable).node.try_as<ast::range>() : nullptr;
@@ -3188,6 +3260,8 @@ struct flattener
         }
         auto const first = flatten_expr(r->first);
         auto const end = flatten_expr(r->last);
+        if (sgl::is_valid(r->op) && c.text_of(file(), c.file_of(file()).at(r->op).where) == "..=")
+            return flatten_inclusive_for(from, id, loop, first, end);
         if (c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr)
             return flatten_unrolled_for(from, id, loop, first, end);
         flatten_looped_for(from, id, loop, first, end);
@@ -3210,7 +3284,8 @@ struct flattener
             // minted ahead of its value, so the name the program wrote is its own and a callee inlined there mints past it
             auto const local = add_local(let->is_mut ? local_kind::var : local_kind::let,
                                          c.text_of(file(), name->where), tables().type_at(let->pattern));
-            auto const value = flatten_expr(let->value);
+            // CHK-55: a `let mut` without a value holds nothing until it is assigned, which judge_assignments holds to
+            auto const value = ast::is_valid(let->value) || !let->is_mut ? flatten_expr(let->value) : flat_expr_id::none;
             current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = local});
             if (let->is_mut)
                 add_stmt(from, flat_var{.local = local, .value = value});
@@ -3429,6 +3504,7 @@ void checker::flatten_test(i32 index)
         {
             f.entry.body = f.add_list(f.block);
             judge_constants(f.entry);
+            judge_assignments(f.entry);
         }
         return;
     }
@@ -3448,6 +3524,7 @@ void checker::flatten_test(i32 index)
         return;
     f.entry.body = f.add_list(f.block);
     judge_constants(f.entry);
+    judge_assignments(f.entry);
     out.tests[index].unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
 }
@@ -3825,6 +3902,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         return;
     }
     judge_constants(f.entry);
+    judge_assignments(f.entry);
     judge_uniformity(f.entry);
     f.entry.options = options_reached(id, traversal != nullptr ? traversal->any_hit : symbol_id::none);
     out.entry_points.push_back(cc::move(f.entry));

@@ -189,8 +189,11 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     auto const where = span_of(file, id);
 
     auto type = error_type;
-    if (!ast::is_valid(let.value))
-        unsupported(file, where, "a let without a value");
+    // CHK-55: a value assigned later needs a local that may be assigned, and a type nothing else would give it
+    if (!ast::is_valid(let.value) && !let.is_mut)
+        unsupported(file, where, "a let without a value that is no `let mut`, which nothing could assign");
+    else if (!ast::is_valid(let.value) && !ast::is_valid(let.type))
+        unsupported(file, where, "a let without a value or a written type: `let mut x: float`");
     // CHK-82: a written type is expected of the value, which a literal converts to
     if (ast::is_valid(let.type))
     {
@@ -467,9 +470,10 @@ void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt co
         };
         bound(r->first);
         bound(r->last);
-        // `..=` has no flat form: `end + 1` wraps where the last int is the end
-        if (sgl::is_valid(r->op) && text_of(file, file_of(file).at(r->op).where) != "..<")
-            unsupported(file, span_of(file, loop.iterable), "a for over a range that is not `..<`");
+        // `..<` and `..=` are the two ranges (OP-8); anything else the AST reports
+        if (sgl::is_valid(r->op) && text_of(file, file_of(file).at(r->op).where) != "..<"
+            && text_of(file, file_of(file).at(r->op).where) != "..=")
+            unsupported(file, span_of(file, loop.iterable), "a for over a range that is neither `..<` nor `..=`");
     }
 
     if (ast::is_valid(loop.type))
