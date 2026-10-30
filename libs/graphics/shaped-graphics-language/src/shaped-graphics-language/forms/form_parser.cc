@@ -524,14 +524,25 @@ struct form_parser
         return binary(result, else_group, otherwise);
     }
 
-    /// A keyword form whose first keyword is `if`.
+    /// A keyword form whose first keyword is `if`, or whose jumps `return`, `yield` or `break` stand before an `if`:
+    /// `return if c => a else b` returns the `if`'s value (AST-155).
     [[nodiscard]] bool is_if_led(form_id f) const
     {
         auto const& form = file.at(f);
-        if (form.kind != form_kind::keyword_form || !is_valid(form.first_child))
+        if (form.kind != form_kind::keyword_form)
             return false;
-        auto const& first = file.at(form.first_child);
-        return first.kind == form_kind::keyword && file.text_of(file.at(first.token).where) == "if";
+        for (auto child = form.first_child; is_valid(child); child = file.at(child).next_sibling)
+        {
+            auto const& k = file.at(child);
+            if (k.kind != form_kind::keyword)
+                return false;
+            auto const text = file.text_of(file.at(k.token).where);
+            if (text == "if")
+                return true;
+            if (text != "return" && text != "yield" && text != "break")
+                return false;
+        }
+        return false;
     }
 
     /// A keyword form, or an expression — which becomes a keyword form without keywords when a block hangs off it.
