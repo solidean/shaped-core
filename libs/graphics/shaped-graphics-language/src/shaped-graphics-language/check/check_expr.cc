@@ -1456,9 +1456,23 @@ type_id checker::check_call(function_scope& scope, ast::expr_id id, ast::call co
         set_target(file, call.callee, local->where);
         (void)check_arguments(scope, call.arguments, false);
         if (local->is_captured)
+        {
             report_capture(scope, callee_where, *local);
-        else
+            return error_type;
+        }
+        // a local hides every symbol of its name, which a port meets as a parameter named like a builtin
+        auto hidden = cc::string_view();
+        if (auto const* const found = names_seen_from(file).get_ptr(text))
+            for (auto const s : *found)
+                if (out.at(s).kind == symbol_kind::function || out.at(s).kind == symbol_kind::structure)
+                    hidden = is_prelude_file(out.at(s).file) ? "the prelude's" : "the module's";
+        if (hidden.empty())
             unsupported(file, callee_where, "a call of a local value");
+        else
+            unsupported(file, callee_where,
+                        cc::format("a call of a local value: the {} {} hides {} {}, so rename the {}",
+                                   local->where.kind == target_kind::parameter ? "parameter" : "local", text, hidden,
+                                   text, local->where.kind == target_kind::parameter ? "parameter" : "local"));
         return error_type;
     }
 
