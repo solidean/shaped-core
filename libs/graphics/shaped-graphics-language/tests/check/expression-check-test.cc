@@ -314,8 +314,8 @@ TEST("sgl check - statements and expressions the tracer does not carry")
 {
     CHECK(body_reports("for i in v:\n    return k\nreturn k\n")
           == "unsupported-yet user:[v] a for over anything but an int range\n");
-    CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n")
-          == "unsupported-yet user:[0 ..= 3] a for over a range that is not `..<`\n");
+    // EVAL-101: `..=` is a range a for runs over, its last value included
+    CHECK(body_reports("for i in 0 ..= 3:\n    return k\nreturn k\n") == "");
     CHECK(body_reports("assert k > 0.0, \"positive\"\nreturn k\n")
               .contains("unsupported-yet user:[\"positive\"] an assert message"));
     // a call may be written for its effect, so its value may be dropped; any other expression has none to be written for

@@ -467,9 +467,10 @@ void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt co
         };
         bound(r->first);
         bound(r->last);
-        // `..=` has no flat form: `end + 1` wraps where the last int is the end
-        if (sgl::is_valid(r->op) && text_of(file, file_of(file).at(r->op).where) != "..<")
-            unsupported(file, span_of(file, loop.iterable), "a for over a range that is not `..<`");
+        // `..<` and `..=` are the two ranges (OP-8); anything else the AST reports
+        if (sgl::is_valid(r->op) && text_of(file, file_of(file).at(r->op).where) != "..<"
+            && text_of(file, file_of(file).at(r->op).where) != "..=")
+            unsupported(file, span_of(file, loop.iterable), "a for over a range that is neither `..<` nor `..=`");
     }
 
     if (ast::is_valid(loop.type))
