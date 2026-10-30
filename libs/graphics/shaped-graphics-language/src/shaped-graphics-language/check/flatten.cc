@@ -2958,7 +2958,8 @@ struct flattener
             auto const index = once.later == once.first ? again(once.first, from) : once.later;
             return add_expr(x.type, from, flat_element{.object = object, .index = index});
         }
-        if (x.node.is<flat_local_ref>())
+        // a local and a binding's member, `@workgroup` memory among them, hold nothing to evaluate
+        if (x.node.is<flat_local_ref>() || x.node.is<flat_binding_member>())
             return again(id, from);
         return fail();
     }

@@ -2,8 +2,8 @@
 created: 2026-10-30
 corpus:
   - bgfx/shaders/37-gpudrivenrendering/cs_gdr_stream_compaction
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-10-30T13:36Z
+closed: 2026-10-30
+resolution: fixed
 ---
 
 # `op=` on an element of a `@workgroup` array

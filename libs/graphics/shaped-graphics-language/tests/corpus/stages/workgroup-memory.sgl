@@ -22,3 +22,18 @@ test:
     workgroup_barrier()
     sum(2) == 4.0
     tile.total == 4.0
+
+// a compound assignment reads the element it writes, and evaluates its index once for both (EVAL-14)
+fun next(i: mut int) -> int:
+    i += 1
+    return i + 1
+
+test:
+    tile.values[2] = 1.0
+    tile.values[3] = 10.0
+    let mut calls = 0
+    tile.values[next(mut calls)] += 3.0
+    tile.values[next(mut calls)] *= 2.0
+    calls == 2
+    tile.values[2] == 4.0
+    tile.values[3] == 20.0
