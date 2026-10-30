@@ -52,3 +52,6 @@ binding scene:
     let basis = mat3(scene.axes[0], scene.axes[1], scene.axes[2])
     let f = frame(basis * turn(), float3(0.0))
     scene.points[id.x] = to_world(f, scene.points[id.x])
+
+// a column or a row by name, as a mat4's (CHK-407)
+test turn().column(0) == float3(0.0, 1.0, 0.0) and turn().row(0) == float3(0.0, -1.0, 0.0)

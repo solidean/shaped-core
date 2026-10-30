@@ -143,9 +143,9 @@ binding rows_echo:
         rows_echo.values[4 + 4 * i] = r.y
         rows_echo.values[5 + 4 * i] = r.z
         rows_echo.values[6 + 4 * i] = r.w
-    // column 3 of each matrix, its translation
+    // column 3 of each matrix, its translation, at an index the shader reads from the block (CHK-407)
     for m in 0 ..< 2:
-        let t = rows_echo.xf[m] * float4(0.0, 0.0, 0.0, 1.0)
+        let t = rows_echo.xf[m].column(rows_echo.ids[0].x)
         rows_echo.values[15 + 4 * m] = t.x
         rows_echo.values[16 + 4 * m] = t.y
         rows_echo.values[17 + 4 * m] = t.z

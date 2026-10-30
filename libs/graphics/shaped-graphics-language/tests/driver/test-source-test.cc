@@ -152,3 +152,13 @@ TEST("sgl driver - a pipeline names no entry point that expects a diagnostic, si
                                         "e.sgl");
     CHECK(named.errors == "e.sgl:20:13: error: invalid-pipeline: bad_ps expects a diagnostic, so it is never built\n");
 }
+
+TEST("sgl driver - a matrix column or row outside the matrix has no value, which fails the run")
+{
+    // CHK-407: no target defines one, so the abstract machine stops there
+    auto const tested = sgl::test_source("fun at(i: int) -> float => mat2(float2(1.0, 2.0), float2(3.0, "
+                                         "4.0)).column(i).x\ntest at(2) == 0.0\n",
+                                         "m.sgl");
+    CHECK(tested.errors.contains("test-failed"));
+    CHECK(tested.errors.contains("a matrix index outside the matrix, in a call of 'matrix_column'"));
+}

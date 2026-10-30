@@ -70,3 +70,16 @@ struct pixel_input:
 @pixel fun handedness_ps(p: pixel_input){frame} -> target:
     let mirrors = determinant(frame.model * diagonal(-1.0, 1.0, 1.0, 1.0)) > 0.0
     return { color = float4(select(mirrors, 1.0, 0.0), p.position.x, 0.0, 1.0) }
+
+// a column or a row is read by name, since a bracket means a row in HLSL and a column elsewhere (CHK-407)
+test counting().column(1) == float4(5.0, 6.0, 7.0, 8.0)
+test counting().row(1) == float4(2.0, 6.0, 10.0, 14.0)
+test counting().row(3) == transpose(counting()).column(3)
+test translation(float3(1.0, 2.0, 3.0)).column(3) == float4(1.0, 2.0, 3.0, 1.0)
+
+// the index may be known only at run time
+test:
+    let mut sum = 0.0
+    for i in 0 ..< 4:
+        sum += counting().column(i).x
+    sum == 1.0 + 5.0 + 9.0 + 13.0

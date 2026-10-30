@@ -97,6 +97,33 @@ void transpose(leaves in, result& out)
             out.push_back(in[row * N + column]);
 }
 
+/// Column `i` of an n by n matrix is its leaves from n * i on; row `i` takes one from each column.
+template <isize N, bool IsRow>
+void matrix_part(leaves in, result& out)
+{
+    auto const i = isize(in[N * N].as_int());
+    for (auto k = isize(0); k < N; ++k)
+        out.push_back(IsRow ? in[k * N + i] : in[i * N + k]);
+}
+
+/// A column or a row exists for an index from 0 below the matrix's size, and no target defines another.
+template <isize N>
+cc::string_view matrix_part_undefined(leaves in)
+{
+    auto const i = in[N * N].as_int();
+    return i < 0 || i >= N ? "a matrix index outside the matrix" : cc::string_view();
+}
+
+/// WGSL's and MSL's `m[i]` is column `i`, and HLSL's is row `i`, since HLSL holds an SGL matrix as its transpose.
+template <bool IsRow>
+written write_matrix_part(call_context const& c)
+{
+    auto const is_native = (c.target == language::hlsl) == IsRow;
+    auto const matrix
+        = is_native ? wrapped(c.arguments[0], precedence::primary) : cc::format("transpose({})", c.arguments[0].text);
+    return {.text = cc::format("{}[{}]", matrix, c.arguments[1].text)};
+}
+
 /// WGSL's and MSL's constructor takes columns, and HLSL's takes rows.
 written write_from_columns(call_context const& c)
 {
@@ -266,6 +293,35 @@ void sgl::builtins::register_transforms(registry& r)
     impl::add_function(r, "transpose", {"m", "mat3"}, "mat3", transpose<3>, {},
                        "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
                        "rotates.");
+
+    r.add_comment("// one column or one row of a matrix, which core.sgl gives every matrix as `m.column(i)` and "
+                  "`m.row(i)`");
+    struct matrix_shape
+    {
+        cc::string_view matrix;
+        cc::string_view vector;
+        evaluator column;
+        evaluator row;
+        undefined_check undefined;
+    };
+    matrix_shape const shapes[] = {
+        {"mat4", "float4", matrix_part<4, false>, matrix_part<4, true>, matrix_part_undefined<4>},
+        {"mat3", "float3", matrix_part<3, false>, matrix_part<3, true>, matrix_part_undefined<3>},
+        {"mat2", "float2", matrix_part<2, false>, matrix_part<2, true>, matrix_part_undefined<2>},
+    };
+    for (auto const& shape : shapes)
+        for (auto const is_row : {false, true})
+            r.add(function_record{
+                .signature = cc::format("@internal @pure fun matrix_{}(m: {}, i: int) -> {}", is_row ? "row" : "column",
+                                        shape.matrix, shape.vector),
+                .evaluate = is_row ? shape.row : shape.column,
+                .undefined_when = shape.undefined,
+                .write = {.kind = spelling_kind::custom,
+                          .custom = is_row ? write_matrix_part<true> : write_matrix_part<false>,
+                          .hlsl_names = k_transpose,
+                          .wgsl_names = k_transpose,
+                          .msl_names = k_transpose},
+            });
 
     r.add_comment("// a mat2 is a mat3 of the plane: a value of function bodies alone, made of its columns, times a "
                   "float2");

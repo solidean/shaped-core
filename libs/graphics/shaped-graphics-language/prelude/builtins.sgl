@@ -1096,6 +1096,14 @@
 /// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
 @builtin @pure fun transpose(m: mat3) -> mat3
 
+// one column or one row of a matrix, which core.sgl gives every matrix as `m.column(i)` and `m.row(i)`
+@builtin @internal @pure fun matrix_column(m: mat4, i: int) -> float4
+@builtin @internal @pure fun matrix_row(m: mat4, i: int) -> float4
+@builtin @internal @pure fun matrix_column(m: mat3, i: int) -> float3
+@builtin @internal @pure fun matrix_row(m: mat3, i: int) -> float3
+@builtin @internal @pure fun matrix_column(m: mat2, i: int) -> float2
+@builtin @internal @pure fun matrix_row(m: mat2, i: int) -> float2
+
 // a mat2 is a mat3 of the plane: a value of function bodies alone, made of its columns, times a float2
 /// The matrix of two columns, `c0` first.
 @builtin @pure fun mat2(c0: float2, c1: float2) -> mat2
