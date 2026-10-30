@@ -3,6 +3,8 @@ created: 2026-10-30
 corpus:
   - bgfx/shaders/09-hdr/fs_hdr_blur
   - bgfx/shaders/09-hdr/fs_hdr_tonemap
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-30T13:02Z
 ---
 
 # A `const` whose value is an expression over constants
