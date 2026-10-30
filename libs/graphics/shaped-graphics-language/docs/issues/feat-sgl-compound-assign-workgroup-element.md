@@ -22,4 +22,8 @@ The same `+=` on a buffer element compiles, and so does `scan.temp[i] = scan.tem
 - **What needs it** is a parallel prefix sum, the core of stream compaction: bgfx's `cs_gdr_stream_compaction` does `temp[bi] += temp[ai]` in its up-sweep.
 - The diagnostic names no construct and points at the entry point, which `bug-sgl-flat-tree-unsupported-names-nothing` is about.
 
+**The fix must evaluate the place once.**
+`a[f()] += x` calls `f` once, as CHK-352 already requires of a swizzle's indices, so lowering `+=` to `a[f()] = a[f()] + x` is wrong whenever an index has an effect.
+The index goes into a local first wherever it is not trivially pure, and a test pins that with an index that counts its calls.
+
 `corpus:` names the shader in shader-rosetta (`uv run dev.py companions init shader-rosetta`), under `sources/`.

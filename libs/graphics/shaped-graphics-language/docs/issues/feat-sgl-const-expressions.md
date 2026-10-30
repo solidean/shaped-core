@@ -14,4 +14,9 @@ CHK-394 already folds operators over literals to a literal inside a body, so the
 - It blocks 2 of the first 104 bgfx translations in shader-rosetta, and will block more: weight tables and derived sizes are common.
 - Minimal repro: the line above, and any entry point reading `a`.
 
+**Decided: the rule is compile-time evaluability, not literal folding.**
+A `const` may be any expression that evaluates at compile time and reaches no binding and nothing else dynamic, calls of the program's own functions included.
+So the fix is an evaluator over the checked tree rather than an extension of CHK-394's folding, and CHK-219 is restated in those terms.
+The strict literal-only step first is not wanted: a shader language carries no API-evolution burden that would make the broad rule a risk.
+
 `corpus:` names the shaders in shader-rosetta (`uv run dev.py companions init shader-rosetta`), under `sources/`.
