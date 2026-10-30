@@ -20,6 +20,13 @@ const false = bool.false
 @shadowable(false)
 const true = bool.true
 
+// ---- constants --------------------------------------------------------------------------------------------------------
+//
+// A program that declares its own `pi` hides this one, which is what the many shaders that already do need.
+
+/// The ratio of a circle's circumference to its diameter.
+const pi = 3.14159265358979323846
+
 // ---- the bits of a value --------------------------------------------------------------------------------------------
 //
 // `x.bits` reads a float's bits as a uint, and `float.from_bits(u)` builds one from them; `as` stays a numeric conversion.
