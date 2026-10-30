@@ -156,8 +156,10 @@ void dx12_command_list::fold_transfer_waits()
     // A texture owes it whatever this list does: its entry barrier can change the layout the copy queue is still reading.
     for (auto const& buffer : _touched_buffers)
     {
-        auto const upload = dx12_group_value{buffer->_upload_group, buffer->_pending_async_upload_value.load(std::memory_order_acquire)};
-        auto const stream = dx12_group_value{buffer->_upload_group, buffer->_pending_stream_copy_value.load(std::memory_order_acquire)};
+        auto const upload = dx12_group_value{buffer->_upload_group,
+                                             buffer->_pending_async_upload_value.load(std::memory_order_acquire)};
+        auto const stream = dx12_group_value{buffer->_upload_group,
+                                             buffer->_pending_stream_copy_value.load(std::memory_order_acquire)};
         note_awaited(upload);
         note_awaited(stream);
         fold_group_wait(_required_copy_waits, upload);
@@ -173,8 +175,10 @@ void dx12_command_list::fold_transfer_waits()
     }
     for (auto const& texture : _touched_textures)
     {
-        auto const upload = dx12_group_value{texture->_upload_group, texture->_pending_async_upload_value.load(std::memory_order_acquire)};
-        auto const stream = dx12_group_value{texture->_upload_group, texture->_pending_stream_copy_value.load(std::memory_order_acquire)};
+        auto const upload = dx12_group_value{texture->_upload_group,
+                                             texture->_pending_async_upload_value.load(std::memory_order_acquire)};
+        auto const stream = dx12_group_value{texture->_upload_group,
+                                             texture->_pending_stream_copy_value.load(std::memory_order_acquire)};
         note_awaited(upload);
         note_awaited(stream);
         fold_group_wait(_required_copy_waits, upload);

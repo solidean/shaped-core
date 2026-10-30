@@ -43,11 +43,11 @@ struct sg::backend::dx12::dx12_async_upload_job
     // list waits on this job's value anyway — see dx12_completion_group::awaited_value.
     // Holding it costs no lifetime: the deferred-deletion gate keeps the storage until this value is signaled anyway.
     ComPtr<ID3D12Resource> storage;
-    dx12_texture_footprint footprint;                 // the texture region's copy footprint (texture copies)
-    bool is_texture = false;                          // discriminant: texture copy vs buffer copy
-    isize dst_offset = 0;                             // destination byte offset (buffer copies)
-    cc::pinned_data<byte const> src;                  // source bytes + their pin
-    dx12_group_value completion; // this upload's completion value, on the destination's upload timeline
+    dx12_texture_footprint footprint; // the texture region's copy footprint (texture copies)
+    bool is_texture = false;          // discriminant: texture copy vs buffer copy
+    isize dst_offset = 0;             // destination byte offset (buffer copies)
+    cc::pinned_data<byte const> src;  // source bytes + their pin
+    dx12_group_value completion;      // this upload's completion value, on the destination's upload timeline
     sg::submission_token wait_token
         = sg::submission_token::invalid; // defer the copy until this direct-queue token completes
 

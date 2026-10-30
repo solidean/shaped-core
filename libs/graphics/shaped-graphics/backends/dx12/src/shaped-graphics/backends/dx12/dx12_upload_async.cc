@@ -215,7 +215,8 @@ private:
     // A list drops its handles on the way out of submit, so a dead target says nothing about whether the GPU reads it.
     // The job's own `storage` reference is what the copy then writes; job.storage keeps it alive until the job is gone.
     template <class Resource>
-    [[nodiscard]] static ID3D12Resource* admitted_destination(dx12_async_upload_job const& job, std::shared_ptr<Resource> const& strong)
+    [[nodiscard]] static ID3D12Resource* admitted_destination(dx12_async_upload_job const& job,
+                                                              std::shared_ptr<Resource> const& strong)
     {
         if (strong != nullptr)
             return strong->_resource.Get(); // null when expired: skipped as before

@@ -316,8 +316,8 @@ ASYNC_INVOCABLE_TEST("sg - an async upload a submitted list reads is copied even
         REQUIRE(copy != nullptr);
         {
             // The pattern most likely to read as stale: everything but zero, which fresh storage tends to hold.
-            auto const src = ctx->persistent.create_buffer_from_bytes(pinned_bytes(n, [round](isize i) { return int(i) ^ (0x5A + round); }),
-                                                                      sg::buffer_usage::copy_src);
+            auto const src = ctx->persistent.create_buffer_from_bytes(
+                pinned_bytes(n, [round](isize i) { return int(i) ^ (0x5A + round); }), sg::buffer_usage::copy_src);
             copy->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = n});
             ctx->submit_command_list(cc::move(copy));
         } // the list was the last holder of `src` besides this scope: from here on only the GPU still reads it

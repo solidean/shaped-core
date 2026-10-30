@@ -85,7 +85,8 @@ struct sg::backend::vulkan::vulkan_group_value
             return;
         auto prev = group->awaited_value.load(cc::memory_order_relaxed);
         while (prev < value
-               && !group->awaited_value.compare_exchange_weak(prev, value, cc::memory_order_release, cc::memory_order_relaxed))
+               && !group->awaited_value.compare_exchange_weak(prev, value, cc::memory_order_release,
+                                                              cc::memory_order_relaxed))
         {
             // CAS retries; `prev` is refreshed with the current value each time.
         }

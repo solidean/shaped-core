@@ -583,8 +583,8 @@ bool vulkan_upload_async_system::run_one_window()
     auto chunk_bytes = cc::min(_window_bytes, remaining);
     if (job.is_texture && job.row_bytes > 0)
     {
-        auto const rows = copyable_block_rows(job.dst_format, job.region, dst_offset / job.row_bytes,
-                                              chunk_bytes / job.row_bytes);
+        auto const rows
+            = copyable_block_rows(job.dst_format, job.region, dst_offset / job.row_bytes, chunk_bytes / job.row_bytes);
         chunk_bytes = rows * job.row_bytes;
         CC_ASSERT(chunk_bytes > 0, "the async upload window is smaller than one texture row");
     }
@@ -643,9 +643,9 @@ bool vulkan_upload_async_system::run_one_window()
                                                               .mipLevel = u32(job.subresource.mip_level),
                                                               .baseArrayLayer = u32(job.subresource.array_layer),
                                                               .layerCount = 1};
-            auto const count = build_texture_copy_regions(
-                job.region, job.dst_format, first_row, row_count, job.row_bytes,
-                VkDeviceSize(isize(slot) * _window_bytes), subresource, cc::span<VkBufferImageCopy>(copies));
+            auto const count = build_texture_copy_regions(job.region, job.dst_format, first_row, row_count,
+                                                          job.row_bytes, VkDeviceSize(isize(slot) * _window_bytes),
+                                                          subresource, cc::span<VkBufferImageCopy>(copies));
 
             // GENERAL rather than a transfer-optimal layout: it is what the layout was settled to before the enqueue,
             // and one layout for both directions is what keeps a transfer of the other direction from
