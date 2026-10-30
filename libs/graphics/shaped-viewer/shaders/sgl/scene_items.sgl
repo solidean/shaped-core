@@ -84,7 +84,7 @@ const value_texture = 3u
 /// What `instance.opacity_offset` and `opacity_uv_offset` name when they are not a parameter-block offset.
 const no_offset = 0xffffffffu
 
-/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 208 bytes.
+/// One scene item, as a hit reads it by its instance id — `tracer.instance_record`, 224 bytes.
 /// `gpu_resource_manager::describe_instance` fills the first seven fields, and `view_renderer` the opacity and the placement.
 ///
 /// Keep the two in lockstep: this is a byte layout, not a description of one.
@@ -144,6 +144,9 @@ struct instance:
     /// A bounce reads its +z as the smooth normal, `tracer.instance_shading_normal`.
     frame_offset: uint
     frame_frequency: uint
+    /// 1 where the instance is solid glass, which a hybrid bounce refracts through on its way to what lies beyond, `hybrid.passage_of`; 0 elsewhere.
+    /// A pane is never met by a hybrid ray at all, so it is 0.
+    glass: uint
 
     /// The rows of the object-to-world transform the instance is placed by, which a hit stored for later shading needs.
     to_world_x: float4

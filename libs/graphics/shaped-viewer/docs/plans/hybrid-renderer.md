@@ -433,8 +433,11 @@ Each phase lands with its tests, and its measurement on Sponza and on one large 
      A temporal member reads each frame alone and a spatial one the mean, with the crossfade between; no split signal and no upscaling yet.
 4. **The indirect ray** with the secondary material, ending in the environment past its hit.
    Done, lights reached by the bounce and the secondary's roughness and metalness included.
-   A refracted bounce crosses a solid once, bending out at the first surface it meets inside, and continues from there; a thin wall's goes straight on.
-   What the far side reflects back inside is lost, as is a crossing that ends in total internal reflection: a glass sphere under a uniform sky reads 0.96 of it at its center, 0.88 over its disc.
+   A refracted bounce crosses a solid, bending out at the first surface it meets inside, and continues from there; a thin wall's goes straight on.
+   Every solid glass instance it meets after that is refracted through too, at index 1.5, up to six; the instance record's `glass` word says which are.
+   What an interface reflects is lost, as is a crossing that ends in total internal reflection: a glass sphere under a uniform sky reads 0.96 of it at its center, 0.88 over its disc.
+   Glass spends no bounce: the surface a bounce meets past it is lit as a primary hit is, by direct light and one plain bounce of its own.
+   That is what keeps a hollow vessel in an indirectly lit room from going black, Veach Ajar's teapot, and it adds four trace sites to each lighting.
    The deferred kernel's glass is clear: the thin G-buffer keeps no medium and no thin wall.
 5. **The radiance cache**, ending the indirect ray in it, once counsel has confirmed its design.
    The design is settled and waits on counsel; the glowing-sphere test comes first, since it tells a bug in the feed from a weakness of the design.

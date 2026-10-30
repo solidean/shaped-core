@@ -106,14 +106,17 @@ struct bounce:
     /// its specular roughness, or -1 for none, which leaves it matte; and its metalness
     roughness: float
     metalness: float
+    /// whether it refracted on the way, through the primary hit's own glass or any solid glass after it, which spends no bounce
+    /// `secondary_of` then lights what it met as a primary hit is lit, and a caller follows it with `bounce_plain`
+    through_glass: bool
 
 /// One bounce from `p`: a direction drawn from the closure `b`, traced inline to what it meets.
 ///
-/// A refraction into a solid crosses its interior first, as `crossing_of` follows it, and what it meets beyond is the bounce's.
-/// A thin wall's continues straight on from the far side, and a subsurface one ends.
-/// Past a crossing everything weighs 1 against `direct`, whose shadow rays a transmissive surface blocks, so no light sample reaches what lies behind it.
+/// A refraction into a solid crosses its interior, and a thin wall's continues straight on from the far side; a subsurface one ends.
+/// Any solid glass met after that is refracted through as well, and what the bounce meets beyond it all is the bounce's: `passage_of` follows the whole way.
+/// Past a refraction everything weighs 1 against `direct`, whose shadow ray toward the same light would not have bent with it.
 fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> bounce:
-    let mut result = bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0)
+    let mut result = no_bounce()
     let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
     let s = openpbr.bsdf_sample_direction(b, wo_local, u)
     if s.pdf <= 0.0 or s.direction.z == 0.0 or not s.valid => return result
@@ -123,24 +126,44 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
     // the shading normal bent the direction to the other side of the face than it was drawn for
     if (dot(sampled, n) < 0.0) != refracts => return result
 
-    let mut throughput = s.value * (abs(s.direction.z) / s.pdf)
-    let mut origin = if refracts => p - n * 1e-3 else p + n * 1e-3
-    let mut wi = sampled
+    let origin = if refracts => p - n * 1e-3 else p + n * 1e-3
     let weight_pdf = if refracts => 1e30 else s.pdf
-    if refracts and s.medium == openpbr.medium_transmission:
-        let c = crossing_of(b, origin, sampled, rng)
-        if not c.through => return result
-        throughput *= c.weight
-        origin = c.at
-        wi = c.wi
-    result.throughput = throughput
-    result.wi = wi
+    let solid = refracts and s.medium == openpbr.medium_transmission
+    let way = passage_of(origin, sampled, if solid => b.trans_eta else 0.0, b.medium_sigma_t, rng)
+    if not way.through => return result
+    result.throughput = s.value * (abs(s.direction.z) / s.pdf) * way.weight
+    result.through_glass = refracts or way.crossings > 0u
+    return landed(result, way.h, way.at, way.wi, if way.crossings > 0u => 1e30 else weight_pdf)
 
+/// A bounce that has not happened: nothing carried, nothing met.
+fun no_bounce() -> bounce:
+    return bounce(float3(0.0), float3(0.0), float3(0.0), false, float3(0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.5), -1.0, 0.0, false)
+
+/// `bounce_from` for a closure that refracts nowhere: one direction reflected off it, and one trace, with no glass to pass.
+/// It is the bounce a surface met past glass leaves, whose closure `secondary_of` makes with no transmission, so a second `bounce_from` would only inline code nothing runs.
+/// Nothing where the viewer is below the frame, which `beyond_glass` leaves where no glass was crossed.
+fun bounce_plain(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, p: float3, rng: mut uint){tracer.traced, tracer.bindless} -> bounce:
+    let mut result = no_bounce()
+    if wo_local.z <= 0.0 => return result
+    let u = float3(pt.rand(mut rng), pt.rand(mut rng), pt.rand(mut rng))
+    let s = openpbr.bsdf_sample_direction(b, wo_local, u)
+    if s.pdf <= 0.0 or s.direction.z <= 0.0 or not s.valid => return result
+    let wi = openpbr.to_world(f, s.direction)
+    if dot(wi, n) <= 0.0 => return result
+    result.throughput = s.value * (s.direction.z / s.pdf)
+    let origin = p + n * 1e-3
     let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(rng, tracer.cutout_ray_surface), tracer.ray_mask_hybrid)
-    result.lights = lights_along(origin, wi, h.t, weight_pdf)
+    return landed(result, h, origin, wi, s.pdf)
+
+/// `so_far` completed with what its last segment, from `origin` along the unit `wi`, met at `h`: the lights it passed, and the environment or the surface it ended at.
+/// `pdf` is the density the direction was drawn at, which each light it reaches is weighed against.
+fun landed(so_far: bounce, h: tracer.hit_record, origin: float3, wi: float3, pdf: float){tracer.traced, tracer.bindless} -> bounce:
+    let mut result = so_far
+    result.wi = wi
+    result.lights = lights_along(origin, wi, h.t, pdf)
     if h.kind == tracer.hit_none:
         let env = tracer.background_lanes()
-        result.escaped = scene.environment_radiance(env, wi) * pt.mis_weight(weight_pdf, scene.environment_pdf(env, wi))
+        result.escaped = scene.environment_radiance(env, wi) * pt.mis_weight(pdf, scene.environment_pdf(env, wi))
         return result
 
     let inst = scene.instance(..tracer.traced.instances[h.instance as int])
@@ -157,44 +180,87 @@ fun bounce_from(b: openpbr.bsdf, f: openpbr.frame, n: float3, wo_local: float3, 
         result.albedo = tracer.instance_base_color(inst, ctx)
         result.roughness = tracer.instance_roughness(inst, ctx)
         result.metalness = tracer.instance_metalness(inst, ctx)
-        result.lights += emitter_light(inst, ctx, w1 - w0, w2 - w0, wi, h.t, weight_pdf)
+        result.lights += emitter_light(inst, ctx, w1 - w0, w2 - w0, wi, h.t, pdf)
     else:
         result.n = normalize(raster.to_world_vector(inst, h.normal))
     if dot(result.n, wi) > 0.0 => result.n = -result.n
     return result
 
-/// Where a ray refracted into a solid leaves it again: the far side it reaches, the direction it bends out in, and what the crossing costs.
-struct crossing:
-    /// false where it met nothing, or the far side reflects it totally; the path then ends, and that light is lost
+/// A bounce on its way through solid glass: the segment it is on, what met it there, what the glass has cost so far, and whether it is inside a solid now.
+struct passage:
+    /// false where it met no way out of a solid, or the way out reflected it totally; the bounce then ends, and that light is lost
     through: bool
+    /// whether it has come to rest at `h`, outside every solid
+    done: bool
     at: float3
     wi: float3
-    /// the interior's absorption over the distance, times what the far interface transmits
-    /// and the square of `trans_eta`, which returns the radiance the closure compressed on the way in
+    h: tracer.hit_record
     weight: float3
+    /// how many solids it has left
+    crossings: uint
+    /// inside a solid, its index over the outside's and its interior's extinction; 0 outside one
+    eta: float
+    sigma_t: float3
+    /// what leaving the solid multiplies by: the square of `eta` where a closure compressed the radiance on the way in, 1 where `entered` did not
+    restore: float
 
-/// The crossing of the solid whose surface `b` describes, from `origin` just inside it along `wi`.
+/// How many segments a bounce traces through solid glass before it gives up and its light is lost: each solid costs two, the way in and the way out.
+const passage_segments = 13
+
+/// The index solid glass met by a bounce bends it by, since the instance table carries none.
+/// A refraction into the primary hit's own glass bends by its closure's index instead.
+const glass_eta = 1.5
+
+/// The bounce from `origin` along `wi`, followed through every solid glass it meets to the first other surface, or the environment.
+/// It starts inside a solid where `eta` is not 0, as a refraction into the primary hit's own glass does, with that index and `sigma_t`.
 ///
-/// The first surface met is taken as the way out, and refracts through `b`'s own interface turned around.
+/// Inside a solid, the first surface met is the way out, and refracts back through the way in turned around.
 /// So an object nested inside another bends the ray as if it were the far wall.
-/// The far interface's reflection is a loss rather than a further path, which darkens thick glass slightly.
-/// The interior absorbs alone: a scattering one is extinction here.
-fun crossing_of(b: openpbr.bsdf, origin: float3, wi: float3, rng: uint){tracer.traced, tracer.bindless} -> crossing:
-    let mut result = crossing(false, origin, wi, float3(0.0))
-    // hashed, so the far side's cutouts draw apart from those of the trace beyond it
-    let h = tracer.trace_hit(origin, wi, tracer.cutout_seed(pt.hash(rng), tracer.cutout_ray_surface), tracer.ray_mask_hybrid)
-    if h.kind == tracer.hit_none => return result
-    let mut outward = face_normal(h)
-    if dot(outward, wi) < 0.0 => outward = -outward
-    // `trans_eta` is the inside over the outside, which is the ratio a ray leaving bends by
-    let bent = openpbr.refract_through(wi, -outward, b.trans_eta)
-    if dot(bent, bent) < 1e-6 => return result
-    let transmitted = 1.0 - openpbr.fresnel_dielectric(dot(wi, outward), 1.0 / b.trans_eta)
-    result.through = true
-    result.at = origin + wi * h.t + outward * 1e-3
-    result.wi = normalize(bent)
-    result.weight = exp(-b.medium_sigma_t * h.t) * (transmitted * b.trans_eta * b.trans_eta)
-    return result
+/// Each interface's reflection is a loss rather than a further path, which darkens thick glass slightly, and an interior absorbs alone.
+/// One trace site serves every segment, since each inlines the whole of a trace's any-hit and intersection code.
+fun passage_of(origin: float3, wi: float3, eta: float, sigma_t: float3, rng: uint){tracer.traced, tracer.bindless} -> passage:
+    let none = tracer.hit_record(0u, 0u, tracer.hit_none, -1.0, float2(0.0), float3(0.0))
+    let mut p = passage(true, false, origin, wi, none, float3(1.0), 0u, eta, sigma_t, eta * eta)
+    for i in 0 ..< passage_segments:
+        // the first segment draws its cutouts from the seed a bounce always drew them from
+        let seed = if i == 0 => rng else pt.hash(rng + 7919u * (i as uint))
+        p.h = tracer.trace_hit(p.at, p.wi, tracer.cutout_seed(seed, tracer.cutout_ray_surface), tracer.ray_mask_hybrid)
+        p = passage_step(p)
+        if p.done => return p
+    p.through = false
+    return p
+
+/// `p` moved past the surface its segment met: out of the solid it is in, into a solid glass, or to rest.
+fun passage_step(p: passage){tracer.traced, tracer.bindless} -> passage:
+    let mut q = p
+    let inside = q.eta > 0.0
+    if q.h.kind == tracer.hit_none or not (inside or is_glass(q.h)):
+        q.through = not inside
+        q.done = true
+        return q
+    let mut facing = face_normal(q.h)
+    if dot(facing, q.wi) > 0.0 => facing = -facing
+    let ratio = if inside => q.eta else 1.0 / glass_eta
+    let bent = openpbr.refract_through(q.wi, facing, ratio)
+    if dot(bent, bent) < 1e-6:
+        q.through = false
+        q.done = true
+        return q
+    let transmitted = 1.0 - openpbr.fresnel_dielectric(dot(-q.wi, facing), 1.0 / ratio)
+    let leaving = if inside => exp(-q.sigma_t * q.h.t) * q.restore else float3(1.0)
+    q.weight *= leaving * transmitted
+    q.at = q.at + q.wi * q.h.t - facing * 1e-3
+    q.wi = normalize(bent)
+    q.crossings += if inside => 1u else 0u
+    q.eta = if inside => 0.0 else glass_eta
+    q.sigma_t = float3(0.0)
+    q.restore = 1.0
+    return q
+
+/// Whether `h` met an instance of solid glass, `scene.instance::glass`.
+fun is_glass(h: tracer.hit_record){tracer.traced} -> bool:
+    if h.kind != tracer.hit_triangle => return false
+    return tracer.traced.instances[h.instance as int].glass != 0u
 
 /// The world normal of the face `h` met, either way around: its smooth normal where its material carries one, so a crossing bends without facets.
 fun face_normal(h: tracer.hit_record){tracer.traced, tracer.bindless} -> float3:
@@ -253,6 +319,7 @@ struct secondary:
 const secondary_roughness_floor = 0.4
 
 /// What `direct` lights where `bounced` landed.
+/// Past glass it is lit as a primary hit is: no roughness floor, since `bounce_plain` follows it and `direct` there weighs against it.
 ///
 /// A caller lights the primary hit and this side by side, `direct` for each, rather than one inside the other.
 /// Every call is inlined and the nesting has a limit, which a generated pixel stage around them sits close to.
@@ -264,10 +331,22 @@ fun secondary_of(bounced: bounce) -> secondary:
     surface.specular_weight = if bounced.roughness < 0.0 => 0.0 else 1.0
     // Regularized: `direct` lights this side by its light samples alone, with no BSDF sample to weigh them against,
     // so a near-mirror here turns the rare sample inside its lobe into a firefly; a roughness floor trades that for a softer caustic.
-    surface.specular_roughness = max(bounced.roughness, secondary_roughness_floor)
+    surface.specular_roughness = if bounced.through_glass => bounced.roughness else max(bounced.roughness, secondary_roughness_floor)
     let f = openpbr.make_frame(bounced.n)
     let wo_local = if bounced.hit => openpbr.to_local(f, -bounced.wi) else float3(0.0, 0.0, -1.0)
     return { b = openpbr.bsdf_prepare(surface, false, 3u), f = f, wo_local = wo_local }
+
+/// `wo_local` where `bounced` passed through glass, and below the frame elsewhere, which leaves a `bounce_plain` from it nothing to do.
+/// Glass spends no bounce, as it spends none of the tracer's, so a room seen through a window keeps its indirect light.
+fun beyond_glass(bounced: bounce, wo_local: float3) -> float3:
+    let beyond = if bounced.through_glass => wo_local else float3(0.0, 0.0, -1.0)
+    return beyond
+
+/// `wo_local` where `bounced` passed through no glass, and below the frame elsewhere: what `secondary_environment` lights.
+/// Past glass the environment is `direct`'s own sample instead, weighed against the bounce that follows.
+fun short_of_glass(bounced: bounce, wo_local: float3) -> float3:
+    let unglazed = if bounced.through_glass => float3(0.0, 0.0, -1.0) else wo_local
+    return unglazed
 
 /// `raster.vertex_of`, reading the frame and the instance table of `tracer.traced`, and the image's size from `pass`.
 fun vertex_of(vertex: int, instance: uint){tracer.traced, tracer.bindless, pass} -> raster.varyings:
@@ -316,8 +395,12 @@ fun shade(p: raster.varyings, ctx: material.shading_context, surface_in: openpbr
     let lit = direct(b, shading, face.n, wo_local, p.world, true, mut rng)
     let bounced = bounce_from(b, shading, face.n, wo_local, p.world, mut rng)
     let s2 = secondary_of(bounced)
-    let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, false, mut rng) + secondary_environment(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, mut rng)
-    let color = finite(b.emission + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit))
+    let bounce_lit = direct(s2.b, s2.f, bounced.n, s2.wo_local, bounced.at, bounced.through_glass, mut rng) + secondary_environment(s2.b, s2.f, bounced.n, short_of_glass(bounced, s2.wo_local), bounced.at, mut rng)
+    let next = bounce_plain(s2.b, s2.f, bounced.n, beyond_glass(bounced, s2.wo_local), bounced.at, mut rng)
+    let s3 = secondary_of(next)
+    let next_lit = direct(s3.b, s3.f, next.n, s3.wo_local, next.at, false, mut rng) + secondary_environment(s3.b, s3.f, next.n, s3.wo_local, next.at, mut rng)
+    let beyond = next.throughput * (next.escaped + next.lights + next_lit)
+    let color = finite(b.emission + lit + bounced.throughput * (bounced.escaped + bounced.lights + bounce_lit + beyond))
 
     let prev = scene.camera(..f.previous_camera)
     let motion = pixel + jitter_of(f) - scene.camera_project(prev, p.world - prev.position, pass.size)

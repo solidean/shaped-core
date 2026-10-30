@@ -311,7 +311,10 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
         if (is_pane(secondary, instance))
             out.instances.back().mask = instance_mask_hybrid_skips;
         else if (is_transmissive(secondary, instance))
+        {
             out.instances.back().mask &= instance_mask_hybrid_shadow_skips;
+            out.records.back().glass = 1u;
+        }
 
         if (!estimate.has_value() || !traced || !resources.meshes.can_build_emitter_cdfs())
             continue;
