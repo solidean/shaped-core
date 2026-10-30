@@ -4,8 +4,6 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/check_decl.cc
   - file: libs/graphics/shaped-graphics-language/tests/check/array-check-test.cc
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-10-30T12:16Z
 ---
 
 # Arrays and `mat3` in GPU memory, and matrices and arrays across a stage edge
