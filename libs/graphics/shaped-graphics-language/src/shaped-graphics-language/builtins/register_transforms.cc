@@ -88,6 +88,15 @@ void from_columns(leaves in, result& out)
         out.push_back(leaf);
 }
 
+/// Leaf c * n + r of an n by n matrix becomes leaf r * n + c: column c of the result is row c of `in`.
+template <isize N>
+void transpose(leaves in, result& out)
+{
+    for (auto column = isize(0); column < N; ++column)
+        for (auto row = isize(0); row < N; ++row)
+            out.push_back(in[row * N + column]);
+}
+
 /// WGSL's and MSL's constructor takes columns, and HLSL's takes rows.
 written write_from_columns(call_context const& c)
 {
@@ -205,8 +214,12 @@ void sgl::builtins::register_transforms(registry& r)
     r.add_comment("// what a matrix is on its own; every target has it under this name");
     impl::add_function(r, "determinant", {"m", "mat4"}, "float", determinant, {},
                        "/// The factor `m` scales a volume by, negative where it mirrors and 0 where it flattens one.");
+    impl::add_function(r, "transpose", {"m", "mat4"}, "mat4", transpose<4>, {},
+                       "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
+                       "rotates.");
 
-    r.add_comment("// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector");
+    r.add_comment("// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector, "
+                  "and transposed");
     r.add(function_record{
         .signature = "@pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3",
         .doc = "/// The matrix of three columns, `c0` first.",
@@ -216,4 +229,7 @@ void sgl::builtins::register_transforms(registry& r)
     add_product(r, "transform_float3", "mat3", "v", "float3", "float3", transform_float3, write_product);
     add_product(r, "transform_direction3", "mat3", "v", "vec3", "vec3", transform_float3, write_product);
     add_product(r, "multiply_mat3", "mat3", "b", "mat3", "mat3", multiply_mat3, write_product);
+    impl::add_function(r, "transpose", {"m", "mat3"}, "mat3", transpose<3>, {},
+                       "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
+                       "rotates.");
 }

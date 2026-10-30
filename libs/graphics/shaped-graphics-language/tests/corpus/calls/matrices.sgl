@@ -42,6 +42,16 @@ test:
     let d = float4(3.0, 1.0, 0.0, 2.0)
     determinant(mat4(a, b, c, d)) == 8.0 and determinant(mat4(b, a, c, d)) == -8.0
 
+// a transpose's columns are the rows, so axis `i` reads row `i` back, and twice is the matrix again
+test (transpose(counting()) * float4(1.0, 0.0, 0.0, 0.0)) == float4(1.0, 5.0, 9.0, 13.0)
+test (transpose(counting()) * float4(0.0, 0.0, 0.0, 1.0)) == float4(4.0, 8.0, 12.0, 16.0)
+test (transpose(transpose(counting())) * float4(1.0, 2.0, 3.0, 4.0)) == counting() * float4(1.0, 2.0, 3.0, 4.0)
+
+// a row vector times a matrix, HLSL's `mul(v, m)`, is the transpose times the column vector
+test (transpose(translation(float3(1.0, 2.0, 3.0))) * float4(0.0, 0.0, 0.0, 1.0)) == float4(0.0, 0.0, 0.0, 1.0)
+test (transpose(translation(float3(1.0, 2.0, 3.0))) * float4(1.0, 0.0, 0.0, 0.0)) == float4(1.0, 0.0, 0.0, 1.0)
+test determinant(transpose(diagonal(2.0, 3.0, 4.0, 5.0))) == 120.0
+
 binding frame:
     model: mat4
 

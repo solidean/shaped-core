@@ -124,7 +124,8 @@ use view
 * **CHK-397** `mat3` is the prelude's 3x3 matrix of floats, column-major like `mat4`, and a value of function bodies alone ([why](why/checking.md#chk-397)).
   `mat3(c0, c1, c2)` makes one of three `float3` columns, `c0` first.
   `m * v` of a `float3` or a `vec3` gives the same type, and `m * n` of two is their product, which applies `n` first.
-  It has no other function yet, as `mat4` has none: no transpose, no subscript and no `==`.
+  `transpose(m)` of either is its rows as columns, which is how a row vector times a matrix, HLSL's `mul(v, m)`, is spelled.
+  Neither has another function yet: no subscript and no `==`.
   A local, a parameter, a result and a field of a struct a body holds may be one.
   Wherever a layout would place one it is `unsupported-yet`, at any depth of the structs and arrays holding it.
   That is a constant block, an `@inline` one among them, a buffer's element, a binding array's buffer and workgroup memory.

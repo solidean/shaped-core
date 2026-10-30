@@ -1061,13 +1061,17 @@
 // what a matrix is on its own; every target has it under this name
 /// The factor `m` scales a volume by, negative where it mirrors and 0 where it flattens one.
 @builtin @pure fun determinant(m: mat4) -> float
+/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
+@builtin @pure fun transpose(m: mat4) -> mat4
 
-// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector
+// a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector, and transposed
 /// The matrix of three columns, `c0` first.
 @builtin @pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3
 @builtin @pure @operator("*") fun transform_float3(m: mat3, v: float3) -> float3
 @builtin @pure @operator("*") fun transform_direction3(m: mat3, v: vec3) -> vec3
 @builtin @pure @operator("*") fun multiply_mat3(m: mat3, b: mat3) -> mat3
+/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
+@builtin @pure fun transpose(m: mat3) -> mat3
 
 // `x as T` between the numeric families of one width, and between the widths of one family,
 // component for component; each target writes a conversion to `T`

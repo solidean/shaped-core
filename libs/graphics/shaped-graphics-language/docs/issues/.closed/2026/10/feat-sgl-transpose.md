@@ -8,6 +8,8 @@ corpus:
   - bgfx/shaders/06-bump/vs_bump_instanced
   - bgfx/shaders/33-pom/vs_pom
   - bgfx/shaders/49-hextile/fs_hextile
+closed: 2026-10-30
+resolution: fixed
 ---
 
 # A `transpose` for `mat4` and `mat3`
