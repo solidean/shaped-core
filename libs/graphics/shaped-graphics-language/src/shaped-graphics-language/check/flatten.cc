@@ -379,9 +379,32 @@ struct flattener
 
     flat_expr_id fail()
     {
-        is_failed = true;
+        mark_failed();
         return flat_expr_id::none;
     }
+
+    /// The expression or statement being flattened, innermost, which a failure is located at (CHK-213).
+    origin cursor;
+    /// Where the first failure stood: what a report names, however deep the construct is.
+    cc::optional<origin> first_failure;
+
+    void mark_failed()
+    {
+        is_failed = true;
+        if (!first_failure.has_value() && (ast::is_valid(cursor.expr) || ast::is_valid(cursor.stmt)))
+            first_failure = cursor;
+    }
+
+    /// Moves `cursor` to `at` until it goes out of scope.
+    struct cursor_scope
+    {
+        flattener& f;
+        origin outer;
+        cursor_scope(flattener& f, origin at) : f(f), outer(f.cursor) { f.cursor = at; }
+        ~cursor_scope() { f.cursor = outer; }
+        cursor_scope(cursor_scope const&) = delete;
+        cursor_scope& operator=(cursor_scope const&) = delete;
+    };
 
     /// `type` as the current frame's bindings make it: a generic body names its type parameters, and the tree never does.
     [[nodiscard]] type_id concrete(type_id type)
@@ -391,7 +414,7 @@ struct flattener
         auto const result = c.substitute_existing(type, frames.back().bindings);
         if (!is_valid(result) || c.is_open(result))
         {
-            is_failed = true;
+            mark_failed();
             return type;
         }
         return result;
@@ -815,7 +838,7 @@ struct flattener
         auto value = flatten_expr(assign.value);
         if (!is_valid(operand) || !is_valid(value))
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         judge_decision_store(operand, assign.target);
@@ -826,7 +849,7 @@ struct flattener
             auto const callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
             if (!is_valid(callee))
             {
-                is_failed = true;
+                mark_failed();
                 return;
             }
             auto const read = swizzle_of(again(operand, assign.target), s.letters, type, assign.target);
@@ -859,6 +882,7 @@ struct flattener
     {
         if (!ast::is_valid(id))
             return fail();
+        auto const at = cursor_scope(*this, origin{.file = file(), .expr = id});
         auto const& e = ast().at(id);
         auto const type = tables().type_at(id);
         auto const& where = tables().target_at(id);
@@ -1904,7 +1928,7 @@ struct flattener
         for (auto const& b : current()->bound)
             if (b.where == where && b.closure >= 0)
                 return b.closure;
-        is_failed = true;
+        mark_failed();
         return -1;
     }
 
@@ -2166,7 +2190,7 @@ struct flattener
         {
             effectful_asserts.push_back({.file = file(), .expr = condition});
             meets_error = true;
-            is_failed = true;
+            mark_failed();
         }
 
         auto loop_variables = cc::vector<flat_expr_id>();
@@ -2294,7 +2318,7 @@ struct flattener
             {.kind = check_node_kind::chain, .from = {.file = file(), .expr = id}, .parent = parent, .value = local});
         if (operands.size() < 2 || operators.size() + 1 != operands.size())
         {
-            is_failed = true;
+            mark_failed();
             return local;
         }
 
@@ -2320,7 +2344,7 @@ struct flattener
             auto const callee = c.find_operator(file(), spelling, types);
             if (!is_valid(callee))
             {
-                is_failed = true;
+                mark_failed();
                 return local;
             }
             assign_check(link, id, compare_call(id, callee, left, right));
@@ -2490,7 +2514,7 @@ struct flattener
     {
         if (branches.size() < 2 || !ast::is_valid(branches.front().condition))
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         auto const condition = is_valid(first) ? first : flatten_expr(branches.front().condition);
@@ -2546,7 +2570,7 @@ struct flattener
     {
         if (!is_valid(value))
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         auto const where = target{.kind = target_kind::parameter, .index = i32(p.field)};
@@ -2575,7 +2599,7 @@ struct flattener
                 continue;
             if (!parameters[p].has_default || !ast::is_valid(parameters[p].field))
             {
-                is_failed = true;
+                mark_failed();
                 continue;
             }
             bind_parameter(parameters[p], flatten_expr(ast().at(parameters[p].field).default_value));
@@ -2622,7 +2646,7 @@ struct flattener
         // recursion was reported by the check pass, and an entry point that reaches it is never written
         if (source == nullptr)
         {
-            is_failed = true;
+            mark_failed();
             return {};
         }
         auto const& info = c.out.functions[s.info];
@@ -2638,7 +2662,7 @@ struct flattener
             is_complete = is_complete && p >= 0;
         if (!is_complete)
         {
-            is_failed = true;
+            mark_failed();
             return {};
         }
 
@@ -2659,7 +2683,7 @@ struct flattener
             {
                 if (k >= handed.size() || handed[k] < 0)
                 {
-                    is_failed = true;
+                    mark_failed();
                     continue;
                 }
                 bound.push_back({.where = where, .closure = handed[k]});
@@ -2668,7 +2692,7 @@ struct flattener
             auto const argument = values[k];
             if (!is_valid(argument))
             {
-                is_failed = true;
+                mark_failed();
                 continue;
             }
             // CHK-316: a `mut` parameter is the caller's place, named again wherever the body names the parameter
@@ -2779,7 +2803,7 @@ struct flattener
         // a stray `else` was reported by the AST pass, and no sound body holds one
         if (!ast::is_valid(first.condition))
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         auto const condition = flatten_expr(first.condition);
@@ -2821,7 +2845,7 @@ struct flattener
         auto const op = sgl::is_valid(assign.op) ? c.text_of(file(), c.file_of(file()).at(assign.op).where) : "";
         if (!is_valid(place) || !is_valid(value) || op.empty())
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         if (op != "=")
@@ -2830,7 +2854,7 @@ struct flattener
             auto const callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
             if (!is_valid(callee))
             {
-                is_failed = true;
+                mark_failed();
                 return;
             }
             flat_expr_id const arguments[] = {read_of_place(place, assign.target), value};
@@ -2856,7 +2880,7 @@ struct flattener
         {
             if (!is_valid(coordinates[i]))
             {
-                is_failed = true;
+                mark_failed();
                 return;
             }
             if (i == 0)
@@ -2878,7 +2902,7 @@ struct flattener
         auto const operator_callee = c.find_operator(file(), op.subview({.offset = 0, .size = op.size() - 1}), types);
         if (!is_valid(loaded) || !is_valid(value) || !is_valid(operator_callee))
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         flat_expr_id const operands[] = {loaded, value};
@@ -3029,7 +3053,7 @@ struct flattener
     {
         if (!is_valid(first) || !is_valid(end))
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         auto const low = constant_int(first);
@@ -3058,7 +3082,7 @@ struct flattener
                                                 "constants once the function is inlined, such as `0 ..< taps` with "
                                                 "`taps` a const",
                                       .site = innermost_call()});
-            is_failed = true;
+            mark_failed();
             meets_error = true;
             return;
         }
@@ -3159,7 +3183,7 @@ struct flattener
         auto const* const r = ast::is_valid(loop.iterable) ? ast().at(loop.iterable).node.try_as<ast::range>() : nullptr;
         if (r == nullptr)
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         auto const first = flatten_expr(r->first);
@@ -3173,13 +3197,14 @@ struct flattener
     {
         auto const& s = ast().at(id);
         auto const from = origin{.file = file(), .stmt = id};
+        auto const at = cursor_scope(*this, from);
         if (auto const* const let = s.node.try_as<ast::let_stmt>())
         {
             auto const* const name
                 = ast::is_valid(let->pattern) ? ast().at(let->pattern).node.try_as<ast::name>() : nullptr;
             if (name == nullptr)
             {
-                is_failed = true;
+                mark_failed();
                 return;
             }
             // minted ahead of its value, so the name the program wrote is its own and a callee inlined there mints past it
@@ -3222,7 +3247,7 @@ struct flattener
         auto const* const e = s.node.try_as<ast::expr_stmt>();
         if (e == nullptr || !ast::is_valid(e->value))
         {
-            is_failed = true;
+            mark_failed();
             return;
         }
         flatten_expr_stmt(from, e->value);
@@ -3238,7 +3263,7 @@ struct flattener
         {
             if (loops.empty())
             {
-                is_failed = true;
+                mark_failed();
                 return;
             }
             if (!ast::is_valid(b->value))
@@ -3258,7 +3283,7 @@ struct flattener
         {
             if (loops.empty())
             {
-                is_failed = true;
+                mark_failed();
                 return;
             }
             if (is_valid(loops.back().continue_block))
@@ -3278,7 +3303,7 @@ struct flattener
             auto const& blocks = current()->value_blocks;
             if (blocks.empty())
             {
-                is_failed = true;
+                mark_failed();
                 return;
             }
             // by value: flattening the value may open a value block of its own
@@ -3566,7 +3591,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                                    : cc::string_view("current_procedural_candidate"));
                 if (found == nullptr || found->empty())
                 {
-                    f.is_failed = true;
+                    f.mark_failed();
                     continue;
                 }
                 auto const builder = found->front();
@@ -3595,7 +3620,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
             auto const* const found = prelude_names.get_ptr(source);
             if (source.empty() || found == nullptr || found->empty())
             {
-                f.is_failed = true;
+                f.mark_failed();
                 continue;
             }
             auto const read = found->front();
@@ -3764,8 +3789,24 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
                                    check::stage_name(info.entry_stage)));
     // CHK-213: a gap of this pass is reported, so an entry point never vanishes without a word.
     if (f.is_failed && !f.meets_error)
-        unsupported(s.file, ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name,
-                    cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));
+    {
+        auto const name = ast_of(s.file).at(s.declaration).node.as<ast::fun_decl>().name;
+        if (!f.first_failure.has_value())
+            unsupported(s.file, name,
+                        cc::format("{}: its body reaches a construct the flat tree cannot hold yet", s.name));
+        else
+        {
+            // the construct itself, and the entry point it was reached from, however many calls deep
+            auto const at = f.first_failure.value();
+            auto const where = ast::is_valid(at.expr) ? span_of(at.file, at.expr) : span_of(at.file, at.stmt);
+            auto& d = report(diagnostic_kind::unsupported_yet, at.file, where,
+                             "a construct the flat tree cannot hold yet, here");
+            d.notes.push_back({.file = s.file,
+                               .where = name,
+                               .message = cc::format("reached from the {} entry point {}",
+                                                     check::stage_name(info.entry_stage), s.name)});
+        }
+    }
     if (f.is_failed || !f.stage_violations.empty() || reaches_discard
         || (info.stages & stage_bit(info.entry_stage)) == 0 || (!is_linear && !f.quad_calls.empty()))
         return;

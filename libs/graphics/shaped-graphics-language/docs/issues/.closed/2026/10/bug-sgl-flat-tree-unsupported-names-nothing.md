@@ -1,5 +1,7 @@
 ---
 created: 2026-10-30
+closed: 2026-10-30
+resolution: fixed
 ---
 
 # An `unsupported-yet` of the flat tree names no construct, and points at the entry point

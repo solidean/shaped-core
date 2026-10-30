@@ -1280,7 +1280,9 @@ hit_group textured for path_rays:
   A splatted value that is no local is bound to a temporary local where its first member stands, so it is evaluated once and no earlier than written.
 * **CHK-104** Every name an emitter writes comes from one **mint**, which hands out a desired name when it is free and `name_1`, `name_2`, … otherwise ([why](why/checking.md#chk-104)).
 * **CHK-105** An entry point keeps its name, and every module-level name is taken in the mint before the first local is minted.
-* **CHK-213** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet` at its name.
+* **CHK-213** An entry point whose flat tree the pass cannot write, though nothing it reaches reported an error, is `unsupported-yet`.
+  It stands at the first expression or statement the pass could not write, in whatever function that was inlined from, and a note names the entry point.
+  Where the pass knows no such place, it stands at the entry point's name.
   A gap of the pass is never a silent loss of the entry point.
 * **CHK-356** An `if` or an `else if` whose condition is a constant (CHK-310), as a statement or as a value, is replaced in the flat tree by the branch it takes ([why](why/checking.md#chk-356)).
   The branch it does not take is in no target's text and in no footprint.
