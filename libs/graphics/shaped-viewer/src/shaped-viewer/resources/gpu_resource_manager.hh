@@ -547,8 +547,9 @@ private:
     /// A pointer rather than a reference so the type stays movable, which `create` returns by value.
     sg::context* _ctx = nullptr;
 
-    /// This epoch's frame meshes, cleared by `advance_to`.
-    cc::vector<frame_mesh> _frame_meshes;
+    /// This epoch's frame meshes by their geometry's content hash, cleared by `advance_to`.
+    /// A mesh every view acquires again is found in O(1), however many frame meshes the epoch holds.
+    cc::map<cc::hash128, frame_mesh> _frame_meshes;
 
     /// keyed on the packed texel and the format it is stored in; never evicted, since one 1x1 costs nothing to keep
     cc::map<u64, sg::texture_2d> _placeholder_textures;

@@ -761,11 +761,7 @@ sv::frame_mesh const& gpu_resource_manager::acquire_frame_mesh(sg::command_list&
                                                                triangle_geometry const& geometry,
                                                                bool build_blas)
 {
-    auto* found = static_cast<frame_mesh*>(nullptr);
-    for (auto& m : _frame_meshes)
-        if (m.hash == geometry.hash)
-            found = &m;
-
+    auto* found = _frame_meshes.get_ptr(geometry.hash);
     if (found == nullptr)
     {
         // Build input only where the context builds acceleration structures, which a raster-only device refuses;
@@ -781,8 +777,7 @@ sv::frame_mesh const& gpu_resource_manager::acquire_frame_mesh(sg::command_list&
                             .triangle_count = geometry.triangle_count()};
         if (m.is_indexed)
             m.indices = _ctx->transient.create_buffer_from_data(cmd, geometry.indices.span(), usage);
-        _frame_meshes.push_back(cc::move(m));
-        found = &_frame_meshes.back();
+        found = &_frame_meshes.entry(geometry.hash).get_or_emplace(cc::move(m));
     }
 
     if (build_blas && found->blas == nullptr)
