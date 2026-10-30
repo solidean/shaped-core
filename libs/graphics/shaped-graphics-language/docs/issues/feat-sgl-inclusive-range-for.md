@@ -2,6 +2,8 @@
 created: 2026-10-30
 corpus:
   - bgfx/shaders/53-sky2/fs_sky2
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-30T16:08Z
 ---
 
 # A for over an inclusive range, for i in a ..= b
