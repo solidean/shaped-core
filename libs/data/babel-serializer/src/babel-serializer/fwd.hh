@@ -20,6 +20,8 @@ struct corner;
 struct face;
 struct group;
 struct data;
+struct texture_map;
+struct material;
 
 /// The domain every recording site in babel::obj is attributed to.
 CC_REC_DECLARE_DOMAIN(g_rec_domain);

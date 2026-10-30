@@ -7,7 +7,7 @@
 
 #include <charconv> // std::from_chars
 
-// Line-oriented OBJ parser.
+// Line-oriented OBJ and MTL parsers.
 // One line at a time via read_stream::read_line — never buffers the whole file.
 // Grouping directives (o / g / usemtl) open a face span that stays open until the next directive of the same
 // kind (or end of file); the span records which faces it covers.
@@ -239,6 +239,228 @@ struct obj_parser
         return cc::move(result);
     }
 };
+
+// Line-oriented MTL parser, on the same tokenizer.
+// A `newmtl` opens a material that every statement up to the next `newmtl` fills in.
+struct mtl_parser
+{
+    cc::vector<obj::material> result;
+    int line_number = 0;
+
+    [[nodiscard]] auto error_here(cc::string_view what)
+    {
+        return cc::error(cc::format("MTL parse error on line {}: {}", line_number, what));
+    }
+
+    /// `r [g b]`; nothing for `spectral` / `xyz`, which the reader does not model.
+    [[nodiscard]] cc::result<cc::optional<tg::vec3f>> parse_color(line_tokenizer& tok, cc::string_view keyword)
+    {
+        auto first = cc::string_view();
+        if (!tok.next(first))
+            return error_here(cc::format("expected a color after '{}'", keyword));
+        if (first == "spectral" || first == "xyz")
+            return cc::optional<tg::vec3f>();
+        auto c = tg::vec3f();
+        if (!parse_float(first, c[0]))
+            return error_here(cc::format("invalid color after '{}'", keyword));
+        auto more = cc::string_view();
+        if (!tok.next(more))
+            return cc::optional<tg::vec3f>(tg::vec3f(c[0], c[0], c[0]));
+        if (!parse_float(more, c[1]) || !tok.next(more) || !parse_float(more, c[2]))
+            return error_here(cc::format("expected 1 or 3 color components after '{}'", keyword));
+        return cc::optional<tg::vec3f>(c);
+    }
+
+    [[nodiscard]] cc::result<f32> parse_scalar(line_tokenizer& tok, cc::string_view keyword)
+    {
+        auto value = cc::string_view();
+        auto f = f32(0);
+        if (!tok.next(value) || !parse_float(value, f))
+            return error_here(cc::format("expected a number after '{}'", keyword));
+        return f;
+    }
+
+    /// The options, then the file name as the rest of the line.
+    [[nodiscard]] cc::result<obj::texture_map> parse_map(line_tokenizer& tok, cc::string_view keyword)
+    {
+        auto map = obj::texture_map();
+        while (true)
+        {
+            auto const before = tok.p;
+            auto option = cc::string_view();
+            if (!tok.next(option) || option.front() != '-')
+            {
+                tok.p = before;
+                break;
+            }
+            // up to three numbers, as -o / -s / -t take one to three
+            auto const read_vector = [&](tg::vec3f& v) -> bool
+            {
+                for (auto i = 0; i < 3; ++i)
+                {
+                    auto const at = tok.p;
+                    auto value = cc::string_view();
+                    auto f = f32(0);
+                    if (!tok.next(value) || !parse_float(value, f))
+                    {
+                        tok.p = at;
+                        return i > 0;
+                    }
+                    v[i] = f;
+                }
+                return true;
+            };
+            auto ignored = tg::vec3f();
+            auto arg = cc::string_view();
+            auto ok = true;
+            if (option == "-o")
+                ok = read_vector(map.offset);
+            else if (option == "-s")
+                ok = read_vector(map.scale);
+            else if (option == "-t")
+                ok = read_vector(ignored);
+            else if (option == "-bm")
+                ok = tok.next(arg) && parse_float(arg, map.bump_multiplier);
+            else if (option == "-clamp")
+            {
+                ok = tok.next(arg);
+                map.clamp = arg == "on";
+            }
+            else if (option == "-mm")
+                ok = tok.next(arg) && tok.next(arg);
+            else if (option == "-blendu" || option == "-blendv" || option == "-boost" || option == "-texres"
+                     || option == "-imfchan" || option == "-cc" || option == "-type")
+                ok = tok.next(arg);
+            else
+                return error_here(cc::format("unknown option '{}' after '{}'", option, keyword));
+            if (!ok)
+                return error_here(cc::format("malformed option '{}' after '{}'", option, keyword));
+        }
+        map.filename = cc::string(tok.rest());
+        if (map.filename.empty())
+            return error_here(cc::format("expected a file name after '{}'", keyword));
+        return map;
+    }
+
+    [[nodiscard]] cc::result<cc::unit> parse_line(cc::string_view line)
+    {
+        auto tok = line_tokenizer(line);
+        auto keyword = cc::string_view();
+        if (!tok.next(keyword) || keyword.front() == '#')
+            return cc::unit{};
+
+        if (keyword == "newmtl")
+        {
+            result.push_back({});
+            result.back().name = cc::string(tok.rest());
+            return cc::unit{};
+        }
+        if (result.empty())
+            return cc::unit{}; // nothing to fill in yet
+        auto& m = result.back();
+
+        auto const color = [&](cc::optional<tg::vec3f>& out) -> cc::result<cc::unit>
+        {
+            auto c = parse_color(tok, keyword);
+            CC_RETURN_IF_ERROR(c);
+            if (c.value().has_value())
+                out = c.value().value();
+            return cc::unit{};
+        };
+        auto const scalar = [&](cc::optional<f32>& out) -> cc::result<cc::unit>
+        {
+            auto f = parse_scalar(tok, keyword);
+            CC_RETURN_IF_ERROR(f);
+            out = f.value();
+            return cc::unit{};
+        };
+        auto const texture = [&](cc::optional<obj::texture_map>& out) -> cc::result<cc::unit>
+        {
+            auto t = parse_map(tok, keyword);
+            CC_RETURN_IF_ERROR(t);
+            out = cc::move(t.value());
+            return cc::unit{};
+        };
+
+        if (keyword == "Ka")
+            return color(m.ambient);
+        if (keyword == "Kd")
+            return color(m.diffuse);
+        if (keyword == "Ks")
+            return color(m.specular);
+        if (keyword == "Ke")
+            return color(m.emissive);
+        if (keyword == "Tf")
+            return color(m.transmission_filter);
+        if (keyword == "Ns")
+            return scalar(m.specular_exponent);
+        if (keyword == "d")
+        {
+            // `d -halo f` is a dissolve that depends on the view angle; its factor is kept as the plain dissolve
+            auto const before = tok.p;
+            auto halo = cc::string_view();
+            if (!tok.next(halo) || halo != "-halo")
+                tok.p = before;
+            return scalar(m.dissolve);
+        }
+        if (keyword == "Tr")
+            return scalar(m.transparency);
+        if (keyword == "Ni")
+            return scalar(m.optical_density);
+        if (keyword == "Pr")
+            return scalar(m.roughness);
+        if (keyword == "Pm")
+            return scalar(m.metallic);
+        if (keyword == "illum")
+        {
+            auto value = cc::string_view();
+            auto i = i32(0);
+            if (!tok.next(value) || !parse_int(value, i))
+                return error_here("expected an integer after 'illum'");
+            m.illumination_model = i;
+            return cc::unit{};
+        }
+        if (keyword == "map_Ka")
+            return texture(m.ambient_map);
+        if (keyword == "map_Kd")
+            return texture(m.diffuse_map);
+        if (keyword == "map_Ks")
+            return texture(m.specular_map);
+        if (keyword == "map_Ke")
+            return texture(m.emissive_map);
+        if (keyword == "map_Ns")
+            return texture(m.specular_exponent_map);
+        if (keyword == "map_d")
+            return texture(m.dissolve_map);
+        if (keyword == "bump" || keyword == "map_bump" || keyword == "map_Bump")
+            return texture(m.bump_map);
+        if (keyword == "disp")
+            return texture(m.displacement_map);
+        if (keyword == "norm")
+            return texture(m.normal_map);
+        if (keyword == "map_Pr")
+            return texture(m.roughness_map);
+        if (keyword == "map_Pm")
+            return texture(m.metallic_map);
+        // any other statement (decal, refl, sharpness, Ps, aniso, ...) is skipped
+        return cc::unit{};
+    }
+
+    [[nodiscard]] cc::result<cc::vector<obj::material>> parse(cc::read_stream& in)
+    {
+        auto line = cc::string();
+        while (true)
+        {
+            auto more = in.read_line(line);
+            CC_RETURN_IF_ERROR(more);
+            if (!more.value())
+                break;
+            ++line_number;
+            CC_RETURN_IF_ERROR(parse_line(line));
+        }
+        return cc::move(result);
+    }
+};
 } // namespace
 } // namespace babel::impl
 
@@ -263,5 +485,25 @@ cc::result<data> read(cc::span<byte const> bytes)
 cc::result<data> read(cc::string_view text)
 {
     return read(cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size()));
+}
+
+cc::result<cc::vector<material>> read_materials(cc::read_stream& in)
+{
+    CC_RECORD_SCOPE("obj.read_materials");
+
+    auto parser = babel::impl::mtl_parser();
+    return parser.parse(in);
+}
+
+cc::result<cc::vector<material>> read_materials(cc::span<byte const> bytes)
+{
+    auto adapter = cc::span_read_stream_adapter(bytes);
+    cc::read_stream stream = adapter;
+    return read_materials(stream);
+}
+
+cc::result<cc::vector<material>> read_materials(cc::string_view text)
+{
+    return read_materials(cc::span<byte const>(reinterpret_cast<byte const*>(text.data()), text.size()));
 }
 } // namespace babel::obj

@@ -31,7 +31,7 @@ babel-serializer/src/babel-serializer/
   geometry/    [in progress]   mesh / geometry formats
     fbx        [done]          FBX reader, both encodings, over the vendored ufbx
     gltf       [done]          glTF 2.0 + GLB reader over pinned bytes (zero-copy buffers)
-    obj        [done]          reader
+    obj        [done]          reader, and its MTL material files
   image/       [in progress]   image formats (read + write; committed libspng + stb backends, plus native codecs)
     png        [done]          low-level reader + writer (native IHDR fields; ancillary chunks read and written)
     jpg        [done]          low-level reader + writer (native SOF/JFIF fields; rich metadata [todo])
@@ -93,6 +93,7 @@ See [sqlite.hh](../src/babel-serializer/data/sqlite.hh) for the shape, and [codi
 ### obj [done]
 
 Reader only: a faithful, flat mirror of the Wavefront `.obj`, no triangulation and no dedup.
+Its `.mtl` files read the same way, through `read_materials`: each material with the statements it holds, colors unconverted and texture names as written.
 See [obj.hh](../src/babel-serializer/geometry/obj.hh).
 
 No refinements planned for the reader itself.
