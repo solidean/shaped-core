@@ -13,6 +13,8 @@ corpus:
   - bgfx/shaders/13-stencil/fs_stencil_texture_lighting
   - bgfx/shaders/36-sky/vs_sky
   - bgfx/shaders/37-gpudrivenrendering/fs_gdr_instanced_indirect_rendering
+claimed-by: Claude (for Philip Trettner)
+claimed-at: 2026-10-30T12:16Z
 ---
 
 # Arrays and `mat3` in GPU memory, and matrices and arrays across a stage edge
