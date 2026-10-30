@@ -3284,7 +3284,8 @@ struct flattener
             // minted ahead of its value, so the name the program wrote is its own and a callee inlined there mints past it
             auto const local = add_local(let->is_mut ? local_kind::var : local_kind::let,
                                          c.text_of(file(), name->where), tables().type_at(let->pattern));
-            auto const value = flatten_expr(let->value);
+            // CHK-55: a `let mut` without a value holds nothing until it is assigned, which judge_assignments holds to
+            auto const value = ast::is_valid(let->value) || !let->is_mut ? flatten_expr(let->value) : flat_expr_id::none;
             current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = local});
             if (let->is_mut)
                 add_stmt(from, flat_var{.local = local, .value = value});
@@ -3503,6 +3504,7 @@ void checker::flatten_test(i32 index)
         {
             f.entry.body = f.add_list(f.block);
             judge_constants(f.entry);
+            judge_assignments(f.entry);
         }
         return;
     }
@@ -3522,6 +3524,7 @@ void checker::flatten_test(i32 index)
         return;
     f.entry.body = f.add_list(f.block);
     judge_constants(f.entry);
+    judge_assignments(f.entry);
     out.tests[index].unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
 }
@@ -3899,6 +3902,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
         return;
     }
     judge_constants(f.entry);
+    judge_assignments(f.entry);
     judge_uniformity(f.entry);
     f.entry.options = options_reached(id, traversal != nullptr ? traversal->any_hit : symbol_id::none);
     out.entry_points.push_back(cc::move(f.entry));

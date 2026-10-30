@@ -64,3 +64,16 @@ test:
     for d in -1 ..= 1:
         s += d * d
     s == 2
+
+// a `let mut` without a value is read only once every path to the read assigned it (CHK-55)
+fun first_square_above(n: int) -> int:
+    let mut found: int
+    let mut i = 0
+    loop:
+        if i * i > n:
+            found = i
+            break
+        i += 1
+    return found
+
+test first_square_above(10) == 4

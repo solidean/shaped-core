@@ -51,6 +51,7 @@ add_library(shaped-graphics-language
     src/shaped-graphics-language/check/check.cc
     src/shaped-graphics-language/check/check_arrays.cc
     src/shaped-graphics-language/check/check_case.cc
+    src/shaped-graphics-language/check/check_assignments.cc
     src/shaped-graphics-language/check/check_constants.cc
     src/shaped-graphics-language/check/check_decl.cc
     src/shaped-graphics-language/check/check_pipeline.cc

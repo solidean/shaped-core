@@ -189,8 +189,11 @@ void checker::check_let(function_scope& scope, ast::stmt_id id, ast::let_stmt co
     auto const where = span_of(file, id);
 
     auto type = error_type;
-    if (!ast::is_valid(let.value))
-        unsupported(file, where, "a let without a value");
+    // CHK-55: a value assigned later needs a local that may be assigned, and a type nothing else would give it
+    if (!ast::is_valid(let.value) && !let.is_mut)
+        unsupported(file, where, "a let without a value that is no `let mut`, which nothing could assign");
+    else if (!ast::is_valid(let.value) && !ast::is_valid(let.type))
+        unsupported(file, where, "a let without a value or a written type: `let mut x: float`");
     // CHK-82: a written type is expected of the value, which a literal converts to
     if (ast::is_valid(let.type))
     {

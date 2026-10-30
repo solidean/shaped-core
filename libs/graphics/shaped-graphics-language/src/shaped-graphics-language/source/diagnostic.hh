@@ -154,6 +154,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     recursive_call,
     /// An assignment to what is no mutable local and no member of one.
     not_assignable,
+    /// A read of a `let mut` declared without a value, on a path where nothing has assigned it yet.
+    read_before_assignment,
     /// A statement after a jump in its list, which never runs; a warning.
     unreachable_code,
     /// A `case` that neither names every case of its enum nor carries a `_`.

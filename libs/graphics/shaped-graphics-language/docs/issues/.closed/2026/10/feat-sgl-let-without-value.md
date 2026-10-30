@@ -4,8 +4,8 @@ corpus:
   - bgfx/shaders/53-sky2/cs_atmo_skyview
   - bgfx/shaders/53-sky2/fs_sky2
   - bgfx/shaders/53-sky2/fs_sky2_bg
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-10-30T16:08Z
+closed: 2026-10-30
+resolution: fixed
 ---
 
 # A let without a value, assigned on every path before it is read
