@@ -484,6 +484,25 @@ struct flattener
         return range;
     }
 
+    /// The constant arrays this tree reads, each bound once to a local of its own (EMIT-165).
+    struct hoisted_constant
+    {
+        symbol_id symbol = symbol_id::none;
+        local_id local = local_id::none;
+    };
+    cc::vector<hoisted_constant> hoisted_constants;
+    /// Their `let`s, which stand in front of everything else of the tree's body.
+    cc::vector<flat_stmt_id> hoisted_lets;
+
+    /// The tree's own body: the hoisted constants' `let`s, then what was written.
+    ast::range_of<flat_stmt_id> root_body()
+    {
+        auto all = hoisted_lets;
+        for (auto const stmt : block)
+            all.push_back(stmt);
+        return add_list(all);
+    }
+
     ast::range_of<flat_arm> add_arms(cc::span<flat_arm const> list)
     {
         auto const range = ast::range_of<flat_arm>{.first = u32(entry.arms.size()), .count = u32(list.size())};
@@ -1055,9 +1074,24 @@ struct flattener
             return enum_value(type, from, info.case_index);
         case constant_kind::composite:
         {
+            // EMIT-165: an array is bound once per tree and read from there, since a target would write it whole at
+            // every index otherwise
+            auto const is_array
+                = c.out.builtin_type_of(info.type) == nullptr && c.out.at(info.type).kind == type_kind::array;
+            if (is_array)
+                for (auto const& h : hoisted_constants)
+                    if (h.symbol == info.symbol)
+                        return local_ref(h.local, from);
             auto at = isize(0);
             auto const result = value_of(info.type, from, info.leaves, at);
-            return at == info.leaves.size() ? result : fail();
+            if (at != info.leaves.size())
+                return fail();
+            if (!is_array)
+                return result;
+            auto const local = add_local(local_kind::let, c.out.at(info.symbol).name, info.type);
+            hoisted_lets.push_back(make_stmt({.file = file(), .expr = from}, flat_let{.local = local, .value = result}));
+            hoisted_constants.push_back({.symbol = info.symbol, .local = local});
+            return local_ref(local, from);
         }
         }
         return fail();
@@ -3502,7 +3536,7 @@ void checker::flatten_test(i32 index)
     {
         if (!f.is_failed)
         {
-            f.entry.body = f.add_list(f.block);
+            f.entry.body = f.root_body();
             judge_constants(f.entry);
             judge_assignments(f.entry);
         }
@@ -3522,7 +3556,7 @@ void checker::flatten_test(i32 index)
         unsupported(test.file, test.where, "a test whose body reaches a construct the flat tree cannot hold yet");
     if (f.is_failed || !f.stage_violations.empty() || !f.ray_stage_calls.empty() || !f.subgroup_calls.empty())
         return;
-    f.entry.body = f.add_list(f.block);
+    f.entry.body = f.root_body();
     judge_constants(f.entry);
     judge_assignments(f.entry);
     out.tests[index].unit = i32(out.test_units.size());
@@ -3560,7 +3594,7 @@ checker::const_evaluation checker::evaluate_const(symbol_id scope, i32 file, ast
     if (f.is_failed || !is_valid(result))
         return {.detail = "a const whose value reaches a construct the flat tree cannot hold yet"};
     f.add_stmt(origin{.file = file, .expr = expr}, flat_return{.value = result});
-    f.entry.body = f.add_list(f.block);
+    f.entry.body = f.root_body();
 
     // a const reads no binding, so the run has no inputs, and a value that takes this long is no constant
     constexpr auto fuel = 100'000;
@@ -3887,7 +3921,7 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     if (f.is_failed || !f.stage_violations.empty() || reaches_discard
         || (info.stages & stage_bit(info.entry_stage)) == 0 || (!is_linear && !f.quad_calls.empty()))
         return;
-    f.entry.body = f.add_list(f.block);
+    f.entry.body = f.root_body();
 
     // Every later walk stops descending at the limit and leaves a hole where it stopped, so a tree past it must never
     // reach them: the hole would surface as a missing id rather than as the limit (CHK-268).
@@ -3944,6 +3978,6 @@ void checker::flatten_metal_traversals()
     f.entry.features = feature_set(feature::raytracing_pipeline);
     f.entry.names.reserve(f.entry.name);
     f.frames.push_back({.file = i32(out.files.size()) - 1});
-    f.entry.body = f.add_list(f.block);
+    f.entry.body = f.root_body();
     out.entry_points.push_back(cc::move(f.entry));
 }

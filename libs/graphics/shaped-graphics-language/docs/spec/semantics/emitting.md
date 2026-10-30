@@ -540,6 +540,9 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 * **EMIT-164** An array in a constant block, whose element takes whole 16-byte rows (CHK-291), starts a row and holds its elements back to back.
   Every target places it so natively, so a memory form holds it as one field of the array type, and a read takes it in place: a runtime index needs no copy.
   The host holds it as a `cc::fixed_array` of the element's host type.
+* **EMIT-165** A computed `const` array (CHK-219) is bound once per tree to a local of its name, at the start of the tree's body, and every read of it indexes that local.
+  A target writes a constructed array whole wherever it stands, so read in place it would be written once per index: S2H's 192-word font table reached 1.5 MB of text.
+  A vector, a matrix or a struct const is written where it is read, since it is no larger than the expression that reads it.
 
 ## Error kinds
 

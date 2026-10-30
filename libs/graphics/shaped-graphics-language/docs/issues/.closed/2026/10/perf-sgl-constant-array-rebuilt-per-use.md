@@ -3,8 +3,8 @@ created: 2026-10-30
 corpus:
   - bgfx/shaders/54-s2h/fs_s2h_gather
   - bgfx/shaders/54-s2h/fs_s2h
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-10-30T19:00Z
+closed: 2026-10-30
+resolution: fixed
 ---
 
 # A constant array is rebuilt at every use, which multiplies a shader's text
