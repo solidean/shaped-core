@@ -116,7 +116,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture writes a complete image and ends the loop",
         SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
     // The OS scratch directory, not the working directory: a test must not leave a file in whatever tree it ran from.
-    auto const path = cc::format("{}/sv-capture-test.jpg", cc::temp_directory_path());
+    auto const path = cc::temp_file_path("sv-capture-test", ".jpg");
     auto const size = tg::vec2i(96, 64);
 
     // Scoped, so a REQUIRE below cannot leak capture mode into every test that runs after this one.
@@ -237,7 +237,7 @@ ASYNC_INVOCABLE_TEST("sv - a wavefront capture settles at its samples per pixel 
     if (!ctx.supports(sg::feature::ray_query))
         SKIP("the wavefront tracer needs inline ray queries");
 
-    auto const path = cc::format("{}/sv-capture-samples.jpg", cc::temp_directory_path());
+    auto const path = cc::temp_file_path("sv-capture-samples", ".jpg");
     auto const partial = sv::impl::partial_capture_path(path);
     cc::remove_file(path);
     cc::remove_file(partial); // leftovers from an earlier run would make both checks below vacuous
@@ -307,7 +307,7 @@ INVOCABLE_TEST("sv - a capture nothing registered fails without writing", (sg::c
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
-    auto const path = cc::format("{}/sv-capture-missing.jpg", cc::temp_directory_path());
+    auto const path = cc::temp_file_path("sv-capture-missing", ".jpg");
     cc::remove_file(path); // a leftover from an earlier run would make the check below vacuous
 
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");
@@ -367,7 +367,7 @@ ASYNC_INVOCABLE_TEST("sv - a capture that times out writes beside the requested 
     if (!sv_test::shared_env().has_compiler)
         SKIP("no SGL compiler for this backend to build the path-tracing shaders");
 
-    auto const path = cc::format("{}/sv-capture-timeout.jpg", cc::temp_directory_path());
+    auto const path = cc::temp_file_path("sv-capture-timeout", ".jpg");
     auto const partial = sv::impl::partial_capture_path(path);
     cc::remove_file(path);
     cc::remove_file(partial); // leftovers from an earlier run would make both checks below vacuous
@@ -440,7 +440,7 @@ INVOCABLE_TEST("sv - a capture waits for every frame that holds it", (sg::contex
 {
     auto& ctx = *ctx_h;
 
-    auto const path = cc::format("{}/sv-capture-hold.jpg", cc::temp_directory_path());
+    auto const path = cc::temp_file_path("sv-capture-hold", ".jpg");
     cc::remove_file(path); // a leftover from an earlier run would make the check below vacuous
 
     auto const request = sr::capture_request{.active = true,
@@ -476,7 +476,7 @@ INVOCABLE_TEST("sv - a sequence capture steps the frame clock and writes every s
 {
     auto& ctx = *ctx_h;
 
-    auto const pattern = cc::format("{}/sv-capture-sequence_%03d.jpg", cc::temp_directory_path());
+    auto const pattern = cc::temp_file_path("sv-capture-sequence", "_%03d.jpg");
     for (auto i = 0; i < 5; ++i)
         cc::remove_file(sr::capture_frame_path(pattern, i)); // leftovers from an earlier run would make the checks vacuous
 
