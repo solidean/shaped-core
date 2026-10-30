@@ -4,6 +4,8 @@ refs:
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/scene/scene_item.hh
   - file: libs/graphics/shaped-viewer/src/shaped-viewer/resources/gpu_resource_manager.cc
   - test: "sv - a frame mesh traces in the frame it is placed, and keeps the image only while its content holds"
+closed: 2026-10-30
+resolution: fixed
 ---
 
 # Frame meshes: attributes uploaded for the frame too
@@ -33,3 +35,13 @@ It leaves frame attributes in the attribute manager's budget until evicted, as t
 Textures can stay resident: they rarely change per frame.
 
 Done 2026-10-30: the epoch's frame meshes are a map keyed by their geometry's content hash, so a re-acquire is O(1) rather than a scan of the epoch's meshes.
+
+## Resolution
+
+Fixed 2026-10-30 by the simpler path, the attribute bytes held by the manager rather than carried on the scene item:
+`attribute_manager::acquire_inline` creates the persistent buffer and keeps the bytes, and `record_inline_uploads`, called at the start of `resolve_scene`,
+writes them into the command list that draws the mesh and marks them complete.
+Measured by "sv - a frame mesh's new attributes are resident in the frame it is placed, never streamed", new per-triangle colors each frame for 8 frames:
+streamed, the mesh was shaded by the fallback in all 8 of its frames, so content new every frame never got its material; inline, in none.
+The test checks residency, which is what the renderer gates the fallback on, not the pixels; it relies on the command list ordering the upload before later reads.
+Not done: the transient-buffer route with a per-epoch parameter block, unneeded for this; frame attributes stay in the attribute budget until evicted.

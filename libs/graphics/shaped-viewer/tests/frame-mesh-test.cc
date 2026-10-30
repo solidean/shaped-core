@@ -81,6 +81,40 @@ ASYNC_INVOCABLE_TEST("sv - a frame mesh uploads once per epoch, names its own bu
     CHECK(resources.settling_count() == 0);
 }
 
+ASYNC_INVOCABLE_TEST("sv - a frame mesh's new attributes are resident in the frame it is placed, never streamed",
+                     (sg::context_handle const& ctx_h))
+{
+    // Each frame places a mesh whose per-triangle color is new content, as an edited mesh's would be.
+    // Streamed, such an attribute stayed pending for a frame or more, and the mesh was shaded by the fallback meanwhile.
+    auto& ctx = *ctx_h;
+    auto resources = sv::gpu_resource_manager::create(ctx);
+    auto const colored = [](f32 shade)
+    {
+        auto m = moved_cloud(0);
+        auto colors = cc::vector<tg::vec3f>();
+        for (auto t = 0; t < 32; ++t)
+            colors.push_back(tg::vec3f(shade, 0.5f, f32(t) / 32));
+        m.attributes.push_back(
+            sv::mesh_attribute::create("base_color", sv::attribute_frequency::per_triangle, cc::move(colors)));
+        return m;
+    };
+    auto fallback_frames = 0;
+    for (auto frame = 0; frame < 8; ++frame)
+    {
+        resources.advance_to(ctx.current_epoch());
+        auto const item = resources.acquire_frame_scene_item(colored(0.1f * f32(frame)));
+        CHECK(resources.settling_count() == 0); // nothing was handed to the stream
+        auto cmd = ctx.create_command_list();
+        resources.attributes.record_inline_uploads(*cmd);
+        fallback_frames += resources.attributes_resident(item.instance) ? 0 : 1;
+        ctx.submit_command_list(cc::move(cmd));
+        ctx.advance_epoch();
+    }
+    CHECK(fallback_frames == 0);
+    CHECK(resources.attributes.inline_count() == 0);
+    (void)co_await ctx.idle_completion();
+}
+
 ASYNC_INVOCABLE_TEST("sv - a frame mesh traces in the frame it is placed, and keeps the image only while its content "
                      "holds",
                      (sg::context_handle const& ctx_h))

@@ -719,12 +719,13 @@ scene_item gpu_resource_manager::acquire_frame_scene_item(sv::mesh const& mesh)
     CC_ASSERT(!mesh.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
 
     // Resolution reads the attributes and textures, never the geometry, so a resident_mesh without geometry is what it is resolved against.
+    // The attributes are written inline by the command list that draws the mesh, not streamed, so it is never shaded by the fallback for them.
     auto bindings = cc::vector<mesh_attribute_binding>();
     bindings.reserve(mesh.attributes.size());
     for (auto const& a : mesh.attributes)
     {
         auto const uploads = a.frequency != attribute_frequency::per_instance;
-        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire(a) : attribute_id::invalid));
+        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire_inline(a) : attribute_id::invalid));
     }
     auto bound_textures = cc::vector<mesh_texture_binding>();
     bound_textures.reserve(mesh.textures.size());

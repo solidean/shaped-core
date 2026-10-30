@@ -389,6 +389,19 @@ public:
     /// belongs to is drawn with anything but a placeholder.
     [[nodiscard]] attribute_id acquire(mesh_attribute const& attribute);
 
+    /// The same for a frame mesh's attribute, whose content is new more often than not: nothing streams.
+    /// Its bytes wait for `record_inline_uploads`, which writes them into the command list that draws it,
+    /// so the attribute is `complete` in the frame it is placed rather than a frame or two after.
+    /// A resident attribute of the same content is found as `acquire` finds it.
+    [[nodiscard]] attribute_id acquire_inline(mesh_attribute const& attribute);
+
+    /// Writes the bytes of every attribute acquired inline since the last call into `cmd`, and marks them `complete`.
+    /// A read recorded later in `cmd` sees them; a renderer calls this before it records anything that reads an attribute.
+    void record_inline_uploads(sg::command_list& cmd);
+
+    /// How many attributes acquired inline wait for `record_inline_uploads`.
+    [[nodiscard]] isize inline_count() const { return _inline_bytes.size(); }
+
     /// Marks every attribute whose bytes have finished streaming `complete`; returns how many.
     /// Nothing is recorded — an attribute is done the moment its transfer is, since nothing has to be built from it.
     isize collect_settled();
@@ -406,6 +419,9 @@ private:
 
     /// The in-flight transfer per queued attribute; dropping one cancels it.
     cc::map<attribute_id, sg::stream_upload_handle> _settling;
+
+    /// Per attribute acquired inline, its bytes until a command list writes them; pinned, so holding them copies nothing.
+    cc::map<attribute_id, cc::pinned_data<byte const>> _inline_bytes;
 };
 
 /// One uploaded texture and how much of it has landed.
