@@ -15,3 +15,4 @@ Seen again in `dev.py check`'s `singlethreaded-clang` leg on 2026-10-21, after 9
 
 Seen again on 2026-10-30 in the same leg, with the machine under heavy load from other work; `--repeat 10` alone passed every time.
 That is three sightings, each in a full run and none alone, which points at timing under load rather than at the change under test.
+A fourth time the same day, in the next full `check`, with the load unchanged: under sustained load it now shows in nearly every full run.
