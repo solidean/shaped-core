@@ -96,6 +96,10 @@ struct active_upload
     // on it.
     // Cleared at the top of every cycle, which is what makes a wake re-poll.
     bool stalled = false;
+
+    // A skipped job queued behind earlier jobs of its family: it copies nothing and only folds its completion value
+    // once the scheduler reaches it in family order — see drop_job.
+    bool dropped = false;
 };
 
 /// The async-upload copy actor: one thread that packs jobs into staging windows and submits copy work.
@@ -175,6 +179,51 @@ private:
         cancel_stream(job);
     }
 
+    // Skips an arriving job's copy, keeping its completion value in family order.
+    //
+    // A family's values must be signaled in sequence order: a window signals the highest value it finished, so folding
+    // this one ahead of an earlier job of its family still waiting to be packed would mark that job's copy done before
+    // it ran — releasing its readers and the deferred-deletion gate while the copy is in flight.
+    // So a job with earlier work of its family still active joins it as an empty entry, folded when the scheduler
+    // reaches it; with none, nothing can be overtaken and it folds at once.
+    void drop_job(dx12_async_upload_job& job, double admitted_at)
+    {
+        auto const family = u64(reinterpret_cast<u64>(job.storage.Get()));
+        auto is_behind = false;
+        for (auto const& a : _active)
+            is_behind = is_behind || (family != 0 && a.family == family);
+        if (!is_behind)
+        {
+            fold_dropped_completion(job);
+            return;
+        }
+        active_upload a;
+        a.family = family;
+        a.sequence = _next_sequence++;
+        a.admitted_at = admitted_at;
+        a.dropped = true;
+        a.job = cc::move(job);
+        _active.push_back(cc::move(a));
+    }
+
+    // Where an arriving job copies to, or null when its copy is skipped.
+    //
+    // A destination someone still holds is copied, unless its storage was expired.
+    // One nobody holds is skipped — a 1 GiB upload to a dead buffer must not stage — unless a submitted command list
+    // waits on this job's value: that list reads the storage as soon as the wait is satisfied, and skipping would hand it
+    // bytes never copied while signaling it that they were.
+    // A list drops its handles on the way out of submit, so a dead target says nothing about whether the GPU reads it.
+    // The job's own `storage` reference is what the copy then writes; job.storage keeps it alive until the job is gone.
+    template <class Resource>
+    [[nodiscard]] static ID3D12Resource* admitted_destination(dx12_async_upload_job const& job, std::shared_ptr<Resource> const& strong)
+    {
+        if (strong != nullptr)
+            return strong->_resource.Get(); // null when expired: skipped as before
+        if (job.completion.is_awaited())
+            return job.storage.Get();
+        return nullptr;
+    }
+
     // Resolves each arriving job's destination and gives it a resumable packer.
     // A destination already released skips the copy entirely — a 1 GiB upload to a dead buffer must not stage.
     void admit_pending()
@@ -189,16 +238,17 @@ private:
             if (job.is_texture)
             {
                 auto strong = job.texture_target.lock();
-                if (!strong || !strong->_resource)
+                auto* const resource = admitted_destination(job, strong);
+                if (resource == nullptr)
                 {
-                    fold_dropped_completion(job);
+                    drop_job(job, admitted_at);
                     continue;
                 }
                 CC_ASSERT(round_window(job.footprint.padded_pitch) <= _sys._window_bytes, "a single texture row "
                                                                                           "exceeds one staging "
                                                                                           "window");
-                a.family = u64(reinterpret_cast<u64>(strong->_resource.Get()));
-                a.resource = strong->_resource.Get();
+                a.family = u64(reinterpret_cast<u64>(resource));
+                a.resource = resource;
                 if (!source_driven)
                     a.packer = std::make_unique<dx12_texture_upload>(a.resource, job.footprint, job.src.span());
                 a.keepalive = cc::move(strong);
@@ -206,13 +256,14 @@ private:
             else
             {
                 auto strong = job.buffer_target.lock();
-                if (!strong || !strong->_resource)
+                auto* const resource = admitted_destination(job, strong);
+                if (resource == nullptr)
                 {
-                    fold_dropped_completion(job);
+                    drop_job(job, admitted_at);
                     continue;
                 }
-                a.family = u64(reinterpret_cast<u64>(strong->_resource.Get()));
-                a.resource = strong->_resource.Get();
+                a.family = u64(reinterpret_cast<u64>(resource));
+                a.resource = resource;
                 if (!source_driven)
                     a.packer = std::make_unique<dx12_buffer_upload>(a.resource, job.dst_offset, job.src.span());
                 a.keepalive = cc::move(strong);
@@ -467,6 +518,13 @@ private:
             }
 
             isize const index = pick.value();
+            if (_active[index].dropped)
+            {
+                // Its turn in family order: everything ahead of it is packed, so its value may now join the window.
+                fold_dropped_completion(_active[index].job);
+                _active.remove_at(index);
+                continue;
+            }
             if (_active[index].packer == nullptr && !pull_next_chunk(index))
                 continue; // stalled, finished or failed — all handled inside, so just re-pick
 
@@ -883,6 +941,7 @@ void dx12_upload_async_system::upload_buffer(sg::raw_buffer_handle buffer, cc::p
     // Weak ref, not strong: a caller may drop its last handle before the actor stages this.
     // Resolving at stage time lets a released buffer skip the copy and its staging cost — see stage_job.
     // The storage stays alive independently until the copy fence reaches `value`, which is the lifetime gate.
+    job.storage = dst->_resource; // before the move below, which may drop the caller's last handle
     job.buffer_target = std::static_pointer_cast<dx12_buffer const>(cc::move(buffer)); // dst already dynamic_cast-verified
     job.dst_offset = offset;
     job.src = cc::move(data);
@@ -924,6 +983,7 @@ void dx12_upload_async_system::upload_texture(sg::raw_texture_handle texture,
     stamp_max(dst->_pending_async_upload_value, value);
 
     dx12_async_upload_job job;
+    job.storage = dst->_resource; // before the move below, which may drop the caller's last handle
     job.texture_target = std::static_pointer_cast<dx12_texture const>(cc::move(texture));
     job.footprint = fp;
     job.is_texture = true;
@@ -1005,6 +1065,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_buffer(sg::raw_
 
     dx12_async_upload_job job;
     job.buffer_target = typed;
+    job.storage = typed->_resource;
     job.dst_offset = offset;
     job.completion = dx12_group_value{dst->_upload_group, value};
     job.wait_token = sg::submission_token(dst->_last_used_submission_token.load(std::memory_order_acquire));
@@ -1049,6 +1110,7 @@ sg::stream_upload_handle dx12_upload_async_system::stream_source_texture(sg::raw
 
     dx12_async_upload_job job;
     job.texture_target = typed;
+    job.storage = typed->_resource;
     job.footprint = fp;
     job.is_texture = true;
     job.completion = dx12_group_value{dst->_upload_group, value};

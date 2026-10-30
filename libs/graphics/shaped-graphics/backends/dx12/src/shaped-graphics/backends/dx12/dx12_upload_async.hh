@@ -39,6 +39,10 @@ struct sg::backend::dx12::dx12_async_upload_job
     // Both are weak refs, locked at stage time — see stage_job.
     std::weak_ptr<dx12_buffer const> buffer_target;   // destination buffer, or empty for a texture copy
     std::weak_ptr<dx12_texture const> texture_target; // destination texture, or empty for a buffer copy
+    // The destination's storage, held strong: what the copy still writes when every handle is gone and a submitted
+    // list waits on this job's value anyway — see dx12_completion_group::awaited_value.
+    // Holding it costs no lifetime: the deferred-deletion gate keeps the storage until this value is signaled anyway.
+    ComPtr<ID3D12Resource> storage;
     dx12_texture_footprint footprint;                 // the texture region's copy footprint (texture copies)
     bool is_texture = false;                          // discriminant: texture copy vs buffer copy
     isize dst_offset = 0;                             // destination byte offset (buffer copies)

@@ -158,6 +158,9 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
 
     for (auto const& buffer : cmd->_touched_buffers)
     {
+        // An upload this list waits on is stamped as awaited, so the actor copies it even if this list held the last handle.
+        vulkan_group_value{buffer->_upload_group, buffer->_pending_async_upload_value.load(cc::memory_order_acquire)}.note_awaited();
+        vulkan_group_value{buffer->_upload_group, buffer->_pending_stream_copy_value.load(cc::memory_order_acquire)}.note_awaited();
         add_async_wait(buffer->_upload_group, buffer->_pending_async_upload_value.load(cc::memory_order_acquire));
         add_async_wait(buffer->_download_group, buffer->_pending_async_download_value.load(cc::memory_order_acquire));
         add_stream_wait(buffer->_upload_group, buffer->_pending_stream_copy_value.load(cc::memory_order_acquire), buffer);
@@ -169,6 +172,8 @@ sg::submission_token vulkan_context::submit_vulkan_command_list(std::unique_ptr<
     // only thing keeping this list's work off a texture a copy is still reading or writing.
     for (auto const& texture : cmd->_touched_textures)
     {
+        vulkan_group_value{texture->_upload_group, texture->_pending_async_upload_value.load(cc::memory_order_acquire)}.note_awaited();
+        vulkan_group_value{texture->_upload_group, texture->_pending_stream_copy_value.load(cc::memory_order_acquire)}.note_awaited();
         add_async_wait(texture->_upload_group, texture->_pending_async_upload_value.load(cc::memory_order_acquire));
         add_async_wait(texture->_download_group, texture->_pending_async_download_value.load(cc::memory_order_acquire));
         add_stream_wait(texture->_upload_group, texture->_pending_stream_copy_value.load(cc::memory_order_acquire),

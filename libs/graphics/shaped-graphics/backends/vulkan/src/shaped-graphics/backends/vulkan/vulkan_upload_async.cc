@@ -417,7 +417,8 @@ bool vulkan_upload_async_system::run_one_window()
     {
         auto& job = _pending[i];
         bool const cancelled = job.stream != nullptr && job.stream->cancelled.load(cc::memory_order_relaxed);
-        bool const dead = job.buffer_target.expired() && job.texture_target.expired();
+        // Dead only when nobody holds the destination AND no submitted list waits on this value — see the copy below.
+        bool const dead = job.buffer_target.expired() && job.texture_target.expired() && !job.completion.is_awaited();
         if (!cancelled && !dead)
         {
             ++i;
@@ -523,9 +524,13 @@ bool vulkan_upload_async_system::run_one_window()
 
     auto& job = _pending[index];
 
-    auto const target = job.buffer_target.lock();
-    auto const texture = job.texture_target.lock();
-    bool const alive = job.is_texture ? texture != nullptr : target != nullptr;
+    // A destination nobody holds is skipped — a 1 GiB upload to a dead buffer must not stage — unless a submitted command
+    // list waits on this job's value: that list reads the storage as soon as the wait is satisfied, and skipping would
+    // hand it bytes never copied while signaling it that they were.
+    // A list drops its handles on the way out of submit, so a dead target says nothing about whether the GPU reads it.
+    // The copy then writes through the handles captured at enqueue, which the deferred-deletion gate still holds.
+    bool const held = job.is_texture ? !job.texture_target.expired() : !job.buffer_target.expired();
+    bool const alive = held || job.completion.is_awaited();
     auto const payload = job.source != nullptr ? job.chunk.span() : job.src.span();
     auto const remaining = payload.size() - job.staged;
 
@@ -578,7 +583,7 @@ bool vulkan_upload_async_system::run_one_window()
     auto chunk_bytes = cc::min(_window_bytes, remaining);
     if (job.is_texture && job.row_bytes > 0)
     {
-        auto const rows = copyable_block_rows(texture->format(), job.region, dst_offset / job.row_bytes,
+        auto const rows = copyable_block_rows(job.dst_format, job.region, dst_offset / job.row_bytes,
                                               chunk_bytes / job.row_bytes);
         chunk_bytes = rows * job.row_bytes;
         CC_ASSERT(chunk_bytes > 0, "the async upload window is smaller than one texture row");
@@ -634,19 +639,19 @@ bool vulkan_upload_async_system::run_one_window()
             // A row is a BLOCK row on a compressed format and rows run slice-major on a 3D one, so a run of them is
             // not one box — see vulkan_texture_copy_regions.hh.
             VkBufferImageCopy copies[max_copy_regions] = {};
-            auto const subresource = VkImageSubresourceLayers{.aspectMask = vk_aspect_mask_from(range, texture->format()),
+            auto const subresource = VkImageSubresourceLayers{.aspectMask = vk_aspect_mask_from(range, job.dst_format),
                                                               .mipLevel = u32(job.subresource.mip_level),
                                                               .baseArrayLayer = u32(job.subresource.array_layer),
                                                               .layerCount = 1};
             auto const count = build_texture_copy_regions(
-                job.region, texture->description().format, first_row, row_count, job.row_bytes,
+                job.region, job.dst_format, first_row, row_count, job.row_bytes,
                 VkDeviceSize(isize(slot) * _window_bytes), subresource, cc::span<VkBufferImageCopy>(copies));
 
             // GENERAL rather than a transfer-optimal layout: it is what the layout was settled to before the enqueue,
             // and one layout for both directions is what keeps a transfer of the other direction from
             // moving it — see vulkan_context::async_ready_layout.
             if (count > 0)
-                vkCmdCopyBufferToImage(_window_buffers[slot], _staging, texture->_image, VK_IMAGE_LAYOUT_GENERAL,
+                vkCmdCopyBufferToImage(_window_buffers[slot], _staging, job.dst_image, VK_IMAGE_LAYOUT_GENERAL,
                                        u32(count), copies);
         }
         else
@@ -656,7 +661,7 @@ bool vulkan_upload_async_system::run_one_window()
                 .dstOffset = VkDeviceSize(dst_offset),
                 .size = VkDeviceSize(chunk_bytes),
             };
-            vkCmdCopyBuffer(_window_buffers[slot], _staging, target->_buffer, 1, &region);
+            vkCmdCopyBuffer(_window_buffers[slot], _staging, job.dst_buffer, 1, &region);
         }
         vkEndCommandBuffer(_window_buffers[slot]);
 
@@ -729,8 +734,8 @@ bool vulkan_upload_async_system::run_one_window()
             .window_value = _window_next_value,
             .slot = slot,
             .sequence = job.sequence,
-            .destination = job.is_texture ? u64(reinterpret_cast<uintptr_t>(texture->_image))
-                                          : u64(reinterpret_cast<uintptr_t>(target->_buffer)),
+            .destination = job.is_texture ? u64(reinterpret_cast<uintptr_t>(job.dst_image))
+                                          : u64(reinterpret_cast<uintptr_t>(job.dst_buffer)),
             .is_texture = job.is_texture,
             .offset = i64(dst_offset),
             .bytes = i64(chunk_bytes),
@@ -791,6 +796,7 @@ void vulkan_upload_async_system::upload_buffer(sg::raw_buffer_handle const& buff
 
     vulkan_async_upload_job job;
     job.buffer_target = dst;
+    job.dst_buffer = dst->_buffer;
     job.dst_offset = offset;
     job.src = cc::move(data);
     job.family = u64(reinterpret_cast<uintptr_t>(dst.get()));
@@ -833,6 +839,7 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_buffer(sg::ra
 
     vulkan_async_upload_job job;
     job.buffer_target = dst;
+    job.dst_buffer = dst->_buffer;
     job.dst_offset = offset;
     job.source = cc::move(source);
     job.stream = control;
@@ -911,6 +918,8 @@ void vulkan_upload_async_system::upload_texture(sg::raw_texture_handle const& te
 
     vulkan_async_upload_job job;
     job.texture_target = dst;
+    job.dst_image = dst->_image;
+    job.dst_format = dst->format();
     job.is_texture = true;
     job.subresource = subresource;
     job.region = region;
@@ -966,6 +975,8 @@ sg::stream_upload_handle vulkan_upload_async_system::stream_source_texture(sg::r
 
     vulkan_async_upload_job job;
     job.texture_target = dst;
+    job.dst_image = dst->_image;
+    job.dst_format = dst->format();
     job.is_texture = true;
     job.subresource = subresource;
     job.region = region;
