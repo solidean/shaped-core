@@ -536,7 +536,10 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
   Every target writes the block as its memory form (EMIT-113), and in every target a vector the layout lets cross a 16-byte row is split into scalars.
   `hlsl-vulkan` states every field's offset.
   `hlsl-dx12` states none: each field fits its row and padding fills each gap, so its own packing lands every field there ([why](why/emitting.md#emit-154)).
-  A struct member of such a block is `unsupported` for now.
+  A struct member of such a block is `unsupported` for now, and so is an array C++ places anywhere but at a multiple of 16 bytes.
+* **EMIT-164** An array in a constant block, whose element takes whole 16-byte rows (CHK-291), starts a row and holds its elements back to back.
+  Every target places it so natively, so a memory form holds it as one field of the array type, and a read takes it in place: a runtime index needs no copy.
+  The host holds it as a `cc::fixed_array` of the element's host type.
 
 ## Error kinds
 
@@ -562,7 +565,7 @@ EMIT-110 and EMIT-111 describe today's choice, not a promise; `@layout` (CHK-369
 ## Open
 
 * GLSL, which comes through the same seam.
-* Arrays in GPU memory, which the checker refuses today (CHK-291).
+* Arrays in GPU memory beyond a constant block's arrays of whole rows (EMIT-164), which the checker refuses today (CHK-291).
   In a constant block every element starts a row, as HLSL places it: an element shorter than a row is `array<vec4f, N>` read through `.x` in WGSL, and `slib::row<T>` on the host.
 * Whether `@layout` also promises a buffer element's layout, which EMIT-111 places today without a promise.
 * A struct member of a `@layout(.cpp)` block, which HLSL would read back by building the struct in a local field by field.

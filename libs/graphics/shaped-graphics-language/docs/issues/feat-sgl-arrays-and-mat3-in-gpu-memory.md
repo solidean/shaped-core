@@ -4,15 +4,6 @@ refs:
   - file: libs/graphics/shaped-graphics-language/src/shaped-graphics-language/check/check_decl.cc
   - file: libs/graphics/shaped-graphics-language/tests/check/array-check-test.cc
   - file: libs/graphics/shaped-graphics-language/docs/spec/semantics/emitting.md
-corpus:
-  - bgfx/shaders/06-bump/fs_bump
-  - bgfx/shaders/09-hdr/fs_hdr_bright
-  - bgfx/shaders/09-hdr/fs_hdr_lum
-  - bgfx/shaders/09-hdr/fs_hdr_lumavg
-  - bgfx/shaders/13-stencil/fs_stencil_color_lighting
-  - bgfx/shaders/13-stencil/fs_stencil_texture_lighting
-  - bgfx/shaders/36-sky/vs_sky
-  - bgfx/shaders/37-gpudrivenrendering/fs_gdr_instanced_indirect_rendering
 claimed-by: Claude (for Philip Trettner)
 claimed-at: 2026-10-30T12:16Z
 ---
@@ -30,8 +21,6 @@ Their layout is decided (the spec's emitting file, "Open"), and they land togeth
   In a buffer's element it is 36 bytes, which is `tg::mat3f` itself.
 - **WGSL passes no matrix and no array between stages**, so both cross as one location per column or element.
 
-**It is the gap real shaders hit most.**
-An array in a constant block blocks 8 of the first 104 bgfx translations in shader-rosetta, more than any other.
-bgfx declares `uniform vec4 u_lightPosRadius[4]` and indexes it by a variable, or packs offsets as `uniform vec4 u_offset[16]`.
-Each blocked shader compiled once its arrays were swapped for buffers, so nothing else hides behind it.
-`corpus:` names them, under shader-rosetta's `sources/` (`uv run dev.py companions init shader-rosetta`).
+**A constant block's array of whole rows has landed** (EMIT-164): `float4`, `int4`, `uint4` and `mat4` elements, which every target places alike.
+It was the gap real shaders hit most, 8 of the first 104 bgfx translations in shader-rosetta, and none of them is blocked by it now.
+What remains is every other array in GPU memory: padded elements in a block, arrays in a struct or a buffer's element, and arrays across a stage edge.

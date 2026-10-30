@@ -121,3 +121,33 @@ binding host_halves:
     host_halves.values[4] = host_halves.tint.z as float
     host_halves.values[5] = (host_halves.count as uint) as float
     host_halves.values[6] = host_halves.after
+
+// An array of whole rows starts a row and strides by its element: `rows` at 16, `xf` at 64 and `ids` at 192.
+// `shift` at 4 is what WGSL splits, so the block is a memory form there, and the arrays stay whole in it.
+binding rows_echo:
+    scale: float
+    shift: float2
+    rows: float4[3]
+    xf: mat4[2]
+    ids: int4[2]
+    values: mut buffer[float]
+
+@compute(1) fun echo_rows(){rows_echo}:
+    rows_echo.values[0] = rows_echo.scale
+    rows_echo.values[1] = rows_echo.shift.x
+    rows_echo.values[2] = rows_echo.shift.y
+    // a runtime index walks into the block in place
+    for i in 0 ..< rows_echo.ids[0].x:
+        let r = rows_echo.rows[i]
+        rows_echo.values[3 + 4 * i] = r.x
+        rows_echo.values[4 + 4 * i] = r.y
+        rows_echo.values[5 + 4 * i] = r.z
+        rows_echo.values[6 + 4 * i] = r.w
+    // column 3 of each matrix, its translation
+    for m in 0 ..< 2:
+        let t = rows_echo.xf[m] * float4(0.0, 0.0, 0.0, 1.0)
+        rows_echo.values[15 + 4 * m] = t.x
+        rows_echo.values[16 + 4 * m] = t.y
+        rows_echo.values[17 + 4 * m] = t.z
+        rows_echo.values[18 + 4 * m] = t.w
+    rows_echo.values[23] = rows_echo.ids[1].w as float

@@ -717,9 +717,15 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 innermost = out.at(innermost).element;
             if (!is_resource(out.at(innermost).kind))
             {
-                unsupported(file, span_of(file, f.type),
-                            "an array in a constant block, whose layout no rule settles yet");
-                type = checked_module::error_type;
+                if (!is_whole_row_array(type))
+                {
+                    unsupported(file, span_of(file, f.type),
+                                cc::format("an array of {} in a constant block, whose element takes no whole number of "
+                                           "16-byte rows: only `float4`, `int4`, `uint4` and `mat4` elements have a "
+                                           "layout yet",
+                                           out.name_of(t.element)));
+                    type = checked_module::error_type;
+                }
             }
             // CHK-299: a binding array is `count` consecutive slots of one resource, which a device grants
             else if (element.kind == type_kind::array)

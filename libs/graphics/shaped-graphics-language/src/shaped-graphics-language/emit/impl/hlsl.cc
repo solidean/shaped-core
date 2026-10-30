@@ -340,7 +340,8 @@ public:
                 out += k_indent;
                 if (_is_vulkan)
                     out.appendf("[[vk::offset({})]] ", f.offset);
-                out.appendf("{}{} {};\n", f.type == "float4x4" ? "column_major " : "", f.type, f.name);
+                out.appendf("{}{} {}{};\n", f.type == "float4x4" ? "column_major " : "", f.type, f.name,
+                            f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
             }
         out += "};\n\n";
     }

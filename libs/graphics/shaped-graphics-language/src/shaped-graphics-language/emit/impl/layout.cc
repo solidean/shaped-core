@@ -60,6 +60,26 @@ placed_members place_from(checked_module const& m,
             continue;
         }
 
+        // CHK-291: an array's elements take whole rows, so it starts one in a constant block and needs no padding
+        if (m.at(type).kind == type_kind::array)
+        {
+            auto const& array = m.at(type);
+            auto const& record = *m.builtin_type_of(array.element);
+            auto const scalar = scalar_size_of(record);
+            at = round_up(at, space == address_space::constants ? 16 : scalar);
+            result.alignment = scalar > result.alignment ? scalar : result.alignment;
+            auto const size = i32(array.count) * record.hlsl_layout.size;
+            result.offsets.push_back(at);
+            result.sizes.push_back(size);
+            result.leaves.push_back({.path = cc::move(path),
+                                     .type = array.element,
+                                     .offset = base + at,
+                                     .size = size,
+                                     .count = i32(array.count)});
+            at += size;
+            continue;
+        }
+
         // A nested struct starts a fresh row in a constant block, and what follows it packs against its last member.
         // In a buffer it starts at its own alignment, which a dry run over its members gives.
         if (space == address_space::constants)
@@ -103,6 +123,14 @@ cc::string sgl::emit::impl::first_unplaceable(check::checked_module const& m, ch
 {
     if (auto const* const record = m.builtin_type_of(type))
         return record->hlsl_layout.size != 0 ? cc::string() : cc::format(": {}", m.name_of(type));
+    // CHK-291: the checker admits an array only of builtin elements that take whole rows
+    if (is_valid(type) && m.at(type).kind == type_kind::array && m.builtin_type_of(type) == nullptr)
+    {
+        auto const* const record = m.builtin_type_of(m.at(type).element);
+        return record != nullptr && record->hlsl_layout.size % 16 == 0 && m.at(type).count > 0
+                 ? cc::string()
+                 : cc::format(": {}", m.name_of(type));
+    }
     // an atomic stands in memory as the integer it updates
     if (is_valid(type) && m.at(type).kind == type_kind::atomic)
         return first_unplaceable(m, m.at(type).element);

@@ -522,3 +522,89 @@ TEST("sgl emit layout - a @layout(.cpp) block holds no struct yet")
                     "    let x = work.one.a\n")
           == "unsupported a struct member in a @layout(.cpp) block: 'work.one'\n");
 }
+
+TEST("sgl emit layout - an array of whole rows starts a row and packs alike everywhere")
+{
+    // CHK-291: an element of whole 16-byte rows has no padding on any target, so a runtime index reads it in place
+    constexpr auto source = "binding lights:\n"
+                            "    count: int\n"
+                            "    pos: float4[4]\n"
+                            "    xf: mat4[2]\n"
+                            "\n"
+                            "binding out_data:\n"
+                            "    result: mut buffer[float4]\n"
+                            "\n"
+                            "@compute(1) fun main(@thread_id id: int3){lights, out_data}:\n"
+                            "    out_data.result[0] = lights.xf[id.x % 2] * lights.pos[id.y]\n";
+
+    auto const d = described(source);
+    REQUIRE(d.bindings.size() == 2);
+    CHECK(d.bindings[0].members[1].offset == 16);
+    CHECK(d.bindings[0].members[1].size == 64);
+    CHECK(d.bindings[0].members[2].offset == 80);
+    CHECK(d.bindings[0].members[2].size == 128);
+    CHECK(d.bindings[0].block_size == 208);
+
+    CHECK(text_of(source, target::hlsl_dx12)
+              .contains("    int count;\n    float4 pos[4];\n    column_major float4x4 xf[2];\n"));
+    CHECK(text_of(source, target::hlsl_vulkan)
+              .contains("    [[vk::offset(16)]] float4 pos[4];\n"
+                        "    [[vk::offset(80)]] column_major float4x4 xf[2];\n"));
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("    count: i32,\n    pos: array<vec4f, 4>,\n    xf: array<mat4x4f, 2>,\n"));
+    CHECK(wgsl.contains("lights.xf[id.x % 2] * lights.pos[id.y]"));
+    CHECK(text_of(source, target::msl).contains("    int count;\n    array<float4, 4> pos;\n    array<float4x4, 2> xf;\n"));
+}
+
+TEST("sgl emit layout - an array in a memory form is one field, read in place")
+{
+    // WGSL splits the float2 HLSL keeps at byte 4, so the block is a memory form, and the array stays whole in it
+    constexpr auto source = "binding lights:\n"
+                            "    k: float\n"
+                            "    off: float2\n"
+                            "    pos: float4[3]\n"
+                            "\n"
+                            "binding out_data:\n"
+                            "    result: mut buffer[float4]\n"
+                            "\n"
+                            "fun total(a: float4[3]) -> float4 => a[0] + a[1] + a[2]\n"
+                            "\n"
+                            "@compute(1) fun main(@thread_id id: int3){lights, out_data}:\n"
+                            "    out_data.result[0] = lights.pos[id.x] * lights.k + total(lights.pos)\n";
+
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("    k: f32,\n    off_x: f32,\n    off_y: f32,\n    _pad0: u32,\n    pos: array<vec4f, 3>,\n"));
+    CHECK(wgsl.contains("lights.pos[id.x] * lights.k"));
+    CHECK(!wgsl.contains("array<vec4f, 3>()"));
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    packed_float2 off;\n    uint _pad0;\n    array<float4, 3> pos;\n"));
+    CHECK(!msl.contains("array<float4, 3>{}"));
+}
+
+TEST("sgl emit layout - a @layout(.cpp) block holds an array where a row starts")
+{
+    auto const fine = "@layout(.cpp)\n"
+                      "binding work:\n"
+                      "    s: float\n"
+                      "    v: float3\n"
+                      "    rows: float4[2]\n"
+                      "\n"
+                      "binding out_data:\n"
+                      "    result: mut buffer[float4]\n"
+                      "\n"
+                      "@compute(1) fun main(@thread_id id: int3){work, out_data}:\n"
+                      "    out_data.result[0] = work.rows[id.x]\n";
+    for (auto const t : sgl::emit::all_targets())
+        CHECK(text_of(fine, t).contains("work.rows[id.x]"));
+
+    // C++ puts the array right after the float, at byte 4, where no target can declare one
+    CHECK(errors_of("@layout(.cpp)\n"
+                    "binding work:\n"
+                    "    s: float\n"
+                    "    rows: float4[2]\n"
+                    "\n"
+                    "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                    "    let x = work.rows[0]\n")
+          == "unsupported an array at byte 4 of a @layout(.cpp) block, where C++ places it and no target can: "
+             "'work.rows'\n");
+}

@@ -817,9 +817,23 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
     // struct value out of the fields
     if (b.layout == check::block_layout::cpp)
         for (auto const& member : plain_members_of(m, b))
-            if (member.type != check::checked_module::void_type && m.builtin_type_of(member.type) == nullptr)
+            if (member.type != check::checked_module::void_type && m.builtin_type_of(member.type) == nullptr
+                && m.at(member.type).kind == check::type_kind::structure)
                 report(error_kind::unsupported,
                        cc::format("a struct member in a @layout(.cpp) block: '{}.{}'", s.name, member.name));
+    // C++ aligns a `tg::vec4f` at 4, and no target declares an array anywhere but at the start of a row
+    if (b.layout == check::block_layout::cpp)
+    {
+        auto const plain = plain_members_of(m, b);
+        auto const placed = place(m, plain, address_space::cpp_constants);
+        for (auto i = isize(0); i < plain.size(); ++i)
+            if (plain[i].type != check::checked_module::void_type && m.builtin_type_of(plain[i].type) == nullptr
+                && m.at(plain[i].type).kind == check::type_kind::array && placed.offsets[i] % 16 != 0)
+                report(error_kind::unsupported, cc::format("an array at byte {} of a @layout(.cpp) block, where C++ "
+                                                           "places it and no target "
+                                                           "can: '{}.{}'",
+                                                           placed.offsets[i], s.name, plain[i].name));
+    }
 
     // A struct has one layout, so it stands in one address space; two rules would give it two.
     for (auto const space : {address_space::constants, address_space::storage})

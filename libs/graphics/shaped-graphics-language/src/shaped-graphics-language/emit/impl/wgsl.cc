@@ -106,7 +106,8 @@ public:
     {
         out.appendf("struct {} {{\n", form.name);
         for (auto const& f : form.fields)
-            out.appendf("{}{}: {},\n", k_indent, f.name, f.type);
+            out.appendf("{}{}: {},\n", k_indent, f.name,
+                        f.count > 0 ? cc::format("array<{}, {}>", f.type, f.count) : cc::string(f.type));
         out += "}\n\n";
     }
 

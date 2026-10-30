@@ -34,9 +34,13 @@ struct placed_leaf
     /// The member positions from the outermost value down, each in its struct's declared members.
     /// Empty for a value that is a builtin itself.
     cc::vector<i32> path;
+    /// The element type where the value is an array of `count` elements, each a whole number of 16-byte rows.
     check::type_id type = check::type_id::none;
     i32 offset = 0;
+    /// The whole value's bytes, every element of an array included.
     i32 size = 0;
+    /// 0 for a value that is no array.
+    i32 count = 0;
 };
 
 /// Members placed one after another: a block, or the fields of a struct.

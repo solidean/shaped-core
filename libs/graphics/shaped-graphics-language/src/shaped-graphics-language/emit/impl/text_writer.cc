@@ -386,6 +386,9 @@ struct writer
     cc::string read_memory(memory_ref const& r)
     {
         auto const type = cc::string(type_text(p, d, r.type));
+        // an array's whole-row elements are never split, so its one field is the array itself
+        if (!is_builtin_type(p.m, r.type) && p.m.at(r.type).kind == type_kind::array)
+            return field_text(r, leaf_at(r), 0);
         if (is_builtin_type(p.m, r.type))
         {
             auto const& leaf = leaf_at(r);

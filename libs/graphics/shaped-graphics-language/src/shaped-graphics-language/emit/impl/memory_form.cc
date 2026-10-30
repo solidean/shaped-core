@@ -68,6 +68,16 @@ native_placement place_natively(checked_module const& m,
     {
         if (member.type == checked_module::void_type)
             continue;
+        // an array of whole-row elements strides by its element's size on every target, with no padding
+        if (m.builtin_type_of(member.type) == nullptr && m.at(member.type).kind == type_kind::array)
+        {
+            auto const l = native_layout(*m.builtin_type_of(m.at(member.type).element), t);
+            at = round_up(at, 16);
+            offsets.push_back(base + at);
+            at += i32(m.at(member.type).count) * l.size;
+            alignment = max_of(alignment, 16);
+            continue;
+        }
         if (auto const* const record = m.builtin_type_of(member.type))
         {
             auto const l = native_layout(*record, t);
@@ -149,9 +159,9 @@ struct form_builder
         return name;
     }
 
-    i32 add_field(cc::string name, cc::string type, i32 size)
+    i32 add_field(cc::string name, cc::string type, i32 size, i32 count = 0)
     {
-        form.fields.push_back({.name = unique(cc::move(name)), .type = cc::move(type), .offset = at});
+        form.fields.push_back({.name = unique(cc::move(name)), .type = cc::move(type), .offset = at, .count = count});
         at += size;
         return i32(form.fields.size() - 1);
     }
@@ -184,7 +194,7 @@ struct form_builder
             if (!result.empty())
                 result += "_";
             result += member.name;
-            if (m.builtin_type_of(member.type) == nullptr)
+            if (m.builtin_type_of(member.type) == nullptr && m.at(member.type).kind == type_kind::structure)
                 level = m.at(m.at(member.type).members);
         }
         return result.empty() ? cc::string(fallback) : result;
@@ -200,7 +210,10 @@ struct form_builder
         auto const scalar_size = scalar_size_of(record);
 
         auto const is_crossing = splits_rows && crosses_row(record, leaf.offset);
-        if (record.leaf_count == 1)
+        // an array's elements take whole rows, which every target places as SGL does, so it is never split
+        if (leaf.count > 0)
+            result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), leaf.size, leaf.count));
+        else if (record.leaf_count == 1)
             result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), scalar_size));
         else if (!is_forced && !is_crossing && leaf.offset % l.alignment == 0
                  && !(t == emit::target::msl && record.leaf_count == 3))

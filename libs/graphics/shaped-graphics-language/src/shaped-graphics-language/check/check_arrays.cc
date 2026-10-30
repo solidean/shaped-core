@@ -290,6 +290,18 @@ cc::string checker::array_path(type_id type) const
     return {};
 }
 
+bool checker::is_whole_row_array(type_id type) const
+{
+    auto const& t = out.at(type);
+    if (t.kind != type_kind::array || t.count == 0)
+        return false;
+    auto const* const record = out.builtin_type_of(t.element);
+    if (record == nullptr)
+        return false;
+    auto const whole = [](builtins::block_layout l) { return l.size > 0 && l.size % 16 == 0; };
+    return whole(record->hlsl_layout) && whole(record->wgsl_layout) && whole(record->msl_layout);
+}
+
 void checker::judge_edge_arrays(i32 file, source_span where, type_id type)
 {
     // a patch and a geometry stage's vertices are arrays of the struct that crosses, and a stream holds it

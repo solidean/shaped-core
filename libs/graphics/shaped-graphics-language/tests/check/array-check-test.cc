@@ -94,15 +94,16 @@ TEST("sgl check - an element of a mutable array is assigned, and its length neve
               .contains("an array's length is part of its type, and never assigned"));
 }
 
-TEST("sgl check - an array in a constant block waits for a layout rule, and a binding array for its feature")
+TEST("sgl check - a constant block holds an array of whole rows, and a binding array waits for its feature")
 {
+    // CHK-291: every target places an element of whole 16-byte rows alike, back to back from a fresh row
+    CHECK(reports_for("binding work:\n    lights: float4[4]\n    ids: int4[2]\n    bones: mat4[8]\n") == "");
     CHECK(reports_for("binding work:\n    weights: float[4]\n")
-              .contains("unsupported-yet user:[float[4]] an array in a constant block, whose layout no rule settles "
-                        "yet"));
+              .contains("unsupported-yet user:[float[4]] an array of float in a constant block, whose element takes no "
+                        "whole number of 16-byte rows"));
+    CHECK(reports_for("binding work:\n    offsets: float2[4]\n").contains("an array of float2 in a constant block"));
     // an array of arrays of values is values still, and no binding array
-    CHECK(reports_for("binding work:\n    grid: float[2, 3]\n")
-              .contains("unsupported-yet user:[float[2, 3]] an array in a constant block, whose layout no rule "
-                        "settles yet"));
+    CHECK(reports_for("binding work:\n    grid: float4[2, 3]\n").contains("an array of float4[3] in a constant block"));
     // a binding array is a feature a device grants (CHK-299)
     CHECK(reports_for("binding work:\n    maps: texture_2d[float4][4]\n").contains("needs binding_arrays"));
 }

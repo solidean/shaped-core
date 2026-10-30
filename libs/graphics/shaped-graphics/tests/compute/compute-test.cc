@@ -349,6 +349,46 @@ ASYNC_INVOCABLE_TEST("sg - a @layout(.cpp) block is filled from a plain C++ stru
         CHECK(data[i] == float(i + 1)).context(cc::format("value {}", i));
 }
 
+ASYNC_INVOCABLE_TEST("sg - a constant block's arrays are filled from fixed arrays and indexed at runtime",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::layout::echo_rows.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::layout::rows_echo>();
+    constexpr auto count = 24;
+    auto const values = ctx->persistent.create_buffer_from_data(
+        cc::vector<float>::create_defaulted(count), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+
+    // each matrix moves by its translation column, which the shader reads back as values 16 to 23
+    auto xf = cc::fixed_array<tg::mat4f, 2>{};
+    for (auto m = 0; m < 2; ++m)
+        for (auto r = 0; r < 4; ++r)
+            xf[m].col(3)[r] = float(16 + 4 * m + r);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout,
+        shaders::layout::rows_echo{.scale = 1.0f,
+                                   .shift = tg::vec2f(2, 3),
+                                   .rows = {tg::vec4f(4, 5, 6, 7), tg::vec4f(8, 9, 10, 11), tg::vec4f(12, 13, 14, 15)},
+                                   .xf = xf,
+                                   .ids = {tg::vec4i(3, 0, 0, 0), tg::vec4i(0, 0, 0, 24)},
+                                   .values = values.as_readwrite_buffer()});
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(1);
+    auto const future = cmd->download.data_from_buffer(values);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const data = co_await future.data();
+    REQUIRE(data.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+        CHECK(data[i] == float(i + 1)).context(cc::format("value {}", i));
+}
+
 ASYNC_INVOCABLE_TEST("sg - a @layout(.cpp) block places its 16-bit members as tg does", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

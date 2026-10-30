@@ -27,6 +27,8 @@ struct memory_field
     /// As the target spells it: `f32`, `vec2f`, `packed_float3`.
     cc::string type;
     i32 offset = 0;
+    /// The field is an array of `count` values of `type`, and 0 where it is one value.
+    i32 count = 0;
 };
 
 /// One builtin value of the root and the fields that hold it.

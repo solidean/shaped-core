@@ -11,6 +11,8 @@ It carries no group index, because SGL numbers a group by its position in each e
 
 from __future__ import annotations
 
+import re
+
 from sgl_description import SglEntries, SglFile
 
 # An SGL type as the host holds it: the C++ type, its size in bytes, and the vertex format it is read as (None where it is none).
@@ -234,7 +236,18 @@ def memory_structs_of(entries: SglEntries, path: str) -> dict[str, tuple[str, in
     return out
 
 
+def array_of(sgl_type: str) -> tuple[str, int] | None:
+    """`float4[4]` as its element and its count, or None for a type that is no array.
+
+    The compiler admits only elements that take whole 16-byte rows, so the elements sit back to back with no padding.
+    """
+    match = re.fullmatch(r"(.+)\[(\d+)\]", sgl_type)
+    return (match.group(1), int(match.group(2))) if match else None
+
+
 def host_size(memory: dict[str, tuple[str, int]], sgl_type: str) -> int:
+    if (array := array_of(sgl_type)) is not None:
+        return host_size(memory, array[0]) * array[1]
     return memory[sgl_type][1] if sgl_type in memory else HOST_TYPES[sgl_type][1]
 
 
@@ -246,6 +259,8 @@ def host_type(package: str, memory: dict[str, tuple[str, int]], where: str, sgl_
     """The C++ spelling of `sgl_type`: one of `memory`, the package's structs in GPU memory, or a builtin's."""
     if sgl_type in memory:
         return memory[sgl_type][0]
+    if (array := array_of(sgl_type)) is not None:
+        return f"cc::fixed_array<{host_type(package, memory, where, array[0])}, {array[1]}>"
     known = HOST_TYPES.get(sgl_type)
     if known is None:
         raise HostCodeError(
@@ -344,6 +359,11 @@ def includes(entries: SglEntries) -> list[str]:
     types = {m["type"] for _, b in entries.bindings for m in b["members"]}
     types |= {m["type"] for _, v in entries.vertex_inputs for m in v["members"]}
     types |= {m["type"] for _, s in entries.memory_structs for m in s["members"]}
+    # an array is a fixed array of its element, which needs its own header too
+    arrays = {array_of(t) for t in types} - {None}
+    if arrays:
+        out.append("<clean-core/container/fixed_array.hh>")
+    types |= {element for element, _ in arrays}
     if types & {"int", "uint", "atomic[int]", "atomic[uint]", "short", "ushort"}:
         out.append("<clean-core/fwd.hh>")
     if types & HALF_TYPES:

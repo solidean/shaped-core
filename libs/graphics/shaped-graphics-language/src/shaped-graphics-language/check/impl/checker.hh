@@ -652,6 +652,9 @@ struct checker
     /// CHK-291: the path from `type` down to the first array it holds, through struct members, as `.corners: float2[3]`.
     /// Empty when it holds none; a tessellation factor member is skipped, since it is an array by design (CHK-305).
     [[nodiscard]] cc::string array_path(type_id type) const;
+    /// CHK-291: whether `type` is a one-dimensional array of `count` > 0 elements that each take a whole number of 16-byte
+    /// rows on every target, which every target places alike in a constant block.
+    [[nodiscard]] bool is_whole_row_array(type_id type) const;
     /// CHK-291: refuses each array a struct crossing a stage edge holds, reported at `where` of `file`.
     void judge_edge_arrays(i32 file, source_span where, type_id type);
     /// `atomic[uint]` and `atomic[int]` in a type position.
