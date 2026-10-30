@@ -177,6 +177,18 @@ void sgl::builtins::register_types(registry& r)
     });
 
     r.add(type_record{
+        .declaration = "struct mat2",
+        .doc = "/// Column-major, and a vector stands to its right: a rotation or a shear of the plane.\n"
+               "/// A value of function bodies alone, which no GPU memory holds yet.",
+        .hlsl = "float2x2",
+        .wgsl = "mat2x2f",
+        .msl = "float2x2",
+        .leaf_kind = value_kind::scalar_float,
+        .leaf_count = 4,
+        .local_only_reason = "its layout in GPU memory is not decided yet",
+    });
+
+    r.add(type_record{
         .declaration = "struct bool32",
         .doc = "/// A bool as GPU memory holds one: four bytes, 0 for false and anything else for true.\n"
                "/// `x as bool32` and `x as bool` convert; a bool itself has no layout.",

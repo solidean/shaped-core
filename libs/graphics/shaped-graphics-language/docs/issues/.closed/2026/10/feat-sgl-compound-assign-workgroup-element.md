@@ -2,6 +2,8 @@
 created: 2026-10-30
 corpus:
   - bgfx/shaders/37-gpudrivenrendering/cs_gdr_stream_compaction
+closed: 2026-10-30
+resolution: fixed
 ---
 
 # `op=` on an element of a `@workgroup` array

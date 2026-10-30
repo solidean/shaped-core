@@ -11,8 +11,7 @@ A hit's transforms are rows of `float4` because SGL has `mat4`, and a `mat3` of 
 Neither `mat4` nor `mat3` has a subscript of a column, `==`, or a `mat3` of a `mat4`'s upper left, which a normal matrix wants (CHK-397).
 `mat3` in GPU memory is `feat-sgl-arrays-and-mat3-in-gpu-memory`'s.
 
-The bgfx corpus in shader-rosetta needs three more, each written today through a stand-in marked `// gap:`:
+The bgfx corpus in shader-rosetta needs two more, each written today through a stand-in marked `// gap:`:
 
-- **`mat2`**, for rotation and skew in `49-hextile/fs_hextile`.
 - **A 3x4 matrix**, bgfx's `mat4x3` with `mtxFromRows` and `mtxGetRow`, in `41-tess/cs_terrain_lod` and `41-tess/vs_terrain_render`.
 - **A column or an element of a matrix**, bgfx's `mtxGetColumn` and `mtxGetElement`, in `41-tess/cs_terrain_lod`.

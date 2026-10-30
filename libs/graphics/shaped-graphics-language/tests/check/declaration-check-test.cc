@@ -150,6 +150,25 @@ TEST("sgl check - a const is a literal, an enum case or another const, and stand
           == "");
 }
 
+TEST("sgl check - a computed const reads no binding, and one without a value says why")
+{
+    // CHK-219: its value is checked in a scope that lists no binding, as a test's is
+    constexpr auto cells = "binding cells:\n    scale: float\n\nfun scaled(){cells} -> float => cells.scale\n";
+    CHECK(reports_for(cc::format("{}const k = scaled()\n", cells))
+              .contains("binding-not-listed user:[scaled()] scaled needs cells, which is not in the binding list of "
+                        "const k"));
+    // CHK-311: a run that has no value is the const's error, at its value
+    CHECK(reports_for("const z = 0\nconst k = 7 / z\n")
+              .contains("constant-without-value user:[7 / z] k has no value: an integer divided by zero"));
+    CHECK(reports_for("fun spin() -> int:\n    let mut i = 0\n    while i >= 0:\n        i = (i + 1) % 7\n    "
+                      "return i\nconst k = spin()\n")
+              .contains("constant-without-value user:[spin()] k takes more than 100000 steps to compute"));
+    // CHK-353: an option is a bool, an int or an enum case, which a computed value of another type is not
+    CHECK(reports_for("@option const v = float2(1.0, 2.0)\n").contains("an option of float or uint"));
+    // a computed int is the same constant a literal is, so an array length and a workgroup size take it
+    CHECK(reports_for("const n = 2 * 4\nfun f() -> float[n] => float[n].filled(0.0)\n") == "");
+}
+
 TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
 {
     // CHK-220: not by a declaration of the program, a local, a parameter or a for variable
@@ -178,8 +197,6 @@ TEST("sgl check - a @shadowable(false) symbol is hidden by nothing")
 
 TEST("sgl check - what the tracer does not carry is unsupported-yet, and names the construct")
 {
-    CHECK(reports_for("const k = 2.0 * 1.0\n")
-          == "unsupported-yet user:[2.0 * 1.0] a const whose value is no literal, no enum case and no const\n");
     CHECK(reports_for("type color = float3\n") == "unsupported-yet user:[type color = float3] type alias\n");
 
     // CHK-339: a generic struct is the prelude's

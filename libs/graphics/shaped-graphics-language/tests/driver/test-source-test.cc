@@ -68,7 +68,7 @@ TEST("sgl driver - a const that did not check fails what reads it silently, and 
 {
     // CHK-19: a failed symbol is the error type where it is named, and the one diagnostic is its own
     cc::string_view const broken[] = {
-        "const a = nope\n",       "const a: int = 1.5\n",       "const a = 1 + 2\n",
+        "const a = nope\n",       "const a: int = 1.5\n",       "const a = 7 / (0 as int)\n",
         "const a = 2147483648\n", "const a = b\nconst b = a\n",
     };
     for (auto const b : broken)
@@ -82,10 +82,11 @@ TEST("sgl driver - a const that did not check fails what reads it silently, and 
     }
 
     // reached through a callee and as a case pattern, and from an entry point
-    CHECK(sgl::test_source("enum m:\n    a\n    b\nconst bad = 1 + 2\nfun f(x: m) -> int:\n    return case x:\n"
+    CHECK(sgl::test_source("enum m:\n    a\n    b\nconst bad = 7 / (0 as int)\nfun f(x: m) -> int:\n    return case "
+                           "x:\n"
                            "        bad => 1\n        _ => 0\ntest f(m.a) == 0\n",
                            "p.sgl")
-              .errors.contains("unsupported-yet"));
+              .errors.contains("constant-without-value"));
     auto const entry = sgl::compile_to_text({.source = "const a = nope\nstruct frag:\n    x: float\n@pixel struct "
                                                        "target:\n    color: float4\n"
                                                        "@pixel fun main_ps(p: frag) -> target:\n    let w = a\n    "

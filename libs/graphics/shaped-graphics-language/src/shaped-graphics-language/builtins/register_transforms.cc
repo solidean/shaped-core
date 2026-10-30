@@ -81,7 +81,7 @@ void determinant(leaves in, result& out)
     out.push_back(scalar::of(f32(sum)));
 }
 
-/// The columns, one behind the other, are the matrix's leaves already, for a `mat4` and a `mat3` alike.
+/// The columns, one behind the other, are the matrix's leaves already, for every matrix alike.
 void from_columns(leaves in, result& out)
 {
     for (auto const& leaf : in)
@@ -132,13 +132,47 @@ void multiply_mat3(leaves in, result& out)
 }
 
 /// HLSL's constructor takes rows, so the columns it is handed are transposed back.
+written write_of_columns(call_context const& c, cc::string_view matrix)
+{
+    auto columns = cc::string();
+    for (auto i = isize(0); i < c.arguments.size(); ++i)
+        columns.appendf("{}{}", i == 0 ? "" : ", ", c.arguments[i].text);
+    auto const spelled = c.builtins.at(c.builtins.find_type(matrix)).spelled_in(c.target);
+    if (c.target == language::hlsl)
+        return {.text = cc::format("transpose({}({}))", spelled, columns)};
+    return {.text = cc::format("{}({})", spelled, columns)};
+}
+
 written write_mat3_of_columns(call_context const& c)
 {
-    auto const columns = cc::format("{}, {}, {}", c.arguments[0].text, c.arguments[1].text, c.arguments[2].text);
-    auto const mat3 = c.builtins.at(c.builtins.find_type("mat3")).spelled_in(c.target);
-    if (c.target == language::hlsl)
-        return {.text = cc::format("transpose({}({}))", mat3, columns)};
-    return {.text = cc::format("{}({})", mat3, columns)};
+    return write_of_columns(c, "mat3");
+}
+
+written write_mat2_of_columns(call_context const& c)
+{
+    return write_of_columns(c, "mat2");
+}
+
+/// Row `row` of `matrix * (x, y)`, for a `mat2`, whose element (row r, column c) is leaf c * 2 + r.
+f32 transformed2(leaves matrix, isize row, f32 x, f32 y)
+{
+    return matrix[row].as_float() * x + matrix[2 + row].as_float() * y;
+}
+
+void transform_float2(leaves in, result& out)
+{
+    for (auto row = isize(0); row < 2; ++row)
+        out.push_back(scalar::of(transformed2(in, row, in[4].as_float(), in[5].as_float())));
+}
+
+void multiply_mat2(leaves in, result& out)
+{
+    for (auto column = isize(0); column < 2; ++column)
+    {
+        auto const at = 4 + column * 2;
+        for (auto row = isize(0); row < 2; ++row)
+            out.push_back(scalar::of(transformed2(in, row, in[at].as_float(), in[at + 1].as_float())));
+    }
 }
 
 /// A matrix times what stands to its right: HLSL has a function for it, and every other target the operator.
@@ -230,6 +264,20 @@ void sgl::builtins::register_transforms(registry& r)
     add_product(r, "transform_direction3", "mat3", "v", "vec3", "vec3", transform_float3, write_product);
     add_product(r, "multiply_mat3", "mat3", "b", "mat3", "mat3", multiply_mat3, write_product);
     impl::add_function(r, "transpose", {"m", "mat3"}, "mat3", transpose<3>, {},
+                       "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
+                       "rotates.");
+
+    r.add_comment("// a mat2 is a mat3 of the plane: a value of function bodies alone, made of its columns, times a "
+                  "float2");
+    r.add(function_record{
+        .signature = "@pure fun mat2(c0: float2, c1: float2) -> mat2",
+        .doc = "/// The matrix of two columns, `c0` first.",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_mat2_of_columns, .hlsl_names = k_transpose},
+    });
+    add_product(r, "transform_float2", "mat2", "v", "float2", "float2", transform_float2, write_product);
+    add_product(r, "multiply_mat2", "mat2", "b", "mat2", "mat2", multiply_mat2, write_product);
+    impl::add_function(r, "transpose", {"m", "mat2"}, "mat2", transpose<2>, {},
                        "/// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only "
                        "rotates.");
 }

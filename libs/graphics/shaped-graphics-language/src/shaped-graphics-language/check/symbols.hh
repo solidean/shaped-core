@@ -6,6 +6,7 @@
 #include <shaped-graphics-language/builtins/ids.hh>
 #include <shaped-graphics-language/check/features.hh>
 #include <shaped-graphics-language/check/ids.hh>
+#include <shaped-graphics-language/interpret/scalar.hh>
 
 /// What the check pass knows about the declarations of a module: its types, its symbols and the per-file side tables.
 /// Every name is kept as text, so a reader of these needs no `parsed_file`.
@@ -456,6 +457,8 @@ enum class sgl::check::constant_kind : sgl::u8
     real,
     /// A case of an enum; for `bool`, whose cases are its two values, the case is the value.
     enum_case,
+    /// Any other value a const computes (CHK-219): a vector, a matrix, a struct or an array, as its scalars.
+    composite,
 };
 
 /// The value of a `const`, which is known before anything runs.
@@ -475,8 +478,19 @@ struct sgl::check::constant_info
     i32 case_index = -1;
     /// The `@option const` the value comes from, through any chain of consts naming it (CHK-353); `none` for a plain one.
     symbol_id option = symbol_id::none;
+    /// A `composite`'s scalars in field order, nested values included, as the abstract machine holds a value.
+    cc::vector<scalar> leaves;
+    /// Every option a computed value reaches, through its own names and the functions it calls; each place the const
+    /// is named reaches them all.
+    cc::vector<symbol_id> computed_options;
 
-    bool operator==(constant_info const&) const = default;
+    [[nodiscard]] bool operator==(constant_info const& rhs) const
+    {
+        return symbol == rhs.symbol && type == rhs.type && kind == rhs.kind && integer == rhs.integer
+            && is_unsigned == rhs.is_unsigned && is_hex == rhs.is_hex && real == rhs.real
+            && case_index == rhs.case_index && option == rhs.option && ast::impl::is_equal(leaves, rhs.leaves)
+            && ast::impl::is_equal(computed_options, rhs.computed_options);
+    }
 };
 
 /// Where the source names an option, through a const naming it or directly: what an entry point's options are read from.

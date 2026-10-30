@@ -51,6 +51,38 @@ TEST("sgl options - a compile without values takes every default, and names the 
     CHECK(footprint_of(text.value()) == "work.values: write");
 }
 
+TEST("sgl options - a const computed from an option follows its value, and reaches it wherever it is named")
+{
+    // CHK-219 and CHK-355: the const is computed for each set of values, and naming it is naming what it reaches
+    constexpr auto source = "@option const taps = 4\n"
+                            "@option const unused = 1\n"
+                            "fun twice(x: int) -> int => 2 * x\n"
+                            "const span = twice(taps) + 1\n"
+                            "\n"
+                            "binding data:\n"
+                            "    out_buf: mut buffer[float]\n"
+                            "\n"
+                            "@compute(1) fun main(@thread_id id: int3){data}:\n"
+                            "    data.out_buf[0] = span as float\n";
+    sgl::check::option_value const seven[] = {{.name = "taps", .value = "7"}};
+    auto const defaults = sgl::compile_to_text({.source = source, .entry_point = "main", .target = target::wgsl});
+    auto const set
+        = sgl::compile_to_text({.source = source, .entry_point = "main", .target = target::wgsl, .options = seven});
+    REQUIRE(defaults.has_value());
+    REQUIRE(set.has_value());
+    CHECK(defaults.value().text.contains("data_out_buf[0] = f32(9);"));
+    CHECK(set.value().text.contains("data_out_buf[0] = f32(15);"));
+    REQUIRE(defaults.value().options.size() == 1);
+    CHECK(defaults.value().options[0] == "taps");
+
+    // CHK-353: an option the host sets would not be followed by one computed from it
+    auto const derived = sgl::compile_to_text({.source = "@option const taps = 4\n@option const span = taps * 2\n",
+                                               .entry_point = "main",
+                                               .target = target::wgsl});
+    REQUIRE(derived.has_error());
+    CHECK(derived.error().contains("an option whose value names another option"));
+}
+
 TEST("sgl options - each set of values is a text of its own, and a branch on one leaves what only it used")
 {
     sgl::check::option_value const narrow[] = {{.name = "shift", .value = "5"}};
