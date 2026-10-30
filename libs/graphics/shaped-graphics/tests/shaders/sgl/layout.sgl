@@ -122,6 +122,8 @@ binding host_halves:
     host_halves.values[5] = (host_halves.count as uint) as float
     host_halves.values[6] = host_halves.after
 
+const last_values = [22.0, 23.0, 24.0]
+
 // An array of whole rows starts a row and strides by its element: `rows` at 16, `xf` at 64 and `ids` at 192.
 // `shift` at 4 is what WGSL splits, so the block is a memory form there, and the arrays stay whole in it.
 binding rows_echo:
@@ -150,4 +152,5 @@ binding rows_echo:
         rows_echo.values[16 + 4 * m] = t.y
         rows_echo.values[17 + 4 * m] = t.z
         rows_echo.values[18 + 4 * m] = t.w
-    rows_echo.values[23] = rows_echo.ids[1].w as float
+    // a const array is bound once and indexed where it is read, here at an index the block holds (EMIT-165)
+    rows_echo.values[23] = last_values[rows_echo.ids[0].x - 1] + (rows_echo.ids[1].w as float) - 24.0
