@@ -20,18 +20,18 @@
 @builtin struct float
 
 @shadowable(false)
-@builtin @swizzle struct float2:
+@builtin @swizzle(rg) struct float2:
     x: float
     y: float
 
 @shadowable(false)
-@builtin @swizzle struct float3:
+@builtin @swizzle(rgb) struct float3:
     x: float
     y: float
     z: float
 
 @shadowable(false)
-@builtin @swizzle struct float4:
+@builtin @swizzle(rgba) struct float4:
     x: float
     y: float
     z: float
@@ -89,18 +89,18 @@
 @builtin struct int
 
 @shadowable(false)
-@builtin @swizzle struct int2:
+@builtin @swizzle(rg) struct int2:
     x: int
     y: int
 
 @shadowable(false)
-@builtin @swizzle struct int3:
+@builtin @swizzle(rgb) struct int3:
     x: int
     y: int
     z: int
 
 @shadowable(false)
-@builtin @swizzle struct int4:
+@builtin @swizzle(rgba) struct int4:
     x: int
     y: int
     z: int
@@ -111,18 +111,18 @@
 @builtin struct uint
 
 @shadowable(false)
-@builtin @swizzle struct uint2:
+@builtin @swizzle(rg) struct uint2:
     x: uint
     y: uint
 
 @shadowable(false)
-@builtin @swizzle struct uint3:
+@builtin @swizzle(rgb) struct uint3:
     x: uint
     y: uint
     z: uint
 
 @shadowable(false)
-@builtin @swizzle struct uint4:
+@builtin @swizzle(rgba) struct uint4:
     x: uint
     y: uint
     z: uint
@@ -134,18 +134,18 @@
     true
 
 @shadowable(false)
-@builtin @swizzle struct bool2:
+@builtin @swizzle(rg) struct bool2:
     x: bool
     y: bool
 
 @shadowable(false)
-@builtin @swizzle struct bool3:
+@builtin @swizzle(rgb) struct bool3:
     x: bool
     y: bool
     z: bool
 
 @shadowable(false)
-@builtin @swizzle struct bool4:
+@builtin @swizzle(rgba) struct bool4:
     x: bool
     y: bool
     z: bool
@@ -158,18 +158,18 @@
 @builtin struct half
 
 @shadowable(false)
-@builtin @swizzle struct half2:
+@builtin @swizzle(rg) struct half2:
     x: half
     y: half
 
 @shadowable(false)
-@builtin @swizzle struct half3:
+@builtin @swizzle(rgb) struct half3:
     x: half
     y: half
     z: half
 
 @shadowable(false)
-@builtin @swizzle struct half4:
+@builtin @swizzle(rgba) struct half4:
     x: half
     y: half
     z: half
@@ -180,18 +180,18 @@
 @builtin struct short
 
 @shadowable(false)
-@builtin @swizzle struct short2:
+@builtin @swizzle(rg) struct short2:
     x: short
     y: short
 
 @shadowable(false)
-@builtin @swizzle struct short3:
+@builtin @swizzle(rgb) struct short3:
     x: short
     y: short
     z: short
 
 @shadowable(false)
-@builtin @swizzle struct short4:
+@builtin @swizzle(rgba) struct short4:
     x: short
     y: short
     z: short
@@ -202,18 +202,18 @@
 @builtin struct ushort
 
 @shadowable(false)
-@builtin @swizzle struct ushort2:
+@builtin @swizzle(rg) struct ushort2:
     x: ushort
     y: ushort
 
 @shadowable(false)
-@builtin @swizzle struct ushort3:
+@builtin @swizzle(rgb) struct ushort3:
     x: ushort
     y: ushort
     z: ushort
 
 @shadowable(false)
-@builtin @swizzle struct ushort4:
+@builtin @swizzle(rgba) struct ushort4:
     x: ushort
     y: ushort
     z: ushort

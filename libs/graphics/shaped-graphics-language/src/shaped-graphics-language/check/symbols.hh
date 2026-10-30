@@ -255,6 +255,8 @@ struct sgl::check::type_info
     bool is_no_padding = false;
     /// `@swizzle`: every two to four of its one-letter fields read at once, `v.zyx`, as a plain vector (CHK-384).
     bool has_swizzles = false;
+    /// `@swizzle(rgba)`: a second letter per field in order, which a swizzle may use instead of the fields' own (CHK-409).
+    cc::string swizzle_alias;
     /// The element of a `buffer` or an `array`; `none` for every other kind.
     type_id element = type_id::none;
     /// An `array`'s length; 0 for `T[]`, whose length the host binds (CHK-286).

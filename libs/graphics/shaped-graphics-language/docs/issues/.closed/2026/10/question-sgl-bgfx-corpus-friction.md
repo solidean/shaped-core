@@ -1,5 +1,7 @@
 ---
 created: 2026-10-30
+closed: 2026-10-30
+resolution: fixed
 ---
 
 # What translating the bgfx corpus found awkward in SGL

@@ -1007,6 +1007,7 @@ void checker::compile_struct(symbol_id id)
 
     // CHK-384: a swizzle names fields by their letters and is a vector of their one element type
     auto has_swizzles = false;
+    auto swizzle_alias = cc::string();
     if (auto const* const swizzled = find_attribute(file, d.attributes, "swizzle"))
     {
         auto const fields = out.at(members);
@@ -1024,6 +1025,25 @@ void checker::compile_struct(symbol_id id)
                                  out.name_of(f.type), fields[0].name, out.name_of(fields[0].type));
             else if (vector_name_of(f.type, 2).empty())
                 why = cc::format("{} is {}, which has no vectors", f.name, out.name_of(f.type));
+        }
+        // CHK-409: `@swizzle(rgba)` gives every field a second letter, which no field already uses
+        auto const arguments = ast_of(file).at(swizzled->arguments);
+        if (why.empty() && !arguments.empty())
+        {
+            auto const* const letters = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
+                                             && ast::is_valid(arguments[0].value)
+                                          ? ast_of(file).at(arguments[0].value).node.try_as<ast::name>()
+                                          : nullptr;
+            auto const alias = letters != nullptr ? text_of(file, letters->where) : cc::string_view();
+            if (alias.size() != fields.size())
+                why = cc::format("@swizzle takes one more letter per field, {} of them in order: `@swizzle(rgba)`",
+                                 fields.size());
+            for (auto i = isize(0); why.empty() && i < alias.size(); ++i)
+                for (auto k = isize(0); why.empty() && k < alias.size(); ++k)
+                    if ((k != i && alias[k] == alias[i]) || fields[k].name[0] == alias[i])
+                        why = cc::format("{} names two fields, and each letter of a swizzle names one", alias[i]);
+            if (why.empty())
+                swizzle_alias = cc::string(alias);
         }
         if (!why.empty())
             report(diagnostic_kind::invalid_attribute_arguments, file, swizzled->name, why);
@@ -1044,6 +1064,7 @@ void checker::compile_struct(symbol_id id)
         .edge = stage_of(is_vertex, is_pixel, false, false, false, false),
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
         .has_swizzles = has_swizzles,
+        .swizzle_alias = has_swizzles ? cc::move(swizzle_alias) : cc::string(),
         .element = parameter,
         .is_template = is_valid(parameter),
     });

@@ -39,7 +39,12 @@ constexpr scalar_family k_ushort_family
 /// Its swizzles are the target's own too (EMIT-142).
 type_record vector_of(scalar_family const& family, cc::string_view name, i32 width, cc::string_view doc)
 {
-    auto declaration = cc::format("@swizzle struct {}:", name);
+    // CHK-409: a plain vector holds numbers, so its components may be colors; a position or a direction has no red
+    auto const is_plain = name == cc::format("{}{}", family.name, width);
+    auto declaration
+        = is_plain
+            ? cc::format("@swizzle({}) struct {}:", cc::string_view("rgba").subview({.offset = 0, .size = width}), name)
+            : cc::format("@swizzle struct {}:", name);
     cc::string_view const fields[] = {"x", "y", "z", "w"};
     for (auto i = 0; i < width; ++i)
         declaration.appendf("\n    {}: {}", fields[i], family.name);

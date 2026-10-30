@@ -154,3 +154,30 @@ binding grid:
     let mut c = sky()
     c.bg = grid.colors[i].xy
     grid.colors[i + 1] = float3(..c.bgr) + float3(..sky().rgb)
+
+// a plain vector takes rgba as its second alphabet, so color code reads as color (CHK-409)
+test float4(1.0, 2.0, 3.0, 4.0).rgb == float3(1.0, 2.0, 3.0)
+test float4(1.0, 2.0, 3.0, 4.0).a == 4.0
+test float3(1.0, 2.0, 3.0).bgr == float3(3.0, 2.0, 1.0)
+test int2(5, 6).gr == int2(6, 5)
+
+// it is a place where its letters are distinct, as xyzw is
+test:
+    let mut c = float4(0.0)
+    c.rg = float2(1.0, 2.0)
+    c.a = 5.0
+    c.b += 3.0
+    c == float4(1.0, 2.0, 3.0, 5.0)
+
+// one swizzle takes its letters from one alphabet, and a position or a direction has no red
+@expect(error = "unknown-member")
+test float4(1.0).xg == float2(1.0)
+@expect(error = "unknown-member")
+test pos3(1.0, 2.0, 3.0).r == 1.0
+
+// a program's struct names its own second alphabet
+@swizzle(uv) struct st:
+    s: float
+    t: float
+
+test st(1.0, 2.0).vu == float2(2.0, 1.0)

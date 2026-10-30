@@ -573,7 +573,15 @@ So the element is `half2`, or a struct that fills its words, until a packed buff
 The rule is the same for any struct, since SGL's vectors are prelude structs of one-character fields and not a type the checker knows apart.
 The annotation keeps it opt-in: a struct of `a` and `b` fields does not grow `e.ba` and `e.aa` by accident.
 Adding swizzles to such a struct later breaks nothing, where removing them would.
-`rgba` is not a second alphabet: the letters are the field names, so a port writes `.xyz` for `.rgb`, one spelling per read.
+A second alphabet is the struct's own to name (CHK-409), so the rule here stays one about fields.
+
+## CHK-409
+
+Color code reads as color: `albedo.rgb * light.a` says what it means, and ports from every shading language write it so.
+One spelling per read was the earlier rule, and the corpus showed what it cost: every color swizzle rewritten to `xyzw`, and reviewed in that form.
+The alphabet is the struct's to name rather than a list the language knows, so a program's own struct may take `st` or `uv`.
+It stays off the types that are no plain numbers: a `pos3` is a position and a `vec3` a direction, and neither has a red.
+Mixing alphabets in one swizzle is refused, as GLSL refuses it, since `c.xg` reads as two things at once.
 
 ## CHK-385
 

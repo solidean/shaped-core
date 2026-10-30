@@ -179,6 +179,11 @@ use view
   It is a value of the plain vector of the element type and the letter count: `float3` from a `vec3`, a `pos3` and a program's `rgb` alike ([why](why/checking.md#chk-385)).
   One letter is the field itself, by CHK-64.
   A letter that names no field, or a fifth letter, is `unknown-member`, and the detail names the letter.
+* **CHK-409** `@swizzle(letters)` gives the struct a second alphabet, one letter per field in order, none of them a field's own ([why](why/checking.md#chk-409)).
+  A swizzle takes its letters from one alphabet alone, so `c.rgb` and `c.xyz` read, and `c.xg` is `unknown-member`.
+  One letter of the second alphabet is its field, as CHK-64 has a field's own.
+  The prelude's plain vectors carry `rgba`: `float4` is `@swizzle(rgba)` and `float2` `@swizzle(rg)`, while `vec3`, `pos3` and `hpos4` carry none, so a position has no red.
+  Every swizzle of either alphabet is a member by CHK-386.
 * **CHK-386** Every swizzle of a `@swizzle` struct is a member of its type scope, as a field is (CHK-233) ([why](why/checking.md#chk-386)).
   So `v.xy` is the swizzle before any function is consulted (CHK-249).
   A function named `xy` visible at the use changes nothing, and `v.xy(…)` is still a call of it.
