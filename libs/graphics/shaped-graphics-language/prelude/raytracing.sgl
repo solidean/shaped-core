@@ -40,12 +40,9 @@ struct triangle_candidate:
     /// The weights of the three vertices: `(1 - u - v, u, v)`.
     barycentrics: float3
     is_front_face: bool
-    _to_world_x: float4
-    _to_world_y: float4
-    _to_world_z: float4
-    _to_object_x: float4
-    _to_object_y: float4
-    _to_object_z: float4
+    /// The instance's placement, object space to world space, and its inverse (CHK-408).
+    object_to_world: affine3
+    world_to_object: affine3
 
 /// The nearest triangle a trace accepted, where `is_hit`; otherwise its `t` is the ray's `t_max` and nothing else is set.
 struct triangle_hit:
@@ -58,12 +55,9 @@ struct triangle_hit:
     primitive_index: int
     barycentrics: float3
     is_front_face: bool
-    _to_world_x: float4
-    _to_world_y: float4
-    _to_world_z: float4
-    _to_object_x: float4
-    _to_object_y: float4
-    _to_object_z: float4
+    /// The instance's placement, object space to world space, and its inverse (CHK-408).
+    object_to_world: affine3
+    world_to_object: affine3
 
 /// A box of procedural geometry the traversal entered, which an intersection decides by what it reports.
 /// Its `object_ray` is the ray in the instance's object space, where the box and its primitive stand.
@@ -76,12 +70,9 @@ struct procedural_box:
     instance_index: int
     geometry_index: int
     primitive_index: int
-    _to_world_x: float4
-    _to_world_y: float4
-    _to_world_z: float4
-    _to_object_x: float4
-    _to_object_y: float4
-    _to_object_z: float4
+    /// The instance's placement, object space to world space, and its inverse (CHK-408).
+    object_to_world: affine3
+    world_to_object: affine3
 
 /// What an intersection reports of a box: a hit at `t` with its `attributes`, or none (`report.none()`).
 /// At most one per box; a report beyond the box's `t_current` or before the ray's `t_min` is no hit.
@@ -102,12 +93,9 @@ struct procedural_candidate[A]:
     geometry_index: int
     primitive_index: int
     attributes: A
-    _to_world_x: float4
-    _to_world_y: float4
-    _to_world_z: float4
-    _to_object_x: float4
-    _to_object_y: float4
-    _to_object_z: float4
+    /// The instance's placement, object space to world space, and its inverse (CHK-408).
+    object_to_world: affine3
+    world_to_object: affine3
 
 /// The nearest procedural primitive a trace accepted, where `is_hit`; otherwise its `t` is the ray's `t_max`, and its
 /// attributes are undefined.
@@ -120,16 +108,13 @@ struct procedural_hit[A]:
     geometry_index: int
     primitive_index: int
     attributes: A
-    _to_world_x: float4
-    _to_world_y: float4
-    _to_world_z: float4
-    _to_object_x: float4
-    _to_object_y: float4
-    _to_object_z: float4
+    /// The instance's placement, object space to world space, and its inverse (CHK-408).
+    object_to_world: affine3
+    world_to_object: affine3
 
 @internal fun procedural_hit.none(r: ray) -> procedural_hit:
     let zero = float4(0.0, 0.0, 0.0, 0.0)
-    return procedural_hit(false, r.t_max, r, 0, 0, 0, 0, undefined(), zero, zero, zero, zero, zero, zero)
+    return procedural_hit(false, r.t_max, r, 0, 0, 0, 0, undefined(), affine3.from_rows(zero, zero, zero), affine3.from_rows(zero, zero, zero))
 
 /// What a trace of a mixed structure hit: nothing, a triangle or a procedural primitive.
 enum hit_kind:
@@ -153,12 +138,9 @@ struct mixed_hit[A]:
     barycentrics: float3
     is_front_face: bool
     attributes: A
-    _to_world_x: float4
-    _to_world_y: float4
-    _to_world_z: float4
-    _to_object_x: float4
-    _to_object_y: float4
-    _to_object_z: float4
+    /// The instance's placement, object space to world space, and its inverse (CHK-408).
+    object_to_world: affine3
+    world_to_object: affine3
 
 @internal fun mixed_hit.none(r: ray) -> mixed_hit:
     let zero = float4(0.0, 0.0, 0.0, 0.0)
@@ -174,12 +156,8 @@ struct mixed_hit[A]:
         float3(0.0, 0.0, 0.0)
         false
         undefined()
-        zero
-        zero
-        zero
-        zero
-        zero
-        zero
+        affine3.from_rows(zero, zero, zero)
+        affine3.from_rows(zero, zero, zero)
     )
 
 /// The hit as a triangle's, which `is_hit` only where the kind is `triangle`.
@@ -194,12 +172,8 @@ fun mixed_hit.triangle(self) -> triangle_hit:
         self.primitive_index
         self.barycentrics
         self.is_front_face
-        self._to_world_x
-        self._to_world_y
-        self._to_world_z
-        self._to_object_x
-        self._to_object_y
-        self._to_object_z
+        self.object_to_world
+        self.world_to_object
     )
 
 /// The hit as a procedural primitive's, which `is_hit` only where the kind is `procedural`.
@@ -215,12 +189,8 @@ fun mixed_hit.procedural(self) => procedural_of_mixed(self)
         h.geometry_index
         h.primitive_index
         h.attributes
-        h._to_world_x
-        h._to_world_y
-        h._to_world_z
-        h._to_object_x
-        h._to_object_y
-        h._to_object_z
+        h.object_to_world
+        h.world_to_object
     )
 
 @internal fun mixed_of_triangle[A](h: triangle_hit, attributes: A) -> mixed_hit[A]:
@@ -238,12 +208,8 @@ fun mixed_hit.procedural(self) => procedural_of_mixed(self)
         h.barycentrics
         h.is_front_face
         attributes
-        h._to_world_x
-        h._to_world_y
-        h._to_world_z
-        h._to_object_x
-        h._to_object_y
-        h._to_object_z
+        h.object_to_world
+        h.world_to_object
     )
 
 @internal fun mixed_of_procedural[A](h: procedural_hit[A]) -> mixed_hit[A]:
@@ -261,17 +227,16 @@ fun mixed_hit.procedural(self) => procedural_of_mixed(self)
         float3(0.0, 0.0, 0.0)
         false
         h.attributes
-        h._to_world_x
-        h._to_world_y
-        h._to_world_z
-        h._to_object_x
-        h._to_object_y
-        h._to_object_z
+        h.object_to_world
+        h.world_to_object
     )
 
 // ---- the transforms of a hit, typed by what they move ---------------------------------------------------------------
 
-@internal fun apply_point(x: float4, y: float4, z: float4, p: float3) -> float3:
+@internal fun apply_point(a: affine3, p: float3) -> float3:
+    let x = a.row(0)
+    let y = a.row(1)
+    let z = a.row(2)
     return float3(
         x.x * p.x + x.y * p.y + x.z * p.z + x.w
         y.x * p.x + y.y * p.y + y.z * p.z + y.w
@@ -279,14 +244,20 @@ fun mixed_hit.procedural(self) => procedural_of_mixed(self)
     )
 
 /// The rows without their translation, which a direction never takes: no `w * 0.0` a compiler cannot fold away.
-@internal fun apply_vector(x: float4, y: float4, z: float4, v: float3) -> float3:
+@internal fun apply_vector(a: affine3, v: float3) -> float3:
+    let x = a.row(0)
+    let y = a.row(1)
+    let z = a.row(2)
     return float3(
         x.x * v.x + x.y * v.y + x.z * v.z
         y.x * v.x + y.y * v.y + y.z * v.z
         z.x * v.x + z.y * v.y + z.z * v.z
     )
 
-@internal fun apply_transposed(x: float4, y: float4, z: float4, n: float3) -> float3:
+@internal fun apply_transposed(a: affine3, n: float3) -> float3:
+    let x = a.row(0)
+    let y = a.row(1)
+    let z = a.row(2)
     return float3(
         x.x * n.x + y.x * n.y + z.x * n.z
         x.y * n.x + y.y * n.y + z.y * n.z
@@ -295,97 +266,97 @@ fun mixed_hit.procedural(self) => procedural_of_mixed(self)
 
 /// An object-space point of the hit's instance, in world space.
 fun triangle_hit.to_world(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.object_to_world, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space direction, in world space: the linear part alone.
 fun triangle_hit.to_world(self, v: vec3) -> vec3:
-    let m = apply_vector(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z))
+    let m = apply_vector(self.object_to_world, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space normal, in world space: by the inverse transpose, so it stays perpendicular to the surface.
 fun triangle_hit.normal_to_world(self, n: vec3) -> vec3:
-    let m = apply_transposed(self._to_object_x, self._to_object_y, self._to_object_z, float3(n.x, n.y, n.z))
+    let m = apply_transposed(self.world_to_object, float3(n.x, n.y, n.z))
     return vec3(m.x, m.y, m.z)
 
 /// A world-space point, in the hit's object space.
 fun triangle_hit.to_object(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.world_to_object, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// A world-space direction, in the hit's object space.
 fun triangle_hit.to_object(self, v: vec3) -> vec3:
-    let m = apply_vector(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z))
+    let m = apply_vector(self.world_to_object, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space point of the candidate's instance, in world space.
 fun triangle_candidate.to_world(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.object_to_world, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space direction of the candidate's instance, in world space.
 fun triangle_candidate.to_world(self, v: vec3) -> vec3:
-    let m = apply_vector(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z))
+    let m = apply_vector(self.object_to_world, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space point of the hit's instance, in world space.
 fun procedural_hit.to_world(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.object_to_world, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space direction, in world space: the linear part alone.
 fun procedural_hit.to_world(self, v: vec3) -> vec3:
-    let m = apply_vector(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z))
+    let m = apply_vector(self.object_to_world, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space normal, in world space: by the inverse transpose, so it stays perpendicular to the surface.
 fun procedural_hit.normal_to_world(self, n: vec3) -> vec3:
-    let m = apply_transposed(self._to_object_x, self._to_object_y, self._to_object_z, float3(n.x, n.y, n.z))
+    let m = apply_transposed(self.world_to_object, float3(n.x, n.y, n.z))
     return vec3(m.x, m.y, m.z)
 
 /// A world-space point, in the hit's object space.
 fun procedural_hit.to_object(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.world_to_object, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// A world-space direction, in the hit's object space.
 fun procedural_hit.to_object(self, v: vec3) -> vec3:
-    let m = apply_vector(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z))
+    let m = apply_vector(self.world_to_object, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space point of the hit's instance, in world space.
 fun mixed_hit.to_world(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.object_to_world, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space direction, in world space: the linear part alone.
 fun mixed_hit.to_world(self, v: vec3) -> vec3:
-    let m = apply_vector(self._to_world_x, self._to_world_y, self._to_world_z, float3(v.x, v.y, v.z))
+    let m = apply_vector(self.object_to_world, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space normal, in world space: by the inverse transpose, so it stays perpendicular to the surface.
 fun mixed_hit.normal_to_world(self, n: vec3) -> vec3:
-    let m = apply_transposed(self._to_object_x, self._to_object_y, self._to_object_z, float3(n.x, n.y, n.z))
+    let m = apply_transposed(self.world_to_object, float3(n.x, n.y, n.z))
     return vec3(m.x, m.y, m.z)
 
 /// A world-space point, in the hit's object space.
 fun mixed_hit.to_object(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_object_x, self._to_object_y, self._to_object_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.world_to_object, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// A world-space direction, in the hit's object space.
 fun mixed_hit.to_object(self, v: vec3) -> vec3:
-    let m = apply_vector(self._to_object_x, self._to_object_y, self._to_object_z, float3(v.x, v.y, v.z))
+    let m = apply_vector(self.world_to_object, float3(v.x, v.y, v.z))
     return vec3(m.x, m.y, m.z)
 
 /// An object-space point of the candidate's instance, in world space.
 fun procedural_candidate.to_world(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.object_to_world, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 /// An object-space point of the box's instance, in world space.
 fun procedural_box.to_world(self, p: pos3) -> pos3:
-    let m = apply_point(self._to_world_x, self._to_world_y, self._to_world_z, float3(p.x, p.y, p.z))
+    let m = apply_point(self.object_to_world, float3(p.x, p.y, p.z))
     return pos3(m.x, m.y, m.z)
 
 // ---- the trace ------------------------------------------------------------------------------------------------------
@@ -482,7 +453,7 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
 
 @internal fun no_triangle_hit(r: ray) -> triangle_hit:
     let zero = float4(0.0, 0.0, 0.0, 0.0)
-    return triangle_hit(false, r.t_max, r, 0, 0, 0, 0, float3(0.0, 0.0, 0.0), false, zero, zero, zero, zero, zero, zero)
+    return triangle_hit(false, r.t_max, r, 0, 0, 0, 0, float3(0.0, 0.0, 0.0), false, affine3.from_rows(zero, zero, zero), affine3.from_rows(zero, zero, zero))
 
 // ---- what a ray-tracing stage is handed -----------------------------------------------------------------------------
 //
@@ -505,12 +476,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         hit_primitive_index()
         float3(1.0 - b.x - b.y, b.x, b.y)
         hit_is_front_face()
-        hit_object_to_world_row(0)
-        hit_object_to_world_row(1)
-        hit_object_to_world_row(2)
-        hit_world_to_object_row(0)
-        hit_world_to_object_row(1)
-        hit_world_to_object_row(2)
+        affine3.from_rows(hit_object_to_world_row(0), hit_object_to_world_row(1), hit_object_to_world_row(2))
+        affine3.from_rows(hit_world_to_object_row(0), hit_world_to_object_row(1), hit_world_to_object_row(2))
     )
 
 @internal fun current_triangle_candidate() -> triangle_candidate:
@@ -524,12 +491,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         hit_primitive_index()
         float3(1.0 - b.x - b.y, b.x, b.y)
         hit_is_front_face()
-        hit_object_to_world_row(0)
-        hit_object_to_world_row(1)
-        hit_object_to_world_row(2)
-        hit_world_to_object_row(0)
-        hit_world_to_object_row(1)
-        hit_world_to_object_row(2)
+        affine3.from_rows(hit_object_to_world_row(0), hit_object_to_world_row(1), hit_object_to_world_row(2))
+        affine3.from_rows(hit_world_to_object_row(0), hit_world_to_object_row(1), hit_world_to_object_row(2))
     )
 
 @internal fun current_procedural_box() -> procedural_box:
@@ -543,12 +506,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         hit_instance_index()
         hit_geometry_index()
         hit_primitive_index()
-        hit_object_to_world_row(0)
-        hit_object_to_world_row(1)
-        hit_object_to_world_row(2)
-        hit_world_to_object_row(0)
-        hit_world_to_object_row(1)
-        hit_world_to_object_row(2)
+        affine3.from_rows(hit_object_to_world_row(0), hit_object_to_world_row(1), hit_object_to_world_row(2))
+        affine3.from_rows(hit_world_to_object_row(0), hit_world_to_object_row(1), hit_world_to_object_row(2))
     )
 
 @internal fun current_procedural_hit[A](attributes: A) -> procedural_hit[A]:
@@ -561,12 +520,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         hit_geometry_index()
         hit_primitive_index()
         attributes
-        hit_object_to_world_row(0)
-        hit_object_to_world_row(1)
-        hit_object_to_world_row(2)
-        hit_world_to_object_row(0)
-        hit_world_to_object_row(1)
-        hit_world_to_object_row(2)
+        affine3.from_rows(hit_object_to_world_row(0), hit_object_to_world_row(1), hit_object_to_world_row(2))
+        affine3.from_rows(hit_world_to_object_row(0), hit_world_to_object_row(1), hit_world_to_object_row(2))
     )
 
 @internal fun current_procedural_candidate[A](attributes: A) -> procedural_candidate[A]:
@@ -578,12 +533,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         hit_geometry_index()
         hit_primitive_index()
         attributes
-        hit_object_to_world_row(0)
-        hit_object_to_world_row(1)
-        hit_object_to_world_row(2)
-        hit_world_to_object_row(0)
-        hit_world_to_object_row(1)
-        hit_world_to_object_row(2)
+        affine3.from_rows(hit_object_to_world_row(0), hit_object_to_world_row(1), hit_object_to_world_row(2))
+        affine3.from_rows(hit_world_to_object_row(0), hit_world_to_object_row(1), hit_world_to_object_row(2))
     )
 
 // ---- the native form ------------------------------------------------------------------------------------------------
@@ -599,12 +550,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         ray_query_candidate_primitive_index(q)
         float3(1.0 - b.x - b.y, b.x, b.y)
         ray_query_candidate_is_front_face(q)
-        ray_query_candidate_object_to_world_row(q, 0)
-        ray_query_candidate_object_to_world_row(q, 1)
-        ray_query_candidate_object_to_world_row(q, 2)
-        ray_query_candidate_world_to_object_row(q, 0)
-        ray_query_candidate_world_to_object_row(q, 1)
-        ray_query_candidate_world_to_object_row(q, 2)
+        affine3.from_rows(ray_query_candidate_object_to_world_row(q, 0), ray_query_candidate_object_to_world_row(q, 1), ray_query_candidate_object_to_world_row(q, 2))
+        affine3.from_rows(ray_query_candidate_world_to_object_row(q, 0), ray_query_candidate_world_to_object_row(q, 1), ray_query_candidate_world_to_object_row(q, 2))
     )
 
 @internal fun committed_of(q: ray_query, r: ray) -> triangle_hit:
@@ -620,12 +567,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         ray_query_committed_primitive_index(q)
         float3(1.0 - b.x - b.y, b.x, b.y)
         ray_query_committed_is_front_face(q)
-        ray_query_committed_object_to_world_row(q, 0)
-        ray_query_committed_object_to_world_row(q, 1)
-        ray_query_committed_object_to_world_row(q, 2)
-        ray_query_committed_world_to_object_row(q, 0)
-        ray_query_committed_world_to_object_row(q, 1)
-        ray_query_committed_world_to_object_row(q, 2)
+        affine3.from_rows(ray_query_committed_object_to_world_row(q, 0), ray_query_committed_object_to_world_row(q, 1), ray_query_committed_object_to_world_row(q, 2))
+        affine3.from_rows(ray_query_committed_world_to_object_row(q, 0), ray_query_committed_world_to_object_row(q, 1), ray_query_committed_world_to_object_row(q, 2))
     )
 
 @internal fun trace_native(
@@ -666,12 +609,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         ray_query_candidate_instance_index(q)
         ray_query_candidate_geometry_index(q)
         ray_query_candidate_primitive_index(q)
-        ray_query_candidate_object_to_world_row(q, 0)
-        ray_query_candidate_object_to_world_row(q, 1)
-        ray_query_candidate_object_to_world_row(q, 2)
-        ray_query_candidate_world_to_object_row(q, 0)
-        ray_query_candidate_world_to_object_row(q, 1)
-        ray_query_candidate_world_to_object_row(q, 2)
+        affine3.from_rows(ray_query_candidate_object_to_world_row(q, 0), ray_query_candidate_object_to_world_row(q, 1), ray_query_candidate_object_to_world_row(q, 2))
+        affine3.from_rows(ray_query_candidate_world_to_object_row(q, 0), ray_query_candidate_world_to_object_row(q, 1), ray_query_candidate_world_to_object_row(q, 2))
     )
 
 @internal fun candidate_of_box[A](b: procedural_box, reported: report[A]) -> procedural_candidate[A]:
@@ -683,12 +622,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         b.geometry_index
         b.primitive_index
         reported.attributes
-        b._to_world_x
-        b._to_world_y
-        b._to_world_z
-        b._to_object_x
-        b._to_object_y
-        b._to_object_z
+        b.object_to_world
+        b.world_to_object
     )
 
 @internal fun hit_of_box[A](b: procedural_box, reported: report[A]) -> procedural_hit[A]:
@@ -701,12 +636,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         b.geometry_index
         b.primitive_index
         reported.attributes
-        b._to_world_x
-        b._to_world_y
-        b._to_world_z
-        b._to_object_x
-        b._to_object_y
-        b._to_object_z
+        b.object_to_world
+        b.world_to_object
     )
 
 @internal fun trace_native_procedural[A](
@@ -884,8 +815,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 to_object_x = pool_float4(acceleration_pool_load(instance_unit))
                 to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
                 to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
-                o = apply_point(to_object_x, to_object_y, to_object_z, origin)
-                d = apply_vector(to_object_x, to_object_y, to_object_z, direction)
+                o = apply_point(affine3.from_rows(to_object_x, to_object_y, to_object_z), origin)
+                d = apply_vector(affine3.from_rows(to_object_x, to_object_y, to_object_z), direction)
             inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
 
         let lo = acceleration_pool_load(region + 1 + 2 * node)
@@ -940,12 +871,12 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 a.w as int
                 float3(1.0 - found.y - found.z, found.y, found.z)
                 is_front
-                pool_float4(acceleration_pool_load(instance_unit + 3))
-                pool_float4(acceleration_pool_load(instance_unit + 4))
-                pool_float4(acceleration_pool_load(instance_unit + 5))
-                to_object_x
-                to_object_y
-                to_object_z
+                affine3.from_rows(
+                    pool_float4(acceleration_pool_load(instance_unit + 3))
+                    pool_float4(acceleration_pool_load(instance_unit + 4))
+                    pool_float4(acceleration_pool_load(instance_unit + 5))
+                )
+                affine3.from_rows(to_object_x, to_object_y, to_object_z)
             )
             let mut decision = hit_decision.accept
             if not is_opaque:
@@ -958,12 +889,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                     hit.primitive_index
                     hit.barycentrics
                     hit.is_front_face
-                    hit._to_world_x
-                    hit._to_world_y
-                    hit._to_world_z
-                    hit._to_object_x
-                    hit._to_object_y
-                    hit._to_object_z
+                    hit.object_to_world
+                    hit.world_to_object
                 )
                 decision = any_hit(candidate)
             if decision == hit_decision.ignore => continue
@@ -1022,8 +949,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 to_object_x = pool_float4(acceleration_pool_load(instance_unit))
                 to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
                 to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
-                o = apply_point(to_object_x, to_object_y, to_object_z, origin)
-                d = apply_vector(to_object_x, to_object_y, to_object_z, direction)
+                o = apply_point(affine3.from_rows(to_object_x, to_object_y, to_object_z), origin)
+                d = apply_vector(affine3.from_rows(to_object_x, to_object_y, to_object_z), direction)
             inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
 
         let lo = acceleration_pool_load(region + 1 + 2 * node)
@@ -1067,12 +994,12 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 instance.w as int
                 (box_hi.w & 2147483647) as int
                 box_lo.w as int
-                pool_float4(acceleration_pool_load(instance_unit + 3))
-                pool_float4(acceleration_pool_load(instance_unit + 4))
-                pool_float4(acceleration_pool_load(instance_unit + 5))
-                to_object_x
-                to_object_y
-                to_object_z
+                affine3.from_rows(
+                    pool_float4(acceleration_pool_load(instance_unit + 3))
+                    pool_float4(acceleration_pool_load(instance_unit + 4))
+                    pool_float4(acceleration_pool_load(instance_unit + 5))
+                )
+                affine3.from_rows(to_object_x, to_object_y, to_object_z)
             )
             let reported = intersection(b)
             if reported.t < r.t_min or reported.t > best.t or not reported.is_hit => continue
@@ -1140,8 +1067,8 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 to_object_x = pool_float4(acceleration_pool_load(instance_unit))
                 to_object_y = pool_float4(acceleration_pool_load(instance_unit + 1))
                 to_object_z = pool_float4(acceleration_pool_load(instance_unit + 2))
-                o = apply_point(to_object_x, to_object_y, to_object_z, origin)
-                d = apply_vector(to_object_x, to_object_y, to_object_z, direction)
+                o = apply_point(affine3.from_rows(to_object_x, to_object_y, to_object_z), origin)
+                d = apply_vector(affine3.from_rows(to_object_x, to_object_y, to_object_z), direction)
             inverse = float3(1.0 / d.x, 1.0 / d.y, 1.0 / d.z)
 
         let lo = acceleration_pool_load(region + 1 + 2 * node)
@@ -1187,12 +1114,12 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                     instance.w as int
                     (box_hi.w & 2147483647) as int
                     box_lo.w as int
-                    pool_float4(acceleration_pool_load(instance_unit + 3))
-                    pool_float4(acceleration_pool_load(instance_unit + 4))
-                    pool_float4(acceleration_pool_load(instance_unit + 5))
-                    to_object_x
-                    to_object_y
-                    to_object_z
+                    affine3.from_rows(
+                        pool_float4(acceleration_pool_load(instance_unit + 3))
+                        pool_float4(acceleration_pool_load(instance_unit + 4))
+                        pool_float4(acceleration_pool_load(instance_unit + 5))
+                    )
+                    affine3.from_rows(to_object_x, to_object_y, to_object_z)
                 )
                 let reported = intersection(b)
                 if reported.t < r.t_min or reported.t > best.t or not reported.is_hit => continue
@@ -1232,12 +1159,12 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
                 a.w as int
                 float3(1.0 - found.y - found.z, found.y, found.z)
                 is_front
-                pool_float4(acceleration_pool_load(instance_unit + 3))
-                pool_float4(acceleration_pool_load(instance_unit + 4))
-                pool_float4(acceleration_pool_load(instance_unit + 5))
-                to_object_x
-                to_object_y
-                to_object_z
+                affine3.from_rows(
+                    pool_float4(acceleration_pool_load(instance_unit + 3))
+                    pool_float4(acceleration_pool_load(instance_unit + 4))
+                    pool_float4(acceleration_pool_load(instance_unit + 5))
+                )
+                affine3.from_rows(to_object_x, to_object_y, to_object_z)
             )
             let mut decision = hit_decision.accept
             if not is_opaque => decision = any_hit(candidate_of_triangle_hit(hit))
@@ -1259,10 +1186,6 @@ fun is_occluded(world: acceleration_structure[.triangles], r: ray, .mask: int = 
         hit.primitive_index
         hit.barycentrics
         hit.is_front_face
-        hit._to_world_x
-        hit._to_world_y
-        hit._to_world_z
-        hit._to_object_x
-        hit._to_object_y
-        hit._to_object_z
+        hit.object_to_world
+        hit.world_to_object
     )

@@ -502,6 +502,7 @@ let p = spheres.trace(r, sphere, cutout_sphere)          // .procedural: (proced
 let m = both.trace(r, any_hit = a, intersection = s, procedural_any_hit = b)   // .mixed -> mixed_hit[A]: m.kind, m.triangle(), m.procedural()
 is_occluded(scene.world, r)                              // the shadow ray
 h.to_world(p: pos3)  h.to_world(v: vec3)  h.normal_to_world(n)  h.to_object(p)  // typed transforms
+h.object_to_world  h.world_to_object                                        // affine3: a * p translates, a * v does not
 report(t = t, attributes = a)  report.none()             // what an intersection returns: at most one per box
 
 rays path_rays:                                          // a ray set: position = contribution and miss index

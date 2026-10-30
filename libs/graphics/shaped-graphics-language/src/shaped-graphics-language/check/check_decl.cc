@@ -2031,8 +2031,39 @@ void checker::judge_entry_point(symbol_id id)
 
     // CHK-291: what crosses a stage edge holds no array until a target gives it a location per element
     // CHK-397 first: a value of function bodies alone is what the detail names, rather than an array holding it
+    // A ray-tracing stage's hit, candidate or box is a prelude struct the flat tree builds from the stage's builtins,
+    // so it crosses no edge and may hold what a body holds, an affine3 among it (CHK-408); a payload does cross.
+    auto const ray_stages = stage_bit(stage::closest_hit) | stage_bit(stage::any_hit) | stage_bit(stage::intersection);
+    auto const is_built_in_place = [&](type_id type)
+    {
+        return (stage_bit(info.entry_stage) & ray_stages) != 0 && type != type_id::none
+            && type != checked_module::error_type && out.at(type).kind == type_kind::structure
+            && is_prelude_file(out.at(out.at(type).symbol).file);
+    };
     for (auto const& parameter : parameters)
-        if (parameter.input == stage_input::none)
+        if (parameter.input == stage_input::none && is_built_in_place(parameter.type))
+        {
+            // its own builtin fields are built in place, and what the program hands it, the attributes, crosses
+            auto is_reported = false;
+            for (auto const& m : out.at(out.at(parameter.type).members))
+            {
+                if (is_reported || out.builtin_type_of(m.type) != nullptr)
+                    continue;
+                if (auto const found = local_only_path(m.type); !found.path.empty())
+                {
+                    unsupported(file, where,
+                                cc::format("a {} crossing a stage edge, in {}.{}{}, which only a function body holds, "
+                                           "since {}",
+                                           out.name_of(found.type), out.name_of(parameter.type), m.name, found.path,
+                                           found.reason));
+                    is_reported = true;
+                }
+            }
+            if (!is_reported)
+                judge_edge_arrays(file, where, parameter.type);
+            judge_edge_16_bit(file, where, parameter.type);
+        }
+        else if (parameter.input == stage_input::none)
         {
             if (!judge_edge_local_only(file, where, parameter.type))
                 judge_edge_arrays(file, where, parameter.type);

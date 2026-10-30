@@ -188,6 +188,20 @@ void sgl::builtins::register_types(registry& r)
         .local_only_reason = "its layout in GPU memory is not decided yet",
     });
 
+    // CHK-408: held as its three rows, the shape every API hands a hit's transform in
+    r.add(type_record{
+        .declaration = "struct affine3",
+        .doc = "/// An affine map of space: a linear part and a translation, as three rows of four.\n"
+               "/// It translates a `pos3` and leaves a `vec3` untranslated, so the type decides the w.\n"
+               "/// A value of function bodies alone, which no GPU memory holds yet.",
+        .hlsl = "float3x4",
+        .wgsl = "mat3x4f",
+        .msl = "float3x4",
+        .leaf_kind = value_kind::scalar_float,
+        .leaf_count = 12,
+        .local_only_reason = "its layout in GPU memory is not decided yet",
+    });
+
     r.add(type_record{
         .declaration = "struct bool32",
         .doc = "/// A bool as GPU memory holds one: four bytes, 0 for false and anything else for true.\n"

@@ -140,6 +140,11 @@ use view
 * **CHK-407** `m.column(i)` and `m.row(i)` of any matrix are its column and its row `i`, a vector of its size, for an `int` index that may be known only when it runs.
   A matrix has no subscript `m[i]`: HLSL's is a row and WGSL's and MSL's a column, so the name says which one is read.
   An index outside the matrix has no value, as EVAL-84 has it of a call no target defines.
+* **CHK-408** `affine3` is the prelude's affine map of space: a linear part and a translation, held as three rows of four `float`s ([why](why/checking.md#chk-408)).
+  It is a value of function bodies alone, as `mat3` is (CHK-397).
+  `affine3.from_rows(r0, r1, r2)` makes one of its three `float4` rows, and `a.row(i)` reads one back, as CHK-407 reads a matrix's.
+  `a * p` of a `pos3` translates it and gives a `pos3`, `a * v` of a `vec3` does not and gives a `vec3`, and `a * v` of a `float4` takes its own `w` and gives a `float3`.
+  A ray-tracing stage's hit, candidate or box holds its placement as `object_to_world` and `world_to_object`, and crosses no stage edge for them: the flat tree builds it in place.
 * **CHK-233** A struct and an enum each have a **type scope**: the properties and functions declared in its block, and its extensions (CHK-237).
   A field and a case are members of the type, and no function.
 * **CHK-234** A `fun` in a type's block whose first parameter is `self` is a **method**, and `self` is a parameter of that type; `mut self` is CHK-48.

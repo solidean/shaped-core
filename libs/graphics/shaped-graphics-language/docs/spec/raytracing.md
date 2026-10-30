@@ -67,6 +67,7 @@ HLSL writes `RaytracingAccelerationStructure`, MSL `instance_acceleration_struct
 | `h.to_world(p: pos3) -> pos3`, `h.to_world(v: vec3) -> vec3` | every hit and `triangle_candidate`; `procedural_candidate` and `procedural_box` take the point alone | object space to world space |
 | `h.normal_to_world(n: vec3) -> vec3` | every hit | by the inverse transpose, so a normal stays perpendicular to its surface |
 | `h.to_object(p: pos3) -> pos3`, `h.to_object(v: vec3) -> vec3` | every hit | world space to object space |
+| `h.object_to_world`, `h.world_to_object` | every hit, candidate and box | the instance's placement and its inverse, each an `affine3` (CHK-408) |
 
 The fields whose names start with `_` hold the rows of both matrices; they are the prelude's, and no program reads them.
 

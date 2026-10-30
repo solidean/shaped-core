@@ -124,6 +124,75 @@ written write_matrix_part(call_context const& c)
     return {.text = cc::format("{}[{}]", matrix, c.arguments[1].text)};
 }
 
+// An affine3's leaves are its three rows, one after the other; HLSL holds it as `float3x4`, its rows as rows, and
+// WGSL and MSL as a `mat3x4f` / `float3x4` whose columns are those rows, so `v * a` there is `mul(a, v)` in HLSL.
+
+/// Row `row` of an affine3 dotted with `(x, y, z, w)`.
+f32 affine_row(leaves a, isize row, f32 x, f32 y, f32 z, f32 w)
+{
+    return a[row * 4].as_float() * x + a[row * 4 + 1].as_float() * y + a[row * 4 + 2].as_float() * z
+         + a[row * 4 + 3].as_float() * w;
+}
+
+template <int W>
+void affine_apply(leaves in, result& out)
+{
+    for (auto row = isize(0); row < 3; ++row)
+        out.push_back(scalar::of(affine_row(in, row, in[12].as_float(), in[13].as_float(), in[14].as_float(),
+                                            W < 0 ? in[15].as_float() : f32(W))));
+}
+
+void affine_row_at(leaves in, result& out)
+{
+    auto const i = isize(in[12].as_int());
+    for (auto k = isize(0); k < 4; ++k)
+        out.push_back(in[i * 4 + k]);
+}
+
+cc::string_view affine_row_undefined(leaves in)
+{
+    auto const i = in[12].as_int();
+    return i < 0 || i >= 3 ? "a matrix index outside the matrix" : cc::string_view();
+}
+
+/// `a` times `(v, w)`, or times `v` itself where `w` is empty: HLSL's `mul`, and the row vector on the left elsewhere.
+written write_affine_apply(call_context const& c, cc::string_view w)
+{
+    auto const float4 = c.builtins.at(c.builtins.find_type("float4")).spelled_in(c.target);
+    auto const v = w.empty() ? c.arguments[1].text : cc::format("{}({}, {})", float4, c.arguments[1].text, w);
+    if (c.target == language::hlsl)
+        return {.text = cc::format("mul({}, {})", c.arguments[0].text, v)};
+    return {.text = cc::format("({} * {})", v, wrapped(c.arguments[0], precedence::primary))};
+}
+
+written write_affine_point(call_context const& c)
+{
+    return write_affine_apply(c, "1.0");
+}
+
+written write_affine_direction(call_context const& c)
+{
+    return write_affine_apply(c, "0.0");
+}
+
+written write_affine_float4(call_context const& c)
+{
+    return write_affine_apply(c, "");
+}
+
+/// Every target's constructor of `float3x4` / `mat3x4f` takes the rows as they are held.
+written write_affine_of_rows(call_context const& c)
+{
+    auto const spelled = c.builtins.at(c.builtins.find_type("affine3")).spelled_in(c.target);
+    return {.text = cc::format("{}({}, {}, {})", spelled, c.arguments[0].text, c.arguments[1].text, c.arguments[2].text)};
+}
+
+/// Every target's `a[i]` is row `i`, as the affine3 is held.
+written write_affine_row(call_context const& c)
+{
+    return {.text = cc::format("{}[{}]", wrapped(c.arguments[0], precedence::primary), c.arguments[1].text)};
+}
+
 /// WGSL's and MSL's constructor takes columns, and HLSL's takes rows.
 written write_from_columns(call_context const& c)
 {
@@ -328,6 +397,23 @@ void sgl::builtins::register_transforms(registry& r)
                           .wgsl_names = k_transpose,
                           .msl_names = k_transpose},
             });
+
+    r.add_comment("// an affine3 translates a position and leaves a direction alone (CHK-408); core.sgl names its "
+                  "parts");
+    r.add(function_record{
+        .signature = "@internal @pure fun affine3_of_rows(r0: float4, r1: float4, r2: float4) -> affine3",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_affine_of_rows},
+    });
+    r.add(function_record{
+        .signature = "@internal @pure fun affine3_row(a: affine3, i: int) -> float4",
+        .evaluate = affine_row_at,
+        .undefined_when = affine_row_undefined,
+        .write = {.kind = spelling_kind::custom, .custom = write_affine_row},
+    });
+    add_product(r, "transform_position_affine", "affine3", "p", "pos3", "pos3", affine_apply<1>, write_affine_point);
+    add_product(r, "transform_direction_affine", "affine3", "v", "vec3", "vec3", affine_apply<0>, write_affine_direction);
+    add_product(r, "transform_float4_affine", "affine3", "v", "float4", "float3", affine_apply<-1>, write_affine_float4);
 
     r.add_comment("// a mat2 is a mat3 of the plane: a value of function bodies alone, made of its columns, times a "
                   "float2");
