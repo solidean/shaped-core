@@ -267,3 +267,16 @@ TEST("obj - a malformed MTL statement fails with its line")
 
     CHECK(babel::obj::read_materials(cc::string_view("")).value().empty());
 }
+
+TEST("obj - an mtllib name may hold blanks, and one statement may name several libraries")
+{
+    auto const m = babel::obj::read(cc::string_view("mtllib 48th Ave Walls Floors.mtl\n"
+                                                    "mtllib a.mtl b.MTL\n"
+                                                    "mtllib no extension\n"))
+                       .value();
+    REQUIRE(m.material_libraries.size() == 4);
+    CHECK(m.material_libraries[0] == "48th Ave Walls Floors.mtl");
+    CHECK(m.material_libraries[1] == "a.mtl");
+    CHECK(m.material_libraries[2] == "b.MTL");
+    CHECK(m.material_libraries[3] == "no extension");
+}

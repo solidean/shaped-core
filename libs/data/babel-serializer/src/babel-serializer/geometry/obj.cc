@@ -210,9 +210,30 @@ struct obj_parser
             open_span(result.materials, open_material, tok.rest());
         else if (keyword == "mtllib")
         {
-            auto name = cc::string_view();
-            while (tok.next(name))
-                result.material_libraries.push_back(cc::string(name));
+            // The format separates several libraries by blanks, but exporters write names that hold blanks themselves
+            // (`mtllib 48th Ave Walls Floors.mtl`): a name runs until a token ending in `.mtl`, any case.
+            auto const ends_in_mtl = [](cc::string_view t)
+            {
+                if (t.size() < 4)
+                    return false;
+                auto const ext = t.subview(t.size() - 4);
+                return ext[0] == '.' && (ext[1] | 0x20) == 'm' && (ext[2] | 0x20) == 't' && (ext[3] | 0x20) == 'l';
+            };
+            auto name = cc::string();
+            auto token = cc::string_view();
+            while (tok.next(token))
+            {
+                if (!name.empty())
+                    name += ' ';
+                name += token;
+                if (ends_in_mtl(token))
+                {
+                    result.material_libraries.push_back(cc::move(name));
+                    name = cc::string();
+                }
+            }
+            if (!name.empty())
+                result.material_libraries.push_back(cc::move(name));
         }
         // any other directive (s, vp, curve data, ...) is skipped
         return cc::unit{};

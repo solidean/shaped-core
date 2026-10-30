@@ -69,7 +69,7 @@ struct babel::obj::data
     cc::vector<group> groups;    // `g` group spans over faces
     cc::vector<group> materials; // `usemtl` material spans over faces
 
-    cc::vector<cc::string> material_libraries; // `mtllib` referenced files
+    cc::vector<cc::string> material_libraries; // `mtllib` referenced files; a name runs up to `.mtl`, blanks included
 };
 
 /// One texture statement of an MTL material (`map_Kd`, `bump`, ...): the file it names, and the options this reader models.
