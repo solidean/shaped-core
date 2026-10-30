@@ -287,6 +287,12 @@ void sgl::builtins::register_transforms(registry& r)
         .evaluate = from_columns,
         .write = {.kind = spelling_kind::custom, .custom = write_mat3_of_columns, .hlsl_names = k_transpose},
     });
+    r.add(function_record{
+        .signature = "@pure fun mat3(c0: vec3, c1: vec3, c2: vec3) -> mat3",
+        .doc = "/// A basis of three directions, `c0` first: where x, y and z go, as a tangent frame is built.",
+        .evaluate = from_columns,
+        .write = {.kind = spelling_kind::custom, .custom = write_mat3_of_columns, .hlsl_names = k_transpose},
+    });
     add_product(r, "transform_float3", "mat3", "v", "float3", "float3", transform_float3, write_product);
     add_product(r, "transform_direction3", "mat3", "v", "vec3", "vec3", transform_float3, write_product);
     add_product(r, "multiply_mat3", "mat3", "b", "mat3", "mat3", multiply_mat3, write_product);

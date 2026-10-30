@@ -122,7 +122,7 @@ use view
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
 * **CHK-397** `mat3` and `mat2` are the prelude's 3x3 and 2x2 matrices of floats, column-major like `mat4`, and values of function bodies alone ([why](why/checking.md#chk-397)).
-  `mat3(c0, c1, c2)` makes one of three `float3` columns, `c0` first, and `mat2(c0, c1)` one of two `float2` columns.
+  `mat3(c0, c1, c2)` makes one of three `float3` or three `vec3` columns, `c0` first, and `mat2(c0, c1)` one of two `float2` columns.
   `m * v` of a `mat3` and a `float3` or a `vec3` gives the same type, and of a `mat2` and a `float2` a `float2`.
   `m * n` of two of one size is their product, which applies `n` first.
   `transpose(m)` of any matrix is its rows as columns, which is how a row vector times a matrix, HLSL's `mul(v, m)`, is spelled.
