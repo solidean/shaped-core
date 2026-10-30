@@ -1029,8 +1029,95 @@ struct flattener
             return add_expr(type, from, flat_literal{.value = info.real});
         case constant_kind::enum_case:
             return enum_value(type, from, info.case_index);
+        case constant_kind::composite:
+        {
+            auto at = isize(0);
+            auto const result = value_of(info.type, from, info.leaves, at);
+            return at == info.leaves.size() ? result : fail();
+        }
         }
         return fail();
+    }
+
+    /// The scalars of a computed const from `at` on, built back into a value of `type` in the shape every target
+    /// constructs one: a vector of its scalars, a matrix of its columns, a struct of its members and an array of its
+    /// elements.
+    flat_expr_id value_of(type_id type, ast::expr_id from, cc::span<scalar const> leaves, isize& at)
+    {
+        if (auto const* const record = c.out.builtin_type_of(type))
+        {
+            if (record->leaf_count == 1)
+            {
+                if (at >= leaves.size())
+                    return fail();
+                auto const leaf = leaves[at++];
+                switch (leaf.kind)
+                {
+                case value_kind::scalar_float:
+                case value_kind::scalar_half:
+                    return add_expr(type, from, flat_literal{.value = f64(leaf.widened().as_float())});
+                case value_kind::scalar_int:
+                case value_kind::scalar_short:
+                    return add_expr(type, from, flat_int_literal{.value = leaf.widened().as_int()});
+                case value_kind::scalar_uint:
+                case value_kind::scalar_ushort:
+                    return add_expr(type, from, flat_int_literal{.value = leaf.widened().as_int(), .is_unsigned = true});
+                case value_kind::boolean:
+                    return add_expr(type, from, flat_bool_literal{.value = leaf.as_bool()});
+                default:
+                    return fail();
+                }
+            }
+            if (record->leaf_count <= 4)
+            {
+                auto arguments = cc::vector<flat_expr_id>();
+                for (auto i = 0; i < record->leaf_count; ++i)
+                    arguments.push_back(value_of(field_type(type, i), from, leaves, at));
+                return add_expr(type, from, flat_construct{.arguments = add_list(arguments)});
+            }
+            // a matrix is its constructor of columns, `mat4(c0, c1, c2, c3)`, which every target writes as it must
+            auto const* const overloads = c.prelude_names.get_ptr(c.out.name_of(type));
+            if (overloads == nullptr)
+                return fail();
+            for (auto const callee : *overloads)
+            {
+                auto const& s = c.out.at(callee);
+                if (s.kind != symbol_kind::function || s.info < 0)
+                    continue;
+                auto const& f = c.out.functions[s.info];
+                auto const parameters = c.out.at(f.parameters);
+                // the constructor of columns has as many as each column has rows
+                if (f.result != type || parameters.size() * parameters.size() != record->leaf_count)
+                    continue;
+                auto columns = cc::vector<flat_expr_id>();
+                for (auto const& p : parameters)
+                    columns.push_back(value_of(p.type, from, leaves, at));
+                return builtin_call(from, callee, columns);
+            }
+            return fail();
+        }
+        auto const& t = c.out.at(type);
+        if (t.kind == type_kind::enumeration)
+        {
+            if (at >= leaves.size())
+                return fail();
+            auto const leaf = leaves[at++];
+            auto const cases = c.out.at(t.cases);
+            for (auto i = isize(0); i < cases.size(); ++i)
+                if (cases[i].value == leaf.as_int())
+                    return enum_value(type, from, i32(i));
+            return fail();
+        }
+        auto arguments = cc::vector<flat_expr_id>();
+        if (t.kind == type_kind::array)
+            for (auto i = 0; i < t.count; ++i)
+                arguments.push_back(value_of(t.element, from, leaves, at));
+        else if (t.kind == type_kind::structure)
+            for (auto const& member : c.out.at(t.members))
+                arguments.push_back(value_of(member.type, from, leaves, at));
+        else
+            return fail();
+        return add_expr(type, from, flat_construct{.arguments = add_list(arguments)});
     }
 
     /// A number literal as the type it was checked as, which a conversion may have made other than its default.
@@ -3336,6 +3423,60 @@ void checker::flatten_test(i32 index)
     judge_constants(f.entry);
     out.tests[index].unit = i32(out.test_units.size());
     out.test_units.push_back(cc::move(f.entry));
+}
+
+checker::const_evaluation checker::evaluate_const(symbol_id scope, i32 file, ast::expr_id expr, type_id type)
+{
+    // Bodies are checked once every signature is known, and inlining needs them, so a const checks those it reaches
+    // first; recursion among them is find_recursion's to report, and stops this walk at the first repeat.
+    auto reached = cc::vector<symbol_id>{scope};
+    for (auto i = isize(0); i < reached.size(); ++i)
+        for (auto k = isize(0); k < calls.size(); ++k)
+        {
+            if (calls[k].caller != reached[i])
+                continue;
+            auto const callee = calls[k].callee;
+            auto is_known = false;
+            for (auto const r : reached)
+                is_known = is_known || r == callee;
+            if (is_known)
+                continue;
+            reached.push_back(callee);
+            if (out.at(callee).state == symbol_state::checked)
+                check_body(callee);
+        }
+
+    auto f = flattener{.c = *this};
+    f.entry.name = "const";
+    f.entry.function = scope;
+    f.entry.result = type;
+    f.entry.names.also_taken = module_names();
+    f.frames.push_back({.function = scope, .file = file, .result = type});
+    auto const result = f.flatten_expr(expr);
+    if (f.is_failed || !is_valid(result))
+        return {.detail = "a const whose value reaches a construct the flat tree cannot hold yet"};
+    f.add_stmt(origin{.file = file, .expr = expr}, flat_return{.value = result});
+    f.entry.body = f.add_list(f.block);
+
+    // a const reads no binding, so the run has no inputs, and a value that takes this long is no constant
+    constexpr auto fuel = 100'000;
+    auto const o = interpret(out, f.entry, {}, {.fuel = fuel});
+    auto const without_value = [](cc::string detail)
+    { return const_evaluation{.kind = diagnostic_kind::constant_without_value, .detail = cc::move(detail)}; };
+    switch (o.status)
+    {
+    case run_status::ok:
+        return {.leaves = o.result.leaves, .is_ok = true};
+    case run_status::out_of_fuel:
+        return without_value(cc::format("takes more than {} steps to compute", fuel));
+    case run_status::assertion_failed:
+        return without_value("fails an assert while it is computed");
+    case run_status::program_error:
+        return without_value(cc::format("has no value: {}", o.detail));
+    default:
+        return {.detail = cc::format("a const whose value the abstract machine cannot compute: {} {}",
+                                     to_string(o.status), o.detail)};
+    }
 }
 
 bool checker::is_sound(type_id type) const

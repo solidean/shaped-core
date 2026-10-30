@@ -330,6 +330,14 @@ Refusing it would only send the author to `as`, and a second meaning would be wo
 So the call is exactly the conversion `as` is, with the same overloads and the same unspecified values, and never a reinterpretation of bits, which `from_bits` is.
 A type `as` does not reach stays unreachable this way too, so `bool` keeps its one explicit spelling.
 
+## CHK-219
+
+A shader builds tables from constants: weights normalized by their sum, sizes derived from a radius, a basis from its axes.
+A shader language carries no API to keep stable here, so the rule is the widest one that stays sound: whatever is computable before the program runs.
+The abstract machine is what decides it, since it is what a test runs on already, and what it computes is exactly what a run of the same expression gives.
+That is why the arithmetic is `f32` and not `f64`: a const and the same expression in a body agree to the bit, on every target, because every target reads the literal.
+Whether a const may ask for more precision is `question-sgl-const-f64-evaluation`.
+
 ## CHK-225
 
 A `bool` line is a check rather than a line under a `check` keyword, because the keyword would sit on every line of every test.

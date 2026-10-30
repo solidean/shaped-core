@@ -1,4 +1,4 @@
-// a const is a literal, an enum case or another const, and stands for its value wherever it is named
+// a const is any value computed before the program runs, and stands for that value wherever it is named (CHK-219)
 
 const steps = 4
 const scale = -0.5
@@ -60,3 +60,71 @@ binding cells:
 
 @compute(steps, also_steps) fun spread(@thread_id id: int3){cells}:
     cells.values[id.x + id.y * steps] = scale
+
+// any other value is computed once, as the abstract machine runs it, which is what every target then reads
+const w0 = 0.2270270270
+const w1 = 0.1945945946
+const norm = w0 + 2.0 * w1
+const taps = 2 * steps + 1
+const half_mask = mask >> 8u
+const is_wide = taps > 8
+
+test norm == w0 + 2.0 * w1
+test taps == 9 and half_mask == 255u and is_wide
+
+// a const of a written type converts what it computes as a `let` of that type does
+const eight: uint = 5 + 3
+const three: float = 1 + 2
+
+test eight == 8u and three == 3.0
+
+// a call of the program's own function is computed too, however far it calls on
+fun gaussian(x: float, sigma: float) -> float => exp(-(x * x) / (2.0 * sigma * sigma))
+fun weight_at(i: int) -> float => gaussian(i as float, 2.0)
+fun sum_to(n: int) -> int:
+    let mut total = 0
+    for i in 0 ..< n:
+        total += i
+    return total
+
+const g0 = weight_at(0)
+const g2 = weight_at(2)
+const triangle = sum_to(5)
+
+test g0 == 1.0 and g2 == gaussian(2.0, 2.0)
+test triangle == 10
+
+// an array length and a case label take a computed int as they take a literal
+const lanes = taps - 5
+
+test float[lanes].filled(1.0).length == 4
+
+fun bucket(n: int) -> int:
+    return case n:
+        lanes => 1
+        _ => 0
+
+test bucket(4) == 1 and bucket(5) == 0
+
+// a vector, a matrix, an array and a struct are consts as well
+struct light:
+    dir: vec3
+    tint: float3
+
+const up = vec3(0.0, 1.0, 0.0)
+const tint = float3(1.0, norm, 0.5)
+const offsets = [float2(-1.0, 0.0), float2(1.0, 0.0), float2(0.0, 1.0)]
+const sun = light(up, tint * 2.0)
+const shift = mat4(float4(1.0, 0.0, 0.0, 0.0), float4(0.0, 1.0, 0.0, 0.0), float4(0.0, 0.0, 1.0, 0.0), float4(1.0, 2.0, 3.0, 1.0))
+
+test up.y == 1.0 and tint.y == norm
+test offsets[1].x == 1.0 and offsets.length == 3
+test sun.tint == float3(2.0, 2.0 * norm, 1.0)
+test (shift * float4(0.0, 0.0, 0.0, 1.0)) == float4(1.0, 2.0, 3.0, 1.0)
+
+// what a const computes reaches an entry point as literals, whatever index it is read at
+binding taps_out:
+    values: mut buffer[float2]
+
+@compute(4) fun spread_taps(@thread_id id: int3){taps_out}:
+    taps_out.values[id.x] = offsets[id.x % 3] * g2 + (sun.tint.xy * norm)

@@ -1220,6 +1220,83 @@ void checker::compile_const(symbol_id id)
     if (ast::is_valid(literal) && ast.at(literal).node.is<ast::literal>())
         info.is_hex = is_hex_literal(text_of(file, span_of(file, literal)));
 
+    // The value is checked and flattened as a test's body is, in a scope of its own that lists no binding (CHK-224),
+    // so a call that needs one is refused as it is in a test.
+    auto scope_symbol = symbol_id::none;
+    auto const value_scope = [&]
+    {
+        if (!is_valid(scope_symbol))
+        {
+            scope_symbol = symbol_id(out.symbols.size());
+            out.symbols.push_back({.file = file,
+                                   .declaration = decl,
+                                   .kind = symbol_kind::test,
+                                   .state = symbol_state::checked,
+                                   .name = cc::format("const {}", out.at(id).name),
+                                   .info = i32(out.functions.size())});
+            out.functions.push_back({.symbol = scope_symbol,
+                                     .parameters = {.first = u32(out.parameters.size()), .count = 0},
+                                     .result = error_type,
+                                     .bindings = {.first = u32(out.binding_lists.size()), .count = 0}});
+            notes.push_back({});
+        }
+        return function_scope{.function = scope_symbol, .file = file};
+    };
+    auto const checked_value = [&]
+    {
+        auto scope = value_scope();
+        return ast::is_valid(c.type) ? check_expected(scope, c.value, written) : check_expr(scope, c.value);
+    };
+
+    // CHK-219: any other value is computed once on the abstract machine, and stands for its result
+    auto const compute = [&](type_id type) -> bool
+    {
+        if (type == error_type)
+            return false;
+        auto e = evaluate_const(value_scope().function, file, c.value, type);
+        if (!e.is_ok)
+        {
+            if (e.kind == diagnostic_kind::unsupported_yet)
+                unsupported(file, where, e.detail);
+            else
+                report(e.kind, file, where, cc::format("{} {}", out.at(id).name, e.detail));
+            return false;
+        }
+        info.type = type;
+        // CHK-355: a compile reaches what the value reaches wherever the const is named
+        info.computed_options = options_reached(value_scope().function, symbol_id::none);
+        // a scalar is the constant a literal makes, so an array length or a case label takes it as it takes one
+        if (auto const* const record = out.builtin_type_of(type); record != nullptr && record->leaf_count == 1)
+            switch (auto const leaf = e.leaves[0]; leaf.kind)
+            {
+            case value_kind::scalar_float:
+                info.kind = constant_kind::real;
+                info.real = f64(leaf.as_float());
+                return true;
+            case value_kind::scalar_int:
+            case value_kind::scalar_uint:
+                info.kind = constant_kind::integer;
+                info.integer = leaf.as_int();
+                info.is_unsigned = leaf.kind == value_kind::scalar_uint;
+                return true;
+            default:
+                break;
+            }
+        if (out.at(type).kind == type_kind::enumeration && e.leaves.size() == 1)
+        {
+            auto const cases = out.at(out.at(type).cases);
+            for (auto i = isize(0); i < cases.size(); ++i)
+                if (cases[i].value == e.leaves[0].as_int())
+                {
+                    info.kind = constant_kind::enum_case;
+                    info.case_index = i32(i);
+                    return true;
+                }
+        }
+        info.kind = constant_kind::composite;
+        info.leaves = cc::move(e.leaves);
+        return true;
+    };
     if (converts)
     {
         if (is_float)
@@ -1308,7 +1385,7 @@ void checker::compile_const(symbol_id id)
     }
     else if (value.node.is<ast::member>() || value.node.is<ast::name>())
     {
-        auto scope = function_scope{.file = file};
+        auto scope = value_scope();
         auto const type = check_expr(scope, c.value);
         if (type == error_type)
             return fail();
@@ -1324,17 +1401,11 @@ void checker::compile_const(symbol_id id)
             info = out.constants[out.at(target.symbol).info];
             info.symbol = id;
         }
-        else
-        {
-            unsupported(file, where, "a const whose value is no literal, no enum case and no const");
+        else if (!compute(type))
             return fail();
-        }
     }
-    else
-    {
-        unsupported(file, where, "a const whose value is no literal, no enum case and no const");
+    else if (!compute(checked_value()))
         return fail();
-    }
     if (info.type == error_type)
         return fail();
 
@@ -1353,13 +1424,13 @@ void checker::compile_const(symbol_id id)
     // CHK-353: an option is a bool, an int or an enum case, and the compile may give it another value of its type
     if (find_attribute(file, d.attributes, "option") != nullptr)
     {
-        if (info.kind == constant_kind::real || info.is_unsigned)
+        if (info.kind == constant_kind::real || info.kind == constant_kind::composite || info.is_unsigned)
         {
             unsupported(file, c.name, "an option of float or uint; an option is a bool, an int or an enum case");
             return fail();
         }
         // the host would set the named option and not see this one follow it
-        if (is_valid(info.option))
+        if (is_valid(info.option) || !info.computed_options.empty())
         {
             unsupported(file, where, "an option whose value names another option");
             return fail();

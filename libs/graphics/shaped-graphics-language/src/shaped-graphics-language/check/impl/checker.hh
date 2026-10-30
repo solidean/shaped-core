@@ -914,6 +914,17 @@ struct checker
     void check_test(i32 index);
     /// The flat tree of test `index`, when it checked soundly and all it reaches inlines whole (flatten.cc).
     void flatten_test(i32 index);
+    /// What a computed const's run gave: its scalars, or the diagnostic that says why it has none.
+    struct const_evaluation
+    {
+        cc::vector<scalar> leaves;
+        bool is_ok = false;
+        diagnostic_kind kind = diagnostic_kind::unsupported_yet;
+        cc::string detail;
+    };
+    /// CHK-219: the value of a const, whose expression `expr` of `file` was checked as type `type` in the scope of
+    /// `scope`, run once on the abstract machine; nothing is reported (flatten.cc).
+    [[nodiscard]] const_evaluation evaluate_const(symbol_id scope, i32 file, ast::expr_id expr, type_id type);
     /// Every module-level name as `out.symbols` now holds them, the last of `out.module_names`, made anew only when a
     /// symbol joined since `module_names_for`.
     [[nodiscard]] cc::set<cc::string> const* module_names();
