@@ -691,6 +691,9 @@ The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2
 * **CHK-359** `min`, `max` and `clamp` take every integer vector family as they take the float ones, and `abs` and `sign` take the signed ones.
 * **CHK-398** `mix(a, b, t)` of two `float` or `half` vectors takes `t` as one scalar of their element type, or as a vector of their type, one `t` per component.
   Every target's own `mix` or `lerp` takes both, so neither form needs a construction.
+* **CHK-406** `min(v, b)`, `max(v, b)` and `clamp(v, low, high)` of a `float` or `half` vector take each bound as one scalar of its element type too, which stands for the vector of it.
+  No target but HLSL takes a scalar there, so each is written as that vector's one-value constructor (CHK-360) on every target.
+  There is no implicit scalar-to-vector conversion: these overloads are the whole of it.
 * **CHK-360** Every vector of the prelude has a one-value constructor, `float3(x)`, whose every component is `x`; it is a function of the vector's name beside its synthesized constructor (CHK-240).
 * **CHK-361** `fwidth(x)` is `abs(ddx(x)) + abs(ddy(x))`, and like `ddx` it is `@stages(.pixel)` and takes derivatives (CHK-282).
 * **CHK-362** `<`, `<=`, `>` and `>=` over two plain vectors of one family are componentwise, and give the `bool` vector of their width ([why](why/checking.md#chk-362)).
