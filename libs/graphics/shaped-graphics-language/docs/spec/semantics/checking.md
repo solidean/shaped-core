@@ -122,11 +122,11 @@ use view
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
 * **CHK-397** `mat3` and `mat2` are the prelude's 3x3 and 2x2 matrices of floats, column-major like `mat4`, and values of function bodies alone ([why](why/checking.md#chk-397)).
-  `mat3(c0, c1, c2)` makes one of three `float3` columns, `c0` first, and `mat2(c0, c1)` one of two `float2` columns.
+  `mat3(c0, c1, c2)` makes one of three `float3` or three `vec3` columns, `c0` first, and `mat2(c0, c1)` one of two `float2` columns.
   `m * v` of a `mat3` and a `float3` or a `vec3` gives the same type, and of a `mat2` and a `float2` a `float2`.
   `m * n` of two of one size is their product, which applies `n` first.
   `transpose(m)` of any matrix is its rows as columns, which is how a row vector times a matrix, HLSL's `mul(v, m)`, is spelled.
-  None has another function yet: no subscript and no `==`.
+  `m.column(i)` and `m.row(i)` read one column and one row (CHK-407); none has another function yet, and no `==`.
   A local, a parameter, a result and a field of a struct a body holds may be one.
   Wherever a layout would place one it is `unsupported-yet`, at any depth of the structs and arrays holding it.
   That is a constant block, an `@inline` one among them, a buffer's element, a binding array's buffer and workgroup memory.
@@ -137,6 +137,9 @@ use view
 
 ## Members and constructors
 
+* **CHK-407** `m.column(i)` and `m.row(i)` of any matrix are its column and its row `i`, a vector of its size, for an `int` index that may be known only when it runs.
+  A matrix has no subscript `m[i]`: HLSL's is a row and WGSL's and MSL's a column, so the name says which one is read.
+  An index outside the matrix has no value, as EVAL-84 has it of a call no target defines.
 * **CHK-233** A struct and an enum each have a **type scope**: the properties and functions declared in its block, and its extensions (CHK-237).
   A field and a case are members of the type, and no function.
 * **CHK-234** A `fun` in a type's block whose first parameter is `self` is a **method**, and `self` is a parameter of that type; `mut self` is CHK-48.

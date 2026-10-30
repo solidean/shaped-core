@@ -27,6 +27,17 @@ const true = bool.true
 /// The ratio of a circle's circumference to its diameter.
 const pi = 3.14159265358979323846
 
+// ---- the parts of a matrix ------------------------------------------------------------------------------------------
+//
+// A column or a row by name, never `m[i]`: HLSL's subscript is a row where WGSL's and MSL's is a column (CHK-407).
+
+fun mat4.column(self, i: int) => matrix_column(self, i)
+fun mat4.row(self, i: int) => matrix_row(self, i)
+fun mat3.column(self, i: int) => matrix_column(self, i)
+fun mat3.row(self, i: int) => matrix_row(self, i)
+fun mat2.column(self, i: int) => matrix_column(self, i)
+fun mat2.row(self, i: int) => matrix_row(self, i)
+
 // ---- the bits of a value --------------------------------------------------------------------------------------------
 //
 // `x.bits` reads a float's bits as a uint, and `float.from_bits(u)` builds one from them; `as` stays a numeric conversion.

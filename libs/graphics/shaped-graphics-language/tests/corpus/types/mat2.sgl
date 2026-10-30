@@ -35,3 +35,6 @@ binding plane:
     let a = plane.angles[id.x]
     let r = mat2(float2(cos(a), sin(a)), float2(-sin(a), cos(a)))
     plane.points[id.x] = r * skew * plane.points[id.x]
+
+// a column or a row by name, as a mat4's (CHK-407)
+test turn().column(1) == float2(-1.0, 0.0) and turn().row(1) == float2(1.0, 0.0)

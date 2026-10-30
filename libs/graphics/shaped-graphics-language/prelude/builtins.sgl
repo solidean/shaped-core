@@ -1090,11 +1090,21 @@
 // a mat3 is a value of function bodies alone (CHK-397): made of its columns, times a three-vector, and transposed
 /// The matrix of three columns, `c0` first.
 @builtin @pure fun mat3(c0: float3, c1: float3, c2: float3) -> mat3
+/// A basis of three directions, `c0` first: where x, y and z go, as a tangent frame is built.
+@builtin @pure fun mat3(c0: vec3, c1: vec3, c2: vec3) -> mat3
 @builtin @pure @operator("*") fun transform_float3(m: mat3, v: float3) -> float3
 @builtin @pure @operator("*") fun transform_direction3(m: mat3, v: vec3) -> vec3
 @builtin @pure @operator("*") fun multiply_mat3(m: mat3, b: mat3) -> mat3
 /// `m` mirrored across its diagonal: its rows as columns, which is its inverse where it only rotates.
 @builtin @pure fun transpose(m: mat3) -> mat3
+
+// one column or one row of a matrix, which core.sgl gives every matrix as `m.column(i)` and `m.row(i)`
+@builtin @internal @pure fun matrix_column(m: mat4, i: int) -> float4
+@builtin @internal @pure fun matrix_row(m: mat4, i: int) -> float4
+@builtin @internal @pure fun matrix_column(m: mat3, i: int) -> float3
+@builtin @internal @pure fun matrix_row(m: mat3, i: int) -> float3
+@builtin @internal @pure fun matrix_column(m: mat2, i: int) -> float2
+@builtin @internal @pure fun matrix_row(m: mat2, i: int) -> float2
 
 // a mat2 is a mat3 of the plane: a value of function bodies alone, made of its columns, times a float2
 /// The matrix of two columns, `c0` first.
