@@ -121,17 +121,18 @@ use view
 * **CHK-388** `bytes` and `mut bytes` are resources of their own kind, and `out bytes` is an error.
   The prelude's loads take either, its stores `mut bytes` alone, and `@coherent` applies to `mut bytes` as to a `mut buffer`.
 * **CHK-387** An `@inline` binding holds no 16-bit value: a member that is one, or holds one at any depth, is `unsupported-yet` ([why](why/checking.md#chk-387)).
-* **CHK-397** `mat3` is the prelude's 3x3 matrix of floats, column-major like `mat4`, and a value of function bodies alone ([why](why/checking.md#chk-397)).
-  `mat3(c0, c1, c2)` makes one of three `float3` columns, `c0` first.
-  `m * v` of a `float3` or a `vec3` gives the same type, and `m * n` of two is their product, which applies `n` first.
-  `transpose(m)` of either is its rows as columns, which is how a row vector times a matrix, HLSL's `mul(v, m)`, is spelled.
-  Neither has another function yet: no subscript and no `==`.
+* **CHK-397** `mat3` and `mat2` are the prelude's 3x3 and 2x2 matrices of floats, column-major like `mat4`, and values of function bodies alone ([why](why/checking.md#chk-397)).
+  `mat3(c0, c1, c2)` makes one of three `float3` columns, `c0` first, and `mat2(c0, c1)` one of two `float2` columns.
+  `m * v` of a `mat3` and a `float3` or a `vec3` gives the same type, and of a `mat2` and a `float2` a `float2`.
+  `m * n` of two of one size is their product, which applies `n` first.
+  `transpose(m)` of any matrix is its rows as columns, which is how a row vector times a matrix, HLSL's `mul(v, m)`, is spelled.
+  None has another function yet: no subscript and no `==`.
   A local, a parameter, a result and a field of a struct a body holds may be one.
   Wherever a layout would place one it is `unsupported-yet`, at any depth of the structs and arrays holding it.
   That is a constant block, an `@inline` one among them, a buffer's element, a binding array's buffer and workgroup memory.
   It is also every struct that crosses a stage edge: a vertex input, a stage link, a control point, a factors struct, a stream's vertex and a pixel output.
   So are the ray data of CHK-326: a ray set's payload, a stage's payload, the attributes a hit carries or an intersection reports, and a callable's parameter.
-  It is judged before an array holding it is (CHK-291), so the detail names the `mat3`.
+  It is judged before an array holding it is (CHK-291), so the detail names the matrix.
   The detail names the path down to it and says that its layout in GPU memory is not decided.
 
 ## Members and constructors

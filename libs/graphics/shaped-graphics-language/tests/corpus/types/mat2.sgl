@@ -1,0 +1,37 @@
+// `mat2` is a 2x2 float matrix of function bodies, made of its columns, multiplied and transposed as `mat3` is (CHK-397)
+
+// a quarter turn of the plane, which takes x to y
+fun turn() => mat2(float2(0.0, 1.0), float2(-1.0, 0.0))
+
+// a shear moves x by y, which only the second column says
+fun shear(k: float) => mat2(float2(1.0, 0.0), float2(k, 1.0))
+
+// the columns stand in order, so the first one is what x becomes
+test:
+    let m = mat2(float2(1.0, 2.0), float2(3.0, 4.0))
+    m * float2(1.0, 0.0) == float2(1.0, 2.0)
+    m * float2(0.0, 1.0) == float2(3.0, 4.0)
+    m * float2(1.0, 1.0) == float2(4.0, 6.0)
+
+// a product applies its right side first, and a rotation's transpose undoes it
+test:
+    let v = float2(2.0, 3.0)
+    (turn() * shear(2.0)) * float2(0.0, 1.0) == turn() * float2(2.0, 1.0)
+    (turn() * turn()) * float2(1.0, 0.0) == float2(-1.0, 0.0)
+    transpose(turn()) * (turn() * v) == v
+    transpose(mat2(float2(1.0, 2.0), float2(3.0, 4.0))) * float2(1.0, 0.0) == float2(1.0, 3.0)
+
+// it is a value like any other in a body, and a const computes one
+const skew = shear(0.5)
+
+test (skew * float2(0.0, 2.0)) == float2(1.0, 2.0)
+
+// no GPU memory holds one yet, so a shader builds it from what memory holds
+binding plane:
+    angles: buffer[float]
+    points: mut buffer[float2]
+
+@compute(64) fun rotate(@thread_id id: int3){plane}:
+    let a = plane.angles[id.x]
+    let r = mat2(float2(cos(a), sin(a)), float2(-sin(a), cos(a)))
+    plane.points[id.x] = r * skew * plane.points[id.x]

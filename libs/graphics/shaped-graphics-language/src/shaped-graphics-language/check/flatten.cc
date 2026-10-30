@@ -1068,7 +1068,8 @@ struct flattener
                     return fail();
                 }
             }
-            if (record->leaf_count <= 4)
+            // a vector has its components as fields, and a matrix, a `mat2` among them, has none
+            if (c.out.at(type).members.count > 0)
             {
                 auto arguments = cc::vector<flat_expr_id>();
                 for (auto i = 0; i < record->leaf_count; ++i)
