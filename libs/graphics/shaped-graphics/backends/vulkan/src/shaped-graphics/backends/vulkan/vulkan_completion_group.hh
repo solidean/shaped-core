@@ -43,6 +43,13 @@ struct sg::backend::vulkan::vulkan_completion_group
     /// Which of this timeline's values are waited on before their signal is queued — see vulkan_forward_waits.hh.
     forward_wait_state forward_waits;
 
+    /// Highest value a submitted command list waits on, stamped at its submit.
+    /// What the upload actor asks before skipping the copy of a target nobody holds a handle to any more:
+    /// a value some list waits on must be copied, since that list reads the storage once the wait is satisfied.
+    /// Exact rather than conservative: a list needs a handle to touch the resource, so once the last one is gone no
+    /// new reader can appear, and every reader there is has stamped this already.
+    cc::atomic<u64> awaited_value = {0};
+
     [[nodiscard]] u64 reserve() { return next_value.fetch_add(1, cc::memory_order_relaxed) + 1; }
 
     /// Whether the copy carrying `value` has run; `0` means nothing was ever reserved, so trivially yes.
@@ -62,6 +69,28 @@ struct sg::backend::vulkan::vulkan_group_value
 
     [[nodiscard]] bool is_pending() const { return group != nullptr && value != 0; }
     [[nodiscard]] bool has_reached() const { return !is_pending() || group->has_reached(value); }
+
+    /// Whether a submitted command list waits on this value — see vulkan_completion_group::awaited_value.
+    [[nodiscard]] bool is_awaited() const
+    {
+        return is_pending() && group->awaited_value.load(cc::memory_order_acquire) >= value;
+    }
+
+    /// Says on the timeline that a list about to be submitted waits on this value, so the upload actor copies it even
+    /// once every handle to the destination is gone.
+    /// Called while that list still holds the resource, which is what makes the actor's reading of it exact.
+    void note_awaited() const
+    {
+        if (!is_pending())
+            return;
+        auto prev = group->awaited_value.load(cc::memory_order_relaxed);
+        while (prev < value
+               && !group->awaited_value.compare_exchange_weak(prev, value, cc::memory_order_release,
+                                                              cc::memory_order_relaxed))
+        {
+            // CAS retries; `prev` is refreshed with the current value each time.
+        }
+    }
 
     /// Raises this to `other` when the two name the same timeline, and reports whether it could.
     /// False means they are unrelated values that a caller has to keep side by side — merging them into one maximum

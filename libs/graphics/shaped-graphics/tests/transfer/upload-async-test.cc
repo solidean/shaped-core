@@ -2,6 +2,7 @@
 #include <clean-core/container/span.hh>
 #include <clean-core/container/vector.hh>
 #include <clean-core/fwd.hh> // cc::byte
+#include <clean-core/string/format.hh>
 #include <clean-core/thread/async_coroutine.hh>
 #include <nexus/async-test.hh>
 #include <nexus/test.hh>
@@ -255,7 +256,8 @@ ASYNC_INVOCABLE_TEST("sg - async upload feeds a later on-queue copy", (sg::conte
 // An async upload whose target's last handle is dropped before the actor stages it must still release the buffer's storage.
 // The copy is skipped, but its completion value V is still signaled.
 // Otherwise the deferred-deletion gate, which holds the storage until the copy fence reaches V, would never release it.
-// The drop-before-stage race cannot be forced deterministically from the public API, but the release invariant must hold whichever way it resolves.
+// The drop-before-stage race is left to chance here, but the release invariant must hold whichever way it resolves.
+// The test after this one forces it, with a large upload ahead that keeps the actor busy.
 // A second, kept buffer's download drives the copy fence past V, since the actor processes jobs in order, after which the retired epoch must free the dropped buffer.
 ASYNC_INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", (sg::context_handle const& ctx))
 {
@@ -290,6 +292,52 @@ ASYNC_INVOCABLE_TEST("sg - async upload to a dropped buffer still releases it", 
     ctx->process_completed_epochs();
 
     CHECK(released->load(std::memory_order_acquire));
+}
+
+// Regression: a buffer whose last handle is dropped after a submitted list READ it must still be copied.
+// The actor skipped the copy of any upload whose target had no handle left when it got to it, and still signaled its value.
+// But a list submitted after the upload folds a wait on that value, and may drop its handle on the way out of submit.
+// The wait was then satisfied with the copy never run, and the list read whatever the storage held before.
+// A large upload ahead keeps the actor busy, so the small one is reached only after its target is gone: deterministic.
+ASYNC_INVOCABLE_TEST("sg - an async upload a submitted list reads is copied even after the last handle is dropped",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    constexpr isize ballast_size = isize(64) * 1024 * 1024; // several staging windows: the actor is busy for a while
+    constexpr int n = 256;
+
+    for (auto round = 0; round < 4; ++round)
+    {
+        auto const ballast = make_transfer_buffer(ctx, ballast_size);
+        ctx->upload.bytes_to_buffer(ballast, pinned_bytes(ballast_size, [](isize i) { return int(i >> 4); }));
+
+        auto const dst = make_transfer_buffer(ctx, n);
+        auto copy = ctx->create_command_list();
+        REQUIRE(copy != nullptr);
+        {
+            // The pattern most likely to read as stale: everything but zero, which fresh storage tends to hold.
+            auto const src = ctx->persistent.create_buffer_from_bytes(
+                pinned_bytes(n, [round](isize i) { return int(i) ^ (0x5A + round); }), sg::buffer_usage::copy_src);
+            copy->copy.buffer_bytes_region({.src = src, .dst = dst, .size_in_bytes = n});
+            ctx->submit_command_list(cc::move(copy));
+        } // the list was the last holder of `src` besides this scope: from here on only the GPU still reads it
+
+        auto down = ctx->create_command_list();
+        REQUIRE(down != nullptr);
+        auto future = down->download.bytes_from_buffer(dst, 0, n);
+        ctx->submit_command_list(cc::move(down));
+
+        auto const bytes = co_await future.bytes();
+        REQUIRE(bytes.size() == n);
+        auto matches = true;
+        for (auto i = 0; i < n; ++i)
+            if (bytes[i] != byte((i ^ (0x5A + round)) & 0xFF))
+                matches = false;
+        CHECK(matches).context(cc::format("round {}", round));
+    }
+
+    // The ballast uploads are fire-and-forget; settle them before the test ends.
+    co_await ctx->idle_completion();
 }
 
 // The create_buffer_from_* factories: one call that allocates a buffer sized to its data and fills it through ctx.upload.

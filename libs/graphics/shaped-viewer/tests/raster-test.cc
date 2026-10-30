@@ -735,7 +735,7 @@ ASYNC_INVOCABLE_TEST("sv - a raster layer's capture finishes on its first drawn 
         SKIP("no SGL compiler, so the viewer's shaders do not build");
 
     constexpr auto size = tg::vec2i(96, 64);
-    auto const path = cc::format("{}/sv-raster-capture.png", cc::temp_directory_path());
+    auto const path = cc::temp_file_path("sv-raster-capture", ".png");
 
     // Asking for the cap, which a traced layer takes thousands of frames to reach: a raster layer holds it at once.
     auto const on = cc::scoped_environment_variable(sr::capture_request_env_var, "1");

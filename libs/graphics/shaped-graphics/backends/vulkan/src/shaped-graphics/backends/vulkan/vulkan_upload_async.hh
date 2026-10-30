@@ -47,6 +47,14 @@ struct sg::backend::vulkan::vulkan_async_upload_job
     std::weak_ptr<vulkan_texture const> texture_target;
     bool is_texture = false;
 
+    // The destination's GPU handles and format, captured at enqueue.
+    // What the copy still writes when every handle is gone and a submitted list waits on this job's value anyway —
+    // see vulkan_completion_group::awaited_value.
+    // Valid until then without owning them: the deferred-deletion gate keeps them until this value is signaled.
+    VkBuffer dst_buffer = VK_NULL_HANDLE;
+    VkImage dst_image = VK_NULL_HANDLE;
+    sg::pixel_format dst_format = {};
+
     isize dst_offset = 0;              // buffer copies
     sg::subresource_index subresource; // texture copies
     sg::texture_region region;         // texture copies
