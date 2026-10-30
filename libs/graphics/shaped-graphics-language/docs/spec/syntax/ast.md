@@ -428,6 +428,8 @@ fun blend(base: vec3, top: vec3, mask: float) -> vec3:
 * **AST-154** An `if` with an `else` where a value is expected reads as an `if` expression, the chain of AST-50 with a body per branch: `let y = if c => a else b`.
   An `if` without an `else` there is still `statement-in-expression`, since it has no value where its condition is false.
   The `else` joins the `if` on its own line, so a statement written that way is the same chain, and it gives no value.
+* **AST-155** `return`, `yield` or `break` in front of such an `if` takes the whole `if` as its value: `return if c => a else b` returns `a` or `b`.
+  `=>` is looser than a keyword form, so the jump arrives in the first condition's keyword form, and the AST puts it back together as it does a lambda's.
 
 ```sgl
 if count > 0:

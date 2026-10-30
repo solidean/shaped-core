@@ -360,6 +360,46 @@ written write_spread_remainder(call_context const& c)
 }
 constexpr cc::string_view k_fmod[] = {"fmod"};
 
+/// The leaves of a vector and `Bounds` scalars after it, each scalar spread across the vector's width.
+template <isize Bounds>
+result spread_bounds(leaves in)
+{
+    auto const width = in.size() - Bounds;
+    auto spread = result();
+    for (auto i = isize(0); i < width; ++i)
+        spread.push_back(in[i]);
+    for (auto b = isize(0); b < Bounds; ++b)
+        for (auto i = isize(0); i < width; ++i)
+            spread.push_back(in[width + b]);
+    return spread;
+}
+
+/// `Evaluate`, a componentwise evaluator of vectors, over a vector and scalar bounds.
+template <evaluator Evaluate, isize Bounds>
+void with_scalar_bounds(leaves in, result& out)
+{
+    auto const spread = spread_bounds<Bounds>(in);
+    Evaluate(spread, out);
+}
+
+cc::string_view clamp_scalar_undefined(leaves in)
+{
+    auto const spread = spread_bounds<2>(in);
+    return impl::clamp_undefined(spread);
+}
+
+/// `name(v, T(b), …)`: no target but HLSL takes a scalar where a vector is, so every bound is the vector of it.
+template <char Name>
+written write_scalar_bounds(call_context const& c)
+{
+    auto const name = Name == 'n' ? "min" : Name == 'x' ? "max" : "clamp";
+    auto const vector = c.builtins.at(builtin_type_id(i32(c.data))).spelled_in(c.target);
+    auto text = cc::format("{}({}", name, c.arguments[0].text);
+    for (auto i = isize(1); i < c.arguments.size(); ++i)
+        text.appendf(", {}({})", vector, c.arguments[i].text);
+    return {.text = text + ")"};
+}
+
 void dot(leaves in, result& out)
 {
     auto const width = in.size() / 2;
@@ -403,8 +443,19 @@ void sgl::builtins::register_vector_math(registry& r)
         add_function(r, "mix", {"a", type, "b", type, "t", element}, type, mix, {.hlsl = "lerp"},
                      "/// `a` where `t` is 0 and `b` where it is 1.");
         if (type != element)
+        {
             add_function(r, "mix", {"a", type, "b", type, "t", type}, type, mix_componentwise, {.hlsl = "lerp"},
                          "/// `mix` of each component by its own `t` (CHK-398).");
+            // CHK-406: a scalar bound is the vector of it, `max(v, 0.0)`
+            auto const data = u32(index_of(registered_type(r, type)));
+            add_function(r, "min", {"a", type, "b", element}, type, with_scalar_bounds<min_of, 1>,
+                         {.kind = spelling_kind::custom, .custom = write_scalar_bounds<'n'>, .data = data});
+            add_function(r, "max", {"a", type, "b", element}, type, with_scalar_bounds<max_of, 1>,
+                         {.kind = spelling_kind::custom, .custom = write_scalar_bounds<'x'>, .data = data});
+            add_function(r, "clamp", {"x", type, "low", element, "high", element}, type, with_scalar_bounds<clamp, 2>,
+                         {.kind = spelling_kind::custom, .custom = write_scalar_bounds<'c'>, .data = data}, {},
+                         clamp_scalar_undefined);
+        }
     }
 
     r.add_comment("// float3 and float4 are plain numbers, so all of their arithmetic is componentwise");

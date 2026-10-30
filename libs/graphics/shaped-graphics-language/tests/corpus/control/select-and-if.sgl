@@ -122,3 +122,18 @@ struct pixel_input:
     let band = select(x > 16.0, 3u, 1u)
     let lift = select(tone > 0.5, float3(0.25), float3(0.0))
     return { color = float4(tone + lift.x, edge, side.x * (band as float), side.y) }
+
+// a jump in front of an `if` value takes the whole `if`, its `else if` chain included (AST-155)
+fun sign_of(x: int) -> int:
+    return if x < 0 => -1 else if x > 0 => 1 else 0
+
+fun first_at_least(limit: int) -> int:
+    let mut i = 0
+    let found = loop:
+        i += 1
+        if i * i >= limit:
+            break if i > 3 => i else 0
+    return found
+
+test sign_of(-5) == -1 and sign_of(0) == 0 and sign_of(3) == 1
+test first_at_least(20) == 5 and first_at_least(5) == 0

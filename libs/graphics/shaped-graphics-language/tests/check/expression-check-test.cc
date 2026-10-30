@@ -284,7 +284,14 @@ TEST("sgl check - a local or a parameter shadows a module-level name, and hides 
     CHECK(body_reports("let dot = k\nreturn dot\n") == "");
     CHECK(body_reports("let length = length v\nreturn length\n") == "");
     // one namespace: behind the local, the name is no function and no type
-    CHECK(body_reports("let dot = k\nreturn dot v v\n") == "unsupported-yet user:[dot] a call of a local value\n");
+    // and the error says which name it hides, since a port meets this as a parameter named like a builtin
+    CHECK(body_reports("let dot = k\nreturn dot v v\n")
+          == "unsupported-yet user:[dot] a call of a local value: the local dot hides the prelude's dot, so rename the "
+             "local\n");
+    CHECK(reports_for("fun f(pow: float) -> float => pow(2.0, pow)\n")
+          == "unsupported-yet user:[pow] a call of a local value: the parameter pow hides the prelude's pow, so rename "
+             "the parameter\n");
+    CHECK(body_reports("let h = k\nreturn h(k)\n") == "unsupported-yet user:[h] a call of a local value\n");
     // a builtin type is @shadowable(false), so these two need a prelude whose types may be hidden
     auto const shadowable = shadowable_builtins_text();
     CHECK(reports_of(check_sources(shadowable, body_source("let float = k\nlet a : float = k\nreturn k\n")))

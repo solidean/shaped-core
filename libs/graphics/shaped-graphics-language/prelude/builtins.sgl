@@ -381,6 +381,9 @@
 @builtin @pure fun mix(a: float2, b: float2, t: float) -> float2
 /// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: float2, b: float2, t: float2) -> float2
+@builtin @pure fun min(a: float2, b: float) -> float2
+@builtin @pure fun max(a: float2, b: float) -> float2
+@builtin @pure fun clamp(x: float2, low: float, high: float) -> float2
 @builtin @pure fun saturate(x: float3) -> float3
 @builtin @pure fun abs(x: float3) -> float3
 @builtin @pure fun min(a: float3, b: float3) -> float3
@@ -390,6 +393,9 @@
 @builtin @pure fun mix(a: float3, b: float3, t: float) -> float3
 /// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: float3, b: float3, t: float3) -> float3
+@builtin @pure fun min(a: float3, b: float) -> float3
+@builtin @pure fun max(a: float3, b: float) -> float3
+@builtin @pure fun clamp(x: float3, low: float, high: float) -> float3
 @builtin @pure fun saturate(x: float4) -> float4
 @builtin @pure fun abs(x: float4) -> float4
 @builtin @pure fun min(a: float4, b: float4) -> float4
@@ -399,6 +405,9 @@
 @builtin @pure fun mix(a: float4, b: float4, t: float) -> float4
 /// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: float4, b: float4, t: float4) -> float4
+@builtin @pure fun min(a: float4, b: float) -> float4
+@builtin @pure fun max(a: float4, b: float) -> float4
+@builtin @pure fun clamp(x: float4, low: float, high: float) -> float4
 @builtin @pure fun saturate(x: half) -> half
 @builtin @pure fun abs(x: half) -> half
 @builtin @pure fun min(a: half, b: half) -> half
@@ -415,6 +424,9 @@
 @builtin @pure fun mix(a: half2, b: half2, t: half) -> half2
 /// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: half2, b: half2, t: half2) -> half2
+@builtin @pure fun min(a: half2, b: half) -> half2
+@builtin @pure fun max(a: half2, b: half) -> half2
+@builtin @pure fun clamp(x: half2, low: half, high: half) -> half2
 @builtin @pure fun saturate(x: half3) -> half3
 @builtin @pure fun abs(x: half3) -> half3
 @builtin @pure fun min(a: half3, b: half3) -> half3
@@ -424,6 +436,9 @@
 @builtin @pure fun mix(a: half3, b: half3, t: half) -> half3
 /// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: half3, b: half3, t: half3) -> half3
+@builtin @pure fun min(a: half3, b: half) -> half3
+@builtin @pure fun max(a: half3, b: half) -> half3
+@builtin @pure fun clamp(x: half3, low: half, high: half) -> half3
 @builtin @pure fun saturate(x: half4) -> half4
 @builtin @pure fun abs(x: half4) -> half4
 @builtin @pure fun min(a: half4, b: half4) -> half4
@@ -433,6 +448,9 @@
 @builtin @pure fun mix(a: half4, b: half4, t: half) -> half4
 /// `mix` of each component by its own `t` (CHK-398).
 @builtin @pure fun mix(a: half4, b: half4, t: half4) -> half4
+@builtin @pure fun min(a: half4, b: half) -> half4
+@builtin @pure fun max(a: half4, b: half) -> half4
+@builtin @pure fun clamp(x: half4, low: half, high: half) -> half4
 
 // float3 and float4 are plain numbers, so all of their arithmetic is componentwise
 @builtin @pure @operator("+") fun add_float2(a: float2, b: float2) -> float2
