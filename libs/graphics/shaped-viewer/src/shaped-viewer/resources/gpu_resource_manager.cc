@@ -719,12 +719,13 @@ scene_item gpu_resource_manager::acquire_frame_scene_item(sv::mesh const& mesh)
     CC_ASSERT(!mesh.geometry.is_empty(), "a mesh needs geometry to be placed in a scene");
 
     // Resolution reads the attributes and textures, never the geometry, so a resident_mesh without geometry is what it is resolved against.
+    // The attributes are written inline by the command list that draws the mesh, not streamed, so it is never shaded by the fallback for them.
     auto bindings = cc::vector<mesh_attribute_binding>();
     bindings.reserve(mesh.attributes.size());
     for (auto const& a : mesh.attributes)
     {
         auto const uploads = a.frequency != attribute_frequency::per_instance;
-        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire(a) : attribute_id::invalid));
+        bindings.push_back(mesh_attribute_binding::of(a, uploads ? attributes.acquire_inline(a) : attribute_id::invalid));
     }
     auto bound_textures = cc::vector<mesh_texture_binding>();
     bound_textures.reserve(mesh.textures.size());
@@ -761,11 +762,7 @@ sv::frame_mesh const& gpu_resource_manager::acquire_frame_mesh(sg::command_list&
                                                                triangle_geometry const& geometry,
                                                                bool build_blas)
 {
-    auto* found = static_cast<frame_mesh*>(nullptr);
-    for (auto& m : _frame_meshes)
-        if (m.hash == geometry.hash)
-            found = &m;
-
+    auto* found = _frame_meshes.get_ptr(geometry.hash);
     if (found == nullptr)
     {
         // Build input only where the context builds acceleration structures, which a raster-only device refuses;
@@ -781,8 +778,7 @@ sv::frame_mesh const& gpu_resource_manager::acquire_frame_mesh(sg::command_list&
                             .triangle_count = geometry.triangle_count()};
         if (m.is_indexed)
             m.indices = _ctx->transient.create_buffer_from_data(cmd, geometry.indices.span(), usage);
-        _frame_meshes.push_back(cc::move(m));
-        found = &_frame_meshes.back();
+        found = &_frame_meshes.entry(geometry.hash).get_or_emplace(cc::move(m));
     }
 
     if (build_blas && found->blas == nullptr)

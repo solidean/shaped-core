@@ -808,6 +808,41 @@ attribute_id attribute_manager::acquire(mesh_attribute const& attribute)
     return id;
 }
 
+attribute_id attribute_manager::acquire_inline(mesh_attribute const& attribute)
+{
+    if (auto const resident = find_by_hash(attribute.hash); resident.has_value())
+        return resident.value();
+
+    auto const bytes = attribute.data.span();
+    CC_ASSERT(!bytes.empty(), "an attribute a material reads must carry elements");
+
+    auto data = _ctx.persistent.create_buffer<byte>(bytes.size(), bindless_bytes_usage);
+    auto const id = insert(attribute.hash,
+                           {.state = residency::pending,
+                            .data = cc::move(data),
+                            .format = attribute.format,
+                            .frequency = attribute.frequency,
+                            .element_count = attribute.element_count(),
+                            .summary = summarize_elements(bytes, attribute.format, attribute.element_count())},
+                           bytes.size());
+    _inline_bytes[id] = attribute.data;
+    return id;
+}
+
+void attribute_manager::record_inline_uploads(sg::command_list& cmd)
+{
+    for (auto&& [id, bytes] : _inline_bytes)
+    {
+        // evicted before a command list came for it: nothing is left to write into
+        auto* const record = mutable_record(id);
+        if (record == nullptr)
+            continue;
+        cmd.upload.bytes_to_buffer(record->data.raw(), bytes.span(), 0);
+        record->state = residency::complete;
+    }
+    _inline_bytes.clear();
+}
+
 isize attribute_manager::collect_settled()
 {
     if (_settling.empty())

@@ -166,6 +166,9 @@ resolved_view resolve_scene(sg::command_list& cmd, layer const& l, gpu_resource_
     auto const traced = mode != render_mode::raster;
     auto out = resolved_view{};
 
+    // A frame mesh's attributes are written here, ahead of every read this command list records, so they are resident this frame.
+    resources.attributes.record_inline_uploads(cmd);
+
     // Acquired once rather than per item: it is a resolve walk plus a key hash plus a lookup, and every placeholder in
     // the layer shades through the same one.
     auto const& fallback = resources.shaders.acquire_fallback();
