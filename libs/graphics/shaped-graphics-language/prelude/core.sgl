@@ -38,6 +38,10 @@ fun mat3.row(self, i: int) => matrix_row(self, i)
 fun mat2.column(self, i: int) => matrix_column(self, i)
 fun mat2.row(self, i: int) => matrix_row(self, i)
 
+// an affine3 is built from its rows and read by them, the shape a hit's transform is handed in (CHK-408)
+fun affine3.from_rows(r0: float4, r1: float4, r2: float4) => affine3_of_rows(r0, r1, r2)
+fun affine3.row(self, i: int) => affine3_row(self, i)
+
 // ---- the bits of a value --------------------------------------------------------------------------------------------
 //
 // `x.bits` reads a float's bits as a uint, and `float.from_bits(u)` builds one from them; `as` stays a numeric conversion.

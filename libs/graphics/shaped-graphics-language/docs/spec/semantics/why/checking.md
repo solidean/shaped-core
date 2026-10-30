@@ -759,6 +759,13 @@ Taking that decision with the first local `mat3` would fix it before any shader 
 Everywhere memory or a stage edge would hold one is refused at its line, the way an array is (CHK-291), rather than by the emitter with no line at all.
 A shader that wants one from memory reads its columns, which are `float3`s, and builds it in the body.
 
+## CHK-408
+
+An affine map is named by what it is rather than by its shape, as `pos3` and `vec3` are.
+A generic `mat3x4` would carry the shape's two names along, since GLSL calls the same matrix `mat4x3`, and the corpus already shows bgfx mixing them up.
+The type decides the `w` instead: a position is translated and a direction is not, so no caller writes the `1.0` or the `0.0`.
+Three rows of four is how DXR, Vulkan and Metal hand a hit's transform over, so a hit's placement needs no conversion to become one.
+
 ## CHK-404
 
 An atomic counts the invocations that reach it, so it means something only where the program can say how many there are.

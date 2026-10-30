@@ -6,12 +6,14 @@ refs:
 
 # The matrix zoo, and `tg` types such as `quat`
 
-A hit's transforms are rows of `float4` because SGL has `mat4`, and a `mat3` of function bodies alone.
-`mat3x4` and a quaternion would let a hit hand them over typed.
-Neither `mat4` nor `mat3` has a subscript of a column, `==`, or a `mat3` of a `mat4`'s upper left, which a normal matrix wants (CHK-397).
+A hit hands its placement over as an `affine3` (CHK-408), and every matrix reads a column and a row by name (CHK-407).
+What is left:
+
+- **A quaternion**, mirroring `tg`'s, for rotations a hit or an animation carries.
+- **`==` of matrices**, and **a `mat3` of a `mat4`'s upper left**, which a normal matrix wants.
+- **`affine3` in GPU memory**: three `float4` rows, 48 bytes, the instance layout every API uses.
+  The host needs a type of its own, since `tg::affine_transform3f` holds a column-major linear part and a translation instead.
+- **A general 3x4 matrix product**, which the bgfx corpus's `41-tess` shaders need: `mul(xf, mtxFromRows(v0, v1, v2))` stacks three vertices as the rows of a matrix and blends them by a 3x3 one.
+  That has no translation in it, so it is no `affine3`; the translations still write it column by column, marked `// gap:`.
+
 `mat3` in GPU memory is `feat-sgl-arrays-and-mat3-in-gpu-memory`'s.
-
-The bgfx corpus in shader-rosetta needs two more, each written today through a stand-in marked `// gap:`:
-
-- **A 3x4 matrix**, bgfx's `mat4x3` with `mtxFromRows` and `mtxGetRow`, in `41-tess/cs_terrain_lod` and `41-tess/vs_terrain_render`.
-- **A column or an element of a matrix**, bgfx's `mtxGetColumn` and `mtxGetElement`, in `41-tess/cs_terrain_lod`.
