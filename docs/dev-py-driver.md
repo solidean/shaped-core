@@ -147,6 +147,9 @@ extra_roots=(dev.ExtraRoot("extern/api", submodule=True, checks=("crossrefs", "p
 
 `Policy.default_branch` is the branch `check` scopes itself against.
 
+`Policy.companions` is the opt-in repositories `dev.py companions` clones into gitignored paths, and defaults to none.
+Each is a `Companion`: a name, a clone url, a path, and the branch it follows; `init` refuses a path the project does not ignore.
+
 The driver's *own* files are the other kind of path, and they are not policy: the pinned clang-format and its fetcher, the emsdk pin, the vendored TLS stack doctor reports on.
 They belong to shaped-core whichever project runs the driver, so lib/ finds them relative to itself (`DRIVER_ROOT`), never relative to the project root.
 

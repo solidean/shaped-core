@@ -105,13 +105,25 @@ def init_nested(root: Path, sub: Submodule, *, dry_run: bool = False) -> list[Ou
 
 def sync(root: Path, sub: Submodule, *, dry_run: bool = False, fetch: bool = True, tip: bool = False) -> Outcome:
     """Fast-forward one submodule to its recorded commit, or with `tip` to its tracked branch, or say why not."""
-    repo = root / sub.path
+    if tip:
+        if sub.branch is None:
+            return Outcome(sub.path, "skipped", "no `branch =` in .gitmodules")
+        return sync_branch(root / sub.path, sub.path, sub.branch, dry_run=dry_run, fetch=fetch)
     try:
-        if tip:
-            return _sync_tip(repo, sub, dry_run=dry_run, fetch=fetch)
         return _sync_recorded(root, sub, dry_run=dry_run, fetch=fetch)
     except _GitError as e:
         return Outcome(sub.path, "refused", str(e))
+
+
+def sync_branch(repo: Path, path: str, branch: str, *, dry_run: bool = False, fetch: bool = True) -> Outcome:
+    """Fast-forward the clone at `repo` to the head of `branch` under the same rules as a `tip` sync; `path` labels the outcome.
+
+    Not bound to a submodule: a clone the superproject records nothing for, a companion repository, moves this way too.
+    """
+    try:
+        return _sync_tip(repo, path, branch, dry_run=dry_run, fetch=fetch)
+    except _GitError as e:
+        return Outcome(path, "refused", str(e))
 
 
 def _is_ancestor(repo: Path, a: str, b: str) -> bool:
@@ -180,18 +192,15 @@ def _sync_recorded(root: Path, sub: Submodule, *, dry_run: bool, fetch: bool) ->
     return Outcome(sub.path, "updated", detail, head, target)
 
 
-def _sync_tip(repo: Path, sub: Submodule, *, dry_run: bool, fetch: bool) -> Outcome:
-    if sub.branch is None:
-        return Outcome(sub.path, "skipped", "no `branch =` in .gitmodules")
-    branch = sub.branch
+def _sync_tip(repo: Path, path: str, branch: str, *, dry_run: bool, fetch: bool) -> Outcome:
     remote = _git(repo, "config", f"branch.{branch}.remote", check=False).stdout.strip() or "origin"
     tracking = f"refs/remotes/{remote}/{branch}"
 
     # Untracked files are not judged: a fast-forward never touches one, and git refuses rather than overwrite it.
     if _out(repo, "status", "--porcelain", "--untracked-files=no"):
-        return Outcome(sub.path, "refused", "uncommitted changes")
+        return Outcome(path, "refused", "uncommitted changes")
     if _git(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).returncode == 0:
-        return Outcome(sub.path, "refused", "a merge is in progress")
+        return Outcome(path, "refused", "a merge is in progress")
     if fetch:
         _git(repo, "fetch", "-q", remote, f"+refs/heads/{branch}:{tracking}")
     target = _out(repo, "rev-parse", "--verify", f"{tracking}^{{commit}}")
@@ -199,27 +208,27 @@ def _sync_tip(repo: Path, sub: Submodule, *, dry_run: bool, fetch: bool) -> Outc
     on = _git(repo, "symbolic-ref", "-q", "--short", "HEAD", check=False).stdout.strip()
 
     if on and on != branch:
-        return Outcome(sub.path, "skipped", f"{on} is checked out, and it tracks {branch}")
+        return Outcome(path, "skipped", f"{on} is checked out, and it tracks {branch}")
     if on:
         ahead = _count(repo, f"{target}..HEAD")
         if ahead:
-            return Outcome(sub.path, "refused", f"{ahead} unpushed commit(s) on {branch}")
+            return Outcome(path, "refused", f"{ahead} unpushed commit(s) on {branch}")
     else:
         if _git(repo, "merge-base", "--is-ancestor", "HEAD", target, check=False).returncode != 0:
-            return Outcome(sub.path, "refused", f"detached at {head[:10]}, which {remote}/{branch} does not contain")
+            return Outcome(path, "refused", f"detached at {head[:10]}, which {remote}/{branch} does not contain")
         local = _git(repo, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False).stdout.strip()
         if local and _count(repo, f"{target}..{local}"):
-            return Outcome(sub.path, "refused", f"local {branch} has {_count(repo, f'{target}..{local}')} unpushed commit(s)")
+            return Outcome(path, "refused", f"local {branch} has {_count(repo, f'{target}..{local}')} unpushed commit(s)")
 
     behind = _count(repo, f"HEAD..{target}")
     if on and not behind:
-        return Outcome(sub.path, "up-to-date", f"{branch} at {head[:10]}", head, head)
+        return Outcome(path, "up-to-date", f"{branch} at {head[:10]}", head, head)
     if on:
         detail = f"{branch}: {head[:10]}..{target[:10]}, {behind} commit(s)"
     else:
         detail = f"checks {branch} out at the detached {head[:10]}" + (f", then {behind} commit(s) to {target[:10]}" if behind else "")
     if dry_run:
-        return Outcome(sub.path, "would update", detail, head, target)
+        return Outcome(path, "would update", detail, head, target)
 
     if not on:
         if _git(repo, "rev-parse", "-q", "--verify", f"refs/heads/{branch}", check=False).returncode == 0:
@@ -227,7 +236,7 @@ def _sync_tip(repo: Path, sub: Submodule, *, dry_run: bool, fetch: bool) -> Outc
         else:
             _git(repo, "checkout", "-q", "-b", branch, "--track", f"{remote}/{branch}")
     _git(repo, "merge", "--ff-only", "-q", target)
-    return Outcome(sub.path, "updated", detail, head, target)
+    return Outcome(path, "updated", detail, head, target)
 
 
 def recorded(root: Path, sub: Submodule) -> str | None:

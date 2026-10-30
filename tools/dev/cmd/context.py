@@ -38,6 +38,8 @@ class Policy:
     layout: dev.Layout
     # The integration branch; `check` scopes itself to everything since its merge base.
     default_branch: str
+    # The opt-in repositories `companions` clones into gitignored paths (lib/project/companions.py).
+    companions: tuple[dev.Companion, ...] = ()
 
 
 @dataclass

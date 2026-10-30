@@ -877,6 +877,25 @@ Each dependency's pin lives in its own `extern/<dep>/dependency.yml`, which is w
 Worth knowing about `list`: its second block reports each fetched dependency as **current**, **stale** or **not fetched**.
 A `.install/` at the wrong pin is otherwise invisible, and is the thing that makes a build quietly use a version nobody chose.
 
+## Companion repositories (`companions`)
+
+A companion is a repository of our own that most people never need, so it is neither a submodule nor a dependency: a corpus, a large data set.
+`dev.py companions` clones one into a gitignored path inside this tree, where nothing records which commit it is at.
+The `COMPANIONS` table in [dev.py](../../dev.py) declares them.
+
+```bash
+uv run dev.py companions list                   # every companion, its path, and where its clone stands
+uv run dev.py companions init shader-rosetta    # clone it on its branch
+uv run dev.py companions sync                   # fast-forward every cloned one to its branch head
+```
+
+- **The clone is an ordinary repository.** Commit and push in it with plain git; this repository's status never shows it.
+- **`sync` moves it by a fast-forward only**, under the rules of `submodules sync --tip`: uncommitted changes, another branch or unpushed commits are reported and left alone.
+- **Code that reads a companion must run without it**, saying how to clone it rather than failing, since most checkouts will not have one.
+- `init --url <https-url>` clones over https where no SSH key is set up.
+
+Its path sits under a directory named `extern/`, which keeps clang-format and shaped-linter out of it: the companion keeps its own rules.
+
 ## Sanitizers
 
 Two families, and they cannot be combined: **`sanitize-*`** is AddressSanitizer + UndefinedBehaviorSanitizer, **`sanitize-thread-*`** is ThreadSanitizer.
