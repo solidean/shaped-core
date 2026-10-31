@@ -130,7 +130,8 @@ let z = scale (a + b) 2.0
 * **FORM-31** The arguments of a keyword form are whole expressions, of level 5 and tighter, separated by commas ([why](why/forms.md#form-31)).
 * **FORM-32** A keyword in operand position starts a nested keyword form that takes the rest of the run.
 * **FORM-33** The word operators `and`, `or`, `not`, `as` and `in` never start a keyword form.
-* **FORM-43** A keyword followed by an ascription `:`, or by an assignment operator right after another keyword, is a name, since no keyword form reads that way: the tree holds an identifier, and it is the normal error `keyword-as-name`.
+* **FORM-43** A keyword followed by an ascription `:`, or by an assignment operator right after another keyword, is a name, since no keyword form reads that way.
+  The tree holds an identifier there, and it is the normal error `keyword-as-name`.
   So `type: int` in a struct and `let type = 1` report the keyword once, and nothing after it; `rays = set` in a pipeline is no name, since no keyword stands before it.
 * **FORM-34** A block belongs to the rightmost form of its line.
 * **FORM-35** After a `=>` with nothing to its right, the block is the right side of that `=>`.
