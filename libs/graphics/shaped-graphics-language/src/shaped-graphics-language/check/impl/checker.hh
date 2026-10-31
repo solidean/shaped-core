@@ -822,7 +822,8 @@ struct checker
         cc::string_view reason;
         type_id type = type_id::none;
     };
-    [[nodiscard]] local_only_found local_only_path(type_id type) const;
+    /// `in_memory`: what GPU memory holds, where a builtin with a layout there is no value of function bodies alone.
+    [[nodiscard]] local_only_found local_only_path(type_id type, bool in_memory = false) const;
     /// CHK-397: refuses a value of function bodies alone a struct crossing a stage edge holds; true where it did.
     bool judge_edge_local_only(i32 file, source_span where, type_id type);
     /// Marks the first body `require` of each feature of `features` in each of `functions` as used (CHK-265).

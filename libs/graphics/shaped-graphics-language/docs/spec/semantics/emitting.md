@@ -550,6 +550,10 @@ The C++ struct a package generates is that layout byte for byte, padding include
 * **EMIT-165** A computed `const` array (CHK-219) is bound once per tree to a local of its name, at the start of the tree's body, and every read of it indexes that local.
   A target writes a constructed array whole wherever it stands, so read in place it would be written once per index: S2H's 192-word font table reached 1.5 MB of text.
   A vector, a matrix or a struct const is written where it is read, since it is no larger than the expression that reads it.
+* **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).
+  A read narrows it, `((float3x3)m)`, and a write widens a value through `sgl_widen_mat3`, which the text declares wherever it holds one.
+  A struct that stands in memory declares the `float4x3` as its field, so a read of the field narrows wherever the struct is.
+  Under `@padding(.none)` a `mat3` is HLSL's own `float3x3`, 36 bytes in a buffer; WGSL and MSL split that one into its scalars in a memory form.
 * **EMIT-167** A buffer whose binding or member is marked `@padding(.none)` has its element placed as a C++ compiler places it, in declaration order, and promised.
   Each value stands at the next multiple of its scalar's size, a struct's size is rounded up to its largest scalar, and `buffer[float3]` strides by 12.
   HLSL's structured buffer packs so natively; WGSL and MSL write the element as its memory form wherever their own rule would not.
@@ -581,8 +585,8 @@ The C++ struct a package generates is that layout byte for byte, padding include
 * Arrays in GPU memory beyond a constant block's arrays of whole rows (EMIT-164), which the checker refuses today (CHK-291).
   An array strides by its element's size rounded up to the element's alignment, as a buffer does.
   In a constant block an element shorter than a row would need component arithmetic at a runtime index, so it is refused without `@padding(.every_element)`, which starts each element on a row.
-* `mat3` in GPU memory, which the checker refuses today (CHK-397).
-  By EMIT-110 its columns are 3-vectors, so it takes 48 bytes; `@padding(.every_column)` names that, and `@padding(.none)` gives the 36 of `tg::mat3f`.
+* `@padding(.every_column)`, which would name a `mat3`'s natural 48 bytes explicitly; `.none` gives the 36 of `tg::mat3f` already.
+* `mat2` in GPU memory, which HLSL's constant buffer would place a row per column.
 * A struct member of a `@padding(.none)` block, which HLSL would read back by building the struct in a local field by field.
 * `@padding` on a struct, which would place it so wherever it stands.
 * Whether an emit error becomes a diagnostic with a span; today it names a symbol and carries a detail.

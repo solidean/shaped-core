@@ -46,7 +46,7 @@ placed_members place_from(checked_module const& m,
 
         if (auto const* const record = m.builtin_type_of(type))
         {
-            auto const size = record->hlsl_layout.size;
+            auto const size = memory_size_of(*record, space);
             auto const alignment = is_packed(space) ? scalar_size_of(*record) : natural_alignment_of(*record);
             at = round_up(at, alignment);
             result.alignment = alignment > result.alignment ? alignment : result.alignment;
@@ -66,7 +66,7 @@ placed_members place_from(checked_module const& m,
             auto const alignment = is_packed(space) ? scalar_size_of(record) : 16;
             at = round_up(at, alignment);
             result.alignment = alignment > result.alignment ? alignment : result.alignment;
-            auto const size = i32(array.count) * record.hlsl_layout.size;
+            auto const size = i32(array.count) * memory_size_of(record, space);
             result.offsets.push_back(at);
             result.sizes.push_back(size);
             result.leaves.push_back({.path = cc::move(path),
@@ -107,6 +107,17 @@ sgl::i32 sgl::emit::impl::natural_alignment_of(builtins::type_record const& reco
 {
     // WGSL's own alignment is this rule's, for every builtin that has one there
     return record.wgsl_layout.alignment;
+}
+
+sgl::i32 sgl::emit::impl::memory_size_of(builtins::type_record const& record, address_space space)
+{
+    return is_packed(space) ? record.leaf_count * scalar_size_of(record) : record.wgsl_layout.size;
+}
+
+bool sgl::emit::impl::is_mat3(check::checked_module const& m, check::type_id type)
+{
+    auto const* const record = m.builtin_type_of(type);
+    return record != nullptr && record->leaf_count == 9;
 }
 
 bool sgl::emit::impl::is_storage(address_space space)
@@ -197,7 +208,7 @@ sgl::emit::impl::placed_members sgl::emit::impl::place_struct(check::checked_mod
 sgl::i32 sgl::emit::impl::element_stride(check::checked_module const& m, check::type_id element, address_space space)
 {
     if (auto const* const record = m.builtin_type_of(element))
-        return round_up(record->hlsl_layout.size,
+        return round_up(memory_size_of(*record, space),
                         is_packed(space) ? scalar_size_of(*record) : natural_alignment_of(*record));
     if (m.at(element).kind == check::type_kind::atomic)
         return element_stride(m, m.at(element).element, space);

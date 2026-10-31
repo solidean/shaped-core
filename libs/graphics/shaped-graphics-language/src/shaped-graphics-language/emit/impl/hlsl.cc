@@ -38,6 +38,7 @@ public:
     bool has_struct_constructor() const override { return false; }
 
     bool is_c_like() const override { return true; }
+    bool widens_mat3() const override { return true; }
     cc::string_view rolled_loop_hint() const override { return "[loop]"; }
 
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
@@ -297,8 +298,12 @@ public:
             out.appendf("[[vk::location({})]] ", member.location);
         if (_is_vulkan && member.offset >= 0)
             out.appendf("[[vk::offset({})]] ", member.offset);
+        // EMIT-168: a mat3 in memory is three whole rows, which no packed layout and no function body holds
+        auto const is_widened = member.offset >= 0 && is_mat3(p.m, member.type)
+                             && (owner == nullptr || (owner->memory_size > 0 && !owner->is_packed));
+        auto const type = is_widened ? cc::string("float4x3") : cc::string(type_text(p, *this, member.type));
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
-        if (type_text(p, *this, member.type) == "float4x4")
+        if (type == "float4x4" || type == "float4x3" || type == "float3x3")
             out += "column_major ";
         // EMIT-129: a stage link's interpolation, as HLSL's qualifiers spell it
         if (owner != nullptr && owner->role == struct_role::stage_link)
@@ -314,7 +319,7 @@ public:
             else if (member.interpolate.sampling == sampling::sample)
                 out += "sample ";
         }
-        out.appendf("{} {}{}", type_text(p, *this, member.type), member.name, array_dimensions(p, member.type));
+        out.appendf("{} {}{}", type, member.name, array_dimensions(p, member.type));
         if (owner != nullptr)
             if (auto const semantic = semantic_of(*owner, member, p); !semantic.empty())
                 out.appendf(" : {}", semantic);
@@ -361,6 +366,21 @@ public:
             write_padding(out, at, memory_size, count);
     }
 
+    /// Whether any root holds a mat3 as three whole rows, which a write widens through `sgl_widen_mat3`.
+    [[nodiscard]] static bool holds_widened_mat3(plan const& p)
+    {
+        auto result = false;
+        for (auto const& s : p.structs)
+            if (s.memory_size > 0 && !s.is_packed)
+                for (auto const& member : s.members)
+                    result = result || is_mat3(p.m, member.type);
+        for (auto const& r : p.resources)
+            if (r.element_form.has_value())
+                for (auto const& leaf : r.element_form.value().leaves)
+                    result = result || leaf.is_widened;
+        return result;
+    }
+
     void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const override
     {
         out.appendf("static const int {} = {};\n", name, value);
@@ -378,7 +398,8 @@ public:
             out += k_indent;
             if (_is_vulkan)
                 out.appendf("[[vk::offset({})]] ", f.offset);
-            out.appendf("{}{} {}{};\n", f.type == "float4x4" ? "column_major " : "", f.type, f.name,
+            auto const is_matrix = f.type == "float4x4" || f.type == "float4x3" || f.type == "float3x3";
+            out.appendf("{}{} {}{};\n", is_matrix ? "column_major " : "", f.type, f.name,
                         f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
         }
         out += "};\n\n";
@@ -501,6 +522,8 @@ public:
         if (p.e.entry_stage >= stage::raygen)
             out += "#pragma dxc diagnostic ignored \"-Wpayload-access-perf\"\n\n";
         write_enum_constants(out, p, *this);
+        if (holds_widened_mat3(p))
+            out += "float4x3 sgl_widen_mat3(float3x3 m)\n{\n    return float4x3(m[0], m[1], m[2], float3(0.0, 0.0, 0.0));\n}\n\n";
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {

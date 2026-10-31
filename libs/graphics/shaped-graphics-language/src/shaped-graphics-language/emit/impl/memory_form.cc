@@ -36,9 +36,9 @@ bool is_hlsl(emit::target t)
 builtins::block_layout native_layout(builtins::type_record const& record, emit::target t, address_space space)
 {
     if (is_hlsl(t))
-        return is_storage(space)
-                 ? builtins::block_layout{.size = record.hlsl_layout.size, .alignment = scalar_size_of(record)}
-                 : record.hlsl_layout;
+        return is_storage(space) ? builtins::block_layout{.size = record.leaf_count * scalar_size_of(record),
+                                                          .alignment = scalar_size_of(record)}
+                                 : record.hlsl_layout;
     return t == emit::target::msl ? record.msl_layout : record.wgsl_layout;
 }
 
@@ -214,12 +214,19 @@ struct form_builder
         auto const scalar_size = scalar_size_of(record);
 
         auto const is_crossing = splits_rows && crosses_row(record, leaf.offset);
+        // a packed mat3's columns stand 12 bytes apart, which no target's own matrix does
+        auto const is_packed_mat3 = is_matrix(record) && record.leaf_count == 9 && is_packed(space);
         // an array's elements take whole rows, which every target places as SGL does, so it is never split
-        if (leaf.count > 0)
+        if (is_hlsl(t) && is_matrix(record) && record.leaf_count == 9 && !is_packed(space))
+        {
+            result.is_widened = true;
+            result.fields.push_back(add_field(stem, "float4x3", 48));
+        }
+        else if (leaf.count > 0)
             result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), leaf.size, leaf.count));
         else if (record.leaf_count == 1)
             result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), scalar_size));
-        else if (!is_forced && !is_crossing && leaf.offset % l.alignment == 0
+        else if (!is_forced && !is_crossing && !is_packed_mat3 && leaf.offset % l.alignment == 0
                  && !(t == emit::target::msl && record.leaf_count == 3))
             result.fields.push_back(add_field(stem, cc::string(record.spelled_in(language_of(t))), l.size));
         else if (t == emit::target::msl && !is_matrix(record) && !is_crossing)
@@ -359,7 +366,7 @@ cc::optional<sgl::emit::impl::memory_form> sgl::emit::impl::element_form_of(chec
         for (auto const& leaf : placed.leaves)
             leaves.push_back({.path = {}, .type = leaf.type, .offset = leaf.offset, .size = leaf.size});
         // EMIT-112: HLSL strides a buffer by its element's own size, so a 3-vector's padding has to be a field
-        if (is_hlsl(t) && stride != record->hlsl_layout.size)
+        if (is_hlsl(t) && stride != record->leaf_count * scalar_size_of(*record))
             return build(m, members, leaves, space, stride, stride, "value", t, false);
         return form_for(m, members, leaves, space, stride, stride, "value", t);
     }

@@ -661,6 +661,14 @@ def a_buffer_of_3_vectors_strides_by_16_through_gpu_padded():
     expect_in("<shaped-shader-library/gpu_padded.hh>", "\n".join(sgl_host_code.includes(entries)), "its header")
 
 
+@test
+def a_mat3_is_gpu_mat3_at_48_bytes_and_tg_mat3f_packed():
+    natural = [{"name": "basis", "type": "mat3", "offset": 0, "size": 48}]
+    packed = [{"name": "basis", "type": "mat3", "offset": 0, "size": 36}]
+    expect_in("slib::gpu_mat3 basis;", sgl_host_code.padded_fields("p", {}, "here", natural, ""), "a natural mat3")
+    expect_in("tg::mat3f basis;", sgl_host_code.padded_fields("p", {}, "here", packed, ""), "a packed mat3")
+
+
 def main() -> int:
     failed = 0
     for fn in TESTS:

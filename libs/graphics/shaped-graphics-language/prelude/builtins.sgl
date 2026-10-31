@@ -64,7 +64,7 @@
 @builtin struct mat4
 
 /// Column-major, and a vector stands to its right.
-/// A value of function bodies alone, which no GPU memory holds yet.
+/// In GPU memory its columns stand 16 bytes apart, as three float3 do; ray data and stage edges hold none yet.
 @shadowable(false)
 @builtin struct mat3
 

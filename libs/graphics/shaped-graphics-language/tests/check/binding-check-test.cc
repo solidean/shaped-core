@@ -494,41 +494,29 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
     CHECK(whole.contains("b.t is a binding array, read by element: `b.t[i]`"));
 }
 
-TEST("sgl check - a mat3 is a value of function bodies, and no binding or stage edge holds one yet")
+TEST("sgl check - a mat3 stands in GPU memory, and crosses no stage edge yet")
 {
-    // CHK-397: its layout in memory is not decided, so every place that would need one refuses it at its line
-    constexpr auto why = "which only a function body holds, since its layout in GPU memory is not decided yet";
+    // CHK-397: its layout in memory is three 16-byte columns (EMIT-110), and no stage edge carries one yet
+    constexpr auto why = "which no stage edge carries yet, since its layout as ray data and across a stage edge is not decided yet";
     constexpr auto nested = "struct holder:\n    m: mat3\nstruct outer:\n    h: holder\n\n";
     auto const with_nested = [&](cc::string_view members) { return reports_for(cc::string(nested) + listing(members)); };
 
-    // a plain member of a group's constant block, directly, in an array, and nested in structs
-    CHECK(reports_for(listing("    basis: mat3\n"))
-              .contains(
-                  cc::format("unsupported-yet user:[mat3] a mat3 in a constant block, as its member basis, {}", why)));
-    CHECK(reports_for(listing("    bases: mat3[2]\n"))
-              .contains(cc::format("a mat3 in a constant block, as its member bases, {}", why)));
-    CHECK(with_nested("    o: outer\n").contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
-    CHECK(with_nested("    os: outer[2]\n").contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
+    // a constant block, an @inline one, a buffer's element and workgroup memory hold one, directly or nested
+    CHECK(reports_for(listing("    basis: mat3\n")) == "");
+    CHECK(with_nested("    o: outer\n") == "");
+    CHECK(reports_for(cc::format("{}@inline binding pushed:\n    o: outer\n", nested)) == "");
+    CHECK(reports_for(listing("    raw: mut buffer[mat3]\n")) == "");
+    CHECK(with_nested("    items: buffer[outer]\n") == "");
+    CHECK(reports_for(listing("    @padding(.none) raw: mut buffer[mat3]\n")) == "");
+    CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n") == "");
 
-    // an @inline block is a constant block too
-    CHECK(reports_for(cc::format("{}@inline binding pushed:\n    o: outer\n", nested))
-              .contains(cc::format("a mat3 in a constant block, outer.h.m: mat3, {}", why)));
+    // an array of them in a block or a buffer is an array in GPU memory, which CHK-291 judges
+    CHECK(reports_for(listing("    bases: mat3[2]\n")).contains("unsupported-yet"));
 
-    // a buffer's element, directly, as an array, nested, and in a binding array of buffers
-    CHECK(reports_for(listing("    raw: mut buffer[mat3]\n"))
-              .contains(cc::format("a mat3 in a buffer's element, as its member raw, {}", why)));
-    CHECK(reports_for(listing("    rows: buffer[mat3[2]]\n"))
-              .contains(cc::format("a mat3 in a buffer's element, as its member rows, {}", why)));
-    CHECK(with_nested("    items: buffer[outer]\n")
-              .contains(cc::format("a mat3 in a buffer's element, outer.h.m: mat3, {}", why)));
-    CHECK(reports_for(cc::format("require binding_arrays\n{}{}", nested, listing("    sets: buffer[outer][2]\n")))
-              .contains(cc::format("a mat3 in a buffer's element, outer.h.m: mat3, {}", why)));
-
-    // workgroup memory, which has no host side, is GPU memory all the same
-    CHECK(reports_for("@workgroup binding tile:\n    rows: mat3[4]\n")
-              .contains(cc::format("a mat3 in workgroup memory, as its member rows, {}", why)));
-    CHECK(reports_for(cc::format("{}@workgroup binding tile:\n    o: outer\n", nested))
-              .contains(cc::format("a mat3 in workgroup memory, outer.h.m: mat3, {}", why)));
+    // a mat2's layout is not decided, so memory refuses it at its line
+    CHECK(reports_for(listing("    turn: mat2\n"))
+              .contains("unsupported-yet user:[mat2] a mat2 in a constant block, as its member turn, which only a function "
+                        "body holds, since its layout in GPU memory is not decided yet"));
 
     // a vertex input, a stage link in both directions, and a pixel output
     constexpr auto edges

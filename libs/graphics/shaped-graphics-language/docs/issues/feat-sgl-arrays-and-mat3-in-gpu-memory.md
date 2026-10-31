@@ -22,6 +22,8 @@ Their layout is decided (the spec's emitting file, "Open"), and they land togeth
 - **The mechanism that is missing** is a memory form holding an array, which a runtime index walks into.
 - **WGSL passes no matrix and no array between stages**, so both cross as one location per column or element.
 
+**`mat3` in GPU memory has landed** (CHK-397, EMIT-168): 48 bytes natural, 36 under `@padding(.none)`, and HLSL holds it as a `float4x3`.
+
 **A constant block's array of whole rows has landed** (EMIT-164): `float4`, `int4`, `uint4` and `mat4` elements, which every target places alike.
 It was the gap real shaders hit most, 8 of the first 104 bgfx translations in shader-rosetta, and none of them is blocked by it now.
 What remains is every other array in GPU memory: padded elements in a block, arrays in a struct or a buffer's element, and arrays across a stage edge.

@@ -655,3 +655,50 @@ TEST("sgl emit layout - a @padding(.none) block holds an array where a row start
           == "unsupported an array at byte 4 of a @padding(.none) block, where C++ places it and no target can: "
              "'work.rows'\n");
 }
+
+TEST("sgl emit layout - a mat3 is three 16-byte columns, which HLSL holds as whole rows of a float4x3")
+{
+    constexpr auto source = "struct framed:\n"
+                            "    basis: mat3\n"
+                            "    scale: float\n"
+                            "\n"
+                            "binding work:\n"
+                            "    xf: mat3\n"
+                            "    after: float\n"
+                            "    frames: mut buffer[framed]\n"
+                            "    mats: mut buffer[mat3]\n"
+                            "    @padding(.none) flat: mut buffer[mat3]\n"
+                            "\n"
+                            "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                            "    let f = work.frames[id.x]\n"
+                            "    work.frames[id.x] = framed(work.xf * f.basis, f.scale + work.after)\n"
+                            "    work.mats[id.x] = work.flat[id.x]\n"
+                            "    work.flat[id.x] = f.basis\n";
+
+    auto const d = described(source);
+    REQUIRE(d.memory_structs.size() == 1);
+    CHECK(d.memory_structs[0].size == 64);
+    CHECK(d.memory_structs[0].members[1].offset == 48);
+    CHECK(d.bindings[0].members[1].offset == 48);
+    CHECK(d.bindings[0].members[3].stride == 48);
+    CHECK(d.bindings[0].members[4].stride == 36);
+
+    // EMIT-168: a read narrows the rows to the matrix, a write widens it back, and a packed buffer is HLSL's own
+    auto const dx12 = text_of(source, target::hlsl_dx12);
+    CHECK(dx12.contains("float4x3 sgl_widen_mat3(float3x3 m)\n"));
+    CHECK(dx12.contains("struct framed\n{\n    column_major float4x3 basis;\n    float scale;\n"));
+    CHECK(dx12.contains("struct work_data\n{\n    column_major float4x3 xf;\n    float after;\n};\n"));
+    CHECK(dx12.contains("struct mat3_memory\n{\n    column_major float4x3 value;\n};\n"));
+    CHECK(dx12.contains("RWStructuredBuffer<float3x3> work_flat"));
+    CHECK(dx12.contains("framed_value.basis = sgl_widen_mat3(mul(((float3x3)work.xf), ((float3x3)f.basis)));\n"));
+    CHECK(dx12.contains("work_mats[id.x].value = sgl_widen_mat3(work_flat[id.x]);\n"));
+
+    // WGSL's mat3x3f and MSL's float3x3 are this layout, and a packed one is split into its scalars
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("struct framed {\n    basis: mat3x3f,\n    scale: f32,\n}\n"));
+    CHECK(wgsl.contains("var<storage, read_write> work_mats: array<mat3x3f>;\n"));
+    CHECK(wgsl.contains("work_mats[id.x] = mat3x3f(work_flat[id.x].value_0, work_flat[id.x].value_1, "));
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    device float3x3* work_mats [[id(2)]];\n"));
+    CHECK(msl.contains("float3x3(float3(work_flat[id.x].value_0, work_flat[id.x].value_1, work_flat[id.x].value_2), "));
+}

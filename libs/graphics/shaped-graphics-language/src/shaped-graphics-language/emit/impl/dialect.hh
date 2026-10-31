@@ -55,6 +55,8 @@ public:
 
     /// True where `v.zy = value;` assigns through a swizzle; WGSL assigns one component at a time (EMIT-143).
     [[nodiscard]] virtual bool assigns_through_swizzles() const { return true; }
+    /// Whether a `mat3` in GPU memory is held as three whole rows, `float4x3`, rather than as itself (EMIT-168).
+    [[nodiscard]] virtual bool widens_mat3() const { return false; }
 
     /// A `discard` as a whole statement: `discard;`, or MSL's `discard_fragment();` (EMIT-117).
     [[nodiscard]] virtual cc::string_view discard_statement() const { return "discard;"; }

@@ -681,7 +681,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         // CHK-397: a value of function bodies alone has no layout in any memory yet, workgroup memory included
         // It is judged before an array is, so the detail names it rather than the array holding it.
         if (!is_struct && type != checked_module::error_type)
-            if (auto const found = local_only_path(type); !found.path.empty())
+            if (auto const found = local_only_path(type, true); !found.path.empty())
             {
                 // the path is named from what a block or a buffer holds, as CHK-291 names an array's
                 auto root = type;
@@ -1014,7 +1014,7 @@ void checker::compile_struct(symbol_id id)
             else if (auto const found = local_only_path(m.type);
                      m.type != checked_module::error_type && !found.path.empty())
                 unsupported(file, span_of(file, ast_of(file).at(m.field).type),
-                            cc::format("a {} in a ray payload, {}{}, which only a function body holds, since {}",
+                            cc::format("a {} in a ray payload, {}{}, which no ray payload carries yet, since {}",
                                        out.name_of(found.type), out.name_of(m.type), found.path, found.reason));
 
     // CHK-384: a swizzle names fields by their letters and is a vector of their one element type
@@ -2141,7 +2141,7 @@ void checker::judge_entry_point(symbol_id id)
                 if (auto const found = local_only_path(m.type); !found.path.empty())
                 {
                     unsupported(file, where,
-                                cc::format("a {} crossing a stage edge, in {}.{}{}, which only a function body holds, "
+                                cc::format("a {} crossing a stage edge, in {}.{}{}, which no stage edge carries yet, "
                                            "since {}",
                                            out.name_of(found.type), out.name_of(parameter.type), m.name, found.path,
                                            found.reason));

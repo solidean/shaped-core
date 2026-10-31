@@ -44,6 +44,8 @@ struct memory_leaf
     bool is_split = false;
     /// The field is MSL's packed spelling of the value, which a read converts back.
     bool is_packed = false;
+    /// The field is HLSL's `float4x3` of a `mat3`, three whole rows, which a read narrows and a write widens (EMIT-168).
+    bool is_widened = false;
 };
 
 /// A root written as its memory form.

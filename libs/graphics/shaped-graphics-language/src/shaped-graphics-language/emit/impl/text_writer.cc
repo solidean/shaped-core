@@ -208,6 +208,16 @@ struct writer
     }
 
     /// Declares `name` and assigns its members, or its elements, one by one, for a target without a struct constructor.
+    /// EMIT-168: whether member `member` of a value of `object_type` is a mat3 its target holds as three whole rows.
+    [[nodiscard]] bool is_widened_member(type_id object_type, isize member) const
+    {
+        if (!d.widens_mat3() || is_builtin_type(p.m, object_type) || is_array(object_type))
+            return false;
+        auto const at = p.struct_of_type[index_of(object_type)];
+        return at >= 0 && p.structs[at].memory_size > 0 && !p.structs[at].is_packed
+            && is_mat3(p.m, p.m.at(p.m.at(object_type).members)[member].type);
+    }
+
     /// Whether a value of `type` is a struct written with padding fields, which a target writes as memory holds it.
     [[nodiscard]] bool is_padded(type_id type) const
     {
@@ -238,7 +248,9 @@ struct writer
         auto const& planned = p.structs[p.struct_of_type[index_of(x.type)]];
         for (auto i = isize(0); i < arguments.size() && i < planned.member_of.size(); ++i)
             if (planned.member_of[i] >= 0)
-                line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name, expr(arguments[i]).text));
+                line(cc::format("{}.{} = {};", name, planned.members[planned.member_of[i]].name,
+                                is_widened_member(x.type, i) ? cc::format("sgl_widen_mat3({})", expr(arguments[i]).text)
+                                                             : expr(arguments[i]).text));
     }
 
     /// The vector local whose every field, in order, the arguments from `at` on are; none where they are not.
@@ -404,27 +416,34 @@ struct writer
         if (is_builtin_type(p.m, r.type))
         {
             auto const& leaf = leaf_at(r);
+            if (leaf.is_widened)
+                return cc::format("((float3x3){})", field_text(r, leaf, 0));
             if (leaf.is_packed)
                 return cc::format("{}({})", type, field_text(r, leaf, 0));
             if (!leaf.is_split)
                 return field_text(r, leaf, 0);
             auto const& record = *p.m.builtin_type_of(r.type);
             auto pieces = cc::vector<cc::string>();
+            // a square matrix, 3 or 4 columns of as many rows
+            auto const n = record.leaf_count == 9 ? 3 : 4;
             if (record.leaf_count > 4 && d.language() == builtins::language::hlsl)
             {
                 // HLSL fills a matrix row by row from its scalars, and the fields hold it column by column.
-                for (auto row = 0; row < 4; ++row)
-                    for (auto column = 0; column < 4; ++column)
-                        pieces.push_back(field_text(r, leaf, column * 4 + row));
+                for (auto row = 0; row < n; ++row)
+                    for (auto column = 0; column < n; ++column)
+                        pieces.push_back(field_text(r, leaf, column * n + row));
             }
             else if (record.leaf_count > 4 && !d.has_struct_constructor())
             {
                 // MSL builds a matrix from its columns, not from its scalars.
-                auto const column = cc::string(builtin_spelling(p, "float4"));
-                for (auto c = 0; c < 4; ++c)
-                    pieces.push_back(cc::format("{}({}, {}, {}, {})", column, field_text(r, leaf, c * 4),
-                                                field_text(r, leaf, c * 4 + 1), field_text(r, leaf, c * 4 + 2),
-                                                field_text(r, leaf, c * 4 + 3)));
+                auto const column_type = cc::string(builtin_spelling(p, n == 3 ? "float3" : "float4"));
+                for (auto c = 0; c < n; ++c)
+                {
+                    auto column = cc::format("{}(", column_type);
+                    for (auto row = 0; row < n; ++row)
+                        column.appendf("{}{}", row == 0 ? "" : ", ", field_text(r, leaf, c * n + row));
+                    pieces.push_back(column + ")");
+                }
             }
             else
                 for (auto i = isize(0); i < leaf.fields.size(); ++i)
@@ -473,6 +492,11 @@ struct writer
         {
             auto const& leaf = leaf_at(r);
             auto const& record = *p.m.builtin_type_of(r.type);
+            if (leaf.is_widened)
+            {
+                line(cc::format("{} = sgl_widen_mat3({});", field_text(r, leaf, 0), value));
+                return;
+            }
             if (!leaf.is_split)
             {
                 auto const place = field_text(r, leaf, 0);
@@ -490,10 +514,13 @@ struct writer
             auto declaration = cc::string();
             d.write_local(declaration, {.name = name, .type = type_text(p, d, value_type), .value = value});
             line(declaration);
+            auto const n = record.leaf_count == 9 ? 3 : 4;
             for (auto i = 0; i < record.leaf_count; ++i)
             {
+                // field i is row i % n of column i / n, and only HLSL indexes a matrix by its row first
+                auto const is_hlsl = d.language() == builtins::language::hlsl;
                 auto const piece = record.leaf_count > 4
-                                     ? cc::format("{}[{}][{}]", name, i / 4, i % 4)
+                                     ? cc::format("{}[{}][{}]", name, is_hlsl ? i % n : i / n, is_hlsl ? i / n : i % n)
                                      : cc::format("{}.{}", name, p.m.at(p.m.at(r.type).members)[i].name);
                 line(cc::format("{} = {};", field_text(r, leaf, i), piece));
             }
@@ -563,7 +590,10 @@ struct writer
         if (auto const* const member = p.e.at(a.place).node.try_as<flat_member>();
             member != nullptr && member->is_swizzle())
             return assign_swizzle(*member, a.value);
-        auto const value = expr(a.value, true).text;
+        auto value = expr(a.value, true).text;
+        if (auto const* const member = p.e.at(a.place).node.try_as<flat_member>();
+            member != nullptr && is_widened_member(p.e.at(member->object).type, member->member))
+            value = cc::format("sgl_widen_mat3({})", value);
         auto target = memory_of(a.place);
         auto component = -1;
         if (!target.has_value())
@@ -688,6 +718,9 @@ struct writer
                 }
                 auto const& block = *block_of(p, b.binding);
                 result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
+                // EMIT-168: a block that is no memory form holds its mat3 as three whole rows
+                if (d.widens_mat3() && !block.form.has_value() && is_mat3(p.m, x.type))
+                    result = {.text = cc::format("((float3x3){})", result.text)};
             },
             [&](flat_file_sampler const& smp) { result = {.text = p.samplers[sampler_of(p, smp.sampler)].name}; },
             [&](flat_buffer_element const& b)
@@ -724,6 +757,8 @@ struct writer
                 }
                 auto const& planned = p.structs[p.struct_of_type[index_of(object_type)]];
                 result = {.text = cc::format("{}.{}", object, planned.members[planned.member_of[member.member]].name)};
+                if (is_widened_member(object_type, member.member))
+                    result = {.text = cc::format("((float3x3){})", result.text)};
             },
             [&](flat_construct const&) { result = construct(x, is_broken); },
             [&](flat_call const& c) { result = call(c, x.type); }, [&](flat_not const& n)

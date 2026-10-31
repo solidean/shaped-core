@@ -289,6 +289,86 @@ ASYNC_INVOCABLE_TEST("sg - a buffer's element aligns its vectors, and packs tigh
     }
 }
 
+static_assert(sizeof(shaders::layout::framed) == 64);
+static_assert(offsetof(shaders::layout::framed, scale) == 48);
+
+ASYNC_INVOCABLE_TEST("sg - a mat3 reaches the shader column by column, 16 bytes apart or packed, on every backend",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::layout::rotate.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::layout::turn>();
+
+    // no matrix here is symmetric, so a transposed read or write shows
+    auto const basis_of = [](int i)
+    {
+        return tg::mat3f::make_from_cols(tg::vec3f(1, float(i), 0), tg::vec3f(0, 1, 2), tg::vec3f(3, 0, 1));
+    };
+    auto const mat_of = [](int i)
+    {
+        return tg::mat3f::make_from_cols(tg::vec3f(2, 0, 0), tg::vec3f(float(i), 1, 0), tg::vec3f(0, 4, 1));
+    };
+    auto const flat_of = [](int i)
+    {
+        return tg::mat3f::make_from_cols(tg::vec3f(0, 1, 0), tg::vec3f(5, 0, float(i)), tg::vec3f(0, 0, 1));
+    };
+    auto const xf = tg::mat3f::make_from_cols(tg::vec3f(0, 1, 0), tg::vec3f(-1, 0, 0), tg::vec3f(0, 0, 2));
+
+    constexpr auto count = 64;
+    auto frames = cc::vector<shaders::layout::framed>();
+    auto mats = cc::vector<slib::gpu_mat3>();
+    auto flats = cc::vector<tg::mat3f>();
+    for (auto i = 0; i < count; ++i)
+    {
+        frames.push_back({.basis = basis_of(i), .scale = float(i)});
+        mats.push_back(mat_of(i));
+        flats.push_back(flat_of(i));
+    }
+    auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
+    auto const frame_buffer = ctx->persistent.create_buffer_from_data(cc::move(frames), usage);
+    auto const mat_buffer = ctx->persistent.create_buffer_from_data(cc::move(mats), usage);
+    auto const flat_buffer = ctx->persistent.create_buffer_from_data(cc::move(flats), usage);
+    auto const dir_buffer = ctx->persistent.create_buffer<tg::vec4f>(count, usage);
+
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::layout::turn{
+                                                               .xf = xf,
+                                                               .after = 0.5f,
+                                                               .frames = frame_buffer.as_readwrite_buffer(),
+                                                               .mats = mat_buffer.as_readwrite_buffer(),
+                                                               .flat = flat_buffer.as_readwrite_buffer(),
+                                                               .dirs = dir_buffer.as_readwrite_buffer(),
+                                                           });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const frames_back = cmd->download.data_from_buffer(frame_buffer);
+    auto const mats_back = cmd->download.data_from_buffer(mat_buffer);
+    auto const flats_back = cmd->download.data_from_buffer(flat_buffer);
+    auto const dirs_back = cmd->download.data_from_buffer(dir_buffer);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got_frames = co_await frames_back.data();
+    auto const got_mats = co_await mats_back.data();
+    auto const got_flats = co_await flats_back.data();
+    auto const got_dirs = co_await dirs_back.data();
+    REQUIRE(got_frames.size() == isize(count));
+    REQUIRE(got_dirs.size() == isize(count));
+    for (auto i = 0; i < count; ++i)
+    {
+        auto const v = xf * (basis_of(i) * tg::vec3f(1, 2, 3));
+        CHECK(got_dirs[i] == tg::vec4f(v[0], v[1], v[2], float(i) + 0.5f));
+        CHECK(tg::mat3f(got_frames[i].basis) == mat_of(i));
+        CHECK(got_frames[i].scale == float(2 * i));
+        CHECK(tg::mat3f(got_mats[i]) == flat_of(i));
+        CHECK(got_flats[i] == basis_of(i));
+    }
+}
+
 namespace
 {
 /// What a host writes with no knowledge of HLSL's rows: `host_params` of layout.sgl is placed as this struct is.

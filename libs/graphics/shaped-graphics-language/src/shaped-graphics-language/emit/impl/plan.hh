@@ -71,6 +71,8 @@ struct planned_struct
     cc::vector<i32> member_of;
     /// Its size in GPU memory, its tail padding included; -1 where it stands in none.
     i32 memory_size = -1;
+    /// It stands in GPU memory under `@padding(.none)`.
+    bool is_packed = false;
 };
 
 /// An enum the entry point mentions, whose every case is declared whether or not an arm names it (EMIT-77).

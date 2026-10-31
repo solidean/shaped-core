@@ -764,9 +764,9 @@ Unrolling every small constant-range loop without the attribute was not chosen: 
 
 A rotation or a normal matrix is a `mat3`, and building one from three columns is the common case in a body.
 Its layout in GPU memory is a decision of its own: a constant block starts each column on a row of 16 bytes, a buffer's element may pack it into 36, and each target's memory form differs.
-Taking that decision with the first local `mat3` would fix it before any shader needed one in memory, so a `mat3` stays in function bodies until it is taken.
-Everywhere memory or a stage edge would hold one is refused at its line, the way an array is (CHK-291), rather than by the emitter with no line at all.
-A shader that wants one from memory reads its columns, which are `float3`s, and builds it in the body.
+The natural rule took it (EMIT-110): a `mat3` is three `float3` columns, each at 16, so it takes 48 bytes wherever it stands, and `@padding(.none)` packs it into 36.
+A stage edge and ray data are layouts of their own, which no target agrees on yet, so they still refuse one at its line, the way an array is refused (CHK-291).
+A `mat2` waits for a shader that needs one in memory: HLSL starts each of its two columns on a row, which no other target does.
 
 ## CHK-408
 

@@ -33,6 +33,8 @@ HOST_TYPES: dict[str, tuple[str, int, str | None]] = {
     "float4": ("tg::vec4f", 16, "vec4f"),
     "int3": ("tg::vec3i", 12, "vec3i"),
     "mat4": ("tg::mat4f", 64, None),
+    # packed, as `@padding(.none)` places it; at its natural 48 bytes it is slib::gpu_mat3 (sized_host_type)
+    "mat3": ("tg::mat3f", 36, None),
     # an atomic is a plain integer to the host, which never updates it while the shader does
     "atomic[uint]": ("cc::u32", 4, None),
     "atomic[int]": ("cc::i32", 4, None),
@@ -269,6 +271,13 @@ def host_type(package: str, memory: dict[str, tuple[str, int]], where: str, sgl_
     return known[0]
 
 
+def sized_host_type(package: str, memory: dict[str, tuple[str, int]], where: str, sgl_type: str, size: int) -> str:
+    """`host_type` of a value that takes `size` bytes in GPU memory: a `mat3` at its natural 48 is slib::gpu_mat3."""
+    if sgl_type == "mat3" and size == 48:
+        return "slib::gpu_mat3"
+    return host_type(package, memory, where, sgl_type)
+
+
 def generated_names(entries: SglEntries, path: str) -> dict[str, str]:
     """The names the generator itself writes into file `path`'s namespace, each with what writes it."""
     out = {}
@@ -374,7 +383,9 @@ def includes(entries: SglEntries) -> list[str]:
         out.append("<shaped-graphics/binding/sampler.hh>")
     if "pos3" in types:
         out.append("<typed-geometry/linalg/pos.hh>")
-    if "mat4" in types:
+    if "mat3" in types:
+        out.append("<shaped-shader-library/gpu_mat3.hh>")
+    if "mat4" in types or "mat3" in types:
         out.append("<typed-geometry/linalg/mat.hh>")
     if "bool32" in types:
         out.append("<shaped-shader-library/gpu_bool.hh>")
@@ -453,7 +464,8 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
         count = member.get("count", 1)
         array = (lambda view: f"cc::fixed_array<{view}, {count}>") if count > 1 else (lambda view: view)
         if member["kind"] == "constant":
-            out.append(f"    {host_type(package, memory, where, member['type'])} {member['name']}; ///< `{member['type']}`, "
+            cpp = sized_host_type(package, memory, where, member["type"], member["size"])
+            out.append(f"    {cpp} {member['name']}; ///< `{member['type']}`, "
                        f"at byte {member['offset']} of the group's constant buffer\n")
             continue
         if member["kind"] == "texture":
@@ -481,7 +493,7 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
             access = "readwrite" if member["access"] == "read_write" else "readonly"
             out.append(f"    {array(f'sg::{access}_buffer_view<cc::byte>')} {member['name']}; ///< `{member['type']}`\n")
             continue
-        element = host_type(package, memory, where, member["type"])
+        element = sized_host_type(package, memory, where, member["type"], member.get("stride", 0))
         if padded_element(member):
             element = f"slib::gpu_padded<{element}, {member['stride']}>"
         is_written = member["access"] == "read_write"
@@ -705,8 +717,9 @@ def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str,
     for member in binding["members"]:
         if member["kind"] != "constant":
             continue
-        cpp = host_type(package, memory, f"'{file.path}' `binding {name}` member '{member['name']}'", member["type"])
-        size = host_size(memory, member["type"])
+        cpp = sized_host_type(package, memory, f"'{file.path}' `binding {name}` member '{member['name']}'",
+                              member["type"], member["size"])
+        size = 48 if cpp == "slib::gpu_mat3" else host_size(memory, member["type"])
         if size != member["size"]:
             raise HostCodeError(
                 f"shader package '{package}': '{file.path}' `binding {name}` member '{member['name']}' is "
@@ -721,7 +734,7 @@ def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str,
 
 def padded_element(member: dict) -> bool:
     """Whether a buffer member's builtin element strides past its own bytes, as a 3-vector does."""
-    return (member["kind"] == "buffer" and member["type"] in HOST_TYPES
+    return (member["kind"] == "buffer" and member["type"] in HOST_TYPES and member["type"] != "mat3"
             and member.get("stride", 0) > HOST_TYPES[member["type"]][1])
 
 
@@ -749,7 +762,7 @@ def padded_fields(package: str, memory: dict[str, int], where: str, members: lis
 
     for member in members:
         pad_to(member["offset"])
-        cpp = host_type(package, memory, f"{where} member '{member['name']}'", member["type"])
+        cpp = sized_host_type(package, memory, f"{where} member '{member['name']}'", member["type"], member["size"])
         out.append(f"{indent}{cpp} {member['name']}; ///< `{member['type']}`, at byte {member['offset']}\n")
         end = member["offset"] + member["size"]
     pad_to(size)

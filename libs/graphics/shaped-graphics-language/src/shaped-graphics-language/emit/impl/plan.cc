@@ -580,6 +580,7 @@ struct planner
             auto& planned = p.structs[at];
             auto const placed = place_struct(p.m, s, space);
             planned.memory_size = placed.size;
+            planned.is_packed = is_packed(space);
             for (auto i = isize(0); i < planned.member_of.size(); ++i)
                 if (planned.member_of[i] >= 0)
                 {

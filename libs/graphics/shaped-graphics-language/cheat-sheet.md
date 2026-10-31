@@ -715,6 +715,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   A struct placed by two rules is `layout-conflict`; `@no_padding` turns a gap into `padding-forbidden`; `bool` has no layout, `bool32` does.
   **`@padding(.none)` packs as C++ does**, on a binding (its block and its buffers) or on one buffer member (CHK-369).
   It is for a host's own hand-written struct, or memory something else reads too, such as a BLAS's vertices; WGSL and MSL then read through a memory form.
+  **A `mat3` in memory is three 16-byte columns, 48 bytes**: the host writes `slib::gpu_mat3`, and `tg::mat3f` under `@padding(.none)`.
+  HLSL holds it as a `float4x3`, which a read narrows and a write widens (EMIT-168); it crosses no stage edge and rides in no ray payload yet.
 - **`half`, `short`, `ushort` and their vectors are the 16-bit families** (CHK-381): `require shader_f16` or `shader_int16`, and WGSL has no short.
   HLSL spells a half `float16_t`, never `half`, so slib's SGL edge hands DXC `-enable-16bit-types` on every compile; a 16-bit literal is a construction, `half(0.5)`.
   A 16-bit value aligns to its size, a `half3` to 8, and crosses no stage edge and sits in no `@inline` binding (CHK-387).

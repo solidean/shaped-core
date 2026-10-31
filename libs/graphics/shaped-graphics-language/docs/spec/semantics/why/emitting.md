@@ -127,6 +127,14 @@ A struct an HLSL text pads is therefore padded in function bodies too, and DXIL 
 A buffer of bare 3-vectors cannot carry padding in a struct of the program, so it is the one root HLSL writes as a memory form under the natural rule.
 `scalarBlockLayout`, which sg's vulkan backend requires, admits every offset the natural rule and `@padding(.none)` produce, and nearly every Vulkan device has it.
 
+## EMIT-168
+
+HLSL places a `float3x3` differently in each memory: 44 bytes in a constant buffer, each column on a row but the last short, and 36 in a structured buffer.
+Neither is the natural 48, and a memory form would flatten every struct holding one, which HLSL cannot rebuild into a struct value.
+A `column_major float4x3` is exactly the natural layout in both: three columns of four floats.
+Its upper-left 3x3 is the matrix, which is what HLSL's cast to `float3x3` reads, and a constructor from the matrix's three rows and a zero row writes it.
+So the matrix stays a field of its struct, and the cost is a cast at each read and a call at each write.
+
 ## EMIT-116
 
 Reordering members is how a compiler packs a struct tighter, and it is planned: a `{float; float4; float}` block takes three rows where `{float4; float; float}` takes two.

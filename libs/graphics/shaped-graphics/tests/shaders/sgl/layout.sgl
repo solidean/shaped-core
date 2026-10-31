@@ -53,6 +53,28 @@ binding stretch:
     stretch.flat_pairs[id.x] = flat_pair(f.a * 2.0, f.b + g)
     stretch.flat_dirs[id.x] = g * 3.0
 
+// A mat3's columns stand 16 bytes apart, 48 bytes in all, in a block, a struct and a buffer alike.
+// `@padding(.none)` packs them into the 36 bytes of a tg::mat3f.
+struct framed:
+    basis: mat3
+    scale: float
+
+binding turn:
+    xf: mat3
+    after: float
+    frames: mut buffer[framed]
+    mats: mut buffer[mat3]
+    @padding(.none) flat: mut buffer[mat3]
+    dirs: mut buffer[float4]
+
+@compute(64) fun rotate(@thread_id id: int3){turn}:
+    let f = turn.frames[id.x]
+    let v = turn.xf * (f.basis * float3(1.0, 2.0, 3.0))
+    turn.dirs[id.x] = float4(v.x, v.y, v.z, f.scale + turn.after)
+    turn.frames[id.x] = framed(turn.mats[id.x], f.scale * 2.0)
+    turn.mats[id.x] = turn.flat[id.x]
+    turn.flat[id.x] = f.basis
+
 // `@padding(.none)` places a block as C++ places a struct of tg types, so a host fills it from a struct of its own.
 // `tint` sits at 4 and `bias` right behind it at 16, and `weights` crosses a row from 28: 48 bytes in all.
 @padding(.none) @inline binding host_params:
