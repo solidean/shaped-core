@@ -590,7 +590,8 @@ fun shade(k: float) -> float:
   A name with neither a field nor a candidate is the normal error `unknown-member`.
 * **CHK-65** `(x)` is `x`.
 * **CHK-152** `.name` is the case `name` of the enum the context expects.
-  Today that is the scrutinee of a `case`, the field a pipeline setting assigns (CHK-178) and the written type of a `const` (CHK-219).
+  Today that is the scrutinee of a `case`, the field a pipeline setting assigns (CHK-178), the written type of a `const` (CHK-219) and the parameter a call's argument meets.
+  A leading-dot argument binds only a parameter of an enum that has its case, so two candidates of different enums that both have it are `ambiguous-overload`.
   A leading dot where no type is expected is `unsupported-yet`, and one whose expected type is no enum, or has no such case, is `unknown-member`.
 * **CHK-66** Every expression kind not named in this section is `unsupported-yet`.
 

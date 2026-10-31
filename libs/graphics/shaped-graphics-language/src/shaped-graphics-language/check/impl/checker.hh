@@ -217,6 +217,9 @@ struct call_arguments
     cc::vector<i32> functions;
     /// Parallel to `written`: the prelude's `undefined()`, which has the type of the parameter it meets (CHK-341).
     cc::vector<bool> undefineds;
+    /// Parallel to `written`: the case a leading dot names, which meets a parameter of an enum holding it (CHK-152);
+    /// empty for anything else, whose type is in `types`.
+    cc::vector<cc::string_view> leading_dots;
     /// An argument had the error type or was reported, so the call reports nothing about its arguments.
     bool is_poisoned = false;
 };
@@ -714,6 +717,8 @@ struct checker
     /// The generic struct of the prelude `expr` names, `none` where it names no such struct (CHK-339).
     type_id generic_named(i32 file, ast::expr_id expr);
     /// An array's length as written: an int literal or a `const`; none for anything else.
+    /// The position of the case `name` among `type`'s, -1 where `type` is no enum or has no such case.
+    [[nodiscard]] i32 case_index_of(type_id type, cc::string_view name) const;
     [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
     /// A checked index's value when it is an int literal or names a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;

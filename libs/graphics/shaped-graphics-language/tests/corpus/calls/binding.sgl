@@ -51,3 +51,38 @@ test span2(1.0, hi = 2.0).lo == 1.0
 
 @expect(error = "no-matching-overload")
 test span2(1.0, lo = 2.0).lo == 1.0
+
+// a leading dot as an argument is a case of the enum its parameter is (CHK-152)
+enum tone:
+    warm
+    cold
+
+enum side:
+    left
+    right
+    cold
+
+fun weight(t: tone) -> float => case t:
+    .warm => 2.0
+    .cold => 0.5
+
+fun weight(s: side, scale: float) -> float => case s:
+    .left => scale
+    .right => -scale
+    .cold => 0.0
+
+test weight(.warm) == 2.0 and weight(t = .cold) == 0.5
+test weight(.right, 3.0) == -3.0
+
+// the case must exist in the parameter's enum
+@expect(error = "no-matching-overload")
+test weight(.hot) == 1.0
+
+fun pick(t: tone) => 1
+fun pick(s: side) => 2
+
+// a case two candidates' enums both have does not tell them apart, and one only one has does
+@expect(error = "ambiguous-overload")
+test pick(.cold) == 1
+
+test pick(.warm) == 1 and pick(.left) == 2

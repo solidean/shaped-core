@@ -30,6 +30,7 @@ void add_argument(call_arguments& a,
     a.literals.push_back(literal);
     a.functions.push_back(function);
     a.undefineds.push_back(false);
+    a.leading_dots.push_back({});
 }
 } // namespace
 
@@ -307,6 +308,7 @@ type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index 
     arguments.literals.insert_at(0, -1);
     arguments.functions.insert_at(0, -1);
     arguments.undefineds.insert_at(0, false);
+    arguments.leading_dots.insert_at(0, {});
 
     auto const& info = out.at(image);
     auto const texel = type_of_builtin(texel_name_of(info.format), file, span_of(file, id));
@@ -1166,6 +1168,15 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             continue;
         }
 
+        // CHK-152: a leading dot is a case of the enum its parameter is, so it has no type until one meets it
+        if (auto const* const dot
+            = !a.is_splat && !a.is_mut && value != nullptr ? value->try_as<ast::leading_dot>() : nullptr)
+        {
+            add_argument(result, {.expr = a.value}, type_id::none, text_of(file, a.name));
+            result.leading_dots.back() = text_of(file, dot->name);
+            continue;
+        }
+
         // CHK-318: a lambda, or the name of a function, has no type until a parameter of function type meets it
         if (!a.is_splat && !a.is_mut && value != nullptr && value->is<ast::lambda>())
         {
@@ -1495,6 +1506,8 @@ cc::string checker::call_text(i32 file_of_call, cc::string_view spelling, call_a
             text += "a literal";
         else if (arguments.undefineds[i])
             text += "undefined()";
+        else if (!arguments.leading_dots[i].empty())
+            text.appendf(".{}", arguments.leading_dots[i]);
         else if (arguments.functions[i] >= 0)
             text += function_arguments[arguments.functions[i]].is_lambda ? "a lambda" : "a function";
         else if (arguments.numbers[i].is_number && ast::is_valid(arguments.written[i].expr))
@@ -1844,6 +1857,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     arguments.literals.insert_at(0, -1);
     arguments.functions.insert_at(0, -1);
     arguments.undefineds.insert_at(0, false);
+    arguments.leading_dots.insert_at(0, {});
 
     auto const candidates = candidates_of(file, name, receiver);
     if (candidates.empty())
@@ -2368,6 +2382,9 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
             continue;
         if (is_open(out.at(range)[p].type))
         {
+            // a leading dot names a case of the enum it meets, which a type parameter does not say
+            if (!arguments.leading_dots[i].empty())
+                return cc::nullopt;
             // a number binds the type it was checked as, since nothing asks it for another
             if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0)
                 deferred.push_back(p);
@@ -2452,6 +2469,10 @@ cc::optional<i32> checker::chain_of(i32 file, parameter const& taking, call_argu
     // CHK-341: `undefined()` is of whatever type it meets
     if (arguments.undefineds[i])
         return 0;
+    // CHK-152: a leading dot meets an enum that has its case, and nothing else
+    if (!arguments.leading_dots[i].empty())
+        return case_index_of(taking.type, arguments.leading_dots[i]) >= 0 && !taking.is_mut ? cc::optional<i32>(0)
+                                                                                            : cc::nullopt;
     // CHK-316: a place is handed over as it is, so it has the parameter's type exactly, and a mark meets a mut parameter
     if (taking.is_mut || arguments.written[i].is_mut)
     {
@@ -2662,6 +2683,16 @@ void checker::commit_literals(function_scope& scope,
             if (arguments.undefineds[i])
             {
                 set_type(scope.file, arguments.written[i].expr, copied[p].type);
+                continue;
+            }
+            if (!arguments.leading_dots[i].empty())
+            {
+                auto const type = copied[p].type;
+                set_type(scope.file, arguments.written[i].expr, type);
+                set_target(scope.file, arguments.written[i].expr,
+                           {.kind = target_kind::enum_case,
+                            .symbol = out.at(type).symbol,
+                            .index = case_index_of(type, arguments.leading_dots[i])});
                 continue;
             }
             if (arguments.numbers[i].is_number)

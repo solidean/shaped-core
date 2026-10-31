@@ -54,6 +54,17 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
 }
 
+i32 checker::case_index_of(type_id type, cc::string_view name) const
+{
+    if (!is_valid(type) || type == checked_module::error_type || out.at(type).kind != type_kind::enumeration)
+        return -1;
+    auto const cases = out.at(out.at(type).cases);
+    for (auto i = isize(0); i < cases.size(); ++i)
+        if (cases[i].name == name)
+            return i32(i);
+    return -1;
+}
+
 cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr, function_scope const* scope)
 {
     auto const& e = ast_of(file).at(expr);
