@@ -230,7 +230,8 @@ stmt_id builder::scope_statement(statement_head const& head, keyword_parts const
         report(diagnostic_kind::too_many_arguments, head.arrow);
     if (!is_valid(parts.block))
         report(diagnostic_kind::expected_body, head.keyword_form);
-    return make_stmt(head.whole, attributes, scope_stmt{.body = is_valid(parts.block) ? block_body(parts.block) : body()});
+    return make_stmt(head.whole, attributes,
+                     scope_stmt{.body = is_valid(parts.block) ? block_body(parts.block) : body()});
 }
 
 stmt_id builder::assert_statement(statement_head const& head, keyword_parts const& parts)

@@ -2357,9 +2357,9 @@ cc::string checker::miss_hint(function_scope& scope,
 }
 
 cc::optional<call_arguments> checker::converted_for_plain_vector(i32 file,
-                                                                  source_span where,
-                                                                  cc::span<symbol_id const> candidates,
-                                                                  call_arguments const& arguments)
+                                                                 source_span where,
+                                                                 cc::span<symbol_id const> candidates,
+                                                                 call_arguments const& arguments)
 {
     // the vector a constructor among the candidates builds: `float3`, `int2` or `uint4`, and never `vec3` or `pos3`
     auto const* vector = static_cast<builtins::type_record const*>(nullptr);
@@ -2404,7 +2404,8 @@ cc::optional<call_arguments> checker::converted_for_plain_vector(i32 file,
         return {};
     for (auto const candidate : candidates)
         if (out.at(candidate).role == function_role::constructor && out.at(candidate).info >= 0
-            && out.functions[out.at(candidate).info].result == vector_type && match(file, candidate, converted).has_value())
+            && out.functions[out.at(candidate).info].result == vector_type
+            && match(file, candidate, converted).has_value())
             return converted;
     return {};
 }
