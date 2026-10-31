@@ -35,6 +35,9 @@ struct wgsl_declarations;
 
 // a bool as GPU memory holds one (gpu_bool.hh)
 struct gpu_bool;
+// a value and the padding GPU memory leaves after it (gpu_padded.hh)
+template <class T, int Size>
+struct gpu_padded;
 
 // shader packages
 enum class shader_language;

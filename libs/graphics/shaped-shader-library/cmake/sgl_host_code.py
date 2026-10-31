@@ -378,6 +378,8 @@ def includes(entries: SglEntries) -> list[str]:
         out.append("<typed-geometry/linalg/mat.hh>")
     if "bool32" in types:
         out.append("<shaped-shader-library/gpu_bool.hh>")
+    if any(padded_element(m) for _, b in entries.bindings for m in b["members"]):
+        out.append("<shaped-shader-library/gpu_padded.hh>")
     return list(dict.fromkeys(out))
 
 
@@ -480,6 +482,8 @@ def emit_group(package: str, memory: dict[str, int], namespace: str, file: SglFi
             out.append(f"    {array(f'sg::{access}_buffer_view<cc::byte>')} {member['name']}; ///< `{member['type']}`\n")
             continue
         element = host_type(package, memory, where, member["type"])
+        if padded_element(member):
+            element = f"slib::gpu_padded<{element}, {member['stride']}>"
         is_written = member["access"] == "read_write"
         access = "readwrite" if is_written else "readonly"
         sgl_type = f"mut buffer[{member['type']}]" if is_written else f"buffer[{member['type']}]"
@@ -715,8 +719,15 @@ def pack_members(package: str, memory: dict[str, int], file: SglFile, name: str,
 # ---- a struct in GPU memory ---------------------------------------------------------------------------------------
 
 
-def padded_fields(package: str, memory: dict[str, int], where: str, members: list[dict], indent: str) -> str:
-    """Each member as a field, with a named padding field wherever SGL's layout leaves a gap before one.
+def padded_element(member: dict) -> bool:
+    """Whether a buffer member's builtin element strides past its own bytes, as a 3-vector does."""
+    return (member["kind"] == "buffer" and member["type"] in HOST_TYPES
+            and member.get("stride", 0) > HOST_TYPES[member["type"]][1])
+
+
+def padded_fields(package: str, memory: dict[str, int], where: str, members: list[dict], indent: str,
+                  size: int = 0) -> str:
+    """Each member as a field, with a named padding field wherever SGL's layout leaves a gap before one, or before `size`.
 
     Padding is visible rather than implied, and `= {}`, so a designated initializer never has to name it.
     A gap is a whole number of 4-byte words, or of 2-byte ones where a 16-bit value leaves room of 2.
@@ -724,17 +735,24 @@ def padded_fields(package: str, memory: dict[str, int], where: str, members: lis
     out = []
     end = 0
     padding = 0
+
+    def pad_to(offset: int) -> None:
+        nonlocal padding
+        gap = offset - end
+        if gap <= 0:
+            return
+        word, size = ("cc::u32", 4) if gap % 4 == 0 else ("cc::u16", 2)
+        words = gap // size
+        extent = "" if words == 1 else f"[{words}]"
+        out.append(f"{indent}{word} _pad{padding}{extent} = {{}}; ///< {gap} bytes SGL's layout leaves free\n")
+        padding += 1
+
     for member in members:
-        gap = member["offset"] - end
-        if gap > 0:
-            word, size = ("cc::u32", 4) if gap % 4 == 0 else ("cc::u16", 2)
-            words = gap // size
-            extent = "" if words == 1 else f"[{words}]"
-            out.append(f"{indent}{word} _pad{padding}{extent} = {{}}; ///< {gap} bytes SGL's layout leaves free\n")
-            padding += 1
+        pad_to(member["offset"])
         cpp = host_type(package, memory, f"{where} member '{member['name']}'", member["type"])
         out.append(f"{indent}{cpp} {member['name']}; ///< `{member['type']}`, at byte {member['offset']}\n")
         end = member["offset"] + member["size"]
+    pad_to(size)
     return "".join(out)
 
 
@@ -753,7 +771,8 @@ def emit_memory_struct(package: str, memory: dict[str, int], namespace: str, fil
     out.append(f"/// `struct {name}` of {file.path}, byte for byte as {space} holds it. Generated; do not edit.\n")
     out.append("/// Copy it into GPU memory as it is: every member sits where the shader reads it on every backend.\n")
     out.append(f"struct {name}\n{{\n")
-    out.append(padded_fields(package, memory, f"'{file.path}' `struct {name}`", struct["members"], "    "))
+    out.append(padded_fields(package, memory, f"'{file.path}' `struct {name}`", struct["members"], "    ",
+                             struct["size"]))
     out.append("};\n")
     out.append(f"}} // namespace {namespace}\n")
     return "".join(out)
@@ -775,7 +794,8 @@ def emit_inline(package: str, memory: dict[str, int], namespace: str, file: SglF
     out.append("///\n")
     out.append(f"///     pass.set_inline_constants({namespace}::{name}{{...}}.to_block());\n")
     out.append(f"struct {name}\n{{\n")
-    out.append(padded_fields(package, memory, f"'{file.path}' `@inline binding {name}`", binding["members"], "    "))
+    out.append(padded_fields(package, memory, f"'{file.path}' `@inline binding {name}`", binding["members"], "    ",
+                             binding["block_size"]))
     out.append("\n")
     out.append("    /// The block's size in bytes, as the shader lays it out.\n")
     out.append(f"    static constexpr cc::isize block_size = {binding['block_size']};\n")

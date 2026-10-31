@@ -637,6 +637,30 @@ def a_16_bit_value_is_its_host_type_and_a_2_byte_gap_a_u16():
     expect_in("cc::u16 _pad1 = {}; ///< 2 bytes", fields, "a gap of 2 after a ushort")
 
 
+@test
+def a_struct_pads_its_tail_up_to_its_size():
+    members = [
+        {"name": "origin", "type": "float3", "offset": 0, "size": 12},
+        {"name": "direction", "type": "float3", "offset": 16, "size": 12},
+    ]
+    fields = sgl_host_code.padded_fields("p", {}, "here", members, "", 32)
+    expect_in("tg::vec3f origin; ///< `float3`, at byte 0\ncc::u32 _pad0 = {};", fields, "the gap after origin")
+    expect_in("tg::vec3f direction; ///< `float3`, at byte 16\ncc::u32 _pad1 = {};", fields, "the tail after direction")
+
+
+@test
+def a_buffer_of_3_vectors_strides_by_16_through_gpu_padded():
+    group = {"name": "points", "inline": False, "members": [
+        resource("buffer", name="dirs", type="float3", slot=0, stride=16, access="read"),
+        resource("buffer", name="flat", type="float3", slot=1, stride=12, access="read"),
+    ]}
+    entries = sgl_description.SglEntries(bindings=[(FILE, group)])
+    header = sgl_host_code.emit_group("pkg", {}, "ns", FILE, group)
+    expect_in("sg::readonly_buffer_view<slib::gpu_padded<tg::vec3f, 16>> dirs;", header, "a natural float3 buffer")
+    expect_in("sg::readonly_buffer_view<tg::vec3f> flat;", header, "a packed float3 buffer")
+    expect_in("<shaped-shader-library/gpu_padded.hh>", "\n".join(sgl_host_code.includes(entries)), "its header")
+
+
 def main() -> int:
     failed = 0
     for fn in TESTS:

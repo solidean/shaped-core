@@ -389,7 +389,10 @@ pass.set_inline_constants(shaders::compute::constants{.view_projection = vp}.to_
 // a struct a binding places in GPU memory -> shaders::compute::particle: tg members at SGL's offsets, padding as `cc::u32 _padN = {}`,
 //   and static_asserts on sizeof and every offsetof. A buffer of it is sg::readwrite_buffer_view<shaders::compute::particle>:
 auto const items = ctx.persistent.create_buffer_from_data(cc::vector<shaders::compute::particle>{...}, sg::buffer_usage::readwrite_buffer);
-//   a constant block packs as an HLSL cbuffer, a buffer element tight like a tg struct (the SGL spec's layout rules).
+//   every vector at its natural alignment, a 3-vector at 16, so the padding fields are real (the SGL spec's layout rules);
+//   `@padding(.none)` in the shader packs it as C++ does instead.
+// SGL `buffer[float3]` -> sg::readonly_buffer_view<slib::gpu_padded<tg::vec3f, 16>> (gpu_padded.hh): a value and its padding,
+//   which a tg::vec3f converts to and from; under `@padding(.none)` it is plain tg::vec3f at a 12-byte stride.
 // SGL `bool32` -> slib::gpu_bool (gpu_bool.hh): a bool as one 32-bit lane; a plain bool assigns into it.
 // SGL `half` -> tg::f16, `short`/`ushort` -> cc::i16/cc::u16, their vectors tg::vec<N, T>; a 2-byte gap is `cc::u16 _padN`.
 // within one file a name is generated once, so a binding named like the file's entry point type (`main_t`) or options
