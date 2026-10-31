@@ -63,6 +63,10 @@ struct temporal_slot
     /// The smaller of `sv::accumulation_sample_cap` and `viewer_definition::sample_target` where that is set; `is_accumulation_converged` takes reaching it as stopped.
     u32 sample_target = accumulation_sample_cap;
 
+    /// The frames this layer stops at, as the frame that last decided whether to trace took it; 0 for no such count.
+    /// `viewer_definition::frame_target`, counted as frames are recorded, so reaching it waits on nothing the GPU reads back.
+    u32 frame_target = 0;
+
     /// How many pixels held fewer samples than the trace's target as of the last wavefront floor that landed, and 0 for any other layer.
     /// What a capture that gives up names, since one stalled pixel holds the whole floor down.
     u32 pixels_short = 0;
@@ -70,6 +74,13 @@ struct temporal_slot
     /// The wavefront frames' sample floors still in flight, oldest first, all of the paths' current generation.
     /// A restart drops them, since they count samples of the image it threw away.
     cc::vector<sg::data_future<u32>> sample_floors;
+
+    /// Whether the mean holds what this layer stops at: `sample_target` samples, or `frame_target` frames where one is set.
+    /// Never true of a mean that restarts, whose counts are both 0.
+    [[nodiscard]] bool is_at_target() const
+    {
+        return accum_frame > 0 && (samples >= sample_target || (frame_target > 0 && accum_frame >= frame_target));
+    }
 
     /// The denoiser's own state, held only by a `temporal_id::denoised` slot.
     ///

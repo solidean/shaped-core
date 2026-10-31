@@ -124,6 +124,10 @@ namespace babel::image
 struct babel::image::write_options
 {
     int jpg_quality = 90; // 1..100, and ignored by every other format
+
+    /// zlib's Deflate level for a PNG, 0 (store) to 9 (smallest) or -1 for zlib's default, and ignored by every other format.
+    /// 1080p RGB measured 304 ms at the default, 101 ms at 1 and 5 ms at 0 for a 5x larger file.
+    int png_compression_level = -1;
 };
 
 namespace babel::image

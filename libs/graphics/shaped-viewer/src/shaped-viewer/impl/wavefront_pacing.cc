@@ -74,7 +74,7 @@ isize still_wavefront_traces(viewer_definition const& def, render_plan const& pl
             continue;
         auto const* const rec = store.peek_ptr(tr.id);
         auto const* const slot = rec != nullptr ? rec->temporal.get_ptr(temporal_id::accumulation(tr.layer)) : nullptr;
-        if (slot != nullptr && slot->accum_frame > 0 && slot->samples < slot->sample_target)
+        if (slot != nullptr && slot->accum_frame > 0 && !slot->is_at_target())
             ++count;
     }
     return count;

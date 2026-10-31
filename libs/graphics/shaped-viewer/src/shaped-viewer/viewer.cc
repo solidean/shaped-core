@@ -13,6 +13,7 @@
 #include <imgui/imgui.h>
 #include <shaped-graphics/all.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-rendering/capture.hh> // sr::submit_capture_readback, sr::encode_capture_image_async
 #include <shaped-rendering/imgui_context.hh>
 #include <shaped-rendering/imgui_routine.hh>
 #include <shaped-rendering/input.hh>
@@ -128,6 +129,20 @@ template <class T>
         co_return cc::string("the readback never landed");
     co_return written->has_error() ? written->error().to_string() : cc::string();
 }
+
+/// How many capture images may be read back and encoded at once while the loop renders on.
+/// A 1080p frame holds about 14 MB between its readback and its encode, and a PNG at level 1 takes about 100 ms to encode.
+constexpr isize max_capture_writes_in_flight = 16;
+
+/// Waits for one capture write and logs why it failed, if it did.
+void report_capture_write(sg::context& ctx, cc::shared_async<cc::string> const& writing)
+{
+    auto const failure = block_on(ctx, writing);
+    if (failure.has_error())
+        CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
+    else if (!failure.value().empty())
+        CC_LOG_ERROR("capture: {}", failure.value());
+}
 } // namespace
 
 struct viewer::impl
@@ -159,6 +174,9 @@ struct viewer::impl
     /// The capture this run is taking, or null on an ordinary interactive run.
     cc::unique_ptr<sv::impl::capture_session> capture;
 
+    /// The capture's images still being read back and encoded, oldest first; each resolves to why it failed, or empty.
+    /// Drained before the run closes, since a tool reads the files once the process ends.
+    cc::vector<cc::shared_async<cc::string>> capture_writes;
 
     gpu_resource_manager resources;
 
@@ -358,6 +376,9 @@ viewer::~viewer()
         // A loop that left through a break still holds a frame here, and its backbuffer and command list have to be
         // handed back before anything drains — so it presents, exactly as if end_frame had been reached.
         end_frame();
+
+        // A loop that left before its capture finished still owes the images it submitted.
+        drain_capture_writes();
 
         _impl->ctx->advance_epoch();
         (void)block_on(*_impl->ctx, _impl->ctx->idle_completion());
@@ -984,9 +1005,12 @@ void viewer::finish_frame(frame& f)
     // A capture asks every traced view for its samples and no more, so a traced layer stops where the image is taken.
     // Also while work is owed: what the views hold then is thrown away once it drains, so tracing on past the target buys nothing.
     // Nor does it denoise an image it will not take: only the one at the target.
+    // A request counting iterations stops each layer at that many frames instead, which no readback has to confirm.
     if (im.capture != nullptr && !im.capture->is_done())
     {
-        def.sample_target = im.capture->request().accumulate;
+        auto const& req = im.capture->request();
+        def.sample_target = req.iterations > 0 ? 0 : req.accumulate;
+        def.frame_target = req.iterations;
         def.denoise_at_target_only = true;
     }
 
@@ -1307,7 +1331,10 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         short_pixels += im.views.pixels_short_of_target(tr.id);
 
         any_traced = true;
-        views_converged &= im.views.is_accumulation_converged(tr.id, session.request().accumulate);
+        // Under an iteration count the frame target alone stops a layer, and a sample count reached early must not settle it first.
+        auto const samples
+            = session.request().iterations > 0 ? cc::optional<u32>() : cc::optional<u32>(session.request().accumulate);
+        views_converged &= im.views.is_accumulation_converged(tr.id, samples);
     }
 
     // Payloads still streaming count as owed work too: until they land their meshes are traced as placeholder boxes, and
@@ -1333,17 +1360,27 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
     if (!settled && !session.is_out_of_time())
         return;
 
+    // The readback is submitted now, before the next frame renders over the offscreen target; the wait and the encode are not waited for here.
+    // A sequence's frames go to a video encoder next, so their PNGs trade size for an encode about three times faster.
     auto const write = [&](cc::string const& path)
     {
         // The floor the image was written at, which a test reads to see a target was kept to rather than overshot.
         CC_RECORD_STAT("sv.capture.samples_per_pixel", cc::rec::unit_count, lowest);
 
-        auto const failure
-            = block_on(*im.ctx, capture_failure(sr::write_capture_image_async(*im.ctx, im.offscreen, path)));
-        if (failure.has_error())
-            CC_LOG_ERROR("capture: {}", failure.error().underlying().to_string());
-        else if (!failure.value().empty())
-            CC_LOG_ERROR("capture: {}", failure.value());
+        auto const readback = sr::submit_capture_readback(*im.ctx, im.offscreen);
+        auto const opts = babel::image::write_options{.jpg_quality = 88,
+                                                      .png_compression_level = session.request().is_sequence() ? 1 : -1};
+        auto writing = capture_failure(sr::encode_capture_image_async(
+            readback, tg::vec2i(im.offscreen.width(), im.offscreen.height()), path, opts));
+        (void)cc::async_start(writing);
+        im.capture_writes.push_back(cc::move(writing));
+
+        // Bounded, so a GPU outpacing the encoders holds the loop back rather than queueing every frame's bytes.
+        while (im.capture_writes.size() > max_capture_writes_in_flight)
+        {
+            report_capture_write(*im.ctx, im.capture_writes[0]);
+            im.capture_writes.remove_at(0);
+        }
     };
 
     // A sequence writes every frame to its own path, settled or not, since a sequence with a hole cannot be encoded.
@@ -1371,6 +1408,7 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
         if (session.unsettled_frames() > 0)
             CC_LOG_WARNING("capture: {} of the sequence's written frames ran out of time before they settled",
                            session.unsettled_frames());
+        drain_capture_writes();
         session.mark_done();
         request_close();
         return;
@@ -1393,8 +1431,17 @@ void viewer::advance_capture(render_plan const& plan, bool traces_ran)
                        session.request().output_path);
 
     write(path);
+    drain_capture_writes();
 
     session.mark_done();
     request_close();
+}
+
+void viewer::drain_capture_writes()
+{
+    auto& im = *_impl;
+    for (auto const& writing : im.capture_writes)
+        report_capture_write(*im.ctx, writing);
+    im.capture_writes.clear();
 }
 } // namespace sv

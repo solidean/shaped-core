@@ -238,6 +238,7 @@ req.active                         // -> bool; everything below is meaningless w
 req.name / req.output_path         // -> cc::string; a sequence's output_path is a pattern
 req.size                           // -> tg::vec2i, default 1920x1080
 req.accumulate                     // -> u32, default 60, in the program's own unit; per frame for a sequence
+req.iterations                     // -> u32, default 0; above 0, frames rendered into each image in place of accumulate
 req.timeout_seconds                // -> double, default 60, spent against req.clock_seconds
 req.clock_seconds                  // -> double (*)(), default cc::current_time_steady_secs; a test swaps in a clock it advances
 req.frames / req.fps / req.start_seconds / req.stride   // the sequence; frames 0 is a still
@@ -246,12 +247,16 @@ req.seconds_at(i)                  // -> double, start_seconds + i / fps: what t
 
 sr::capture_frame_path("f_%05d.png", 7)        // -> "f_00007.png"; %d or %0Nd as ffmpeg reads it, else _%05d before the extension
 sr::write_capture_image_async(ctx, tex, path)  // -> cc::shared_async<cc::result<cc::unit>>; awaited readback, bgra8 -> RGB, format from the extension
+auto const rb = sr::submit_capture_readback(ctx, tex);         // -> sg::bytes_future; recorded and submitted now, before tex is rendered again
+sr::encode_capture_image_async(rb, size, path, {.png_compression_level = 1})  // -> the same async; waits and encodes on the compute pool
 ```
 
 - **A capture's clock is the request's, never the wall's**: a still shows `start_seconds`, frame `i` of a sequence `seconds_at(i)`.
   The program holds that instant while the frame finishes by its own `accumulate` rule, and moves on only once it is written.
   `sv::frame::seconds` is that clock in sv, so a body animating off it captures a video with no capture code.
 - **A sequence writes every frame, settled or not**, since one with a hole cannot be encoded; a frame that ran out of time is warned about instead.
+- **A loop rendering on while its images encode splits the write**: `submit_capture_readback` between frames, `encode_capture_image_async` in flight.
+  `write_capture_image_async` records its readback only once awaited, so a frame rendered before that would land in the image.
 
 - **`active` with an empty `output_path` is a caller error**, not a silent no-op — a tool that forgot the path would otherwise get a run that looked like it worked.
 - **A name the program does not offer must be an ERROR**, never a quiet fall back to the default view.

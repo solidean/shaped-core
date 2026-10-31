@@ -722,18 +722,18 @@ void land_sample_floors(impl::temporal_slot& slot)
         slot.sample_floors.remove_at(0);
 }
 
-/// Whether this frame of `slot`'s layer traces at all: not a full-size one whose pixels all hold `target` already.
+/// Whether this frame of `slot`'s layer traces at all: not a full-size one whose mean is at its target already.
 ///
-/// Neither integrator has anything to add there.
+/// Neither integrator has anything to add there, whether the target is `slot.sample_target` or `slot.frame_target`.
 /// A megakernel frame would blend more samples into a mean that is to stop, and the wavefront starts no sample past the target,
 /// so its floor at the target means no path is in flight.
 /// A frame that does not trace counts nothing, which keeps the megakernel's `samples` at `accum_frame` frames of `samples_per_pixel`:
 /// the shader's blend weight relies on that once a raised target lets it go on.
 /// Lands the wavefront's sample floors first, so the answer is as fresh as the GPU allows.
-[[nodiscard]] bool frame_samples(impl::temporal_slot& slot, u32 target, bool scaled)
+[[nodiscard]] bool frame_samples(impl::temporal_slot& slot, bool scaled)
 {
     land_sample_floors(slot);
-    return scaled || slot.accum_frame == 0 || slot.samples < target;
+    return scaled || !slot.is_at_target();
 }
 
 /// Marks a guide or primary-depth `slot` as holding nothing, where there is one.
@@ -1352,9 +1352,10 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
     // At the target no frame traces, so the mean starts over instead: a denoiser would read blank guides, and a drawing test or a pick blank depth.
     auto const target = effective_sample_target(def.sample_target);
     slot->sample_target = target;
+    slot->frame_target = def.frame_target;
     auto const guides_unwritten = has_guides && slot->accum_frame > 0 && ds.normal->accum_frame == 0;
     auto const depth_unwritten = depth_slot != nullptr && slot->accum_frame > 0 && depth_slot->accum_frame == 0;
-    auto const at_target = !frame_samples(*slot, target, false);
+    auto const at_target = !frame_samples(*slot, false);
     if (at_target && (guides_unwritten || depth_unwritten))
         impl::restart_accumulation(*slot);
     auto const samples = !at_target || slot->accum_frame == 0;
@@ -1670,7 +1671,8 @@ sg::routine_outcome view_renderer::trace(sg::command_list& cmd,
         // The denoised slot is marked as holding nothing, so the frame at the target denoises, and no stale image from an earlier mean shows.
         // That is the frame reaching it for a megakernel, whose samples count as it traces, and the first frame tracing nothing for a wavefront,
         // whose samples land a frame or more later; convergence reads that same count, so a capture never settles before the denoise.
-        if (def.denoise_at_target_only && traces && slot->samples < target && !schedule.runs_temporal())
+        // A frame target is reached by the frame that traces it, under either integrator.
+        if (def.denoise_at_target_only && traces && !slot->is_at_target() && !schedule.runs_temporal())
         {
             ds.denoised->accum_frame = 0;
             res.traces[trace_index] = slot->texture;
@@ -1924,7 +1926,7 @@ sg::texture_2d view_renderer::execute(sg::command_list& cmd,
 
     // As `trace`: a mean whose pixels all hold the cap is the image, and a frame there traces nothing.
     slot.sample_target = effective_sample_target(0);
-    if (!frame_samples(slot, slot.sample_target, false))
+    if (!frame_samples(slot, false))
         return slot.texture;
 
     // The shader reads accum_frame == 0 as "overwrite", anything above it as "blend in place".

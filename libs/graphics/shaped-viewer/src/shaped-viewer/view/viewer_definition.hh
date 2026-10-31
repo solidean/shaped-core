@@ -31,6 +31,12 @@ struct sv::viewer_definition
     /// Never part of a trace's hash: raising it carries on from the samples the image holds.
     u32 sample_target = 0;
 
+    /// The frames a traced layer's mean stops at this frame, or 0 for none; reaching either target stops it.
+    /// Counted as frames are recorded, so a capture asking for it settles without waiting on a sample floor's readback.
+    /// A wavefront frame after the first runs `render_settings::rounds_per_frame` rounds, so the image depends on this count alone.
+    /// Never part of a trace's hash, like `sample_target`.
+    u32 frame_target = 0;
+
     /// Whether a traced layer's spatial denoiser runs only on the image at `sample_target`, every frame before it presenting the raw mean.
     /// A capture sets it with the target: nothing sees the frames in between, and a spatial member such as OIDN costs several frames' traces.
     /// A temporal member runs on regardless, since its history is built frame by frame.

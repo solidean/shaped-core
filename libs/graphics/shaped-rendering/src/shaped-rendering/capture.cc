@@ -7,7 +7,7 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/thread/async_coroutine.hh>
-#include <shaped-graphics/all.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh> // cc::async_resume_on_compute#include <shaped-graphics/all.hh>
 #include <shaped-rendering/capture.hh>
 
 namespace sr
@@ -111,6 +111,15 @@ capture_request capture_request::from_environment()
             CC_LOG_WARNING("capture: ignoring unparseable {}", capture_time_env_var);
     }
 
+    if (auto const iterations = cc::environment_variable(capture_iterations_env_var); iterations.has_value())
+    {
+        auto parsed = u32(0);
+        if (cc::from_string(iterations.value(), parsed))
+            req.iterations = parsed;
+        else
+            CC_LOG_WARNING("capture: ignoring unparseable {}", capture_iterations_env_var);
+    }
+
     if (auto const stride = cc::environment_variable(capture_stride_env_var); stride.has_value())
     {
         auto parsed = i32(0);
@@ -154,7 +163,10 @@ cc::string capture_frame_path(cc::string_view pattern, i32 index)
 namespace
 {
 /// The readback, converted and written, once the bytes have landed.
-[[nodiscard]] cc::result<cc::unit> encode_capture_image(cc::span<byte const> src, tg::vec2i size, cc::string_view path)
+[[nodiscard]] cc::result<cc::unit> encode_capture_image(cc::span<byte const> src,
+                                                        tg::vec2i size,
+                                                        cc::string_view path,
+                                                        babel::image::write_options opts)
 {
     auto const pixels = isize(size[0]) * isize(size[1]);
     if (src.size() < pixels * 4)
@@ -175,7 +187,7 @@ namespace
     CC_RETURN_IF_ERROR(adapter);
 
     cc::write_stream out = adapter.value(); // the adapter narrows to the stream babel writes through
-    auto written = babel::image::write(out, img, format_of(path), {.jpg_quality = 88});
+    auto written = babel::image::write(out, img, format_of(path), opts);
     CC_RETURN_IF_ERROR(written);
 
     // The adapter buffers, and its destructor does not drain — so without this the file ends at a 4096-byte boundary,
@@ -207,6 +219,30 @@ cc::shared_async<cc::result<cc::unit>> write_capture_image_async(sg::context& ct
 
     // The encode below touches only the bytes and the file, so it may run wherever the download resumes this.
     auto const bytes = co_await future.bytes();
-    co_return encode_capture_image(bytes.span(), size, path);
+    co_return encode_capture_image(bytes.span(), size, path, {.jpg_quality = 88});
+}
+
+sg::bytes_future submit_capture_readback(sg::context& ctx, sg::texture_2d const& texture)
+{
+    CC_ASSERT(texture.format() == sg::pixel_format::bgra8_unorm, "a capture target must be bgra8_unorm");
+
+    // A list rather than the async tier, for the same render-target layout as write_capture_image_async.
+    auto cmd = ctx.create_command_list();
+    auto future = cmd->download.bytes_from_texture(texture.raw());
+    (void)ctx.submit_command_list(cc::move(cmd));
+    return future;
+}
+
+cc::shared_async<cc::result<cc::unit>> encode_capture_image_async(sg::bytes_future readback,
+                                                                  tg::vec2i size,
+                                                                  cc::string path,
+                                                                  babel::image::write_options opts)
+{
+    // Held before awaiting, since a reference bound to a co_await on a temporary dangles.
+    auto const landing = readback.bytes();
+    auto const& bytes = co_await landing;
+    // Off whatever thread pushed the readback: an encode takes up to a few hundred ms, and a readback actor must not wait on it.
+    co_await cc::async_resume_on_compute();
+    co_return encode_capture_image(bytes.span(), size, path, opts);
 }
 } // namespace sr
