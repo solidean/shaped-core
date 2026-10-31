@@ -83,3 +83,6 @@ test:
     for i in 0 ..< 4:
         sum += counting().column(i).x
     sum == 1.0 + 5.0 + 9.0 + 13.0
+
+// a clip-space position stays one through a further projective matrix (EMIT-166)
+test (diagonal(2.0, 2.0, 2.0, 1.0) * (diagonal(2.0, 2.0, 2.0, 1.0) * pos3(1.0, 1.0, 1.0))) == hpos4(4.0, 4.0, 4.0, 1.0)

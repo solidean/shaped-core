@@ -155,6 +155,41 @@ cc::string_view smoothstep_undefined(leaves in)
     return {};
 }
 
+/// The leaves of two scalar edges and a vector, each edge spread across the vector's width.
+result spread_edges(leaves in)
+{
+    auto const width = in.size() - 2;
+    auto spread = result();
+    for (auto const edge : {isize(0), isize(1)})
+        for (auto k = isize(0); k < width; ++k)
+            spread.push_back(in[edge]);
+    for (auto k = isize(0); k < width; ++k)
+        spread.push_back(in[2 + k]);
+    return spread;
+}
+
+void smoothstep_scalar_edges(leaves in, result& out)
+{
+    auto const spread = spread_edges(in);
+    smoothstep(spread, out);
+}
+
+cc::string_view smoothstep_scalar_edges_undefined(leaves in)
+{
+    auto const spread = spread_edges(in);
+    return smoothstep_undefined(spread);
+}
+
+/// CHK-406's rule for smoothstep's edges: no target but HLSL takes a scalar where a vector is, so each is the vector of it.
+written write_smoothstep_scalar_edges(call_context const& c)
+{
+    auto const vector = c.builtins.at(builtin_type_id(i32(c.data))).spelled_in(c.target);
+    return {.text = cc::format("smoothstep({0}({1}), {0}({2}), {3})", vector, c.arguments[0].text, c.arguments[1].text,
+                               c.arguments[2].text)};
+}
+
+constexpr cc::string_view k_smoothstep[] = {"smoothstep"};
+
 // ---- geometry ---------------------------------------------------------------------------------------------------
 
 void cross(leaves in, result& out)
@@ -668,6 +703,16 @@ void sgl::builtins::register_math(registry& r)
             "/// 0 where `x` is below `edge`, and 1 from it on.");
         add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep, {},
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
+        if (auto const element = cc::string_view(t.starts_with("half") ? "half" : "float"); element != t)
+            add(r, cc::format("@pure fun smoothstep(low: {}, high: {}, x: {}) -> {}", element, element, t, t),
+                smoothstep_scalar_edges,
+                {.kind = spelling_kind::custom,
+                 .custom = write_smoothstep_scalar_edges,
+                 .data = u32(index_of(impl::registered_type(r, t))),
+                 .hlsl_names = k_smoothstep,
+                 .wgsl_names = k_smoothstep,
+                 .msl_names = k_smoothstep},
+                smoothstep_scalar_edges_undefined, false, "/// Each edge stands for the vector of it (CHK-406).");
     }
 
     r.add_comment("// whether a float or a half is a NaN or an infinity, per component; read from its bits on every\n"

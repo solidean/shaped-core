@@ -191,9 +191,13 @@ TEST("sgl check - a texel of another kind offers the conversion to write first o
     CHECK(from_uint.contains("type-mismatch")).dump("reports", from_uint);
     CHECK(from_uint.contains("a kind converts first: `(v as float2) as texel[.rg8_unorm]`")).dump("reports", from_uint);
 
-    // a bool2 has no `as float2`, so the report suggests no step that would fail in turn
+    // a bool2 converts to a float2 too (CHK-197), so its report spells the same two steps
     auto const from_bool = reports_for("fun f(b: bool2) => b as texel[.rg8_unorm]\n");
-    CHECK(from_bool.contains("type-mismatch")).dump("reports", from_bool);
-    CHECK(from_bool.contains("bool2 converts to no float2")).dump("reports", from_bool);
-    CHECK(!from_bool.contains("converts first")).dump("reports", from_bool);
+    CHECK(from_bool.contains("a kind converts first: `(v as float2) as texel[.rg8_unorm]`")).dump("reports", from_bool);
+
+    // a short2 has no `as float2`, so the report suggests no step that would fail in turn
+    auto const from_short = reports_for("fun f(b: short2) => b as texel[.rg8_unorm]\n");
+    CHECK(from_short.contains("type-mismatch")).dump("reports", from_short);
+    CHECK(from_short.contains("short2 converts to no float2")).dump("reports", from_short);
+    CHECK(!from_short.contains("converts first")).dump("reports", from_short);
 }

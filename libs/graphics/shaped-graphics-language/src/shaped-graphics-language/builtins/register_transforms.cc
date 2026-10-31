@@ -331,6 +331,8 @@ void sgl::builtins::register_transforms(registry& r)
     add_product(r, "transform_position", "mat4", "p", "pos3", "hpos4", transform_position, write_position);
     add_product(r, "transform_direction", "mat4", "v", "vec3", "vec3", transform_direction, write_direction);
     add_product(r, "transform_float4", "mat4", "v", "float4", "float4", transform_float4, write_product);
+    // a clip-space position stays one through a further projective matrix, as a model-then-view-projection chain is
+    add_product(r, "transform_hpos4", "mat4", "v", "hpos4", "hpos4", transform_float4, write_product);
     add_product(r, "multiply_mat4", "mat4", "b", "mat4", "mat4", multiply_mat4, write_product);
 
     r.add_comment("// a matrix of its four columns");

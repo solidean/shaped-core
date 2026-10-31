@@ -166,6 +166,21 @@ written write_bool32_to_bool(call_context const& c)
 
 constexpr cc::string_view k_select[] = {"select"};
 
+/// A bool's components as 1 and 0 of `Kind`, which every target's own conversion gives too.
+template <value_kind Kind>
+void bool_to_number(leaves in, result& out)
+{
+    for (auto const& leaf : in)
+    {
+        if constexpr (Kind == value_kind::scalar_float)
+            out.push_back(scalar::of(leaf.as_bool() ? 1.0f : 0.0f));
+        else if constexpr (Kind == value_kind::scalar_int)
+            out.push_back(scalar::of(leaf.as_bool() ? 1 : 0));
+        else
+            out.push_back(scalar::of_uint(leaf.as_bool() ? 1u : 0u));
+    }
+}
+
 cc::string type_name(numeric const& n, i32 width)
 {
     return width == 1 ? cc::string(n.name) : cc::format("{}{}", n.name, width);
@@ -247,6 +262,26 @@ void sgl::builtins::register_conversions(registry& r)
                     .takes_literal_at_default = true,
                 });
             }
+
+    r.add_comment("// `b as T` of a bool and its vectors, to a float, an int or a uint: 1 where true and 0 where not");
+    for (auto width = 1; width <= 4; ++width)
+        for (auto const& to : k_numerics)
+        {
+            auto const evaluate = to.kind == value_kind::scalar_float ? bool_to_number<value_kind::scalar_float>
+                                : to.kind == value_kind::scalar_int   ? bool_to_number<value_kind::scalar_int>
+                                : to.kind == value_kind::scalar_uint  ? bool_to_number<value_kind::scalar_uint>
+                                                                      : nullptr;
+            if (evaluate == nullptr)
+                continue;
+            auto const source = width == 1 ? cc::string("bool") : cc::format("bool{}", width);
+            auto const target = type_name(to, width);
+            r.add(function_record{
+                .signature = cc::format("@pure @operator(\"as\") fun convert_{}_to_{}(x: {}) -> {}", source, target,
+                                        source, target),
+                .evaluate = evaluate,
+                .write = conversion_to(to, width),
+            });
+        }
 
     r.add_comment("// A bool32 is a bool as GPU memory holds one, and `as` is how either becomes the other");
     r.add(function_record{

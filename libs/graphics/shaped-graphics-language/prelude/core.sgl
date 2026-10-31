@@ -27,6 +27,30 @@ const true = bool.true
 /// The ratio of a circle's circumference to its diameter.
 const pi = 3.14159265358979323846
 
+/// An angle in degrees, in radians.
+fun radians(degrees: float) => degrees * (pi / 180.0)
+fun radians(degrees: float2) => degrees * (pi / 180.0)
+fun radians(degrees: float3) => degrees * (pi / 180.0)
+fun radians(degrees: float4) => degrees * (pi / 180.0)
+/// An angle in radians, in degrees.
+fun degrees(radians: float) => radians * (180.0 / pi)
+fun degrees(radians: float2) => radians * (180.0 / pi)
+fun degrees(radians: float3) => radians * (180.0 / pi)
+fun degrees(radians: float4) => radians * (180.0 / pi)
+
+// ---- a floored remainder ---------------------------------------------------------------------------------------------
+//
+// `%` of floats truncates, as HLSL's `fmod` and MSL's `fmod` do; `mod` floors, as GLSL's does, so it never turns negative
+// for a positive `b`.
+
+fun mod(a: float, b: float) => a - b * floor(a / b)
+fun mod(a: float2, b: float2) => a - b * floor(a / b)
+fun mod(a: float3, b: float3) => a - b * floor(a / b)
+fun mod(a: float4, b: float4) => a - b * floor(a / b)
+fun mod(a: float2, b: float) => a - b * floor(a / b)
+fun mod(a: float3, b: float) => a - b * floor(a / b)
+fun mod(a: float4, b: float) => a - b * floor(a / b)
+
 // ---- the parts of a matrix ------------------------------------------------------------------------------------------
 //
 // A column or a row by name, never `m[i]`: HLSL's subscript is a row where WGSL's and MSL's is a column (CHK-407).

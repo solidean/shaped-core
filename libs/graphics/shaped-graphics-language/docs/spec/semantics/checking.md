@@ -251,6 +251,9 @@ fun f(x: float) -> float:
 * **CHK-221** A `const` whose value is an enum case names that case as a `case` pattern, so it counts for exhaustiveness as `e.case` does (CHK-159).
 * **CHK-222** `true` and `false` are `@shadowable(false)` consts of `core.sgl`, whose values are the cases of `bool` (CHK-218).
 * **CHK-405** `pi` is a `float` const of `core.sgl`, and a program's own `pi` hides it, as any shadowable name of the prelude is (CHK-220).
+  `radians(d)` and `degrees(r)` of a `float` or a plain float vector convert an angle by it.
+  `mod(a, b)` is the remainder that floors, `a - b * floor(a / b)`, as GLSL's does, with `b` a scalar or of `a`'s type.
+  The float `%` truncates instead, as HLSL's and MSL's `fmod` do (CHK-313).
 * **CHK-353** `@option` on a file-scope `const` makes it an **option**: a value the host sets for each compile, whose written value is its default ([why](why/checking.md#chk-353)).
   An option is a `bool`, an `int` or an enum case, an image format among them; one of another type is `unsupported-yet`.
   An option whose value names another option is `unsupported-yet` too, whether directly or through what it computes; a plain `const` naming one follows it.
@@ -680,6 +683,7 @@ fun shade(k: float) -> float:
 * **CHK-196** `x as T` where `x` already has the type `T` is `x`.
 * **CHK-197** The prelude converts between `float`, `int` and `uint` of one width, and nothing else ([why](why/checking.md#chk-197)).
   Each family also converts between its widths: `half` and `float`, `short` and `int`, `ushort` and `uint` (CHK-381).
+  A `bool` and its vectors convert to `float`, `int` and `uint` of their width as 1 where true and 0 where not; nothing converts to a `bool` but a comparison.
   A float whose truncation the integer holds becomes that integer, truncated toward zero.
   A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
   Between `int` and `uint` the bits stay.
@@ -711,6 +715,7 @@ The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2
   Every target's own `mix` or `lerp` takes both, so neither form needs a construction.
 * **CHK-406** `min(v, b)`, `max(v, b)` and `clamp(v, low, high)` of a `float` or `half` vector take each bound as one scalar of its element type too, which stands for the vector of it.
   No target but HLSL takes a scalar there, so each is written as that vector's one-value constructor (CHK-360) on every target.
+  `smoothstep(low, high, x)` of such a vector takes its two edges as scalars the same way.
   There is no implicit scalar-to-vector conversion: these overloads are the whole of it.
 * **CHK-360** Every vector of the prelude has a one-value constructor, `float3(x)`, whose every component is `x`; it is a function of the vector's name beside its synthesized constructor (CHK-240).
 * **CHK-361** `fwidth(x)` is `abs(ddx(x)) + abs(ddy(x))`, and like `ddx` it is `@stages(.pixel)` and takes derivatives (CHK-282).
