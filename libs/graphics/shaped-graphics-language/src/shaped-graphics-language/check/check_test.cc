@@ -266,6 +266,8 @@ ast::stmt_id checker::last_code_line(i32 file, ast::range_of<ast::stmt_id> state
         return deeper(loop->body.statements);
     if (auto const* const loop = s.node.try_as<ast::while_stmt>())
         return deeper(loop->body.statements);
+    if (auto const* const block = s.node.try_as<ast::scope_stmt>())
+        return deeper(block->body.statements);
     if (auto const* const e = s.node.try_as<ast::expr_stmt>(); e != nullptr && ast::is_valid(e->value))
     {
         auto const& value = ast.at(e->value);

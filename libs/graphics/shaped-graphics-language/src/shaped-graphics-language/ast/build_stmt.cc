@@ -73,6 +73,8 @@ stmt_id builder::statement(statement_head const& head)
         return for_statement(head, parts);
     if (keyword == "while")
         return while_statement(head, parts);
+    if (keyword == "scope")
+        return scope_statement(head, parts);
     if (keyword == "assert")
         return assert_statement(head, parts);
     if (keyword == "print")
@@ -216,6 +218,19 @@ stmt_id builder::while_statement(statement_head const& head, keyword_parts const
 
     result.body = loop_statement_body(head, parts);
     return make_stmt(head.whole, attributes, result);
+}
+
+stmt_id builder::scope_statement(statement_head const& head, keyword_parts const& parts)
+{
+    // AST-156: no owner of its own, so a `break`, a `yield` and a `return` reach past it as past an `if`
+    auto const attributes = attributes_of(head.whole);
+    if (!parts.arguments.empty())
+        report(diagnostic_kind::too_many_arguments, parts.arguments[0]);
+    if (is_valid(head.arrow))
+        report(diagnostic_kind::too_many_arguments, head.arrow);
+    if (!is_valid(parts.block))
+        report(diagnostic_kind::expected_body, head.keyword_form);
+    return make_stmt(head.whole, attributes, scope_stmt{.body = is_valid(parts.block) ? block_body(parts.block) : body()});
 }
 
 stmt_id builder::assert_statement(statement_head const& head, keyword_parts const& parts)

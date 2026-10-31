@@ -201,6 +201,13 @@ A `return` inside a `case` arm or a property block therefore leaves the function
 An arrow lambda is no `fun`, so a `return` in it would leave either the lambda or the function that holds it, and readers would disagree on which.
 It is an error there, and the two honest spellings remain: `yield` for the value of the lambda, or an anonymous function, where `return` is unambiguous again.
 
+## AST-156
+
+A port of C-like code meets `{ … }` scopes, most often two sibling blocks that each declare their own temporary of one name.
+Flattening them means renaming by hand, so the block keeps a spelling, and the keyword names what it opens.
+`block` read better and is a name real shaders use, the BC compressor's above all, so a keyword would have taken it from them.
+A name for the scope, so a `break` or a `yield` could reach it from any depth, can come later without changing what an unnamed one means, which is why it stays transparent.
+
 ## AST-118
 
 A `loop` is a value construct with a keyword of its own: its value is that of the `break` that leaves it ([AST-39](../ast.md#lambdas-case-and-loop)).

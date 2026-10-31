@@ -143,6 +143,7 @@ struct assign_stmt;
 struct if_stmt;
 struct for_stmt;
 struct while_stmt;
+struct scope_stmt;
 struct assert_stmt;
 struct print_stmt;
 struct decl_stmt;

@@ -265,6 +265,7 @@ struct builder
     stmt_id let_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id for_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id while_statement(statement_head const& head, keyword_parts const& parts);
+    stmt_id scope_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id assert_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id print_statement(statement_head const& head, keyword_parts const& parts);
     stmt_id expression_statement(form_id form);

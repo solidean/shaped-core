@@ -1,0 +1,60 @@
+// `scope:` opens a block whose locals end with it, so two siblings may each declare their own `t` (CHK-420)
+
+fun dot_sum(a: float3, b: float3, c: float3, d: float3) -> float:
+    let mut acc = 0.0
+    scope:
+        let t = dot(a, b)
+        acc += t
+    scope:
+        let t = dot(c, d)
+        acc += t
+    return acc
+
+test dot_sum(float3(1.0), float3(2.0), float3(1.0, 0.0, 0.0), float3(3.0, 0.0, 0.0)) == 9.0
+
+// a scope is transparent: a `return` and a `break` in it leave what encloses it, as from an `if`
+fun first_above(limit: int) -> int:
+    let mut found = -1
+    for i in 0 ..< 10:
+        scope:
+            let doubled = i * 2
+            if doubled > limit:
+                found = i
+                break
+    return found
+
+fun clamped(x: float) -> float:
+    scope:
+        let high = 1.0
+        if x > high => return high
+    return x
+
+test first_above(5) == 3 and first_above(100) == -1
+test clamped(2.0) == 1.0 and clamped(0.5) == 0.5
+
+// a local of the enclosing block stays visible inside, and one declared inside is gone after it
+fun shadowed(x: float) -> float:
+    let base = x
+    scope:
+        let base = base * 2.0
+        return base + 1.0
+
+test shadowed(1.5) == 4.0
+
+@compute(1) fun scoped_entry(){sink}:
+    scope:
+        let v = 2.0
+        sink.values[0] = v
+    scope:
+        let v = 3.0
+        sink.values[1] = v
+
+binding sink:
+    values: mut buffer[float]
+
+// a local declared in a scope is gone after it
+@expect(error = "unknown-name")
+test:
+    scope:
+        let inner = 1.0
+    inner == 1.0

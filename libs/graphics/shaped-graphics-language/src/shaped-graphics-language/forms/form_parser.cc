@@ -1054,6 +1054,7 @@ constexpr cc::string_view sgl_keywords[] = {
     "pipeline", "rays",   "hit_group", "callables", "const",  "use",    "module",   "type",
     "if",       "else",   "for",       "while",     "loop",   "return", "continue", "break",
     "case",     "assert", "print",     "notation",  "yield",  "test",   "require",  "discard",
+    "scope",
 };
 } // namespace
 
