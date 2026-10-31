@@ -93,3 +93,14 @@ struct pixel_input:
     let checker = (id.x + id.y) % 2
     let shade = min(min(line.x, line.y), 1.0) * 0.5 + 0.25 * (checker as float)
     return { color = float4(..float3(shade), 1.0) }
+
+// a prefix `+` is the value itself, of a name as of a literal (CHK-410)
+test:
+    let h = float2(0.25, 0.5)
+    let n = -3
+    float2(+h.x, -h.y) == float2(0.25, -0.5) and +n == -3 and +h == h
+
+test:
+    let v = vec3(1.0, 2.0, 3.0)
+    let u = uint2(4u, 5u)
+    (+v).y == 2.0 and +u == u

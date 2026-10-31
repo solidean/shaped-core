@@ -98,6 +98,16 @@ void saturate(leaves in, result& out)
         out.push_back(scalar::of(x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x)));
     }
 }
+void identity(leaves in, result& out)
+{
+    for (auto const& x : in)
+        out.push_back(x);
+}
+written write_identity(call_context const& c)
+{
+    return c.arguments[0];
+}
+
 void abs_of(leaves in, result& out)
 {
     for (auto const& leaf : in)
@@ -574,6 +584,16 @@ void sgl::builtins::register_vector_math(registry& r)
         add_negate(r, named("negate", type), type, negate_ints);
         constant_rule(type, negation_unrepresentable);
     }
+
+    r.add_comment("// a prefix `+` of every number and vector is the value itself, as every target writes it (CHK-410)");
+    for (auto const type : {"float", "half", "int", "uint", "short", "ushort", "float2", "float3", "float4", "half2",
+                            "half3", "half4", "int2",  "int3",  "int4",   "uint2",  "uint3",  "uint4",  "short2",
+                            "short3", "short4", "ushort2", "ushort3", "ushort4", "vec3"})
+        r.add(function_record{
+            .signature = cc::format("@pure @operator(\"+\") fun {}(x: {}) -> {}", named("identity", type), type, type),
+            .evaluate = identity,
+            .write = {.kind = spelling_kind::custom, .custom = write_identity},
+        });
 
     r.add_comment("// two vectors compared: an ordering per component (CHK-362), and `==` and `!=` of the whole "
                   "value,\n"

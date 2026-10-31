@@ -710,6 +710,7 @@ The **plain vector families** are `float2` to `float4`, `int2` to `int4`, `uint2
 
 * **CHK-358** Every arithmetic operator, `+`, `-`, `*`, `/` and `%`, takes a plain vector and its element type on either side, and is componentwise ([why](why/checking.md#chk-358)).
   So do `&`, `|`, `^`, `<<` and `>>` for the integer families, so `id.xy % 2` and `mask >> 4` need no construction, and unary `-` for the signed families.
+* **CHK-410** A prefix `+` of every number, every plain vector and `vec3` is the value itself, unchanged, so `float2(+h.x, -h.y)` reads as its original.
 * **CHK-359** `min`, `max` and `clamp` take every integer vector family as they take the float ones, and `abs` and `sign` take the signed ones.
 * **CHK-398** `mix(a, b, t)` of two `float` or `half` vectors takes `t` as one scalar of their element type, or as a vector of their type, one `t` per component.
   Every target's own `mix` or `lerp` takes both, so neither form needs a construction.
