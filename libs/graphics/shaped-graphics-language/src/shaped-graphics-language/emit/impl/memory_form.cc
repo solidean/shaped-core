@@ -84,7 +84,13 @@ native_placement place_natively(checked_module const& m,
             }
             auto stride = 0;
             auto element_alignment = 1;
-            if (auto const* const record = m.builtin_type_of(element))
+            // EMIT-172: every target declares a `@padding(.every_element)` array as 4-vectors, a row apiece
+            if (member.padding == check::padding::every_element)
+            {
+                stride = 16;
+                element_alignment = 16;
+            }
+            else if (auto const* const record = m.builtin_type_of(element))
             {
                 auto const l = native_layout(*record, t, space);
                 stride = round_up(l.size, l.alignment);
@@ -381,6 +387,9 @@ cc::optional<memory_form> form_for(checked_module const& m,
         return build(m, members, leaves, space, size, stride, element_name, t, false);
     // EMIT-112: HLSL writes a padding field into each gap instead, and packs a buffer's element as C++ does
     if (is_hlsl(t))
+        return {};
+    // EMIT-170: MSL packs a shared tail where the root declares it, so natural memory needs no form there either
+    if (t == emit::target::msl && !is_packed(space))
         return {};
     if (is_natively_placed(m, members, leaves, space, stride, t))
         return {};

@@ -406,16 +406,25 @@ TEST("sgl check - @padding(.none) on a binding or a buffer member packs GPU memo
     CHECK(reports_for("@padding(.none) @inline binding look:\n    scale: float\n") == "");
     CHECK(reports_for(listing("    scale: float\n    @padding(.none) dst: mut buffer[float3]\n")) == "");
 
-    constexpr auto expected = "@padding takes where GPU memory leaves room: `@padding(.none)`";
+    constexpr auto expected
+        = "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`";
     for (auto const attribute : {"@padding", "@padding(.std430)", "@padding(none)", "@padding(.none, .none)"})
     {
         auto const reported = reports_for(cc::format("{}\n{}", attribute, listing("    scale: float\n")));
         CHECK(reported.contains("invalid-attribute-arguments"));
         CHECK(reported.contains(expected));
     }
-    // the matrix and array forms are spelled, and land with matrices and arrays in GPU memory
-    for (auto const attribute : {"@padding(.every_column)", "@padding(.every_element)"})
-        CHECK(reports_for(cc::format("{}\n{}", attribute, listing("    scale: float\n"))).contains("unsupported-yet"));
+    // a mat3's columns stand 16 bytes apart already, so the matrix form is spelled and waits
+    CHECK(reports_for(cc::format("@padding(.every_column)\n{}", listing("    scale: float\n"))).contains("unsupported-yet"));
+
+    // EMIT-172: a row per element stands on a constant block's array of values, and nowhere else
+    CHECK(reports_for(listing("    @padding(.every_element) weights: float[4]\n")) == "");
+    CHECK(reports_for(cc::format("@padding(.every_element)\n{}", listing("    weights: float4[4]\n")))
+              .contains("@padding(.every_element) starts each element of one array on a row, so it stands on the array "
+                        "member"));
+    CHECK(reports_for(listing("    @padding(.every_element) scale: float\n"))
+              .contains("@padding(.every_element) starts each element of a constant block's array of values on a row, "
+                        "and this is none"));
 
     auto const workgroup = reports_for("@padding(.none) @workgroup binding tile:\n    x: float\n");
     CHECK(workgroup.contains("invalid-attribute-arguments"));

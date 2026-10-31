@@ -218,6 +218,26 @@ struct writer
             && is_mat3(p.m, p.m.at(p.m.at(object_type).members)[member].type);
     }
 
+    /// The lanes an element of the array `x` reaches is read through, where its target holds it as 4-vectors, or empty.
+    /// Every target holds a `@padding(.every_element)` array so (EMIT-172), and HLSL one of 3-vectors in memory (EMIT-169).
+    [[nodiscard]] cc::string_view widened_lanes(flat_expr const& x) const
+    {
+        if (!is_array(x.type))
+            return {};
+        auto const* const record = p.m.builtin_type_of(p.m.at(x.type).element);
+        if (record == nullptr || record->leaf_count > 3)
+            return {};
+        constexpr cc::string_view lanes[] = {"", ".x", ".xy", ".xyz"};
+        if (auto const* const b = x.node.try_as<flat_binding_member>();
+            b != nullptr && resource_of(p, b->binding, b->member) < 0 && workgroup_of(p, b->binding, b->member) < 0)
+        {
+            auto const& block = *block_of(p, b->binding);
+            if (block.members[block.block_member_of[b->member]].is_row_per_element)
+                return lanes[record->leaf_count];
+        }
+        return reaches_widened_array(x) ? lanes[3] : cc::string_view();
+    }
+
     /// EMIT-169: whether `x` reaches an array of 3-vectors its target holds in memory as 4-vectors: a member of a struct
     /// that stands in memory, or of a block that is no memory form.
     [[nodiscard]] bool reaches_widened_array(flat_expr const& x) const
@@ -241,8 +261,8 @@ struct writer
         return false;
     }
 
-    /// The array `raw` holds as 4-vectors, rebuilt into a local of 3-vectors element by element.
-    cc::string narrowed_array(flat_expr const& x, cc::string const& raw)
+    /// The array `raw` holds as 4-vectors, rebuilt into a local of its own elements, each read through `lanes`.
+    cc::string narrowed_array(flat_expr const& x, cc::string const& raw, cc::string_view lanes)
     {
         auto const name = p.names.mint("narrowed");
         auto declaration = cc::string();
@@ -252,7 +272,7 @@ struct writer
                                     .is_mut = true});
         line(declaration);
         for (auto i = isize(0); i < isize(p.m.at(x.type).count); ++i)
-            line(cc::format("{}[{}] = {}[{}].xyz;", name, i, raw, i));
+            line(cc::format("{}[{}] = {}[{}]{};", name, i, raw, i, lanes));
         return name;
     }
 
@@ -796,8 +816,11 @@ struct writer
                 }
                 auto const& block = *block_of(p, b.binding);
                 result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
-                if (reaches_widened_array(x) && !cc::exchange(is_indexing_widened, false))
-                    result = {.text = narrowed_array(x, result.text)};
+                // EMIT-170: a block's 3-vector whose tail holds the next member is packed in MSL, and read back
+                if (d.packs_shared_tails() && shares_tail(p, block.members, block.block_member_of[b.member]))
+                    result = {.text = cc::format("{}({})", type_text(p, d, x.type), result.text)};
+                if (auto const lanes = widened_lanes(x); !lanes.empty() && !cc::exchange(is_indexing_widened, false))
+                    result = {.text = narrowed_array(x, result.text, lanes)};
                 // EMIT-168: a block that is no memory form holds its mat3 as three whole rows
                 if (d.widens_mat3() && !block.form.has_value() && is_mat3(p.m, x.type))
                     result = {.text = cc::format("((float3x3){})", result.text)};
@@ -810,13 +833,13 @@ struct writer
             },
             [&](flat_element const& a)
             {
-                // EMIT-169: an element of an array held as 4-vectors is read as its first three lanes
-                if (reaches_widened_array(p.e.at(a.object)))
+                // EMIT-169 and EMIT-172: an element of an array held as 4-vectors is read through its own lanes
+                if (auto const lanes = widened_lanes(p.e.at(a.object)); !lanes.empty())
                 {
                     is_indexing_widened = true;
                     auto const object = wrapped(expr(a.object), level::primary);
                     is_indexing_widened = false;
-                    result = {.text = cc::format("{}[{}].xyz", object, expr(a.index).text), .binds = level::primary};
+                    result = {.text = cc::format("{}[{}]{}", object, expr(a.index).text, lanes), .binds = level::primary};
                     return;
                 }
                 auto const object = wrapped(expr(a.object), level::primary);
@@ -852,7 +875,7 @@ struct writer
                 else if (d.packs_shared_tails() && shares_tail(p, planned, planned.member_of[member.member]))
                     result = {.text = cc::format("{}({})", type_text(p, d, x.type), result.text)};
                 else if (reaches_widened_array(x) && !is_raw)
-                    result = {.text = narrowed_array(x, result.text)};
+                    result = {.text = narrowed_array(x, result.text, ".xyz")};
             },
             [&](flat_construct const&) { result = construct(x, is_broken); },
             [&](flat_call const& c) { result = call(c, x.type); }, [&](flat_not const& n)

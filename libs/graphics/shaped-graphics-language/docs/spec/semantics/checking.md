@@ -522,7 +522,9 @@ fun shade(k: float) -> float:
   On a binding it places the binding's constant block (EMIT-154) and every buffer's element (EMIT-167); on a buffer member, that buffer's element.
   Without it, memory is placed at its natural alignment (EMIT-110).
   On any other member it is `wrong-kind-of-name`, since a constant takes its block's padding.
-  `.every_column` and `.every_element` are `unsupported-yet`: they land with matrices and arrays in GPU memory ([emitting](emitting.md#open)).
+  `@padding(.every_element)` on a constant block's member that is an array of values starts each element on a row (EMIT-172).
+  On any other member it is `wrong-kind-of-name`, and on a binding `invalid-attribute-arguments`, since it stands on the array it pads.
+  `.every_column` is `unsupported-yet`, since a `mat3`'s columns stand 16 bytes apart already.
   Any other argument, and the attribute on a `@workgroup` binding, is `invalid-attribute-arguments`.
 
 ```sgl
@@ -975,6 +977,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
 * **CHK-291** An array stands in GPU memory at its natural stride (EMIT-110): in a buffer's element, at any depth of its structs, and in a constant block.
   In a constant block every element must stride by whole 16-byte rows, at any depth, since a runtime index into a shorter one needs component arithmetic.
   A `float3`, a 4-vector, a `mat3`, a `mat4` and every struct do; a scalar, a 2-vector or a 16-bit vector shorter than a row is `unsupported-yet`, and the detail names it.
+  `@padding(.every_element)` on a block member that is such an array starts each element on a row instead (CHK-369).
   A buffer's element is never an array itself, which is `unsupported-yet`: a struct holding the array is the element.
   An array in a struct that crosses a stage edge is `unsupported-yet`, and the detail names the path down to it.
   A tessellation factor is an array by design (CHK-305), and workgroup memory has no host side, so neither counts.

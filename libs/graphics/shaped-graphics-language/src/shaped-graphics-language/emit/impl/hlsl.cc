@@ -302,7 +302,10 @@ public:
         auto const in_memory = member.offset >= 0 && (owner == nullptr || (owner->memory_size > 0 && !owner->is_packed));
         auto const is_widened = in_memory && is_mat3(p.m, member.type);
         // EMIT-169: an array of 3-vectors in memory is one of 4-vectors, which a structured buffer strides by 16 too
-        auto const widened_vector = in_memory ? widened_vector_of(p, member.type) : cc::string();
+        auto const widened_vector = member.is_row_per_element
+                                      ? cc::string(builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)))
+                                  : in_memory ? widened_vector_of(p, member.type)
+                                              : cc::string();
         auto const type = is_widened                ? cc::string("float4x3")
                         : !widened_vector.empty() ? widened_vector
                                                     : cc::string(type_text(p, *this, member.type));

@@ -253,11 +253,13 @@ sgl::check::padding checker::padding_of(i32 file, ast::attribute const* a)
     auto const rule = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
     if (rule == "none")
         return padding::none;
-    if (rule == "every_column" || rule == "every_element")
-        unsupported(file, a->name, cc::format("@padding(.{}), which lands with matrices and arrays in GPU memory", rule));
+    if (rule == "every_element")
+        return padding::every_element;
+    if (rule == "every_column")
+        unsupported(file, a->name, "@padding(.every_column), since a mat3's columns stand 16 bytes apart already");
     else
         report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-               "@padding takes where GPU memory leaves room: `@padding(.none)`");
+               "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`");
     return padding::natural;
 }
 
@@ -713,9 +715,15 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             auto innermost = t.element;
             while (out.at(innermost).kind == type_kind::array)
                 innermost = out.at(innermost).element;
+            // EMIT-172: `@padding(.every_element)` starts each element of a one-dimensional array of values on a row
+            auto const* const rows = find_attribute(file, f.attributes, "padding");
+            auto const asks_rows = rows != nullptr && ast_of(file).at(rows->arguments).size() == 1
+                                && ast::is_valid(ast_of(file).at(rows->arguments)[0].value)
+                                && text_of(file, span_of(file, ast_of(file).at(rows->arguments)[0].value)) == ".every_element"
+                                && out.builtin_type_of(t.element) != nullptr;
             if (!is_resource(out.at(innermost).kind))
             {
-                if (auto const path = sub_row_array_path(type); !path.empty())
+                if (auto const path = asks_rows ? cc::string() : sub_row_array_path(type); !path.empty())
                 {
                     auto const stride = out.builtin_type_of(t.element) != nullptr ? natural_stride_of(t.element) : 0;
                     unsupported(file, span_of(file, f.type),
@@ -863,7 +871,19 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         // CHK-369: a member's own padding is its buffer's elements', and a constant takes its block's
         auto const* const padded = is_struct ? nullptr : find_attribute(file, f.attributes, "padding");
         auto member_padding = padding_of(file, padded);
-        if (padded != nullptr && type != checked_module::error_type && out.at(innermost).kind != type_kind::buffer)
+        auto const is_value_array = type != checked_module::error_type && out.builtin_type_of(type) == nullptr
+                                 && out.at(type).kind == type_kind::array
+                                 && out.builtin_type_of(out.at(type).element) != nullptr;
+        if (padded != nullptr && type != checked_module::error_type && member_padding == padding::every_element
+            && (is_workgroup || !is_value_array))
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, padded->name,
+                   "@padding(.every_element) starts each element of a constant block's array of values on a row, and "
+                   "this is none");
+            member_padding = padding::natural;
+        }
+        else if (padded != nullptr && type != checked_module::error_type && member_padding == padding::none
+                 && out.at(innermost).kind != type_kind::buffer)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, padded->name,
                    is_workgroup ? "@padding places memory a host fills, and @workgroup memory has none a host sees"
@@ -1503,7 +1523,13 @@ void checker::compile_binding(symbol_id id)
     auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
     auto const* const padded = find_attribute(file, d.attributes, "padding");
     auto binding_padding = padding_of(file, padded);
-    if (padded != nullptr && is_workgroup)
+    if (padded != nullptr && binding_padding == padding::every_element)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, padded->name,
+               "@padding(.every_element) starts each element of one array on a row, so it stands on the array member");
+        binding_padding = padding::natural;
+    }
+    else if (padded != nullptr && is_workgroup)
     {
         report(diagnostic_kind::invalid_attribute_arguments, file, padded->name,
                "@padding places memory a host fills, and @workgroup memory has none a host sees");

@@ -558,6 +558,11 @@ The C++ struct a package generates is that layout byte for byte, padding include
   A padding field keeps it at its offset, since a packed vector aligns to its scalar alone, and `alignas` keeps the struct's own alignment.
   A read converts it back, `float3(s.color)`, and a write converts into it implicitly.
   So the struct is placed as SGL places it wherever it stands, in an array too, and a buffer of it needs no memory form.
+  A constant block's own members are declared the same way, so MSL writes a memory form only for `@padding(.none)`.
+* **EMIT-172** A constant block's array marked `@padding(.every_element)` takes a 16-byte row per element ([why](why/emitting.md#emit-172)).
+  Every target declares it as an array of 4-vectors of the element's scalar.
+  An element reads as its own lanes, `a[i].x` or `a[i].xy`, and a read of the whole array rebuilds it into a local element by element.
+  The host writes each element as `slib::gpu_padded<T, 16>`.
 * **EMIT-171** An array in GPU memory waits, `unsupported` alike on every target, where it is multi-dimensional, where `@padding(.none)` places it, or where its element is a `mat3`.
   A packed block's array of whole rows is the exception, which EMIT-154 places.
 * **EMIT-168** HLSL holds a `mat3` in GPU memory as a `column_major float4x3`, three whole rows of a constant buffer and 48 bytes of a buffer ([why](why/emitting.md#emit-168)).
@@ -592,7 +597,6 @@ The C++ struct a package generates is that layout byte for byte, padding include
 ## Open
 
 * GLSL, which comes through the same seam.
-* A constant block's array of elements shorter than a row (CHK-291), which `@padding(.every_element)` will start each on a row of.
 * The arrays EMIT-171 refuses: multi-dimensional ones, packed ones, and arrays of `mat3`.
 * `@padding(.every_column)`, which would name a `mat3`'s natural 48 bytes explicitly; `.none` gives the 36 of `tg::mat3f` already.
 * `mat2` in GPU memory, which HLSL's constant buffer would place a row per column.

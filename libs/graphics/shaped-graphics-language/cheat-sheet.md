@@ -716,7 +716,8 @@ ops[i](mut v)                                            // raygen, miss, closes
   **`@padding(.none)` packs as C++ does**, on a binding (its block and its buffers) or on one buffer member (CHK-369).
   It is for a host's own hand-written struct, or memory something else reads too, such as a BLAS's vertices; WGSL and MSL then read through a memory form.
   **An array in memory strides by its element rounded up to its alignment** (CHK-291): a `float3` by 16, a struct by its size.
-  A constant block admits only elements of whole rows; HLSL holds a 3-vector array as 4-vectors (EMIT-169), MSL packs a struct's shared tail (EMIT-170).
+  A constant block admits only elements of whole rows, unless `@padding(.every_element) weights: float[8]` gives each element a row (EMIT-172).
+  HLSL holds a 3-vector array as 4-vectors (EMIT-169), and MSL packs a struct's or a block's shared tail (EMIT-170).
   Multi-dimensional, packed and `mat3` arrays in memory still wait (EMIT-171); the host writes a 3-vector element as `slib::gpu_padded<T, 16>`.
   **A `mat3` in memory is three 16-byte columns, 48 bytes**: the host writes `slib::gpu_mat3`, and `tg::mat3f` under `@padding(.none)`.
   HLSL holds it as a `float4x3`, which a read narrows and a write widens (EMIT-168); it crosses no stage edge and rides in no ray payload yet.

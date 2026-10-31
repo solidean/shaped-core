@@ -140,6 +140,12 @@ A memory form flattens a root to fix that, which cannot reach a struct repeated 
 Declaring the vector packed fixes the struct itself instead, the way HLSL's padding fields do (EMIT-112), so it holds wherever the struct stands.
 A packed vector converts to its plain type on assignment, but MSL's builtin functions take only the plain one, which is why every read converts it.
 
+## EMIT-172
+
+HLSL's constant buffers start each array element on a row, WGSL's uniform rule requires a stride of 16, and MSL strides by the element alone.
+An array of 4-vectors is the one declaration every target places alike, and reading `.x` of it is what a hand-written port of such a shader does.
+The attribute stands on the array, so its cost, three unused lanes per element, is visible where the array is declared.
+
 ## EMIT-168
 
 HLSL places a `float3x3` differently in each memory: 44 bytes in a constant buffer, each column on a row but the last short, and 36 in a structured buffer.

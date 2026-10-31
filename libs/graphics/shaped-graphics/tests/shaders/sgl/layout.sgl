@@ -109,6 +109,17 @@ binding lit:
     u.weights[0] = l.radius
     lit.tracks[id.x] = u
 
+// `@padding(.every_element)` starts each element of a block's array of values on a row, 16 bytes apart.
+binding taps:
+    @padding(.every_element) weights: float[4]
+    @padding(.every_element) offsets: float2[3]
+    sums: mut buffer[float4]
+
+@compute(64) fun gather(@thread_id id: int3){taps}:
+    let o = taps.offsets[id.x % 3]
+    let w = taps.weights
+    taps.sums[id.x] = float4(taps.weights[id.x % 4], o.x, o.y, w[0] + w[1] + w[2] + w[3])
+
 // `@padding(.none)` places a block as C++ places a struct of tg types, so a host fills it from a struct of its own.
 // `tint` sits at 4 and `bias` right behind it at 16, and `weights` crosses a row from 28: 48 bytes in all.
 @padding(.none) @inline binding host_params:

@@ -276,6 +276,7 @@ struct planner
                 .interpolate = member.interpolate,
                 .output = member.output,
                 .factor = member.factor,
+                .is_row_per_element = member.padding == check::padding::every_element,
                 .location = has_locations && !member.is_position && !member.is_layer
                                  && member.output == check::pixel_output::color
                                  && member.factor == check::tessellation_factor::none
@@ -896,6 +897,8 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
         auto const& whole = m.at(member.type);
         auto const& t = m.takes_slots(member.type) && whole.kind == check::type_kind::array ? m.at(whole.element) : whole;
         auto const where = cc::format("'{}.{}'", s.name, member.name);
+        if (member.padding == check::padding::every_element && block_space(b) == address_space::packed_constants)
+            report(error_kind::unsupported, cc::format("@padding(.every_element) in a @padding(.none) block: {}", where));
         if (t.kind == check::type_kind::buffer)
             judge_arrays(judge_arrays, t.element, element_space(b, member), where, false);
         else if (!m.takes_slots(member.type))
@@ -970,11 +973,35 @@ sgl::i32 sgl::emit::impl::first_resource_slot(check::checked_module const& m, ch
 
 bool sgl::emit::impl::shares_tail(plan const& p, planned_struct const& s, isize member)
 {
-    if (s.memory_size <= 0 || s.is_packed || member + 1 >= s.members.size())
+    return s.memory_size > 0 && !s.is_packed && shares_tail(p, cc::span<planned_member const>(s.members), member);
+}
+
+bool sgl::emit::impl::shares_tail(plan const& p, cc::span<planned_member const> members, isize member)
+{
+    if (member < 0 || member + 1 >= members.size() || members[member].offset < 0)
         return false;
-    auto const* const record = p.m.builtin_type_of(s.members[member].type);
+    auto const* const record = p.m.builtin_type_of(members[member].type);
     return record != nullptr && record->leaf_count == 3
-        && s.members[member + 1].offset < s.members[member].offset + record->msl_layout.size;
+        && members[member + 1].offset < members[member].offset + record->msl_layout.size;
+}
+
+cc::string_view sgl::emit::impl::row_vector_of(plan const& p, check::type_id element)
+{
+    switch (p.m.builtin_type_of(element)->leaf_kind)
+    {
+    case check::value_kind::scalar_int:
+        return "int4";
+    case check::value_kind::scalar_uint:
+        return "uint4";
+    case check::value_kind::scalar_half:
+        return "half4";
+    case check::value_kind::scalar_short:
+        return "short4";
+    case check::value_kind::scalar_ushort:
+        return "ushort4";
+    default:
+        return "float4";
+    }
 }
 
 sgl::emit::impl::planned_constants const* sgl::emit::impl::block_of(plan const& p, check::symbol_id binding)

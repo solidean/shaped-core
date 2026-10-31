@@ -325,6 +325,8 @@ enum class sgl::check::padding : sgl::u8
     natural,
     /// `@padding(.none)`: as a C++ compiler places a struct of the generated host types (EMIT-154, EMIT-167).
     none,
+    /// `@padding(.every_element)` on a constant block's array: each element starts a 16-byte row (EMIT-172).
+    every_element,
 };
 
 /// A field of a struct or a member of a binding.

@@ -58,6 +58,8 @@ struct planned_member
     i32 offset = -1;
     /// The bytes it takes there, where `offset` is one.
     i32 size = 0;
+    /// `@padding(.every_element)`: a constant block's array of values, each element on a row, held as 4-vectors (EMIT-172).
+    bool is_row_per_element = false;
 };
 
 struct planned_struct
@@ -315,6 +317,11 @@ struct block_placement
 /// EMIT-170: whether member `member` of `s`, a struct in natural GPU memory, is a 3-vector the next member sits in the
 /// tail of, which MSL's 16-byte 3-vector would push past, so MSL declares it packed.
 [[nodiscard]] bool shares_tail(plan const& p, planned_struct const& s, isize member);
+/// The same of `members` placed in natural memory, a block's or a struct's.
+[[nodiscard]] bool shares_tail(plan const& p, cc::span<planned_member const> members, isize member);
+
+/// The prelude's 4-vector of the scalar of `element`, `float4` for a `float2`, which holds one element per row.
+[[nodiscard]] cc::string_view row_vector_of(plan const& p, check::type_id element);
 
 /// `members` must belong to a binding that passed `validate_binding`.
 [[nodiscard]] block_placement place_block(check::checked_module const& m,

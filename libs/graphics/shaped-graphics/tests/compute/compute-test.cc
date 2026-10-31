@@ -452,6 +452,41 @@ ASYNC_INVOCABLE_TEST("sg - an array strides by its element rounded to its alignm
     }
 }
 
+ASYNC_INVOCABLE_TEST("sg - an every_element array takes a row per element in a constant block, on every backend",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    auto const pipeline = co_await shaders::layout::gather.acquire_pipeline(*ctx);
+    auto const group_layout = ctx->cached.acquire_binding_group_layout<shaders::layout::taps>();
+    static_assert(shaders::layout::taps::constants_size == 112);
+
+    constexpr auto count = 64;
+    auto const sum_buffer = ctx->persistent.create_buffer<tg::vec4f>(
+        count, sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto cmd = ctx->create_command_list();
+    auto const group = ctx->transient.create_binding_group(
+        *cmd, group_layout,
+        shaders::layout::taps{
+            .weights = {1.0f, 2.0f, 4.0f, 8.0f},
+            .offsets = {tg::vec2f(0.5f, -1.0f), tg::vec2f(1.5f, -2.0f), tg::vec2f(2.5f, -3.0f)},
+            .sums = sum_buffer.as_readwrite_buffer(),
+        });
+    cmd->compute.bind_pipeline(*pipeline);
+    cmd->compute.bind_group(0, *group);
+    cmd->compute.dispatch_threads(count);
+    auto const sums_back = cmd->download.data_from_buffer(sum_buffer);
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const got = co_await sums_back.data();
+    REQUIRE(got.size() == isize(count));
+    constexpr float weights[] = {1.0f, 2.0f, 4.0f, 8.0f};
+    for (auto i = 0; i < count; ++i)
+        CHECK(got[i] == tg::vec4f(weights[i % 4], float(i % 3) + 0.5f, -float(i % 3 + 1), 15.0f));
+}
+
 namespace
 {
 /// What a host writes with no knowledge of HLSL's rows: `host_params` of layout.sgl is placed as this struct is.

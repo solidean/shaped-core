@@ -23,7 +23,8 @@ Their layout is decided (the spec's emitting file, "Open"), and they land togeth
 - **WGSL passes no matrix and no array between stages**, so both cross as one location per column or element.
 
 **Arrays in buffer elements and structs have landed** (CHK-291, EMIT-169, EMIT-170): at their natural stride, in a block where they take whole rows.
-What waits is EMIT-171's (multi-dimensional, packed and `mat3` arrays), sub-row block arrays behind `.every_element`, and stage edges.
+A block's sub-row array has landed behind `@padding(.every_element)` (EMIT-172).
+What waits is EMIT-171's (multi-dimensional, packed and `mat3` arrays), `.every_column`, `mat2` in memory, and stage edges.
 
 **`mat3` in GPU memory has landed** (CHK-397, EMIT-168): 48 bytes natural, 36 under `@padding(.none)`, and HLSL holds it as a `float4x3`.
 

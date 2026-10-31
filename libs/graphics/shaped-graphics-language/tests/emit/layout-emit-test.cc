@@ -762,3 +762,38 @@ TEST("sgl emit layout - a multi-dimensional, a packed or a mat3 array in GPU mem
     CHECK(in_buffer("items: buffer[holder]", "turns: mat3[2]")
           == "unsupported an array of mat3 in GPU memory: 'work.items'.turns\n");
 }
+
+TEST("sgl emit layout - an every_element array is one of 4-vectors on every target, read through its own lanes")
+{
+    constexpr auto source = "binding blur:\n"
+                            "    tint: float3\n"
+                            "    strength: float\n"
+                            "    @padding(.every_element) weights: float[4]\n"
+                            "    @padding(.every_element) offsets: float2[3]\n"
+                            "    out_data: mut buffer[float4]\n"
+                            "\n"
+                            "fun total(w: float[4]) -> float => w[0] + w[1] + w[2] + w[3]\n"
+                            "\n"
+                            "@compute(64) fun main(@thread_id id: int3){blur}:\n"
+                            "    let o = blur.offsets[id.x % 3]\n"
+                            "    blur.out_data[id.x] = float4(blur.weights[id.y % 4], o.x, o.y, total(blur.weights))\n";
+
+    auto const d = described(source);
+    CHECK(d.bindings[0].members[2].offset == 16);
+    CHECK(d.bindings[0].members[2].size == 64);
+    CHECK(d.bindings[0].members[3].offset == 80);
+    CHECK(d.bindings[0].block_size == 128);
+
+    // EMIT-172: an element reads its own lanes, and a whole read rebuilds the array element by element
+    auto const dx12 = text_of(source, target::hlsl_dx12);
+    CHECK(dx12.contains("    float4 weights[4];\n    float4 offsets[3];\n"));
+    CHECK(dx12.contains("const float2 o = blur.offsets[id.x % 3].xy;\n"));
+    CHECK(dx12.contains("narrowed[3] = blur.weights[3].x;\n"));
+    auto const wgsl = text_of(source, target::wgsl);
+    CHECK(wgsl.contains("    weights: array<vec4f, 4>,\n    offsets: array<vec4f, 3>,\n"));
+    CHECK(wgsl.contains("blur.weights[id.y % 4].x"));
+
+    // EMIT-170: MSL packs the block's float3 whose tail `strength` sits in, so the block is no memory form there
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("struct blur_data\n{\n    packed_float3 tint;\n    float strength;\n    array<float4, 4> weights;\n"));
+}

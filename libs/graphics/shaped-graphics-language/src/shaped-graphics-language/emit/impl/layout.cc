@@ -92,7 +92,10 @@ placed_members place_from(checked_module const& m,
         if (m.at(type).kind == type_kind::array)
         {
             auto const& array = m.at(type);
-            auto const element = element_of(m, array.element, space);
+            // EMIT-172: each element of a `@padding(.every_element)` array starts a row of its own
+            auto const element = members[i].padding == check::padding::every_element && space == address_space::constants
+                                   ? element_shape{.stride = 16, .alignment = 16}
+                                   : element_of(m, array.element, space);
             auto const alignment = space == address_space::constants ? round_up(element.alignment, 16) : element.alignment;
             at = round_up(at, alignment);
             result.alignment = alignment > result.alignment ? alignment : result.alignment;
