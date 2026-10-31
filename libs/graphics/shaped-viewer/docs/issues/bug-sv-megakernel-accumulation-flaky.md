@@ -12,6 +12,7 @@ Three traces of an unchanged view leave `accumulated(v.id) == 1`, so something b
 The failing `REQUIRE` then makes the later sections unreachable, which is the rest of the report.
 
 - **Measured**: once in a full `check` on `debug-nopch-clang`, and once in 12 with `uv run dev.py test "a view accumulates across frames under its id" --preset debug-nopch-clang --repeat 20`.
+- **Seen again** on 2026-10-31, once more in a full `check` on `debug-nopch-clang`, with the second review's SGL commits in the tree.
 - **Not measured**: whether the other presets see it, or vulkan.
 - **Unrelated to SGL's array and transpose commits of 2026-10-30**, which were in the tree: no sv shader holds an array in a block or calls `transpose`.
 - **Hypothesis**, unverified: the restart test compares something that is not stable across frames for a megakernel layer, such as a value read back asynchronously.
