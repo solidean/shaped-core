@@ -298,6 +298,18 @@ The implementation is nexus'.
 The page itself is the shared renderer [nexus-web-driver.js](../../libs/base/nexus/web/nexus-web-driver.js).
 Its template is [nexus-web-page.html.in](../../libs/base/nexus/web/nexus-web-page.html.in).
 
+## The memory guard
+
+Everything dev.py starts runs under a memory guard, so a runaway process or a pile of parallel links fails instead of swapping the machine to a halt.
+- **No process past 30 GB**, committed, and **all of them together at most half of physical RAM**: a Windows Job Object dev.py puts itself into, which every child inherits.
+  An allocation past either fails in the process that asked, which then fails as it would on any out-of-memory.
+- **Below 5 GB of free RAM, dev.py ends itself and everything it started**, saying so, whoever took the memory: a run that would swap is worth less than one that stops.
+- Override each in GB through the environment, 0 turning it off: `SC_DEV_MEMORY_PROCESS_GB`, `SC_DEV_MEMORY_TOTAL_GB`, `SC_DEV_MEMORY_FREE_GB`.
+- On Linux and macOS only the free-RAM floor applies: a per-process address-space limit would refuse the sanitizers' shadow reservations.
+- A gate that fails on the guard is a setup to fix, or a wait for memory to free up, never a reason to raise the limits by default.
+
+[memory_guard.py](../../tools/dev/lib/core/memory_guard.py) has the details, and [its self-test](../../tools/dev/memory-guard-self-test.py) runs with `check`.
+
 ## Quiet by default, and how to diagnose
 
 dev.py never streams child output into your scrollback.

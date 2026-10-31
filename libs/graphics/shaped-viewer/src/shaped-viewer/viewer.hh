@@ -199,6 +199,9 @@ private:
     /// Runs after the frame has been submitted, since that is when its accumulators hold this frame's counts.
     void advance_capture(render_plan const& plan, bool traces_ran);
 
+    /// Waits for every capture image still being read back or encoded, logging each that failed.
+    void drain_capture_writes();
+
     /// Runs one frame's rendering: resolve layout, translate views to a viewer_definition, drive viewer_renderer, present, advance the epoch.
     /// Called by frame::present.
     /// Never throws — device loss stops the viewer instead.

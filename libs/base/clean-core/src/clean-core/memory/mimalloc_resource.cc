@@ -91,3 +91,9 @@ constinit cc::memory_resource const mimalloc_memory_resource = {
 } // namespace
 
 constinit cc::memory_resource const* const cc::default_memory_resource = &mimalloc_memory_resource;
+
+void cc::trim_thread_memory(memory_trim how)
+{
+    // forced, mimalloc also frees the thread's empty pages and purges every arena now, whatever the purge delay
+    mi_collect(how == memory_trim::all);
+}

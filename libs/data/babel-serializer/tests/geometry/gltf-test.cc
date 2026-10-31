@@ -965,3 +965,31 @@ TEST("gltf - a registered extension may be required, and its use is no issue")
     auto const doc = REQUIRED_VALUE(babel::gltf::read(json, {.extensions = mine}));
     CHECK(!doc.has_issues()).dump("issues", doc.issue_report());
 }
+
+TEST("gltf - a file requiring KHR_mesh_quantization reads, its normalized positions as stored")
+{
+    // three 16-bit positions, padded to 8 bytes each as vertex data must be
+    auto bin = cc::vector<byte>();
+    for (i16 const v : {i16(-32767), i16(0), i16(32767), i16(0), i16(16384), i16(0), i16(0), i16(0), i16(0), i16(0),
+                        i16(32767), i16(0)})
+    {
+        bin.push_back(byte(u16(v) & 0xff));
+        bin.push_back(byte(u16(v) >> 8));
+    }
+    auto const glb = make_glb(R"({"asset": {"version": "2.0"},
+        "extensionsUsed": ["KHR_mesh_quantization"], "extensionsRequired": ["KHR_mesh_quantization"],
+        "buffers": [{"byteLength": 24}],
+        "bufferViews": [{"buffer": 0, "byteLength": 24, "byteStride": 8}],
+        "accessors": [{"bufferView": 0, "componentType": 5122, "normalized": true, "count": 3, "type": "VEC3",
+                       "min": [-32767, 0, 0], "max": [0, 16384, 32767]}]})",
+                              bin);
+    auto const doc = babel::gltf::read(glb);
+    REQUIRE(doc.has_value());
+    auto const view = doc.value().view_of(babel::gltf::accessor_index(0));
+    REQUIRE(view.has_value());
+    CHECK(view.value().normalized);
+    CHECK(view.value().component == babel::gltf::component_type::i16);
+    i16 z = 0;
+    cc::memcpy(&z, view.value().element(2).data() + 4, 2);
+    CHECK(z == 32767);
+}

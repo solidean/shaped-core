@@ -96,6 +96,30 @@ TEST("sv - a layer at its definition's sample target has converged")
     CHECK(!sv::impl::is_accumulation_converged(state, {}));
 }
 
+// A frame target is counted as frames are recorded, so a wavefront layer reaches it with its sample floor still in flight.
+// That is what lets a capture counting iterations settle without waiting on the readback.
+TEST("sv - a layer at its frame target has converged whatever its samples say")
+{
+    auto state = view_with(cc::array<cc::pair<u8, u32>>{{0, 0}});
+    auto& slot = state.temporal[sv::temporal_id::accumulation(0)];
+    slot.frame_target = 3;
+    slot.accum_frame = 2;
+    CHECK(!sv::impl::is_accumulation_converged(state, {}));
+
+    slot.accum_frame = 3;
+    CHECK(slot.is_at_target());
+    CHECK(sv::impl::is_accumulation_converged(state, {}));
+
+    // A restart counts neither frames nor samples, so it is short of any target.
+    sv::impl::restart_accumulation(slot);
+    CHECK(!slot.is_at_target());
+
+    // No frame target leaves the sample rule alone.
+    slot.frame_target = 0;
+    slot.accum_frame = 100;
+    CHECK(!sv::impl::is_accumulation_converged(state, {}));
+}
+
 // A raster layer's frame is its final image, so the renderer marks it at the cap the frame one lands.
 // That is what lets a raster view finish a capture whatever it asks for.
 TEST("sv - a raster layer at the cap has converged for any target")

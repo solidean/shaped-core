@@ -25,9 +25,10 @@ constexpr u32 glb_chunk_json = 0x4E4F534A; // 'J','S','O','N'
 constexpr u32 glb_chunk_bin = 0x004E4942;  // 'B','I','N',0
 
 /// Whether this reader interprets `name` — the extensions a file may require of it.
+/// KHR_mesh_quantization only widens which component types an attribute may use, and accessors are read whatever theirs.
 [[nodiscard]] bool is_implemented_extension(cc::string_view name)
 {
-    return name == "KHR_lights_punctual" || name == "EXT_meshopt_compression";
+    return name == "KHR_lights_punctual" || name == "EXT_meshopt_compression" || name == "KHR_mesh_quantization";
 }
 
 /// EXT_meshopt_compression's packed bytes, decoded and unfiltered: `m.count` elements of `m.byte_stride` bytes.
