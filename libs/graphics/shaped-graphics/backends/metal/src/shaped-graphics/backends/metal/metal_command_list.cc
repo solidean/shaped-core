@@ -1282,6 +1282,14 @@ void metal_command_list::open_render_encoder(bool force_load)
         width = width != 0 ? width : target.view.width();
         height = height != 0 ? height : target.view.height();
     }
+
+    // A view over several layers of an array is a layered target, whose layer a vertex function's
+    // `[[render_target_array_index]]` picks; Metal clamps that index to the length the pass states.
+    auto const layers = !info.color_targets.empty() ? info.color_targets[0].view.range().array_range
+                      : info.depth_stencil_target.has_value() ? info.depth_stencil_target.value().view.range().array_range
+                                                              : cc::start_end{.start = 0, .end = 1};
+    if (layers.end - layers.start > 1)
+        descriptor->setRenderTargetArrayLength(NS::UInteger(layers.end - layers.start));
     // **Retained, because it outlives the pool this function opened.**
     // `renderCommandEncoder` hands back an autoreleased object, and the scope above drains when this returns — so an
     // unretained encoder is deallocated the moment `begin_rendering` exits, and `end_rendering` then messages freed

@@ -447,8 +447,15 @@ void checker::judge_attributes(i32 file,
                        "@shadowable takes `false` or `true`, as in @shadowable(false)");
         }
         // CHK-389: a count asks for partial unrolling
+        // CHK-414: `false` asks for the loop to stay one
         else if (sgl::is_valid(a.list) && name == "unroll")
-            unsupported(file, span_of(file, a.list), "@unroll with arguments, which would unroll a loop in part");
+        {
+            auto const arguments = ast_of(file).at(a.arguments);
+            auto const is_false = arguments.size() == 1 && ast::is_valid(arguments[0].value) && arguments[0].name.empty()
+                               && text_of(file, span_of(file, arguments[0].value)) == "false";
+            if (!is_false)
+                unsupported(file, span_of(file, a.list), "@unroll with arguments, which would unroll a loop in part");
+        }
         else if (sgl::is_valid(a.list) && name != "operator" && name != "compute" && name != "preferred_subgroup_size"
                  && name != "stream" && name != "stages" && name != "shadowable" && name != "expect"
                  && name != "interpolate" && name != "format" && name != "depth" && name != "sampler"

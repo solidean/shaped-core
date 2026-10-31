@@ -30,6 +30,7 @@ void add_argument(call_arguments& a,
     a.literals.push_back(literal);
     a.functions.push_back(function);
     a.undefineds.push_back(false);
+    a.leading_dots.push_back({});
 }
 } // namespace
 
@@ -307,6 +308,7 @@ type_id checker::check_texel(function_scope& scope, ast::expr_id id, ast::index 
     arguments.literals.insert_at(0, -1);
     arguments.functions.insert_at(0, -1);
     arguments.undefineds.insert_at(0, false);
+    arguments.leading_dots.insert_at(0, {});
 
     auto const& info = out.at(image);
     auto const texel = type_of_builtin(texel_name_of(info.format), file, span_of(file, id));
@@ -457,10 +459,106 @@ type_id checker::check_texel_conversion(i32 file, ast::expr_id id, type_id from,
     return to;
 }
 
+bool checker::report_as_precedence(i32 file, ast::expr_id id)
+{
+    auto const& ast = ast_of(file);
+    auto const source = cc::string_view(file_of(file).source);
+    // `(a + b)` leaves no node, so whether a node was parenthesized is read from the text around it
+    auto const is_parenthesized = [&](ast::expr_id e)
+    {
+        auto const where = span_of(file, e);
+        auto before = isize(where.offset) - 1;
+        while (before >= 0 && source[before] == ' ')
+            --before;
+        auto after = isize(where.end());
+        while (after < source.size() && source[after] == ' ')
+            ++after;
+        return before >= 0 && source[before] == '(' && after < source.size() && source[after] == ')';
+    };
+    auto const operator_of = [&](ast::expr_id e) -> cc::string_view
+    {
+        auto const* const c = ast.at(e).node.try_as<ast::call>();
+        if (c == nullptr || c->spelling != ast::call_spelling::infix || !sgl::is_valid(c->op) || is_parenthesized(e))
+            return {};
+        auto const op = text_of(file, file_of(file).at(c->op).where);
+        for (auto const arithmetic : {"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>"})
+            if (op == arithmetic)
+                return op;
+        return {};
+    };
+    auto const cast_of = [&](ast::expr_id e, bool is_root) -> ast::cast const*
+    {
+        auto const* const c = ast.at(e).node.try_as<ast::cast>();
+        return c != nullptr && (is_root || !is_parenthesized(e)) ? c : nullptr;
+    };
+    // the run reaches through the value of each cast, since `a as T - b as U` is `(a as (T - b)) as U`
+    auto first_slip = ast::expr_id::none;
+    for (auto e = id; e != ast::expr_id::none;)
+    {
+        auto const* const c = cast_of(e, e == id);
+        if (c == nullptr)
+            break;
+        if (!operator_of(c->type).empty())
+            first_slip = c->type;
+        e = c->value;
+    }
+    if (first_slip == ast::expr_id::none)
+        return false;
+
+    // the run as written, its operands and its operators in order, `as` among them
+    auto operands = cc::vector<cc::string>();
+    auto operators = cc::vector<cc::string_view>();
+    auto const flatten = [&](auto const& self, ast::expr_id e, bool is_root) -> void
+    {
+        if (auto const* const c = cast_of(e, is_root))
+        {
+            self(self, c->value, false);
+            operators.push_back("as");
+            self(self, c->type, false);
+            return;
+        }
+        if (auto const op = operator_of(e); !op.empty())
+        {
+            auto const arguments = ast.at(ast.at(e).node.as<ast::call>().arguments);
+            self(self, arguments[0].value, false);
+            operators.push_back(op);
+            self(self, arguments[1].value, false);
+            return;
+        }
+        auto const text = text_of(file, span_of(file, e));
+        operands.push_back(is_parenthesized(e) ? cc::format("({})", text) : cc::string(text));
+    };
+    flatten(flatten, id, true);
+
+    // the reading the author meant: each `as` takes the operand before it
+    auto fixed = cc::string();
+    auto current = operands[0];
+    for (auto i = isize(0); i < operators.size(); ++i)
+    {
+        if (operators[i] == "as")
+            current = cc::format("({} as {})", current, operands[i + 1]);
+        else
+        {
+            fixed.appendf("{} {} ", current, operators[i]);
+            current = operands[i + 1];
+        }
+    }
+    fixed += current;
+
+    auto const where = span_of(file, id);
+    auto& d = report(diagnostic_kind::as_precedence, file, where,
+                     cc::format("`as` binds looser than `{}`, so this converts to the type `{}`; write `{}`",
+                                operator_of(first_slip), text_of(file, span_of(file, first_slip)), fixed));
+    d.fixes.push_back({.title = cc::format("Convert each operand first: {}", fixed), .edits = {{where, fixed}}});
+    return true;
+}
+
 type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node)
 {
     auto const file = scope.file;
     auto const where = span_of(file, id);
+    if (report_as_precedence(file, id))
+        return error_type;
     auto const from = check_expr(scope, node.value);
     auto const to = resolve_value_type(file, node.type);
     if (from == error_type || to == error_type)
@@ -674,6 +772,12 @@ type_id checker::check_name(function_scope& scope, ast::expr_id id, ast::name co
 
     if (auto const* const local = scope.find_local(text))
     {
+        // CHK-413: a function's own `const` is the symbol it was compiled to
+        if (local->where.kind == target_kind::symbol && !local->is_captured)
+        {
+            auto const one = cc::vector<symbol_id>{local->where.symbol};
+            return check_symbol_value(scope, id, text, &one);
+        }
         set_target(file, id, local->where);
         if (local->is_captured)
         {
@@ -1064,6 +1168,15 @@ call_arguments checker::check_arguments(function_scope& scope, ast::range_of<ast
             continue;
         }
 
+        // CHK-152: a leading dot is a case of the enum its parameter is, so it has no type until one meets it
+        if (auto const* const dot
+            = !a.is_splat && !a.is_mut && value != nullptr ? value->try_as<ast::leading_dot>() : nullptr)
+        {
+            add_argument(result, {.expr = a.value}, type_id::none, text_of(file, a.name));
+            result.leading_dots.back() = text_of(file, dot->name);
+            continue;
+        }
+
         // CHK-318: a lambda, or the name of a function, has no type until a parameter of function type meets it
         if (!a.is_splat && !a.is_mut && value != nullptr && value->is<ast::lambda>())
         {
@@ -1393,6 +1506,8 @@ cc::string checker::call_text(i32 file_of_call, cc::string_view spelling, call_a
             text += "a literal";
         else if (arguments.undefineds[i])
             text += "undefined()";
+        else if (!arguments.leading_dots[i].empty())
+            text.appendf(".{}", arguments.leading_dots[i]);
         else if (arguments.functions[i] >= 0)
             text += function_arguments[arguments.functions[i]].is_lambda ? "a lambda" : "a function";
         else if (arguments.numbers[i].is_number && ast::is_valid(arguments.written[i].expr))
@@ -1734,7 +1849,10 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
                cc::format("the texels of an @atomic image are atomics, so `{0}` is the texel's: `img[xy].{0}(…)`", name));
         return error_type;
     }
-    arguments.written.insert_at(0, {.expr = member.object});
+    // CHK-416: a receiver that is a place may stand for a `mut` first parameter, which the call then needs no mark for
+    auto quiet = cc::string();
+    auto const is_place = judge_place(scope, member.object, "", &quiet);
+    arguments.written.insert_at(0, {.expr = member.object, .may_be_mut = is_place});
     arguments.types.insert_at(0, receiver);
     arguments.names.insert_at(0, {});
     // CHK-250, CHK-253: the receiver is argument 0, and a number literal there converts like one anywhere else
@@ -1742,6 +1860,7 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
     arguments.literals.insert_at(0, -1);
     arguments.functions.insert_at(0, -1);
     arguments.undefineds.insert_at(0, false);
+    arguments.leading_dots.insert_at(0, {});
 
     auto const candidates = candidates_of(file, name, receiver);
     if (candidates.empty())
@@ -2266,10 +2385,14 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
             continue;
         if (is_open(out.at(range)[p].type))
         {
+            // a leading dot names a case of the enum it meets, which a type parameter does not say
+            if (!arguments.leading_dots[i].empty())
+                return cc::nullopt;
             // a number binds the type it was checked as, since nothing asks it for another
             if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0)
                 deferred.push_back(p);
-            else if (out.at(range)[p].is_mut != arguments.written[i].is_mut
+            else if (out.at(range)[p].is_mut
+                         != (arguments.written[i].is_mut || (arguments.written[i].may_be_mut && out.at(range)[p].is_mut))
                      || !unify(out.at(range)[p].type, arguments.types[i], result.bindings))
                 return cc::nullopt;
             continue;
@@ -2350,10 +2473,16 @@ cc::optional<i32> checker::chain_of(i32 file, parameter const& taking, call_argu
     // CHK-341: `undefined()` is of whatever type it meets
     if (arguments.undefineds[i])
         return 0;
+    // CHK-152: a leading dot meets an enum that has its case, and nothing else
+    if (!arguments.leading_dots[i].empty())
+        return case_index_of(taking.type, arguments.leading_dots[i]) >= 0 && !taking.is_mut ? cc::optional<i32>(0)
+                                                                                            : cc::nullopt;
     // CHK-316: a place is handed over as it is, so it has the parameter's type exactly, and a mark meets a mut parameter
-    if (taking.is_mut || arguments.written[i].is_mut)
+    // CHK-416: a receiver that is a place is marked wherever the parameter is `mut`
+    auto const is_mut = arguments.written[i].is_mut || (arguments.written[i].may_be_mut && taking.is_mut);
+    if (taking.is_mut || is_mut)
     {
-        if (taking.is_mut != arguments.written[i].is_mut || arguments.types[i] != taking.type)
+        if (taking.is_mut != is_mut || arguments.types[i] != taking.type)
             return cc::nullopt;
         return 0;
     }
@@ -2560,6 +2689,16 @@ void checker::commit_literals(function_scope& scope,
             if (arguments.undefineds[i])
             {
                 set_type(scope.file, arguments.written[i].expr, copied[p].type);
+                continue;
+            }
+            if (!arguments.leading_dots[i].empty())
+            {
+                auto const type = copied[p].type;
+                set_type(scope.file, arguments.written[i].expr, type);
+                set_target(scope.file, arguments.written[i].expr,
+                           {.kind = target_kind::enum_case,
+                            .symbol = out.at(type).symbol,
+                            .index = case_index_of(type, arguments.leading_dots[i])});
                 continue;
             }
             if (arguments.numbers[i].is_number)
@@ -2780,6 +2919,15 @@ void checker::record_call(i32 file,
     auto const written = ast::range_of<written_argument>{.first = u32(out.written_arguments.size()),
                                                          .count = u32(arguments.written.size())};
     out.written_arguments.push_back_range(arguments.written);
+    // CHK-416: a receiver bound to a `mut` parameter is handed over as `mut x` is, which is what every later pass reads
+    auto const has_receiver = !arguments.written.empty() && arguments.written[0].may_be_mut;
+    if (has_receiver && is_valid(callee) && out.at(callee).kind == symbol_kind::function)
+    {
+        auto const parameters = out.at(out.functions[out.at(callee).info].parameters);
+        for (auto p = isize(0); p < slots.size() && p < parameters.size(); ++p)
+            if (auto const i = slots[p]; i >= 0 && parameters[p].is_mut && arguments.written[i].may_be_mut)
+                out.written_arguments[written.first + i].is_mut = true;
+    }
     auto const slot_range = ast::range_of<i32>{.first = u32(out.call_slots.size()), .count = u32(slots.size())};
     out.call_slots.push_back_range(slots);
     out.files[file].call_of[ast::index_of(id)] = i32(out.call_records.size());

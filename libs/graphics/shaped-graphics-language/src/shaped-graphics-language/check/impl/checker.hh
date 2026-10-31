@@ -217,6 +217,9 @@ struct call_arguments
     cc::vector<i32> functions;
     /// Parallel to `written`: the prelude's `undefined()`, which has the type of the parameter it meets (CHK-341).
     cc::vector<bool> undefineds;
+    /// Parallel to `written`: the case a leading dot names, which meets a parameter of an enum holding it (CHK-152);
+    /// empty for anything else, whose type is in `types`.
+    cc::vector<cc::string_view> leading_dots;
     /// An argument had the error type or was reported, so the call reports nothing about its arguments.
     bool is_poisoned = false;
 };
@@ -388,6 +391,8 @@ struct checker
     cc::vector<function_argument> function_arguments;
     /// True while a parameter's type is resolved, the one place a function type may stand (CHK-317).
     bool allows_function_type = false;
+    /// The type being resolved is a pixel entry point's result, whose attributes are its target's settings (CHK-418).
+    bool allows_type_attributes = false;
     cc::map<cc::string, cc::vector<type_id>> interned_types;
     cc::vector<pending_extension> pending_extensions;
     /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
@@ -398,6 +403,15 @@ struct checker
     /// The symbols in compilation, outermost first, which is the loop a dependency cycle names.
     cc::vector<symbol_id> compiling;
     cc::vector<function_notes> notes;
+    /// A `const` in a function body (CHK-413): a symbol no file scope sees, with the earlier ones of its body it reads.
+    struct local_constant
+    {
+        i32 file = 0;
+        ast::decl_id declaration = ast::decl_id::none;
+        symbol_id symbol = symbol_id::none;
+        cc::vector<local_name> visible;
+    };
+    cc::vector<local_constant> local_constants;
     /// Parallel to the registry's functions: the prelude symbol declaring each, filled before any tree is flattened.
     cc::vector<symbol_id> symbol_of_builtin;
     /// Every call of a function that is no `@builtin`, in the order the bodies were checked.
@@ -705,7 +719,9 @@ struct checker
     /// The generic struct of the prelude `expr` names, `none` where it names no such struct (CHK-339).
     type_id generic_named(i32 file, ast::expr_id expr);
     /// An array's length as written: an int literal or a `const`; none for anything else.
-    [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr);
+    /// The position of the case `name` among `type`'s, -1 where `type` is no enum or has no such case.
+    [[nodiscard]] i32 case_index_of(type_id type, cc::string_view name) const;
+    [[nodiscard]] cc::optional<i32> constant_count(i32 file, ast::expr_id expr, function_scope const* scope = nullptr);
     /// A checked index's value when it is an int literal or names a `const`; none for anything else.
     [[nodiscard]] cc::optional<i32> constant_index(i32 file, ast::expr_id expr) const;
     /// The same of a `uint` index: a literal with its `u` suffix, or a `const` of `uint`.
@@ -954,6 +970,9 @@ struct checker
     void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
     [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
+    /// CHK-411: an `as` whose type is an arithmetic run, reported once over the whole run with the fix that converts
+    /// each operand; false where the cast is no such run.
+    [[nodiscard]] bool report_as_precedence(i32 file, ast::expr_id id);
     /// The `as` overload visible from `file` that converts `from` to `to`, or `none` where there is no such conversion
     /// (CHK-197).
     [[nodiscard]] symbol_id conversion_of(i32 file, source_span where, type_id from, type_id to);
@@ -973,11 +992,27 @@ struct checker
     void check_assign(function_scope& scope, ast::stmt_id id, ast::assign_stmt const& assign);
     [[nodiscard]] flow check_if(function_scope& scope, ast::if_stmt const& chain);
     void check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt const& loop);
+    /// What a `for` runs over: a range, then each `.reversed` and `.by(step)` written after it, innermost first (CHK-415).
+    struct range_walk
+    {
+        ast::range const* range = nullptr;
+        /// An argument of `.by`, or `none` for a `.reversed`.
+        cc::vector<ast::expr_id> steps;
+    };
+    /// `iterable` as a range and the walk around it; no range where it is none, or a walk names anything else.
+    [[nodiscard]] range_walk range_walk_of(i32 file, ast::expr_id iterable) const;
     void check_return(function_scope& scope, source_span where, ast::expr_id value);
     void check_break(function_scope& scope, source_span where, ast::expr_id value);
     void check_condition(function_scope& scope, ast::expr_id condition);
     /// Declares a local, which shadows every earlier local, parameter and module-level symbol of its name (CHK-53, CHK-54).
     void declare_local(function_scope& scope, local_name local);
+    /// The symbol of the `const` that `decl` of a function body declares, minted once however often the body is
+    /// checked.
+    [[nodiscard]] symbol_id local_constant_of(function_scope const& scope, ast::decl_id decl);
+    /// A numeric scalar or a plain vector of `float`, `half`, `int` or `uint`, which a color target holds (CHK-418).
+    [[nodiscard]] bool is_color_value(type_id type) const;
+    /// The `@pixel struct` a pixel entry point returning one `color` stands in for, minted under a name nothing has.
+    [[nodiscard]] type_id pixel_targets_of(symbol_id entry, type_id color);
     /// A `loop:`; the result is the type its breaks carry, and `nothing` for one that is a statement.
     /// `has_break` is false for a loop nothing leaves, which never ends.
     [[nodiscard]] type_id check_loop(function_scope& scope,

@@ -292,6 +292,8 @@ m.entry_points                             // flat_entry_point per SOUND entry p
                                            // sound means: its body and the body of every function it reaches reported no error
 m.diagnostics                              // located_diagnostic { what, file, detail, notes }, in the order they were found; a related_note
                                            // { file, where, message } is a second place a diagnostic points at
+d.fixes                                    // suggested_fix { title, edits }: edits of the diagnostic's own file that fix it,
+                                           // which `sgl lsp` offers as quick fixes; empty where the checker knows none
 m.at(symbol_id)  m.at(type_id)  m.at(range)  m.name_of(type_id)   // name_of gives "<error>" for the error type
 
 #include <shaped-graphics-language/check/flat.hh>

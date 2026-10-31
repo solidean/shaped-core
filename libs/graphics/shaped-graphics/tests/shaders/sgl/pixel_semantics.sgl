@@ -147,3 +147,50 @@ binding gathered:
 
 @compute(1) fun gather_centre(@thread_id id: int3){gathered}:
     gathered.values[0] = gathered.source.gather(float2(0.5, 0.5), gathered.nearest)
+
+// One color value needs no @pixel struct: it is the stage's one target, named `color` (CHK-418).
+@pixel fun direct_ps(p: tagged) -> float4 => float4(p.tag as float, 1.0, 0.0, 1.0)
+
+pipeline direct_tags:
+    vertex = tagged_vs
+    pixel = direct_ps
+    cull = .none
+    format = .rgba32_float
+
+binding pixel_marks:
+    marks: mut buffer[uint]
+
+// A pixel stage that writes memory alone returns nothing, and its pipeline has no color target (CHK-418).
+@pixel fun marking_ps(p: tagged){pixel_marks}:
+    let slot = (p.position.x as int) + 4 * (p.position.y as int)
+    pixel_marks.marks[slot] = (p.tag as uint) + 1u
+
+pipeline marked:
+    vertex = tagged_vs
+    pixel = marking_ps
+    cull = .none
+    depth_stencil_format = .depth32_float
+
+struct layered:
+    @position position: hpos4
+    @layer layer: uint
+    @interpolate(.flat) tag: int
+
+// One draw fills both layers of an array target: each instance sends its triangles to its own layer (CHK-419).
+@vertex fun layered_vs(v: tagged_corner, @instance_index i: int) -> layered:
+    require vertex_layer_output
+    return {
+        position = hpos4(v.position.x, v.position.y, v.depth, 1.0)
+        layer = i as uint
+        tag = v.tag + 10 * i
+    }
+
+@pixel fun layered_ps(p: layered) -> float4:
+    require vertex_layer_output
+    return float4(p.tag as float, p.layer as float, 0.0, 1.0)
+
+pipeline layered_tags:
+    vertex = layered_vs
+    pixel = layered_ps
+    cull = .none
+    format = .rgba32_float

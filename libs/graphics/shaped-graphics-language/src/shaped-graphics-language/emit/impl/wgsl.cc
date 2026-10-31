@@ -271,6 +271,9 @@ public:
             out.appendf("@compute @workgroup_size({}, {}, {})\n", p.e.workgroup[0], p.e.workgroup[1], p.e.workgroup[2]);
             out.appendf("fn {}({}) {{\n", p.entry_name, list);
         }
+        // a pixel stage that writes images alone returns nothing, which WGSL spells with no result at all (CHK-418)
+        else if (p.e.result == check::checked_module::void_type)
+            out.appendf("@fragment\nfn {}({}) {{\n", p.entry_name, list);
         else
             out.appendf("@{}\nfn {}({}) -> {} {{\n", p.e.entry_stage == stage::vertex ? "vertex" : "fragment",
                         p.entry_name, list, type_text(p, *this, p.e.result));

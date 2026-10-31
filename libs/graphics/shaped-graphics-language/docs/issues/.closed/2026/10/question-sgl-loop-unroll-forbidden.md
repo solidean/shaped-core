@@ -6,6 +6,8 @@ corpus:
   - bgfx/shaders/39-assao/cs_assao_generate_q2
   - bgfx/shaders/39-assao/cs_assao_generate_q3
   - bgfx/shaders/39-assao/cs_assao_generate_q3base
+closed: 2026-10-31
+resolution: fixed
 ---
 
 # A loop that must not be unrolled, HLSL's [loop]

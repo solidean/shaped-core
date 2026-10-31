@@ -272,10 +272,12 @@ struct planner
                 .source_name = member.name,
                 .type = member.type,
                 .is_position = has_locations && member.is_position,
+                .is_layer = has_locations && member.is_layer,
                 .interpolate = member.interpolate,
                 .output = member.output,
                 .factor = member.factor,
-                .location = has_locations && !member.is_position && member.output == check::pixel_output::color
+                .location = has_locations && !member.is_position && !member.is_layer
+                                 && member.output == check::pixel_output::color
                                  && member.factor == check::tessellation_factor::none
                               ? next_location++
                               : -1,
@@ -326,6 +328,9 @@ struct planner
 
     void need(type_id type, struct_role role)
     {
+        // a pixel stage that returns nothing has no result to declare (CHK-418)
+        if (type == check::checked_module::void_type)
+            return;
         // a binding array is declared with its resource, and has no type of its own to spell
         if (is_valid(type) && !is_builtin_type(p.m, type) && p.m.at(type).kind == type_kind::array)
             return p.m.takes_slots(type) ? void() : need_array(type, role);
@@ -932,7 +937,8 @@ void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry
                 if (local.kind == check::local_kind::parameter && m.at(local.type).kind == type_kind::stream)
                     v.edge_struct(m.at(local.type).element, struct_role::stage_link);
         }
-        else if (input != e.result)
+        // a pixel stage that writes images alone returns nothing, and has no render target (CHK-418)
+        else if (input != e.result && e.result != check::checked_module::void_type)
             v.edge_struct(e.result, result_role(e));
     }
     v.bindings();

@@ -60,6 +60,35 @@ namespace
 }
 } // namespace
 
+cc::vector<lsp::code_action> sgl_lsp::code_actions_of(analysis const& a, lsp::range around, lsp::position_encoding e)
+{
+    auto const user = a.user_file();
+    auto const text = a.text_of(user);
+    auto const& index = a.index_of(user);
+    auto const first = index.offset_of(text, around.start, e);
+    auto const last = index.offset_of(text, around.end, e);
+
+    auto out = cc::vector<lsp::code_action>();
+    for (auto const& d : a.diagnostics)
+    {
+        if (d.file != user || isize(d.what.where.end()) < first || isize(d.what.where.offset) > last)
+            continue;
+        for (auto const& fix : d.fixes)
+        {
+            auto action = lsp::code_action{
+                .title = fix.title,
+                .diagnostics = {lsp_diagnostic_of(a, d, e)},
+                .is_preferred = d.fixes.size() == 1,
+                .uri = a.uri_of(user),
+            };
+            for (auto const& edit : fix.edits)
+                action.edits.push_back({.range = range_of(a, user, edit.where, e), .new_text = edit.text});
+            out.push_back(cc::move(action));
+        }
+    }
+    return out;
+}
+
 cc::vector<lsp::diagnostic> sgl_lsp::diagnostics_of(analysis const& a,
                                                     cc::span<sgl::test::test_result const> tests,
                                                     lsp::position_encoding e)

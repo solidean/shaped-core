@@ -375,9 +375,10 @@ TEST("sgl check - a call one `mut` mark away from a candidate says which paramet
                       "fun f() -> float:\n    let mut a = 1.0\n    let mut b = 2.0\n    both(a, b)\n    return a\n")
               .contains("x and y are mut parameters, so their arguments are places marked `mut`, as in "
                         "`both(mut a, mut b)`"));
-    // a dot call has no place for the mark, so the fix is the free call
-    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    v.twice()\n    return v\n", twice))
-              .contains("x is a mut parameter, so its argument is a place marked `mut`, as in `twice(mut v)`"));
+    // CHK-416: a dot call's receiver that is a place needs no mark, and one that is none says why
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    v.twice()\n    return v\n", twice)) == "");
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let k = 1.0\n    k.twice()\n    return k\n", twice))
+              .contains("and `k` is none: k is immutable; `let mut` declares a local an assignment may name"));
 }
 
 TEST("sgl check - a select written with its condition last says the condition comes first")
@@ -629,4 +630,37 @@ TEST("sgl check - a let mut without a value is read only after every path assign
     // without mut nothing could assign it, and without a type nothing says what it holds
     CHECK(body_reports("let v: float\nreturn k\n").contains("a let without a value that is no `let mut`"));
     CHECK(body_reports("let mut v\nreturn k\n").contains("a let without a value or a written type"));
+}
+
+TEST("sgl check - an as whose type is arithmetic names the precedence, and its fix converts each operand")
+{
+    // CHK-411: reported once over the run, whose fix gives each `as` the operand before it
+    auto const prefix = cc::string("fun f(xx: int, center: int) -> float:\n    let d = ");
+    auto const slip_in = [&](cc::string_view line) -> cc::optional<sgl::check::located_diagnostic>
+    {
+        auto const s = check_sources(read_prelude(), prefix + line + "\n    return d\n");
+        auto found = cc::optional<sgl::check::located_diagnostic>();
+        for (auto const& d : s.module.diagnostics)
+            if (d.what.kind == sgl::diagnostic_kind::as_precedence)
+            {
+                CHECK(!found.has_value()).dump("reports", reports_of(s));
+                found = d;
+            }
+        return found;
+    };
+
+    auto const slip = slip_in("xx as float - center as float");
+    REQUIRE(slip.has_value());
+    CHECK(slip.value().detail.contains("`as` binds looser than `-`, so this converts to the type `float - center`"))
+        .dump("detail", slip.value().detail);
+    REQUIRE(slip.value().fixes.size() == 1);
+    REQUIRE(slip.value().fixes[0].edits.size() == 1);
+    CHECK(slip.value().fixes[0].edits[0].text == "(xx as float) - (center as float)");
+    CHECK(slip.value().fixes[0].edits[0].where.offset == prefix.size());
+
+    // a parenthesized operand stays whole, and `a + b as float` converts the sum, as written
+    auto const grouped = slip_in("(xx + 1) as float * 2.0 + center as float");
+    REQUIRE(grouped.has_value());
+    CHECK(grouped.value().fixes[0].edits[0].text == "((xx + 1) as float) * 2.0 + (center as float)");
+    CHECK(reports_for(prefix + "(xx + center) as float\n    return d\n") == "");
 }

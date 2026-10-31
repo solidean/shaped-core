@@ -70,6 +70,17 @@ cc::shared_async<lsp::answer<cc::vector<lsp::inlay_hint>>> hints_request(sgl_lsp
         co_return lsp::answer<cc::vector<lsp::inlay_hint>>(cc::error(cancelled()));
     co_return lsp::answer<cc::vector<lsp::inlay_hint>>(sgl_lsp::inlay_hints_of(*analysis, visible, e));
 }
+
+cc::shared_async<lsp::answer<cc::vector<lsp::code_action>>> actions_request(sgl_lsp::analysis_cache::handle a,
+                                                                            lsp::range around,
+                                                                            lsp::position_encoding e,
+                                                                            cc::shared_ptr<lsp::cancel_flag> flag)
+{
+    auto const& analysis = co_await a;
+    if (flag->is_raised.load())
+        co_return lsp::answer<cc::vector<lsp::code_action>>(cc::error(cancelled()));
+    co_return lsp::answer<cc::vector<lsp::code_action>>(sgl_lsp::code_actions_of(*analysis, around, e));
+}
 } // namespace
 
 cc::unique_ptr<sgl_lsp::language_server> sgl_lsp::language_server::create()
@@ -89,6 +100,7 @@ sgl_lsp::language_server::language_server()
             w.write("full", true);
             w.end_object();
             w.write("inlayHintProvider", true);
+            w.write("codeActionProvider", true);
         },
     })
 {
@@ -113,6 +125,16 @@ sgl_lsp::language_server::language_server()
                                                    return hints_request(cc::move(a), p.range, _server.encoding(),
                                                                         ctx.flag);
                                                });
+
+    _server.on_request<lsp::code_action_params>("textDocument/codeAction",
+                                                [this](lsp::request_context const& ctx, lsp::code_action_params p)
+                                                {
+                                                    auto a = _analyses.of(_server.workspace().snapshot(), p.uri);
+                                                    if (!a)
+                                                        return answer_now(cc::vector<lsp::code_action>());
+                                                    return actions_request(cc::move(a), p.range, _server.encoding(),
+                                                                           ctx.flag);
+                                                });
 
     _server.on_request<prelude_text_params>(
         "sgl/preludeText",

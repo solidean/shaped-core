@@ -317,6 +317,7 @@ An entry point must declare each of those itself: by its file, by a binding it l
 | `@coherent` on a member ([Coherent memory](#coherent-memory)) | `sg::feature::device_coherence`, which WebGPU lacks |
 | `@atomic` on an image member ([Atomics](#atomics)) | `sg::feature::image_atomics`, which core WebGPU lacks |
 | `compare_exchange_strong` in a pixel stage ([Atomics](#atomics)) | `sg::feature::helper_lane_query`, which WebGPU lacks |
+| a `@layer` field of a vertex stage's result ([CHK-419](semantics/checking.md#entry-points)) | `sg::feature::vertex_layer_output`, which WebGPU lacks |
 
 `ray_query` and `raytracing_pipeline` are the two halves of ray tracing, and [raytracing.md](raytracing.md) says what each grants.
 A device may have either without the other, which is why they are two features.

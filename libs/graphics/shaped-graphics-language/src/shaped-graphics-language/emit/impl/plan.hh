@@ -44,6 +44,8 @@ struct planned_member
     cc::string source_name;
     check::type_id type = check::type_id::none;
     bool is_position = false;
+    /// `@layer`, which the target names by an attribute of its own and no location (CHK-419).
+    bool is_layer = false;
     /// How a stage link's member is interpolated; the default everywhere else.
     check::interpolation interpolate;
     /// A render target struct's depth or sample mask, which takes no location; `color` everywhere else.

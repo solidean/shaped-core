@@ -132,23 +132,28 @@ void vulkan_command_list::raster_begin_rendering(sg::rendering_info const& info)
     // 3) The render area, and the viewport / scissor defaults, both from the target extent.
     int extent_w = 1;
     int extent_h = 1;
+    // a view over several layers of an array is a layered target, whose layer a vertex stage picks
+    auto layers = cc::start_end{.start = 0, .end = 1};
     if (!info.color_targets.empty())
     {
         extent_w = info.color_targets[0].view.width();
         extent_h = info.color_targets[0].view.height();
+        layers = info.color_targets[0].view.range().array_range;
     }
     else
     {
         extent_w = info.depth_stencil_target.value().view.width();
         extent_h = info.depth_stencil_target.value().view.height();
+        layers = info.depth_stencil_target.value().view.range().array_range;
     }
+    _rendering_layer_count = u32(layers.end - layers.start);
 
     _rendering_area = {.offset = {0, 0}, .extent = {u32(extent_w), u32(extent_h)}};
 
     auto const rendering = VkRenderingInfo{
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = _rendering_area,
-        .layerCount = 1,
+        .layerCount = _rendering_layer_count,
         .colorAttachmentCount = u32(color_attachments.size()),
         .pColorAttachments = color_attachments.empty() ? nullptr : color_attachments.data(),
         .pDepthAttachment = _rendering_has_depth ? &depth_attachment : nullptr,
@@ -186,7 +191,7 @@ void vulkan_command_list::reopen_rendering()
     auto const rendering = VkRenderingInfo{
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
         .renderArea = _rendering_area,
-        .layerCount = 1,
+        .layerCount = _rendering_layer_count,
         .colorAttachmentCount = u32(_rendering_color_attachments.size()),
         .pColorAttachments = _rendering_color_attachments.empty() ? nullptr : _rendering_color_attachments.data(),
         .pDepthAttachment = _rendering_has_depth ? &_rendering_depth_attachment : nullptr,

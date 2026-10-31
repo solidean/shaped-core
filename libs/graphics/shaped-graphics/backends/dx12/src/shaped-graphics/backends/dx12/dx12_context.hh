@@ -235,6 +235,8 @@ public:
             return _native_16bit_shader_ops;
         case sg::feature::subgroups:
             return _wave_ops;
+        case sg::feature::vertex_layer_output:
+            return _vertex_layer_output;
         }
         return false;
     }
@@ -646,6 +648,7 @@ public:
     bool _extended_image_formats = false;   // bgra8_unorm's typed UAV, cached at creation
     bool _native_16bit_shader_ops = false;  // D3D12_OPTIONS4, cached at creation
     bool _wave_ops = false;                 // D3D12_OPTIONS1, cached at creation
+    bool _vertex_layer_output = false;      // D3D12_OPTIONS, cached at creation
 
     // Where debug-layer messages go; empty means stderr.
     // See set_message_callback.

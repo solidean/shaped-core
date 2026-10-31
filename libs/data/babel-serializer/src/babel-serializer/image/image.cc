@@ -329,7 +329,7 @@ cc::result<cc::vector<byte>> encode(image const& img, format fmt, write_options 
             // PNG is the format that accepts two sample types, so `comp` is what picks the written depth.
             .decoded = img.comp == component::u16 ? babel::png::component::u16 : babel::png::component::u8};
         pd.pixels = img.pixels; // aggregator owns only the packed buffer; hand it to the codec
-        return babel::png::encode(pd);
+        return babel::png::encode(pd, {.compression_level = opts.png_compression_level});
     }
     case format::jpg:
     {

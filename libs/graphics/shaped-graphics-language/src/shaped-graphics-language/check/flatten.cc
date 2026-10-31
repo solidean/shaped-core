@@ -121,6 +121,17 @@ struct flattener
         source_span where;
     };
     cc::optional<looped_unroll> looped_around;
+    /// A walk of a range (CHK-415): the next `for` runs `k` over `0 ..< count`, and its variable is `start + k * step`.
+    /// Taken by the `for` it was set for before anything in its body is flattened.
+    struct walk_mapping
+    {
+        flat_expr_id start = flat_expr_id::none;
+        i32 step = 1;
+    };
+    cc::optional<walk_mapping> pending_walk;
+    /// A pixel entry point's minted `@pixel struct`, which each of its own returns builds of the one color it gives
+    /// (CHK-418); none for every other tree.
+    type_id pixel_targets = type_id::none;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
     /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
@@ -616,6 +627,19 @@ struct flattener
             for (auto& a : arguments)
                 a = again(a, from);
             return add_expr(x.type, from, flat_construct{.arguments = add_list(arguments)});
+        }
+        // the int arithmetic a walk's variable is (CHK-415), whose operands are substitutable in turn
+        if (auto const* const call = x.node.try_as<flat_call>())
+        {
+            auto arguments = cc::vector<flat_expr_id>();
+            for (auto const a : entry.at(call->arguments))
+                arguments.push_back(a);
+            for (auto& a : arguments)
+                a = again(a, from);
+            auto copy = x;
+            copy.node.as<flat_call>().arguments = add_list(arguments);
+            entry.exprs.push_back(cc::move(copy));
+            return flat_expr_id(entry.exprs.size() - 1);
         }
         return fail();
     }
@@ -1254,37 +1278,45 @@ struct flattener
     }
 
     /// CHK-289: `T[N].filled(v)` is a local every element of which is assigned `v`, evaluated once.
+    /// A nested array filled with its innermost element assigns `v` to every scalar, one loop per level.
     flat_expr_id flatten_filled(ast::expr_id id, type_id type, ast::call const& call)
     {
         auto const arguments = ast().at(call.arguments);
         if (arguments.size() != 1 || !is_valid(type))
             return fail();
         auto const where = origin{.file = file(), .expr = id};
-        auto const& info = c.out.at(type);
         auto const value = flatten_expr(arguments[0].value);
         if (!is_valid(value))
             return fail();
+        auto const value_type = entry.at(value).type;
 
         auto const label = add_label("filled");
         auto body = cc::vector<flat_stmt_id>();
         auto filler = value;
         if (!is_substitutable(value))
         {
-            auto const held = add_local(local_kind::let, "fill", info.element);
+            auto const held = add_local(local_kind::let, "fill", value_type);
             body.push_back(make_stmt(where, flat_let{.local = held, .value = value}));
             filler = local_ref(held, id);
         }
         auto const result = add_local(local_kind::var, "filled", type);
         body.push_back(make_stmt(where, flat_var{.local = result}));
-        auto const index = add_local(local_kind::index, "i", int_type());
-        auto const element
-            = add_expr(info.element, id, flat_element{.object = local_ref(result, id), .index = local_ref(index, id)});
-        flat_stmt_id const store[] = {make_stmt(where, flat_assign{.place = element, .value = filler})};
-        body.push_back(make_stmt(where, flat_for{.label = add_label("fill"),
-                                                 .index = index,
-                                                 .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
-                                                 .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
-                                                 .body = add_list(store)}));
+        // the statements that assign `filler` to every element of `place`, of type `t`, down to the filler's own type
+        auto const fill = [&](auto const& self, flat_expr_id place, type_id t) -> flat_stmt_id
+        {
+            if (t == value_type)
+                return make_stmt(where, flat_assign{.place = place, .value = filler});
+            auto const& info = c.out.at(t);
+            auto const index = add_local(local_kind::index, "i", int_type());
+            auto const element = add_expr(info.element, id, flat_element{.object = place, .index = local_ref(index, id)});
+            flat_stmt_id const store[] = {self(self, element, info.element)};
+            return make_stmt(where, flat_for{.label = add_label("fill"),
+                                             .index = index,
+                                             .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                             .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
+                                             .body = add_list(store)});
+        };
+        body.push_back(fill(fill, local_ref(result, id), type));
         body.push_back(make_stmt(where, flat_leave{.target = label, .value = local_ref(result, id)}));
         return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
     }
@@ -2823,6 +2855,12 @@ struct flattener
         // CHK-345: the entry point's own report, decided by the fused any hit before it leaves
         if (fused.has_value() && frames.size() == 1 && is_valid(result))
             result = decide_report(from, result);
+        // CHK-418: the one color a pixel stage gives is its minted struct's one member
+        if (is_valid(pixel_targets) && frames.size() == 1 && is_valid(result))
+        {
+            flat_expr_id const color[] = {result};
+            result = add_expr(pixel_targets, from.expr, flat_construct{.arguments = add_list(color)});
+        }
         if (is_valid(return_label))
             add_stmt(from, flat_leave{.target = return_label, .value = result});
         else
@@ -3143,6 +3181,7 @@ struct flattener
             return flatten_fallen_back_for(from, id, loop, first, end);
         }
 
+        auto const walk = take_walk();
         auto const type = entry.at(first).type;
         auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
         auto const index_from = ast::is_valid(loop.variable) ? loop.variable : loop.iterable;
@@ -3161,8 +3200,10 @@ struct flattener
         for (auto i = i64(0); i < count; ++i)
         {
             if (n != nullptr)
-                current()->bound[slot].literal
-                    = add_expr(type, index_from, flat_int_literal{.value = i32(i64(low.value()) + i)});
+            {
+                auto const k = add_expr(type, index_from, flat_int_literal{.value = i32(i64(low.value()) + i)});
+                current()->bound[slot].literal = walk.has_value() ? walked(walk.value(), k, index_from) : k;
+            }
             auto const copy = add_label("unrolled_index");
             current()->loops.push_back({.loop = label, .continue_block = copy});
             ++unrolled_depth;
@@ -3191,16 +3232,42 @@ struct flattener
         looped_around = around;
     }
 
+    /// `@unroll(false)` on the loop `id`, which stays a loop and asks its target to keep it one (CHK-414).
+    [[nodiscard]] bool is_rolled(ast::stmt_id id) const
+    {
+        auto const* const a = c.find_attribute(file(), ast().at(id).attributes, "unroll");
+        if (a == nullptr)
+            return false;
+        auto const arguments = ast().at(a->arguments);
+        return arguments.size() == 1 && ast::is_valid(arguments[0].value)
+            && c.text_of(file(), c.span_of(file(), arguments[0].value)) == "false";
+    }
+
+    /// `@unroll` on the loop `id`, written without `false` (CHK-389).
+    [[nodiscard]] bool is_unrolled(ast::stmt_id id) const
+    {
+        return c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr && !is_rolled(id);
+    }
+
     /// `for i in a ..< b` as a loop of the flat tree, whose bounds `first` and `end` are flattened already.
     void flatten_looped_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end)
     {
         auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
         auto const int_type = is_valid(first) ? entry.at(first).type : type_id::none;
-        auto const index
-            = add_local(local_kind::index, n != nullptr ? c.text_of(file(), n->where) : cc::string_view("i"), int_type);
-        current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
+        auto const walk = take_walk();
+        auto const index = add_local(local_kind::index,
+                                     walk.has_value() ? cc::string_view("k")
+                                     : n != nullptr   ? c.text_of(file(), n->where)
+                                                      : cc::string_view("i"),
+                                     int_type);
+        current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)},
+                                    .local = index,
+                                    .literal = walk.has_value()
+                                                 ? walked(walk.value(), local_ref(index, loop.iterable), loop.iterable)
+                                                 : flat_expr_id::none});
 
         auto const label = add_label("for");
+        entry.labels[index_of(label)].is_rolled = is_rolled(id);
         auto const is_test_loop = is_test && frames.size() == 1;
         if (is_test_loop)
             test_loops.push_back(index);
@@ -3223,11 +3290,11 @@ struct flattener
             return;
         }
         auto const int_type = entry.at(first).type;
-        auto const is_unrolled = c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr;
+        auto const unrolls = is_unrolled(id);
         if (auto const high = constant_int(last); high.has_value() && high.value() < 2147483647)
         {
             auto const end = add_expr(int_type, loop.iterable, flat_int_literal{.value = high.value() + 1});
-            if (is_unrolled)
+            if (unrolls)
                 return flatten_unrolled_for(from, id, loop, first, end);
             return flatten_looped_for(from, id, loop, first, end);
         }
@@ -3256,6 +3323,7 @@ struct flattener
         current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
 
         auto const label = add_label("for");
+        entry.labels[index_of(label)].is_rolled = is_rolled(id);
         auto const iteration = add_label("iteration");
         auto const is_test_loop = is_test && frames.size() == 1;
         if (is_test_loop)
@@ -3284,19 +3352,126 @@ struct flattener
         add_stmt(from, flat_if{.condition = builtin_call(where, at_most, ordered), .then_body = runs});
     }
 
+    /// The walk set for the `for` being flattened, which no `for` inside its body sees.
+    [[nodiscard]] cc::optional<walk_mapping> take_walk()
+    {
+        auto const walk = pending_walk;
+        pending_walk = {};
+        return walk;
+    }
+
+    /// `start + k * step`, folded where its parts are constants, so a walk over a constant range reads as one.
+    flat_expr_id walked(walk_mapping const& walk, flat_expr_id k, ast::expr_id where)
+    {
+        auto const type = entry.at(k).type;
+        auto const start = constant_int(walk.start);
+        auto const index = constant_int(k);
+        auto const literal = [&](i32 v) { return add_expr(type, where, flat_int_literal{.value = v}); };
+        if (start.has_value() && index.has_value())
+            return literal(start.value() + index.value() * walk.step);
+        type_id const ints[] = {type, type};
+        auto const op = [&](cc::string_view spelling, flat_expr_id a, flat_expr_id b)
+        {
+            flat_expr_id const operands[] = {a, b};
+            return builtin_call(where, c.find_operator(file(), spelling, ints), operands);
+        };
+        auto const is_zero = start.has_value() && start.value() == 0;
+        if (walk.step == -1)
+            return op("-", is_zero ? literal(0) : again(walk.start, where), again(k, where));
+        auto const scaled = walk.step == 1 ? again(k, where) : op("*", again(k, where), literal(walk.step));
+        return is_zero ? scaled : op("+", again(walk.start, where), scaled);
+    }
+
+    /// CHK-415: a range walked in reverse or in steps, as a `for` of `k` over `0 ..< count` whose variable is the
+    /// walk's `k`-th value; every part is an int, its bounds evaluated once, first before last.
+    void flatten_walked_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, checker::range_walk const& walk)
+    {
+        auto const& r = *walk.range;
+        auto first = flatten_expr(r.first);
+        auto last = flatten_expr(r.last);
+        if (!is_valid(first) || !is_valid(last))
+        {
+            mark_failed();
+            return;
+        }
+        auto const where = loop.iterable;
+        auto const type = entry.at(first).type;
+        type_id const ints[] = {type, type};
+        auto const literal = [&](i32 v) { return add_expr(type, where, flat_int_literal{.value = v}); };
+        // a part that is no constant is held in a local, so the bounds are evaluated once and in order
+        auto const held = [&](flat_expr_id value, cc::string_view name)
+        {
+            if (constant_int(value).has_value())
+                return value;
+            auto const local = add_local(local_kind::temporary, name, type);
+            add_stmt(from, flat_let{.local = local, .value = value});
+            return local_ref(local, where);
+        };
+        auto const op = [&](cc::string_view spelling, flat_expr_id a, flat_expr_id b)
+        {
+            auto const x = constant_int(a);
+            auto const y = constant_int(b);
+            if (x.has_value() && y.has_value())
+            {
+                auto const l = i64(x.value());
+                auto const m = i64(y.value());
+                auto const v = spelling == "+" ? l + m : spelling == "-" ? l - m : spelling == "*" ? l * m : l / m;
+                return literal(i32(v));
+            }
+            flat_expr_id const operands[] = {a, b};
+            return builtin_call(where, c.find_operator(file(), spelling, ints), operands);
+        };
+        first = held(first, "first");
+        last = held(last, "last");
+        auto const is_inclusive = sgl::is_valid(r.op) && c.text_of(file(), c.file_of(file()).at(r.op).where) == "..=";
+        auto count = held(
+            op("-", is_inclusive ? op("+", again(last, where), literal(1)) : again(last, where), again(first, where)),
+            "count");
+        auto start = first;
+        auto step = 1;
+        for (auto const s : walk.steps)
+        {
+            if (!ast::is_valid(s))
+            {
+                // the last value first: `start + (count - 1) * step`
+                start = held(
+                    op("+", again(start, where), op("*", op("-", again(count, where), literal(1)), literal(step))),
+                    "start");
+                step = -step;
+                continue;
+            }
+            auto const by = constant_int(flatten_expr(s));
+            if (!by.has_value() || by.value() < 1)
+            {
+                mark_failed();
+                return;
+            }
+            // as many values as a step of `by` reaches, rounded up; a count of none or fewer stays one of none
+            count = held(op("/", op("+", again(count, where), literal(by.value() - 1)), literal(by.value())), "count");
+            step *= by.value();
+        }
+        pending_walk = walk_mapping{.start = start, .step = step};
+        if (is_unrolled(id))
+            return flatten_unrolled_for(from, id, loop, literal(0), count);
+        flatten_looped_for(from, id, loop, literal(0), count);
+    }
+
     void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
     {
-        auto const* const r = ast::is_valid(loop.iterable) ? ast().at(loop.iterable).node.try_as<ast::range>() : nullptr;
+        auto const walk = ast::is_valid(loop.iterable) ? c.range_walk_of(file(), loop.iterable) : checker::range_walk();
+        auto const* const r = walk.range;
         if (r == nullptr)
         {
             mark_failed();
             return;
         }
+        if (!walk.steps.empty())
+            return flatten_walked_for(from, id, loop, walk);
         auto const first = flatten_expr(r->first);
         auto const end = flatten_expr(r->last);
         if (sgl::is_valid(r->op) && c.text_of(file(), c.file_of(file()).at(r->op).where) == "..=")
             return flatten_inclusive_for(from, id, loop, first, end);
-        if (c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr)
+        if (is_unrolled(id))
             return flatten_unrolled_for(from, id, loop, first, end);
         flatten_looped_for(from, id, loop, first, end);
     }
@@ -3344,11 +3519,11 @@ struct flattener
         }
         if (auto const* const print = s.node.try_as<ast::print_stmt>())
             return add_stmt(from, flat_print{.value = flatten_expr(print->message)});
-        // A test in a function body never runs where it stands (CHK-224), and a `require` is no code at all.
+        // A test in a function body never runs where it stands (CHK-224), and a `require` and a `const` are no code.
         if (auto const* const d = s.node.try_as<ast::decl_stmt>();
             d != nullptr && ast::is_valid(d->declaration)
-            && (ast().at(d->declaration).node.is<ast::test_decl>()
-                || ast().at(d->declaration).node.is<ast::require_decl>()))
+            && (ast().at(d->declaration).node.is<ast::test_decl>() || ast().at(d->declaration).node.is<ast::require_decl>()
+                || ast().at(d->declaration).node.is<ast::const_decl>()))
             return;
         if (auto const* const a = s.node.try_as<ast::assert_stmt>())
             return flatten_check(from, a->condition, true);
@@ -3441,8 +3616,25 @@ struct flattener
         {
             auto const& r = c.out.call_records[record];
             auto const values = flatten_written(c.out.at(r.written));
-            auto const inlined = inline_bound(value, where.symbol, values, c.out.at(r.slots));
+            // a function argument is handed over as a closure, and a generic callee takes its type arguments
+            auto const handed = written_closures;
+            auto const inlined
+                = inline_bound(value, where.symbol, values, c.out.at(r.slots), handed, c.out.at(r.type_arguments));
             return add_stmt(from, flat_block{.label = inlined.label, .body = inlined.body});
+        }
+        // CHK-319: a call through a parameter of function type that gives `void` is the block it inlines, a statement
+        if (record >= 0 && !is_valid(c.out.call_records[record].callee)
+            && tables().type_at(value) == checked_module::void_type)
+        {
+            auto const inlined = flatten_expr(value);
+            if (!is_valid(inlined))
+                return;
+            if (auto const* const b = entry.at(inlined).node.try_as<flat_block>())
+            {
+                auto const block = *b;
+                return add_stmt(from, flat_block{.label = block.label, .body = block.body});
+            }
+            return add_stmt(from, flat_eval{.value = inlined});
         }
         // Any other call has a value, which is evaluated where it stands and dropped.
         add_stmt(from, flat_eval{.value = flatten_expr(value)});
@@ -3651,7 +3843,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     // CHK-271: the stage struct, when there is one, is the first parameter; every other is a stage input
     if (!parameters.empty() && parameters[0].input == stage_input::none)
         f.entry.input = parameters[0].type;
-    f.entry.result = info.result;
+    f.entry.result = is_valid(info.pixel_targets) ? info.pixel_targets : info.result;
+    f.pixel_targets = info.pixel_targets;
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];

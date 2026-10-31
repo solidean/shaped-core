@@ -155,6 +155,41 @@ cc::string_view smoothstep_undefined(leaves in)
     return {};
 }
 
+/// The leaves of two scalar edges and a vector, each edge spread across the vector's width.
+result spread_edges(leaves in)
+{
+    auto const width = in.size() - 2;
+    auto spread = result();
+    for (auto const edge : {isize(0), isize(1)})
+        for (auto k = isize(0); k < width; ++k)
+            spread.push_back(in[edge]);
+    for (auto k = isize(0); k < width; ++k)
+        spread.push_back(in[2 + k]);
+    return spread;
+}
+
+void smoothstep_scalar_edges(leaves in, result& out)
+{
+    auto const spread = spread_edges(in);
+    smoothstep(spread, out);
+}
+
+cc::string_view smoothstep_scalar_edges_undefined(leaves in)
+{
+    auto const spread = spread_edges(in);
+    return smoothstep_undefined(spread);
+}
+
+/// CHK-406's rule for smoothstep's edges: no target but HLSL takes a scalar where a vector is, so each is the vector of it.
+written write_smoothstep_scalar_edges(call_context const& c)
+{
+    auto const vector = c.builtins.at(builtin_type_id(i32(c.data))).spelled_in(c.target);
+    return {.text = cc::format("smoothstep({0}({1}), {0}({2}), {3})", vector, c.arguments[0].text, c.arguments[1].text,
+                               c.arguments[2].text)};
+}
+
+constexpr cc::string_view k_smoothstep[] = {"smoothstep"};
+
 // ---- geometry ---------------------------------------------------------------------------------------------------
 
 void cross(leaves in, result& out)
@@ -307,6 +342,16 @@ void reinterpret_as_float(leaves in, result& out)
 {
     reinterpret(in, out, value_kind::scalar_float);
 }
+/// CHK-417: a half's 16 bits, as the low bits of a uint whose high bits are zero.
+void reinterpret_half_as_uint(leaves in, result& out)
+{
+    out.push_back(scalar::of_uint(half_bits_of(in[0].as_float())));
+}
+/// CHK-417: the half the low 16 bits of a uint are; the high bits are ignored.
+void reinterpret_uint_as_half(leaves in, result& out)
+{
+    out.push_back(scalar::of_half(f64(float_of_half_bits(in[0].bits & 0xffffu))));
+}
 
 // ---- how targets write what they spell differently ------------------------------------------------------------
 
@@ -455,6 +500,37 @@ written write_reinterpret(call_context const& c)
     return {};
 }
 
+/// CHK-417: the bits travel in a uint everywhere, since WGSL has no 16-bit integer (EMIT-109); WGSL reaches them as
+/// half of a 32-bit `vec2<f16>`, whose first component is its low bits.
+written write_half_as_uint(call_context const& c)
+{
+    auto const& x = c.arguments[0].text;
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("uint(asuint16({}))", x)};
+    case language::wgsl:
+        return {.text = cc::format("bitcast<u32>(vec2<f16>({}, 0.0h))", x)};
+    case language::msl:
+        return {.text = cc::format("uint(as_type<ushort>({}))", x)};
+    }
+    return {};
+}
+written write_uint_as_half(call_context const& c)
+{
+    auto const& x = c.arguments[0].text;
+    switch (c.target)
+    {
+    case language::hlsl:
+        return {.text = cc::format("asfloat16(uint16_t({} & 0xffffu))", x)};
+    case language::wgsl:
+        return {.text = cc::format("bitcast<vec2<f16>>({}).x", x)};
+    case language::msl:
+        return {.text = cc::format("as_type<half>(ushort({}))", x)};
+    }
+    return {};
+}
+
 /// HLSL has no packing of four bytes before shader model 6.6's integer forms, so the text declares one per function.
 cc::string hlsl_packing_helper(helper_context const& c, cc::string_view text)
 {
@@ -554,6 +630,7 @@ constexpr cc::string_view k_reverse_bits_wgsl[] = {"reverseBits"};
 constexpr cc::string_view k_reverse_bits_msl[] = {"reverse_bits"};
 constexpr cc::string_view k_reinterpret_hlsl[] = {"asfloat", "asint", "asuint"};
 constexpr cc::string_view k_reinterpret_wgsl[] = {"bitcast"};
+constexpr cc::string_view k_half_bits_hlsl[] = {"asuint16", "asfloat16"};
 constexpr cc::string_view k_as_type[] = {"as_type"};
 constexpr cc::string_view k_pack_unorm_hlsl[] = {"floor", "saturate"};
 constexpr cc::string_view k_pack_snorm_hlsl[] = {"floor", "clamp"};
@@ -668,6 +745,16 @@ void sgl::builtins::register_math(registry& r)
             "/// 0 where `x` is below `edge`, and 1 from it on.");
         add(r, cc::format("@pure fun smoothstep(low: {0}, high: {0}, x: {0}) -> {0}", t), smoothstep, {},
             smoothstep_undefined, false, "/// 0 up to `low`, 1 from `high` on, and a smooth Hermite curve between.");
+        if (auto const element = cc::string_view(t.starts_with("half") ? "half" : "float"); element != t)
+            add(r, cc::format("@pure fun smoothstep(low: {}, high: {}, x: {}) -> {}", element, element, t, t),
+                smoothstep_scalar_edges,
+                {.kind = spelling_kind::custom,
+                 .custom = write_smoothstep_scalar_edges,
+                 .data = u32(index_of(impl::registered_type(r, t))),
+                 .hlsl_names = k_smoothstep,
+                 .wgsl_names = k_smoothstep,
+                 .msl_names = k_smoothstep},
+                smoothstep_scalar_edges_undefined, false, "/// Each edge stands for the vector of it (CHK-406).");
     }
 
     r.add_comment("// whether a float or a half is a NaN or an infinity, per component; read from its bits on every\n"
@@ -804,6 +891,19 @@ void sgl::builtins::register_math(registry& r)
              .hlsl_names = k_reinterpret_hlsl,
              .wgsl_names = k_reinterpret_wgsl,
              .msl_names = k_as_type});
+    r.add_comment("// a half's bits travel as the low 16 bits of a uint, on every target (CHK-417)");
+    add(r, "@pure fun reinterpret_as_uint(x: half) -> uint", reinterpret_half_as_uint,
+        {.kind = spelling_kind::custom,
+         .custom = write_half_as_uint,
+         .hlsl_names = k_half_bits_hlsl,
+         .wgsl_names = k_reinterpret_wgsl,
+         .msl_names = k_as_type});
+    add(r, "@pure fun reinterpret_as_half(x: uint) -> half", reinterpret_uint_as_half,
+        {.kind = spelling_kind::custom,
+         .custom = write_uint_as_half,
+         .hlsl_names = k_half_bits_hlsl,
+         .wgsl_names = k_reinterpret_wgsl,
+         .msl_names = k_as_type});
 
     r.add_comment("// packing into a uint and back: bytes rounded half up, as floor(x + 0.5), and halves rounded to "
                   "even");

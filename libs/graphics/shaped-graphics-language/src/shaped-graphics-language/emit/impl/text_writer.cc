@@ -751,8 +751,16 @@ struct writer
         close();
     }
 
+    /// CHK-414: the target's hint ahead of a loop written `@unroll(false)`.
+    void hint_rolled(check::label_id label)
+    {
+        if (check::is_valid(label) && p.e.labels[index_of(label)].is_rolled && !d.rolled_loop_hint().empty())
+            line(d.rolled_loop_hint());
+    }
+
     void loop_while(flat_while const& s)
     {
+        hint_rolled(s.label);
         if (!writes_lines(s.condition))
         {
             open(condition_text("while", expr(s.condition).text));
@@ -897,6 +905,7 @@ struct writer
             [&](flat_case const&) {},
             [&](flat_loop const& l)
             {
+                hint_rolled(l.label);
                 open(d.is_c_like() ? "while (true)" : "loop");
                 body(l.body);
                 close();
@@ -908,6 +917,7 @@ struct writer
                 auto const end = wrapped(expr(f.end), level::additive);
                 auto head = cc::string();
                 d.write_for_head(head, p.locals[index_of(f.index)], first, end);
+                hint_rolled(f.label);
                 open(head);
                 body(f.body);
                 close();
@@ -1033,6 +1043,9 @@ void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect cons
 
 cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, check::type_id type)
 {
+    // what a pixel stage that writes images alone returns, which HLSL and MSL spell as C does (CHK-418)
+    if (type == check::checked_module::void_type)
+        return "void";
     if (auto const* const record = p.m.builtin_type_of(type))
         return record->spelled_in(d.language());
     // An enum is its cases' `int` on every target (EVAL-64); the constants of EMIT-76 are what its values read as.

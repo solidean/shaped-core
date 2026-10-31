@@ -77,3 +77,58 @@ fun first_square_above(n: int) -> int:
     return found
 
 test first_square_above(10) == 4
+
+// a range walked backwards or in steps, the two composed in the order written (CHK-415, EVAL-102)
+fun digits(walk: int) -> int:
+    let mut acc = 0
+    if walk == 0:
+        for i in (0 ..< 4).reversed:
+            acc = acc * 10 + i
+    else if walk == 1:
+        for i in (1 ..= 9).by(3):
+            acc = acc * 10 + i
+    else if walk == 2:
+        for i in (0 ..< 8).by(3).reversed:
+            acc = acc * 10 + i
+    else:
+        for i in (0 ..< 8).reversed.by(3):
+            acc = acc * 10 + i
+    return acc
+
+test digits(0) == 3210
+test digits(1) == 147
+test digits(2) == 630
+test digits(3) == 741
+
+// a walk of bounds no constant evaluates them once, and an empty range walks nothing
+fun walked_sum(first: int, last: int) -> int:
+    let mut total = 0
+    for i in (first ..< last).by(2).reversed:
+        total = total * 100 + i
+    return total
+
+test walked_sum(3, 8) == 70503
+test walked_sum(5, 5) == 0 and walked_sum(6, 2) == 0
+
+// unrolled, each copy reads its value of the walk as a literal
+test:
+    let mut seen = 0
+    @unroll
+    for i in (0 ..< 3).reversed:
+        seen = seen * 10 + i
+    seen == 210
+
+@expect(error = "invalid-constant-argument")
+test:
+    let s = 2
+    let mut n = 0
+    for i in (0 ..< 8).by(s):
+        n += 1
+    n == 4
+
+@expect(error = "invalid-constant-argument")
+test:
+    let mut n = 0
+    for i in (0 ..< 8).by(0):
+        n += 1
+    n == 0

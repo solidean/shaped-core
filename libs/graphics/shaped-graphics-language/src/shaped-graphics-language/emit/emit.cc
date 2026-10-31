@@ -129,11 +129,11 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     // EMIT-109: WebGPU has none of these on any device, and the text would spell a type WGSL does not have.
     if (t == target::wgsl)
     {
-        auto const never = check::feature_set(check::feature::binding_arrays)
-                         | check::feature::multisampled_array_textures | check::feature::raytracing_pipeline
-                         | check::feature::geometry_shader | check::feature::tessellation_shader
-                         | check::feature::shader_int16 | check::feature::device_coherence
-                         | check::feature::image_atomics | check::feature::helper_lane_query;
+        auto const never
+            = check::feature_set(check::feature::binding_arrays) | check::feature::multisampled_array_textures
+            | check::feature::raytracing_pipeline | check::feature::geometry_shader
+            | check::feature::tessellation_shader | check::feature::shader_int16 | check::feature::device_coherence
+            | check::feature::image_atomics | check::feature::helper_lane_query | check::feature::vertex_layer_output;
         for (auto i = isize(0); i < check::k_feature_count; ++i)
             if (e.features.has(check::feature(i)) && never.has(check::feature(i)))
                 result.errors.push_back({.kind = error_kind::target_lacks_feature,
@@ -234,7 +234,9 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     for (auto const& s : plan.samplers)
         result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);
-    if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none)
+    // a pixel stage that writes images alone has no target struct at all (CHK-418)
+    if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none
+        && e.result != check::checked_module::void_type)
     {
         // a depth or a sample mask is an output of its own and no target (EMIT-130)
         result.color_targets = 0;

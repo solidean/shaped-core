@@ -37,6 +37,8 @@ struct semantic_tokens_legend;
 struct semantic_tokens;
 struct inlay_hint_params;
 struct inlay_hint;
+struct code_action_params;
+struct code_action;
 struct log_message_params;
 
 class text_index;

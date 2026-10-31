@@ -204,6 +204,30 @@ struct form_parser
         return false;
     }
 
+    /// FORM-43: no keyword form has a keyword followed by an ascription, or by an assignment right after another
+    /// keyword, so that keyword is a name, which the tree holds as an identifier once it is reported.
+    /// `rays = set` in a pipeline is a keyword followed by an assignment, which is why the second needs a keyword before.
+    [[nodiscard]] bool is_keyword_as_name(group_id g) const
+    {
+        if (!is_keyword(g))
+            return false;
+        auto const n = next_of(g);
+        if (!is_valid(n))
+            return false;
+        if (is_token(n, token_kind::colon))
+            return true;
+        return is_valid(c.previous) && c.previous != g && is_keyword(c.previous) && is_token(n, token_kind::op)
+            && !is_prefix_shaped(n) && !is_postfix_shaped(n) && classify(text_of(n)) == operator_class::assignment;
+    }
+
+    form_id keyword_as_name()
+    {
+        report(diagnostic_kind::keyword_as_name, span_of_group(c.at));
+        auto const result = leaf(form_kind::identifier, c.at);
+        advance();
+        return result;
+    }
+
     [[nodiscard]] bool is_word_operator(group_id g) const
     {
         return is_word(g, "and") || is_word(g, "or") || is_word(g, "not") || is_word(g, "as") || is_word(g, "in");
@@ -548,7 +572,7 @@ struct form_parser
     /// A keyword form, or an expression — which becomes a keyword form without keywords when a block hangs off it.
     form_id parse_head()
     {
-        if (!at_end() && is_keyword(c.at))
+        if (!at_end() && is_keyword(c.at) && !is_keyword_as_name(c.at))
             return parse_keyword_form();
 
         auto const expression = parse_level(level::connective);
@@ -575,7 +599,7 @@ struct form_parser
     {
         auto const result = make({.kind = form_kind::keyword_form});
         auto last = form_id::none;
-        while (!at_end() && is_keyword(c.at))
+        while (!at_end() && is_keyword(c.at) && !is_keyword_as_name(c.at))
         {
             add_child(result, leaf(form_kind::keyword, c.at), last);
             advance();
@@ -993,6 +1017,8 @@ struct form_parser
 
         case token_kind::symbol:
         {
+            if (is_keyword_as_name(g))
+                return keyword_as_name();
             if (is_keyword(g))
                 return parse_keyword_form();
             auto const text = text_of(g);

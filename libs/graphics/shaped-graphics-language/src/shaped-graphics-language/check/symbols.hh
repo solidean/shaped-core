@@ -328,6 +328,8 @@ struct sgl::check::member_info
     ast::field_id field = ast::field_id::none;
     /// Carries `@position`.
     bool is_position = false;
+    /// Carries `@layer`: the layer of a layered render target the vertex stage sends its primitive to (CHK-419).
+    bool is_layer = false;
     /// `@interpolate(…)`, or the default: perspective at the pixel centre.
     interpolation interpolate;
     /// Carries `@interpolate` at all, which a member that is no stage link must not.
@@ -550,6 +552,9 @@ struct sgl::check::function_info
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
+    /// A pixel entry point that returns one color value (CHK-418): the `@pixel struct` of one member, `color`, which
+    /// the checker mints and every return builds; none for one that returns its `@pixel struct`, or nothing.
+    type_id pixel_targets = type_id::none;
     /// `@geometry(max_vertices = N)`'s `N`; 0 for every other stage.
     i32 max_vertices = 0;
     /// `@tessellation_control(partitioning = …, winding = …)`; the first of each for every other stage.
@@ -834,6 +839,9 @@ struct sgl::check::written_argument
     i32 splat_member = -1;
     /// `mut x`: the caller's place, for a `mut` parameter (AST-149, CHK-316).
     bool is_mut = false;
+    /// A dot call's receiver that is a place a body could assign: it meets a `mut` parameter as `mut x` would, and
+    /// any other as a value (CHK-416); a call that binds it to a `mut` parameter records it `is_mut`.
+    bool may_be_mut = false;
     /// A function handed to a parameter of function type: a function's name, an arrow lambda, or such a parameter
     /// handed on (CHK-318); what it stands for is its expression's target.
     bool is_function = false;

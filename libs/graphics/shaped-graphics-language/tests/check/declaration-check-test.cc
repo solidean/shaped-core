@@ -370,7 +370,17 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
 
     CHECK(entry_reports("@pixel fun ps(v: vout) -> target:\n    return { c = float4(..v.p) }\n") == "");
     CHECK(entry_reports("@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n")
-          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct\n");
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    // CHK-418: one color value is a target of its own, and nothing is no target; a strong vector or a bool is neither
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> float4 => float4(..v.p)\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> uint2 => uint2(1u, 2u)\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout):\n    let unused = v.p\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> bool => true\n")
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> vec3 => vec3(1.0, 0.0, 0.0)\n")
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    // the attributes of its result are its target's settings, and no other function's result takes one
+    CHECK(entry_reports("fun f() -> @blend(.none) float4 => float4(1.0)\n").contains("an attribute on a type"));
     CHECK(entry_reports("@pixel fun ps(v: float) -> target:\n    return { c = float4(v, v, v, v) }\n")
           == "invalid-entry-point user:[ps] the struct parameter of an entry point is a struct with fields\n");
     CHECK(entry_reports("@pixel fun ps(v: vout, @is_front_facing f: bool, @sample_mask m: uint) -> target:\n"
@@ -546,4 +556,25 @@ TEST("sgl check - only a pixel entry point may reach discard")
                       + "struct vout:\n    @position p: hpos4\n@pixel struct target:\n    c: float4\n"
                         "@pixel fun ps(v: vout) -> target:\n    return { c = float4(cut(v.p.x), 0.0, 0.0, 1.0) }\n")
           == "");
+}
+
+TEST("sgl check - a vertex stage's @layer is one uint the rasterizer reads, and needs vertex_layer_output")
+{
+    // CHK-419
+    auto const layered = [](cc::string_view fields, cc::string_view require = "require vertex_layer_output\n\n")
+    {
+        return reports_for(cc::format("{}struct layered_out:\n    @position p: hpos4\n{}\n"
+                                      "@vertex fun vs(@instance_index i: int) -> layered_out:\n"
+                                      "    return {{ p = hpos4(0.0, 0.0, 0.0, 1.0), layer = i as uint }}\n",
+                                      require, fields));
+    };
+    CHECK(layered("    @layer layer: uint\n") == "");
+    CHECK(layered("    @layer layer: uint\n", "").contains("feature-not-declared user:[vs] vs needs vertex_layer_output"));
+    CHECK(layered("    @layer layer: int\n").contains("the @layer field 'layer' of a @vertex fun is a uint"));
+    CHECK(layered("    @layer @interpolate(.flat) layer: uint\n")
+              .contains("the @layer member 'layer' is the rasterizer's, and is no interpolated value"));
+    // a struct no rasterizer reads has no layer to pick
+    CHECK(reports_for("@vertex struct vin:\n    @layer layer: uint\n\nstruct layered_out:\n    @position p: hpos4\n\n"
+                      "@vertex fun vs(v: vin) -> layered_out:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
+              .contains("reaches no rasterizer, so @layer means nothing on it"));
 }

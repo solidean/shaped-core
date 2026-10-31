@@ -54,7 +54,18 @@ bool checker::is_type_name(i32 file, ast::expr_id expr) const
     return kind == symbol_kind::structure || kind == symbol_kind::enumeration;
 }
 
-cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
+i32 checker::case_index_of(type_id type, cc::string_view name) const
+{
+    if (!is_valid(type) || type == checked_module::error_type || out.at(type).kind != type_kind::enumeration)
+        return -1;
+    auto const cases = out.at(out.at(type).cases);
+    for (auto i = isize(0); i < cases.size(); ++i)
+        if (cases[i].name == name)
+            return i32(i);
+    return -1;
+}
+
+cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr, function_scope const* scope)
 {
     auto const& e = ast_of(file).at(expr);
     auto const text = text_of(file, span_of(file, expr));
@@ -63,10 +74,21 @@ cc::optional<i32> checker::constant_count(i32 file, ast::expr_id expr)
     auto const* const n = e.node.try_as<ast::name>();
     if (n == nullptr)
         return {};
-    auto const* const found = names_seen_from(file).get_ptr(text);
-    if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::constant)
-        return {};
-    auto const id = found->front();
+    // a local hides a file-scope const of its name, unless it is a function's own `const` (CHK-413)
+    auto id = symbol_id::none;
+    if (auto const* const local = scope != nullptr ? scope->find_local(text) : nullptr)
+    {
+        if (local->where.kind != target_kind::symbol)
+            return {};
+        id = local->where.symbol;
+    }
+    else
+    {
+        auto const* const found = names_seen_from(file).get_ptr(text);
+        if (found == nullptr || found->empty() || out.at(found->front()).kind != symbol_kind::constant)
+            return {};
+        id = found->front();
+    }
     set_target(file, expr, {.kind = target_kind::symbol, .symbol = id});
     if (demand(id, file, span_of(file, expr)) != symbol_state::checked)
         return {};
@@ -149,8 +171,9 @@ type_id checker::resolve_array(i32 file, ast::expr_id expr, ast::index const& no
     auto counts = cc::vector<i32>();
     for (auto const& a : arguments)
     {
-        auto const count = !a.name.empty() || a.is_splat || !ast::is_valid(a.value) ? cc::optional<i32>()
-                                                                                    : constant_count(file, a.value);
+        auto const count = !a.name.empty() || a.is_splat || !ast::is_valid(a.value)
+                             ? cc::optional<i32>()
+                             : constant_count(file, a.value, scope);
         if (!count.has_value() || count.value() < 1)
         {
             report(diagnostic_kind::invalid_constant_argument, file,
@@ -251,9 +274,35 @@ type_id checker::check_filled(function_scope& scope, ast::expr_id id, ast::call 
                cc::format("{}.filled takes the one value every element holds", out.name_of(type)));
         return error_type;
     }
-    if (check_expected(scope, arguments[0].value, out.at(type).element, "the value it is filled with")
-        != out.at(type).element)
+    auto const element = out.at(type).element;
+    auto const value = arguments[0].value;
+    if (out.at(element).kind != type_kind::array || ast.at(value).node.is<ast::array>())
+    {
+        if (check_expected(scope, value, element, "the value it is filled with") != element)
+            return error_type;
+        set_target(file, id, {.kind = target_kind::array_filled});
+        return type;
+    }
+
+    // CHK-289: a nested array is filled with a row, or with the innermost element, which then stands in every scalar
+    auto innermost = element;
+    while (out.at(innermost).kind == type_kind::array)
+        innermost = out.at(innermost).element;
+    auto const got = check_expr(scope, value);
+    if (got == error_type)
         return error_type;
+    if (got != element && got != innermost)
+    {
+        auto const number = number_of(file, value);
+        if (!number.is_number || !holds(number, innermost))
+        {
+            report(diagnostic_kind::type_mismatch, file, span_of(file, value),
+                   cc::format("the value it is filled with is {} or {}, got {}", out.name_of(element),
+                              out.name_of(innermost), out.name_of(got)));
+            return error_type;
+        }
+        set_type(file, value, innermost);
+    }
     set_target(file, id, {.kind = target_kind::array_filled});
     return type;
 }
