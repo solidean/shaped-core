@@ -148,6 +148,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "ambiguous-overload";
     case diagnostic_kind::type_mismatch:
         return "type-mismatch";
+    case diagnostic_kind::as_precedence:
+        return "as-precedence";
     case diagnostic_kind::dependency_cycle:
         return "dependency-cycle";
     case diagnostic_kind::unknown_module:
@@ -408,6 +410,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "two functions of this name take exactly these arguments";
     case diagnostic_kind::type_mismatch:
         return "a value of another type than the one expected here";
+    case diagnostic_kind::as_precedence:
+        return "an `as` whose type is arithmetic: `as` binds looser, so parenthesize the conversion";
     case diagnostic_kind::dependency_cycle:
         return "a declaration that needs itself to be compiled";
     case diagnostic_kind::unknown_module:
@@ -594,6 +598,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::no_matching_overload:
     case diagnostic_kind::ambiguous_overload:
     case diagnostic_kind::type_mismatch:
+    case diagnostic_kind::as_precedence:
     case diagnostic_kind::dependency_cycle:
     case diagnostic_kind::unknown_module:
     case diagnostic_kind::module_cycle:

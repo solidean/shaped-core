@@ -122,6 +122,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     /// Two candidates take exactly these argument types.
     ambiguous_overload,
     type_mismatch,
+    /// An `as` whose type is an arithmetic run, `x as float - y`: `as` binds looser than arithmetic (CHK-411).
+    as_precedence,
     /// A symbol that needs itself to be compiled.
     dependency_cycle,
     /// A `use` that names a module no file of the library declares.

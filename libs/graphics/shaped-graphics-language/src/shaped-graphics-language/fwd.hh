@@ -325,6 +325,8 @@ struct test_expectation;
 struct entry_expectation;
 struct test_info;
 struct related_note;
+struct fix_edit;
+struct suggested_fix;
 struct located_diagnostic;
 struct checked_module;
 struct module_file;

@@ -195,6 +195,23 @@ struct lsp::inlay_hint
     cc::vector<text_edit> text_edits;
 };
 
+struct lsp::code_action_params
+{
+    cc::string uri;
+    lsp::range range;
+};
+
+/// A quick fix: the edits of one document that resolve `diagnostics`.
+struct lsp::code_action
+{
+    cc::string title;
+    cc::vector<diagnostic> diagnostics;
+    bool is_preferred = false;
+    /// The document `edits` change.
+    cc::string uri;
+    cc::vector<text_edit> edits;
+};
+
 struct lsp::log_message_params
 {
     message_type type = message_type::log;
@@ -215,6 +232,7 @@ namespace lsp
 [[nodiscard]] bool read(json::ref in, did_change_params& out);
 [[nodiscard]] bool read(json::ref in, did_close_params& out);
 [[nodiscard]] bool read(json::ref in, inlay_hint_params& out);
+[[nodiscard]] bool read(json::ref in, code_action_params& out);
 
 // writing
 void write_fields(json::writer& w, position const& v);
@@ -227,5 +245,6 @@ void write_fields(json::writer& w, publish_diagnostics_params const& v);
 void write_fields(json::writer& w, semantic_tokens_legend const& v);
 void write_fields(json::writer& w, semantic_tokens const& v);
 void write_fields(json::writer& w, inlay_hint const& v);
+void write_fields(json::writer& w, code_action const& v);
 void write_fields(json::writer& w, log_message_params const& v);
 } // namespace lsp

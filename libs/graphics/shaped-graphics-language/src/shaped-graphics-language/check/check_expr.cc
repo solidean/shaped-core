@@ -457,10 +457,106 @@ type_id checker::check_texel_conversion(i32 file, ast::expr_id id, type_id from,
     return to;
 }
 
+bool checker::report_as_precedence(i32 file, ast::expr_id id)
+{
+    auto const& ast = ast_of(file);
+    auto const source = cc::string_view(file_of(file).source);
+    // `(a + b)` leaves no node, so whether a node was parenthesized is read from the text around it
+    auto const is_parenthesized = [&](ast::expr_id e)
+    {
+        auto const where = span_of(file, e);
+        auto before = isize(where.offset) - 1;
+        while (before >= 0 && source[before] == ' ')
+            --before;
+        auto after = isize(where.end());
+        while (after < source.size() && source[after] == ' ')
+            ++after;
+        return before >= 0 && source[before] == '(' && after < source.size() && source[after] == ')';
+    };
+    auto const operator_of = [&](ast::expr_id e) -> cc::string_view
+    {
+        auto const* const c = ast.at(e).node.try_as<ast::call>();
+        if (c == nullptr || c->spelling != ast::call_spelling::infix || !sgl::is_valid(c->op) || is_parenthesized(e))
+            return {};
+        auto const op = text_of(file, file_of(file).at(c->op).where);
+        for (auto const arithmetic : {"+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>"})
+            if (op == arithmetic)
+                return op;
+        return {};
+    };
+    auto const cast_of = [&](ast::expr_id e, bool is_root) -> ast::cast const*
+    {
+        auto const* const c = ast.at(e).node.try_as<ast::cast>();
+        return c != nullptr && (is_root || !is_parenthesized(e)) ? c : nullptr;
+    };
+    // the run reaches through the value of each cast, since `a as T - b as U` is `(a as (T - b)) as U`
+    auto first_slip = ast::expr_id::none;
+    for (auto e = id; e != ast::expr_id::none;)
+    {
+        auto const* const c = cast_of(e, e == id);
+        if (c == nullptr)
+            break;
+        if (!operator_of(c->type).empty())
+            first_slip = c->type;
+        e = c->value;
+    }
+    if (first_slip == ast::expr_id::none)
+        return false;
+
+    // the run as written, its operands and its operators in order, `as` among them
+    auto operands = cc::vector<cc::string>();
+    auto operators = cc::vector<cc::string_view>();
+    auto const flatten = [&](auto const& self, ast::expr_id e, bool is_root) -> void
+    {
+        if (auto const* const c = cast_of(e, is_root))
+        {
+            self(self, c->value, false);
+            operators.push_back("as");
+            self(self, c->type, false);
+            return;
+        }
+        if (auto const op = operator_of(e); !op.empty())
+        {
+            auto const arguments = ast.at(ast.at(e).node.as<ast::call>().arguments);
+            self(self, arguments[0].value, false);
+            operators.push_back(op);
+            self(self, arguments[1].value, false);
+            return;
+        }
+        auto const text = text_of(file, span_of(file, e));
+        operands.push_back(is_parenthesized(e) ? cc::format("({})", text) : cc::string(text));
+    };
+    flatten(flatten, id, true);
+
+    // the reading the author meant: each `as` takes the operand before it
+    auto fixed = cc::string();
+    auto current = operands[0];
+    for (auto i = isize(0); i < operators.size(); ++i)
+    {
+        if (operators[i] == "as")
+            current = cc::format("({} as {})", current, operands[i + 1]);
+        else
+        {
+            fixed.appendf("{} {} ", current, operators[i]);
+            current = operands[i + 1];
+        }
+    }
+    fixed += current;
+
+    auto const where = span_of(file, id);
+    auto& d = report(diagnostic_kind::as_precedence, file, where,
+                     cc::format("`as` binds looser than `{}`, so this converts to the type `{}`; write `{}`",
+                                operator_of(first_slip), text_of(file, span_of(file, first_slip)), fixed));
+    d.fixes.push_back({.title = cc::format("Convert each operand first: {}", fixed), .edits = {{where, fixed}}});
+    return true;
+}
+
 type_id checker::check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node)
 {
     auto const file = scope.file;
     auto const where = span_of(file, id);
+    if (report_as_precedence(file, id))
+        return error_type;
     auto const from = check_expr(scope, node.value);
     auto const to = resolve_value_type(file, node.type);
     if (from == error_type || to == error_type)

@@ -18,6 +18,8 @@ This page is for whoever works on the server.
   Only the server can tell an atomic `max` from a plain one, so the grammar colours just the names that are unique.
 * **Inlay hints**: ` : type` after every `let` that writes no type, and `-> type` before the `=>` of every function or property whose return type is inferred.
   Each inserts itself when accepted, except on a property of a type body, which takes no `-> type`.
+* **Quick fixes**: a diagnostic the checker knows a fix for carries it as `located_diagnostic::fixes`, and `textDocument/codeAction` offers each as a `quickfix`.
+  The one fix of a diagnostic is the preferred one, so an editor's "fix all" applies it; `as-precedence` is the first.
 * **Tests**: after every check the server runs the document's tests itself.
   It then sends `sgl/checkResults`, every check and assert with how often it held and failed, which the extension draws as gutter marks.
 

@@ -21,6 +21,29 @@ struct sgl::check::related_note
     bool operator==(related_note const&) const = default;
 };
 
+/// One replacement of source text, in the file of the diagnostic that suggests it.
+struct sgl::check::fix_edit
+{
+    source_span where;
+    cc::string text;
+
+    bool operator==(fix_edit const&) const = default;
+};
+
+/// An edit that makes a diagnostic go away, which an editor offers as a quick fix.
+/// Its edits never overlap, and applying them all is the fix.
+struct sgl::check::suggested_fix
+{
+    /// What the fix does, as a menu shows it: "Convert each operand first".
+    cc::string title;
+    cc::vector<fix_edit> edits;
+
+    [[nodiscard]] bool operator==(suggested_fix const& rhs) const
+    {
+        return title == rhs.title && ast::impl::is_equal(edits, rhs.edits);
+    }
+};
+
 /// A diagnostic of the check pass.
 /// A module has several files, so the span alone does not say where it points.
 struct sgl::check::located_diagnostic
@@ -37,11 +60,13 @@ struct sgl::check::located_diagnostic
     /// (CHK-402).
     /// Empty for a diagnostic of the program, which every compile of it reports.
     cc::vector<symbol_id> entry_points;
+    /// The edits that would fix it, where the checker knows them.
+    cc::vector<suggested_fix> fixes;
 
     [[nodiscard]] bool operator==(located_diagnostic const& rhs) const
     {
         return what == rhs.what && file == rhs.file && detail == rhs.detail && ast::impl::is_equal(notes, rhs.notes)
-            && ast::impl::is_equal(entry_points, rhs.entry_points);
+            && ast::impl::is_equal(entry_points, rhs.entry_points) && ast::impl::is_equal(fixes, rhs.fixes);
     }
 };
 

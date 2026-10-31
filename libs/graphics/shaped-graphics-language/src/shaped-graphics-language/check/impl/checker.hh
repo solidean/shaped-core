@@ -954,6 +954,9 @@ struct checker
     void check_texel_store(function_scope& scope, ast::expr_id value, type_id type);
     /// `x as T`, which is the operator function of `as` that takes `x` and gives `T`; the error type where none does.
     [[nodiscard]] type_id check_cast(function_scope& scope, ast::expr_id id, ast::cast const& node);
+    /// CHK-411: an `as` whose type is an arithmetic run, reported once over the whole run with the fix that converts
+    /// each operand; false where the cast is no such run.
+    [[nodiscard]] bool report_as_precedence(i32 file, ast::expr_id id);
     /// The `as` overload visible from `file` that converts `from` to `to`, or `none` where there is no such conversion
     /// (CHK-197).
     [[nodiscard]] symbol_id conversion_of(i32 file, source_span where, type_id from, type_id to);

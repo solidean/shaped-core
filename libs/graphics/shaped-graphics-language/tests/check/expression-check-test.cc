@@ -630,3 +630,36 @@ TEST("sgl check - a let mut without a value is read only after every path assign
     CHECK(body_reports("let v: float\nreturn k\n").contains("a let without a value that is no `let mut`"));
     CHECK(body_reports("let mut v\nreturn k\n").contains("a let without a value or a written type"));
 }
+
+TEST("sgl check - an as whose type is arithmetic names the precedence, and its fix converts each operand")
+{
+    // CHK-411: reported once over the run, whose fix gives each `as` the operand before it
+    auto const prefix = cc::string("fun f(xx: int, center: int) -> float:\n    let d = ");
+    auto const slip_in = [&](cc::string_view line) -> cc::optional<sgl::check::located_diagnostic>
+    {
+        auto const s = check_sources(read_prelude(), prefix + line + "\n    return d\n");
+        auto found = cc::optional<sgl::check::located_diagnostic>();
+        for (auto const& d : s.module.diagnostics)
+            if (d.what.kind == sgl::diagnostic_kind::as_precedence)
+            {
+                CHECK(!found.has_value()).dump("reports", reports_of(s));
+                found = d;
+            }
+        return found;
+    };
+
+    auto const slip = slip_in("xx as float - center as float");
+    REQUIRE(slip.has_value());
+    CHECK(slip.value().detail.contains("`as` binds looser than `-`, so this converts to the type `float - center`"))
+        .dump("detail", slip.value().detail);
+    REQUIRE(slip.value().fixes.size() == 1);
+    REQUIRE(slip.value().fixes[0].edits.size() == 1);
+    CHECK(slip.value().fixes[0].edits[0].text == "(xx as float) - (center as float)");
+    CHECK(slip.value().fixes[0].edits[0].where.offset == prefix.size());
+
+    // a parenthesized operand stays whole, and `a + b as float` converts the sum, as written
+    auto const grouped = slip_in("(xx + 1) as float * 2.0 + center as float");
+    REQUIRE(grouped.has_value());
+    CHECK(grouped.value().fixes[0].edits[0].text == "((xx + 1) as float) * 2.0 + (center as float)");
+    CHECK(reports_for(prefix + "(xx + center) as float\n    return d\n") == "");
+}
