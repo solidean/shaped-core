@@ -391,6 +391,8 @@ struct checker
     cc::vector<function_argument> function_arguments;
     /// True while a parameter's type is resolved, the one place a function type may stand (CHK-317).
     bool allows_function_type = false;
+    /// The type being resolved is a pixel entry point's result, whose attributes are its target's settings (CHK-418).
+    bool allows_type_attributes = false;
     cc::map<cc::string, cc::vector<type_id>> interned_types;
     cc::vector<pending_extension> pending_extensions;
     /// Integer literals that do not fit an `int`, judged once every literal has met the type it converts to (CHK-61).
@@ -1007,6 +1009,10 @@ struct checker
     /// The symbol of the `const` that `decl` of a function body declares, minted once however often the body is
     /// checked.
     [[nodiscard]] symbol_id local_constant_of(function_scope const& scope, ast::decl_id decl);
+    /// A numeric scalar or a plain vector of `float`, `half`, `int` or `uint`, which a color target holds (CHK-418).
+    [[nodiscard]] bool is_color_value(type_id type) const;
+    /// The `@pixel struct` a pixel entry point returning one `color` stands in for, minted under a name nothing has.
+    [[nodiscard]] type_id pixel_targets_of(symbol_id entry, type_id color);
     /// A `loop:`; the result is the type its breaks carry, and `nothing` for one that is a statement.
     /// `has_break` is false for a loop nothing leaves, which never ends.
     [[nodiscard]] type_id check_loop(function_scope& scope,

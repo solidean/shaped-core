@@ -370,7 +370,17 @@ TEST("sgl check - an entry point's signature follows the rules of its stage")
 
     CHECK(entry_reports("@pixel fun ps(v: vout) -> target:\n    return { c = float4(..v.p) }\n") == "");
     CHECK(entry_reports("@pixel fun ps(v: vout) -> plain:\n    return { p = pos3(1.0, 1.0, 1.0) }\n")
-          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct\n");
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    // CHK-418: one color value is a target of its own, and nothing is no target; a strong vector or a bool is neither
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> float4 => float4(..v.p)\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> uint2 => uint2(1u, 2u)\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout):\n    let unused = v.p\n") == "");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> bool => true\n")
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    CHECK(entry_reports("@pixel fun ps(v: vout) -> vec3 => vec3(1.0, 0.0, 0.0)\n")
+          == "invalid-entry-point user:[ps] a @pixel fun returns a @pixel struct, one color value or nothing\n");
+    // the attributes of its result are its target's settings, and no other function's result takes one
+    CHECK(entry_reports("fun f() -> @blend(.none) float4 => float4(1.0)\n").contains("an attribute on a type"));
     CHECK(entry_reports("@pixel fun ps(v: float) -> target:\n    return { c = float4(v, v, v, v) }\n")
           == "invalid-entry-point user:[ps] the struct parameter of an entry point is a struct with fields\n");
     CHECK(entry_reports("@pixel fun ps(v: vout, @is_front_facing f: bool, @sample_mask m: uint) -> target:\n"

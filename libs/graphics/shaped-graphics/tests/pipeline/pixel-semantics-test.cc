@@ -318,3 +318,53 @@ ASYNC_INVOCABLE_TEST("sg - gather returns a 2 x 2 footprint's texels in the one 
     CHECK(near(got[0][2], 0.4f));
     CHECK(near(got[0][3], 0.2f));
 }
+
+ASYNC_INVOCABLE_TEST("sg - a pixel stage returns one color without a struct, or nothing and writes memory alone",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+
+    // CHK-418: `direct_ps` returns its float4, which is the one target of the struct SGL mints for it
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 7);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const direct = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::direct_tags);
+    auto const pixels = co_await sg_test::draw_offscreen(*ctx,
+                                                         {.width = 4,
+                                                          .height = 2,
+                                                          .colors = {sg::pixel_format::rgba32_float},
+                                                          .target_set = shaders::pixel_semantics::direct_ps_target::name},
+                                                         [&](sg::rendering_scope& scope)
+                                                         {
+                                                             scope.bind_pipeline(*direct);
+                                                             scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                                             scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                                         });
+    CHECK(pixels[0].rgba_float(1, 1) == tg::vec4f(7, 1, 0, 1));
+
+    // `marking_ps` returns nothing: its pipeline has a depth target alone, and every pixel marks its slot
+    auto const marking = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::marked);
+    auto const marks = ctx->persistent.create_buffer_from_data(
+        cc::vector<u32>::create_defaulted(8), sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src);
+    auto const group = ctx->persistent.create_binding_group(
+        ctx->cached.acquire_binding_group_layout<shaders::pixel_semantics::pixel_marks>(),
+        shaders::pixel_semantics::pixel_marks{.marks = marks.as_readwrite_buffer()});
+    (void)co_await sg_test::draw_offscreen(*ctx,
+                                           {.width = 4, .height = 2, .depth_stencil = sg::pixel_format::depth32_float},
+                                           [&](sg::rendering_scope& scope)
+                                           {
+                                               scope.bind_pipeline(*marking);
+                                               scope.bind_group(0, *group);
+                                               scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+                                               scope.draw({.vertex_range = {.offset = 0, .size = 6}});
+                                           });
+    auto cmd = ctx->create_command_list();
+    auto const back = cmd->download.data_from_buffer(marks);
+    ctx->submit_command_list(cc::move(cmd));
+    auto const got = co_await back.data();
+    REQUIRE(got.size() == 8);
+    for (auto i = 0; i < 8; ++i)
+        CHECK(got[i] == 8u).context(cc::format("slot {}", i));
+}

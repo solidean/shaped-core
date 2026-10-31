@@ -1043,6 +1043,9 @@ void sgl::emit::impl::write_buffers(cc::string& out, plan const& p, dialect cons
 
 cc::string_view sgl::emit::impl::type_text(plan const& p, dialect const& d, check::type_id type)
 {
+    // what a pixel stage that writes images alone returns, which HLSL and MSL spell as C does (CHK-418)
+    if (type == check::checked_module::void_type)
+        return "void";
     if (auto const* const record = p.m.builtin_type_of(type))
         return record->spelled_in(d.language());
     // An enum is its cases' `int` on every target (EVAL-64); the constants of EMIT-76 are what its values read as.

@@ -344,7 +344,9 @@ type_id checker::resolve_type(i32 file, ast::expr_id expr, function_scope const*
     auto const is_whole_parameter_type = allows_function_type;
     allows_function_type = false;
 
-    if (!e.attributes.empty())
+    auto const allows_attributes = allows_type_attributes;
+    allows_type_attributes = false;
+    if (!e.attributes.empty() && !allows_attributes)
         unsupported(file, where, "an attribute on a type");
 
     auto const* const n = e.node.try_as<ast::name>();
@@ -1826,7 +1828,12 @@ void checker::compile_function(symbol_id id)
     auto result = checked_module::void_type;
     auto const infers_result = !ast::is_valid(f.return_type) && f.body.kind == ast::body_kind::arrow;
     if (ast::is_valid(f.return_type))
+    {
+        // CHK-418: a pixel stage's one color value carries its target's settings, as a member of a @pixel struct does
+        allows_type_attributes = find_attribute(file, d.attributes, "pixel") != nullptr;
         result = resolve_value_type(file, f.return_type);
+        allows_type_attributes = false;
+    }
     else if (infers_result)
         result = checked_module::error_type;
     is_failed = is_failed || (result == checked_module::error_type && !infers_result);
@@ -2016,6 +2023,45 @@ void checker::compile_property(symbol_id id)
     }
     if (is_failed)
         out.symbols[index_of(id)].state = symbol_state::failed;
+}
+
+bool checker::is_color_value(type_id type) const
+{
+    auto const* const record = out.builtin_type_of(type);
+    if (record == nullptr)
+        return false;
+    for (auto const family : {"float", "half", "int", "uint"})
+        for (auto const width : {"", "2", "3", "4"})
+            if (record->name == cc::format("{}{}", family, width))
+                return true;
+    return false;
+}
+
+type_id checker::pixel_targets_of(symbol_id entry, type_id color)
+{
+    // a name no symbol of the module has, so the struct the emitter writes clashes with nothing
+    auto name = cc::format("{}_target", out.at(entry).name);
+    for (auto n = 2;; ++n)
+    {
+        auto is_taken = false;
+        for (auto const& s : out.symbols)
+            is_taken = is_taken || s.name == name;
+        if (!is_taken)
+            break;
+        name = cc::format("{}_target{}", out.at(entry).name, n);
+    }
+    auto const symbol = symbol_id(out.symbols.size());
+    auto const type = type_id(out.types.size());
+    out.symbols.push_back({.file = out.at(entry).file,
+                           .declaration = out.at(entry).declaration,
+                           .kind = symbol_kind::structure,
+                           .state = symbol_state::checked,
+                           .name = name,
+                           .type = type});
+    auto const members = ast::range_of<member_info>{.first = u32(out.members.size()), .count = 1};
+    out.members.push_back({.name = "color", .type = color});
+    out.types.push_back({.kind = type_kind::structure, .symbol = symbol, .members = members, .edge = stage::pixel});
+    return type;
 }
 
 void checker::judge_entry_point(symbol_id id)
@@ -2211,8 +2257,17 @@ void checker::judge_entry_point(symbol_id id)
 
     if (info.entry_stage == stage::pixel)
     {
-        if (result.edge != stage::pixel)
-            invalid("a @pixel fun returns a @pixel struct");
+        // CHK-418: one color value is the one target of a @pixel struct the checker mints, and nothing is no target
+        if (result.edge != stage::pixel && info.result != checked_module::void_type)
+        {
+            if (is_color_value(info.result))
+                out.functions[s.info].pixel_targets = pixel_targets_of(id, info.result);
+            else
+                invalid("a @pixel fun returns a @pixel struct, one color value or nothing");
+        }
+        else if (result.edge != stage::pixel)
+        {
+        }
         else
         {
             judge_uninterpolated(info.result);

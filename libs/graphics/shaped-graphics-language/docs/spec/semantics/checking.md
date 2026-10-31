@@ -830,7 +830,11 @@ fun f() -> float:
   `@subgroup_size` and `@subgroup_invocation_id` need `subgroups` in every stage that takes them.
 * **CHK-90** A `@vertex fun` returns a struct with at most one field that carries `@position`, and that field is of the type `hpos4`.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
-* **CHK-91** A `@pixel fun` returns a `@pixel struct`.
+* **CHK-91** A `@pixel fun` returns a `@pixel struct`, one color value, or nothing (CHK-418).
+* **CHK-418** A `@pixel fun` that returns one numeric scalar or plain vector of `float`, `half`, `int` or `uint` writes it as its one color target, named `color`.
+  It stands for a `@pixel struct` of that one member, which the compiler declares as `<entry>_target`, or under a name past it where the module has that one.
+  The attributes of its result type are the target's settings, as a member's are (CHK-181): `-> @blend(.none) float4`; no other function's result takes an attribute.
+  One that returns nothing writes no color target, so its pipeline has none: it writes memory alone, and draws with a depth target or none.
 * **CHK-92** An entry point is neither `@builtin` nor `@operator`.
 * **CHK-173** `@per_instance` and `@stream(name)` are attributes of a struct field, recorded on the member; `@stream` takes one bare name.
 * **CHK-208** `@stages(.pixel)` on a function, builtin or not, names the stages it may be reached from, each an enum case of a stage.
@@ -918,6 +922,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   A paren literal writes a struct whole and names each of its fields once, or it is `missing-field`, `unknown-field` or `duplicate-field`.
   An `int` is held to the range sg keeps its field in: a stencil mask is 0 to 255, `sample_count` a power of two from 1 to 64, and `patch_control_points` 0 to 32.
 * **CHK-179** Under `color_targets` stands one entry per member of the pixel stage's `@pixel struct`; a setting whose path names no member there is one per member.
+  A pixel stage that returns one color value has the one entry `color`, and one that returns nothing has none (CHK-418).
 * **CHK-180** `.host` stands only for a target's `format`, the `depth_stencil_format` and the `sample_count`, and `.none` only for a target's `blend`.
 * **CHK-181** An attribute of a `@vertex` or `@pixel` entry point, of a `@vertex struct` or of a `@pixel struct` is a setting when its name alone is one field.
   A geometry or tessellation entry point takes no setting yet, and one there is `unsupported-yet`.

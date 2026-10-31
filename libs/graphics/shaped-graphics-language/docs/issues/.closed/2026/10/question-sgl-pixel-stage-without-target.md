@@ -3,6 +3,8 @@ created: 2026-10-30
 corpus:
   - bgfx/shaders/21-deferred/fs_deferred_clear_uav
   - bgfx/shaders/21-deferred/fs_deferred_light_uav
+closed: 2026-10-31
+resolution: fixed
 ---
 
 # A pixel stage that writes only images and no render target

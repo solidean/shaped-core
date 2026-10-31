@@ -847,8 +847,11 @@ void checker::compile_pipeline(symbol_id id)
                                        out.at(pixel).name, out.at(geometry).name, out.at(geometry).name,
                                        out.name_of(passed)));
 
-        target_set = pixel_info.result;
-        for (auto const& m : out.at(out.at(target_set).members))
+        // CHK-418: one color value stands in a @pixel struct of its own, and a pixel stage of no result has no target
+        target_set = is_valid(pixel_info.pixel_targets) ? pixel_info.pixel_targets : pixel_info.result;
+        if (target_set == checked_module::void_type)
+            target_set = type_id::none;
+        for (auto const& m : is_valid(target_set) ? out.at(out.at(target_set).members) : cc::span<member_info const>())
         {
             // CHK-276: the depth and the sample mask are outputs, and no color target
             if (m.output != pixel_output::color)
@@ -916,15 +919,20 @@ void checker::compile_pipeline(symbol_id id)
         auto const& info = out.at(edge);
         auto const edge_file = out.at(info.symbol).file;
         auto const& edge_decl = ast_of(edge_file).at(out.at(info.symbol).declaration);
-        pc.attribute_settings(edge_file, edge_decl.attributes, pc.description, {}, false, s.kind, s.settings);
+        // CHK-418: a pixel stage's one color value stands in a struct the checker minted, declared by the entry point,
+        // and its target's settings are the attributes of its result type
+        auto const* const minted_by = edge_decl.node.try_as<ast::fun_decl>();
+        if (minted_by == nullptr)
+            pc.attribute_settings(edge_file, edge_decl.attributes, pc.description, {}, false, s.kind, s.settings);
         if (has_targets)
             for (auto const& m : out.at(info.members))
             {
                 if (m.output != pixel_output::color)
                     continue;
                 auto const prefix = cc::vector<cc::string>{cc::string(k_color_targets), m.name};
-                pc.attribute_settings(edge_file, ast_of(edge_file).at(m.field).attributes, target_state, prefix, true,
-                                      s.kind, s.settings);
+                auto const attributes = minted_by != nullptr ? ast_of(edge_file).at(minted_by->return_type).attributes
+                                                             : ast_of(edge_file).at(m.field).attributes;
+                pc.attribute_settings(edge_file, attributes, target_state, prefix, true, s.kind, s.settings);
             }
         sources.push_back(cc::move(s));
     };

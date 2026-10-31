@@ -129,6 +129,9 @@ struct flattener
         i32 step = 1;
     };
     cc::optional<walk_mapping> pending_walk;
+    /// A pixel entry point's minted `@pixel struct`, which each of its own returns builds of the one color it gives
+    /// (CHK-418); none for every other tree.
+    type_id pixel_targets = type_id::none;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
     /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
@@ -2852,6 +2855,12 @@ struct flattener
         // CHK-345: the entry point's own report, decided by the fused any hit before it leaves
         if (fused.has_value() && frames.size() == 1 && is_valid(result))
             result = decide_report(from, result);
+        // CHK-418: the one color a pixel stage gives is its minted struct's one member
+        if (is_valid(pixel_targets) && frames.size() == 1 && is_valid(result))
+        {
+            flat_expr_id const color[] = {result};
+            result = add_expr(pixel_targets, from.expr, flat_construct{.arguments = add_list(color)});
+        }
         if (is_valid(return_label))
             add_stmt(from, flat_leave{.target = return_label, .value = result});
         else
@@ -3834,7 +3843,8 @@ void checker::flatten_entry_point(symbol_id id, traversal_request const* travers
     // CHK-271: the stage struct, when there is one, is the first parameter; every other is a stage input
     if (!parameters.empty() && parameters[0].input == stage_input::none)
         f.entry.input = parameters[0].type;
-    f.entry.result = info.result;
+    f.entry.result = is_valid(info.pixel_targets) ? info.pixel_targets : info.result;
+    f.pixel_targets = info.pixel_targets;
     f.entry.workgroup[0] = info.workgroup[0];
     f.entry.workgroup[1] = info.workgroup[1];
     f.entry.workgroup[2] = info.workgroup[2];

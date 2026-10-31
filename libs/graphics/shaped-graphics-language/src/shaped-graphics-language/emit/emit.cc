@@ -234,7 +234,9 @@ sgl::emit::emitted_text sgl::emit::emit_entry_point(check::checked_module const&
     for (auto const& s : plan.samplers)
         result.bound_names.push_back({.emitted = s.name, .host = s.host_name});
     result.layouts = impl::layouts_of(plan);
-    if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none)
+    // a pixel stage that writes images alone has no target struct at all (CHK-418)
+    if (e.entry_stage == check::stage::pixel && e.result != check::type_id::none
+        && e.result != check::checked_module::void_type)
     {
         // a depth or a sample mask is an output of its own and no target (EMIT-130)
         result.color_targets = 0;

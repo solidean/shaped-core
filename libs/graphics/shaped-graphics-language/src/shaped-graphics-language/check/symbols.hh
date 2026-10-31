@@ -550,6 +550,9 @@ struct sgl::check::function_info
     /// Carries `@pure`: a call of it has no effect, so nobody can tell whether or when it ran.
     /// A `@builtin` without it is assumed to have one.
     bool is_pure = false;
+    /// A pixel entry point that returns one color value (CHK-418): the `@pixel struct` of one member, `color`, which
+    /// the checker mints and every return builds; none for one that returns its `@pixel struct`, or nothing.
+    type_id pixel_targets = type_id::none;
     /// `@geometry(max_vertices = N)`'s `N`; 0 for every other stage.
     i32 max_vertices = 0;
     /// `@tessellation_control(partitioning = …, winding = …)`; the first of each for every other stage.
