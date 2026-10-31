@@ -140,8 +140,9 @@ described_struct describe_struct(check::checked_module const& m, check::type_inf
         result.members.push_back(
             {.name = member.name,
              .type = cc::string(m.name_of(member.type)),
-             // the position, the depth and the sample mask take no location
-             .location = member.is_position || member.output != check::pixel_output::color ? -1 : location++,
+             // the position, the layer, the depth and the sample mask take no location
+             .location
+             = member.is_position || member.is_layer || member.output != check::pixel_output::color ? -1 : location++,
              .stream = t.edge == check::stage::vertex ? emit_impl::stream_of(member) : cc::string(),
              .format = member.vertex_format,
              .output = member.output == check::pixel_output::sample_mask ? cc::string("sample_mask")

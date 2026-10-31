@@ -170,3 +170,27 @@ pipeline marked:
     pixel = marking_ps
     cull = .none
     depth_stencil_format = .depth32_float
+
+struct layered:
+    @position position: hpos4
+    @layer layer: uint
+    @interpolate(.flat) tag: int
+
+// One draw fills both layers of an array target: each instance sends its triangles to its own layer (CHK-419).
+@vertex fun layered_vs(v: tagged_corner, @instance_index i: int) -> layered:
+    require vertex_layer_output
+    return {
+        position = hpos4(v.position.x, v.position.y, v.depth, 1.0)
+        layer = i as uint
+        tag = v.tag + 10 * i
+    }
+
+@pixel fun layered_ps(p: layered) -> float4:
+    require vertex_layer_output
+    return float4(p.tag as float, p.layer as float, 0.0, 1.0)
+
+pipeline layered_tags:
+    vertex = layered_vs
+    pixel = layered_ps
+    cull = .none
+    format = .rgba32_float

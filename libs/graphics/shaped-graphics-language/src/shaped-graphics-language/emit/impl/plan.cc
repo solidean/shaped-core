@@ -272,10 +272,12 @@ struct planner
                 .source_name = member.name,
                 .type = member.type,
                 .is_position = has_locations && member.is_position,
+                .is_layer = has_locations && member.is_layer,
                 .interpolate = member.interpolate,
                 .output = member.output,
                 .factor = member.factor,
-                .location = has_locations && !member.is_position && member.output == check::pixel_output::color
+                .location = has_locations && !member.is_position && !member.is_layer
+                                 && member.output == check::pixel_output::color
                                  && member.factor == check::tessellation_factor::none
                               ? next_location++
                               : -1,

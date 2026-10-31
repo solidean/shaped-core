@@ -409,6 +409,8 @@ struct optional_shader_features
     /// A subgroup operation over a 16-bit value needs this bit, and SGL has every subgroup operation over 16-bit types.
     VkBool32 subgroup_extended_types = VK_FALSE;
     VkBool32 subgroup_size_control = VK_FALSE;
+    /// SPIR-V's `Layer` written by a vertex shader, which DXC declares as `ShaderLayer`.
+    VkBool32 shader_output_layer = VK_FALSE;
     /// DXC writes a compute stage's quad operations in a derivative group, linear along one axis or of 2x2 threads.
     /// Both are VK_KHR_compute_shader_derivatives', which creation enables wherever the device has it.
     bool has_compute_derivatives = false;
@@ -473,6 +475,7 @@ optional_shader_features query_optional_shader_features(VkPhysicalDevice dev)
         .storage_push_constant_16bit = vk11.storagePushConstant16,
         .subgroup_extended_types = vk12.shaderSubgroupExtendedTypes,
         .subgroup_size_control = vk13.subgroupSizeControl,
+        .shader_output_layer = vk12.shaderOutputLayer,
         .has_compute_derivatives = has_compute_derivatives,
         .compute_derivative_group_linear = linear,
         .compute_derivative_group_quads = has_compute_derivatives ? derivatives.computeDerivativeGroupQuads : VK_FALSE,
@@ -774,6 +777,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
         .hostQueryReset = VK_TRUE,
         .timelineSemaphore = VK_TRUE,
         .bufferDeviceAddress = VK_TRUE,
+        .shaderOutputLayer = shader_features.shader_output_layer,
     };
     // One create-info per family: the graphics one always, plus the transfer family when it is a different one.
     // A shared family asks for its extra queues on the single info instead, which Vulkan requires — two infos for one
@@ -930,6 +934,7 @@ cc::result<context_handle> create_vulkan_context(backend::vulkan::vulkan_config 
     ctx->_shader_f16 = shader_features.has_f16();
     ctx->_shader_int16 = shader_features.has_int16();
     ctx->_subgroups = shader_features.subgroups;
+    ctx->_vertex_layer_output = shader_features.shader_output_layer == VK_TRUE;
     if (shader_features.subgroup_size_control == VK_TRUE)
         ctx->_subgroup_size_control = {
             .min_size = shader_features.vk13_properties.minSubgroupSize,

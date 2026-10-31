@@ -368,3 +368,51 @@ ASYNC_INVOCABLE_TEST("sg - a pixel stage returns one color without a struct, or 
     for (auto i = 0; i < 8; ++i)
         CHECK(got[i] == 8u).context(cc::format("slot {}", i));
 }
+
+ASYNC_INVOCABLE_TEST("sg - a vertex stage sends each instance to its own layer of an array target",
+                     (sg::context_handle const& ctx))
+{
+    REQUIRE(ctx != nullptr);
+    if (!sg_test::shaders_reach(*ctx))
+        SKIP("no compiler builds this binary's shaders into a format this context accepts");
+    if (!ctx->supports(sg::feature::vertex_layer_output))
+        SKIP("this context cannot pick a layer from the vertex stage");
+
+    // CHK-419: two instances of one rect, the second sent to layer 1 with its tag raised by 10
+    auto vertices = cc::vector<corner>();
+    push_rect(vertices, tg::vec4f(-1, -1, 1, 1), 0.5f, 7);
+    auto const buffer = ctx->persistent.create_buffer_from_data(cc::move(vertices), sg::buffer_usage::vertex_buffer);
+    auto const pipeline = co_await ctx->cached.acquire_raster_pipeline(shaders::pixel_semantics::layered_tags);
+    auto const target = ctx->persistent.create_texture_2d_array(
+        {.format = sg::pixel_format::rgba32_float,
+         .width = 4,
+         .height = 2,
+         .array_layers = 2,
+         .usage = sg::texture_usage::render_target | sg::texture_usage::copy_src});
+
+    auto cmd = ctx->create_command_list();
+    {
+        auto scope
+            = cmd->raster.render_to({.color_targets = {target.as_render_target_view().cleared(tg::vec4f(-1, -1, -1, -1))},
+                                     .target_set = shaders::pixel_semantics::layered_ps_target::name});
+        scope.bind_pipeline(*pipeline);
+        scope.bind_vertex_buffer(buffer.as_vertex_buffer());
+        scope.draw({.vertex_range = {.offset = 0, .size = 6}, .instance_range = {.offset = 0, .size = 2}});
+    }
+    auto const first = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 0});
+    auto const second = cmd->download.bytes_from_texture(target.raw(), {.array_layer = 1});
+    ctx->submit_command_list(cc::move(cmd));
+
+    auto const texel = [](cc::span<byte const> bytes, int x, int y)
+    {
+        auto value = tg::vec4f();
+        cc::memcpy(&value, bytes.data() + (isize(y) * 4 + x) * isize(sizeof(tg::vec4f)), sizeof(tg::vec4f));
+        return value;
+    };
+    auto const layer_0 = co_await first.bytes();
+    auto const layer_1 = co_await second.bytes();
+    REQUIRE(layer_0.size() == 4 * 2 * isize(sizeof(tg::vec4f)));
+    REQUIRE(layer_1.size() == layer_0.size());
+    CHECK(texel(layer_0, 1, 1) == tg::vec4f(7, 0, 0, 1));
+    CHECK(texel(layer_1, 1, 1) == tg::vec4f(17, 1, 0, 1));
+}

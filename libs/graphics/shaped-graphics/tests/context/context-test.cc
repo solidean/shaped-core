@@ -145,7 +145,10 @@ INVOCABLE_TEST("sg - coherence, image atomics and 16-bit integers follow the API
     CHECK(ctx->supports(sg::feature::image_atomics) == !is_webgpu);
     CHECK(ctx->supports(sg::feature::helper_lane_query) == !is_webgpu);
     if (is_webgpu)
+    {
         CHECK(!ctx->supports(sg::feature::shader_int16));
+        CHECK(!ctx->supports(sg::feature::vertex_layer_output));
+    }
 }
 
 // The limits are floors a portable caller sizes against, so they must be reportable and sane on every backend.
