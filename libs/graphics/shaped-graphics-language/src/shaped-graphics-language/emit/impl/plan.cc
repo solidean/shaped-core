@@ -276,12 +276,12 @@ struct planner
                 .interpolate = member.interpolate,
                 .output = member.output,
                 .factor = member.factor,
-                .is_row_per_element = member.padding == check::padding::every_element,
                 .location = has_locations && !member.is_position && !member.is_layer
                                  && member.output == check::pixel_output::color
                                  && member.factor == check::tessellation_factor::none
                               ? next_location++
                               : -1,
+                .is_row_per_element = member.padding == check::padding_kind::every_element,
             });
         return result;
     }
@@ -897,7 +897,7 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
         auto const& whole = m.at(member.type);
         auto const& t = m.takes_slots(member.type) && whole.kind == check::type_kind::array ? m.at(whole.element) : whole;
         auto const where = cc::format("'{}.{}'", s.name, member.name);
-        if (member.padding == check::padding::every_element && block_space(b) == address_space::packed_constants)
+        if (member.padding == check::padding_kind::every_element && block_space(b) == address_space::packed_constants)
             report(error_kind::unsupported, cc::format("@padding(.every_element) in a @padding(.none) block: {}", where));
         if (t.kind == check::type_kind::buffer)
             judge_arrays(judge_arrays, t.element, element_space(b, member), where, false);

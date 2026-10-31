@@ -290,6 +290,8 @@ struct writer
 
     /// Set while the object of an index is written, so an array of 4-vectors is indexed in place rather than rebuilt.
     bool is_indexing_widened = false;
+    /// Set while the place an assignment writes is written, which is the member itself, so no read conversion wraps it.
+    bool is_writing_place = false;
 
     /// Whether a value of `type` is a struct written with padding fields, which a target writes as memory holds it.
     [[nodiscard]] bool is_padded(type_id type) const
@@ -641,7 +643,9 @@ struct writer
         auto const value = expr(stored, true).text;
         auto const object_type = p.e.at(place.object).type;
         auto const memory = memory_of(place.object);
+        is_writing_place = true;
         auto const object = wrapped(expr(place.object), level::primary);
+        is_writing_place = false;
         if (!memory.has_value() && d.assigns_through_swizzles())
             return line(cc::format("{}.{} = {};", object, letters_text(object_type, place.letters), value));
 
@@ -701,7 +705,10 @@ struct writer
             }
         if (target.has_value())
             return write_memory(target.value(), component, value, p.e.at(a.value).type);
-        line(cc::format("{} = {};", expr(a.place).text, value));
+        is_writing_place = true;
+        auto const place = expr(a.place).text;
+        is_writing_place = false;
+        line(cc::format("{} = {};", place, value));
     }
 
     /// Every call is written from its registry record; nothing here knows one builtin from another.
@@ -815,7 +822,8 @@ struct writer
                 auto const& block = *block_of(p, b.binding);
                 result = {.text = cc::format("{}.{}", block.name, block.members[block.block_member_of[b.member]].name)};
                 // EMIT-170: a block's 3-vector whose tail holds the next member is packed in MSL, and read back
-                if (d.packs_shared_tails() && shares_tail(p, block.members, block.block_member_of[b.member]))
+                if (d.packs_shared_tails() && !is_writing_place
+                    && shares_tail(p, block.members, block.block_member_of[b.member]))
                     result = {.text = cc::format("{}({})", type_text(p, d, x.type), result.text)};
                 if (auto const lanes = widened_lanes(x); !lanes.empty() && !cc::exchange(is_indexing_widened, false))
                     result = {.text = narrowed_array(x, result.text, lanes)};
@@ -841,7 +849,10 @@ struct writer
                     return;
                 }
                 auto const object = wrapped(expr(a.object), level::primary);
+                // an index is a value read, even inside a place being written
+                auto const was_writing = cc::exchange(is_writing_place, false);
                 auto index = expr(a.index).text;
+                is_writing_place = was_writing;
                 // EMIT-121: a marked index into a binding array tells HLSL, and SPIR-V through it, that it may differ
                 if (d.language() == builtins::language::hlsl && is_nonuniform_mark(a.index)
                     && p.m.takes_slots(p.e.at(a.object).type))
@@ -868,9 +879,10 @@ struct writer
                 }
                 auto const& planned = p.structs[p.struct_of_type[index_of(object_type)]];
                 result = {.text = cc::format("{}.{}", object, planned.members[planned.member_of[member.member]].name)};
-                if (is_widened_member(object_type, member.member))
+                if (is_widened_member(object_type, member.member) && !is_writing_place)
                     result = {.text = cc::format("((float3x3){})", result.text)};
-                else if (d.packs_shared_tails() && shares_tail(p, planned, planned.member_of[member.member]))
+                else if (d.packs_shared_tails() && !is_writing_place
+                         && shares_tail(p, planned, planned.member_of[member.member]))
                     result = {.text = cc::format("{}({})", type_text(p, d, x.type), result.text)};
                 else if (reaches_widened_array(x) && !is_raw)
                     result = {.text = narrowed_array(x, result.text, ".xyz")};

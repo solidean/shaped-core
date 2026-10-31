@@ -800,3 +800,35 @@ TEST("sgl emit layout - an every_element array is one of 4-vectors on every targ
     CHECK(msl.contains("struct blur_data\n{\n    packed_float3 tint;\n    float strength;\n    array<float4, 4> "
                        "weights;\n"));
 }
+
+TEST("sgl emit layout - an assignment writes a packed or widened member itself, and only its read converts")
+{
+    constexpr auto source = "struct tally:\n"
+                            "    normal_sum: float3\n"
+                            "    count: float\n"
+                            "\n"
+                            "struct framed:\n"
+                            "    basis: mat3\n"
+                            "    scale: float\n"
+                            "\n"
+                            "binding work:\n"
+                            "    tallies: mut buffer[tally]\n"
+                            "    frames: mut buffer[framed]\n"
+                            "\n"
+                            "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                            "    let mut t = work.tallies[id.x]\n"
+                            "    t.normal_sum = t.normal_sum + float3(1.0)\n"
+                            "    t.normal_sum.x = 2.0\n"
+                            "    work.tallies[id.x] = t\n"
+                            "    let mut f = work.frames[id.x]\n"
+                            "    f.basis = f.basis * f.basis\n"
+                            "    work.frames[id.x] = f\n";
+
+    // EMIT-170: MSL's packed field is the place, and its read converts
+    auto const msl = text_of(source, target::msl);
+    CHECK(msl.contains("    t.normal_sum = float3(t.normal_sum) + float3(1.0);\n"));
+    CHECK(msl.contains("    t.normal_sum.x = 2.0;\n"));
+    // EMIT-168: HLSL's float4x3 field is the place, and the value widens into it
+    CHECK(text_of(source, target::hlsl_dx12)
+              .contains("    f.basis = sgl_widen_mat3(mul(((float3x3)f.basis), ((float3x3)f.basis)));\n"));
+}

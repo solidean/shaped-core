@@ -93,7 +93,7 @@ placed_members place_from(checked_module const& m,
         {
             auto const& array = m.at(type);
             // EMIT-172: each element of a `@padding(.every_element)` array starts a row of its own
-            auto const element = members[i].padding == check::padding::every_element && space == address_space::constants
+            auto const element = members[i].padding == check::padding_kind::every_element && space == address_space::constants
                                    ? element_shape{.stride = 16, .alignment = 16}
                                    : element_of(m, array.element, space);
             auto const alignment
@@ -182,13 +182,13 @@ cc::string_view sgl::emit::impl::space_name(address_space space)
 
 sgl::emit::impl::address_space sgl::emit::impl::block_space(check::binding_info const& b)
 {
-    return b.padding == check::padding::none ? address_space::packed_constants : address_space::constants;
+    return b.padding == check::padding_kind::none ? address_space::packed_constants : address_space::constants;
 }
 
 sgl::emit::impl::address_space sgl::emit::impl::element_space(check::binding_info const& b,
                                                               check::member_info const& member)
 {
-    return b.padding == check::padding::none || member.padding == check::padding::none ? address_space::packed_storage
+    return b.padding == check::padding_kind::none || member.padding == check::padding_kind::none ? address_space::packed_storage
                                                                                        : address_space::storage;
 }
 

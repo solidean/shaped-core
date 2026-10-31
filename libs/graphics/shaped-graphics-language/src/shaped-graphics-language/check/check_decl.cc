@@ -241,10 +241,10 @@ sgl::i32 checker::preferred_subgroup_size_of(i32 file, ast::attribute const* a, 
 }
 
 /// CHK-369: `@padding(.none)`, where GPU memory leaves no room but what C++ leaves.
-sgl::check::padding checker::padding_of(i32 file, ast::attribute const* a)
+sgl::check::padding_kind checker::padding_of(i32 file, ast::attribute const* a)
 {
     if (a == nullptr)
-        return padding::natural;
+        return padding_kind::natural;
     auto const arguments = ast_of(file).at(a->arguments);
     auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
                                  && ast::is_valid(arguments[0].value)
@@ -252,15 +252,15 @@ sgl::check::padding checker::padding_of(i32 file, ast::attribute const* a)
                               : nullptr;
     auto const rule = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
     if (rule == "none")
-        return padding::none;
+        return padding_kind::none;
     if (rule == "every_element")
-        return padding::every_element;
+        return padding_kind::every_element;
     if (rule == "every_column")
         unsupported(file, a->name, "@padding(.every_column), since a mat3's columns stand 16 bytes apart already");
     else
         report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
                "@padding takes where GPU memory leaves room: `@padding(.none)` or `@padding(.every_element)`");
-    return padding::natural;
+    return padding_kind::natural;
 }
 
 /// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
@@ -878,22 +878,22 @@ ast::range_of<member_info> checker::compile_members(i32 file,
         auto const is_value_array = type != checked_module::error_type && out.builtin_type_of(type) == nullptr
                                  && out.at(type).kind == type_kind::array
                                  && out.builtin_type_of(out.at(type).element) != nullptr;
-        if (padded != nullptr && type != checked_module::error_type && member_padding == padding::every_element
+        if (padded != nullptr && type != checked_module::error_type && member_padding == padding_kind::every_element
             && (is_workgroup || !is_value_array))
         {
             report(diagnostic_kind::wrong_kind_of_name, file, padded->name,
                    "@padding(.every_element) starts each element of a constant block's array of values on a row, and "
                    "this is none");
-            member_padding = padding::natural;
+            member_padding = padding_kind::natural;
         }
-        else if (padded != nullptr && type != checked_module::error_type && member_padding == padding::none
+        else if (padded != nullptr && type != checked_module::error_type && member_padding == padding_kind::none
                  && out.at(innermost).kind != type_kind::buffer)
         {
             report(diagnostic_kind::wrong_kind_of_name, file, padded->name,
                    is_workgroup ? "@padding places memory a host fills, and @workgroup memory has none a host sees"
                                 : "only a buffer member places its own elements; a constant takes its block's "
                                   "@padding, written on the binding");
-            member_padding = padding::natural;
+            member_padding = padding_kind::natural;
         }
 
         // CHK-393: a value that is the same across a draw crosses flat, which interpolating could only round
@@ -1527,17 +1527,17 @@ void checker::compile_binding(symbol_id id)
     auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
     auto const* const padded = find_attribute(file, d.attributes, "padding");
     auto binding_padding = padding_of(file, padded);
-    if (padded != nullptr && binding_padding == padding::every_element)
+    if (padded != nullptr && binding_padding == padding_kind::every_element)
     {
         report(diagnostic_kind::invalid_attribute_arguments, file, padded->name,
                "@padding(.every_element) starts each element of one array on a row, so it stands on the array member");
-        binding_padding = padding::natural;
+        binding_padding = padding_kind::natural;
     }
     else if (padded != nullptr && is_workgroup)
     {
         report(diagnostic_kind::invalid_attribute_arguments, file, padded->name,
                "@padding places memory a host fills, and @workgroup memory has none a host sees");
-        binding_padding = padding::natural;
+        binding_padding = padding_kind::natural;
     }
 
     if (ast::is_valid(b.composition))

@@ -85,7 +85,7 @@ native_placement place_natively(checked_module const& m,
             auto stride = 0;
             auto element_alignment = 1;
             // EMIT-172: every target declares a `@padding(.every_element)` array as 4-vectors, a row apiece
-            if (member.padding == check::padding::every_element)
+            if (member.padding == check::padding_kind::every_element)
             {
                 stride = 16;
                 element_alignment = 16;

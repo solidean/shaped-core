@@ -319,7 +319,7 @@ enum class sgl::check::pixel_output : sgl::u8
 };
 
 /// Where GPU memory leaves room between values, as `@padding` asks (CHK-369).
-enum class sgl::check::padding : sgl::u8
+enum class sgl::check::padding_kind : sgl::u8
 {
     /// No annotation: every value at its natural alignment, so a vector loads whole on every target (EMIT-110).
     natural,
@@ -366,7 +366,7 @@ struct sgl::check::member_info
     /// Carries `@coherent`: a `mut` buffer or image whose writes reach every workgroup of the dispatch (CHK-368).
     bool is_coherent = false;
     /// A buffer member's `@padding(.none)`: its elements are placed as C++ places them (CHK-369).
-    padding padding = padding::natural;
+    padding_kind padding = padding_kind::natural;
     /// A `sampler name:` block of a binding, as a position in `checked_module::samplers`; -1 for any other member.
     i32 static_sampler = -1;
     /// `@sampler(name)` on a texture: the position among its binding's members of the sampler a sampling call without
@@ -594,7 +594,7 @@ struct sgl::check::binding_info
     /// `@no_padding`: a gap before any member of its constant block is an error.
     bool is_no_padding = false;
     /// `@padding(.none)`: its constant block and its buffers' elements are placed as C++ places them (CHK-369).
-    padding padding = padding::natural;
+    padding_kind padding = padding_kind::natural;
     ast::range_of<member_info> members;
     /// What its own `require` lines name, which declares them for every entry point listing it (CHK-262).
     feature_set declared;
