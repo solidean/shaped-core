@@ -946,6 +946,7 @@ A `require` in a test's body that nothing in it uses is `unused-require`, and a 
   Every target subscripts its vectors as it does its arrays, so the text is `v[i]` on each.
 * **CHK-288** `xs.length` is an array's length, an `int` constant, and the one member an array has; it is never assigned.
 * **CHK-289** `T[N].filled(v)` is an array of `T[N]` whose every element is `v`, which converts to `T` as an argument does.
+  Where `T` is an array itself, `v` may instead be its innermost element, which then stands in every scalar: `float[4, 4].filled(0.0)`.
 * **CHK-290** A square literal converts to the array type expected where it stands, with exactly as many elements, each converting to the element type.
   Where no array is expected it is an array of its first element's type, and every other element converts to that.
   It holds at least one element, and no name and no splat.

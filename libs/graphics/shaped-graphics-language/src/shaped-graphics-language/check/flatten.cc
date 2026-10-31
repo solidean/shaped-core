@@ -1254,37 +1254,45 @@ struct flattener
     }
 
     /// CHK-289: `T[N].filled(v)` is a local every element of which is assigned `v`, evaluated once.
+    /// A nested array filled with its innermost element assigns `v` to every scalar, one loop per level.
     flat_expr_id flatten_filled(ast::expr_id id, type_id type, ast::call const& call)
     {
         auto const arguments = ast().at(call.arguments);
         if (arguments.size() != 1 || !is_valid(type))
             return fail();
         auto const where = origin{.file = file(), .expr = id};
-        auto const& info = c.out.at(type);
         auto const value = flatten_expr(arguments[0].value);
         if (!is_valid(value))
             return fail();
+        auto const value_type = entry.at(value).type;
 
         auto const label = add_label("filled");
         auto body = cc::vector<flat_stmt_id>();
         auto filler = value;
         if (!is_substitutable(value))
         {
-            auto const held = add_local(local_kind::let, "fill", info.element);
+            auto const held = add_local(local_kind::let, "fill", value_type);
             body.push_back(make_stmt(where, flat_let{.local = held, .value = value}));
             filler = local_ref(held, id);
         }
         auto const result = add_local(local_kind::var, "filled", type);
         body.push_back(make_stmt(where, flat_var{.local = result}));
-        auto const index = add_local(local_kind::index, "i", int_type());
-        auto const element
-            = add_expr(info.element, id, flat_element{.object = local_ref(result, id), .index = local_ref(index, id)});
-        flat_stmt_id const store[] = {make_stmt(where, flat_assign{.place = element, .value = filler})};
-        body.push_back(make_stmt(where, flat_for{.label = add_label("fill"),
-                                                 .index = index,
-                                                 .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
-                                                 .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
-                                                 .body = add_list(store)}));
+        // the statements that assign `filler` to every element of `place`, of type `t`, down to the filler's own type
+        auto const fill = [&](auto const& self, flat_expr_id place, type_id t) -> flat_stmt_id
+        {
+            if (t == value_type)
+                return make_stmt(where, flat_assign{.place = place, .value = filler});
+            auto const& info = c.out.at(t);
+            auto const index = add_local(local_kind::index, "i", int_type());
+            auto const element = add_expr(info.element, id, flat_element{.object = place, .index = local_ref(index, id)});
+            flat_stmt_id const store[] = {self(self, element, info.element)};
+            return make_stmt(where, flat_for{.label = add_label("fill"),
+                                             .index = index,
+                                             .first = add_expr(int_type(), id, flat_int_literal{.value = 0}),
+                                             .end = add_expr(int_type(), id, flat_int_literal{.value = info.count}),
+                                             .body = add_list(store)});
+        };
+        body.push_back(fill(fill, local_ref(result, id), type));
         body.push_back(make_stmt(where, flat_leave{.target = label, .value = local_ref(result, id)}));
         return add_expr(type, id, flat_block{.label = label, .body = add_list(body)});
     }

@@ -251,9 +251,35 @@ type_id checker::check_filled(function_scope& scope, ast::expr_id id, ast::call 
                cc::format("{}.filled takes the one value every element holds", out.name_of(type)));
         return error_type;
     }
-    if (check_expected(scope, arguments[0].value, out.at(type).element, "the value it is filled with")
-        != out.at(type).element)
+    auto const element = out.at(type).element;
+    auto const value = arguments[0].value;
+    if (out.at(element).kind != type_kind::array || ast.at(value).node.is<ast::array>())
+    {
+        if (check_expected(scope, value, element, "the value it is filled with") != element)
+            return error_type;
+        set_target(file, id, {.kind = target_kind::array_filled});
+        return type;
+    }
+
+    // CHK-289: a nested array is filled with a row, or with the innermost element, which then stands in every scalar
+    auto innermost = element;
+    while (out.at(innermost).kind == type_kind::array)
+        innermost = out.at(innermost).element;
+    auto const got = check_expr(scope, value);
+    if (got == error_type)
         return error_type;
+    if (got != element && got != innermost)
+    {
+        auto const number = number_of(file, value);
+        if (!number.is_number || !holds(number, innermost))
+        {
+            report(diagnostic_kind::type_mismatch, file, span_of(file, value),
+                   cc::format("the value it is filled with is {} or {}, got {}", out.name_of(element),
+                              out.name_of(innermost), out.name_of(got)));
+            return error_type;
+        }
+        set_type(file, value, innermost);
+    }
     set_target(file, id, {.kind = target_kind::array_filled});
     return type;
 }

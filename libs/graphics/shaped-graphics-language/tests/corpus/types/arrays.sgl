@@ -32,6 +32,18 @@ test:
     histogram[3] == 2
     histogram[4] == 0
 
+// a nested array filled with its innermost element, or with a row (CHK-289)
+test:
+    let mut grid = float[4, 3].filled(0.5)
+    grid[1][2] = 2.0
+    let rows = int[2, 3].filled(int[3].filled(7))
+    grid[0][0] == 0.5 and grid[3][2] == 0.5 and grid[1][2] == 2.0 and rows[1][2] == 7
+
+@expect(error = "type-mismatch")
+test:
+    let grid = float[4, 3].filled(true)
+    grid[0][0] == 0.0
+
 // one group holds every dimension, outermost first
 test:
     let mut grid: int[2, 3] = [[1, 2, 3], [4, 5, 6]]
