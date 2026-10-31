@@ -104,3 +104,16 @@ test:
     let v = vec3(1.0, 2.0, 3.0)
     let u = uint2(4u, 5u)
     (+v).y == 2.0 and +u == u
+
+// a direction, a position and a clip position leave their strong types by `as`, and come back by a constructor (CHK-412)
+test:
+    let n = vec3(0.0, 1.0, 0.0)
+    let enc = float4(..((n as float3) * 0.5 + 0.5), 0.0)
+    let h = hpos4(1.0, 2.0, 3.0, 4.0)
+    let p = pos3(5.0, 6.0, 7.0)
+    enc.y == 1.0 and (h as float4).w == 4.0 and (p as float3).z == 7.0
+
+@expect(error = "no-matching-overload")
+test:
+    let v = float3(1.0, 2.0, 3.0)
+    (v as vec3).x == 1.0

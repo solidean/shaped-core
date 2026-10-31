@@ -691,6 +691,8 @@ fun shade(k: float) -> float:
   A float out of the integer's range, and a NaN, become a value the language does not specify, and it may differ between targets.
   Between `int` and `uint` the bits stay.
   The interpreter's choice of the unspecified value is saturation at the integer's bounds, and 0 for a NaN.
+* **CHK-412** `vec3` and `pos3` convert to `float3`, and `hpos4` to `float4`, with `as`: the value as the plain vector of its width, each component kept.
+  Only that direction converts; the way back is a constructor, `vec3(..v)`, which says what the numbers become.
 * **CHK-396** `T(x)`, where `T` is a numeric scalar or a plain vector, is `x as T` wherever `as` converts the type of `x` to `T`, and `x` where it is a `T` already ([why](why/checking.md#chk-396)).
   So `float(k)` of an `int` is `k as float`, and `float3(n)` of an `int3` converts each component, by CHK-197 and with its unspecified values.
   Each is a function of `T`'s name beside its constructors (CHK-240), so a literal meets the overload of its own type.

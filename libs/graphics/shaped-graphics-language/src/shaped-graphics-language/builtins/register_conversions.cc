@@ -294,4 +294,19 @@ void sgl::builtins::register_conversions(registry& r)
         .evaluate = bool32_to_bool,
         .write = {.kind = spelling_kind::custom, .custom = write_bool32_to_bool},
     });
+
+    r.add_comment("// a direction or a position as the plain vector of its width, which every target writes it as "
+                  "already;\n"
+                  "// the way back is a constructor, which says what the numbers become (CHK-412)");
+    struct strong_to_plain
+    {
+        cc::string_view from;
+        cc::string_view to;
+    };
+    for (auto const [from, to] : {strong_to_plain{"vec3", "float3"}, {"pos3", "float3"}, {"hpos4", "float4"}})
+        r.add(function_record{
+            .signature = cc::format("@pure @operator(\"as\") fun convert_{}_to_{}(x: {}) -> {}", from, to, from, to),
+            .evaluate = same,
+            .write = {.kind = spelling_kind::custom, .custom = write_same},
+        });
 }

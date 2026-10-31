@@ -1346,6 +1346,12 @@
 @builtin @pure @operator("as") fun convert_bool_to_bool32(x: bool) -> bool32
 @builtin @pure @operator("as") fun convert_bool32_to_bool(x: bool32) -> bool
 
+// a direction or a position as the plain vector of its width, which every target writes it as already;
+// the way back is a constructor, which says what the numbers become (CHK-412)
+@builtin @pure @operator("as") fun convert_vec3_to_float3(x: vec3) -> float3
+@builtin @pure @operator("as") fun convert_pos3_to_float3(x: pos3) -> float3
+@builtin @pure @operator("as") fun convert_hpos4_to_float4(x: hpos4) -> float4
+
 // bits of int, uint and their vectors, componentwise; a shift counts in the left side's own type,
 // and only its low five bits count, so `x << 33` of a runtime 33 is `x << 1`
 @builtin @pure @operator("&") fun bit_and_int(a: int, b: int) -> int
