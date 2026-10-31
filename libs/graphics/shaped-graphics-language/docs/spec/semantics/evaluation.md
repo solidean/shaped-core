@@ -184,6 +184,9 @@ fun graded(a: float) -> float:
 * **EVAL-101** `for … in first ..= last` runs over `first` to `last`, `last` included, each bound evaluated once, `first` before `last`.
   It takes no `int` past `last`, so a range ending at the largest `int` runs whole, where `first ..< last + 1` would wrap and run none.
   With `last` a constant below the largest `int` it is that `..<` range, `@unroll` included (CHK-389).
+* **EVAL-102** A range followed by `.reversed` or `.by(step)` is a walk: its values are the range's in reverse, or every `step`-th from the first, and the two compose in the order written.
+  So `(0 ..< 8).reversed` is 7 down to 0, `(0 ..< 8).by(3)` is 0, 3 and 6, and `(0 ..< 8).by(3).reversed` is 6, 3 and 0.
+  It is a `for` of a fresh `k` over `0 ..< count`, whose variable is `start + k * step`; the bounds are evaluated once, `first` before `last`.
 * **EVAL-57** A `loop:` that is a value is `block $loop_value { loop $loop { … } }`, and its `break value` is `leave $loop_value value`.
 * **EVAL-58** `a < b <= c` is `a < b and b <= c` with `b` evaluated once: each inner operand is bound to a local where it first stands, and read from it after that.
 * **EVAL-59** So a chain stops at its first comparison that is false, and evaluates no operand behind it.

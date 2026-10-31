@@ -480,13 +480,60 @@ flow checker::check_if(function_scope& scope, ast::if_stmt const& chain)
     return has_else ? result : flow::falls_through;
 }
 
+checker::range_walk checker::range_walk_of(i32 file, ast::expr_id iterable) const
+{
+    auto const& ast = ast_of(file);
+    auto result = range_walk();
+    auto e = iterable;
+    while (ast::is_valid(e))
+    {
+        auto const& node = ast.at(e).node;
+        if (auto const* const r = node.try_as<ast::range>())
+        {
+            result.range = r;
+            break;
+        }
+        if (auto const* const m = node.try_as<ast::member>(); m != nullptr && text_of(file, m->name) == "reversed")
+        {
+            result.steps.insert_at(0, ast::expr_id::none);
+            e = m->object;
+            continue;
+        }
+        auto const* const call = node.try_as<ast::call>();
+        auto const* const callee
+            = call != nullptr && ast::is_valid(call->callee) ? ast.at(call->callee).node.try_as<ast::member>() : nullptr;
+        if (callee == nullptr || text_of(file, callee->name) != "by" || ast.at(call->arguments).size() != 1
+            || !ast.at(call->arguments)[0].name.empty() || ast.at(call->arguments)[0].is_splat)
+            return {};
+        result.steps.insert_at(0, ast.at(call->arguments)[0].value);
+        e = callee->object;
+    }
+    return result.range != nullptr ? result : range_walk();
+}
+
 void checker::check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt const& loop)
 {
     auto const file = scope.file;
     auto const& ast = ast_of(file);
     auto const int_type = type_of_builtin(builtins::k_int, file, span_of(file, id));
 
-    auto const* const r = ast::is_valid(loop.iterable) ? ast.at(loop.iterable).node.try_as<ast::range>() : nullptr;
+    auto const walk = ast::is_valid(loop.iterable) ? range_walk_of(file, loop.iterable) : range_walk();
+    auto const* const r = walk.range;
+    // CHK-415: a step is an int constant of at least 1, so the walk's length is known from its bounds alone
+    for (auto const step : walk.steps)
+    {
+        if (!ast::is_valid(step))
+            continue;
+        auto const value = constant_count(file, step, &scope);
+        if (value.has_value() && value.value() >= 1)
+            set_type(file, step, int_type);
+        else
+        {
+            (void)check_expr(scope, step);
+            report(diagnostic_kind::invalid_constant_argument, file, span_of(file, step),
+                   "a range's step is an int constant of at least 1: a literal or a `const`");
+        }
+    }
     if (r == nullptr)
     {
         if (check_expr(scope, loop.iterable) != error_type)

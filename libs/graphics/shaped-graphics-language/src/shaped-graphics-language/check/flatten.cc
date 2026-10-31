@@ -121,6 +121,14 @@ struct flattener
         source_span where;
     };
     cc::optional<looped_unroll> looped_around;
+    /// A walk of a range (CHK-415): the next `for` runs `k` over `0 ..< count`, and its variable is `start + k * step`.
+    /// Taken by the `for` it was set for before anything in its body is flattened.
+    struct walk_mapping
+    {
+        flat_expr_id start = flat_expr_id::none;
+        i32 step = 1;
+    };
+    cc::optional<walk_mapping> pending_walk;
     /// A call of a builtin that needs a feature of the device, which the entry point then needs too (CHK-322).
     /// A value of a type that needs one, such as a `half`, counts alike (CHK-382).
     struct feature_use
@@ -616,6 +624,19 @@ struct flattener
             for (auto& a : arguments)
                 a = again(a, from);
             return add_expr(x.type, from, flat_construct{.arguments = add_list(arguments)});
+        }
+        // the int arithmetic a walk's variable is (CHK-415), whose operands are substitutable in turn
+        if (auto const* const call = x.node.try_as<flat_call>())
+        {
+            auto arguments = cc::vector<flat_expr_id>();
+            for (auto const a : entry.at(call->arguments))
+                arguments.push_back(a);
+            for (auto& a : arguments)
+                a = again(a, from);
+            auto copy = x;
+            copy.node.as<flat_call>().arguments = add_list(arguments);
+            entry.exprs.push_back(cc::move(copy));
+            return flat_expr_id(entry.exprs.size() - 1);
         }
         return fail();
     }
@@ -3151,6 +3172,7 @@ struct flattener
             return flatten_fallen_back_for(from, id, loop, first, end);
         }
 
+        auto const walk = take_walk();
         auto const type = entry.at(first).type;
         auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
         auto const index_from = ast::is_valid(loop.variable) ? loop.variable : loop.iterable;
@@ -3169,8 +3191,10 @@ struct flattener
         for (auto i = i64(0); i < count; ++i)
         {
             if (n != nullptr)
-                current()->bound[slot].literal
-                    = add_expr(type, index_from, flat_int_literal{.value = i32(i64(low.value()) + i)});
+            {
+                auto const k = add_expr(type, index_from, flat_int_literal{.value = i32(i64(low.value()) + i)});
+                current()->bound[slot].literal = walk.has_value() ? walked(walk.value(), k, index_from) : k;
+            }
             auto const copy = add_label("unrolled_index");
             current()->loops.push_back({.loop = label, .continue_block = copy});
             ++unrolled_depth;
@@ -3221,9 +3245,17 @@ struct flattener
     {
         auto const* const n = ast::is_valid(loop.variable) ? ast().at(loop.variable).node.try_as<ast::name>() : nullptr;
         auto const int_type = is_valid(first) ? entry.at(first).type : type_id::none;
-        auto const index
-            = add_local(local_kind::index, n != nullptr ? c.text_of(file(), n->where) : cc::string_view("i"), int_type);
-        current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
+        auto const walk = take_walk();
+        auto const index = add_local(local_kind::index,
+                                     walk.has_value() ? cc::string_view("k")
+                                     : n != nullptr   ? c.text_of(file(), n->where)
+                                                      : cc::string_view("i"),
+                                     int_type);
+        current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)},
+                                    .local = index,
+                                    .literal = walk.has_value()
+                                                 ? walked(walk.value(), local_ref(index, loop.iterable), loop.iterable)
+                                                 : flat_expr_id::none});
 
         auto const label = add_label("for");
         entry.labels[index_of(label)].is_rolled = is_rolled(id);
@@ -3311,14 +3343,121 @@ struct flattener
         add_stmt(from, flat_if{.condition = builtin_call(where, at_most, ordered), .then_body = runs});
     }
 
+    /// The walk set for the `for` being flattened, which no `for` inside its body sees.
+    [[nodiscard]] cc::optional<walk_mapping> take_walk()
+    {
+        auto const walk = pending_walk;
+        pending_walk = {};
+        return walk;
+    }
+
+    /// `start + k * step`, folded where its parts are constants, so a walk over a constant range reads as one.
+    flat_expr_id walked(walk_mapping const& walk, flat_expr_id k, ast::expr_id where)
+    {
+        auto const type = entry.at(k).type;
+        auto const start = constant_int(walk.start);
+        auto const index = constant_int(k);
+        auto const literal = [&](i32 v) { return add_expr(type, where, flat_int_literal{.value = v}); };
+        if (start.has_value() && index.has_value())
+            return literal(start.value() + index.value() * walk.step);
+        type_id const ints[] = {type, type};
+        auto const op = [&](cc::string_view spelling, flat_expr_id a, flat_expr_id b)
+        {
+            flat_expr_id const operands[] = {a, b};
+            return builtin_call(where, c.find_operator(file(), spelling, ints), operands);
+        };
+        auto const is_zero = start.has_value() && start.value() == 0;
+        if (walk.step == -1)
+            return op("-", is_zero ? literal(0) : again(walk.start, where), again(k, where));
+        auto const scaled = walk.step == 1 ? again(k, where) : op("*", again(k, where), literal(walk.step));
+        return is_zero ? scaled : op("+", again(walk.start, where), scaled);
+    }
+
+    /// CHK-415: a range walked in reverse or in steps, as a `for` of `k` over `0 ..< count` whose variable is the
+    /// walk's `k`-th value; every part is an int, its bounds evaluated once, first before last.
+    void flatten_walked_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, checker::range_walk const& walk)
+    {
+        auto const& r = *walk.range;
+        auto first = flatten_expr(r.first);
+        auto last = flatten_expr(r.last);
+        if (!is_valid(first) || !is_valid(last))
+        {
+            mark_failed();
+            return;
+        }
+        auto const where = loop.iterable;
+        auto const type = entry.at(first).type;
+        type_id const ints[] = {type, type};
+        auto const literal = [&](i32 v) { return add_expr(type, where, flat_int_literal{.value = v}); };
+        // a part that is no constant is held in a local, so the bounds are evaluated once and in order
+        auto const held = [&](flat_expr_id value, cc::string_view name)
+        {
+            if (constant_int(value).has_value())
+                return value;
+            auto const local = add_local(local_kind::temporary, name, type);
+            add_stmt(from, flat_let{.local = local, .value = value});
+            return local_ref(local, where);
+        };
+        auto const op = [&](cc::string_view spelling, flat_expr_id a, flat_expr_id b)
+        {
+            auto const x = constant_int(a);
+            auto const y = constant_int(b);
+            if (x.has_value() && y.has_value())
+            {
+                auto const l = i64(x.value());
+                auto const m = i64(y.value());
+                auto const v = spelling == "+" ? l + m : spelling == "-" ? l - m : spelling == "*" ? l * m : l / m;
+                return literal(i32(v));
+            }
+            flat_expr_id const operands[] = {a, b};
+            return builtin_call(where, c.find_operator(file(), spelling, ints), operands);
+        };
+        first = held(first, "first");
+        last = held(last, "last");
+        auto const is_inclusive = sgl::is_valid(r.op) && c.text_of(file(), c.file_of(file()).at(r.op).where) == "..=";
+        auto count = held(
+            op("-", is_inclusive ? op("+", again(last, where), literal(1)) : again(last, where), again(first, where)),
+            "count");
+        auto start = first;
+        auto step = 1;
+        for (auto const s : walk.steps)
+        {
+            if (!ast::is_valid(s))
+            {
+                // the last value first: `start + (count - 1) * step`
+                start = held(
+                    op("+", again(start, where), op("*", op("-", again(count, where), literal(1)), literal(step))),
+                    "start");
+                step = -step;
+                continue;
+            }
+            auto const by = constant_int(flatten_expr(s));
+            if (!by.has_value() || by.value() < 1)
+            {
+                mark_failed();
+                return;
+            }
+            // as many values as a step of `by` reaches, rounded up; a count of none or fewer stays one of none
+            count = held(op("/", op("+", again(count, where), literal(by.value() - 1)), literal(by.value())), "count");
+            step *= by.value();
+        }
+        pending_walk = walk_mapping{.start = start, .step = step};
+        if (is_unrolled(id))
+            return flatten_unrolled_for(from, id, loop, literal(0), count);
+        flatten_looped_for(from, id, loop, literal(0), count);
+    }
+
     void flatten_for(origin from, ast::stmt_id id, ast::for_stmt const& loop)
     {
-        auto const* const r = ast::is_valid(loop.iterable) ? ast().at(loop.iterable).node.try_as<ast::range>() : nullptr;
+        auto const walk = ast::is_valid(loop.iterable) ? c.range_walk_of(file(), loop.iterable) : checker::range_walk();
+        auto const* const r = walk.range;
         if (r == nullptr)
         {
             mark_failed();
             return;
         }
+        if (!walk.steps.empty())
+            return flatten_walked_for(from, id, loop, walk);
         auto const first = flatten_expr(r->first);
         auto const end = flatten_expr(r->last);
         if (sgl::is_valid(r->op) && c.text_of(file(), c.file_of(file()).at(r->op).where) == "..=")

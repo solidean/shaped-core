@@ -1369,6 +1369,9 @@ hit_group textured for path_rays:
 * **CHK-414** `@unroll(false)` on a `for` asks the target to keep it a loop, and changes nothing of what it means: a hint, never a promise.
   HLSL writes `[loop]` ahead of it, and MSL and WGSL have no spelling for it, so there it is nothing.
   Every other argument of `@unroll` is `unsupported-yet`, a count among them.
+* **CHK-415** A `for` runs over an int range, or over a walk of one ([EVAL-102](evaluation.md#from-the-source)): `.reversed` and `.by(step)` after the range, in any number and order.
+  A step is an int constant of at least 1, a literal or a `const`, and anything else is `invalid-constant-argument`.
+  There is no float range: an int range and a conversion keep the number of iterations exact.
 * **CHK-375** An `if` with an `else` stands where a value is expected ([AST-154](../syntax/ast.md#if-and-else)), and runs the branch its condition takes and no other ([why](why/checking.md#chk-375)).
   Its condition is a `bool` by CHK-114, and its branches are judged as the arms of a `case` expression are, by CHK-164 to CHK-168: each produces a value of its one type or exits.
   In the flat tree it is the block of CHK-170 around an `if`, so a branch under a non-uniform condition is in non-uniform control flow (CHK-284).

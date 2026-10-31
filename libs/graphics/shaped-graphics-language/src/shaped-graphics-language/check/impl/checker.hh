@@ -990,6 +990,15 @@ struct checker
     void check_assign(function_scope& scope, ast::stmt_id id, ast::assign_stmt const& assign);
     [[nodiscard]] flow check_if(function_scope& scope, ast::if_stmt const& chain);
     void check_for(function_scope& scope, ast::stmt_id id, ast::for_stmt const& loop);
+    /// What a `for` runs over: a range, then each `.reversed` and `.by(step)` written after it, innermost first (CHK-415).
+    struct range_walk
+    {
+        ast::range const* range = nullptr;
+        /// An argument of `.by`, or `none` for a `.reversed`.
+        cc::vector<ast::expr_id> steps;
+    };
+    /// `iterable` as a range and the walk around it; no range where it is none, or a walk names anything else.
+    [[nodiscard]] range_walk range_walk_of(i32 file, ast::expr_id iterable) const;
     void check_return(function_scope& scope, source_span where, ast::expr_id value);
     void check_break(function_scope& scope, source_span where, ast::expr_id value);
     void check_condition(function_scope& scope, ast::expr_id condition);
