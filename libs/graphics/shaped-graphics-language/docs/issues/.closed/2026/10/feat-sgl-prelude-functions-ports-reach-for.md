@@ -1,5 +1,7 @@
 ---
 created: 2026-10-30
+closed: 2026-10-31
+resolution: fixed
 ---
 
 # A half's bits, the prelude function ports still reach for
