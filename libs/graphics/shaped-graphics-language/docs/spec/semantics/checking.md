@@ -624,6 +624,7 @@ fun shade(k: float) -> float:
   A function or a lambda meets no parameter of any other type, and its chain has length 0.
 * **CHK-319** A call of a parameter of function type is a call of the function it was handed, inlined where the parameter is called.
   A lambda is written out there with the names it saw where it was written, so a function value is never a value of any target.
+  So a function handed over reads the bindings it lists itself, and the function it is handed to lists none of them: a library calls back into a shader without knowing its bindings.
 * **CHK-316** `mut x` in a call hands over a place, and it fills a mut parameter alone ([why](why/checking.md#chk-316)).
   A mut parameter takes an argument marked `mut` and nothing else, and a marked argument binds to nothing else.
   So a default on a mut parameter is `default-not-allowed-here`, at the declaration.

@@ -3607,8 +3607,25 @@ struct flattener
         {
             auto const& r = c.out.call_records[record];
             auto const values = flatten_written(c.out.at(r.written));
-            auto const inlined = inline_bound(value, where.symbol, values, c.out.at(r.slots));
+            // a function argument is handed over as a closure, and a generic callee takes its type arguments
+            auto const handed = written_closures;
+            auto const inlined
+                = inline_bound(value, where.symbol, values, c.out.at(r.slots), handed, c.out.at(r.type_arguments));
             return add_stmt(from, flat_block{.label = inlined.label, .body = inlined.body});
+        }
+        // CHK-319: a call through a parameter of function type that gives `void` is the block it inlines, a statement
+        if (record >= 0 && !is_valid(c.out.call_records[record].callee)
+            && tables().type_at(value) == checked_module::void_type)
+        {
+            auto const inlined = flatten_expr(value);
+            if (!is_valid(inlined))
+                return;
+            if (auto const* const b = entry.at(inlined).node.try_as<flat_block>())
+            {
+                auto const block = *b;
+                return add_stmt(from, flat_block{.label = block.label, .body = block.body});
+            }
+            return add_stmt(from, flat_eval{.value = inlined});
         }
         // Any other call has a value, which is evaluated where it stands and dropped.
         add_stmt(from, flat_eval{.value = flatten_expr(value)});

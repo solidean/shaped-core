@@ -495,3 +495,26 @@ TEST("sgl emit - a WebGPU trace of the 17th acceleration member is too-many-acce
     // a native trace names its member, and takes no root
     CHECK(sgl::emit::dump_errors(emit_source(source_tracing(16), 0, target::hlsl_dx12)) == "");
 }
+
+TEST("sgl emit - a library calls back into its shader, whose callback reads bindings the library never names")
+{
+    // CHK-319: a callback is inlined where it is called, so its bindings are its own, and one that gives void is a
+    // statement, called from a statement
+    auto const source = cc::string("binding io:\n"
+                                   "    scatter: mut buffer[uint]\n"
+                                   "    scale: uint\n"
+                                   "\n"
+                                   "fun print_char(c: uint, on_char: (uint) -> void):\n"
+                                   "    on_char(c * 2u)\n"
+                                   "\n"
+                                   "fun mine(c: uint){io}:\n"
+                                   "    io.scatter[0] = c * io.scale\n"
+                                   "\n"
+                                   "@compute(4) fun main(@thread_id id: int3){io}:\n"
+                                   "    print_char(id.x as uint, mine)\n");
+    for (auto const t : {target::hlsl_dx12, target::wgsl, target::msl})
+    {
+        auto const text = text_of(source, t);
+        CHECK(text.contains("io_scatter[0] = ")).dump("text", text);
+    }
+}
