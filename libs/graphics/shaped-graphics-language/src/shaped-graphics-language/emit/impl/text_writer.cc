@@ -266,10 +266,9 @@ struct writer
     {
         auto const name = p.names.mint("narrowed");
         auto declaration = cc::string();
-        d.write_local(declaration, {.name = name,
-                                    .type = type_text(p, d, x.type),
-                                    .dimensions = array_dimensions(p, x.type),
-                                    .is_mut = true});
+        d.write_local(
+            declaration,
+            {.name = name, .type = type_text(p, d, x.type), .dimensions = array_dimensions(p, x.type), .is_mut = true});
         line(declaration);
         for (auto i = isize(0); i < isize(p.m.at(x.type).count); ++i)
             line(cc::format("{}[{}] = {}[{}]{};", name, i, raw, i, lanes));
@@ -281,10 +280,9 @@ struct writer
     {
         auto const name = p.names.mint("widened");
         auto declaration = cc::string();
-        d.write_local(declaration, {.name = name,
-                                    .type = type_text(p, d, type),
-                                    .value = value,
-                                    .dimensions = array_dimensions(p, type)});
+        d.write_local(
+            declaration,
+            {.name = name, .type = type_text(p, d, type), .value = value, .dimensions = array_dimensions(p, type)});
         line(declaration);
         for (auto i = isize(0); i < isize(p.m.at(type).count); ++i)
             line(cc::format("{}[{}].xyz = {}[{}];", raw, i, name, i));

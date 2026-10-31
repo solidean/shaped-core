@@ -415,7 +415,8 @@ TEST("sgl check - @padding(.none) on a binding or a buffer member packs GPU memo
         CHECK(reported.contains(expected));
     }
     // a mat3's columns stand 16 bytes apart already, so the matrix form is spelled and waits
-    CHECK(reports_for(cc::format("@padding(.every_column)\n{}", listing("    scale: float\n"))).contains("unsupported-yet"));
+    CHECK(
+        reports_for(cc::format("@padding(.every_column)\n{}", listing("    scale: float\n"))).contains("unsupported-yet"));
 
     // EMIT-172: a row per element stands on a constant block's array of values, and nowhere else
     CHECK(reports_for(listing("    @padding(.every_element) weights: float[4]\n")) == "");
@@ -506,7 +507,8 @@ TEST("sgl check - a binding array is one dimension of resources, bounded, grante
 TEST("sgl check - a mat3 stands in GPU memory, and crosses no stage edge yet")
 {
     // CHK-397: its layout in memory is three 16-byte columns (EMIT-110), and no stage edge carries one yet
-    constexpr auto why = "which no stage edge carries yet, since its layout as ray data and across a stage edge is not decided yet";
+    constexpr auto why
+        = "which no stage edge carries yet, since its layout as ray data and across a stage edge is not decided yet";
     constexpr auto nested = "struct holder:\n    m: mat3\nstruct outer:\n    h: holder\n\n";
     auto const with_nested = [&](cc::string_view members) { return reports_for(cc::string(nested) + listing(members)); };
 
@@ -524,7 +526,8 @@ TEST("sgl check - a mat3 stands in GPU memory, and crosses no stage edge yet")
 
     // a mat2's layout is not decided, so memory refuses it at its line
     CHECK(reports_for(listing("    turn: mat2\n"))
-              .contains("unsupported-yet user:[mat2] a mat2 in a constant block, as its member turn, which only a function "
+              .contains("unsupported-yet user:[mat2] a mat2 in a constant block, as its member turn, which only a "
+                        "function "
                         "body holds, since its layout in GPU memory is not decided yet"));
 
     // a vertex input, a stage link in both directions, and a pixel output

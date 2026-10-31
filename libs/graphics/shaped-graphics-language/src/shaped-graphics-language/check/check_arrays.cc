@@ -356,7 +356,8 @@ cc::string checker::sub_row_array_path(type_id type) const
     if (t.kind == type_kind::array)
     {
         // a struct nested in a constant block takes whole rows (EMIT-110), so only a builtin element can fall short
-        if (auto const* const record = out.builtin_type_of(t.element); record != nullptr && natural_stride_of(t.element) % 16 != 0)
+        if (auto const* const record = out.builtin_type_of(t.element);
+            record != nullptr && natural_stride_of(t.element) % 16 != 0)
             return cc::format(": {}", out.name_of(type));
         auto inner = sub_row_array_path(t.element);
         return inner.starts_with(":") ? cc::format(": {}", out.name_of(type)) : inner;

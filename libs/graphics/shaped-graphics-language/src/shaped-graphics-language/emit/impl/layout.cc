@@ -96,7 +96,8 @@ placed_members place_from(checked_module const& m,
             auto const element = members[i].padding == check::padding::every_element && space == address_space::constants
                                    ? element_shape{.stride = 16, .alignment = 16}
                                    : element_of(m, array.element, space);
-            auto const alignment = space == address_space::constants ? round_up(element.alignment, 16) : element.alignment;
+            auto const alignment
+                = space == address_space::constants ? round_up(element.alignment, 16) : element.alignment;
             at = round_up(at, alignment);
             result.alignment = alignment > result.alignment ? alignment : result.alignment;
             auto const size = i32(array.count) * element.stride;

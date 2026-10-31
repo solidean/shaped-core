@@ -704,7 +704,8 @@ TEST("sgl emit layout - a mat3 is three 16-byte columns, which HLSL holds as who
     CHECK(msl.contains("float3x3(float3(work_flat[id.x].value_0, work_flat[id.x].value_1, work_flat[id.x].value_2), "));
 }
 
-TEST("sgl emit layout - an array strides by its element rounded to its alignment, and HLSL holds a 3-vector's as 4-vectors")
+TEST("sgl emit layout - an array strides by its element rounded to its alignment, and HLSL holds a 3-vector's as "
+     "4-vectors")
 {
     constexpr auto source = "struct lamp:\n"
                             "    pos: float4\n"
@@ -742,7 +743,8 @@ TEST("sgl emit layout - an array strides by its element rounded to its alignment
     auto const wgsl = text_of(source, target::wgsl);
     CHECK(wgsl.contains("struct track {\n    corners: array<vec3f, 3>,\n    weights: array<f32, 4>,\n}\n"));
     auto const msl = text_of(source, target::msl);
-    CHECK(msl.contains("struct alignas(16) lamp\n{\n    float4 pos;\n    packed_float3 color;\n    float radius;\n};\n"));
+    CHECK(msl.contains("struct alignas(16) lamp\n{\n    float4 pos;\n    packed_float3 color;\n    float "
+                       "radius;\n};\n"));
     CHECK(msl.contains("    device track* scene_tracks [[id(1)]];\n"));
 }
 
@@ -795,5 +797,6 @@ TEST("sgl emit layout - an every_element array is one of 4-vectors on every targ
 
     // EMIT-170: MSL packs the block's float3 whose tail `strength` sits in, so the block is no memory form there
     auto const msl = text_of(source, target::msl);
-    CHECK(msl.contains("struct blur_data\n{\n    packed_float3 tint;\n    float strength;\n    array<float4, 4> weights;\n"));
+    CHECK(msl.contains("struct blur_data\n{\n    packed_float3 tint;\n    float strength;\n    array<float4, 4> "
+                       "weights;\n"));
 }

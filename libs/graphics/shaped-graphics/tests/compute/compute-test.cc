@@ -304,17 +304,11 @@ ASYNC_INVOCABLE_TEST("sg - a mat3 reaches the shader column by column, 16 bytes 
 
     // no matrix here is symmetric, so a transposed read or write shows
     auto const basis_of = [](int i)
-    {
-        return tg::mat3f::make_from_cols(tg::vec3f(1, float(i), 0), tg::vec3f(0, 1, 2), tg::vec3f(3, 0, 1));
-    };
+    { return tg::mat3f::make_from_cols(tg::vec3f(1, float(i), 0), tg::vec3f(0, 1, 2), tg::vec3f(3, 0, 1)); };
     auto const mat_of = [](int i)
-    {
-        return tg::mat3f::make_from_cols(tg::vec3f(2, 0, 0), tg::vec3f(float(i), 1, 0), tg::vec3f(0, 4, 1));
-    };
+    { return tg::mat3f::make_from_cols(tg::vec3f(2, 0, 0), tg::vec3f(float(i), 1, 0), tg::vec3f(0, 4, 1)); };
     auto const flat_of = [](int i)
-    {
-        return tg::mat3f::make_from_cols(tg::vec3f(0, 1, 0), tg::vec3f(5, 0, float(i)), tg::vec3f(0, 0, 1));
-    };
+    { return tg::mat3f::make_from_cols(tg::vec3f(0, 1, 0), tg::vec3f(5, 0, float(i)), tg::vec3f(0, 0, 1)); };
     auto const xf = tg::mat3f::make_from_cols(tg::vec3f(0, 1, 0), tg::vec3f(-1, 0, 0), tg::vec3f(0, 0, 2));
 
     constexpr auto count = 64;
@@ -375,7 +369,8 @@ static_assert(sizeof(shaders::layout::track) == 128);
 static_assert(offsetof(shaders::layout::track, weights) == 48);
 static_assert(offsetof(shaders::layout::track, lamps) == 64);
 
-ASYNC_INVOCABLE_TEST("sg - an array strides by its element rounded to its alignment, in a block and a buffer, on every backend",
+ASYNC_INVOCABLE_TEST("sg - an array strides by its element rounded to its alignment, in a block and a buffer, on every "
+                     "backend",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);

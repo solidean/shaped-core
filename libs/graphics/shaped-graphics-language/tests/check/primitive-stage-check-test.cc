@@ -261,7 +261,8 @@ TEST("sgl check - a geometry stage takes the primitive the pipeline assembles")
 TEST("sgl check - a mat3 crosses no tessellation or geometry edge")
 {
     // CHK-397: a control point, a factors struct and a stream's vertex are all edges a target lays out
-    constexpr auto why = "which no stage edge carries yet, since its layout as ray data and across a stage edge is not decided yet";
+    constexpr auto why
+        = "which no stage edge carries yet, since its layout as ray data and across a stage edge is not decided yet";
     constexpr auto head = "require geometry_shader\n"
                           "require tessellation_shader\n"
                           "struct framed:\n    position: float3\n    m: mat3\n"

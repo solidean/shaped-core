@@ -306,9 +306,9 @@ public:
                                       ? cc::string(builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)))
                                   : in_memory ? widened_vector_of(p, member.type)
                                               : cc::string();
-        auto const type = is_widened                ? cc::string("float4x3")
+        auto const type = is_widened              ? cc::string("float4x3")
                         : !widened_vector.empty() ? widened_vector
-                                                    : cc::string(type_text(p, *this, member.type));
+                                                  : cc::string(type_text(p, *this, member.type));
         // Stated on every matrix, so no `-Zpr` and no `#pragma pack_matrix` can turn one around.
         if (type == "float4x4" || type == "float4x3" || type == "float3x3")
             out += "column_major ";
@@ -547,7 +547,8 @@ public:
             out += "#pragma dxc diagnostic ignored \"-Wpayload-access-perf\"\n\n";
         write_enum_constants(out, p, *this);
         if (holds_widened_mat3(p))
-            out += "float4x3 sgl_widen_mat3(float3x3 m)\n{\n    return float4x3(m[0], m[1], m[2], float3(0.0, 0.0, 0.0));\n}\n\n";
+            out += "float4x3 sgl_widen_mat3(float3x3 m)\n{\n    return float4x3(m[0], m[1], m[2], float3(0.0, 0.0, "
+                   "0.0));\n}\n\n";
         // A struct stands ahead of the groups, whose blocks and buffers may hold it.
         for (auto const& s : p.structs)
         {

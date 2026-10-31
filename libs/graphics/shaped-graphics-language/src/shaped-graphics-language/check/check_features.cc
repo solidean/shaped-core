@@ -197,9 +197,9 @@ checker::local_only_found checker::local_only_path(type_id type, bool in_memory)
     if (auto const* const record = out.builtin_type_of(type))
         return record->local_only_reason.empty() || (in_memory && record->wgsl_layout.size != 0)
                  ? local_only_found()
-                                                 : local_only_found{.path = cc::format(": {}", out.name_of(type)),
-                                                                    .reason = record->local_only_reason,
-                                                                    .type = type};
+                 : local_only_found{.path = cc::format(": {}", out.name_of(type)),
+                                    .reason = record->local_only_reason,
+                                    .type = type};
     auto const& t = out.at(type);
     if (t.kind == type_kind::array || t.kind == type_kind::buffer)
     {

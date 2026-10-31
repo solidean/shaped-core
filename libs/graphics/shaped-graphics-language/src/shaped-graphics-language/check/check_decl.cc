@@ -717,10 +717,11 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                 innermost = out.at(innermost).element;
             // EMIT-172: `@padding(.every_element)` starts each element of a one-dimensional array of values on a row
             auto const* const rows = find_attribute(file, f.attributes, "padding");
-            auto const asks_rows = rows != nullptr && ast_of(file).at(rows->arguments).size() == 1
-                                && ast::is_valid(ast_of(file).at(rows->arguments)[0].value)
-                                && text_of(file, span_of(file, ast_of(file).at(rows->arguments)[0].value)) == ".every_element"
-                                && out.builtin_type_of(t.element) != nullptr;
+            auto const asks_rows
+                = rows != nullptr && ast_of(file).at(rows->arguments).size() == 1
+               && ast::is_valid(ast_of(file).at(rows->arguments)[0].value)
+               && text_of(file, span_of(file, ast_of(file).at(rows->arguments)[0].value)) == ".every_element"
+               && out.builtin_type_of(t.element) != nullptr;
             if (!is_resource(out.at(innermost).kind))
             {
                 if (auto const path = asks_rows ? cc::string() : sub_row_array_path(type); !path.empty())
@@ -728,7 +729,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
                     auto const stride = out.builtin_type_of(t.element) != nullptr ? natural_stride_of(t.element) : 0;
                     unsupported(file, span_of(file, f.type),
                                 path.starts_with(":") && stride > 0
-                                    ? cc::format("an array of {} in a constant block, whose element strides by {} bytes, "
+                                    ? cc::format("an array of {} in a constant block, whose element strides by {} "
+                                                 "bytes, "
                                                  "short of a 16-byte row, which a runtime index needs",
                                                  out.name_of(t.element), stride)
                                     : cc::format("an array in a constant block, {}{}, whose element strides by less "
@@ -773,14 +775,16 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             auto const root = is_buffer ? t.element : type;
             if (is_buffer && out.builtin_type_of(root) == nullptr && out.at(root).kind == type_kind::array)
             {
-                unsupported(file, span_of(file, f.type),
-                            cc::format("an array as a buffer's element, {}; a struct holding it is one", out.name_of(root)));
+                unsupported(
+                    file, span_of(file, f.type),
+                    cc::format("an array as a buffer's element, {}; a struct holding it is one", out.name_of(root)));
                 type = checked_module::error_type;
             }
             else if (auto const path = is_buffer ? cc::string() : sub_row_array_path(root); !path.empty())
             {
                 unsupported(file, span_of(file, f.type),
-                            cc::format("an array in a constant block, {}{}, whose element strides by less than a 16-byte "
+                            cc::format("an array in a constant block, {}{}, whose element strides by less than a "
+                                       "16-byte "
                                        "row, which a runtime index needs",
                                        out.name_of(root), path));
                 type = checked_module::error_type;

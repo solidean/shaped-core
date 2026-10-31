@@ -132,10 +132,11 @@ public:
                       bool is_packed_tail = false) const
     {
         // EMIT-172: an array of one value per row is one of 4-vectors
-        auto const type = member.is_row_per_element
-                            ? cc::format("array<{}, {}>", builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)),
-                                         p.m.at(member.type).count)
-                            : cc::string(type_text(p, *this, member.type));
+        auto const type
+            = member.is_row_per_element
+                ? cc::format("array<{}, {}>", builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)),
+                             p.m.at(member.type).count)
+                : cc::string(type_text(p, *this, member.type));
         out.appendf("{}{}{} {}", k_indent, is_packed_tail ? "packed_" : "", type, member.name);
         if (owner != nullptr)
             if (auto const attribute = attribute_of(*owner, member); !attribute.empty())

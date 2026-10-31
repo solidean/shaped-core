@@ -106,12 +106,12 @@ native_placement place_natively(checked_module const& m,
             {
                 auto dry = cc::vector<i32>();
                 auto const inner = place_natively(m, m.at(m.at(element).members), space, t, 0, dry);
-                element_alignment = t == emit::target::wgsl && !is_storage(space) ? round_up(inner.alignment, 16)
-                                                                                  : inner.alignment;
+                element_alignment
+                    = t == emit::target::wgsl && !is_storage(space) ? round_up(inner.alignment, 16) : inner.alignment;
                 stride = round_up(inner.size, element_alignment);
             }
-            auto const array_alignment = t == emit::target::wgsl && !is_storage(space) ? round_up(element_alignment, 16)
-                                                                                       : element_alignment;
+            auto const array_alignment
+                = t == emit::target::wgsl && !is_storage(space) ? round_up(element_alignment, 16) : element_alignment;
             at = round_up(at, array_alignment);
             offsets.push_back(base + at);
             at += count * stride;

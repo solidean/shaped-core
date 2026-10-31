@@ -95,7 +95,8 @@ public:
             // EMIT-172: an array of one value per row is one of 4-vectors, which WGSL's uniform rule admits
             if (member.is_row_per_element)
                 out.appendf("{}: array<{}, {}>,\n", member.name,
-                            builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)), p.m.at(member.type).count);
+                            builtin_spelling(p, row_vector_of(p, p.m.at(member.type).element)),
+                            p.m.at(member.type).count);
             else
                 out.appendf("{}: {},\n", member.name, type_text(p, *this, member.type));
         }

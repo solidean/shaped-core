@@ -94,7 +94,8 @@ TEST("sgl check - an element of a mutable array is assigned, and its length neve
               .contains("an array's length is part of its type, and never assigned"));
 }
 
-TEST("sgl check - a constant block holds an array whose element takes whole rows, and a binding array waits for its feature")
+TEST("sgl check - a constant block holds an array whose element takes whole rows, and a binding array waits for its "
+     "feature")
 {
     // CHK-291: an element striding by whole 16-byte rows is indexed in place on every target
     CHECK(reports_for("binding work:\n    lights: float4[4]\n    ids: int4[2]\n    bones: mat4[8]\n") == "");
