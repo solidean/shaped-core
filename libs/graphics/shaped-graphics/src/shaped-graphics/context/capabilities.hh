@@ -127,6 +127,12 @@ enum class sg::feature
     /// D3D12's and Vulkan's compare-exchange is strong already, so their strong form needs no loop and asks no test.
     /// WGSL has no such test.
     helper_lane_query,
+
+    /// A vertex shader may send its primitive to one layer of a layered render target (SGL's `@layer`), so one draw
+    /// fills every layer of an array, such as both eyes of a stereo frame.
+    /// D3D12 grants it with `VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation`, Vulkan with
+    /// `shaderOutputLayer`, and Metal on every Apple GPU its Metal 4 floor admits; WebGPU has no such output.
+    vertex_layer_output,
 };
 
 CC_FLAG_ENUM_INDEXED(sg, feature, cc::u32);
@@ -161,8 +167,9 @@ inline constexpr feature k_all_features[] = {
     feature::device_coherence,
     feature::image_atomics,
     feature::helper_lane_query,
+    feature::vertex_layer_output,
 };
-static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::helper_lane_query) + 1,
+static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize(feature::vertex_layer_output) + 1,
               "k_all_features lists every feature");
 
 /// The enumerator's name, `ray_query`, which is also what SGL's `require` spells it as.
@@ -216,6 +223,8 @@ static_assert(isize(sizeof(k_all_features) / sizeof(k_all_features[0])) == isize
         return "image_atomics";
     case feature::helper_lane_query:
         return "helper_lane_query";
+    case feature::vertex_layer_output:
+        return "vertex_layer_output";
     }
     return "";
 }

@@ -557,3 +557,24 @@ TEST("sgl check - only a pixel entry point may reach discard")
                         "@pixel fun ps(v: vout) -> target:\n    return { c = float4(cut(v.p.x), 0.0, 0.0, 1.0) }\n")
           == "");
 }
+
+TEST("sgl check - a vertex stage's @layer is one uint the rasterizer reads, and needs vertex_layer_output")
+{
+    // CHK-419
+    auto const layered = [](cc::string_view fields, cc::string_view require = "require vertex_layer_output\n\n")
+    {
+        return reports_for(cc::format("{}struct layered_out:\n    @position p: hpos4\n{}\n"
+                                      "@vertex fun vs(@instance_index i: int) -> layered_out:\n"
+                                      "    return {{ p = hpos4(0.0, 0.0, 0.0, 1.0), layer = i as uint }}\n",
+                                      require, fields));
+    };
+    CHECK(layered("    @layer layer: uint\n") == "");
+    CHECK(layered("    @layer layer: uint\n", "").contains("feature-not-declared user:[vs] vs needs vertex_layer_output"));
+    CHECK(layered("    @layer layer: int\n").contains("the @layer field 'layer' of a @vertex fun is a uint"));
+    CHECK(layered("    @layer @interpolate(.flat) layer: uint\n")
+              .contains("the @layer member 'layer' is the rasterizer's, and is no interpolated value"));
+    // a struct no rasterizer reads has no layer to pick
+    CHECK(reports_for("@vertex struct vin:\n    @layer layer: uint\n\nstruct layered_out:\n    @position p: hpos4\n\n"
+                      "@vertex fun vs(v: vin) -> layered_out:\n    return { p = hpos4(0.0, 0.0, 0.0, 1.0) }\n")
+              .contains("reaches no rasterizer, so @layer means nothing on it"));
+}

@@ -2,6 +2,8 @@
 created: 2026-10-30
 corpus:
   - bgfx/shaders/52-layered/vs_layered
+closed: 2026-10-31
+resolution: fixed
 ---
 
 # A vertex output that sends a primitive to a render-target array layer

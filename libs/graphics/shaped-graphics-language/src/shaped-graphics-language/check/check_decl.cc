@@ -626,8 +626,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             continue;
         auto const name = text_of(file, f.name);
 
-        cc::string_view const known_on_field[]
-            = {"position", "per_instance", "stream", "interpolate", "per_draw", "edge_factors", "inside_factors"};
+        cc::string_view const known_on_field[] = {"position",    "layer",    "per_instance", "stream",
+                                                  "interpolate", "per_draw", "edge_factors", "inside_factors"};
         // CHK-276: a `@pixel struct` member may be the depth or the sample mask rather than a color target
         cc::string_view const known_on_pixel_field[]
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
@@ -867,6 +867,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .type = type,
             .field = line->field,
             .is_position = find_attribute(file, f.attributes, "position") != nullptr,
+            .is_layer = find_attribute(file, f.attributes, "layer") != nullptr,
             .interpolate = interpolated,
             .has_interpolate = interpolate != nullptr,
             .is_per_draw = is_per_draw,
@@ -2228,7 +2229,10 @@ void checker::judge_entry_point(symbol_id id)
             auto const is_integer
                 = record != nullptr
                && (record->leaf_kind == value_kind::scalar_int || record->leaf_kind == value_kind::scalar_uint);
-            if (is_integer && m.interpolate.kind != interpolation::kind_t::flat)
+            // CHK-419: the layer is the rasterizer's, and the pixel stage reads the one its primitive went to
+            if (m.is_layer && m.has_interpolate)
+                invalid(cc::format("the @layer member '{}' is the rasterizer's, and is no interpolated value", m.name));
+            if (is_integer && !m.is_layer && m.interpolate.kind != interpolation::kind_t::flat)
                 invalid(cc::format("the {} member '{}' crosses stages only flat: write `@interpolate(.flat)`",
                                    out.name_of(m.type), m.name));
             if (m.has_interpolate && m.is_position)
@@ -2248,6 +2252,8 @@ void checker::judge_entry_point(symbol_id id)
         {
             if (m.has_interpolate)
                 invalid(cc::format("'{}' crosses no stage edge, so @interpolate means nothing on it", m.name));
+            if (m.is_layer)
+                invalid(cc::format("'{}' reaches no rasterizer, so @layer means nothing on it", m.name));
             if (m.is_per_draw)
                 invalid(cc::format("'{}' crosses no stage edge, so @per_draw means nothing on it", m.name));
         }
@@ -2298,6 +2304,17 @@ void checker::judge_entry_point(symbol_id id)
                 is_hpos4 = is_hpos4 && type.kind == type_kind::structure && record != nullptr
                         && record->name == builtins::k_hpos4;
             }
+        // CHK-419: one layer at most, a uint, as every target's layer output is
+        auto layers = 0;
+        for (auto const& m : out.at(result.members))
+            if (m.is_layer)
+            {
+                ++layers;
+                if (m.type != checked_module::error_type && out.name_of(m.type) != builtins::k_uint)
+                    invalid(cc::format("the @layer field '{}' of a @vertex fun is a uint", m.name));
+            }
+        if (layers > 1)
+            invalid("a @vertex fun returns a struct with at most one @layer field");
         // CHK-90: a vertex stage before a tessellation stage hands on control points, which have none
         if (positions > 1)
             invalid("a @vertex fun returns a struct with at most one @position field");

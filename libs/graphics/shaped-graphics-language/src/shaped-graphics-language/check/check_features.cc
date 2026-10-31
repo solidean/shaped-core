@@ -76,6 +76,22 @@ void checker::judge_entry_features(symbol_id id)
     // CHK-326: the ray-tracing stages are the pipeline's, which a device grants
     if (info.entry_stage >= stage::raygen)
         needed.set(feature::raytracing_pipeline);
+    // CHK-419: the stage that writes a layer, and the one that reads it, need the device to send a primitive to it
+    auto const has_layer = [&](type_id type)
+    {
+        if (!is_valid(type) || out.at(type).kind != type_kind::structure)
+            return false;
+        for (auto const& m : out.at(out.at(type).members))
+            if (m.is_layer)
+                return true;
+        return false;
+    };
+    if (info.entry_stage == stage::vertex && has_layer(info.result))
+        needed.set(feature::vertex_layer_output);
+    if (info.entry_stage == stage::pixel)
+        for (auto const& parameter : out.at(info.parameters))
+            if (parameter.input == stage_input::none && has_layer(parameter.type))
+                needed.set(feature::vertex_layer_output);
     // CHK-274: a pixel stage that takes a member per sample runs per sample, which vulkan gives only with a feature
     if (info.entry_stage == stage::pixel)
         for (auto const& parameter : out.at(info.parameters))

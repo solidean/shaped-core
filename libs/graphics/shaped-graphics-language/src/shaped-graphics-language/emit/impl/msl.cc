@@ -78,6 +78,8 @@ public:
     {
         if (member.is_position)
             return "position";
+        if (member.is_layer)
+            return "render_target_array_index";
         switch (s.role)
         {
         case struct_role::vertex_input:

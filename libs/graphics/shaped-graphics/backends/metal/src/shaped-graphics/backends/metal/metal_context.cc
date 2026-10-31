@@ -152,7 +152,9 @@ bool metal_context::supports(sg::feature f) const
     case sg::feature::multisampled_array_textures:
     case sg::feature::primitive_index:
     case sg::feature::sample_rate_shading:
-        // `[[primitive_id]]` and `[[sample_id]]` exist on every Apple GPU this backend's Metal 4 floor admits.
+    case sg::feature::vertex_layer_output:
+        // `[[primitive_id]]`, `[[sample_id]]` and a vertex function's `[[render_target_array_index]]` exist on every
+        // Apple GPU this backend's Metal 4 floor admits.
         return true;
     case sg::feature::wireframe_fill:
         // `MTLTriangleFillModeLines` is on every Apple GPU.

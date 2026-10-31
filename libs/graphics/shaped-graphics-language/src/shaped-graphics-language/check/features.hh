@@ -37,6 +37,8 @@ enum class sgl::check::feature : sgl::u8
     image_atomics,
     /// A pixel stage's `compare_exchange_strong` (EMIT-163), whose loop must tell a helper invocation; WGSL cannot.
     helper_lane_query,
+    /// A `@layer` member (CHK-419): the vertex stage picks the render target's layer, which WebGPU has on no device.
+    vertex_layer_output,
 };
 
 CC_FLAG_ENUM_INDEXED(sgl::check, feature, u32);
@@ -62,6 +64,7 @@ inline constexpr cc::string_view k_feature_names[] = {
     "device_coherence",            //
     "image_atomics",               //
     "helper_lane_query",           //
+    "vertex_layer_output",         //
 };
 inline constexpr isize k_feature_count = isize(sizeof(k_feature_names) / sizeof(k_feature_names[0]));
 

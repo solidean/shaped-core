@@ -66,6 +66,8 @@ public:
     {
         if (member.is_position)
             return "SV_Position";
+        if (member.is_layer)
+            return "SV_RenderTargetArrayIndex";
         switch (s.role)
         {
         case struct_role::vertex_input:

@@ -829,6 +829,10 @@ fun f() -> float:
   The feature is the pixel stage's alone: the geometry and tessellation stages have the primitive's index wherever they have the stage.
   `@subgroup_size` and `@subgroup_invocation_id` need `subgroups` in every stage that takes them.
 * **CHK-90** A `@vertex fun` returns a struct with at most one field that carries `@position`, and that field is of the type `hpos4`.
+* **CHK-419** A field of the struct a `@vertex fun` returns may carry `@layer`, at most one, a `uint`: the layer of a layered render target its primitive draws into.
+  The rasterizer reads it, so it takes no location and no `@interpolate`, and a pixel stage that takes the struct reads the layer its primitive went to.
+  Each stage whose struct holds one needs `vertex_layer_output`, which WebGPU has on no device, so its WGSL is `target-lacks-feature`.
+  A layer past the target's last layers draws nothing.
   The struct that reaches the rasterizer carries exactly one, which CHK-307 asks of the pipeline.
 * **CHK-91** A `@pixel fun` returns a `@pixel struct`, one color value, or nothing (CHK-418).
 * **CHK-418** A `@pixel fun` that returns one numeric scalar or plain vector of `float`, `half`, `int` or `uint` writes it as its one color target, named `color`.
@@ -868,6 +872,7 @@ A feature is what a device may lack, so using one makes a shader non-portable on
   `binding_arrays`, `extended_image_formats`, `readwrite_image_formats`, `multisampled_array_textures`, `ray_query` and `raytracing_pipeline`.
   The 16-bit types add `shader_f16` and `shader_int16` (CHK-382), and the subgroup operations `subgroups` (CHK-376).
   Coherent memory adds `device_coherence` (CHK-368), image atomics `image_atomics` (CHK-372), and a pixel stage's strong compare-exchange `helper_lane_query` (EMIT-163).
+  A `@layer` field adds `vertex_layer_output` (CHK-419).
   The stages and stage inputs a device may lack add `primitive_index`, `sample_rate_shading`, `geometry_shader` and `tessellation_shader`.
   Any other name is the normal error `unknown-feature`, and its detail lists the names.
 * **CHK-259** A `require` at file scope grants its features to everything in the file ([why](why/checking.md#chk-259)).
