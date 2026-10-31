@@ -375,9 +375,10 @@ TEST("sgl check - a call one `mut` mark away from a candidate says which paramet
                       "fun f() -> float:\n    let mut a = 1.0\n    let mut b = 2.0\n    both(a, b)\n    return a\n")
               .contains("x and y are mut parameters, so their arguments are places marked `mut`, as in "
                         "`both(mut a, mut b)`"));
-    // a dot call has no place for the mark, so the fix is the free call
-    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    v.twice()\n    return v\n", twice))
-              .contains("x is a mut parameter, so its argument is a place marked `mut`, as in `twice(mut v)`"));
+    // CHK-416: a dot call's receiver that is a place needs no mark, and one that is none says why
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let mut v = 1.0\n    v.twice()\n    return v\n", twice)) == "");
+    CHECK(reports_for(cc::format("{}fun f() -> float:\n    let k = 1.0\n    k.twice()\n    return k\n", twice))
+              .contains("and `k` is none: k is immutable; `let mut` declares a local an assignment may name"));
 }
 
 TEST("sgl check - a select written with its condition last says the condition comes first")

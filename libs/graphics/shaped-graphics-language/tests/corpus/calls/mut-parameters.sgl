@@ -95,3 +95,32 @@ fun add_to(x: mut int, by: int):
     bump(mut c, 1.0)
     add_to(mut tally.counts[id.x], c.hits)
     twice(mut tally.sums[id.x + 1])
+
+// a dot call's receiver that is a place meets a `mut` first parameter with no mark (CHK-416)
+test:
+    let mut c = counter(0, 0.0)
+    c.bump(2.0)
+    c.bump(0.5)
+    c.hits == 2 and c.total == 2.5
+
+// a member and an element are places too, and a function taking its first parameter by value still takes the receiver
+fun hits_of(c: counter) -> int => c.hits
+
+test:
+    let mut pair = [counter(0, 0.0), counter(5, 0.0)]
+    pair[1].bump(1.0)
+    let mut v = float3(1.0, 2.0, 3.0)
+    v.x.twice()
+    pair[1].hits_of() == 6 and v.x == 2.0
+
+// a receiver that is no place has nothing a mut parameter could change
+@expect(error = "no-matching-overload")
+test:
+    counter(0, 0.0).bump(1.0)
+    true
+
+@expect(error = "no-matching-overload")
+test:
+    let c = counter(0, 0.0)
+    c.bump(1.0)
+    c.hits == 0

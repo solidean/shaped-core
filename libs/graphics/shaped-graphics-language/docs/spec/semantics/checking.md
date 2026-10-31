@@ -631,6 +631,9 @@ fun shade(k: float) -> float:
   Its indices are evaluated once, where the call binds it, and the body reads and writes that one place wherever it names the parameter.
   A call that a candidate would match but for its marks is `no-matching-overload`, and its detail names each parameter and says whether it takes the mark.
   That is a mark missing on an argument of a mut parameter's type exactly, or one written on an argument of another parameter.
+* **CHK-416** A dot call's receiver that is a place meets a mut first parameter as `mut x` would, with no mark written, and any other parameter as a value.
+  A free call marks its argument because it could be any expression, and a receiver standing before a dot is visibly the place it names.
+  A receiver that is no place, `f().bump()` or an immutable local, meets no mut parameter, and the detail says why it is none.
   Where the argument a mark is missing on is no place this rule takes, the detail says why it is none instead, since the mark would fix nothing.
   Several marks, and a dot call, which has nowhere to write one, are shown as the whole call written with every mark right: `twice(mut v)`.
 * **CHK-70** A candidate **matches** when it binds, and each argument converts to its parameter's type by a **conversion chain**.

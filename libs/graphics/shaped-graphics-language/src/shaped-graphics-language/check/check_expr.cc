@@ -1849,7 +1849,10 @@ type_id checker::check_dot_call(function_scope& scope, ast::expr_id id, ast::cal
                cc::format("the texels of an @atomic image are atomics, so `{0}` is the texel's: `img[xy].{0}(…)`", name));
         return error_type;
     }
-    arguments.written.insert_at(0, {.expr = member.object});
+    // CHK-416: a receiver that is a place may stand for a `mut` first parameter, which the call then needs no mark for
+    auto quiet = cc::string();
+    auto const is_place = judge_place(scope, member.object, "", &quiet);
+    arguments.written.insert_at(0, {.expr = member.object, .may_be_mut = is_place});
     arguments.types.insert_at(0, receiver);
     arguments.names.insert_at(0, {});
     // CHK-250, CHK-253: the receiver is argument 0, and a number literal there converts like one anywhere else
@@ -2388,7 +2391,8 @@ cc::optional<candidate_match> checker::match(i32 file, symbol_id candidate, call
             // a number binds the type it was checked as, since nothing asks it for another
             if (arguments.functions[i] >= 0 || arguments.literals[i] >= 0)
                 deferred.push_back(p);
-            else if (out.at(range)[p].is_mut != arguments.written[i].is_mut
+            else if (out.at(range)[p].is_mut
+                         != (arguments.written[i].is_mut || (arguments.written[i].may_be_mut && out.at(range)[p].is_mut))
                      || !unify(out.at(range)[p].type, arguments.types[i], result.bindings))
                 return cc::nullopt;
             continue;
@@ -2474,9 +2478,11 @@ cc::optional<i32> checker::chain_of(i32 file, parameter const& taking, call_argu
         return case_index_of(taking.type, arguments.leading_dots[i]) >= 0 && !taking.is_mut ? cc::optional<i32>(0)
                                                                                             : cc::nullopt;
     // CHK-316: a place is handed over as it is, so it has the parameter's type exactly, and a mark meets a mut parameter
-    if (taking.is_mut || arguments.written[i].is_mut)
+    // CHK-416: a receiver that is a place is marked wherever the parameter is `mut`
+    auto const is_mut = arguments.written[i].is_mut || (arguments.written[i].may_be_mut && taking.is_mut);
+    if (taking.is_mut || is_mut)
     {
-        if (taking.is_mut != arguments.written[i].is_mut || arguments.types[i] != taking.type)
+        if (taking.is_mut != is_mut || arguments.types[i] != taking.type)
             return cc::nullopt;
         return 0;
     }
@@ -2913,6 +2919,15 @@ void checker::record_call(i32 file,
     auto const written = ast::range_of<written_argument>{.first = u32(out.written_arguments.size()),
                                                          .count = u32(arguments.written.size())};
     out.written_arguments.push_back_range(arguments.written);
+    // CHK-416: a receiver bound to a `mut` parameter is handed over as `mut x` is, which is what every later pass reads
+    auto const has_receiver = !arguments.written.empty() && arguments.written[0].may_be_mut;
+    if (has_receiver && is_valid(callee) && out.at(callee).kind == symbol_kind::function)
+    {
+        auto const parameters = out.at(out.functions[out.at(callee).info].parameters);
+        for (auto p = isize(0); p < slots.size() && p < parameters.size(); ++p)
+            if (auto const i = slots[p]; i >= 0 && parameters[p].is_mut && arguments.written[i].may_be_mut)
+                out.written_arguments[written.first + i].is_mut = true;
+    }
     auto const slot_range = ast::range_of<i32>{.first = u32(out.call_slots.size()), .count = u32(slots.size())};
     out.call_slots.push_back_range(slots);
     out.files[file].call_of[ast::index_of(id)] = i32(out.call_records.size());

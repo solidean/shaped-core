@@ -834,6 +834,9 @@ struct sgl::check::written_argument
     i32 splat_member = -1;
     /// `mut x`: the caller's place, for a `mut` parameter (AST-149, CHK-316).
     bool is_mut = false;
+    /// A dot call's receiver that is a place a body could assign: it meets a `mut` parameter as `mut x` would, and
+    /// any other as a value (CHK-416); a call that binds it to a `mut` parameter records it `is_mut`.
+    bool may_be_mut = false;
     /// A function handed to a parameter of function type: a function's name, an arrow lambda, or such a parameter
     /// handed on (CHK-318); what it stands for is its expression's target.
     bool is_function = false;
