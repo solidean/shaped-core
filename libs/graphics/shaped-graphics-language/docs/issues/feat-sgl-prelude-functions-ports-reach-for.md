@@ -1,7 +1,5 @@
 ---
 created: 2026-10-30
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-10-30T19:15Z
 ---
 
 # Prelude functions every port reaches for: radians, a floored mod, bool to float, mat4 * hpos4
