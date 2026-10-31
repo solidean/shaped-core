@@ -108,6 +108,8 @@ cc::string_view sgl::to_string(diagnostic_kind kind)
         return "statement-in-expression";
     case diagnostic_kind::unexpected_keyword:
         return "unexpected-keyword";
+    case diagnostic_kind::keyword_as_name:
+        return "keyword-as-name";
     case diagnostic_kind::too_many_arguments:
         return "too-many-arguments";
     case diagnostic_kind::for_takes_name_in_range:
@@ -366,6 +368,8 @@ cc::string_view sgl::summary_of(diagnostic_kind kind)
         return "a statement where a value is expected";
     case diagnostic_kind::unexpected_keyword:
         return "keywords that head nothing together, such as `mut` without `let`";
+    case diagnostic_kind::keyword_as_name:
+        return "a keyword where a name stands, such as a member called `type`; name it something else";
     case diagnostic_kind::too_many_arguments:
         return "a keyword that holds more expressions than it takes";
     case diagnostic_kind::for_takes_name_in_range:
@@ -572,6 +576,7 @@ sgl::severity sgl::default_severity_of(diagnostic_kind kind)
     case diagnostic_kind::misplaced_attribute_on_expression:
     case diagnostic_kind::statement_in_expression:
     case diagnostic_kind::unexpected_keyword:
+    case diagnostic_kind::keyword_as_name:
     case diagnostic_kind::too_many_arguments:
     case diagnostic_kind::for_takes_name_in_range:
     case diagnostic_kind::assert_takes_condition_and_message:

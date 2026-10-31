@@ -42,6 +42,7 @@ Each kind names the rule that reports it, and has one example below the table.
 | `semicolon-in-parens` | [FORM-17](forms.md#paren-literals) | the `;` separates elements as a comma does |
 | `expected-expression` | [FORM-40](forms.md#broken-runs) | a missing form stands for the operand |
 | `unexpected-token` | [FORM-41](forms.md#broken-runs) | an error form that keeps the group tokens in source order |
+| `keyword-as-name` | [FORM-43](forms.md#keyword-forms) | an identifier of the keyword's spelling |
 | `underscore-in-number` | [NUM-12](numbers.md#inside-the-symbols) | each `_` reads as `'` |
 | `malformed-number` | [NUM-19](numbers.md#inside-the-symbols) | a number literal without a value |
 | `bare-range` | [OP-8](operators.md#the-operator-table) | a range operator |
@@ -184,6 +185,13 @@ let sum = a +
 
 ```sgl error
 a , b
+```
+
+`keyword-as-name`: a member called `type`, which is a keyword.
+
+```sgl error
+struct paint:
+    type: int
 ```
 
 `underscore-in-number`: written `1'000`.

@@ -291,3 +291,15 @@ TEST("sgl forms - spellings that are kept free say what to write instead")
     CHECK(form_of("(..n, 0)") == "(round (prefix .. id:n) num:0)");
     CHECK(form_of("(n.., 0)") == "(round (postfix .. id:n) num:0) !! reserved-operator @2+2\n");
 }
+
+TEST("sgl forms - a keyword where a name stands is that name, reported once")
+{
+    // FORM-43: a keyword followed by an ascription, or by an assignment right after another keyword
+    CHECK(form_of("type: int") == "(run id:type op:: id:int) !! keyword-as-name @0+4\n");
+    CHECK(diagnostics_of("let type = 1") == "keyword-as-name @4+4\n");
+    CHECK(diagnostics_of("fun f(loop: int) -> int => loop") == "keyword-as-name @6+4\n");
+
+    // `rays = set` in a pipeline has no keyword before its own, and `loop:` ends in a block colon
+    CHECK(diagnostics_of("rays = probe_rays") == "");
+    CHECK(diagnostics_of("loop:\n    break") == "");
+}

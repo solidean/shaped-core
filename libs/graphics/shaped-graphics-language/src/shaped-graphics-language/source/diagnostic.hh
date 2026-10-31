@@ -82,6 +82,8 @@ enum class sgl::diagnostic_kind : sgl::u8
     statement_in_expression,
     /// Keywords that head nothing together, such as `mut` without `let`.
     unexpected_keyword,
+    /// A keyword followed by `:` or `=`, where a name stands: a member or a parameter called `type`.
+    keyword_as_name,
     /// A keyword form holding more expressions than it takes: `return a, b`, `continue x`.
     too_many_arguments,
     for_takes_name_in_range,
