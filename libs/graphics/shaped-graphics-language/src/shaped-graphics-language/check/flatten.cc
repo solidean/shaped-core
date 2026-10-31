@@ -3199,6 +3199,23 @@ struct flattener
         looped_around = around;
     }
 
+    /// `@unroll(false)` on the loop `id`, which stays a loop and asks its target to keep it one (CHK-414).
+    [[nodiscard]] bool is_rolled(ast::stmt_id id) const
+    {
+        auto const* const a = c.find_attribute(file(), ast().at(id).attributes, "unroll");
+        if (a == nullptr)
+            return false;
+        auto const arguments = ast().at(a->arguments);
+        return arguments.size() == 1 && ast::is_valid(arguments[0].value)
+            && c.text_of(file(), c.span_of(file(), arguments[0].value)) == "false";
+    }
+
+    /// `@unroll` on the loop `id`, written without `false` (CHK-389).
+    [[nodiscard]] bool is_unrolled(ast::stmt_id id) const
+    {
+        return c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr && !is_rolled(id);
+    }
+
     /// `for i in a ..< b` as a loop of the flat tree, whose bounds `first` and `end` are flattened already.
     void flatten_looped_for(origin from, ast::stmt_id id, ast::for_stmt const& loop, flat_expr_id first, flat_expr_id end)
     {
@@ -3209,6 +3226,7 @@ struct flattener
         current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
 
         auto const label = add_label("for");
+        entry.labels[index_of(label)].is_rolled = is_rolled(id);
         auto const is_test_loop = is_test && frames.size() == 1;
         if (is_test_loop)
             test_loops.push_back(index);
@@ -3231,11 +3249,11 @@ struct flattener
             return;
         }
         auto const int_type = entry.at(first).type;
-        auto const is_unrolled = c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr;
+        auto const unrolls = is_unrolled(id);
         if (auto const high = constant_int(last); high.has_value() && high.value() < 2147483647)
         {
             auto const end = add_expr(int_type, loop.iterable, flat_int_literal{.value = high.value() + 1});
-            if (is_unrolled)
+            if (unrolls)
                 return flatten_unrolled_for(from, id, loop, first, end);
             return flatten_looped_for(from, id, loop, first, end);
         }
@@ -3264,6 +3282,7 @@ struct flattener
         current()->bound.push_back({.where = {.kind = target_kind::local, .index = i32(id)}, .local = index});
 
         auto const label = add_label("for");
+        entry.labels[index_of(label)].is_rolled = is_rolled(id);
         auto const iteration = add_label("iteration");
         auto const is_test_loop = is_test && frames.size() == 1;
         if (is_test_loop)
@@ -3304,7 +3323,7 @@ struct flattener
         auto const end = flatten_expr(r->last);
         if (sgl::is_valid(r->op) && c.text_of(file(), c.file_of(file()).at(r->op).where) == "..=")
             return flatten_inclusive_for(from, id, loop, first, end);
-        if (c.find_attribute(file(), ast().at(id).attributes, "unroll") != nullptr)
+        if (is_unrolled(id))
             return flatten_unrolled_for(from, id, loop, first, end);
         flatten_looped_for(from, id, loop, first, end);
     }

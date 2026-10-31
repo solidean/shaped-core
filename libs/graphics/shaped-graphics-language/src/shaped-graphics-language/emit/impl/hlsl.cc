@@ -38,6 +38,7 @@ public:
     bool has_struct_constructor() const override { return false; }
 
     bool is_c_like() const override { return true; }
+    cc::string_view rolled_loop_hint() const override { return "[loop]"; }
 
     void write_for_head(cc::string& out, cc::string_view index, cc::string_view first, cc::string_view end) const override
     {
