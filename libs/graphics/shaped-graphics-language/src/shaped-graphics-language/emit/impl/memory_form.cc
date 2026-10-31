@@ -31,11 +31,14 @@ bool is_hlsl(emit::target t)
     return t == emit::target::hlsl_dx12 || t == emit::target::hlsl_vulkan;
 }
 
-/// A builtin's size and alignment under `t`'s own rule.
-builtins::block_layout native_layout(builtins::type_record const& record, emit::target t)
+/// A builtin's size and alignment under `t`'s own rule in `space`.
+/// HLSL aligns every value to its scalar in a structured buffer, and in a constant buffer starts a matrix on a row.
+builtins::block_layout native_layout(builtins::type_record const& record, emit::target t, address_space space)
 {
     if (is_hlsl(t))
-        return record.hlsl_layout;
+        return is_storage(space)
+                 ? builtins::block_layout{.size = record.hlsl_layout.size, .alignment = scalar_size_of(record)}
+                 : record.hlsl_layout;
     return t == emit::target::msl ? record.msl_layout : record.wgsl_layout;
 }
 
@@ -71,7 +74,7 @@ native_placement place_natively(checked_module const& m,
         // an array of whole-row elements strides by its element's size on every target, with no padding
         if (m.builtin_type_of(member.type) == nullptr && m.at(member.type).kind == type_kind::array)
         {
-            auto const l = native_layout(*m.builtin_type_of(m.at(member.type).element), t);
+            auto const l = native_layout(*m.builtin_type_of(m.at(member.type).element), t, space);
             at = round_up(at, 16);
             offsets.push_back(base + at);
             at += i32(m.at(member.type).count) * l.size;
@@ -80,7 +83,7 @@ native_placement place_natively(checked_module const& m,
         }
         if (auto const* const record = m.builtin_type_of(member.type))
         {
-            auto const l = native_layout(*record, t);
+            auto const l = native_layout(*record, t, space);
             at = round_up(at, l.alignment);
             offsets.push_back(base + at);
             at += l.size;
@@ -91,7 +94,7 @@ native_placement place_natively(checked_module const& m,
         auto dry = cc::vector<i32>();
         auto const inner_members = m.at(m.at(member.type).members);
         auto inner = place_natively(m, inner_members, space, t, 0, dry);
-        auto const is_uniform = t == emit::target::wgsl && space != address_space::storage;
+        auto const is_uniform = t == emit::target::wgsl && !is_storage(space);
         auto const inner_alignment = is_uniform ? round_up(inner.alignment, 16) : inner.alignment;
         at = round_up(at, inner_alignment);
         place_natively(m, inner_members, space, t, base + at, offsets);
@@ -135,6 +138,7 @@ struct form_builder
 {
     checked_module const& m;
     emit::target t;
+    address_space space;
     memory_form form;
     i32 at = 0;
     i32 padding = 0;
@@ -205,7 +209,7 @@ struct form_builder
         auto const& record = *m.builtin_type_of(leaf.type);
         pad_to(leaf.offset);
         auto result = memory_leaf{.path = leaf.path, .type = leaf.type};
-        auto const l = native_layout(record, t);
+        auto const l = native_layout(record, t, space);
         auto const scalar = scalar_spelling(record, t);
         auto const scalar_size = scalar_size_of(record);
 
@@ -241,14 +245,14 @@ struct form_builder
 
 /// The largest alignment a field of `form` has under `t`'s rule, which is what an array of it strides by.
 /// A split or packed value aligns to its scalar, and a padding field to its own size.
-i32 alignment_of(checked_module const& m, memory_form const& form, emit::target t)
+i32 alignment_of(checked_module const& m, memory_form const& form, emit::target t, address_space space)
 {
     auto result = 1;
     for (auto const& leaf : form.leaves)
     {
         auto const& record = *m.builtin_type_of(leaf.type);
-        result = max_of(result,
-                        leaf.is_split || leaf.is_packed ? scalar_size_of(record) : native_layout(record, t).alignment);
+        result = max_of(result, leaf.is_split || leaf.is_packed ? scalar_size_of(record)
+                                                                : native_layout(record, t, space).alignment);
     }
     for (auto const& field : form.fields)
         if (field.name.starts_with("_pad"))
@@ -268,9 +272,10 @@ memory_form build(checked_module const& m,
 {
     auto b = form_builder{.m = m,
                           .t = t,
+                          .space = space,
                           .form = {},
                           .is_forced = is_forced,
-                          .splits_rows = space == address_space::cpp_constants};
+                          .splits_rows = space == address_space::packed_constants};
     for (auto const& leaf : leaves)
         b.add_leaf(leaf, b.stem_of(members, leaf.path, element_name));
     b.pad_to(stride > 0 ? stride : size);
@@ -309,17 +314,18 @@ cc::optional<memory_form> form_for(checked_module const& m,
                                    cc::string_view element_name,
                                    emit::target t)
 {
-    // EMIT-154: every target writes a `.cpp` block as its memory form
-    if (space == address_space::cpp_constants)
+    // EMIT-154: every target writes a packed block as its memory form
+    if (space == address_space::packed_constants)
         return build(m, members, leaves, space, size, stride, element_name, t, false);
-    if (t != emit::target::wgsl && t != emit::target::msl)
+    // EMIT-112: HLSL writes a padding field into each gap instead, and packs a buffer's element as C++ does
+    if (is_hlsl(t))
         return {};
     if (is_natively_placed(m, members, leaves, space, stride, t))
         return {};
     auto form = build(m, members, leaves, space, size, stride, element_name, t, false);
     // An array's stride is its element's size rounded to the element's alignment, so a vector field whose alignment
     // does not divide the stride has to become scalars too.
-    if (stride > 0 && round_up(stride, alignment_of(m, form, t)) != stride)
+    if (stride > 0 && round_up(stride, alignment_of(m, form, t, space)) != stride)
         form = build(m, members, leaves, space, size, stride, element_name, t, true);
     return form;
 }
@@ -332,28 +338,32 @@ cc::optional<sgl::emit::impl::memory_form> sgl::emit::impl::memory_form_of(check
                                                                            emit::target t)
 {
     auto const placed = place(m, members, space);
-    return form_for(m, members, placed.leaves, space, placed.size, stride, "value", t);
+    return form_for(m, members, placed.leaves, space, placed.end, stride, "value", t);
 }
 
 cc::optional<sgl::emit::impl::memory_form> sgl::emit::impl::element_form_of(check::checked_module const& m,
                                                                             check::type_id element,
+                                                                            address_space space,
                                                                             emit::target t)
 {
     // an atomic is a 4-byte integer at offset 0 in every target's own rule
     if (m.at(element).kind == type_kind::atomic)
         return {};
-    auto const stride = element_stride(m, element);
-    if (m.builtin_type_of(element) != nullptr)
+    auto const stride = element_stride(m, element, space);
+    if (auto const* const record = m.builtin_type_of(element))
     {
         // A builtin element is one value at offset 0, which a one-member root describes as well as any.
         auto const members = cc::vector<member_info>{member_info{.name = "value", .type = element}};
-        auto const placed = place(m, members, address_space::storage);
+        auto const placed = place(m, members, space);
         auto leaves = cc::vector<placed_leaf>();
         for (auto const& leaf : placed.leaves)
             leaves.push_back({.path = {}, .type = leaf.type, .offset = leaf.offset, .size = leaf.size});
-        return form_for(m, members, leaves, address_space::storage, stride, stride, "value", t);
+        // EMIT-112: HLSL strides a buffer by its element's own size, so a 3-vector's padding has to be a field
+        if (is_hlsl(t) && stride != record->hlsl_layout.size)
+            return build(m, members, leaves, space, stride, stride, "value", t, false);
+        return form_for(m, members, leaves, space, stride, stride, "value", t);
     }
     auto const members = m.at(m.at(element).members);
-    auto const placed = place(m, members, address_space::storage);
-    return form_for(m, members, placed.leaves, address_space::storage, placed.size, stride, "value", t);
+    auto const placed = place(m, members, space);
+    return form_for(m, members, placed.leaves, space, placed.size, stride, "value", t);
 }

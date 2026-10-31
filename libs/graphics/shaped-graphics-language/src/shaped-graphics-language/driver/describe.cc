@@ -179,11 +179,10 @@ described_memory_struct describe_memory_struct(check::checked_module const& m,
                                                emit_impl::address_space space)
 {
     auto const placed = emit_impl::place_struct(m, type, space);
-    auto result = described_memory_struct{
-        .name = cc::string(m.name_of(type)),
-        .module = foreign_module_of_type(m, type),
-        .space = cc::string(space == emit_impl::address_space::constants ? "constants" : "storage"),
-        .size = placed.size};
+    auto result = described_memory_struct{.name = cc::string(m.name_of(type)),
+                                          .module = foreign_module_of_type(m, type),
+                                          .space = cc::string(emit_impl::is_storage(space) ? "storage" : "constants"),
+                                          .size = placed.size};
     auto const members = m.at(m.at(type).members);
     for (auto i = isize(0); i < members.size(); ++i)
         if (members[i].type != check::checked_module::void_type)
@@ -653,14 +652,15 @@ sgl::described_binding sgl::driver::impl::describe_binding(check::checked_module
         auto const& t = m.at(member.type);
         if (t.kind == check::type_kind::buffer)
         {
-            result.members.push_back({.name = member.name,
-                                      .kind = described_member_kind::buffer,
-                                      .type = cc::string(m.name_of(t.element)),
-                                      .slot = slot,
-                                      .count = count,
-                                      .stride = sgl::emit::impl::element_stride(m, t.element),
-                                      .host_name = cc::format("{}.{}", s.name, member.name),
-                                      .access = cc::string(t.is_mut ? "read_write" : "read")});
+            result.members.push_back(
+                {.name = member.name,
+                 .kind = described_member_kind::buffer,
+                 .type = cc::string(m.name_of(t.element)),
+                 .slot = slot,
+                 .count = count,
+                 .stride = sgl::emit::impl::element_stride(m, t.element, sgl::emit::impl::element_space(b, member)),
+                 .host_name = cc::format("{}.{}", s.name, member.name),
+                 .access = cc::string(t.is_mut ? "read_write" : "read")});
             slot += count;
             continue;
         }
@@ -824,7 +824,8 @@ cc::result<sgl::module_description, cc::string> sgl::describe(describe_request c
     auto placed = cc::vector<check::type_id>();
     for (auto const id : described)
     {
-        for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage})
+        for (auto const space : {emit_impl::address_space::constants, emit_impl::address_space::storage,
+                                 emit_impl::address_space::packed_constants, emit_impl::address_space::packed_storage})
         {
             auto structs = cc::vector<check::type_id>();
             emit_impl::collect_placed_structs(m, id, space, structs);

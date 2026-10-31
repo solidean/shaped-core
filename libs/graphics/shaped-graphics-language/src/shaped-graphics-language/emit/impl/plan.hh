@@ -54,8 +54,10 @@ struct planned_member
     check::tessellation_factor factor = {};
     /// The position among the members without `@position`; -1 on a `plain` struct and on the position itself.
     i32 location = -1;
-    /// The byte offset in a constant block; -1 everywhere else.
+    /// The byte offset in a constant block or a buffer's element; -1 everywhere else.
     i32 offset = -1;
+    /// The bytes it takes there, where `offset` is one.
+    i32 size = 0;
 };
 
 struct planned_struct
@@ -67,6 +69,8 @@ struct planned_struct
     cc::vector<planned_member> members;
     /// Parallel to the type's members: the position in `members`, or -1 for a void member.
     cc::vector<i32> member_of;
+    /// Its size in GPU memory, its tail padding included; -1 where it stands in none.
+    i32 memory_size = -1;
 };
 
 /// An enum the entry point mentions, whose every case is declared whether or not an arm names it (EMIT-77).
@@ -114,6 +118,8 @@ struct planned_resource
     check::type_id type = check::type_id::none;
     /// The element of a buffer; `none` for every other kind.
     check::type_id element = check::type_id::none;
+    /// The rule a buffer's elements are placed by, which `@padding(.none)` makes the packed one.
+    address_space space = address_space::storage;
     bool is_mut = false;
     /// `@coherent`: HLSL declares it `globallycoherent`, and MSL `coherent(device)` (EMIT-150).
     bool is_coherent = false;
@@ -291,7 +297,7 @@ void validate_edge_struct(check::checked_module const& m, check::type_id type, s
 /// What only a list can get wrong, an `@inline` binding that does not stand last, is `validate`'s.
 void validate_binding(check::checked_module const& m, check::symbol_id id, cc::vector<error>& errors);
 
-/// Where the members of a constant block land, by the rule its binding's `@layout` names (layout.hh).
+/// Where the members of a constant block land, by the rule its binding's `@padding` names (layout.hh).
 struct block_placement
 {
     /// Parallel to the members.

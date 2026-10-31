@@ -46,28 +46,26 @@ placed_members place_from(checked_module const& m,
 
         if (auto const* const record = m.builtin_type_of(type))
         {
-            auto const l = record->hlsl_layout;
-            auto const scalar = scalar_size_of(*record);
-            at = round_up(at, scalar);
-            result.alignment = scalar > result.alignment ? scalar : result.alignment;
-            // HLSL packs by rows of 16: a value starts a fresh row when it is aligned to one, or when it would cross one.
-            if (space == address_space::constants)
-                at = l.alignment >= 16 || at % 16 + l.size > 16 ? round_up(at, 16) : at;
+            auto const size = record->hlsl_layout.size;
+            auto const alignment = is_packed(space) ? scalar_size_of(*record) : natural_alignment_of(*record);
+            at = round_up(at, alignment);
+            result.alignment = alignment > result.alignment ? alignment : result.alignment;
             result.offsets.push_back(at);
-            result.sizes.push_back(l.size);
-            result.leaves.push_back({.path = cc::move(path), .type = type, .offset = base + at, .size = l.size});
-            at += l.size;
+            result.sizes.push_back(size);
+            result.leaves.push_back({.path = cc::move(path), .type = type, .offset = base + at, .size = size});
+            at += size;
             continue;
         }
 
-        // CHK-291: an array's elements take whole rows, so it starts one in a constant block and needs no padding
+        // CHK-291: an array's elements take whole rows, so it starts one and needs no padding
+        // C++ aligns it to its scalar, which EMIT-154 refuses wherever that is no row.
         if (m.at(type).kind == type_kind::array)
         {
             auto const& array = m.at(type);
             auto const& record = *m.builtin_type_of(array.element);
-            auto const scalar = scalar_size_of(record);
-            at = round_up(at, space == address_space::constants ? 16 : scalar);
-            result.alignment = scalar > result.alignment ? scalar : result.alignment;
+            auto const alignment = is_packed(space) ? scalar_size_of(record) : 16;
+            at = round_up(at, alignment);
+            result.alignment = alignment > result.alignment ? alignment : result.alignment;
             auto const size = i32(array.count) * record.hlsl_layout.size;
             result.offsets.push_back(at);
             result.sizes.push_back(size);
@@ -80,21 +78,22 @@ placed_members place_from(checked_module const& m,
             continue;
         }
 
-        // A nested struct starts a fresh row in a constant block, and what follows it packs against its last member.
-        // In a buffer it starts at its own alignment, which a dry run over its members gives.
+        // A nested struct starts at its own alignment, which a dry run over its members gives.
+        // In a constant block that is at least a row, and what follows it starts the next row.
+        auto alignment = place_from(m, m.at(m.at(type).members), space, 0, path).alignment;
         if (space == address_space::constants)
-            at = round_up(at, 16);
-        else
-            at = round_up(at, place_from(m, m.at(m.at(type).members), space, 0, path).alignment);
+            alignment = round_up(alignment, 16);
+        at = round_up(at, alignment);
         auto inner = place_from(m, m.at(m.at(type).members), space, base + at, path);
-        result.alignment = inner.alignment > result.alignment ? inner.alignment : result.alignment;
+        result.alignment = alignment > result.alignment ? alignment : result.alignment;
         result.offsets.push_back(at);
         result.sizes.push_back(inner.size);
         for (auto& leaf : inner.leaves)
             result.leaves.push_back(cc::move(leaf));
-        at += inner.size;
+        at += round_up(inner.size, alignment);
     }
-    result.size = space != address_space::constants ? round_up(at, result.alignment) : at;
+    result.end = at;
+    result.size = round_up(at, result.alignment);
     return result;
 }
 } // namespace
@@ -104,14 +103,48 @@ sgl::i32 sgl::emit::impl::scalar_size_of(builtins::type_record const& record)
     return check::is_16_bit(record.leaf_kind) ? 2 : 4;
 }
 
+sgl::i32 sgl::emit::impl::natural_alignment_of(builtins::type_record const& record)
+{
+    // WGSL's own alignment is this rule's, for every builtin that has one there
+    return record.wgsl_layout.alignment;
+}
+
+bool sgl::emit::impl::is_storage(address_space space)
+{
+    return space == address_space::storage || space == address_space::packed_storage;
+}
+
+bool sgl::emit::impl::is_packed(address_space space)
+{
+    return space == address_space::packed_constants || space == address_space::packed_storage;
+}
+
 cc::string_view sgl::emit::impl::space_name(address_space space)
 {
-    return space == address_space::storage ? "storage buffer" : "constant block";
+    switch (space)
+    {
+    case address_space::constants:
+        return "constant block";
+    case address_space::storage:
+        return "storage buffer";
+    case address_space::packed_constants:
+        return "packed constant block";
+    case address_space::packed_storage:
+        return "packed storage buffer";
+    }
+    return {};
 }
 
 sgl::emit::impl::address_space sgl::emit::impl::block_space(check::binding_info const& b)
 {
-    return b.layout == check::block_layout::cpp ? address_space::cpp_constants : address_space::constants;
+    return b.padding == check::padding::none ? address_space::packed_constants : address_space::constants;
+}
+
+sgl::emit::impl::address_space sgl::emit::impl::element_space(check::binding_info const& b,
+                                                              check::member_info const& member)
+{
+    return b.padding == check::padding::none || member.padding == check::padding::none ? address_space::packed_storage
+                                                                                       : address_space::storage;
 }
 
 bool sgl::emit::impl::is_placeable(check::checked_module const& m, check::type_id type)
@@ -161,13 +194,14 @@ sgl::emit::impl::placed_members sgl::emit::impl::place_struct(check::checked_mod
     return place_from(m, m.at(m.at(type).members), space, 0, {});
 }
 
-sgl::i32 sgl::emit::impl::element_stride(check::checked_module const& m, check::type_id element)
+sgl::i32 sgl::emit::impl::element_stride(check::checked_module const& m, check::type_id element, address_space space)
 {
     if (auto const* const record = m.builtin_type_of(element))
-        return record->hlsl_layout.size;
+        return round_up(record->hlsl_layout.size,
+                        is_packed(space) ? scalar_size_of(*record) : natural_alignment_of(*record));
     if (m.at(element).kind == check::type_kind::atomic)
-        return element_stride(m, m.at(element).element);
-    return place_struct(m, element, address_space::storage).size;
+        return element_stride(m, m.at(element).element, space);
+    return place_struct(m, element, space).size;
 }
 
 cc::vector<cc::string> sgl::emit::impl::padding_of(check::checked_module const& m,
@@ -219,7 +253,7 @@ void sgl::emit::impl::collect_placed_structs(check::checked_module const& m,
         // a binding array of buffers holds its element as a lone buffer does
         auto const& whole = m.at(member.type);
         auto const& t = m.takes_slots(member.type) && whole.kind == check::type_kind::array ? m.at(whole.element) : whole;
-        if (space == address_space::storage && t.kind == check::type_kind::buffer)
+        if (is_storage(space) && t.kind == check::type_kind::buffer && element_space(b, member) == space)
             collect_structs(m, t.element, out);
         else if (space == block_space(b) && !check::is_resource(t.kind))
             collect_structs(m, member.type, out);

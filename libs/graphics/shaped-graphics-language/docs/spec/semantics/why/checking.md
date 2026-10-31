@@ -697,8 +697,9 @@ WGSL has neither coherence nor ordering across workgroups, so a WebGPU build of 
 ## CHK-369
 
 A host that stages a whole C struct, as AMD's FSR host code does, needs the layout promised rather than generated.
-`.hlsl` promises what is emitted today, so it costs nothing but the freedom to reorder that block.
-`.cpp` is for a host struct written with no knowledge of HLSL's rows; it costs a memory form or offsets on every target, HLSL included.
+The natural rule is the fast one (EMIT-110), so packing is the exception a shader asks for, never the default.
+It costs a memory form on WGSL and MSL wherever a vector lands off its alignment, and the wide loads that alignment buys.
+The attribute names where padding goes rather than a rule's name, so the matrix and array cases it will grow are spelled alike.
 
 ## CHK-371
 

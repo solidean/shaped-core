@@ -413,7 +413,7 @@ fun shade(k: float) -> float:
 | an enum | `@builtin`, `@shadowable`, `@bitflags`, `@internal` |
 | a const | `@shadowable`, `@option` |
 | a test | `@expect` |
-| a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding`, `@layout` |
+| a binding | `@inline`, `@workgroup`, `@shadowable`, `@no_padding`, `@padding` |
 | a binding member | `@unfilterable`, `@non_filtering`, `@sampler`, `@coherent`, `@atomic` |
 | a struct field | `@position`, `@per_instance`, `@stream`, `@interpolate`, `@format` on a `@vertex struct`, `@depth` and `@sample_mask` on a `@pixel struct`, `@per_draw`, `@edge_factors` and `@inside_factors` on any other |
 | a parameter | the stage inputs of CHK-271 |
@@ -519,9 +519,11 @@ fun shade(k: float) -> float:
   A write to it that its workgroup follows with a barrier, `storage_barrier` for a buffer and `texture_barrier` for an image, is visible to every invocation of the dispatch.
   That holds for every invocation that has read the result of an atomic update made after that barrier by an invocation of the writer's workgroup.
   On any other member it is `wrong-kind-of-name`, and it needs `device_coherence`, a form CHK-201 judges.
-* **CHK-369** `@layout(.hlsl)` and `@layout(.cpp)` on a binding promise its constant block's layout to the host ([why](why/checking.md#chk-369)).
-  The members stand in declaration order, placed by the rule the argument names.
-  `.hlsl` is HLSL's constant-buffer packing, and `.cpp` places them as a C++ compiler places a struct of the generated host types ([emitting](emitting.md#layout)).
+* **CHK-369** `@padding(.none)` places GPU memory as a C++ compiler places a struct of the generated host types, and promises that layout to the host ([why](why/checking.md#chk-369)).
+  On a binding it places the binding's constant block (EMIT-154) and every buffer's element (EMIT-167); on a buffer member, that buffer's element.
+  Without it, memory is placed at its natural alignment (EMIT-110).
+  On any other member it is `wrong-kind-of-name`, since a constant takes its block's padding.
+  `.every_column` and `.every_element` are `unsupported-yet`: they land with matrices and arrays in GPU memory ([emitting](emitting.md#open)).
   Any other argument, and the attribute on a `@workgroup` binding, is `invalid-attribute-arguments`.
 
 ```sgl

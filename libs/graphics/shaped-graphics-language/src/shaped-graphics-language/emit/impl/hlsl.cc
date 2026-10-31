@@ -47,7 +47,9 @@ public:
 
     void write_local(cc::string& out, local_declaration const& local) const override
     {
-        if (local.value.empty())
+        if (local.value.empty() && local.is_zeroed)
+            out.appendf("{} {} = ({})0;", local.type, local.name, local.type);
+        else if (local.value.empty())
             out.appendf("{} {}{};", local.type, local.name, local.dimensions);
         else
             out.appendf("{}{} {}{} = {};", local.is_mut ? "" : "const ", local.type, local.name, local.dimensions,
@@ -322,30 +324,73 @@ public:
         out += ";\n";
     }
 
+    /// EMIT-112: padding fields from `at` up to `offset`, in words, and one 16-bit field where 2 bytes are left.
+    /// HLSL's own packing closes every gap a value fits into, so filled gaps land every member at its offset.
+    void write_padding(cc::string& out, i32& at, i32 offset, i32& count) const
+    {
+        while (at < offset)
+        {
+            auto const width = offset - at >= 4 && at % 4 == 0 ? 4 : 2;
+            out += k_indent;
+            if (_is_vulkan)
+                out.appendf("[[vk::offset({})]] ", at);
+            out.appendf("{} sgl_pad{};\n", width == 4 ? "uint" : "uint16_t", count++);
+            at += width;
+        }
+    }
+
+    /// The members of a struct or a block, padded where they stand in GPU memory and as declared everywhere else.
+    void write_members(cc::string& out,
+                       planned_struct const* owner,
+                       cc::span<planned_member const> members,
+                       i32 memory_size,
+                       plan const& p) const
+    {
+        auto at = 0;
+        auto count = 0;
+        for (auto const& member : members)
+        {
+            if (member.offset >= 0)
+            {
+                write_padding(out, at, member.offset, count);
+                at = member.offset + member.size;
+            }
+            write_member(out, owner, member, p);
+        }
+        if (memory_size > 0)
+            write_padding(out, at, memory_size, count);
+    }
+
     void write_enum_constant(cc::string& out, cc::string_view name, i32 value) const override
     {
         out.appendf("static const int {} = {};\n", name, value);
     }
 
-    /// A block's struct: its members, or its memory form where it has one (EMIT-154).
+    /// A memory form's fields in memory order.
     /// Every field states its offset on vulkan, as the push-constant block's do, so no compiler flag decides the layout.
     /// dx12 states none: each field of a form fits its row and padding fills every gap, so its own packing lands each
     /// at its offset.
+    void write_form(cc::string& out, memory_form const& form) const
+    {
+        out.appendf("struct {}\n{{\n", form.name);
+        for (auto const& f : form.fields)
+        {
+            out += k_indent;
+            if (_is_vulkan)
+                out.appendf("[[vk::offset({})]] ", f.offset);
+            out.appendf("{}{} {}{};\n", f.type == "float4x4" ? "column_major " : "", f.type, f.name,
+                        f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
+        }
+        out += "};\n\n";
+    }
+
+    /// A block's struct: its members with their padding, or its memory form where it has one (EMIT-154).
     void write_block_struct(cc::string& out, plan const& p, planned_constants const& block) const
     {
+        if (block.form.has_value())
+            return write_form(out, block.form.value());
         out.appendf("struct {}\n{{\n", block.block_name);
-        if (!block.form.has_value())
-            for (auto const& member : block.members)
-                write_member(out, nullptr, member, p);
-        else
-            for (auto const& f : block.form.value().fields)
-            {
-                out += k_indent;
-                if (_is_vulkan)
-                    out.appendf("[[vk::offset({})]] ", f.offset);
-                out.appendf("{}{} {}{};\n", f.type == "float4x4" ? "column_major " : "", f.type, f.name,
-                            f.count > 0 ? cc::format("[{}]", f.count) : cc::string());
-            }
+        write_members(out, nullptr, block.members, 0, p);
         out += "};\n\n";
     }
 
@@ -359,6 +404,9 @@ public:
     {
         if (block != nullptr)
             write_block_struct(out, p, *block);
+        for (auto const& b : buffers)
+            if (b.element_form.has_value())
+                write_form(out, b.element_form.value());
         if (block != nullptr)
             write_addressed(out, cc::format("ConstantBuffer<{}>", block->block_name), block->name, 'b', block->group,
                             block->slot, {});
@@ -374,8 +422,10 @@ public:
         // a binding array takes `count` consecutive registers from its first
         auto const name = b.count > 1 ? cc::format("{}[{}]", b.name, b.count) : cc::string(b.name);
         // EMIT-150: DXC writes it as SPIR-V's `Coherent` for vulkan
-        auto const type
-            = b.is_coherent ? cc::format("globallycoherent {}", resource_text(p, b.type)) : resource_text(p, b.type);
+        auto const resource = b.element_form.has_value()
+                                ? cc::format("{}StructuredBuffer<{}>", t.is_mut ? "RW" : "", b.element_form.value().name)
+                                : resource_text(p, b.type);
+        auto const type = b.is_coherent ? cc::format("globallycoherent {}", resource) : resource;
         write_addressed(out, type, name, register_class_of(t), b.group, b.slot, format);
     }
 
@@ -455,8 +505,7 @@ public:
         for (auto const& s : p.structs)
         {
             out.appendf("struct {}{}\n{{\n", is_payload(p, s.type) ? "[raypayload] " : "", s.name);
-            for (auto const& member : s.members)
-                write_member(out, &s, member, p);
+            write_members(out, &s, s.members, s.memory_size, p);
             out += "};\n\n";
         }
         write_buffers(out, p, *this);

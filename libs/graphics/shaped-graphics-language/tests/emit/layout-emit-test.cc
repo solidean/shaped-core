@@ -5,8 +5,9 @@
 using namespace sgl_test;
 using sgl::emit::target;
 
-// SGL places every value in GPU memory by one rule per address space, and each target is made to follow it:
-// a constant block by HLSL's constant-buffer packing, a buffer's element by dx12's structured-buffer packing.
+// SGL places every value in GPU memory by one rule, and each target is made to follow it: every value at its natural
+// alignment, a 3-vector at 16, and a struct nested in a constant block on a row of its own.
+// `@padding(.none)` places as C++ does instead.
 // See the spec's emitting file, "Layout".
 
 namespace
@@ -52,33 +53,27 @@ sgl::module_description described(cc::string_view source)
 }
 } // namespace
 
-TEST("sgl emit layout - a vector HLSL packs into a row's tail is split in WGSL and packed in MSL")
+TEST("sgl emit layout - a float3 starts at 16, which WGSL and MSL place natively and HLSL pads to")
 {
     auto const source = inline_block("    scale: float\n"
                                      "    tint: float3\n",
                                      "look.tint.x, look.tint.y, look.tint.z, look.scale");
 
+    // HLSL would pack the float3 right behind the float, so a padding field fills the gap; vulkan states it too.
     auto const vulkan = text_of(source, target::hlsl_vulkan);
     CHECK(vulkan.contains("    [[vk::offset(0)]] float scale;\n"
-                          "    [[vk::offset(4)]] float3 tint;\n"));
-
-    // dx12 needs no attribute: its own packing is the rule.
+                          "    [[vk::offset(4)]] uint sgl_pad0;\n"
+                          "    [[vk::offset(8)]] uint sgl_pad1;\n"
+                          "    [[vk::offset(12)]] uint sgl_pad2;\n"
+                          "    [[vk::offset(16)]] float3 tint;\n"));
     auto const dx12 = text_of(source, target::hlsl_dx12);
-    CHECK(dx12.contains("    float scale;\n    float3 tint;\n"));
+    CHECK(dx12.contains("    float scale;\n    uint sgl_pad0;\n    uint sgl_pad1;\n    uint sgl_pad2;\n    float3 "
+                        "tint;\n"));
 
-    // WGSL aligns a vec3f at 16, so its three floats become fields of their own, and a read takes them one by one.
-    auto const wgsl = text_of(source, target::wgsl);
-    CHECK(wgsl.contains("struct look_data {\n"
-                        "    scale: f32,\n"
-                        "    tint_x: f32,\n"
-                        "    tint_y: f32,\n"
-                        "    tint_z: f32,\n"
-                        "}\n"));
-    CHECK(wgsl.contains("vec4f(look.tint_x, look.tint_y, look.tint_z, look.scale)"));
-
-    // MSL's packed_float3 sits at any 4-byte offset.
+    // WGSL and MSL align a 3-vector at 16 by their own rules, so the block is written as it is.
+    CHECK(text_of(source, target::wgsl).contains("struct look_data {\n    scale: f32,\n    tint: vec3f,\n}\n"));
     auto const msl = text_of(source, target::msl);
-    CHECK(msl.contains("    float scale;\n    packed_float3 tint;\n"));
+    CHECK(msl.contains("    float scale;\n    float3 tint;\n"));
     CHECK(msl.contains("float4(look.tint.x, look.tint.y, look.tint.z, look.scale)"));
 }
 
@@ -109,17 +104,16 @@ TEST("sgl emit layout - a vector that would cross a row starts the next one on e
     CHECK(d.bindings[0].block_size == 24);
 }
 
-TEST("sgl emit layout - a float2 HLSL keeps at a 4-byte offset is split where WGSL aligns it at 8")
+TEST("sgl emit layout - a float2 aligns at 8, which HLSL would pack at 4 and so pads to")
 {
     auto const source = inline_block("    a: float4\n"
                                      "    b: float\n"
                                      "    c: float2\n",
                                      "look.a.x, look.b, look.c.x, look.c.y");
-    CHECK(text_of(source, target::hlsl_vulkan).contains("    [[vk::offset(20)]] float2 c;\n"));
-    auto const wgsl = text_of(source, target::wgsl);
-    CHECK(wgsl.contains("    a: vec4f,\n    b: f32,\n    c_x: f32,\n    c_y: f32,\n"));
-    CHECK(wgsl.contains("look.c_x, look.c_y"));
-    CHECK(text_of(source, target::msl).contains("    float4 a;\n    float b;\n    packed_float2 c;\n"));
+    CHECK(text_of(source, target::hlsl_vulkan).contains("    [[vk::offset(24)]] float2 c;\n"));
+    CHECK(text_of(source, target::hlsl_dx12).contains("    float b;\n    uint sgl_pad0;\n    float2 c;\n"));
+    CHECK(text_of(source, target::wgsl).contains("    a: vec4f,\n    b: f32,\n    c: vec2f,\n"));
+    CHECK(text_of(source, target::msl).contains("    float4 a;\n    float b;\n    float2 c;\n"));
 }
 
 TEST("sgl emit layout - a block of full rows packs alike everywhere, and vulkan states each offset")
@@ -135,7 +129,7 @@ TEST("sgl emit layout - a block of full rows packs alike everywhere, and vulkan 
     CHECK(text_of(source, target::wgsl).contains("    tint: vec3f,\n    to_world: mat4x4f,\n    scale: f32,\n"));
 }
 
-TEST("sgl emit layout - a nested struct starts a row, and what follows packs against its last member")
+TEST("sgl emit layout - a nested struct starts a row in a block, and what follows starts the next one")
 {
     auto const source = cc::format("struct tint:\n"
                                    "    color: float3\n"
@@ -159,29 +153,24 @@ TEST("sgl emit layout - a nested struct starts a row, and what follows packs aga
                                    k_edges);
 
     // vulkan states each struct's own offsets on it, and the struct's place in the block on the block.
+    // HLSL's padding fields stand in the struct itself, its tail included, so a buffer would stride by it too.
     auto const vulkan = text_of(source, target::hlsl_vulkan);
     CHECK(vulkan.contains("    [[vk::offset(0)]] tint t;\n"
                           "    [[vk::offset(16)]] float after;\n"
-                          "    [[vk::offset(20)]] float3 dir;\n"));
+                          "    [[vk::offset(20)]] uint sgl_pad0;\n"
+                          "    [[vk::offset(24)]] uint sgl_pad1;\n"
+                          "    [[vk::offset(28)]] uint sgl_pad2;\n"
+                          "    [[vk::offset(32)]] float3 dir;\n"
+                          "    [[vk::offset(44)]] uint sgl_pad3;\n"));
     CHECK(vulkan.contains("    [[vk::offset(16)]] look_t l;\n"));
 
-    // WGSL's uniform rule would round the nested struct to a whole row, so the block is flattened, padding and all.
+    // WGSL's uniform rule is this one, so the block and its structs are written as they are.
     auto const wgsl = text_of(source, target::wgsl);
-    CHECK(wgsl.contains("struct look_data {\n"
-                        "    scale: f32,\n"
-                        "    _pad0: u32,\n"
-                        "    _pad1: u32,\n"
-                        "    _pad2: u32,\n"
-                        "    l_t_color: vec3f,\n"
-                        "    l_t_strength: f32,\n"
-                        "    l_after: f32,\n"
-                        "    l_dir_x: f32,\n"
-                        "    l_dir_y: f32,\n"
-                        "    l_dir_z: f32,\n"
-                        "}\n"));
-    // A read of the whole struct rebuilds it from its pieces.
-    CHECK(wgsl.contains("let l: look_t = look_t(tint(look.l_t_color, look.l_t_strength), look.l_after, "
-                        "vec3f(look.l_dir_x, look.l_dir_y, look.l_dir_z));\n"));
+    CHECK(wgsl.contains("struct look_t {\n    t: tint,\n    after: f32,\n    dir: vec3f,\n}\n"));
+    CHECK(wgsl.contains("struct look_data {\n    scale: f32,\n    l: look_t,\n}\n"));
+    CHECK(wgsl.contains("let l: look_t = look.l;\n"));
+
+    // MSL's float3 is 16 bytes, so `strength` in its tail makes the block a memory form, and a read rebuilds it.
     CHECK(text_of(source, target::msl)
               .contains("const look_t l = look_t{tint{float3(look.l_t_color), look.l_t_strength}, look.l_after, "
                         "float3(look.l_dir)};\n"));
@@ -191,9 +180,9 @@ TEST("sgl emit layout - a nested struct starts a row, and what follows packs aga
     CHECK(d.memory_structs[0].name == "tint");
     CHECK(d.memory_structs[1].name == "look_t");
     CHECK(d.memory_structs[1].space == "constants");
-    CHECK(d.memory_structs[1].size == 32);
-    CHECK(d.memory_structs[1].members[2].offset == 20);
-    CHECK(d.bindings[0].block_size == 48);
+    CHECK(d.memory_structs[1].size == 48);
+    CHECK(d.memory_structs[1].members[2].offset == 32);
+    CHECK(d.bindings[0].block_size == 64);
 }
 
 namespace
@@ -214,19 +203,69 @@ constexpr auto k_particles = cc::string_view("struct particle:\n"
                                              "    work.items[id.x] = p\n");
 } // namespace
 
-TEST("sgl emit layout - a buffer's element packs tight, as a tg struct does")
+TEST("sgl emit layout - a buffer's element aligns every vector to its size, as WGSL and MSL place it")
 {
+    // HLSL packs a structured buffer as C++ does, so the struct carries its padding, and a float3 element a field of it.
     auto const dx12 = text_of(k_particles, target::hlsl_dx12);
+    CHECK(dx12.contains("struct particle\n{\n"
+                        "    float mass;\n"
+                        "    uint sgl_pad0;\n"
+                        "    uint sgl_pad1;\n"
+                        "    uint sgl_pad2;\n"
+                        "    float3 velocity;\n"
+                        "    uint sgl_pad3;\n"
+                        "    float4 color;\n"
+                        "};\n"));
     CHECK(dx12.contains("RWStructuredBuffer<particle> work_items : register(u1, space0);\n"));
     // HLSL wants a struct declared ahead of the buffer that holds it.
     CHECK(dx12.find("struct particle") < dx12.find("RWStructuredBuffer<particle>"));
+    CHECK(dx12.contains("struct float3_memory\n{\n    float3 value;\n    uint _pad0;\n};\n"));
+    CHECK(dx12.contains("RWStructuredBuffer<float3_memory> work_dirs : register(u2, space0);\n"));
+    CHECK(dx12.contains("work_dirs[id.x].value = work_dirs[id.x].value + p.velocity * work.scale;\n"));
 
     auto const vulkan = text_of(k_particles, target::hlsl_vulkan);
     CHECK(vulkan.contains("    [[vk::offset(0)]] float mass;\n"
-                          "    [[vk::offset(4)]] float3 velocity;\n"
-                          "    [[vk::offset(16)]] float4 color;\n"));
+                          "    [[vk::offset(4)]] uint sgl_pad0;\n"
+                          "    [[vk::offset(8)]] uint sgl_pad1;\n"
+                          "    [[vk::offset(12)]] uint sgl_pad2;\n"
+                          "    [[vk::offset(16)]] float3 velocity;\n"
+                          "    [[vk::offset(28)]] uint sgl_pad3;\n"
+                          "    [[vk::offset(32)]] float4 color;\n"));
 
+    // WGSL's storage rule and MSL's are this one, so both read the element as it is.
     auto const wgsl = text_of(k_particles, target::wgsl);
+    CHECK(wgsl.contains("struct particle {\n    mass: f32,\n    velocity: vec3f,\n    color: vec4f,\n}\n"));
+    CHECK(wgsl.contains("var<storage, read_write> work_items: array<particle>;\n"));
+    CHECK(wgsl.contains("var<storage, read_write> work_dirs: array<vec3f>;\n"));
+    auto const msl = text_of(k_particles, target::msl);
+    CHECK(msl.contains("    device particle* work_items [[id(1)]];\n    device float3* work_dirs [[id(2)]];\n"));
+
+    auto const d = described(k_particles);
+    REQUIRE(d.memory_structs.size() == 1);
+    CHECK(d.memory_structs[0].space == "storage");
+    CHECK(d.memory_structs[0].size == 48);
+    CHECK(d.memory_structs[0].members[1].offset == 16);
+    CHECK(d.bindings[0].members[1].stride == 48);
+    CHECK(d.bindings[0].members[2].stride == 16);
+}
+
+TEST("sgl emit layout - a @padding(.none) buffer packs its element tight, as a tg struct does")
+{
+    auto packed = cc::string(k_particles);
+    packed.replace_first("    items: mut buffer[particle]\n    dirs: mut buffer[float3]\n",
+                         "    @padding(.none) items: mut buffer[particle]\n    @padding(.none) dirs: mut "
+                         "buffer[float3]\n");
+
+    // HLSL's structured buffer packs as C++ does, so it needs nothing; vulkan states each offset.
+    auto const dx12 = text_of(packed, target::hlsl_dx12);
+    CHECK(dx12.contains("struct particle\n{\n    float mass;\n    float3 velocity;\n    float4 color;\n};\n"));
+    CHECK(dx12.contains("RWStructuredBuffer<float3> work_dirs : register(u2, space0);\n"));
+    CHECK(text_of(packed, target::hlsl_vulkan)
+              .contains("    [[vk::offset(0)]] float mass;\n"
+                        "    [[vk::offset(4)]] float3 velocity;\n"
+                        "    [[vk::offset(16)]] float4 color;\n"));
+
+    auto const wgsl = text_of(packed, target::wgsl);
     CHECK(wgsl.contains("struct particle_memory {\n"
                         "    mass: f32,\n"
                         "    velocity_x: f32,\n"
@@ -245,13 +284,28 @@ TEST("sgl emit layout - a buffer's element packs tight, as a tg struct does")
                         "    work_dirs[id.x].value_z = stored.z;\n"));
     CHECK(wgsl.contains("    work_items[id.x].mass = stored_1.mass;\n"));
 
-    auto const d = described(k_particles);
+    auto const d = described(packed);
     REQUIRE(d.memory_structs.size() == 1);
     CHECK(d.memory_structs[0].space == "storage");
     CHECK(d.memory_structs[0].size == 32);
     CHECK(d.memory_structs[0].members[1].offset == 4);
     CHECK(d.bindings[0].members[1].stride == 32);
     CHECK(d.bindings[0].members[2].stride == 12);
+}
+
+TEST("sgl emit layout - a struct placed packed and naturally has two layouts, which is an error")
+{
+    CHECK(errors_of("struct pair:\n"
+                    "    a: float\n"
+                    "    b: float3\n"
+                    "\n"
+                    "binding work:\n"
+                    "    near: buffer[pair]\n"
+                    "    @padding(.none) far: buffer[pair]\n"
+                    "\n"
+                    "@compute(64) fun main(@thread_id id: int3){work}:\n"
+                    "    let x = work.near[id.x].a + work.far[id.x].a\n")
+          == "layout-conflict 'pair' is in a storage buffer of 'work' and in a packed storage buffer of 'work'\n");
 }
 
 TEST("sgl emit layout - a struct in both a constant block and a buffer has two layouts, which is an error")
@@ -325,7 +379,9 @@ TEST("sgl emit layout - @no_padding refuses a gap before a member, and never the
                                             "\n"
                                             "@compute(64) fun main(@thread_id id: int3){work}:\n"
                                             "    let x = work.items[id.x].mass\n");
-    CHECK(text_of(in_storage, target::wgsl).contains("particle_memory"));
+    CHECK(errors_of(in_storage)
+          == "padding-forbidden in @no_padding 'particle', as a storage buffer places it: 'velocity' starts at byte "
+             "16, 12 bytes past where 'mass' ends\n");
     auto const in_constants = cc::string_view("@no_padding struct particle:\n"
                                               "    mass: float\n"
                                               "    velocity: float4\n"
@@ -391,7 +447,7 @@ TEST("sgl emit layout - a bool has no layout, and bool32 is the bool GPU memory 
 namespace
 {
 // Placed as a C++ struct of tg types is: `tint` at 4, `bias` right behind it at 16, and `weights` from 28 across a row.
-constexpr auto k_cpp_block = cc::string_view("@layout(.cpp)\n"
+constexpr auto k_cpp_block = cc::string_view("@padding(.none)\n"
                                              "binding params:\n"
                                              "    scale: float\n"
                                              "    tint: float3\n"
@@ -405,7 +461,7 @@ constexpr auto k_cpp_block = cc::string_view("@layout(.cpp)\n"
                                              "    params.values[1] = params.weights.w + params.shift.x\n");
 } // namespace
 
-TEST("sgl emit layout - a @layout(.cpp) block is placed as C++ places the host struct, on every target")
+TEST("sgl emit layout - a @padding(.none) block is placed as C++ places the host struct, on every target")
 {
     auto const d = described(k_cpp_block);
     REQUIRE(d.bindings.size() == 1);
@@ -467,22 +523,11 @@ TEST("sgl emit layout - a @layout(.cpp) block is placed as C++ places the host s
                        "    float weights_w;\n"));
 }
 
-TEST("sgl emit layout - @layout(.hlsl) promises the placement the block has without it")
-{
-    auto unannotated = cc::string(k_cpp_block);
-    unannotated.replace_first("@layout(.cpp)\n", "");
-    auto promised = cc::string(k_cpp_block);
-    promised.replace_first("@layout(.cpp)\n", "@layout(.hlsl)\n");
-    for (auto const t : sgl::emit::all_targets())
-        CHECK(text_of(promised, t) == text_of(unannotated, t));
-    CHECK(described(promised).bindings[0].members[4].offset == 32);
-}
-
-TEST("sgl emit layout - a @layout(.cpp) block places 16-bit values and matrices as C++ does")
+TEST("sgl emit layout - a @padding(.none) block places 16-bit values and matrices as C++ does")
 {
     auto const source = cc::string_view("require shader_f16\n"
                                         "\n"
-                                        "@layout(.cpp)\n"
+                                        "@padding(.none)\n"
                                         "binding look:\n"
                                         "    a: half\n"
                                         "    b: float\n"
@@ -508,19 +553,19 @@ TEST("sgl emit layout - a @layout(.cpp) block places 16-bit values and matrices 
     CHECK(text_of(source, target::wgsl).contains("mat4x4f(look.to_world_0, look.to_world_1, "));
 }
 
-TEST("sgl emit layout - a @layout(.cpp) block holds no struct yet")
+TEST("sgl emit layout - a @padding(.none) block holds no struct yet")
 {
     CHECK(errors_of("struct pair:\n"
                     "    a: float\n"
                     "    b: float\n"
                     "\n"
-                    "@layout(.cpp)\n"
+                    "@padding(.none)\n"
                     "binding work:\n"
                     "    one: pair\n"
                     "\n"
                     "@compute(64) fun main(@thread_id id: int3){work}:\n"
                     "    let x = work.one.a\n")
-          == "unsupported a struct member in a @layout(.cpp) block: 'work.one'\n");
+          == "unsupported a struct member in a @padding(.none) block: 'work.one'\n");
 }
 
 TEST("sgl emit layout - an array of whole rows starts a row and packs alike everywhere")
@@ -546,7 +591,9 @@ TEST("sgl emit layout - an array of whole rows starts a row and packs alike ever
     CHECK(d.bindings[0].block_size == 208);
 
     CHECK(text_of(source, target::hlsl_dx12)
-              .contains("    int count;\n    float4 pos[4];\n    column_major float4x4 xf[2];\n"));
+              .contains("    int count;\n    uint sgl_pad0;\n    uint sgl_pad1;\n    uint sgl_pad2;\n    float4 "
+                        "pos[4];\n"
+                        "    column_major float4x4 xf[2];\n"));
     CHECK(text_of(source, target::hlsl_vulkan)
               .contains("    [[vk::offset(16)]] float4 pos[4];\n"
                         "    [[vk::offset(80)]] column_major float4x4 xf[2];\n"));
@@ -558,10 +605,10 @@ TEST("sgl emit layout - an array of whole rows starts a row and packs alike ever
 
 TEST("sgl emit layout - an array in a memory form is one field, read in place")
 {
-    // WGSL splits the float2 HLSL keeps at byte 4, so the block is a memory form, and the array stays whole in it
+    // MSL's float3 is 16 bytes, so `k` in its tail makes the block a memory form, and the array stays whole in it
     constexpr auto source = "binding lights:\n"
+                            "    off: float3\n"
                             "    k: float\n"
-                            "    off: float2\n"
                             "    pos: float4[3]\n"
                             "\n"
                             "binding out_data:\n"
@@ -573,17 +620,17 @@ TEST("sgl emit layout - an array in a memory form is one field, read in place")
                             "    out_data.result[0] = lights.pos[id.x] * lights.k + total(lights.pos)\n";
 
     auto const wgsl = text_of(source, target::wgsl);
-    CHECK(wgsl.contains("    k: f32,\n    off_x: f32,\n    off_y: f32,\n    _pad0: u32,\n    pos: array<vec4f, 3>,\n"));
+    CHECK(wgsl.contains("    off: vec3f,\n    k: f32,\n    pos: array<vec4f, 3>,\n"));
     CHECK(wgsl.contains("lights.pos[id.x] * lights.k"));
-    CHECK(!wgsl.contains("array<vec4f, 3>()"));
     auto const msl = text_of(source, target::msl);
-    CHECK(msl.contains("    packed_float2 off;\n    uint _pad0;\n    array<float4, 3> pos;\n"));
+    CHECK(msl.contains("    packed_float3 off;\n    float k;\n    array<float4, 3> pos;\n"));
+    CHECK(msl.contains("lights.pos[id.x] * lights.k"));
     CHECK(!msl.contains("array<float4, 3>{}"));
 }
 
-TEST("sgl emit layout - a @layout(.cpp) block holds an array where a row starts")
+TEST("sgl emit layout - a @padding(.none) block holds an array where a row starts")
 {
-    auto const fine = "@layout(.cpp)\n"
+    auto const fine = "@padding(.none)\n"
                       "binding work:\n"
                       "    s: float\n"
                       "    v: float3\n"
@@ -598,13 +645,13 @@ TEST("sgl emit layout - a @layout(.cpp) block holds an array where a row starts"
         CHECK(text_of(fine, t).contains("work.rows[id.x]"));
 
     // C++ puts the array right after the float, at byte 4, where no target can declare one
-    CHECK(errors_of("@layout(.cpp)\n"
+    CHECK(errors_of("@padding(.none)\n"
                     "binding work:\n"
                     "    s: float\n"
                     "    rows: float4[2]\n"
                     "\n"
                     "@compute(64) fun main(@thread_id id: int3){work}:\n"
                     "    let x = work.rows[0]\n")
-          == "unsupported an array at byte 4 of a @layout(.cpp) block, where C++ places it and no target can: "
+          == "unsupported an array at byte 4 of a @padding(.none) block, where C++ places it and no target can: "
              "'work.rows'\n");
 }

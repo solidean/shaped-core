@@ -407,6 +407,7 @@ struct planner
                                        .host_name = cc::format("{}.{}", s.name, members[i].name),
                                        .type = is_array ? whole.element : members[i].type,
                                        .element = t.element,
+                                       .space = element_space(p.m.bindings[s.info], members[i]),
                                        .is_mut = t.is_mut,
                                        .is_coherent = members[i].is_coherent,
                                        .group = group,
@@ -443,7 +444,10 @@ struct planner
                 };
                 auto const placed = place_block(p.m, plain, block_space(b));
                 for (auto i = isize(0); i < planned.members.size(); ++i)
+                {
                     planned.members[i].offset = placed.offsets[i];
+                    planned.members[i].size = placed.sizes[i];
+                }
                 auto next = 0;
                 for (auto const& member : p.m.at(b.members))
                     planned.block_member_of.push_back(p.m.takes_slots(member.type) ? -1 : next++);
@@ -536,7 +540,7 @@ struct planner
         {
             if (p.m.at(r.type).kind != type_kind::buffer)
                 continue;
-            r.element_form = element_form_of(p.m, r.element, p.which);
+            r.element_form = element_form_of(p.m, r.element, r.space, p.which);
             if (r.element_form.has_value())
                 r.element_form.value().name = p.names.mint(cc::format("{}_memory", p.m.name_of(r.element)));
         }
@@ -557,9 +561,9 @@ struct planner
                 auto const& t
                     = p.m.takes_slots(member.type) && whole.kind == type_kind::array ? p.m.at(whole.element) : whole;
                 if (t.kind == type_kind::buffer)
-                    offsets_of(t.element, address_space::storage);
+                    offsets_of(t.element, element_space(b, member));
                 else if (!check::is_resource(t.kind))
-                    offsets_of(member.type, address_space::constants);
+                    offsets_of(member.type, block_space(b));
             }
         }
     }
@@ -575,9 +579,13 @@ struct planner
                 continue;
             auto& planned = p.structs[at];
             auto const placed = place_struct(p.m, s, space);
+            planned.memory_size = placed.size;
             for (auto i = isize(0); i < planned.member_of.size(); ++i)
                 if (planned.member_of[i] >= 0)
+                {
                     planned.members[planned.member_of[i]].offset = placed.offsets[i];
+                    planned.members[planned.member_of[i]].size = placed.sizes[i];
+                }
         }
     }
 
@@ -600,6 +608,7 @@ struct planner
             for (auto i = isize(0); i < planned.members.size(); ++i)
             {
                 planned.members[i].offset = placed.offsets[i];
+                planned.members[i].size = placed.sizes[i];
                 planned.block_member_of.push_back(i32(i));
             }
             p.constants = cc::move(planned);
@@ -818,56 +827,66 @@ void sgl::emit::impl::validate_binding(check::checked_module const& m, check::sy
     if (!is_placed)
         return;
 
-    // EMIT-154: every target reads a `.cpp` block from its memory form, and HLSL has no expression that builds a
+    // EMIT-154: every target reads a packed block from its memory form, and HLSL has no expression that builds a
     // struct value out of the fields
-    if (b.layout == check::block_layout::cpp)
+    if (block_space(b) == address_space::packed_constants)
         for (auto const& member : plain_members_of(m, b))
             if (member.type != check::checked_module::void_type && m.builtin_type_of(member.type) == nullptr
                 && m.at(member.type).kind == check::type_kind::structure)
                 report(error_kind::unsupported,
-                       cc::format("a struct member in a @layout(.cpp) block: '{}.{}'", s.name, member.name));
+                       cc::format("a struct member in a @padding(.none) block: '{}.{}'", s.name, member.name));
     // C++ aligns a `tg::vec4f` at 4, and no target declares an array anywhere but at the start of a row
-    if (b.layout == check::block_layout::cpp)
+    if (block_space(b) == address_space::packed_constants)
     {
         auto const plain = plain_members_of(m, b);
-        auto const placed = place(m, plain, address_space::cpp_constants);
+        auto const placed = place(m, plain, address_space::packed_constants);
         for (auto i = isize(0); i < plain.size(); ++i)
             if (plain[i].type != check::checked_module::void_type && m.builtin_type_of(plain[i].type) == nullptr
                 && m.at(plain[i].type).kind == check::type_kind::array && placed.offsets[i] % 16 != 0)
-                report(error_kind::unsupported, cc::format("an array at byte {} of a @layout(.cpp) block, where C++ "
-                                                           "places it and no target "
-                                                           "can: '{}.{}'",
+                report(error_kind::unsupported, cc::format("an array at byte {} of a @padding(.none) block, where C++ "
+                                                           "places it and no target can: '{}.{}'",
                                                            placed.offsets[i], s.name, plain[i].name));
     }
 
-    // A struct has one layout, so it stands in one address space; two rules would give it two.
-    for (auto const space : {address_space::constants, address_space::storage})
+    // EMIT-114: a struct has one layout, so every binding places it by one rule; two rules would give it two.
+    constexpr address_space spaces[] = {address_space::constants, address_space::storage,
+                                        address_space::packed_constants, address_space::packed_storage};
+    for (auto const space : spaces)
     {
-        auto const other = space == address_space::constants ? address_space::storage : address_space::constants;
         auto mine = cc::vector<check::type_id>();
         collect_placed_structs(m, id, space, mine);
         for (auto const type : mine)
-            for (auto const& info : m.bindings)
+        {
+            auto is_reported = false;
+            for (auto const other : spaces)
             {
-                auto theirs = cc::vector<check::type_id>();
-                collect_placed_structs(m, info.symbol, other, theirs);
-                if (!contains(theirs, type))
+                if (other == space || is_reported)
                     continue;
-                // Worded from the constant block's side, so the binding on either side finds the same error.
-                auto const is_constants = space == address_space::constants;
-                report_on_struct(error_kind::layout_conflict, type,
-                                 cc::format("'{}' is in a constant block of '{}' and in a storage buffer of '{}'",
-                                            m.name_of(type), is_constants ? s.name : m.at(info.symbol).name,
-                                            is_constants ? m.at(info.symbol).name : s.name));
-                break;
+                for (auto const& info : m.bindings)
+                {
+                    auto theirs = cc::vector<check::type_id>();
+                    collect_placed_structs(m, info.symbol, other, theirs);
+                    if (!contains(theirs, type))
+                        continue;
+                    // Worded from the lower rule's side, so the binding on either side finds the same error.
+                    auto const is_first = space < other;
+                    report_on_struct(
+                        error_kind::layout_conflict, type,
+                        cc::format("'{}' is in a {} of '{}' and in a {} of '{}'", m.name_of(type),
+                                   space_name(is_first ? space : other), is_first ? s.name : m.at(info.symbol).name,
+                                   space_name(is_first ? other : space), is_first ? m.at(info.symbol).name : s.name));
+                    is_reported = true;
+                    break;
+                }
             }
+        }
     }
 
     auto const plain = plain_members_of(m, b);
     if (b.is_no_padding)
         for (auto& gap : padding_of(m, plain, block_space(b)))
             report(error_kind::padding_forbidden, cc::format("in the block of @no_padding '{}': {}", s.name, gap));
-    for (auto const space : {address_space::constants, address_space::storage})
+    for (auto const space : spaces)
     {
         auto structs = cc::vector<check::type_id>();
         collect_placed_structs(m, id, space, structs);
@@ -910,7 +929,7 @@ sgl::emit::impl::block_placement sgl::emit::impl::place_block(check::checked_mod
                                                               address_space space)
 {
     auto placed = place(m, members, space);
-    return {.offsets = cc::move(placed.offsets), .sizes = cc::move(placed.sizes), .size = placed.size};
+    return {.offsets = cc::move(placed.offsets), .sizes = cc::move(placed.sizes), .size = placed.end};
 }
 
 void sgl::emit::impl::validate(check::checked_module const& m, check::flat_entry_point const& e, cc::vector<error>& errors)
@@ -1305,14 +1324,13 @@ cc::vector<sgl::emit::emitted_layout> sgl::emit::impl::layouts_of(plan const& p)
     {
         if (p.m.at(r.type).kind != type_kind::buffer)
             continue;
-        auto layout = emitted_layout{.global = r.name, .stride = element_stride(p.m, r.element)};
+        auto layout = emitted_layout{.global = r.name, .stride = element_stride(p.m, r.element, r.space)};
         if (r.element_form.has_value())
             layout.fields = fields_of(r.element_form.value());
         else if (auto const at = p.struct_of_type[index_of(r.element)]; at >= 0)
         {
             auto const& s = p.structs[at];
-            layout.fields
-                = fields_of(p, s.members, s.member_of, p.m.at(p.m.at(r.element).members), address_space::storage);
+            layout.fields = fields_of(p, s.members, s.member_of, p.m.at(p.m.at(r.element).members), r.space);
         }
         result.push_back(cc::move(layout));
     }

@@ -229,7 +229,7 @@ struct option_use;
 struct option_value;
 struct parameter;
 struct function_info;
-enum class block_layout : u8;
+enum class padding : u8;
 struct binding_info;
 enum class setting_kind : u8;
 enum class setting_source : u8;

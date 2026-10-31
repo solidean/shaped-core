@@ -240,30 +240,25 @@ sgl::i32 checker::preferred_subgroup_size_of(i32 file, ast::attribute const* a, 
     return 0;
 }
 
-/// CHK-369: `@layout(.hlsl)` or `@layout(.cpp)`, on a binding whose block a host fills.
-sgl::check::block_layout checker::layout_of(i32 file, ast::attribute const* a, bool is_workgroup)
+/// CHK-369: `@padding(.none)`, where GPU memory leaves no room but what C++ leaves.
+sgl::check::padding checker::padding_of(i32 file, ast::attribute const* a)
 {
     if (a == nullptr)
-        return block_layout::unpromised;
+        return padding::natural;
     auto const arguments = ast_of(file).at(a->arguments);
     auto const* const dot = arguments.size() == 1 && arguments[0].name.empty() && !arguments[0].is_splat
                                  && ast::is_valid(arguments[0].value)
                               ? ast_of(file).at(arguments[0].value).node.try_as<ast::leading_dot>()
                               : nullptr;
     auto const rule = dot != nullptr ? text_of(file, dot->name) : cc::string_view();
-    if (rule != "hlsl" && rule != "cpp")
-    {
+    if (rule == "none")
+        return padding::none;
+    if (rule == "every_column" || rule == "every_element")
+        unsupported(file, a->name, cc::format("@padding(.{}), which lands with matrices and arrays in GPU memory", rule));
+    else
         report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-               "@layout takes the rule a constant block is placed by: `@layout(.hlsl)` or `@layout(.cpp)`");
-        return block_layout::unpromised;
-    }
-    if (is_workgroup)
-    {
-        report(diagnostic_kind::invalid_attribute_arguments, file, a->name,
-               "@layout promises a constant block's layout to the host, and @workgroup memory has none a host sees");
-        return block_layout::unpromised;
-    }
-    return rule == "hlsl" ? block_layout::hlsl : block_layout::cpp;
+               "@padding takes where GPU memory leaves room: `@padding(.none)`");
+    return padding::natural;
 }
 
 /// `@stream(normals)`: one bare name, which is the buffer a vertex input member is read from.
@@ -633,7 +628,8 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             = {"position", "per_instance", "stream", "interpolate", "depth", "sample_mask"};
         // CHK-275: on a `@vertex struct` member `@format` is the member's own bytes, never a pipeline setting
         cc::string_view const known_on_vertex_field[] = {"position", "per_instance", "stream", "interpolate", "format"};
-        cc::string_view const known_on_member[] = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic"};
+        cc::string_view const known_on_member[]
+            = {"unfilterable", "non_filtering", "sampler", "coherent", "atomic", "padding"};
         judge_attributes(file, f.attributes,
                          !is_struct         ? cc::span<cc::string_view const>(known_on_member)
                          : is_vertex_struct ? cc::span<cc::string_view const>(known_on_vertex_field)
@@ -856,6 +852,18 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             }
         }
 
+        // CHK-369: a member's own padding is its buffer's elements', and a constant takes its block's
+        auto const* const padded = is_struct ? nullptr : find_attribute(file, f.attributes, "padding");
+        auto member_padding = padding_of(file, padded);
+        if (padded != nullptr && type != checked_module::error_type && out.at(innermost).kind != type_kind::buffer)
+        {
+            report(diagnostic_kind::wrong_kind_of_name, file, padded->name,
+                   is_workgroup ? "@padding places memory a host fills, and @workgroup memory has none a host sees"
+                                : "only a buffer member places its own elements; a constant takes its block's "
+                                  "@padding, written on the binding");
+            member_padding = padding::natural;
+        }
+
         // CHK-393: a value that is the same across a draw crosses flat, which interpolating could only round
         auto const* const interpolate = find_attribute(file, f.attributes, "interpolate");
         auto const is_per_draw = is_struct && find_attribute(file, f.attributes, "per_draw") != nullptr;
@@ -882,6 +890,7 @@ ast::range_of<member_info> checker::compile_members(i32 file,
             .is_unfilterable = unfilterable != nullptr,
             .is_non_filtering = non_filtering != nullptr,
             .is_coherent = is_coherent,
+            .padding = member_padding,
         });
         if (auto const* const named = is_struct ? nullptr : find_attribute(file, f.attributes, "sampler"))
             named_samplers.push_back(
@@ -1481,10 +1490,17 @@ void checker::compile_binding(symbol_id id)
     auto const& d = ast_of(file).at(decl);
     auto const& b = d.node.as<ast::binding_decl>();
 
-    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "layout"};
+    cc::string_view const known[] = {"inline", "workgroup", "shadowable", "no_padding", "padding"};
     judge_attributes(file, d.attributes, known, "a binding");
     auto const is_workgroup = find_attribute(file, d.attributes, "workgroup") != nullptr;
-    auto const layout = layout_of(file, find_attribute(file, d.attributes, "layout"), is_workgroup);
+    auto const* const padded = find_attribute(file, d.attributes, "padding");
+    auto binding_padding = padding_of(file, padded);
+    if (padded != nullptr && is_workgroup)
+    {
+        report(diagnostic_kind::invalid_attribute_arguments, file, padded->name,
+               "@padding places memory a host fills, and @workgroup memory has none a host sees");
+        binding_padding = padding::natural;
+    }
 
     if (ast::is_valid(b.composition))
     {
@@ -1551,7 +1567,7 @@ void checker::compile_binding(symbol_id id)
         .is_inline = is_inline,
         .is_workgroup = is_workgroup,
         .is_no_padding = find_attribute(file, d.attributes, "no_padding") != nullptr,
-        .layout = layout,
+        .padding = binding_padding,
         .members = members,
         .declared = declared,
         .required = declared | used,

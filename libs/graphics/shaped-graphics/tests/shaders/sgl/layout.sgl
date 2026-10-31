@@ -1,14 +1,15 @@
 // Every value in GPU memory is placed by SGL's own rule, and each target is made to follow it (the spec's layout rules).
 // The host fills these through the structs the package generates, byte for byte, and reads them back the same way.
 
-// A buffer's element packs tight, as a tg struct does: `velocity` sits at 4 and `alive` at 32, 36 bytes in all.
+// A buffer's element aligns every vector to its size, a float3 to 16: `velocity` sits at 16, `color` at 32 and `alive`
+// at 48, 64 bytes in all.
 struct particle:
     mass: float
     velocity: float3
     color: float4
     alive: bool32
 
-// In a constant block a nested struct starts a row, and what follows packs against its last member.
+// In a constant block a nested struct starts a row, and what follows it starts the next one.
 struct glow:
     color: float3
 
@@ -26,24 +27,35 @@ binding step:
         let color = p.color * step.shade.color.x
         step.items[id.x] = particle(p.mass + step.after, velocity, color, false as bool32)
 
-// Tight packing puts `b` at 8, across a 16-byte row, and a buffer of float3 strides by 12.
+// The natural rule puts `b` at 16, and a buffer of float3 strides by 16.
 struct pair:
+    a: float2
+    b: float3
+
+// `@padding(.none)` packs as C++ does: `b` at 8, across a 16-byte row, and a buffer of float3 strides by 12.
+struct flat_pair:
     a: float2
     b: float3
 
 binding stretch:
     pairs: mut buffer[pair]
     dirs: mut buffer[float3]
+    @padding(.none) flat_pairs: mut buffer[flat_pair]
+    @padding(.none) flat_dirs: mut buffer[float3]
 
 @compute(64) fun spread(@thread_id id: int3){stretch}:
     let p = stretch.pairs[id.x]
     let d = stretch.dirs[id.x]
     stretch.pairs[id.x] = pair(p.a * 2.0, p.b + d)
     stretch.dirs[id.x] = d * 3.0
+    let f = stretch.flat_pairs[id.x]
+    let g = stretch.flat_dirs[id.x]
+    stretch.flat_pairs[id.x] = flat_pair(f.a * 2.0, f.b + g)
+    stretch.flat_dirs[id.x] = g * 3.0
 
-// `@layout(.cpp)` places a block as C++ places a struct of tg types, so a host fills it from a struct of its own.
+// `@padding(.none)` places a block as C++ places a struct of tg types, so a host fills it from a struct of its own.
 // `tint` sits at 4 and `bias` right behind it at 16, and `weights` crosses a row from 28: 48 bytes in all.
-@layout(.cpp) @inline binding host_params:
+@padding(.none) @inline binding host_params:
     scale: float
     tint: float3
     bias: float
@@ -52,7 +64,7 @@ binding stretch:
     count: uint
 
 // A group's block follows the same rule: `dir` at 4, `after` at 16 and `to_world` at 20, column by column as tg holds it.
-@layout(.cpp)
+@padding(.none)
 binding host_echo:
     gain: float
     dir: float3
@@ -103,7 +115,7 @@ binding host_echo:
 
 // 16-bit members pack at 2 bytes, as tg's do: `h` at 4, `tint` at 6, `count` at 12 and `after` at 16, 20 bytes in all.
 // A group's block, since an @inline binding holds no 16-bit value.
-@layout(.cpp)
+@padding(.none)
 binding host_halves:
     require shader_f16, shader_int16
     gain: float
@@ -125,7 +137,7 @@ binding host_halves:
 const last_values = [22.0, 23.0, 24.0]
 
 // An array of whole rows starts a row and strides by its element: `rows` at 16, `xf` at 64 and `ids` at 192.
-// `shift` at 4 is what WGSL splits, so the block is a memory form there, and the arrays stay whole in it.
+// `shift` aligns to its size, at 8, so every target reads the block as it is.
 binding rows_echo:
     scale: float
     shift: float2

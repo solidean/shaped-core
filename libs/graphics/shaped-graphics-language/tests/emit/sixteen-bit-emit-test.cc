@@ -107,45 +107,42 @@ TEST("sgl emit - a short is int16_t in HLSL and short in MSL, whose scalar arith
     CHECK(sgl::emit::dump_errors(wgsl).contains("shader_int16"));
 }
 
-TEST("sgl emit layout - a 16-bit value packs at 2 bytes in a block and in a buffer's element")
+TEST("sgl emit layout - a 16-bit value aligns to its size in a block and in a buffer's element, a half3 to 8")
 {
-    // EMIT-110: `gain` at 0, `offset` at 4, and `bias` at 8, 6 bytes inside the first row
+    // EMIT-110: `gain` at 0, `offset` at 4, and `bias` at 8
     auto const vulkan = text_of(k_halves, target::hlsl_vulkan);
     CHECK(vulkan.contains("    [[vk::offset(0)]] float16_t gain;\n"
+                          "    [[vk::offset(2)]] uint16_t sgl_pad0;\n"
                           "    [[vk::offset(4)]] float offset;\n"
                           "    [[vk::offset(8)]] float16_t3 bias;\n"));
-    // EMIT-111: `tint` at 4 and `scale` at 10, 12 bytes in all
+    // `tint` at 8 and `scale` in its tail at 14, 16 bytes in all
     CHECK(vulkan.contains("    [[vk::offset(0)]] float weight;\n"
-                          "    [[vk::offset(4)]] float16_t3 tint;\n"
-                          "    [[vk::offset(10)]] float16_t scale;\n"));
+                          "    [[vk::offset(4)]] uint sgl_pad0;\n"
+                          "    [[vk::offset(8)]] float16_t3 tint;\n"
+                          "    [[vk::offset(14)]] float16_t scale;\n"));
 
-    // WGSL aligns a vec3h at 8, so the element is split into its halves; the block it places natively
+    // WGSL aligns a vec3h at 8 as well, so it places both natively
     auto const wgsl = text_of(k_halves, target::wgsl);
-    CHECK(wgsl.contains("struct sample_memory {\n"
-                        "    weight: f32,\n"
-                        "    tint_x: f16,\n"
-                        "    tint_y: f16,\n"
-                        "    tint_z: f16,\n"
-                        "    scale: f16,\n"
-                        "}\n"));
+    CHECK(wgsl.contains("struct sample {\n    weight: f32,\n    tint: vec3h,\n    scale: f16,\n}\n"));
     CHECK(wgsl.contains("struct work_data {\n    gain: f16,\n    offset: f32,\n    bias: vec3h,\n}\n"));
 
-    // MSL packs the half3, which its own rule aligns at 8 too
+    // MSL's half3 takes 8 bytes, so a half in its tail makes it packed
     auto const msl = text_of(k_halves, target::msl);
-    CHECK(msl.contains("struct sample_memory\n{\n    float weight;\n    packed_half3 tint;\n    half scale;\n};\n"));
+    CHECK(msl.contains("struct sample_memory\n{\n    float weight;\n    uint _pad0;\n    packed_half3 tint;\n"
+                       "    half scale;\n};\n"));
 
     auto const d = described(k_halves);
     REQUIRE(d.memory_structs.size() == 1);
-    CHECK(d.memory_structs[0].size == 12);
-    CHECK(d.memory_structs[0].members[1].offset == 4);
-    CHECK(d.memory_structs[0].members[2].offset == 10);
-    CHECK(d.bindings[0].members[3].stride == 12);
+    CHECK(d.memory_structs[0].size == 16);
+    CHECK(d.memory_structs[0].members[1].offset == 8);
+    CHECK(d.memory_structs[0].members[2].offset == 14);
+    CHECK(d.bindings[0].members[3].stride == 16);
     CHECK(d.bindings[0].members[4].stride == 4);
 }
 
 TEST("sgl emit layout - a 2-byte gap a half leaves is padded with a 16-bit field")
 {
-    // EMIT-110: `tint` at 4, which WGSL and MSL align at 8, so both write the block's memory form
+    // EMIT-110: `tint` at 8, which WGSL and MSL place natively, and HLSL reaches past a 16-bit and a 32-bit field
     constexpr auto source = cc::string_view("require shader_f16\n"
                                             "\n"
                                             "binding work:\n"
@@ -155,12 +152,13 @@ TEST("sgl emit layout - a 2-byte gap a half leaves is padded with a 16-bit field
                                             "\n"
                                             "@compute(64) fun run(@thread_id id: int3){work}:\n"
                                             "    work.results[id.x] = work.tint * (work.gain as float)\n");
+    CHECK(text_of(source, target::hlsl_dx12)
+              .contains("    float16_t gain;\n    uint16_t sgl_pad0;\n    uint sgl_pad1;\n    float2 tint;\n"));
     auto const vulkan = text_of(source, target::hlsl_vulkan);
-    CHECK(vulkan.contains("    [[vk::offset(0)]] float16_t gain;\n    [[vk::offset(4)]] float2 tint;\n"));
-    auto const wgsl = text_of(source, target::wgsl);
-    CHECK(wgsl.contains("    gain: f16,\n    _pad0: f16,\n    tint_x: f32,\n    tint_y: f32,\n"));
-    auto const msl = text_of(source, target::msl);
-    CHECK(msl.contains("    half gain;\n    ushort _pad0;\n    packed_float2 tint;\n"));
+    CHECK(vulkan.contains("    [[vk::offset(2)]] uint16_t sgl_pad0;\n    [[vk::offset(4)]] uint sgl_pad1;\n"
+                          "    [[vk::offset(8)]] float2 tint;\n"));
+    CHECK(text_of(source, target::wgsl).contains("    gain: f16,\n    tint: vec2f,\n"));
+    CHECK(text_of(source, target::msl).contains("    half gain;\n    float2 tint;\n"));
 }
 
 TEST("sgl emit - is_nan and is_inf of a half test the bits of the float it widens to")

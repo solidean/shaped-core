@@ -208,12 +208,24 @@ struct writer
     }
 
     /// Declares `name` and assigns its members, or its elements, one by one, for a target without a struct constructor.
+    /// Whether a value of `type` is a struct written with padding fields, which a target writes as memory holds it.
+    [[nodiscard]] bool is_padded(type_id type) const
+    {
+        if (is_builtin_type(p.m, type) || is_array(type) || !is_valid(type) || index_of(type) >= p.struct_of_type.size())
+            return false;
+        auto const at = p.struct_of_type[index_of(type)];
+        return at >= 0 && p.structs[at].memory_size > 0;
+    }
+
     void build_struct(flat_expr const& x, cc::string_view name)
     {
         auto declaration = cc::string();
         auto const dimensions = array_dimensions(p, x.type);
-        d.write_local(declaration,
-                      {.name = name, .type = type_text(p, d, x.type), .dimensions = dimensions, .is_mut = true});
+        d.write_local(declaration, {.name = name,
+                                    .type = type_text(p, d, x.type),
+                                    .dimensions = dimensions,
+                                    .is_mut = true,
+                                    .is_zeroed = is_padded(x.type)});
         line(declaration);
 
         auto const arguments = p.e.at(x.node.as<flat_construct>().arguments);
@@ -820,9 +832,12 @@ struct writer
                                && type_record->hlsl_flagged != nullptr && flags.has_value()
                             ? type_record->hlsl_flagged(flags.value())
                             : cc::string(type_text(p, d, local.type));
-        d.write_local(
-            declaration,
-            {.name = name, .type = type, .value = text, .dimensions = dimensions, .is_mut = is_mut || declares_only});
+        d.write_local(declaration, {.name = name,
+                                    .type = type,
+                                    .value = text,
+                                    .dimensions = dimensions,
+                                    .is_mut = is_mut || declares_only,
+                                    .is_zeroed = text.empty() && is_padded(local.type)});
         line(declaration);
     }
 

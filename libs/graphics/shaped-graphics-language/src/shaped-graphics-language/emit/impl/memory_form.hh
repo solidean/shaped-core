@@ -7,7 +7,7 @@
 #include <shaped-graphics-language/emit/emit.hh>
 #include <shaped-graphics-language/emit/impl/layout.hh>
 
-/// How WGSL and MSL, and HLSL for a `@layout(.cpp)` block, are made to follow SGL's layout where their own rules would place a member elsewhere.
+/// How WGSL and MSL, and HLSL for a `@padding(.none)` block or a buffer of 3-vectors, are made to follow SGL's layout where their own rules would place a member elsewhere.
 ///
 /// A memory root is a constant block or the element of a buffer.
 /// Where the target's own rule lands every value of a root at SGL's offset, the root is written as the program's structs
@@ -66,5 +66,8 @@ struct memory_form
                                                        target t);
 
 /// The memory form of one element of a `buffer[element]` for target `t`, or nothing where `t` places it as SGL does.
-[[nodiscard]] cc::optional<memory_form> element_form_of(check::checked_module const& m, check::type_id element, target t);
+[[nodiscard]] cc::optional<memory_form> element_form_of(check::checked_module const& m,
+                                                        check::type_id element,
+                                                        address_space space,
+                                                        target t);
 } // namespace sgl::emit::impl

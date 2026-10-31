@@ -11,6 +11,7 @@
 #include <shaped-graphics/command_list/command_list.hh>
 #include <shaped-graphics/compute/compute_pipeline.hh>
 #include <shaped-graphics/context/context.hh>
+#include <shaped-shader-library/gpu_padded.hh>
 #include <shaped-shader-library/shader_asset.hh>
 #include <typed-geometry/linalg/mat.hh>
 #include <typed-geometry/linalg/vec.hh>
@@ -166,9 +167,10 @@ ASYNC_INVOCABLE_TEST("sg - a group's plain members reach the shader through the 
         CHECK(data[i] == (float(i) * 3.0f + 1.0f) * 0.5f - 2.0f);
 }
 
-// The generated structs are the layout, padding included: `particle` strides by 36 and `step`'s block puts `after` at 28.
-static_assert(sizeof(shaders::layout::particle) == 36);
-static_assert(sizeof(shaders::layout::glow) == 12);
+// The generated structs are the layout, padding included: `particle` strides by 64, and `glow` takes its row whole.
+static_assert(sizeof(shaders::layout::particle) == 64);
+static_assert(offsetof(shaders::layout::particle, velocity) == 16);
+static_assert(sizeof(shaders::layout::glow) == 16);
 
 ASYNC_INVOCABLE_TEST("sg - SGL's layout reaches the shader byte for byte through the structs a package generates",
                      (sg::context_handle const& ctx))
@@ -217,9 +219,13 @@ ASYNC_INVOCABLE_TEST("sg - SGL's layout reaches the shader byte for byte through
     }
 }
 
-static_assert(sizeof(shaders::layout::pair) == 20);
+static_assert(sizeof(shaders::layout::pair) == 32);
+static_assert(offsetof(shaders::layout::pair, b) == 16);
+static_assert(sizeof(shaders::layout::flat_pair) == 20);
+static_assert(offsetof(shaders::layout::flat_pair, b) == 8);
 
-ASYNC_INVOCABLE_TEST("sg - a buffer's element packs tight on every backend, across a row and at a 12-byte stride",
+ASYNC_INVOCABLE_TEST("sg - a buffer's element aligns its vectors, and packs tight under @padding(.none), on every "
+                     "backend",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -231,36 +237,55 @@ ASYNC_INVOCABLE_TEST("sg - a buffer's element packs tight on every backend, acro
 
     constexpr auto count = 64;
     auto pairs = cc::vector<shaders::layout::pair>();
-    auto dirs = cc::vector<tg::vec3f>();
+    auto dirs = cc::vector<slib::gpu_padded<tg::vec3f, 16>>();
+    auto flat_pairs = cc::vector<shaders::layout::flat_pair>();
+    auto flat_dirs = cc::vector<tg::vec3f>();
     for (auto i = 0; i < count; ++i)
     {
         pairs.push_back({.a = tg::vec2f(float(i), 1), .b = tg::vec3f(1, 2, float(i))});
         dirs.push_back(tg::vec3f(float(i), 0, 1));
+        flat_pairs.push_back({.a = tg::vec2f(float(i), 1), .b = tg::vec3f(1, 2, float(i))});
+        flat_dirs.push_back(tg::vec3f(float(i), 0, 1));
     }
     auto const usage = sg::buffer_usage::readwrite_buffer | sg::buffer_usage::copy_src;
     auto const pair_buffer = ctx->persistent.create_buffer_from_data(cc::move(pairs), usage);
     auto const dir_buffer = ctx->persistent.create_buffer_from_data(cc::move(dirs), usage);
+    auto const flat_pair_buffer = ctx->persistent.create_buffer_from_data(cc::move(flat_pairs), usage);
+    auto const flat_dir_buffer = ctx->persistent.create_buffer_from_data(cc::move(flat_dirs), usage);
 
     auto cmd = ctx->create_command_list();
-    auto const group = ctx->transient.create_binding_group(
-        *cmd, group_layout,
-        shaders::layout::stretch{.pairs = pair_buffer.as_readwrite_buffer(), .dirs = dir_buffer.as_readwrite_buffer()});
+    auto const group = ctx->transient.create_binding_group(*cmd, group_layout,
+                                                           shaders::layout::stretch{
+                                                               .pairs = pair_buffer.as_readwrite_buffer(),
+                                                               .dirs = dir_buffer.as_readwrite_buffer(),
+                                                               .flat_pairs = flat_pair_buffer.as_readwrite_buffer(),
+                                                               .flat_dirs = flat_dir_buffer.as_readwrite_buffer(),
+                                                           });
     cmd->compute.bind_pipeline(*pipeline);
     cmd->compute.bind_group(0, *group);
     cmd->compute.dispatch_threads(count);
     auto const pairs_back = cmd->download.data_from_buffer(pair_buffer);
     auto const dirs_back = cmd->download.data_from_buffer(dir_buffer);
+    auto const flat_pairs_back = cmd->download.data_from_buffer(flat_pair_buffer);
+    auto const flat_dirs_back = cmd->download.data_from_buffer(flat_dir_buffer);
     ctx->submit_command_list(cc::move(cmd));
 
     auto const got_pairs = co_await pairs_back.data();
     auto const got_dirs = co_await dirs_back.data();
+    auto const got_flat_pairs = co_await flat_pairs_back.data();
+    auto const got_flat_dirs = co_await flat_dirs_back.data();
     REQUIRE(got_pairs.size() == isize(count));
     REQUIRE(got_dirs.size() == isize(count));
+    REQUIRE(got_flat_pairs.size() == isize(count));
+    REQUIRE(got_flat_dirs.size() == isize(count));
     for (auto i = 0; i < count; ++i)
     {
         CHECK(got_pairs[i].a == tg::vec2f(float(2 * i), 2));
         CHECK(got_pairs[i].b == tg::vec3f(1 + float(i), 2, float(i) + 1));
-        CHECK(got_dirs[i] == tg::vec3f(float(3 * i), 0, 3));
+        CHECK(got_dirs[i].value == tg::vec3f(float(3 * i), 0, 3));
+        CHECK(got_flat_pairs[i].a == tg::vec2f(float(2 * i), 2));
+        CHECK(got_flat_pairs[i].b == tg::vec3f(1 + float(i), 2, float(i) + 1));
+        CHECK(got_flat_dirs[i] == tg::vec3f(float(3 * i), 0, 3));
     }
 }
 
@@ -278,7 +303,7 @@ struct plain_params
 };
 static_assert(sizeof(plain_params) == 48);
 
-/// The plain members of `host_echo` and `host_halves` as C++ places them, which `@layout(.cpp)` promises the GPU reads.
+/// The plain members of `host_echo` and `host_halves` as C++ places them, which `@padding(.none)` promises the GPU reads.
 struct plain_echo
 {
     float gain;
@@ -304,7 +329,7 @@ static_assert(offsetof(plain_halves, after) == 16);
 static_assert(sizeof(plain_halves) == 20);
 } // namespace
 
-ASYNC_INVOCABLE_TEST("sg - a @layout(.cpp) block is filled from a plain C++ struct, float3s and all",
+ASYNC_INVOCABLE_TEST("sg - a @padding(.none) block is filled from a plain C++ struct, float3s and all",
                      (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
@@ -389,7 +414,7 @@ ASYNC_INVOCABLE_TEST("sg - a constant block's arrays are filled from fixed array
         CHECK(data[i] == float(i + 1)).context(cc::format("value {}", i));
 }
 
-ASYNC_INVOCABLE_TEST("sg - a @layout(.cpp) block places its 16-bit members as tg does", (sg::context_handle const& ctx))
+ASYNC_INVOCABLE_TEST("sg - a @padding(.none) block places its 16-bit members as tg does", (sg::context_handle const& ctx))
 {
     REQUIRE(ctx != nullptr);
     if (!sg_test::shaders_reach(*ctx))

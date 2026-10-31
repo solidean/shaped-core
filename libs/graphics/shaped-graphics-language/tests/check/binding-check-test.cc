@@ -400,29 +400,34 @@ TEST("sgl check - a @workgroup binding holds values a compute stage shares, with
     CHECK(raster.contains("tile is @workgroup memory, which only a compute stage has"));
 }
 
-TEST("sgl check - @layout names the rule a binding's constant block is placed by (CHK-369)")
+TEST("sgl check - @padding(.none) on a binding or a buffer member packs GPU memory as C++ does (CHK-369)")
 {
-    CHECK(reports_for(cc::string("@layout(.hlsl)\n") + listing("    scale: float\n")) == "");
-    CHECK(reports_for(cc::string("@layout(.cpp)\n") + listing("    scale: float\n    dst: mut buffer[float]\n")) == "");
-    CHECK(reports_for("@layout(.cpp) @inline binding look:\n    scale: float\n") == "");
+    CHECK(reports_for(cc::string("@padding(.none)\n") + listing("    scale: float\n    dst: mut buffer[float]\n")) == "");
+    CHECK(reports_for("@padding(.none) @inline binding look:\n    scale: float\n") == "");
+    CHECK(reports_for(listing("    scale: float\n    @padding(.none) dst: mut buffer[float3]\n")) == "");
 
-    constexpr auto expected
-        = "@layout takes the rule a constant block is placed by: `@layout(.hlsl)` or `@layout(.cpp)`";
-    for (auto const attribute :
-         {"@layout", "@layout(.std140)", "@layout(hlsl)", "@layout(.hlsl, .cpp)", "@layout(rule = .cpp)"})
+    constexpr auto expected = "@padding takes where GPU memory leaves room: `@padding(.none)`";
+    for (auto const attribute : {"@padding", "@padding(.std430)", "@padding(none)", "@padding(.none, .none)"})
     {
         auto const reported = reports_for(cc::format("{}\n{}", attribute, listing("    scale: float\n")));
         CHECK(reported.contains("invalid-attribute-arguments"));
         CHECK(reported.contains(expected));
     }
+    // the matrix and array forms are spelled, and land with matrices and arrays in GPU memory
+    for (auto const attribute : {"@padding(.every_column)", "@padding(.every_element)"})
+        CHECK(reports_for(cc::format("{}\n{}", attribute, listing("    scale: float\n"))).contains("unsupported-yet"));
 
-    auto const workgroup = reports_for("@layout(.cpp) @workgroup binding tile:\n    x: float\n");
+    auto const workgroup = reports_for("@padding(.none) @workgroup binding tile:\n    x: float\n");
     CHECK(workgroup.contains("invalid-attribute-arguments"));
-    CHECK(workgroup.contains("@layout promises a constant block's layout to the host, and @workgroup memory has none a "
-                             "host sees"));
+    CHECK(workgroup.contains("@padding places memory a host fills, and @workgroup memory has none a host sees"));
 
-    // a binding's attribute, and no other declaration's
-    CHECK(reports_for("@layout(.cpp)\nstruct look:\n    scale: float\n").contains("the attribute @layout on a struct"));
+    // a constant takes its block's padding, which only the binding names
+    CHECK(reports_for(listing("    @padding(.none) scale: float\n"))
+              .contains("only a buffer member places its own elements; a constant takes its block's @padding, written "
+                        "on the binding"));
+
+    // a binding's attribute and a binding member's, and no other declaration's
+    CHECK(reports_for("@padding(.none)\nstruct look:\n    scale: float\n").contains("the attribute @padding on a struct"));
 }
 
 TEST("sgl check - an atomic is memory a builtin updates, in a mut buffer or in workgroup memory, and never a value")

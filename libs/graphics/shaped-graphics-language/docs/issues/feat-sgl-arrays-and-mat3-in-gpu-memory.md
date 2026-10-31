@@ -13,10 +13,13 @@ It is `unsupported-yet` wherever GPU memory or a stage edge holds one (CHK-291).
 `mat3` is a value of function bodies alone, refused wherever memory or a stage edge would hold one (CHK-397).
 Their layout is decided (the spec's emitting file, "Open"), and they land together, after the tier-1 work.
 
-- **In a constant block an array element starts a row**: `slib::row<T>` pads a shorter one to 16 bytes on the host, and WGSL reads it through `array<vec4f, N>`.
+- **The natural rule (EMIT-110) decides the defaults**: an array strides by its element rounded up to its alignment, so a `float3[N]` strides by 16, and a `mat3` is three 3-vectors, 48 bytes.
+- **`@padding` names the cases where that disagrees with a C++ struct**, and is already spelled (CHK-369):
+  `.none` gives a `mat3` its 36 bytes of `tg::mat3f` and a `float3[N]` its 12-byte stride, the latter in a buffer only.
+  `.every_column` names the 48-byte `mat3`, and `.every_element` starts each element of a block's array on a row.
+- **An array of elements shorter than a row in a constant block is refused without `.every_element`**, since a runtime index into it needs component arithmetic.
+  WGSL reads such an array through `array<vec4f, N>`, and the host needs a padded element type like `slib::gpu_padded`.
 - **The mechanism that is missing** is a memory form holding an array, which a runtime index walks into.
-- **A `mat3` is its three columns, each starting a row, in a block** (44 bytes), and `slib::gpu_mat3` holds that on the host.
-  In a buffer's element it is 36 bytes, which is `tg::mat3f` itself.
 - **WGSL passes no matrix and no array between stages**, so both cross as one location per column or element.
 
 **A constant block's array of whole rows has landed** (EMIT-164): `float4`, `int4`, `uint4` and `mat4` elements, which every target places alike.

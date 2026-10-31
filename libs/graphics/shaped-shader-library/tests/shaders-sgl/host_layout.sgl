@@ -1,7 +1,7 @@
-// Constant blocks a host fills from its own struct: `@layout(.cpp)` places each as C++ places a struct of tg types.
+// Constant blocks a host fills from its own struct: `@padding(.none)` places each as C++ places a struct of tg types.
 // So the generated types are the struct a host would write by hand, byte for byte.
 
-@layout(.cpp) @inline binding host_push:
+@padding(.none) @inline binding host_push:
     scale: float
     tint: float3
     bias: float
@@ -9,7 +9,7 @@
     weights: float4
     count: uint
 
-@layout(.cpp)
+@padding(.none)
 binding host_group:
     gain: float
     dir: float3
