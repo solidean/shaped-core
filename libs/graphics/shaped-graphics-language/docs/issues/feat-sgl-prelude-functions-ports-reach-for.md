@@ -1,7 +1,5 @@
 ---
 created: 2026-10-30
-claimed-by: Claude (for Philip Trettner)
-claimed-at: 2026-10-30T19:15Z
 ---
 
 # A half's bits, the prelude function ports still reach for
