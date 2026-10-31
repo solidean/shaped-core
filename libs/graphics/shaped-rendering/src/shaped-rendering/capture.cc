@@ -7,7 +7,8 @@
 #include <clean-core/string/format.hh>
 #include <clean-core/string/from_string.hh>
 #include <clean-core/thread/async_coroutine.hh>
-#include <clean-core/thread/thread_bound_scheduler.hh> // cc::async_resume_on_compute#include <shaped-graphics/all.hh>
+#include <clean-core/thread/thread_bound_scheduler.hh> // cc::async_resume_on_compute
+#include <shaped-graphics/all.hh>
 #include <shaped-rendering/capture.hh>
 
 namespace sr
